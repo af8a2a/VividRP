@@ -14,7 +14,8 @@ namespace VividRP.Runtime
             int requestCount,
             int frameIndex,
             int feedbackOverflowCount = 0,
-            int fallbackSampleCount = 0)
+            int fallbackSampleCount = 0,
+            int residentAccessCount = 0)
             : this(
                 VirtualTextureViewId.FromCameraType(cameraType),
                 cameraType,
@@ -22,7 +23,8 @@ namespace VividRP.Runtime
                 requestCount,
                 frameIndex,
                 feedbackOverflowCount,
-                fallbackSampleCount)
+                fallbackSampleCount,
+                residentAccessCount)
         {
         }
 
@@ -33,7 +35,8 @@ namespace VividRP.Runtime
             int requestCount,
             int frameIndex,
             int feedbackOverflowCount = 0,
-            int fallbackSampleCount = 0)
+            int fallbackSampleCount = 0,
+            int residentAccessCount = 0)
         {
             ViewId = viewId;
             CameraType = cameraType;
@@ -43,6 +46,7 @@ namespace VividRP.Runtime
             FrameIndex = frameIndex;
             FeedbackOverflowCount = Mathf.Max(0, feedbackOverflowCount);
             FallbackSampleCount = Mathf.Max(0, fallbackSampleCount);
+            ResidentAccessCount = Mathf.Clamp(residentAccessCount, 0, RequestCount);
         }
 
         internal VirtualTextureFeedbackBatch(
@@ -52,7 +56,8 @@ namespace VividRP.Runtime
             int requestCount,
             int frameIndex,
             int feedbackOverflowCount = 0,
-            int fallbackSampleCount = 0)
+            int fallbackSampleCount = 0,
+            int residentAccessCount = 0)
         {
             ViewId = viewId;
             CameraType = cameraType;
@@ -62,6 +67,7 @@ namespace VividRP.Runtime
             FrameIndex = frameIndex;
             FeedbackOverflowCount = Mathf.Max(0, feedbackOverflowCount);
             FallbackSampleCount = Mathf.Max(0, fallbackSampleCount);
+            ResidentAccessCount = Mathf.Clamp(residentAccessCount, 0, RequestCount);
         }
 
         internal VirtualTextureViewId ViewId { get; }
@@ -83,6 +89,8 @@ namespace VividRP.Runtime
         internal int FeedbackOverflowCount { get; }
 
         internal int FallbackSampleCount { get; }
+
+        internal int ResidentAccessCount { get; }
 
         internal ulong GetRequest(int requestIndex)
         {
@@ -405,10 +413,19 @@ namespace VividRP.Runtime
 
     internal sealed class VirtualTextureFeedbackBufferState : IDisposable
     {
+        private struct ResidentFeedbackHashEntry
+        {
+            public uint KeyLow;
+            public uint KeyHigh;
+            public uint State;
+            public uint Padding;
+        }
+
         private sealed class BufferPairState : IDisposable
         {
             public ComputeBuffer RequestsBuffer;
             public ComputeBuffer CounterBuffer;
+            public ComputeBuffer ResidentHashBuffer;
             public bool WasWritten;
             public bool ReadbackPending;
             public bool RequestReadbackPending;
@@ -425,6 +442,7 @@ namespace VividRP.Runtime
             public bool CompletedRequestsValid;
             public uint CompletedCount;
             public int CompletedFallbackSampleCount;
+            public int CompletedResidentAccessCount;
             public int FeedbackSampleArea = 1;
 
             public void Dispose()
@@ -434,9 +452,11 @@ namespace VividRP.Runtime
 
                 RequestsBuffer?.Dispose();
                 CounterBuffer?.Dispose();
+                ResidentHashBuffer?.Dispose();
                 DisposeReadbackData();
                 RequestsBuffer = null;
                 CounterBuffer = null;
+                ResidentHashBuffer = null;
                 WasWritten = false;
                 ReadbackPending = false;
                 RequestReadbackPending = false;
@@ -449,6 +469,7 @@ namespace VividRP.Runtime
                 CompletedRequestsValid = false;
                 CompletedCount = 0u;
                 CompletedFallbackSampleCount = 0;
+                CompletedResidentAccessCount = 0;
                 FeedbackSampleArea = 1;
                 ScheduledFrameIndex = -1;
             }
@@ -497,6 +518,7 @@ namespace VividRP.Runtime
                 {
                     CompletedCount = 0u;
                     CompletedFallbackSampleCount = 0;
+                    CompletedResidentAccessCount = 0;
                 }
 
                 CompleteReadbackIfReady();
@@ -511,11 +533,15 @@ namespace VividRP.Runtime
                     CompletedFallbackSampleCount = CounterReadbackData.Length > 1
                         ? SaturatingUIntToInt(CounterReadbackData[1])
                         : 0;
+                    CompletedResidentAccessCount = CounterReadbackData.Length > 2
+                        ? SaturatingUIntToInt(CounterReadbackData[2])
+                        : 0;
                 }
                 else
                 {
                     CompletedCount = 0u;
                     CompletedFallbackSampleCount = 0;
+                    CompletedResidentAccessCount = 0;
                 }
 
                 CompleteReadbackIfReady();
@@ -546,8 +572,8 @@ namespace VividRP.Runtime
             }
         }
 
-        private const int FeedbackCounterElementCount = 2;
-        private const int FeedbackBufferCount = 4;
+        private const int FeedbackCounterElementCount = 3;
+        private const int FeedbackBufferCount = 8;
         private const int MaxTrackedFeedbackSampleArea = sizeof(ulong) * 8;
         internal const int StableReadbackIntervalFrames = 30;
         private readonly BufferPairState[] m_BufferPairs =
@@ -556,10 +582,16 @@ namespace VividRP.Runtime
             new(),
             new(),
             new(),
+            new(),
+            new(),
+            new(),
+            new(),
         };
         private readonly int m_SpaceId;
         private NativeArray<uint> m_ZeroCounterData;
+        private NativeArray<ResidentFeedbackHashEntry> m_ZeroResidentHashData;
         private int m_RequestCapacity;
+        private int m_ResidentHashCapacity;
         private int m_WriteBufferIndex;
         private int m_LastWrittenBufferIndex = -1;
         private bool m_HasCompletedReadbackResult;
@@ -593,21 +625,26 @@ namespace VividRP.Runtime
             VirtualTextureViewId viewId,
             VirtualTextureFeedbackViewSignature viewSignature,
             int feedbackCapacity,
+            int cachePageCount,
             int frameIndex,
             bool forceImmediateReadback,
             out ComputeBuffer requestBuffer,
             out ComputeBuffer counterBuffer,
+            out ComputeBuffer residentHashBuffer,
+            out int residentHashCapacity,
             out string statusMessage)
         {
             requestBuffer = null;
             counterBuffer = null;
+            residentHashBuffer = null;
+            residentHashCapacity = 0;
             statusMessage = string.Empty;
 
             if (cmd == null || camera == null)
                 return false;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsEnsureCapacityMarker.Auto())
-                EnsureCapacity(spaceName, feedbackCapacity);
+                EnsureCapacity(spaceName, feedbackCapacity, cachePageCount);
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsPollMarker.Auto())
                 PollReadbacks();
 
@@ -673,6 +710,8 @@ namespace VividRP.Runtime
 
             requestBuffer = writePair.RequestsBuffer;
             counterBuffer = writePair.CounterBuffer;
+            residentHashBuffer = writePair.ResidentHashBuffer;
+            residentHashCapacity = m_ResidentHashCapacity;
             m_LastWrittenBufferIndex = writeBufferIndex;
             m_WriteBufferIndex = (writeBufferIndex + 1) % FeedbackBufferCount;
             return true;
@@ -701,6 +740,9 @@ namespace VividRP.Runtime
                     int requestCount = Mathf.Min(requestCapacity, completedRequestCount);
                     int overflowCount = Mathf.Max(0, completedRequestCount - requestCapacity);
                     int fallbackSampleCount = pair.CompletedFallbackSampleCount;
+                    int residentAccessCount = Mathf.Min(
+                        requestCount,
+                        pair.CompletedResidentAccessCount);
                     output.Add(new VirtualTextureFeedbackBatch(
                         pair.LastViewId,
                         pair.LastCameraType,
@@ -708,7 +750,8 @@ namespace VividRP.Runtime
                         requestCount,
                         pair.ScheduledFrameIndex,
                         overflowCount,
-                        fallbackSampleCount));
+                        fallbackSampleCount,
+                        residentAccessCount));
                     lastReadbackFrame = Mathf.Max(lastReadbackFrame, pair.ScheduledFrameIndex);
                     m_HasCompletedReadbackResult = true;
                     bool completedReadbackWasEmpty = requestCount == 0
@@ -728,6 +771,7 @@ namespace VividRP.Runtime
                     pair.CompletedRequestsValid = false;
                     pair.CompletedCount = 0u;
                     pair.CompletedFallbackSampleCount = 0;
+                    pair.CompletedResidentAccessCount = 0;
                 }
             }
         }
@@ -746,7 +790,14 @@ namespace VividRP.Runtime
                 m_ZeroCounterData = default;
             }
 
+            if (m_ZeroResidentHashData.IsCreated)
+            {
+                m_ZeroResidentHashData.Dispose();
+                m_ZeroResidentHashData = default;
+            }
+
             m_RequestCapacity = 0;
+            m_ResidentHashCapacity = 0;
             m_WriteBufferIndex = 0;
             m_LastWrittenBufferIndex = -1;
             m_HasCompletedReadbackResult = false;
@@ -787,15 +838,22 @@ namespace VividRP.Runtime
             }
         }
 
-        private void EnsureCapacity(string spaceName, int feedbackCapacity)
+        private void EnsureCapacity(string spaceName, int feedbackCapacity, int cachePageCount)
         {
-            if (m_RequestCapacity == feedbackCapacity && HasAllocatedBuffers())
+            int residentHashCapacity = ResolveResidentHashCapacity(cachePageCount);
+            if (m_RequestCapacity == feedbackCapacity
+                && m_ResidentHashCapacity == residentHashCapacity
+                && HasAllocatedBuffers())
+            {
                 return;
+            }
 
             for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
                 m_BufferPairs[bufferIndex].Dispose();
 
             m_RequestCapacity = feedbackCapacity;
+            m_ResidentHashCapacity = residentHashCapacity;
+            EnsureZeroResidentHashStateCapacity(residentHashCapacity);
             m_WriteBufferIndex = 0;
             m_LastWrittenBufferIndex = -1;
             m_HasCompletedReadbackResult = false;
@@ -815,8 +873,44 @@ namespace VividRP.Runtime
                 pair.RequestsBuffer.name = $"VividVT_{spaceName}_Space{m_SpaceId}_FeedbackRequests_{bufferIndex}";
                 pair.CounterBuffer = new ComputeBuffer(FeedbackCounterElementCount, sizeof(uint), ComputeBufferType.Structured);
                 pair.CounterBuffer.name = $"VividVT_{spaceName}_Space{m_SpaceId}_FeedbackCounter_{bufferIndex}";
+                pair.ResidentHashBuffer = new ComputeBuffer(
+                    residentHashCapacity,
+                    sizeof(uint) * 4,
+                    ComputeBufferType.Structured);
+                pair.ResidentHashBuffer.name =
+                    $"VividVT_{spaceName}_Space{m_SpaceId}_FeedbackResidentHash_{bufferIndex}";
+                pair.ResidentHashBuffer.SetData(m_ZeroResidentHashData);
                 pair.EnsureReadbackCapacity(feedbackCapacity);
             }
+        }
+
+        private void EnsureZeroResidentHashStateCapacity(int residentHashCapacity)
+        {
+            if (m_ZeroResidentHashData.IsCreated
+                && m_ZeroResidentHashData.Length == residentHashCapacity)
+            {
+                return;
+            }
+
+            if (m_ZeroResidentHashData.IsCreated)
+                m_ZeroResidentHashData.Dispose();
+
+            m_ZeroResidentHashData = new NativeArray<ResidentFeedbackHashEntry>(
+                residentHashCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.ClearMemory);
+        }
+
+        internal static int ResolveResidentHashCapacityForTesting(int cachePageCount)
+        {
+            return ResolveResidentHashCapacity(cachePageCount);
+        }
+
+        private static int ResolveResidentHashCapacity(int cachePageCount)
+        {
+            int residentPageCapacity = Mathf.Max(cachePageCount, 1);
+            int targetCapacity = checked(residentPageCapacity * 2);
+            return Mathf.NextPowerOfTwo(Mathf.Max(targetCapacity, 16));
         }
 
         internal static bool ShouldScheduleReadbackForTesting(
@@ -891,8 +985,12 @@ namespace VividRP.Runtime
             for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
             {
                 BufferPairState pair = m_BufferPairs[bufferIndex];
-                if (pair.RequestsBuffer == null || pair.CounterBuffer == null)
+                if (pair.RequestsBuffer == null
+                    || pair.CounterBuffer == null
+                    || pair.ResidentHashBuffer == null)
+                {
                     return false;
+                }
             }
 
             return true;
@@ -943,7 +1041,7 @@ namespace VividRP.Runtime
 #if VT_DEBUG
             if (!wasComplete && HasCompleteQuiescenceCoverage())
             {
-                Debug.Log(
+                VTDebugLog.Trace(
                     $"[VividRP][VT_DEBUG][FeedbackQuiescenceEnter] space={m_SpaceId} "
                     + $"feedbackFrame={scheduledFrameIndex} sampleArea={sampleArea} "
                     + $"phaseMask=0x{m_EmptyReadbackPhaseMask:X16}");
@@ -959,7 +1057,7 @@ namespace VividRP.Runtime
 #if VT_DEBUG
             if (wasComplete)
             {
-                Debug.Log(
+                VTDebugLog.Trace(
                     $"[VividRP][VT_DEBUG][FeedbackQuiescenceExit] space={m_SpaceId} "
                     + $"frame={frameIndex} reason={reason}");
             }
@@ -1062,7 +1160,7 @@ namespace VividRP.Runtime
 
             m_ReadbackStallActive = true;
             m_ReadbackStallStartFrame = frameIndex;
-            Debug.Log(
+            VTDebugLog.Trace(
                 $"[VividRP][VT_DEBUG][FeedbackReadbackStallBegin] space={m_SpaceId} "
                 + $"frame={frameIndex} buffers={FeedbackBufferCount}");
         }
@@ -1073,7 +1171,7 @@ namespace VividRP.Runtime
                 return;
 
             int duration = Mathf.Max(0, frameIndex - m_ReadbackStallStartFrame);
-            Debug.Log(
+            VTDebugLog.Trace(
                 $"[VividRP][VT_DEBUG][FeedbackReadbackStallEnd] space={m_SpaceId} "
                 + $"frame={frameIndex} durationFrames={duration} buffers={FeedbackBufferCount}");
             m_ReadbackStallActive = false;

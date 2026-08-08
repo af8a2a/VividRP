@@ -85,10 +85,11 @@ namespace VividRP.Editor.Tests
         public void DebugTimeline_ValidResidentTransitionSequence_DoesNotReportError()
         {
             var errors = new List<string>();
+            var traces = new List<string>();
             var diagnostics = new VTDebugPageTimelineDiagnostics(
                 "TestPool",
                 errors.Add,
-                _ => { });
+                traces.Add);
             VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
                 VTPageRequestKind.Demand,
                 new VirtualTexturePageCoord(2, 3, 0));
@@ -96,9 +97,24 @@ namespace VividRP.Editor.Tests
             diagnostics.OnReserve(4, 1, 12, 0, 7, 1, true, false, debugInfo);
             diagnostics.OnResidentCommit(4, 1, 12, 0, 7, 2, true, false, false, debugInfo);
             diagnostics.OnTransitionBegin(1, 12, 0, 4, 7, 2);
-            diagnostics.OnTransitionPhase(1, 12, 0, 4, 7, 10, 0, 3);
+            diagnostics.OnTransitionPhase(
+                1,
+                12,
+                0,
+                4,
+                7,
+                10,
+                0,
+                VirtualTexturePageTableEntry.MaxTransitionPhase);
 
             Assert.That(errors, Is.Empty);
+            Assert.That(traces, Has.Count.EqualTo(1));
+            Assert.That(traces[0], Does.Contain("[PageTimeline] outcome=stable"));
+            Assert.That(
+                traces[0],
+                Does.Contain(
+                    $"sequence=reserve@1>commit@2>transition@2>"
+                    + $"phase{VirtualTexturePageTableEntry.MaxTransitionPhase}>stable@10"));
         }
 
         [Test]
@@ -122,7 +138,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DebugTimeline_CancelledNeighborRetriedQuickly_ReportsWarning()
+        public void DebugTimeline_RepeatedNeighborChurn_ReportsOneTraceableWindow()
         {
             var errors = new List<string>();
             var traces = new List<string>();
@@ -137,16 +153,116 @@ namespace VividRP.Editor.Tests
                 VTPageRequestKind.Neighbor,
                 coord);
 
-            diagnostics.OnReserve(78, 3, 41, 2, 79, 9, true, false, debugInfo);
-            diagnostics.OnSlotReleased(78, 79, 10, releaseToFreeList: true);
-            diagnostics.OnReserve(83, 3, 41, 2, 85, 10, true, false, debugInfo);
+            for (int cycle = 0; cycle < 5; cycle++)
+            {
+                int frameIndex = 9 + cycle;
+                int slot = 78 + cycle;
+                int generation = 79 + cycle;
+                diagnostics.OnReserve(
+                    slot,
+                    3,
+                    41,
+                    2,
+                    generation,
+                    frameIndex,
+                    true,
+                    false,
+                    debugInfo);
+                diagnostics.OnSlotReleased(
+                    slot,
+                    generation,
+                    frameIndex,
+                    releaseToFreeList: true);
+            }
+
+            diagnostics.AdvanceFrame(9 + VTDebugPageTimelineDiagnostics.ActivitySummaryFrameCount);
 
             Assert.That(traces, Has.Count.EqualTo(1));
-            Assert.That(traces[0], Does.Contain("[PageReserveCancel]"));
+            Assert.That(traces[0], Does.Contain("[TimelineSummary]"));
+            Assert.That(traces[0], Does.Contain("mode=steady-neighbor-churn"));
+            Assert.That(traces[0], Does.Contain("frameRange=9-13"));
+            Assert.That(traces[0], Does.Contain("windows=1 suppressedWindows=0"));
+            Assert.That(traces[0], Does.Contain("reserves=5"));
+            Assert.That(traces[0], Does.Contain("cancels=5"));
+            Assert.That(traces[0], Does.Contain("retryLoops=4"));
+            Assert.That(traces[0], Does.Contain("sequence:reserve@12>cancel@12>reserve@13"));
             Assert.That(errors, Is.Empty);
-            Assert.That(warnings, Has.Count.EqualTo(1));
-            Assert.That(warnings[0], Does.Contain("code=ReserveCancelRetryLoop"));
-            Assert.That(warnings[0], Does.Contain("sequence=reserve>cancel>reserve"));
+            Assert.That(warnings, Is.Empty);
+        }
+
+        [Test]
+        public void DebugTimeline_SteadyNeighborChurn_UsesExponentialSummaryBackoff()
+        {
+            var errors = new List<string>();
+            var traces = new List<string>();
+            var warnings = new List<string>();
+            var diagnostics = new VTDebugPageTimelineDiagnostics(
+                "TestPool",
+                errors.Add,
+                traces.Add,
+                warnings.Add);
+            VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
+                VTPageRequestKind.Neighbor,
+                new VirtualTexturePageCoord(1, 2, 3));
+
+            for (int frameIndex = 0; frameIndex < 150; frameIndex++)
+            {
+                int generation = frameIndex + 1;
+                diagnostics.OnReserve(
+                    7,
+                    3,
+                    42,
+                    3,
+                    generation,
+                    frameIndex,
+                    true,
+                    false,
+                    debugInfo);
+                diagnostics.OnSlotReleased(
+                    7,
+                    generation,
+                    frameIndex,
+                    releaseToFreeList: true);
+            }
+
+            diagnostics.AdvanceFrame(150);
+
+            Assert.That(errors, Is.Empty);
+            Assert.That(warnings, Is.Empty);
+            Assert.That(traces, Has.Count.EqualTo(2));
+            Assert.That(
+                traces[0],
+                Does.Contain("mode=steady-neighbor-churn frameRange=0-29"));
+            Assert.That(traces[0], Does.Contain("windows=1 suppressedWindows=0 totalPatternWindows=1"));
+            Assert.That(
+                traces[1],
+                Does.Contain("mode=steady-neighbor-churn frameRange=30-149"));
+            Assert.That(traces[1], Does.Contain("windows=4 suppressedWindows=3 totalPatternWindows=5"));
+            Assert.That(traces[1], Does.Contain("reserves=120"));
+            Assert.That(traces[1], Does.Contain("cancels=120"));
+        }
+
+        [Test]
+        public void DebugTimeline_DemandCancel_RemainsAnImmediateTraceableError()
+        {
+            var errors = new List<string>();
+            var traces = new List<string>();
+            var diagnostics = new VTDebugPageTimelineDiagnostics(
+                "TestPool",
+                errors.Add,
+                traces.Add);
+            VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
+                VTPageRequestKind.Demand,
+                new VirtualTexturePageCoord(3, 2, 1));
+
+            diagnostics.OnReserve(8, 4, 32, 1, 12, 20, true, false, debugInfo);
+            diagnostics.OnSlotReleased(8, 12, 21, releaseToFreeList: true);
+
+            Assert.That(errors, Has.Count.EqualTo(1));
+            Assert.That(errors[0], Does.Contain("code=PendingDemandCancelled"));
+            Assert.That(errors[0], Does.Contain("space=4 pageIndex=32 mip=1"));
+            Assert.That(errors[0], Does.Contain("sequence=reserve@20>cancel"));
+            Assert.That(traces, Is.Empty);
         }
 
         [Test]
@@ -650,6 +766,8 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Touch_DeduplicatesLruMutationWithinTheSameFrame()
         {
+            Assert.That(VTPhysicalPool.FeedbackEvictionProtectionFrames, Is.GreaterThanOrEqualTo(16));
+
             VTPhysicalPool pool = CreatePhysicalPoolForTesting(pageCount: 2);
             var owner = new PhysicalPoolOwner(1);
             var producerHandle = new VTProducerHandle(1);

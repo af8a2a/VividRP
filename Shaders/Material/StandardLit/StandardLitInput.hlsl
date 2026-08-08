@@ -99,11 +99,10 @@ float4 SampleVirtualTextureBase(float2 uv, float4 positionSS)
     VTResolvedAddress lowerResolved = VTResolveAddress(uv, requestedMips.lowerMip);
     VTResolvedAddress upperResolved = VTResolveAddress(uv, requestedMips.upperMip);
 
-    if (!lowerResolved.resident)
-        VTWriteFeedback(uv, requestedMips.lowerMip, positionSS);
+    VTWriteAccessFeedback(uv, requestedMips.lowerMip, lowerResolved, positionSS);
 
-    if (requestedMips.upperMip != requestedMips.lowerMip && !upperResolved.resident)
-        VTWriteFeedback(uv, requestedMips.upperMip, positionSS);
+    if (requestedMips.upperMip != requestedMips.lowerMip)
+        VTWriteAccessFeedback(uv, requestedMips.upperMip, upperResolved, positionSS);
 
     VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved, positionSS);
     if (!VTResolvedAddressMatches(lowerResolved, upperResolved))

@@ -25,8 +25,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache"));
             Assert.That(source, Does.Contain("_VTFeedbackRequests"));
             Assert.That(source, Does.Contain("_VTFeedbackCounter"));
+            Assert.That(source, Does.Contain("_VTFeedbackResidentHash"));
+            Assert.That(source, Does.Contain("_VTFeedbackResidentHashCapacity"));
+            Assert.That(source, Does.Contain("VT_FEEDBACK_RESIDENT_ACCESS_COUNTER_INDEX"));
             Assert.That(source, Does.Contain("register(u1)"));
             Assert.That(source, Does.Contain("register(u2)"));
+            Assert.That(source, Does.Contain("register(u3)"));
             Assert.That(source, Does.Contain("float _VTSpaceParams[33];"));
             Assert.That(source, Does.Contain("#define VT_LAYER_ENCODING_WORD    ((int)_VTSpaceParams[32])"));
             Assert.That(source, Does.Contain("uint VTGetLayerEncoding(uint layerIndex)"));
@@ -73,6 +77,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("bool VTShouldWriteFeedback"));
             Assert.That(source, Does.Contain("VTFeedbackHash"));
             Assert.That(source, Does.Contain("void VTWriteFeedback"));
+            Assert.That(source, Does.Contain("void VTWriteAccessFeedback"));
+            Assert.That(source, Does.Contain("VTShouldAppendResidentFeedback"));
+            Assert.That(source, Does.Contain("deduplicateResidentAccess"));
             Assert.That(source, Does.Contain("void VTWriteFallbackSample(float2 virtualUv, uint requestedMip, VTResolvedAddress resolved)"));
         }
 
@@ -86,6 +93,8 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureShaderIDs._VTPhysicalCache3, Is.EqualTo(Shader.PropertyToID("_VTPhysicalCache3")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackRequests, Is.EqualTo(Shader.PropertyToID("_VTFeedbackRequests")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackCounter, Is.EqualTo(Shader.PropertyToID("_VTFeedbackCounter")));
+            Assert.That(VirtualTextureShaderIDs._VTFeedbackResidentHash, Is.EqualTo(Shader.PropertyToID("_VTFeedbackResidentHash")));
+            Assert.That(VirtualTextureShaderIDs._VTFeedbackResidentHashCapacity, Is.EqualTo(Shader.PropertyToID("_VTFeedbackResidentHashCapacity")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackEnabled, Is.EqualTo(Shader.PropertyToID("_VTFeedbackEnabled")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackViewParams, Is.EqualTo(Shader.PropertyToID("_VTFeedbackViewParams")));
             Assert.That(VirtualTextureShaderIDs._VTSpaceParams, Is.EqualTo(Shader.PropertyToID("_VTSpaceParams")));
@@ -115,7 +124,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;"));
             Assert.That(source, Does.Contain("VTComputeRequestedMipRange"));
             Assert.That(source, Does.Contain("VTSampleBaseColor"));
-            Assert.That(source, Does.Contain("VTWriteFeedback"));
+            Assert.That(source, Does.Contain("VTWriteAccessFeedback"));
+            Assert.That(source, Does.Not.Contain("if (!lowerResolved.resident)"));
             Assert.That(source, Does.Contain("VTWriteFallbackSample(input.uv, requestedMips.lowerMip, lowerResolved, input.positionCS)"));
         }
 

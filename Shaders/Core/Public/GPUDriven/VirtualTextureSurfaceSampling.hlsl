@@ -107,13 +107,19 @@ VividSurfaceSampleContext VividCreateSurfaceSampleContextGrad(
 
     if (bindingData.Flags != 0u)
     {
-        if (!context.lowerResolved.resident)
-            VTWriteFeedback(context.virtualUv, context.requestedMips.lowerMip, positionCS);
+        VTWriteAccessFeedback(
+            context.virtualUv,
+            context.requestedMips.lowerMip,
+            context.lowerResolved,
+            positionCS);
 
-        if (context.requestedMips.upperMip != context.requestedMips.lowerMip
-            && !context.upperResolved.resident)
+        if (context.requestedMips.upperMip != context.requestedMips.lowerMip)
         {
-            VTWriteFeedback(context.virtualUv, context.requestedMips.upperMip, positionCS);
+            VTWriteAccessFeedback(
+                context.virtualUv,
+                context.requestedMips.upperMip,
+                context.upperResolved,
+                positionCS);
         }
 
         VTWriteFallbackSample(

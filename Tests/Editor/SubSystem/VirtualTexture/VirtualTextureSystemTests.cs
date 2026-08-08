@@ -379,6 +379,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_DoesNotReportResidentAccessFeedbackAsFaults()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "ResidentAccessStats",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1));
+            ulong residentRoot = VirtualTextureFeedbackProcessor.EncodeKey(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 2));
+            VirtualTextureSystem.InjectCompletedResidentAccessReadbackForTesting(
+                CameraType.Game,
+                residentRoot);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+            Assert.That(stats.FaultCount, Is.EqualTo(0));
+            Assert.That(stats.DeduplicatedRequestCount, Is.EqualTo(1));
+        }
+
+        [Test]
         public void Update_PrioritizesActiveViewFeedback_WhenBackgroundViewHasMoreHits()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("ActiveViewPriority", cachePageCount: 4, maxUploadsPerFrame: 1));
@@ -928,6 +957,7 @@ namespace VividRP.Editor.Tests
                 Texture2D oldPhysicalCache = initialBinding.PhysicalCache;
                 ComputeBuffer oldFeedbackRequests = initialBinding.FeedbackRequests;
                 ComputeBuffer oldFeedbackCounter = initialBinding.FeedbackCounter;
+                ComputeBuffer oldFeedbackResidentHash = initialBinding.FeedbackResidentHash;
 
                 var updatedDesc = new VirtualTextureSpaceDesc(
                     initialDesc.SpaceName,
@@ -948,6 +978,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(oldPhysicalCache == null, Is.True);
                 Assert.That(oldFeedbackRequests.IsValid(), Is.False);
                 Assert.That(oldFeedbackCounter.IsValid(), Is.False);
+                Assert.That(oldFeedbackResidentHash.IsValid(), Is.False);
 
                 VirtualTextureSystem.Update(frameData, commandBuffer);
                 VirtualTextureSpaceBinding updatedBinding = frameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
@@ -958,6 +989,7 @@ namespace VividRP.Editor.Tests
                 AssertPhysicalAtlas(updatedBinding.PhysicalCache, updatedDesc, groupLayerCount: 1);
                 Assert.That(updatedBinding.ShaderParams.PageSize, Is.EqualTo(updatedDesc.PageSize));
                 Assert.That(updatedBinding.ShaderParams.FeedbackCapacity, Is.EqualTo(updatedDesc.FeedbackCapacity));
+                Assert.That(updatedBinding.FeedbackResidentHashCapacity, Is.EqualTo(16));
                 Assert.That(updatedBinding.HasFeedback, Is.True);
             }
             finally
@@ -1025,6 +1057,7 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer pageTableBuffer = binding.PageTableBuffer;
                 ComputeBuffer feedbackRequests = binding.FeedbackRequests;
                 ComputeBuffer feedbackCounter = binding.FeedbackCounter;
+                ComputeBuffer feedbackResidentHash = binding.FeedbackResidentHash;
                 Texture2D physicalCache = binding.PhysicalCache;
 
                 Assert.That(VirtualTextureSystem.IsCameraFeedbackStateCreatedForTesting(camera), Is.True);
@@ -1037,6 +1070,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(pageTableBuffer.IsValid(), Is.False);
                 Assert.That(feedbackRequests.IsValid(), Is.False);
                 Assert.That(feedbackCounter.IsValid(), Is.False);
+                Assert.That(feedbackResidentHash.IsValid(), Is.False);
                 Assert.That(physicalCache == null, Is.True);
             }
             finally
@@ -1068,10 +1102,9 @@ namespace VividRP.Editor.Tests
                 "[VividRP][VT_DEBUG][PageReplaceBegin]",
                 "[VividRP][VT_DEBUG][PageReplaceInvalidate]",
                 "[VividRP][VT_DEBUG][PageReplaceCommit]",
-                "[VividRP][VT_DEBUG][PageFillReserve]",
-                "[VividRP][VT_DEBUG][PageResidentCommit]",
                 "[VividRP][VT_DEBUG][PageResidentAttach]",
-                "[VividRP][VT_DEBUG][PageReserveCancel]",
+                "[VividRP][VT_DEBUG][PageTimeline]",
+                "[VividRP][VT_DEBUG][TimelineSummary]",
                 "[VividRP][VT_DEBUG][PageTransitionForcedStable]",
                 "[VividRP][VT_DEBUG][TimelineError]",
                 "[VividRP][VT_DEBUG][TimelineWarning]",
@@ -1095,6 +1128,33 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(guardEndIndex, Is.GreaterThan(diagnosticIndex), diagnosticTag);
             }
+
+            Assert.That(source, Does.Contain("LogOption.NoStacktrace"));
+            Assert.That(source, Does.Not.Contain("[VividRP][VT_DEBUG][PageFillReserve]"));
+            Assert.That(source, Does.Not.Contain("[VividRP][VT_DEBUG][PageResidentCommit]"));
+            Assert.That(source, Does.Not.Contain("[VividRP][VT_DEBUG][PageReserveCancel]"));
+
+            string residencySource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "SubSystem",
+                "VirtualTexture",
+                "Core",
+                "VTResidencyManager.cs"));
+            Assert.That(residencySource, Does.Not.Contain("[VividRP][VT_DEBUG][PageTransitionBegin]"));
+            Assert.That(residencySource, Does.Not.Contain("[VividRP][VT_DEBUG][PageTransitionReveal]"));
+        }
+
+        [TestCase(1, 16)]
+        [TestCase(8, 16)]
+        [TestCase(9, 32)]
+        [TestCase(512, 1024)]
+        public void ResidentFeedbackHashCapacity_KeepsLoadFactorAtOrBelowOneHalf(
+            int cachePageCount,
+            int expectedCapacity)
+        {
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ResolveResidentHashCapacityForTesting(cachePageCount),
+                Is.EqualTo(expectedCapacity));
         }
 
         [Test]
@@ -1128,7 +1188,11 @@ namespace VividRP.Editor.Tests
             Assert.That(feedbackSource, Does.Contain("internal Dictionary<int, VirtualTextureFeedbackBufferState> EnumerateSpaceStates()"));
             Assert.That(feedbackSource, Does.Contain("m_ZeroCounterData = new NativeArray<uint>("));
             Assert.That(feedbackSource, Does.Contain("cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);"));
-            Assert.That(feedbackSource, Does.Contain("private const int FeedbackBufferCount = 4;"));
+            Assert.That(feedbackSource, Does.Contain("private const int FeedbackBufferCount = 8;"));
+            Assert.That(feedbackSource, Does.Contain("private const int FeedbackCounterElementCount = 3;"));
+            Assert.That(feedbackSource, Does.Contain("ResidentHashBuffer"));
+            Assert.That(feedbackSource, Does.Contain("ResolveResidentHashCapacity"));
+            Assert.That(feedbackSource, Does.Not.Contain("cmd.SetBufferData(writePair.ResidentHashBuffer"));
             Assert.That(feedbackSource, Does.Contain("&& !readPair.HasCompletedReadback"));
             Assert.That(feedbackSource, Does.Contain("pair.WasWritten = false;"));
             Assert.That(feedbackSource, Does.Contain("FindWritableBufferIndex()"));

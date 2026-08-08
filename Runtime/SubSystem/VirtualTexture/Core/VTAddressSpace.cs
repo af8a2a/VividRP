@@ -342,11 +342,6 @@ namespace VividRP.Runtime
                 maxStartsThisCall);
         }
 
-        internal bool IsTransitionCohortReady(int frameIndex)
-        {
-            return m_ResidencyManager.IsTransitionCohortReady(frameIndex);
-        }
-
         internal bool RebuildPageTableIfDirty(int frameIndex = -1)
         {
             m_ResidencyManager.AdvancePageTransitions(
@@ -420,7 +415,7 @@ namespace VividRP.Runtime
                     new RectInt(0, 0, pageCountX, pageCountY));
             }
 
-            m_ResidencyManager.ResetTransitionCohortForRuntimeReset();
+            m_ResidencyManager.ResetPageTransitionsForRuntimeReset();
 
             return flushedCount;
         }
@@ -438,6 +433,8 @@ namespace VividRP.Runtime
             bool privateSpace,
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
+            ComputeBuffer feedbackResidentHash,
+            int feedbackResidentHashCapacity,
             VirtualTextureFeedbackBufferState feedbackState)
         {
             return new VirtualTextureSpaceBinding(
@@ -451,6 +448,8 @@ namespace VividRP.Runtime
                 m_ResidencyManager.PhysicalPool.Textures,
                 feedbackRequests,
                 feedbackCounter,
+                feedbackResidentHash,
+                feedbackResidentHashCapacity,
                 feedbackState,
                 m_ShaderParams,
                 m_MipOffsets,

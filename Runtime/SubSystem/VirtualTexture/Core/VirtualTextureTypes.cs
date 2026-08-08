@@ -567,6 +567,8 @@ namespace VividRP.Runtime
             IReadOnlyList<Texture2D> physicalCaches,
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
+            ComputeBuffer feedbackResidentHash,
+            int feedbackResidentHashCapacity,
             VirtualTextureFeedbackBufferState feedbackState,
             VirtualTextureSpaceShaderParams shaderParams,
             int[] mipOffsets,
@@ -583,6 +585,8 @@ namespace VividRP.Runtime
             PhysicalCache = PhysicalCaches.Count > 0 ? PhysicalCaches[0] : null;
             FeedbackRequests = feedbackRequests;
             FeedbackCounter = feedbackCounter;
+            FeedbackResidentHash = feedbackResidentHash;
+            FeedbackResidentHashCapacity = feedbackResidentHashCapacity;
             FeedbackState = feedbackState;
             ShaderParams = shaderParams;
             MipOffsets = mipOffsets;
@@ -611,6 +615,10 @@ namespace VividRP.Runtime
 
         public ComputeBuffer FeedbackCounter { get; }
 
+        public ComputeBuffer FeedbackResidentHash { get; }
+
+        public int FeedbackResidentHashCapacity { get; }
+
         private VirtualTextureFeedbackBufferState FeedbackState { get; }
 
         public VirtualTextureSpaceShaderParams ShaderParams { get; }
@@ -619,7 +627,10 @@ namespace VividRP.Runtime
 
         public Vector4[] LayerFallbacks { get; }
 
-        public bool HasFeedback => FeedbackRequests != null && FeedbackCounter != null;
+        public bool HasFeedback => FeedbackRequests != null
+                                   && FeedbackCounter != null
+                                   && FeedbackResidentHash != null
+                                   && FeedbackResidentHashCapacity > 0;
 
         public bool IsValid => PageTableBuffer != null && PhysicalCache != null;
 
@@ -641,6 +652,8 @@ namespace VividRP.Runtime
                 PhysicalCaches,
                 FeedbackRequests,
                 FeedbackCounter,
+                FeedbackResidentHash,
+                FeedbackResidentHashCapacity,
                 FeedbackState,
                 ShaderParams,
                 MipOffsets,
@@ -847,6 +860,8 @@ namespace VividRP.Runtime
         public static readonly int _VTPhysicalCache3 = Shader.PropertyToID(nameof(_VTPhysicalCache3));
         public static readonly int _VTFeedbackRequests = Shader.PropertyToID(nameof(_VTFeedbackRequests));
         public static readonly int _VTFeedbackCounter = Shader.PropertyToID(nameof(_VTFeedbackCounter));
+        public static readonly int _VTFeedbackResidentHash = Shader.PropertyToID(nameof(_VTFeedbackResidentHash));
+        public static readonly int _VTFeedbackResidentHashCapacity = Shader.PropertyToID(nameof(_VTFeedbackResidentHashCapacity));
         public static readonly int _VTFeedbackEnabled = Shader.PropertyToID(nameof(_VTFeedbackEnabled));
         public static readonly int _VTFeedbackViewParams = Shader.PropertyToID(nameof(_VTFeedbackViewParams));
         public static readonly int _VTSpaceParams = Shader.PropertyToID(nameof(_VTSpaceParams));

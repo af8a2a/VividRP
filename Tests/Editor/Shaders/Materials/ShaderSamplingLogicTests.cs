@@ -34,7 +34,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float4 SampleVirtualTextureBase(float2 uv)"));
             Assert.That(source, Does.Contain("VTMipRange requestedMips = VTComputeRequestedMipRange(uv);"));
             Assert.That(source, Does.Contain("VTResolvedAddress lowerResolved = VTResolveAddress(uv, requestedMips.lowerMip);"));
-            Assert.That(source, Does.Contain("VTWriteFeedback(uv, requestedMips.lowerMip, positionSS);"));
+            Assert.That(source, Does.Contain("VTWriteAccessFeedback(uv, requestedMips.lowerMip, lowerResolved, positionSS);"));
+            Assert.That(source, Does.Not.Contain("if (!lowerResolved.resident)"));
             Assert.That(source, Does.Contain("VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved, positionSS);"));
             Assert.That(source, Does.Contain("return VTSampleBaseColor(uv, lowerResolved, upperResolved, requestedMips.blend);"));
         }

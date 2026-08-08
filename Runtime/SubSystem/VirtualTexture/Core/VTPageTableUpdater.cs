@@ -347,18 +347,45 @@ namespace VividRP.Runtime
 
             if (pageState.Resident && !pageState.TransitionQueued)
             {
-                hasBestMapping = true;
-                bestPhysicalPageId = pageState.PhysicalPageId;
-                bestResolvedMip = coord.Mip;
-                bestTransitionPhase = pageState.TransitionPhase;
-                entry = new VirtualTexturePageTableEntry(
-                    bestPhysicalPageId,
-                    bestResolvedMip,
-                    true,
-                    false,
-                    false,
-                    pageState.Locked,
-                    bestTransitionPhase);
+                if (TryResolveFixedTransitionAncestor(
+                        desc,
+                        mipOffsets,
+                        residencyManager,
+                        pageState,
+                        out VTPageResidencyState transitionAncestorState,
+                        out int transitionAncestorMip))
+                {
+                    // Keep both this page and its descendants mapped to the ancestor selected
+                    // when the transition began. A closer mip becoming resident must not change
+                    // the visible source before this page's own reveal frame.
+                    hasBestMapping = true;
+                    bestPhysicalPageId = transitionAncestorState.PhysicalPageId;
+                    bestResolvedMip = transitionAncestorMip;
+                    bestTransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
+                    entry = new VirtualTexturePageTableEntry(
+                        bestPhysicalPageId,
+                        bestResolvedMip,
+                        resident: true,
+                        fallback: true,
+                        pendingUpload: false,
+                        locked: pageState.Locked,
+                        transitionPhase: bestTransitionPhase);
+                }
+                else
+                {
+                    hasBestMapping = true;
+                    bestPhysicalPageId = pageState.PhysicalPageId;
+                    bestResolvedMip = coord.Mip;
+                    bestTransitionPhase = pageState.TransitionPhase;
+                    entry = new VirtualTexturePageTableEntry(
+                        bestPhysicalPageId,
+                        bestResolvedMip,
+                        resident: true,
+                        fallback: false,
+                        pendingUpload: false,
+                        locked: pageState.Locked,
+                        transitionPhase: bestTransitionPhase);
+                }
             }
             else
             {
@@ -398,6 +425,41 @@ namespace VividRP.Runtime
             m_BestTransitionPhases[pageIndex] = hasBestMapping
                 ? (byte)bestTransitionPhase
                 : (byte)VirtualTexturePageTableEntry.MaxTransitionPhase;
+        }
+
+        private static bool TryResolveFixedTransitionAncestor(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            VTResidencyManager residencyManager,
+            in VTPageResidencyState pageState,
+            out VTPageResidencyState ancestorState,
+            out int ancestorMip)
+        {
+            ancestorState = default;
+            ancestorMip = 0;
+            if (pageState.TransitionPhase >= VirtualTexturePageTableEntry.MaxTransitionPhase
+                || pageState.TransitionAncestorPageIndex < 0
+                || !TryGetPageCoord(
+                    desc,
+                    mipOffsets,
+                    pageState.TransitionAncestorPageIndex,
+                    out VirtualTexturePageCoord ancestorCoord))
+            {
+                return false;
+            }
+
+            ancestorState = residencyManager.GetPageState(pageState.TransitionAncestorPageIndex);
+            if (!ancestorState.Resident
+                || ancestorState.PendingUpload
+                || ancestorState.TransitionQueued
+                || ancestorState.TransitionPhase < VirtualTexturePageTableEntry.MaxTransitionPhase)
+            {
+                ancestorState = default;
+                return false;
+            }
+
+            ancestorMip = ancestorCoord.Mip;
+            return true;
         }
 
         private static bool TryGetPageCoord(

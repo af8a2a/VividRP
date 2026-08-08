@@ -139,10 +139,19 @@ Shader "VividRP/Material/VirtualTextureDemo"
                     if (resolvedMipsDiffer)
                         VTWriteFallbackSample(input.uv, requestedMips.upperMip, upperResolved, input.positionCS);
 
-                    if (!lowerResolved.resident)
-                        VTWriteFeedback(input.uv, requestedMips.lowerMip, input.positionCS);
-                    if (requestedMips.upperMip != requestedMips.lowerMip && !upperResolved.resident)
-                        VTWriteFeedback(input.uv, requestedMips.upperMip, input.positionCS);
+                    VTWriteAccessFeedback(
+                        input.uv,
+                        requestedMips.lowerMip,
+                        lowerResolved,
+                        input.positionCS);
+                    if (requestedMips.upperMip != requestedMips.lowerMip)
+                    {
+                        VTWriteAccessFeedback(
+                            input.uv,
+                            requestedMips.upperMip,
+                            upperResolved,
+                            input.positionCS);
+                    }
 
                     float4 sampledColor = VTSampleBaseColor(
                         input.uv,

@@ -423,16 +423,9 @@ namespace VividRP.Runtime
             {
                 int spaceIndex = (frameOffset + relativeIndex) % spaceCount;
                 VTPageTableSpace addressSpace = s_TransitionSchedulingSpaces[spaceIndex];
-                bool hasFeedbackRequests = s_FeedbackAggregator != null
-                                           && s_FeedbackAggregator.TryGetRequestsForSpace(
-                                               addressSpace.SpaceId,
-                                               out NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests)
-                                           && requests.Length > 0;
-                bool revealCohort = !hasFeedbackRequests
-                                    && addressSpace.IsTransitionCohortReady(frameIndex);
                 addressSpace.AdvancePageTransitionPhases(
                     frameIndex,
-                    revealCohort ? int.MaxValue : 0);
+                    int.MaxValue);
             }
         }
 
@@ -490,13 +483,15 @@ namespace VividRP.Runtime
                 for (int batchIndex = 0; batchIndex < s_CompletedReadbacks.Count; batchIndex++)
                 {
                     VirtualTextureFeedbackBatch batch = s_CompletedReadbacks[batchIndex];
-                    faultCount += batch.RequestCount;
+                    faultCount += Mathf.Max(0, batch.RequestCount - batch.ResidentAccessCount);
                     feedbackOverflowCount += batch.FeedbackOverflowCount;
                     fallbackSampleCount += batch.FallbackSampleCount;
 
                     if (IsBatchFromView(batch, activeViewId, activeCameraType))
                     {
-                        activeViewFaultCount += batch.RequestCount;
+                        activeViewFaultCount += Mathf.Max(
+                            0,
+                            batch.RequestCount - batch.ResidentAccessCount);
                         activeViewFeedbackOverflowCount += batch.FeedbackOverflowCount;
                         activeViewFallbackSampleCount += batch.FallbackSampleCount;
                         activeViewLastReadbackFrame = Mathf.Max(activeViewLastReadbackFrame, batch.FrameIndex);
@@ -520,8 +515,8 @@ namespace VividRP.Runtime
                 ResolvePrefetchBiasBySpace(cachePriorityViewId);
 
             // Starts are invisible (phase zero resolves the stable ancestor), so upload
-            // work may continue in parallel. Publication is a single cohort transaction
-            // after the space has no feedback, pending uploads, or recent commit activity.
+            // work may continue in parallel. Each page publishes after its own transition
+            // interval; unrelated feedback and uploads in the same space cannot delay it.
             AdvanceAndSchedulePageTransitions(frameIndex);
 
             int evictionCount = 0;
@@ -732,6 +727,8 @@ namespace VividRP.Runtime
                 VTPageTableSpace addressSpace = pair.Value;
                 ComputeBuffer feedbackRequests = null;
                 ComputeBuffer feedbackCounter = null;
+                ComputeBuffer feedbackResidentHash = null;
+                int feedbackResidentHashCapacity = 0;
                 VirtualTextureFeedbackBufferState feedbackBufferState = null;
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsMarker.Auto())
                 {
@@ -751,11 +748,14 @@ namespace VividRP.Runtime
                                 activeViewId,
                                 activeViewSignature,
                                 addressSpace.StackDesc.FeedbackCapacity,
+                                addressSpace.StackDesc.CachePageCount,
                                 frameIndex,
                                 addressSpace.PendingRequestCount > 0
                                 || s_UploadScheduler.HasInFlightUploadForSpace(addressSpace.SpaceId),
                                 out feedbackRequests,
                                 out feedbackCounter,
+                                out feedbackResidentHash,
+                                out feedbackResidentHashCapacity,
                                 out string feedbackStatus)
                             && string.IsNullOrEmpty(statusMessage)
                             && !string.IsNullOrEmpty(feedbackStatus))
@@ -780,6 +780,8 @@ namespace VividRP.Runtime
                         privateSpace,
                         feedbackRequests,
                         feedbackCounter,
+                        feedbackResidentHash,
+                        feedbackResidentHashCapacity,
                         feedbackBufferState));
                 }
             }
@@ -1059,6 +1061,22 @@ namespace VividRP.Runtime
                 feedbackOverflowCount: 0,
                 fallbackSampleCount: 0,
                 requestKeys: requestKeys);
+        }
+
+        internal static void InjectCompletedResidentAccessReadbackForTesting(
+            CameraType cameraType,
+            params ulong[] requestKeys)
+        {
+            if (requestKeys == null || requestKeys.Length == 0)
+                return;
+
+            s_InjectedReadbacks.Add(new VirtualTextureFeedbackBatch(
+                VirtualTextureViewId.FromCameraType(cameraType),
+                cameraType,
+                requestKeys,
+                requestKeys.Length,
+                Time.frameCount,
+                residentAccessCount: requestKeys.Length));
         }
 
         internal static void InjectCompletedReadbackStatsForTesting(

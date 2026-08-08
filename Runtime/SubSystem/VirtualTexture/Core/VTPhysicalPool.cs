@@ -441,6 +441,31 @@ namespace VividRP.Runtime
     }
 
 #if VT_DEBUG
+    internal static class VTDebugLog
+    {
+        internal static void Trace(string message)
+        {
+            Write(LogType.Log, message);
+        }
+
+        internal static void Warning(string message)
+        {
+            Write(LogType.Warning, message);
+        }
+
+        internal static void Error(string message)
+        {
+            Write(LogType.Error, message);
+        }
+
+        private static void Write(LogType logType, string message)
+        {
+            // Structured VT messages already carry the event, frame and page sequence.
+            // Per-message Unity stacks are identical and dominate captures during churn.
+            Debug.LogFormat(logType, LogOption.NoStacktrace, null, "{0}", message);
+        }
+    }
+
     internal enum VTPageRequestKind : byte
     {
         Unknown = 0,
@@ -531,6 +556,9 @@ namespace VividRP.Runtime
         internal const int CommitBurstThreshold = 8;
         internal const int TransitionBurstThreshold = 16;
         internal const int VisibilityWaveThreshold = 16;
+        internal const int ActivitySummaryFrameCount = 30;
+        internal const int NeighborChurnReportBackoffMultiplier = 4;
+        internal const int NeighborChurnMaxReportWindowCount = 64;
 
         private enum PageStage : byte
         {
@@ -629,6 +657,38 @@ namespace VividRP.Runtime
             internal long MaxWeightedScore;
         }
 
+        private sealed class ActivityWindow
+        {
+            internal int FirstFrame = int.MaxValue;
+            internal int LastFrame = int.MinValue;
+            internal int ReserveCount;
+            internal int CommitCount;
+            internal int StableCount;
+            internal int CancelCount;
+            internal int RetryLoopCount;
+            internal int BootstrapReserveCount;
+            internal int LockedReserveCount;
+            internal int DemandReserveCount;
+            internal int RefinementReserveCount;
+            internal int NeighborReserveCount;
+            internal int UnknownReserveCount;
+            internal int MinMip = int.MaxValue;
+            internal int MaxMip = int.MinValue;
+            internal long MaxWeightedScore;
+            internal string FirstSample;
+            internal string LastSample;
+            internal string FirstRetrySample;
+            internal string LastRetrySample;
+        }
+
+        private sealed class RepeatedChurnState
+        {
+            internal ActivityWindow PendingWindow = new();
+            internal int PendingWindowCount;
+            internal int TotalWindowCount;
+            internal int ReportWindowCount = 1;
+        }
+
         private readonly string m_PoolName;
         private readonly Action<string> m_ErrorReporter;
         private readonly Action<string> m_TraceReporter;
@@ -637,7 +697,10 @@ namespace VividRP.Runtime
         private readonly Dictionary<int, int> m_SlotGenerations = new();
         private readonly Dictionary<PageKey, CancelledReserve> m_CancelledReserves = new();
         private readonly Dictionary<int, FrameWave> m_FrameWaves = new();
+        private readonly Dictionary<int, ActivityWindow> m_ActivityWindows = new();
+        private readonly Dictionary<int, RepeatedChurnState> m_RepeatedChurnStates = new();
         private readonly List<PageKey> m_KeysToRemove = new();
+        private readonly List<int> m_SpaceIdsToRemove = new();
         private int m_CurrentFrame = -1;
 
         internal VTDebugPageTimelineDiagnostics(
@@ -647,9 +710,9 @@ namespace VividRP.Runtime
             Action<string> warningReporter = null)
         {
             m_PoolName = string.IsNullOrWhiteSpace(poolName) ? "Shared" : poolName;
-            m_ErrorReporter = errorReporter ?? Debug.LogError;
-            m_TraceReporter = traceReporter ?? Debug.Log;
-            m_WarningReporter = warningReporter ?? Debug.LogWarning;
+            m_ErrorReporter = errorReporter ?? VTDebugLog.Error;
+            m_TraceReporter = traceReporter ?? VTDebugLog.Trace;
+            m_WarningReporter = warningReporter ?? VTDebugLog.Warning;
         }
 
         internal int CurrentFrame => m_CurrentFrame;
@@ -673,7 +736,10 @@ namespace VividRP.Runtime
                 return;
 
             if (m_CurrentFrame >= 0)
+            {
                 FinalizeFrameWaves(m_CurrentFrame);
+                FinalizeActivityWindows(frameIndex, force: false);
+            }
             m_CurrentFrame = frameIndex;
             m_FrameWaves.Clear();
             CheckTimeouts(frameIndex);
@@ -719,24 +785,23 @@ namespace VividRP.Runtime
                 int retryAge = frameIndex - cancelled.Frame;
                 if (retryAge >= 0 && retryAge <= CancelRetryWindowFrames)
                 {
-                    ReportWarning(
-                        "ReserveCancelRetryLoop",
+                    RecordCancelRetry(
+                        spaceId,
+                        pageIndex,
+                        mip,
+                        slot,
+                        generation,
                         frameIndex,
-                        null,
-                        $"space={spaceId} pageIndex={pageIndex} mip={mip} oldSlot={cancelled.Slot} "
-                        + $"oldGeneration={cancelled.Generation} cancelFrame={cancelled.Frame} "
-                        + $"newSlot={slot} newGeneration={generation} retryAgeFrames={retryAge} "
-                        + $"cancelledAgeFrames={cancelled.AgeFrames} "
-                        + $"oldRequestKind={FormatRequestKind(cancelled.RequestKind)} "
-                        + $"newRequestKind={FormatRequestKind(requestDebugInfo.RequestKind)} "
-                        + $"sequence=reserve>cancel>reserve");
+                        cancelled,
+                        retryAge,
+                        requestDebugInfo.RequestKind);
                 }
 
                 m_CancelledReserves.Remove(key);
             }
 
             m_SlotGenerations[slot] = generation;
-            m_Pages[key] = new PageTimeline
+            var timeline = new PageTimeline
             {
                 Key = key,
                 Mip = mip,
@@ -748,6 +813,8 @@ namespace VividRP.Runtime
                 Locked = locked,
                 RequestDebugInfo = requestDebugInfo,
             };
+            m_Pages[key] = timeline;
+            RecordActivityReserve(frameIndex, timeline);
         }
 
         internal void OnResidentAttach(
@@ -835,6 +902,17 @@ namespace VividRP.Runtime
             timeline.Locked = locked;
             timeline.RequestDebugInfo = requestDebugInfo;
             RecordCommitWave(frameIndex, timeline);
+            RecordActivityCommit(frameIndex, timeline);
+            if (locked)
+            {
+                timeline.Stage = PageStage.Stable;
+                RecordActivityStable(frameIndex, timeline);
+                ReportLifecycle(
+                    "resident",
+                    frameIndex,
+                    timeline,
+                    $"commitPath={(wasPending ? "async" : "immediate")} locked=True");
+            }
         }
 
         internal void OnLockChanged(
@@ -863,7 +941,8 @@ namespace VividRP.Runtime
                 $"[VividRP][VT_DEBUG][PageTransitionForcedStable] pool={m_PoolName} "
                 + $"frame={m_CurrentFrame} slot={slot} space={spaceId} pageIndex={pageIndex} "
                 + $"mip={timeline.Mip} generation={generation} phase={previousPhase}->"
-                + $"{VirtualTexturePageTableEntry.MaxTransitionPhase} reason=locked");
+                + $"{VirtualTexturePageTableEntry.MaxTransitionPhase} reason=locked "
+                + $"sequence={FormatSequence(timeline)}>forcedStable@{m_CurrentFrame}");
         }
 
         internal void OnTransitionBegin(
@@ -1041,6 +1120,17 @@ namespace VividRP.Runtime
                 ? PageStage.Stable
                 : PageStage.Transitioning;
             RecordTransitionWave(frameIndex, timeline);
+            if (timeline.Stage == PageStage.Stable)
+            {
+                RecordActivityStable(frameIndex, timeline);
+                ReportLifecycle(
+                    "stable",
+                    frameIndex,
+                    timeline,
+                    $"phase={previousPhase}->{nextPhase} "
+                    + $"ancestor={FormatAncestor(in timeline.TransitionAncestor)} "
+                    + $"revealAgeFrames={Math.Max(0, frameIndex - timeline.TransitionFrame)}");
+            }
         }
 
         internal void OnReplacementBegin(
@@ -1162,12 +1252,7 @@ namespace VividRP.Runtime
                 if (timeline.Pending && releaseToFreeList)
                 {
                     int ageFrames = Math.Max(0, frameIndex - timeline.ReserveFrame);
-                    string trace =
-                        $"[VividRP][VT_DEBUG][PageReserveCancel] pool={m_PoolName} frame={frameIndex} "
-                        + $"slot={slot} space={timeline.Key.SpaceId} pageIndex={timeline.Key.PageIndex} "
-                        + $"mip={timeline.Mip} generation={generation} ageFrames={ageFrames} "
-                        + $"{FormatRequest(in timeline.RequestDebugInfo)}";
-                    m_TraceReporter(trace);
+                    RecordActivityCancel(frameIndex, timeline, ageFrames);
                     m_CancelledReserves[timeline.Key] = new CancelledReserve(
                         frameIndex,
                         slot,
@@ -1175,12 +1260,16 @@ namespace VividRP.Runtime
                         ageFrames,
                         timeline.RequestDebugInfo.RequestKind);
 
-                    if (timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Demand
+                    if (timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Bootstrap
+                        || timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Demand
                         || timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Refinement
                         || timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Locked)
                     {
+                        string code = timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Bootstrap
+                            ? "PendingBootstrapCancelled"
+                            : "PendingDemandCancelled";
                         Report(
-                            "PendingDemandCancelled",
+                            code,
                             frameIndex,
                             timeline,
                             $"ageFrames={ageFrames} sequence={FormatSequence(timeline)}>cancel");
@@ -1219,11 +1308,16 @@ namespace VividRP.Runtime
 
         internal void Reset()
         {
+            if (m_CurrentFrame >= 0)
+                FinalizeActivityWindows(m_CurrentFrame, force: true);
             m_Pages.Clear();
             m_SlotGenerations.Clear();
             m_CancelledReserves.Clear();
             m_FrameWaves.Clear();
+            m_ActivityWindows.Clear();
+            m_RepeatedChurnStates.Clear();
             m_KeysToRemove.Clear();
+            m_SpaceIdsToRemove.Clear();
             m_CurrentFrame = -1;
         }
 
@@ -1278,6 +1372,334 @@ namespace VividRP.Runtime
 
             for (int keyIndex = 0; keyIndex < m_KeysToRemove.Count; keyIndex++)
                 m_CancelledReserves.Remove(m_KeysToRemove[keyIndex]);
+        }
+
+        private void RecordActivityReserve(int frameIndex, PageTimeline timeline)
+        {
+            ActivityWindow window = GetActivityWindow(timeline.Key.SpaceId);
+            window.ReserveCount += 1;
+            switch (timeline.RequestDebugInfo.RequestKind)
+            {
+                case VTPageRequestKind.Bootstrap:
+                    window.BootstrapReserveCount += 1;
+                    break;
+                case VTPageRequestKind.Locked:
+                    window.LockedReserveCount += 1;
+                    break;
+                case VTPageRequestKind.Demand:
+                    window.DemandReserveCount += 1;
+                    break;
+                case VTPageRequestKind.Refinement:
+                    window.RefinementReserveCount += 1;
+                    break;
+                case VTPageRequestKind.Neighbor:
+                    window.NeighborReserveCount += 1;
+                    break;
+                default:
+                    window.UnknownReserveCount += 1;
+                    break;
+            }
+
+            AccumulateActivity(
+                window,
+                frameIndex,
+                timeline.Mip,
+                timeline.RequestDebugInfo.WeightedScore,
+                FormatActivitySample(timeline, $"reserve@{frameIndex}"));
+        }
+
+        private void RecordActivityCommit(int frameIndex, PageTimeline timeline)
+        {
+            ActivityWindow window = GetActivityWindow(timeline.Key.SpaceId);
+            window.CommitCount += 1;
+            AccumulateActivity(
+                window,
+                frameIndex,
+                timeline.Mip,
+                timeline.RequestDebugInfo.WeightedScore,
+                FormatActivitySample(timeline, FormatSequence(timeline)));
+        }
+
+        private void RecordActivityStable(int frameIndex, PageTimeline timeline)
+        {
+            ActivityWindow window = GetActivityWindow(timeline.Key.SpaceId);
+            window.StableCount += 1;
+            AccumulateActivity(
+                window,
+                frameIndex,
+                timeline.Mip,
+                timeline.RequestDebugInfo.WeightedScore,
+                FormatActivitySample(
+                    timeline,
+                    $"{FormatSequence(timeline)}>stable@{frameIndex}"));
+        }
+
+        private void RecordActivityCancel(
+            int frameIndex,
+            PageTimeline timeline,
+            int ageFrames)
+        {
+            ActivityWindow window = GetActivityWindow(timeline.Key.SpaceId);
+            window.CancelCount += 1;
+            AccumulateActivity(
+                window,
+                frameIndex,
+                timeline.Mip,
+                timeline.RequestDebugInfo.WeightedScore,
+                FormatActivitySample(
+                    timeline,
+                    $"reserve@{timeline.ReserveFrame}>cancel@{frameIndex}(age:{ageFrames})"));
+        }
+
+        private void RecordCancelRetry(
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int slot,
+            int generation,
+            int frameIndex,
+            in CancelledReserve cancelled,
+            int retryAge,
+            VTPageRequestKind newRequestKind)
+        {
+            ActivityWindow window = GetActivityWindow(spaceId);
+            window.RetryLoopCount += 1;
+            int reserveFrame = cancelled.Frame - cancelled.AgeFrames;
+            string sample =
+                $"(page:{pageIndex},mip:{mip},oldSlot:{cancelled.Slot},newSlot:{slot},"
+                + $"oldGeneration:{cancelled.Generation},newGeneration:{generation},"
+                + $"oldRequest:{FormatRequestKind(cancelled.RequestKind)},"
+                + $"newRequest:{FormatRequestKind(newRequestKind)},retryAge:{retryAge},"
+                + $"sequence:reserve@{reserveFrame}>cancel@{cancelled.Frame}>reserve@{frameIndex})";
+            window.FirstRetrySample ??= sample;
+            window.LastRetrySample = sample;
+            AccumulateActivity(window, frameIndex, mip, 0, sample);
+        }
+
+        private ActivityWindow GetActivityWindow(int spaceId)
+        {
+            if (!m_ActivityWindows.TryGetValue(spaceId, out ActivityWindow window))
+            {
+                window = new ActivityWindow();
+                m_ActivityWindows.Add(spaceId, window);
+            }
+
+            return window;
+        }
+
+        private static void AccumulateActivity(
+            ActivityWindow window,
+            int frameIndex,
+            int mip,
+            long weightedScore,
+            string sample)
+        {
+            window.FirstFrame = Math.Min(window.FirstFrame, frameIndex);
+            window.LastFrame = Math.Max(window.LastFrame, frameIndex);
+            window.MinMip = Math.Min(window.MinMip, mip);
+            window.MaxMip = Math.Max(window.MaxMip, mip);
+            window.MaxWeightedScore = Math.Max(window.MaxWeightedScore, weightedScore);
+            window.FirstSample ??= sample;
+            window.LastSample = sample;
+        }
+
+        private void FinalizeActivityWindows(int frameIndex, bool force)
+        {
+            m_SpaceIdsToRemove.Clear();
+            foreach (KeyValuePair<int, ActivityWindow> pair in m_ActivityWindows)
+            {
+                ActivityWindow window = pair.Value;
+                if (!force
+                    && (window.FirstFrame == int.MaxValue
+                        || frameIndex - window.FirstFrame < ActivitySummaryFrameCount))
+                {
+                    continue;
+                }
+
+                HandleCompletedActivityWindow(pair.Key, window, force);
+                m_SpaceIdsToRemove.Add(pair.Key);
+            }
+
+            for (int index = 0; index < m_SpaceIdsToRemove.Count; index++)
+                m_ActivityWindows.Remove(m_SpaceIdsToRemove[index]);
+
+            if (force)
+                FlushRepeatedChurnStates();
+        }
+
+        private void HandleCompletedActivityWindow(
+            int spaceId,
+            ActivityWindow window,
+            bool force)
+        {
+            if (!IsPureNeighborChurn(window))
+            {
+                FlushRepeatedChurnState(spaceId, "neighbor-churn-exit", removeState: true);
+                ReportActivityWindow(
+                    spaceId,
+                    window,
+                    "activity",
+                    windowCount: 1,
+                    totalPatternWindowCount: 1,
+                    emitRetryWarning: true);
+                return;
+            }
+
+            if (!m_RepeatedChurnStates.TryGetValue(spaceId, out RepeatedChurnState state))
+            {
+                state = new RepeatedChurnState();
+                m_RepeatedChurnStates.Add(spaceId, state);
+            }
+
+            MergeActivityWindow(state.PendingWindow, window);
+            state.PendingWindowCount += 1;
+            state.TotalWindowCount += 1;
+            if (!force && state.PendingWindowCount < state.ReportWindowCount)
+                return;
+
+            ReportRepeatedChurn(spaceId, state, force ? "neighbor-churn-final" : "steady-neighbor-churn");
+            state.ReportWindowCount = Math.Min(
+                state.ReportWindowCount * NeighborChurnReportBackoffMultiplier,
+                NeighborChurnMaxReportWindowCount);
+        }
+
+        private void FlushRepeatedChurnState(
+            int spaceId,
+            string mode,
+            bool removeState)
+        {
+            if (!m_RepeatedChurnStates.TryGetValue(spaceId, out RepeatedChurnState state))
+                return;
+
+            if (state.PendingWindowCount > 0)
+                ReportRepeatedChurn(spaceId, state, mode);
+            if (removeState)
+                m_RepeatedChurnStates.Remove(spaceId);
+        }
+
+        private void FlushRepeatedChurnStates()
+        {
+            m_SpaceIdsToRemove.Clear();
+            foreach (KeyValuePair<int, RepeatedChurnState> pair in m_RepeatedChurnStates)
+            {
+                if (pair.Value.PendingWindowCount > 0)
+                    ReportRepeatedChurn(pair.Key, pair.Value, "neighbor-churn-final");
+                m_SpaceIdsToRemove.Add(pair.Key);
+            }
+
+            for (int index = 0; index < m_SpaceIdsToRemove.Count; index++)
+                m_RepeatedChurnStates.Remove(m_SpaceIdsToRemove[index]);
+        }
+
+        private void ReportRepeatedChurn(
+            int spaceId,
+            RepeatedChurnState state,
+            string mode)
+        {
+            ReportActivityWindow(
+                spaceId,
+                state.PendingWindow,
+                mode,
+                state.PendingWindowCount,
+                state.TotalWindowCount,
+                emitRetryWarning: false);
+            state.PendingWindow = new ActivityWindow();
+            state.PendingWindowCount = 0;
+        }
+
+        private static bool IsPureNeighborChurn(ActivityWindow window)
+        {
+            return window.ReserveCount > 0
+                   && window.CommitCount == 0
+                   && window.StableCount == 0
+                   && window.CancelCount == window.ReserveCount
+                   && window.NeighborReserveCount == window.ReserveCount
+                   && window.BootstrapReserveCount == 0
+                   && window.LockedReserveCount == 0
+                   && window.DemandReserveCount == 0
+                   && window.RefinementReserveCount == 0
+                   && window.UnknownReserveCount == 0;
+        }
+
+        private static void MergeActivityWindow(ActivityWindow target, ActivityWindow source)
+        {
+            target.FirstFrame = Math.Min(target.FirstFrame, source.FirstFrame);
+            target.LastFrame = Math.Max(target.LastFrame, source.LastFrame);
+            target.ReserveCount += source.ReserveCount;
+            target.CommitCount += source.CommitCount;
+            target.StableCount += source.StableCount;
+            target.CancelCount += source.CancelCount;
+            target.RetryLoopCount += source.RetryLoopCount;
+            target.BootstrapReserveCount += source.BootstrapReserveCount;
+            target.LockedReserveCount += source.LockedReserveCount;
+            target.DemandReserveCount += source.DemandReserveCount;
+            target.RefinementReserveCount += source.RefinementReserveCount;
+            target.NeighborReserveCount += source.NeighborReserveCount;
+            target.UnknownReserveCount += source.UnknownReserveCount;
+            target.MinMip = Math.Min(target.MinMip, source.MinMip);
+            target.MaxMip = Math.Max(target.MaxMip, source.MaxMip);
+            target.MaxWeightedScore = Math.Max(target.MaxWeightedScore, source.MaxWeightedScore);
+            target.FirstSample ??= source.FirstSample;
+            target.LastSample = source.LastSample ?? target.LastSample;
+            target.FirstRetrySample ??= source.FirstRetrySample;
+            target.LastRetrySample = source.LastRetrySample ?? target.LastRetrySample;
+        }
+
+        private void ReportActivityWindow(
+            int spaceId,
+            ActivityWindow window,
+            string mode,
+            int windowCount,
+            int totalPatternWindowCount,
+            bool emitRetryWarning)
+        {
+            string mipRange = window.MinMip == int.MaxValue
+                ? "unknown"
+                : $"{window.MinMip}-{window.MaxMip}";
+            string details =
+                $"pool={m_PoolName} mode={mode} frameRange={window.FirstFrame}-{window.LastFrame} "
+                + $"space={spaceId} windows={windowCount} suppressedWindows={Math.Max(0, windowCount - 1)} "
+                + $"totalPatternWindows={totalPatternWindowCount} "
+                + $"reserves={window.ReserveCount} commits={window.CommitCount} "
+                + $"stable={window.StableCount} cancels={window.CancelCount} "
+                + $"retryLoops={window.RetryLoopCount} "
+                + $"reserveKinds=(bootstrap:{window.BootstrapReserveCount},locked:{window.LockedReserveCount},"
+                + $"demand:{window.DemandReserveCount},"
+                + $"refinement:{window.RefinementReserveCount},neighbor:{window.NeighborReserveCount},"
+                + $"unknown:{window.UnknownReserveCount}) "
+                + $"mipRange={mipRange} maxWeightedScore={window.MaxWeightedScore} "
+                + $"first={window.FirstSample ?? "none"} last={window.LastSample ?? "none"} "
+                + $"retryFirst={window.FirstRetrySample ?? "none"} "
+                + $"retryLast={window.LastRetrySample ?? "none"}";
+            m_TraceReporter($"[VividRP][VT_DEBUG][TimelineSummary] {details}");
+            if (emitRetryWarning && window.RetryLoopCount > 0)
+            {
+                m_WarningReporter(
+                    $"[VividRP][VT_DEBUG][TimelineWarning] code=ReserveCancelRetryLoop "
+                    + $"frame={window.LastFrame} {details} "
+                    + $"sequence=reserve>cancel>reserve(window)");
+            }
+        }
+
+        private static string FormatActivitySample(PageTimeline timeline, string sequence)
+        {
+            return $"(page:{timeline.Key.PageIndex},mip:{timeline.Mip},slot:{timeline.Slot},"
+                   + $"generation:{timeline.Generation},request:{FormatRequestKind(timeline.RequestDebugInfo.RequestKind)},"
+                   + $"sequence:{sequence})";
+        }
+
+        private void ReportLifecycle(
+            string outcome,
+            int frameIndex,
+            PageTimeline timeline,
+            string details)
+        {
+            m_TraceReporter(
+                $"[VividRP][VT_DEBUG][PageTimeline] outcome={outcome} pool={m_PoolName} "
+                + $"frame={frameIndex} space={timeline.Key.SpaceId} pageIndex={timeline.Key.PageIndex} "
+                + $"mip={timeline.Mip} slot={timeline.Slot} generation={timeline.Generation} "
+                + $"{FormatRequest(in timeline.RequestDebugInfo)} {details} "
+                + $"sequence={FormatSequence(timeline)}>stable@{frameIndex}");
         }
 
         private void RecordCommitWave(int frameIndex, PageTimeline timeline)
@@ -1443,7 +1865,7 @@ namespace VividRP.Runtime
     internal sealed class VTPhysicalPool : IDisposable
     {
         internal const int AsyncCommitEvictionProtectionFrames = 3;
-        internal const int FeedbackEvictionProtectionFrames = 8;
+        internal const int FeedbackEvictionProtectionFrames = 16;
 
         private struct PhysicalPageBinding
         {
@@ -1898,17 +2320,16 @@ namespace VividRP.Runtime
             else if (allocatedFromFreeList)
             {
                 PhysicalPageSlotState reservedSlotState = m_Slots[physicalPageId];
-                LogPageFillReserve(
+                RecordPageReserve(
                     physicalPageId,
                     in reservedSlotState,
-                    allocationViewId,
                     frameIndex);
             }
 
             if (!pendingUpload)
             {
                 PhysicalPageSlotState residentSlotState = m_Slots[physicalPageId];
-                LogPageResidentCommit(
+                RecordPageResidentCommit(
                     physicalPageId,
                     in residentSlotState,
                     frameIndex,
@@ -2011,7 +2432,7 @@ namespace VividRP.Runtime
             }
             m_Slots[physicalPageId] = slotState;
 #if VT_DEBUG
-            LogPageResidentCommit(
+            RecordPageResidentCommit(
                 physicalPageId,
                 in slotState,
                 allocationFrameIndex,
@@ -2489,9 +2910,9 @@ namespace VividRP.Runtime
                     + $"pageIndex={binding.VirtualPageIndex} locked={binding.Locked} "
                     + $"owner={ownerType} accepted={invalidated}";
                 if (invalidated)
-                    Debug.Log(message);
+                    VTDebugLog.Trace(message);
                 else
-                    Debug.LogWarning(message);
+                    VTDebugLog.Warning(message);
                 m_DebugTimeline.OnReplacementInvalidation(
                     physicalPageId,
                     binding.SpaceId,
@@ -2526,7 +2947,7 @@ namespace VividRP.Runtime
                 oldSlot.VirtualPageIndex,
                 oldSlot.Generation,
                 frameIndex);
-            Debug.Log(
+            VTDebugLog.Trace(
                 $"[VividRP][VT_DEBUG][PageReplaceBegin] pool={m_DebugName} frame={frameIndex} slot={physicalPageId} "
                 + $"old=(space:{oldSlot.SpaceId},pageIndex:{oldSlot.VirtualPageIndex},mip:{oldSlot.VirtualPageMip},"
                 + $"coord:{oldSlot.Identity.PageCoord},producer:{FormatProducer(oldSlot.Identity.ProducerHandle, oldSlot.Identity.ProducerName)},"
@@ -2559,7 +2980,7 @@ namespace VividRP.Runtime
                 newSlot.PendingUpload,
                 newSlot.Locked,
                 newSlot.RequestDebugInfo);
-            Debug.Log(
+            VTDebugLog.Trace(
                 $"[VividRP][VT_DEBUG][PageReplaceCommit] pool={m_DebugName} frame={frameIndex} slot={physicalPageId} "
                 + $"old=(space:{oldSlot.SpaceId},pageIndex:{oldSlot.VirtualPageIndex},mip:{oldSlot.VirtualPageMip},"
                 + $"coord:{oldSlot.Identity.PageCoord},generation:{oldSlot.Generation},bindings:{oldBindingCount}) "
@@ -2572,10 +2993,9 @@ namespace VividRP.Runtime
                 + $"evictionCountAfter={m_EvictedPageCount}");
         }
 
-        private void LogPageFillReserve(
+        private void RecordPageReserve(
             int physicalPageId,
             in PhysicalPageSlotState slot,
-            VirtualTextureViewId allocationViewId,
             int frameIndex)
         {
             m_DebugTimeline.OnReserve(
@@ -2588,17 +3008,9 @@ namespace VividRP.Runtime
                 slot.PendingUpload,
                 slot.Locked,
                 slot.RequestDebugInfo);
-            Debug.Log(
-                $"[VividRP][VT_DEBUG][PageFillReserve] pool={m_DebugName} frame={frameIndex} slot={physicalPageId} "
-                + $"space={slot.SpaceId} pageIndex={slot.VirtualPageIndex} mip={slot.VirtualPageMip} "
-                + $"coord={slot.Identity.PageCoord} producer={FormatProducer(slot.Identity.ProducerHandle, slot.Identity.ProducerName)} "
-                + $"generation={slot.Generation} resident={slot.Resident} pending={slot.PendingUpload} locked={slot.Locked} "
-                + $"allocationView={allocationViewId} affinity={slot.AffinityViewId} affinityFrame={slot.LastAffinityFrame} "
-                + $"lastTouchFrame={m_LastLruTouchFrames[physicalPageId]} {FormatRequestDebug(in slot.RequestDebugInfo)} "
-                + $"freePagesAfter={m_FreePhysicalPages.Count}");
         }
 
-        private void LogPageResidentCommit(
+        private void RecordPageResidentCommit(
             int physicalPageId,
             in PhysicalPageSlotState slot,
             int allocationFrameIndex,
@@ -2609,9 +3021,6 @@ namespace VividRP.Runtime
             int resolvedCommitFrameIndex = commitFrameIndex >= 0
                 ? commitFrameIndex
                 : allocationFrameIndex;
-            int latencyFrames = resolvedCommitFrameIndex >= 0 && allocationFrameIndex >= 0
-                ? Mathf.Max(0, resolvedCommitFrameIndex - allocationFrameIndex)
-                : -1;
             m_DebugTimeline.OnResidentCommit(
                 physicalPageId,
                 slot.SpaceId,
@@ -2623,16 +3032,6 @@ namespace VividRP.Runtime
                 wasResident,
                 slot.Locked,
                 slot.RequestDebugInfo);
-            Debug.Log(
-                $"[VividRP][VT_DEBUG][PageResidentCommit] pool={m_DebugName} frame={resolvedCommitFrameIndex} slot={physicalPageId} "
-                + $"space={slot.SpaceId} pageIndex={slot.VirtualPageIndex} mip={slot.VirtualPageMip} "
-                + $"coord={slot.Identity.PageCoord} producer={FormatProducer(slot.Identity.ProducerHandle, slot.Identity.ProducerName)} "
-                + $"generation={slot.Generation} allocationFrame={allocationFrameIndex} latencyFrames={latencyFrames} "
-                + $"commitPath={(commitFrameIndex >= 0 ? "async" : "immediate")} "
-                + $"wasPending={wasPendingUpload} wasResident={wasResident} resident={slot.Resident} pending={slot.PendingUpload} "
-                + $"locked={slot.Locked} lastTouchFrame={m_LastLruTouchFrames[physicalPageId]} "
-                + $"affinity={slot.AffinityViewId} affinityFrame={slot.LastAffinityFrame} "
-                + FormatRequestDebug(in slot.RequestDebugInfo));
         }
 
         private static string FormatRequestDebug(in VTPageRequestDebugInfo debugInfo)
@@ -2668,7 +3067,7 @@ namespace VividRP.Runtime
                 generation,
                 frameIndex,
                 locked);
-            Debug.Log(
+            VTDebugLog.Trace(
                 $"[VividRP][VT_DEBUG][PageResidentAttach] pool={m_DebugName} frame={frameIndex} "
                 + $"slot={physicalPageId} space={spaceId} pageIndex={pageIndex} mip={mip} "
                 + $"generation={generation} locked={locked}");

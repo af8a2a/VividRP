@@ -75,6 +75,9 @@ namespace VividRP.Runtime
             cmd.SetGlobalInt(
                 VirtualTextureShaderIDs._VTFeedbackSampleRate,
                 ResolveFeedbackSampleArea(feedbackSampleRate));
+            cmd.SetGlobalInt(
+                VirtualTextureShaderIDs._VTFeedbackResidentHashCapacity,
+                binding.HasFeedback ? binding.FeedbackResidentHashCapacity : 0);
             cmd.SetGlobalFloat(
                 VirtualTextureShaderIDs._VTAdaptiveMipBias,
                 Mathf.Max(0f, adaptiveMipBias));
@@ -88,6 +91,7 @@ namespace VividRP.Runtime
 
             cmd.SetRandomWriteTarget(1, binding.FeedbackRequests, preserveCounterValue: false);
             cmd.SetRandomWriteTarget(2, binding.FeedbackCounter, preserveCounterValue: true);
+            cmd.SetRandomWriteTarget(3, binding.FeedbackResidentHash, preserveCounterValue: true);
             return true;
         }
 

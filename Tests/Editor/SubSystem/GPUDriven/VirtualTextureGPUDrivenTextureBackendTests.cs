@@ -907,7 +907,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("struct VividSurfaceSampleContext"));
             Assert.That(source, Does.Contain("VTComputeRequestedMipRangeGrad("));
             Assert.That(source, Does.Contain("VividGetSurfaceVirtualTextureMaxMip("));
-            Assert.That(source, Does.Contain("VTWriteFeedback("));
+            Assert.That(source, Does.Contain("VTWriteAccessFeedback("));
+            Assert.That(source, Does.Not.Contain("if (!context.lowerResolved.resident)"));
             Assert.That(source, Does.Contain("VTWriteFallbackSample("));
             Assert.That(source, Does.Contain("VividSampleBaseColorGrad("));
             Assert.That(source, Does.Contain("VividSampleNormalGrad("));

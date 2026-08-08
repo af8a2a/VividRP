@@ -315,7 +315,8 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(VirtualTexturePageTableEntry.MaxTransitionPhase));
 
             VirtualTextureSystem.AdvancePageTransitionsForTesting(
-                childRequest.RequestFrame + VTResidencyManager.PageTransitionFrameCount);
+                childRequest.RequestFrame
+                + VTResidencyManager.ColdStartPageTransitionFrameCount);
 
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
@@ -327,7 +328,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PageTransition_KeepsFixedAncestorUntilItsOwnRevealAge()
+        public void PageTransition_ColdStartKeepsFixedAncestorUntilAcceleratedRevealAge()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(
                 CreateDesc("StableAncestorGate", 4, 4, 3, 8, 4));
@@ -352,7 +353,7 @@ namespace VividRP.Editor.Tests
 
             VirtualTextureSystem.AdvancePageTransitionsForTesting(
                 childRequest.RequestFrame
-                + VTResidencyManager.PageTransitionFrameCount
+                + VTResidencyManager.ColdStartPageTransitionFrameCount
                 - 1);
 
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
@@ -369,7 +370,7 @@ namespace VividRP.Editor.Tests
 
             VirtualTextureSystem.AdvancePageTransitionsForTesting(
                 childRequest.RequestFrame
-                + VTResidencyManager.PageTransitionFrameCount);
+                + VTResidencyManager.ColdStartPageTransitionFrameCount);
 
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
@@ -383,9 +384,10 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PageTransition_StartsAtMostEightPagesPerFrame()
+        public void PageTransition_ColdStartCanStartSixteenPagesPerFrame()
         {
             Assert.That(VTResidencyManager.MaxTransitionStartsPerFrame, Is.EqualTo(8));
+            Assert.That(VTResidencyManager.ColdStartMaxTransitionStartsPerFrame, Is.EqualTo(16));
             int spaceId = VirtualTextureSystem.RegisterSpace(
                 CreateDesc("TransitionStartBudget", 16, 16, 5, 32, 16));
             var coords = new VirtualTexturePageCoord[16];
@@ -413,8 +415,10 @@ namespace VividRP.Editor.Tests
                 queuedCount += entry.PendingUpload ? 1 : 0;
             }
 
-            Assert.That(residentCount, Is.EqualTo(VTResidencyManager.MaxTransitionStartsPerFrame));
-            Assert.That(queuedCount, Is.EqualTo(coords.Length - residentCount));
+            Assert.That(
+                residentCount,
+                Is.EqualTo(VTResidencyManager.ColdStartMaxTransitionStartsPerFrame));
+            Assert.That(queuedCount, Is.Zero);
 
             VirtualTextureSystem.AdvancePageTransitionsForTesting(transitionStartFrame + 1);
             foreach (VirtualTexturePageCoord coord in coords)
@@ -442,7 +446,8 @@ namespace VividRP.Editor.Tests
             Assert.That(newerRequest.RequestFrame, Is.GreaterThan(olderRequest.RequestFrame));
 
             VirtualTextureSystem.AdvancePageTransitionsForTesting(
-                olderRequest.RequestFrame + VTResidencyManager.PageTransitionFrameCount);
+                olderRequest.RequestFrame
+                + VTResidencyManager.ColdStartPageTransitionFrameCount);
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 olderRequest.PageCoord,
@@ -460,7 +465,8 @@ namespace VividRP.Editor.Tests
             Assert.That(newerEntry.PhysicalPageId, Is.Not.EqualTo(newerRequest.PhysicalPageId));
 
             VirtualTextureSystem.AdvancePageTransitionsForTesting(
-                newerRequest.RequestFrame + VTResidencyManager.PageTransitionFrameCount);
+                newerRequest.RequestFrame
+                + VTResidencyManager.ColdStartPageTransitionFrameCount);
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 newerRequest.PageCoord,
@@ -470,6 +476,43 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 newerEntry.TransitionPhase,
                 Is.EqualTo(VirtualTexturePageTableEntry.MaxTransitionPhase));
+        }
+
+        [Test]
+        public void PageTransition_AfterColdStartUsesSteadyRevealAge()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(
+                CreateDesc("SteadyTransitionAge", 8, 8, 4, 16, 8));
+            _ = RequestAndCommit(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 2));
+            AdvanceFrames(VTResidencyManager.ColdStartFrameCount);
+
+            VirtualTextureUploadRequest steadyRequest = RequestAndCommit(
+                spaceId,
+                new VirtualTexturePageCoord(1, 0, 2));
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(
+                steadyRequest.RequestFrame
+                + VTResidencyManager.PageTransitionFrameCount
+                - 1);
+
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                steadyRequest.PageCoord,
+                out VirtualTexturePageTableEntry stagedEntry), Is.True);
+            Assert.That(stagedEntry.Fallback, Is.True);
+            Assert.That(stagedEntry.PhysicalPageId, Is.Not.EqualTo(steadyRequest.PhysicalPageId));
+
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(
+                steadyRequest.RequestFrame
+                + VTResidencyManager.PageTransitionFrameCount);
+
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                steadyRequest.PageCoord,
+                out VirtualTexturePageTableEntry revealedEntry), Is.True);
+            Assert.That(revealedEntry.Fallback, Is.False);
+            Assert.That(revealedEntry.PhysicalPageId, Is.EqualTo(steadyRequest.PhysicalPageId));
         }
 
         [Test]
@@ -660,6 +703,23 @@ namespace VividRP.Editor.Tests
                     VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, VirtualTextureFeedbackProcessor.EncodeKey(spaceId, coord));
 
                 VirtualTextureSystem.Update(frameData, commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        private static void AdvanceFrames(int frameCount)
+        {
+            var commandBuffer = new CommandBuffer();
+            try
+            {
+                for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
+                {
+                    commandBuffer.Clear();
+                    VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+                }
             }
             finally
             {

@@ -662,7 +662,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Update_PrefetchesNeighborsAtEffectiveRefinementMipUntilItIsResident()
+        public void Update_ColdStartPrefetchesNeighborsAtRequestedMip()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
                 "RefinementNeighborPrefetch",
@@ -673,7 +673,6 @@ namespace VividRP.Editor.Tests
                 virtualPageCountY: 8,
                 mipCount: 4));
             var sourceCoord = new VirtualTexturePageCoord(5, 5, 0);
-            var effectiveCoord = new VirtualTexturePageCoord(2, 2, 1);
             ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, sourceCoord);
             var commandBuffer = new CommandBuffer();
 
@@ -686,19 +685,19 @@ namespace VividRP.Editor.Tests
                     spaceId,
                     out var refinementRequests), Is.True);
                 Assert.That(refinementRequests, Has.Count.EqualTo(3));
-                Assert.That(refinementRequests.All(request => request.PageCoord.Mip == 1), Is.True);
+                Assert.That(refinementRequests.All(request => request.PageCoord.Mip == 0), Is.True);
                 Assert.That(refinementRequests.Any(
-                    request => request.PageCoord.Equals(effectiveCoord) && request.Priority == 1), Is.True);
+                    request => request.PageCoord.Equals(sourceCoord) && request.Priority == 1), Is.True);
                 Assert.That(refinementRequests.Any(
-                    request => request.PageCoord.Equals(new VirtualTexturePageCoord(1, 2, 1))
+                    request => request.PageCoord.Equals(new VirtualTexturePageCoord(4, 5, 0))
                                && request.Priority == 0), Is.True);
                 Assert.That(refinementRequests.Any(
-                    request => request.PageCoord.Equals(new VirtualTexturePageCoord(3, 2, 1))
+                    request => request.PageCoord.Equals(new VirtualTexturePageCoord(6, 5, 0))
                                && request.Priority == 0), Is.True);
 
-                VirtualTextureUploadRequest effectiveRequest = refinementRequests.Single(
-                    request => request.PageCoord.Equals(effectiveCoord));
-                Assert.That(VirtualTextureSystem.CommitUpload(effectiveRequest), Is.True);
+                VirtualTextureUploadRequest sourceRequest = refinementRequests.Single(
+                    request => request.PageCoord.Equals(sourceCoord));
+                Assert.That(VirtualTextureSystem.CommitUpload(sourceRequest), Is.True);
 
                 commandBuffer.Clear();
                 VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, requestKey);
@@ -712,8 +711,9 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
                 spaceId,
                 out var refinedRequests), Is.True);
+            Assert.That(refinedRequests, Has.Count.EqualTo(2));
             Assert.That(refinedRequests.Any(
-                request => request.PageCoord.Equals(sourceCoord) && request.Priority == 1), Is.True);
+                request => request.PageCoord.Equals(sourceCoord)), Is.False);
             Assert.That(refinedRequests.Any(
                 request => request.PageCoord.Equals(new VirtualTexturePageCoord(4, 5, 0))
                            && request.Priority == 0), Is.True);

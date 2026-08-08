@@ -638,7 +638,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ProcessRequests_RefinesTowardFaultByAtMostTwoMipsPerRequest()
+        public void ProcessRequests_ColdStartRefinesFourMipsThenReturnsToTwoMipSteps()
         {
             var desc = new VirtualTextureSpaceDesc(
                 "TwoMipRefinement",
@@ -655,20 +655,34 @@ namespace VividRP.Editor.Tests
                 desc,
                 new NamedProducer("TwoMipRefinementProducer"));
             var requestedCoord = new VirtualTexturePageCoord(173, 91, 0);
-            var expectedRefinementCoords = new[]
+            IssueFeedback(spaceId, requestedCoord);
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out var pendingRequests), Is.True);
+            Assert.That(pendingRequests, Has.Count.EqualTo(1));
+            Assert.That(
+                pendingRequests[0].PageCoord,
+                Is.EqualTo(new VirtualTexturePageCoord(10, 5, 4)));
+            Assert.That(VirtualTextureSystem.CommitUpload(pendingRequests[0]), Is.True);
+
+            for (int frameOffset = 0;
+                 frameOffset < VTResidencyManager.ColdStartFrameCount;
+                 frameOffset++)
             {
-                new VirtualTexturePageCoord(2, 1, 6),
-                new VirtualTexturePageCoord(10, 5, 4),
+                UpdateOnce();
+            }
+
+            var steadyRefinementCoords = new[]
+            {
                 new VirtualTexturePageCoord(43, 22, 2),
                 requestedCoord,
             };
-
-            foreach (VirtualTexturePageCoord expectedCoord in expectedRefinementCoords)
+            foreach (VirtualTexturePageCoord expectedCoord in steadyRefinementCoords)
             {
                 IssueFeedback(spaceId, requestedCoord);
                 Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
                     spaceId,
-                    out var pendingRequests), Is.True);
+                    out pendingRequests), Is.True);
                 Assert.That(pendingRequests, Has.Count.EqualTo(1));
                 Assert.That(pendingRequests[0].PageCoord, Is.EqualTo(expectedCoord));
                 Assert.That(VirtualTextureSystem.CommitUpload(pendingRequests[0]), Is.True);
@@ -707,7 +721,7 @@ namespace VividRP.Editor.Tests
                 spaceId,
                 out var pendingRequests), Is.True);
             Assert.That(pendingRequests, Has.Count.EqualTo(1));
-            Assert.That(pendingRequests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 6)));
+            Assert.That(pendingRequests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 4)));
             Assert.That(pendingRequests[0].Priority, Is.EqualTo(5));
         }
 

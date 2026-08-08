@@ -403,8 +403,17 @@ namespace VividRP.Runtime
                 static (left, right) => left.SpaceId.CompareTo(right.SpaceId));
             int spaceCount = s_TransitionSchedulingSpaces.Count;
             int frameOffset = frameIndex >= 0 ? frameIndex % spaceCount : 0;
+            int maxTransitionStartRounds = VTResidencyManager.MaxTransitionStartsPerFrame;
+            for (int spaceIndex = 0; spaceIndex < spaceCount; spaceIndex++)
+            {
+                maxTransitionStartRounds = Mathf.Max(
+                    maxTransitionStartRounds,
+                    s_TransitionSchedulingSpaces[spaceIndex]
+                        .ResolveTransitionStartBudget(frameIndex));
+            }
+
             for (int round = 0;
-                 round < VTResidencyManager.MaxTransitionStartsPerFrame;
+                 round < maxTransitionStartRounds;
                  round++)
             {
                 bool startedAny = false;

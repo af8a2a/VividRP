@@ -214,6 +214,10 @@ namespace VividRP.Runtime
         private const int k_InlineClassificationThreshold = 64;
         private const int k_ClassificationBatchSize = 64;
         private const int k_MaxRefinementMipStep = 2;
+        internal const int ColdStartFrameCount = 32;
+        internal const int ColdStartMaxRefinementMipStep = 4;
+        internal const int ColdStartPageTransitionFrameCount = 4;
+        internal const int ColdStartMaxTransitionStartsPerFrame = 16;
         internal const int PageTransitionFrameCount = 8;
         internal const int MaxTransitionStartsPerFrame = 8;
 
@@ -238,6 +242,7 @@ namespace VividRP.Runtime
             public bool TransitionQueued;
             public int TransitionAncestorPageIndex;
             public int LastTransitionPhaseFrame;
+            public byte TransitionFrameCount;
         }
 
         private readonly struct VTRefinementRequest
@@ -333,6 +338,8 @@ namespace VividRP.Runtime
         private uint m_PendingRequestRevision;
         private bool m_PageTableDirty;
         private bool m_LastClassificationUsedParallelJob;
+        private bool m_ColdStartActivated;
+        private int m_ColdStartFrameIndex = int.MinValue;
 
         internal VTResidencyManager(
             int spaceId,
@@ -392,6 +399,24 @@ namespace VividRP.Runtime
             : 0;
 
         internal bool LastClassificationUsedParallelJob => m_LastClassificationUsedParallelJob;
+
+        internal bool IsColdStartActive(int frameIndex)
+        {
+            if (!m_ColdStartActivated
+                || frameIndex < m_ColdStartFrameIndex)
+            {
+                return false;
+            }
+
+            return (long)frameIndex - m_ColdStartFrameIndex < ColdStartFrameCount;
+        }
+
+        internal int ResolveTransitionStartBudget(int frameIndex)
+        {
+            return IsColdStartActive(frameIndex)
+                ? ColdStartMaxTransitionStartsPerFrame
+                : MaxTransitionStartsPerFrame;
+        }
 
         internal bool TryAllocateResidentPage(
             in VirtualTextureSpaceDesc desc,
@@ -643,12 +668,18 @@ namespace VividRP.Runtime
                 return new VTResidencyProcessResult(evictionCount, pageTableChanged);
             }
 
+            ActivateColdStart(frameIndex);
+
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyDemandMarker.Auto())
             {
                 ClassifyRequests(requests);
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyResidentTouchMarker.Auto())
                     TouchResolvedResidentRequestsBeforeAllocation(requests, frameIndex);
-                BuildRefinementRequests(requests);
+                BuildRefinementRequests(
+                    requests,
+                    IsColdStartActive(frameIndex)
+                        ? ColdStartMaxRefinementMipStep
+                        : k_MaxRefinementMipStep);
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyApplyMarker.Auto())
                 {
                     for (int requestIndex = 0; requestIndex < requests.Length; requestIndex++)
@@ -732,7 +763,8 @@ namespace VividRP.Runtime
         }
 
         private void BuildRefinementRequests(
-            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests)
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
+            int maxRefinementMipStep)
         {
             m_RefinementRequests.Clear();
             m_RefinementRequestIndices.Clear();
@@ -752,9 +784,9 @@ namespace VividRP.Runtime
                 VTPageRequestKind requestKind = VTPageRequestKind.Demand;
 #endif
                 if (classification.Classification == VTResidencyRequestClassification.Missing
-                    && classification.MipGap > k_MaxRefinementMipStep)
+                    && classification.MipGap > maxRefinementMipStep)
                 {
-                    int ancestorDelta = classification.MipGap - k_MaxRefinementMipStep;
+                    int ancestorDelta = classification.MipGap - maxRefinementMipStep;
                     VirtualTexturePageCoord requestedCoord = request.PageCoord;
                     var refinementCoord = new VirtualTexturePageCoord(
                         requestedCoord.X >> ancestorDelta,
@@ -923,7 +955,11 @@ namespace VividRP.Runtime
                 updateAffinity: false);
             MarkPageTableDirty(pageIndex);
             if (commitFrameIndex < 0)
-                StartQueuedPageTransitions(residencyFrameIndex, MaxTransitionStartsPerFrame);
+            {
+                StartQueuedPageTransitions(
+                    residencyFrameIndex,
+                    ResolveTransitionStartBudget(residencyFrameIndex));
+            }
             return true;
         }
 
@@ -1064,7 +1100,10 @@ namespace VividRP.Runtime
 
                 byte targetPhase = pageState.Locked
                     ? (byte)VirtualTexturePageTableEntry.MaxTransitionPhase
-                    : CalculateTransitionPhase(pageState.LastAllocationFrame, frameIndex);
+                    : CalculateTransitionPhase(
+                        pageState.LastAllocationFrame,
+                        frameIndex,
+                        pageState.TransitionFrameCount);
                 if (targetPhase <= pageState.TransitionPhase
                     || pageState.LastTransitionPhaseFrame == frameIndex
                     || phaseAdvancesThisCall >= maxPhaseAdvancesThisCall)
@@ -1110,6 +1149,8 @@ namespace VividRP.Runtime
         {
             m_TransitioningPageIndices.Clear();
             m_QueuedTransitionPageIndices.Clear();
+            m_ColdStartActivated = false;
+            m_ColdStartFrameIndex = int.MinValue;
         }
 
         internal bool StartQueuedPageTransitionsOnly(int frameIndex, int maxStartsThisCall)
@@ -1119,11 +1160,22 @@ namespace VividRP.Runtime
 
         internal static byte CalculateTransitionPhase(int residencyFrameIndex, int frameIndex)
         {
+            return CalculateTransitionPhase(
+                residencyFrameIndex,
+                frameIndex,
+                PageTransitionFrameCount);
+        }
+
+        private static byte CalculateTransitionPhase(
+            int residencyFrameIndex,
+            int frameIndex,
+            int transitionFrameCount)
+        {
             if (residencyFrameIndex < 0 || frameIndex < residencyFrameIndex)
                 return 0;
 
             long age = (long)frameIndex - residencyFrameIndex;
-            return age >= PageTransitionFrameCount
+            return age >= Mathf.Max(1, transitionFrameCount)
                 ? (byte)VirtualTexturePageTableEntry.MaxTransitionPhase
                 : (byte)0;
         }
@@ -1742,10 +1794,14 @@ namespace VividRP.Runtime
                 pageState.TransitionTracked = false;
                 pageState.TransitionQueued = false;
                 pageState.TransitionAncestorPageIndex = -1;
+                pageState.TransitionFrameCount = 0;
                 return;
             }
 
             pageState.TransitionPhase = 0;
+            pageState.TransitionFrameCount = (byte)(IsColdStartActive(frameIndex)
+                ? ColdStartPageTransitionFrameCount
+                : PageTransitionFrameCount);
             if (pageState.TransitionTracked || pageState.TransitionQueued)
                 return;
 
@@ -1858,7 +1914,7 @@ namespace VividRP.Runtime
 
                 if (!m_PhysicalPool.TryAcquireTransitionStart(
                         frameIndex,
-                        MaxTransitionStartsPerFrame))
+                        ResolveTransitionStartBudget(frameIndex)))
                 {
                     break;
                 }
@@ -1880,6 +1936,15 @@ namespace VividRP.Runtime
             }
 
             return changed;
+        }
+
+        private void ActivateColdStart(int frameIndex)
+        {
+            if (m_ColdStartActivated || frameIndex < 0)
+                return;
+
+            m_ColdStartActivated = true;
+            m_ColdStartFrameIndex = frameIndex;
         }
 
         private bool TryResolveStableTransitionStartAncestor(

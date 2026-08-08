@@ -176,7 +176,8 @@ namespace VividRP.Runtime
             int actualWidth,
             int actualHeight,
             int pixelWidth,
-            int pixelHeight)
+            int pixelHeight,
+            float adaptiveMipBias = 0f)
         {
             ViewMatrix = viewMatrix;
             ProjectionMatrix = projectionMatrix;
@@ -184,6 +185,7 @@ namespace VividRP.Runtime
             ActualHeight = actualHeight;
             PixelWidth = pixelWidth;
             PixelHeight = pixelHeight;
+            AdaptiveMipBias = Mathf.Max(0f, adaptiveMipBias);
             IsValid = true;
         }
 
@@ -198,6 +200,8 @@ namespace VividRP.Runtime
         internal int PixelWidth { get; }
 
         internal int PixelHeight { get; }
+
+        internal float AdaptiveMipBias { get; }
 
         internal bool IsValid { get; }
 
@@ -215,6 +219,21 @@ namespace VividRP.Runtime
                 cameraData.pixelHeight);
         }
 
+        internal VirtualTextureFeedbackViewSignature WithAdaptiveMipBias(float adaptiveMipBias)
+        {
+            if (!IsValid)
+                return Invalid;
+
+            return new VirtualTextureFeedbackViewSignature(
+                ViewMatrix,
+                ProjectionMatrix,
+                ActualWidth,
+                ActualHeight,
+                PixelWidth,
+                PixelHeight,
+                adaptiveMipBias);
+        }
+
         public bool Equals(VirtualTextureFeedbackViewSignature other)
         {
             return IsValid == other.IsValid
@@ -223,7 +242,8 @@ namespace VividRP.Runtime
                    && ActualWidth == other.ActualWidth
                    && ActualHeight == other.ActualHeight
                    && PixelWidth == other.PixelWidth
-                   && PixelHeight == other.PixelHeight;
+                   && PixelHeight == other.PixelHeight
+                   && AdaptiveMipBias.Equals(other.AdaptiveMipBias);
         }
 
         public override bool Equals(object obj)
@@ -240,6 +260,7 @@ namespace VividRP.Runtime
                 ActualHeight,
                 PixelWidth,
                 PixelHeight,
+                AdaptiveMipBias,
                 IsValid);
         }
     }
@@ -404,6 +425,7 @@ namespace VividRP.Runtime
             public bool CompletedRequestsValid;
             public uint CompletedCount;
             public int CompletedFallbackSampleCount;
+            public int FeedbackSampleArea = 1;
 
             public void Dispose()
             {
@@ -427,6 +449,7 @@ namespace VividRP.Runtime
                 CompletedRequestsValid = false;
                 CompletedCount = 0u;
                 CompletedFallbackSampleCount = 0;
+                FeedbackSampleArea = 1;
                 ScheduledFrameIndex = -1;
             }
 
@@ -524,21 +547,35 @@ namespace VividRP.Runtime
         }
 
         private const int FeedbackCounterElementCount = 2;
+        private const int FeedbackBufferCount = 4;
+        private const int MaxTrackedFeedbackSampleArea = sizeof(ulong) * 8;
         internal const int StableReadbackIntervalFrames = 30;
-        internal const int QuiescentEmptyReadbackCount = 2;
-        private readonly BufferPairState[] m_BufferPairs = { new(), new() };
+        private readonly BufferPairState[] m_BufferPairs =
+        {
+            new(),
+            new(),
+            new(),
+            new(),
+        };
         private readonly int m_SpaceId;
         private NativeArray<uint> m_ZeroCounterData;
         private int m_RequestCapacity;
         private int m_WriteBufferIndex;
+        private int m_LastWrittenBufferIndex = -1;
         private bool m_HasCompletedReadbackResult;
         private bool m_LastCompletedReadbackWasEmpty;
-        private int m_ConsecutiveEmptyReadbackCount;
+        private ulong m_EmptyReadbackPhaseMask;
+        private int m_EmptyReadbackSampleArea;
+        private int m_QuiescenceInvalidatedFrame = -1;
         private int m_LastScheduledReadbackFrame = -1;
         private VirtualTextureFeedbackViewSignature m_LastCompletedReadbackSignature;
         private string m_ReadbackPendingStatusSpaceName;
         private string m_ReadbackPendingStatusMessage;
         private bool m_IsDisposed;
+#if VT_DEBUG
+        private bool m_ReadbackStallActive;
+        private int m_ReadbackStallStartFrame = -1;
+#endif
 
         internal VirtualTextureFeedbackBufferState(int spaceId)
         {
@@ -575,37 +612,56 @@ namespace VividRP.Runtime
                 PollReadbacks();
 
             // Upload completion and page-table publication can make an empty readback stale in
-            // the same frame. Require fresh empty confirmations after activity before entering
-            // the long stable-view heartbeat interval.
+            // the same frame. Only feedback captured after the last active frame may contribute
+            // to quiescence coverage.
             if (forceImmediateReadback)
-                m_ConsecutiveEmptyReadbackCount = 0;
+                InvalidateQuiescence(frameIndex, "activity");
 
-            int readBufferIndex = 1 - m_WriteBufferIndex;
-            BufferPairState readPair = m_BufferPairs[readBufferIndex];
-            if (readPair.WasWritten
-                && !readPair.ReadbackPending
-                && ShouldScheduleReadback(
-                    forceImmediateReadback,
-                    m_HasCompletedReadbackResult,
-                    m_LastCompletedReadbackWasEmpty,
-                    m_ConsecutiveEmptyReadbackCount,
-                    m_LastScheduledReadbackFrame,
-                    frameIndex,
-                    readPair.LastViewSignature,
-                    m_LastCompletedReadbackSignature))
+            if (m_LastWrittenBufferIndex >= 0)
             {
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsScheduleReadbackMarker.Auto())
-                    ScheduleReadback(readPair, m_RequestCapacity);
-                m_LastScheduledReadbackFrame = frameIndex;
+                BufferPairState readPair = m_BufferPairs[m_LastWrittenBufferIndex];
+                if (readPair.WasWritten
+                    && !readPair.ReadbackPending
+                    && !readPair.HasCompletedReadback)
+                {
+                    bool shouldScheduleReadback = ShouldScheduleReadback(
+                        forceImmediateReadback,
+                        m_HasCompletedReadbackResult,
+                        m_LastCompletedReadbackWasEmpty,
+                        HasCompleteQuiescenceCoverage(),
+                        m_LastScheduledReadbackFrame,
+                        frameIndex,
+                        readPair.LastViewSignature,
+                        m_LastCompletedReadbackSignature);
+                    if (shouldScheduleReadback)
+                    {
+                        using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsScheduleReadbackMarker.Auto())
+                            ScheduleReadback(readPair, m_RequestCapacity);
+                        m_LastScheduledReadbackFrame = frameIndex;
+                    }
+                    else
+                    {
+                        // The stable-view heartbeat deliberately discards this sample. Mark it
+                        // reusable instead of pinning a ring entry that will never be read back.
+                        readPair.WasWritten = false;
+                    }
+                }
             }
 
-            BufferPairState writePair = m_BufferPairs[m_WriteBufferIndex];
-            if (writePair.ReadbackPending)
+            int writeBufferIndex = FindWritableBufferIndex();
+            if (writeBufferIndex < 0)
             {
+#if VT_DEBUG
+                BeginReadbackStall(frameIndex);
+#endif
                 statusMessage = GetReadbackPendingStatusMessage(spaceName);
                 return false;
             }
+#if VT_DEBUG
+            EndReadbackStall(frameIndex);
+#endif
 
+            BufferPairState writePair = m_BufferPairs[writeBufferIndex];
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsResetCounterMarker.Auto())
                 cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);
             writePair.WasWritten = true;
@@ -613,10 +669,12 @@ namespace VividRP.Runtime
             writePair.LastCameraType = camera.cameraType;
             writePair.LastViewSignature = viewSignature;
             writePair.ScheduledFrameIndex = frameIndex;
+            writePair.FeedbackSampleArea = 1;
 
             requestBuffer = writePair.RequestsBuffer;
             counterBuffer = writePair.CounterBuffer;
-            m_WriteBufferIndex = readBufferIndex;
+            m_LastWrittenBufferIndex = writeBufferIndex;
+            m_WriteBufferIndex = (writeBufferIndex + 1) % FeedbackBufferCount;
             return true;
         }
 
@@ -659,13 +717,11 @@ namespace VividRP.Runtime
                     bool sameViewAsPrevious = m_LastCompletedReadbackSignature.IsValid
                                               && pair.LastViewSignature.Equals(
                                                   m_LastCompletedReadbackSignature);
-                    m_ConsecutiveEmptyReadbackCount = completedReadbackWasEmpty
-                        ? sameViewAsPrevious
-                            ? Mathf.Min(
-                                QuiescentEmptyReadbackCount,
-                                m_ConsecutiveEmptyReadbackCount + 1)
-                            : 1
-                        : 0;
+                    UpdateQuiescenceCoverage(
+                        completedReadbackWasEmpty,
+                        sameViewAsPrevious,
+                        pair.FeedbackSampleArea,
+                        pair.ScheduledFrameIndex);
                     m_LastCompletedReadbackWasEmpty = completedReadbackWasEmpty;
                     m_LastCompletedReadbackSignature = pair.LastViewSignature;
                     pair.HasCompletedReadback = false;
@@ -691,13 +747,20 @@ namespace VividRP.Runtime
             }
 
             m_RequestCapacity = 0;
+            m_WriteBufferIndex = 0;
+            m_LastWrittenBufferIndex = -1;
             m_HasCompletedReadbackResult = false;
             m_LastCompletedReadbackWasEmpty = false;
-            m_ConsecutiveEmptyReadbackCount = 0;
+            ResetQuiescenceCoverage();
+            m_QuiescenceInvalidatedFrame = -1;
             m_LastScheduledReadbackFrame = -1;
             m_LastCompletedReadbackSignature = VirtualTextureFeedbackViewSignature.Invalid;
             m_ReadbackPendingStatusSpaceName = null;
             m_ReadbackPendingStatusMessage = null;
+#if VT_DEBUG
+            m_ReadbackStallActive = false;
+            m_ReadbackStallStartFrame = -1;
+#endif
             m_IsDisposed = true;
         }
 
@@ -726,25 +789,25 @@ namespace VividRP.Runtime
 
         private void EnsureCapacity(string spaceName, int feedbackCapacity)
         {
-            if (m_RequestCapacity == feedbackCapacity
-                && m_BufferPairs[0].RequestsBuffer != null
-                && m_BufferPairs[0].CounterBuffer != null
-                && m_BufferPairs[1].RequestsBuffer != null
-                && m_BufferPairs[1].CounterBuffer != null)
-            {
+            if (m_RequestCapacity == feedbackCapacity && HasAllocatedBuffers())
                 return;
-            }
 
             for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
                 m_BufferPairs[bufferIndex].Dispose();
 
             m_RequestCapacity = feedbackCapacity;
             m_WriteBufferIndex = 0;
+            m_LastWrittenBufferIndex = -1;
             m_HasCompletedReadbackResult = false;
             m_LastCompletedReadbackWasEmpty = false;
-            m_ConsecutiveEmptyReadbackCount = 0;
+            ResetQuiescenceCoverage();
+            m_QuiescenceInvalidatedFrame = -1;
             m_LastScheduledReadbackFrame = -1;
             m_LastCompletedReadbackSignature = VirtualTextureFeedbackViewSignature.Invalid;
+#if VT_DEBUG
+            m_ReadbackStallActive = false;
+            m_ReadbackStallStartFrame = -1;
+#endif
             for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
             {
                 BufferPairState pair = m_BufferPairs[bufferIndex];
@@ -760,7 +823,7 @@ namespace VividRP.Runtime
             bool forceImmediateReadback,
             bool hasCompletedReadbackResult,
             bool lastCompletedReadbackWasEmpty,
-            int consecutiveEmptyReadbackCount,
+            bool hasCompleteQuiescenceCoverage,
             int lastScheduledReadbackFrame,
             int frameIndex,
             VirtualTextureFeedbackViewSignature readbackSignature,
@@ -770,7 +833,7 @@ namespace VividRP.Runtime
                 forceImmediateReadback,
                 hasCompletedReadbackResult,
                 lastCompletedReadbackWasEmpty,
-                consecutiveEmptyReadbackCount,
+                hasCompleteQuiescenceCoverage,
                 lastScheduledReadbackFrame,
                 frameIndex,
                 readbackSignature,
@@ -781,7 +844,7 @@ namespace VividRP.Runtime
             bool forceImmediateReadback,
             bool hasCompletedReadbackResult,
             bool lastCompletedReadbackWasEmpty,
-            int consecutiveEmptyReadbackCount,
+            bool hasCompleteQuiescenceCoverage,
             int lastScheduledReadbackFrame,
             int frameIndex,
             VirtualTextureFeedbackViewSignature readbackSignature,
@@ -792,7 +855,7 @@ namespace VividRP.Runtime
 
             if (!hasCompletedReadbackResult
                 || !lastCompletedReadbackWasEmpty
-                || consecutiveEmptyReadbackCount < QuiescentEmptyReadbackCount)
+                || !hasCompleteQuiescenceCoverage)
             {
                 return true;
             }
@@ -806,12 +869,161 @@ namespace VividRP.Runtime
             return frameIndex - lastScheduledReadbackFrame >= StableReadbackIntervalFrames;
         }
 
-        private static void ScheduleReadback(BufferPairState pair, int requestCapacity)
+        internal void RegisterFeedbackSampling(int frameIndex, int feedbackSampleRate)
         {
-            if (pair == null || pair.ReadbackPending || pair.RequestsBuffer == null || pair.CounterBuffer == null)
+            int sampleArea = VirtualTextureFeedbackBindingUtility.ResolveFeedbackSampleArea(
+                feedbackSampleRate);
+            for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
+            {
+                BufferPairState pair = m_BufferPairs[bufferIndex];
+                if (!pair.WasWritten || pair.ScheduledFrameIndex != frameIndex)
+                    continue;
+
+                // Multiple consumers may write the same feedback target. Tracking the largest
+                // cycle is conservative and prevents a sparse consumer from being hidden by a
+                // denser one that happens to report an empty frame.
+                pair.FeedbackSampleArea = Mathf.Max(pair.FeedbackSampleArea, sampleArea);
+            }
+        }
+
+        private bool HasAllocatedBuffers()
+        {
+            for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
+            {
+                BufferPairState pair = m_BufferPairs[bufferIndex];
+                if (pair.RequestsBuffer == null || pair.CounterBuffer == null)
+                    return false;
+            }
+
+            return true;
+        }
+
+        internal static ulong AccumulateEmptyFeedbackPhaseForTesting(
+            ulong phaseMask,
+            int feedbackSampleArea,
+            int frameIndex)
+        {
+            return AccumulateEmptyFeedbackPhase(phaseMask, feedbackSampleArea, frameIndex);
+        }
+
+        internal static bool HasCompleteFeedbackPhaseCoverageForTesting(
+            ulong phaseMask,
+            int feedbackSampleArea)
+        {
+            return HasCompleteFeedbackPhaseCoverage(phaseMask, feedbackSampleArea);
+        }
+
+        private void UpdateQuiescenceCoverage(
+            bool completedReadbackWasEmpty,
+            bool sameViewAsPrevious,
+            int feedbackSampleArea,
+            int scheduledFrameIndex)
+        {
+            if (!completedReadbackWasEmpty)
+            {
+                InvalidateQuiescence(scheduledFrameIndex, "non-empty-feedback");
+                return;
+            }
+
+            if (scheduledFrameIndex <= m_QuiescenceInvalidatedFrame)
                 return;
 
+            int sampleArea = Mathf.Max(1, feedbackSampleArea);
+            if (!sameViewAsPrevious || sampleArea != m_EmptyReadbackSampleArea)
+            {
+                ResetQuiescenceCoverage();
+                m_EmptyReadbackSampleArea = sampleArea;
+            }
+
+            bool wasComplete = HasCompleteQuiescenceCoverage();
+            m_EmptyReadbackPhaseMask = AccumulateEmptyFeedbackPhase(
+                m_EmptyReadbackPhaseMask,
+                sampleArea,
+                scheduledFrameIndex);
+#if VT_DEBUG
+            if (!wasComplete && HasCompleteQuiescenceCoverage())
+            {
+                Debug.Log(
+                    $"[VividRP][VT_DEBUG][FeedbackQuiescenceEnter] space={m_SpaceId} "
+                    + $"feedbackFrame={scheduledFrameIndex} sampleArea={sampleArea} "
+                    + $"phaseMask=0x{m_EmptyReadbackPhaseMask:X16}");
+            }
+#endif
+        }
+
+        private void InvalidateQuiescence(int frameIndex, string reason)
+        {
+            bool wasComplete = HasCompleteQuiescenceCoverage();
+            m_QuiescenceInvalidatedFrame = Mathf.Max(m_QuiescenceInvalidatedFrame, frameIndex);
+            ResetQuiescenceCoverage();
+#if VT_DEBUG
+            if (wasComplete)
+            {
+                Debug.Log(
+                    $"[VividRP][VT_DEBUG][FeedbackQuiescenceExit] space={m_SpaceId} "
+                    + $"frame={frameIndex} reason={reason}");
+            }
+#endif
+        }
+
+        private void ResetQuiescenceCoverage()
+        {
+            m_EmptyReadbackPhaseMask = 0ul;
+            m_EmptyReadbackSampleArea = 0;
+        }
+
+        private bool HasCompleteQuiescenceCoverage()
+        {
+            return HasCompleteFeedbackPhaseCoverage(
+                m_EmptyReadbackPhaseMask,
+                m_EmptyReadbackSampleArea);
+        }
+
+        private static ulong AccumulateEmptyFeedbackPhase(
+            ulong phaseMask,
+            int feedbackSampleArea,
+            int frameIndex)
+        {
+            if (feedbackSampleArea <= 0 || feedbackSampleArea > MaxTrackedFeedbackSampleArea)
+                return 0ul;
+
+            int phase = PositiveModulo(frameIndex, feedbackSampleArea);
+            return phaseMask | (1ul << phase);
+        }
+
+        private static bool HasCompleteFeedbackPhaseCoverage(
+            ulong phaseMask,
+            int feedbackSampleArea)
+        {
+            if (feedbackSampleArea <= 0 || feedbackSampleArea > MaxTrackedFeedbackSampleArea)
+                return false;
+
+            ulong completeMask = feedbackSampleArea == MaxTrackedFeedbackSampleArea
+                ? ulong.MaxValue
+                : (1ul << feedbackSampleArea) - 1ul;
+            return (phaseMask & completeMask) == completeMask;
+        }
+
+        private static int PositiveModulo(int value, int divisor)
+        {
+            int result = value % divisor;
+            return result < 0 ? result + divisor : result;
+        }
+
+        private static void ScheduleReadback(BufferPairState pair, int requestCapacity)
+        {
+            if (pair == null
+                || pair.ReadbackPending
+                || pair.HasCompletedReadback
+                || !pair.WasWritten
+                || pair.RequestsBuffer == null
+                || pair.CounterBuffer == null)
+            {
+                return;
+            }
+
             pair.EnsureReadbackCapacity(requestCapacity);
+            pair.WasWritten = false;
             pair.ReadbackPending = true;
             pair.RequestReadbackPending = true;
             pair.CounterReadbackPending = true;
@@ -826,6 +1038,48 @@ namespace VividRP.Runtime
                 pair.CounterBuffer,
                 null);
         }
+
+        private int FindWritableBufferIndex()
+        {
+            for (int offset = 0; offset < FeedbackBufferCount; offset++)
+            {
+                int bufferIndex = (m_WriteBufferIndex + offset) % FeedbackBufferCount;
+                BufferPairState pair = m_BufferPairs[bufferIndex];
+                if (pair.ReadbackPending || pair.HasCompletedReadback || pair.WasWritten)
+                    continue;
+
+                return bufferIndex;
+            }
+
+            return -1;
+        }
+
+#if VT_DEBUG
+        private void BeginReadbackStall(int frameIndex)
+        {
+            if (m_ReadbackStallActive)
+                return;
+
+            m_ReadbackStallActive = true;
+            m_ReadbackStallStartFrame = frameIndex;
+            Debug.Log(
+                $"[VividRP][VT_DEBUG][FeedbackReadbackStallBegin] space={m_SpaceId} "
+                + $"frame={frameIndex} buffers={FeedbackBufferCount}");
+        }
+
+        private void EndReadbackStall(int frameIndex)
+        {
+            if (!m_ReadbackStallActive)
+                return;
+
+            int duration = Mathf.Max(0, frameIndex - m_ReadbackStallStartFrame);
+            Debug.Log(
+                $"[VividRP][VT_DEBUG][FeedbackReadbackStallEnd] space={m_SpaceId} "
+                + $"frame={frameIndex} durationFrames={duration} buffers={FeedbackBufferCount}");
+            m_ReadbackStallActive = false;
+            m_ReadbackStallStartFrame = -1;
+        }
+#endif
 
         private static int SaturatingUIntToInt(uint value)
         {

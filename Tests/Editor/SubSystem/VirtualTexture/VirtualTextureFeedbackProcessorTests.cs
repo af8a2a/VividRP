@@ -291,8 +291,7 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: false,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
-                    consecutiveEmptyReadbackCount:
-                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
+                    hasCompleteQuiescenceCoverage: true,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 100 + VirtualTextureFeedbackBufferState.StableReadbackIntervalFrames - 1,
                     signature,
@@ -304,8 +303,7 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: false,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
-                    consecutiveEmptyReadbackCount:
-                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
+                    hasCompleteQuiescenceCoverage: true,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 100 + VirtualTextureFeedbackBufferState.StableReadbackIntervalFrames,
                     signature,
@@ -314,7 +312,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ShouldScheduleReadback_RequiresConsecutiveEmptyResultsBeforeThrottling()
+        public void ShouldScheduleReadback_RequiresCompleteFeedbackPhaseCoverageBeforeThrottling()
         {
             var signature = new VirtualTextureFeedbackViewSignature(
                 Matrix4x4.identity,
@@ -329,8 +327,7 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: false,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
-                    consecutiveEmptyReadbackCount:
-                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount - 1,
+                    hasCompleteQuiescenceCoverage: false,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 101,
                     signature,
@@ -342,13 +339,50 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: false,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
-                    consecutiveEmptyReadbackCount:
-                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
+                    hasCompleteQuiescenceCoverage: true,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 101,
                     signature,
                     signature),
                 Is.False);
+        }
+
+        [Test]
+        public void EmptyFeedbackPhaseCoverage_RequiresEveryJitterPhase()
+        {
+            const int sampleArea = 4;
+            ulong phaseMask = 0ul;
+
+            phaseMask = VirtualTextureFeedbackBufferState.AccumulateEmptyFeedbackPhaseForTesting(
+                phaseMask,
+                sampleArea,
+                frameIndex: 100);
+            phaseMask = VirtualTextureFeedbackBufferState.AccumulateEmptyFeedbackPhaseForTesting(
+                phaseMask,
+                sampleArea,
+                frameIndex: 102);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.HasCompleteFeedbackPhaseCoverageForTesting(
+                    phaseMask,
+                    sampleArea),
+                Is.False,
+                "Two empty readbacks can still cover only half of a 2x2 feedback jitter cycle.");
+
+            phaseMask = VirtualTextureFeedbackBufferState.AccumulateEmptyFeedbackPhaseForTesting(
+                phaseMask,
+                sampleArea,
+                frameIndex: 101);
+            phaseMask = VirtualTextureFeedbackBufferState.AccumulateEmptyFeedbackPhaseForTesting(
+                phaseMask,
+                sampleArea,
+                frameIndex: 103);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.HasCompleteFeedbackPhaseCoverageForTesting(
+                    phaseMask,
+                    sampleArea),
+                Is.True);
         }
 
         [Test]
@@ -374,8 +408,7 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: false,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
-                    consecutiveEmptyReadbackCount:
-                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
+                    hasCompleteQuiescenceCoverage: true,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 101,
                     secondSignature,
@@ -387,12 +420,39 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: true,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
-                    consecutiveEmptyReadbackCount:
-                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
+                    hasCompleteQuiescenceCoverage: true,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 101,
                     firstSignature,
                     firstSignature),
+                Is.True);
+        }
+
+        [Test]
+        public void ShouldScheduleReadback_KeepsFastPath_WhenAdaptiveMipBiasChanges()
+        {
+            var stableSignature = new VirtualTextureFeedbackViewSignature(
+                Matrix4x4.identity,
+                Matrix4x4.Perspective(60f, 1f, 0.1f, 100f),
+                actualWidth: 1920,
+                actualHeight: 1080,
+                pixelWidth: 1920,
+                pixelHeight: 1080,
+                adaptiveMipBias: 2f);
+            VirtualTextureFeedbackViewSignature recoveringSignature =
+                stableSignature.WithAdaptiveMipBias(1.875f);
+
+            Assert.That(recoveringSignature, Is.Not.EqualTo(stableSignature));
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldScheduleReadbackForTesting(
+                    forceImmediateReadback: false,
+                    hasCompletedReadbackResult: true,
+                    lastCompletedReadbackWasEmpty: true,
+                    hasCompleteQuiescenceCoverage: true,
+                    lastScheduledReadbackFrame: 100,
+                    frameIndex: 101,
+                    recoveringSignature,
+                    stableSignature),
                 Is.True);
         }
     }

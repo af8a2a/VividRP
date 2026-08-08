@@ -67,6 +67,7 @@ namespace VividRP.Runtime
             cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTMipOffsets, mipOffsets);
             cmd.SetGlobalVectorArray(VirtualTextureShaderIDs._VTLayerFallbacks, layerFallbacks);
             cmd.SetGlobalInt(VirtualTextureShaderIDs._VTFeedbackEnabled, binding.HasFeedback ? 1 : 0);
+            binding.RegisterFeedbackSampling(frameIndex, feedbackSampleRate);
             cmd.SetGlobalVector(
                 VirtualTextureShaderIDs._VTFeedbackViewParams,
                 BuildFeedbackViewParams(feedbackSampleRate, frameIndex));

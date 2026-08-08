@@ -209,12 +209,16 @@ namespace VividRP.Runtime
         public const int FallbackBitOffset = 27;
         public const int PendingUploadBitOffset = 28;
         public const int LockedBitOffset = 29;
+        public const int TransitionPhaseBitOffset = 30;
+        public const int TransitionPhaseBitCount = 2;
         public const uint PhysicalPageIdMask = (1u << PhysicalPageIdBitCount) - 1u;
         public const uint ResolvedMipMask = (1u << ResolvedMipBitCount) - 1u;
+        public const uint TransitionPhaseMask = (1u << TransitionPhaseBitCount) - 1u;
+        public const int MaxTransitionPhase = (int)TransitionPhaseMask;
         public const int MaxPhysicalPageCount = (int)PhysicalPageIdMask;
         public const int InvalidPhysicalPageId = MaxPhysicalPageCount;
         public const int MaxPhysicalPageId = InvalidPhysicalPageId - 1;
-        public const int ReservedBitCount = PackedBitCount - LockedBitOffset - 1;
+        public const int ReservedBitCount = PackedBitCount - TransitionPhaseBitOffset - TransitionPhaseBitCount;
 
         public VirtualTexturePageTableEntry(
             int physicalPageId,
@@ -222,12 +226,15 @@ namespace VividRP.Runtime
             bool resident,
             bool fallback,
             bool pendingUpload,
-            bool locked)
+            bool locked,
+            int transitionPhase = MaxTransitionPhase)
         {
             if ((uint)physicalPageId > PhysicalPageIdMask)
                 throw new ArgumentOutOfRangeException(nameof(physicalPageId));
             if ((uint)resolvedMip > ResolvedMipMask)
                 throw new ArgumentOutOfRangeException(nameof(resolvedMip));
+            if ((uint)transitionPhase > TransitionPhaseMask)
+                throw new ArgumentOutOfRangeException(nameof(transitionPhase));
             if (resident && fallback)
                 throw new ArgumentException("A page table entry cannot be both directly resident and a fallback.");
             if ((resident || fallback) && physicalPageId == InvalidPhysicalPageId)
@@ -242,7 +249,8 @@ namespace VividRP.Runtime
                           | (resident ? (1u << ResidentBitOffset) : 0u)
                           | (fallback ? (1u << FallbackBitOffset) : 0u)
                           | (pendingUpload ? (1u << PendingUploadBitOffset) : 0u)
-                          | (locked ? (1u << LockedBitOffset) : 0u);
+                          | (locked ? (1u << LockedBitOffset) : 0u)
+                          | (((uint)transitionPhase & TransitionPhaseMask) << TransitionPhaseBitOffset);
         }
 
         public uint PackedValue { get; }
@@ -258,6 +266,9 @@ namespace VividRP.Runtime
         public bool PendingUpload => (PackedValue & (1u << PendingUploadBitOffset)) != 0u;
 
         public bool Locked => (PackedValue & (1u << LockedBitOffset)) != 0u;
+
+        public int TransitionPhase =>
+            (int)((PackedValue >> TransitionPhaseBitOffset) & TransitionPhaseMask);
 
         public bool IsMapped => Resident || Fallback;
 
@@ -556,6 +567,7 @@ namespace VividRP.Runtime
             IReadOnlyList<Texture2D> physicalCaches,
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
+            VirtualTextureFeedbackBufferState feedbackState,
             VirtualTextureSpaceShaderParams shaderParams,
             int[] mipOffsets,
             Vector4[] layerFallbacks)
@@ -571,6 +583,7 @@ namespace VividRP.Runtime
             PhysicalCache = PhysicalCaches.Count > 0 ? PhysicalCaches[0] : null;
             FeedbackRequests = feedbackRequests;
             FeedbackCounter = feedbackCounter;
+            FeedbackState = feedbackState;
             ShaderParams = shaderParams;
             MipOffsets = mipOffsets;
             LayerFallbacks = layerFallbacks ?? Array.Empty<Vector4>();
@@ -598,6 +611,8 @@ namespace VividRP.Runtime
 
         public ComputeBuffer FeedbackCounter { get; }
 
+        private VirtualTextureFeedbackBufferState FeedbackState { get; }
+
         public VirtualTextureSpaceShaderParams ShaderParams { get; }
 
         public int[] MipOffsets { get; }
@@ -607,6 +622,11 @@ namespace VividRP.Runtime
         public bool HasFeedback => FeedbackRequests != null && FeedbackCounter != null;
 
         public bool IsValid => PageTableBuffer != null && PhysicalCache != null;
+
+        internal void RegisterFeedbackSampling(int frameIndex, int feedbackSampleRate)
+        {
+            FeedbackState?.RegisterFeedbackSampling(frameIndex, feedbackSampleRate);
+        }
 
         internal VirtualTextureSpaceBinding WithBindingIndex(int bindingIndex)
         {
@@ -621,6 +641,7 @@ namespace VividRP.Runtime
                 PhysicalCaches,
                 FeedbackRequests,
                 FeedbackCounter,
+                FeedbackState,
                 ShaderParams,
                 MipOffsets,
                 LayerFallbacks);

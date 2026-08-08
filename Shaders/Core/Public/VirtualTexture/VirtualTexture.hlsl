@@ -73,6 +73,8 @@ float _VTAdaptiveMipBias;
 #define VT_PAGE_TABLE_FALLBACK_BIT 27u
 #define VT_PAGE_TABLE_PENDING_UPLOAD_BIT 28u
 #define VT_PAGE_TABLE_LOCKED_BIT 29u
+#define VT_PAGE_TABLE_TRANSITION_PHASE_BIT 30u
+#define VT_PAGE_TABLE_TRANSITION_PHASE_MASK 3u
 
 struct VTResolvedAddress
 {
@@ -82,6 +84,7 @@ struct VTResolvedAddress
     bool fallback;
     bool pendingUpload;
     bool locked;
+    uint transitionPhase;
     bool valid;
 };
 
@@ -203,6 +206,8 @@ VTResolvedAddress VTResolveAddress(float2 virtualUv, uint requestedMip)
     resolved.fallback = (packedEntry & (1u << VT_PAGE_TABLE_FALLBACK_BIT)) != 0u;
     resolved.pendingUpload = (packedEntry & (1u << VT_PAGE_TABLE_PENDING_UPLOAD_BIT)) != 0u;
     resolved.locked = (packedEntry & (1u << VT_PAGE_TABLE_LOCKED_BIT)) != 0u;
+    resolved.transitionPhase =
+        (packedEntry >> VT_PAGE_TABLE_TRANSITION_PHASE_BIT) & VT_PAGE_TABLE_TRANSITION_PHASE_MASK;
     resolved.valid = resolved.resident || resolved.fallback;
     return resolved;
 }
@@ -393,7 +398,89 @@ bool VTResolvedAddressMatches(VTResolvedAddress left, VTResolvedAddress right)
         && left.resident == right.resident
         && left.fallback == right.fallback
         && left.pendingUpload == right.pendingUpload
-        && left.locked == right.locked;
+        && left.locked == right.locked
+        && left.transitionPhase == right.transitionPhase;
+}
+
+VTResolvedAddress VTFindStableTransitionAncestor(
+    float2 virtualUv,
+    VTResolvedAddress resolved)
+{
+    VTResolvedAddress ancestor = resolved;
+    uint firstAncestorMip = resolved.resolvedMip + 1u;
+    [loop]
+    for (uint mip = firstAncestorMip; mip < (uint)VT_MIP_COUNT; mip++)
+    {
+        VTResolvedAddress candidate = VTResolveAddress(virtualUv, mip);
+        if (!candidate.valid
+            || (candidate.physicalPageId == resolved.physicalPageId
+                && candidate.resolvedMip == resolved.resolvedMip))
+        {
+            continue;
+        }
+
+        ancestor = candidate;
+        if (candidate.locked
+            || candidate.transitionPhase >= VT_PAGE_TABLE_TRANSITION_PHASE_MASK)
+        {
+            break;
+        }
+    }
+
+    return ancestor;
+}
+
+float4 VTSamplePhysicalCacheTransitioned(
+    float2 virtualUv,
+    VTResolvedAddress resolved)
+{
+    float4 currentColor = VTSamplePhysicalCache(virtualUv, resolved);
+    if (!resolved.valid
+        || resolved.locked
+        || resolved.transitionPhase >= VT_PAGE_TABLE_TRANSITION_PHASE_MASK)
+    {
+        return currentColor;
+    }
+
+    VTResolvedAddress ancestor = VTFindStableTransitionAncestor(virtualUv, resolved);
+    if (!ancestor.valid
+        || (ancestor.physicalPageId == resolved.physicalPageId
+            && ancestor.resolvedMip == resolved.resolvedMip))
+    {
+        return currentColor;
+    }
+
+    float4 ancestorColor = VTSamplePhysicalCache(virtualUv, ancestor);
+    float transitionWeight =
+        (float)resolved.transitionPhase / (float)VT_PAGE_TABLE_TRANSITION_PHASE_MASK;
+    return lerp(ancestorColor, currentColor, saturate(transitionWeight));
+}
+
+float4 VTSamplePhysicalCacheLayerTransitioned(
+    float2 virtualUv,
+    VTResolvedAddress resolved,
+    uint layerIndex)
+{
+    float4 currentColor = VTSamplePhysicalCacheLayer(virtualUv, resolved, layerIndex);
+    if (!resolved.valid
+        || resolved.locked
+        || resolved.transitionPhase >= VT_PAGE_TABLE_TRANSITION_PHASE_MASK)
+    {
+        return currentColor;
+    }
+
+    VTResolvedAddress ancestor = VTFindStableTransitionAncestor(virtualUv, resolved);
+    if (!ancestor.valid
+        || (ancestor.physicalPageId == resolved.physicalPageId
+            && ancestor.resolvedMip == resolved.resolvedMip))
+    {
+        return currentColor;
+    }
+
+    float4 ancestorColor = VTSamplePhysicalCacheLayer(virtualUv, ancestor, layerIndex);
+    float transitionWeight =
+        (float)resolved.transitionPhase / (float)VT_PAGE_TABLE_TRANSITION_PHASE_MASK;
+    return lerp(ancestorColor, currentColor, saturate(transitionWeight));
 }
 
 float4 VTSamplePhysicalCacheTrilinear(
@@ -403,10 +490,10 @@ float4 VTSamplePhysicalCacheTrilinear(
     float mipBlend)
 {
     if (VTResolvedAddressMatches(lowerResolved, upperResolved))
-        return VTSamplePhysicalCache(virtualUv, lowerResolved);
+        return VTSamplePhysicalCacheTransitioned(virtualUv, lowerResolved);
 
-    float4 lowerColor = VTSamplePhysicalCache(virtualUv, lowerResolved);
-    float4 upperColor = VTSamplePhysicalCache(virtualUv, upperResolved);
+    float4 lowerColor = VTSamplePhysicalCacheTransitioned(virtualUv, lowerResolved);
+    float4 upperColor = VTSamplePhysicalCacheTransitioned(virtualUv, upperResolved);
 
     if (!lowerResolved.valid)
         lowerColor = upperColor;
@@ -424,10 +511,12 @@ float4 VTSamplePhysicalCacheTrilinearLayer(
     uint layerIndex)
 {
     if (VTResolvedAddressMatches(lowerResolved, upperResolved))
-        return VTSamplePhysicalCacheLayer(virtualUv, lowerResolved, layerIndex);
+        return VTSamplePhysicalCacheLayerTransitioned(virtualUv, lowerResolved, layerIndex);
 
-    float4 lowerColor = VTSamplePhysicalCacheLayer(virtualUv, lowerResolved, layerIndex);
-    float4 upperColor = VTSamplePhysicalCacheLayer(virtualUv, upperResolved, layerIndex);
+    float4 lowerColor = VTSamplePhysicalCacheLayerTransitioned(
+        virtualUv, lowerResolved, layerIndex);
+    float4 upperColor = VTSamplePhysicalCacheLayerTransitioned(
+        virtualUv, upperResolved, layerIndex);
 
     if (!lowerResolved.valid)
         lowerColor = upperColor;

@@ -320,8 +320,14 @@ namespace VividRP.Runtime
             m_PageTableUpdater.RefreshBufferImmediate();
         }
 
-        internal bool RebuildPageTableIfDirty()
+        internal void AdvancePageTransitions(int frameIndex)
         {
+            m_ResidencyManager.AdvancePageTransitions(frameIndex);
+        }
+
+        internal bool RebuildPageTableIfDirty(int frameIndex = -1)
+        {
+            m_ResidencyManager.AdvancePageTransitions(frameIndex);
             if (!m_ResidencyManager.ConsumePageTableDirtyFlag())
                 return false;
 
@@ -404,7 +410,8 @@ namespace VividRP.Runtime
             int allocationId,
             bool privateSpace,
             ComputeBuffer feedbackRequests,
-            ComputeBuffer feedbackCounter)
+            ComputeBuffer feedbackCounter,
+            VirtualTextureFeedbackBufferState feedbackState)
         {
             return new VirtualTextureSpaceBinding(
                 -1,
@@ -417,6 +424,7 @@ namespace VividRP.Runtime
                 m_ResidencyManager.PhysicalPool.Textures,
                 feedbackRequests,
                 feedbackCounter,
+                feedbackState,
                 m_ShaderParams,
                 m_MipOffsets,
                 m_LayerFallbacks);

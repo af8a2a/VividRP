@@ -9,6 +9,7 @@ namespace VividRP.Runtime
     {
         private readonly int[] m_BestPhysicalPageIds;
         private readonly int[] m_BestResolvedMips;
+        private readonly byte[] m_BestTransitionPhases;
         private readonly VirtualTexturePageTableEntry[] m_PageTableEntries;
         private readonly bool[] m_RecomputeMask;
         private readonly bool[] m_UploadMask;
@@ -34,6 +35,7 @@ namespace VividRP.Runtime
             m_BestPhysicalPageIds = new int[totalPageCount];
             Array.Fill(m_BestPhysicalPageIds, -1);
             m_BestResolvedMips = new int[totalPageCount];
+            m_BestTransitionPhases = new byte[totalPageCount];
             m_PageTableEntries = new VirtualTexturePageTableEntry[totalPageCount];
             m_RecomputeMask = new bool[totalPageCount];
             m_UploadMask = new bool[totalPageCount];
@@ -340,6 +342,7 @@ namespace VividRP.Runtime
             bool hasBestMapping = false;
             int bestPhysicalPageId = -1;
             int bestResolvedMip = 0;
+            int bestTransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
             VirtualTexturePageTableEntry entry;
 
             if (pageState.Resident)
@@ -347,13 +350,15 @@ namespace VividRP.Runtime
                 hasBestMapping = true;
                 bestPhysicalPageId = pageState.PhysicalPageId;
                 bestResolvedMip = coord.Mip;
+                bestTransitionPhase = pageState.TransitionPhase;
                 entry = new VirtualTexturePageTableEntry(
                     bestPhysicalPageId,
                     bestResolvedMip,
                     true,
                     false,
                     false,
-                    pageState.Locked);
+                    pageState.Locked,
+                    bestTransitionPhase);
             }
             else
             {
@@ -369,6 +374,7 @@ namespace VividRP.Runtime
                         hasBestMapping = true;
                         bestPhysicalPageId = m_BestPhysicalPageIds[parentIndex];
                         bestResolvedMip = m_BestResolvedMips[parentIndex];
+                        bestTransitionPhase = m_BestTransitionPhases[parentIndex];
                     }
                 }
 
@@ -379,13 +385,17 @@ namespace VividRP.Runtime
                         false,
                         true,
                         pageState.PendingUpload,
-                        pageState.Locked)
+                        pageState.Locked,
+                        bestTransitionPhase)
                     : VirtualTexturePageTableEntry.Invalid(pageState.PendingUpload, pageState.Locked);
             }
 
             m_PageTableEntries[pageIndex] = entry;
             m_BestPhysicalPageIds[pageIndex] = hasBestMapping ? bestPhysicalPageId : -1;
             m_BestResolvedMips[pageIndex] = hasBestMapping ? bestResolvedMip : 0;
+            m_BestTransitionPhases[pageIndex] = hasBestMapping
+                ? (byte)bestTransitionPhase
+                : (byte)VirtualTexturePageTableEntry.MaxTransitionPhase;
         }
 
         private static bool TryGetPageCoord(

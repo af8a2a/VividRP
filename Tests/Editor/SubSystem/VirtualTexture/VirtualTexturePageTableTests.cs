@@ -24,7 +24,8 @@ namespace VividRP.Editor.Tests
                 resident: true,
                 fallback: false,
                 pendingUpload: true,
-                locked: true);
+                locked: true,
+                transitionPhase: 1);
 
             Assert.That(entry.PhysicalPageId, Is.EqualTo(17));
             Assert.That(entry.ResolvedMip, Is.EqualTo(3));
@@ -32,15 +33,18 @@ namespace VividRP.Editor.Tests
             Assert.That(entry.Fallback, Is.False);
             Assert.That(entry.PendingUpload, Is.True);
             Assert.That(entry.Locked, Is.True);
+            Assert.That(entry.TransitionPhase, Is.EqualTo(1));
             Assert.That(entry.IsMapped, Is.True);
         }
 
         [Test]
-        public void PageTableEntry_ReservesInvalidPhysicalIdAndTwoFutureFormatBits()
+        public void PageTableEntry_ReservesInvalidPhysicalIdAndUsesHighBitsForTransitionPhase()
         {
             Assert.That(VirtualTexturePageTableEntry.MaxPhysicalPageId,
                 Is.EqualTo(VirtualTexturePageTableEntry.InvalidPhysicalPageId - 1));
-            Assert.That(VirtualTexturePageTableEntry.ReservedBitCount, Is.EqualTo(2));
+            Assert.That(VirtualTexturePageTableEntry.TransitionPhaseBitCount, Is.EqualTo(2));
+            Assert.That(VirtualTexturePageTableEntry.MaxTransitionPhase, Is.EqualTo(3));
+            Assert.That(VirtualTexturePageTableEntry.ReservedBitCount, Is.Zero);
             Assert.That(
                 () => new VirtualTexturePageTableEntry(
                     VirtualTexturePageTableEntry.InvalidPhysicalPageId,
@@ -50,6 +54,29 @@ namespace VividRP.Editor.Tests
                     pendingUpload: false,
                     locked: false),
                 Throws.TypeOf<System.ArgumentOutOfRangeException>());
+            Assert.That(
+                () => new VirtualTexturePageTableEntry(
+                    physicalPageId: 0,
+                    resolvedMip: 0,
+                    resident: true,
+                    fallback: false,
+                    pendingUpload: false,
+                    locked: false,
+                    transitionPhase: 4),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>());
+        }
+
+        [Test]
+        public void PageTransitionPhase_ReachesStableOverEightFrames()
+        {
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 100), Is.EqualTo(0));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 102), Is.EqualTo(0));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 103), Is.EqualTo(1));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 105), Is.EqualTo(1));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 106), Is.EqualTo(2));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 107), Is.EqualTo(2));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 108), Is.EqualTo(3));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 1000), Is.EqualTo(3));
         }
 
         [Test]
@@ -276,6 +303,8 @@ namespace VividRP.Editor.Tests
                 out VirtualTexturePageTableEntry rootEntry), Is.True);
             Assert.That(rootEntry.Resident, Is.True);
             Assert.That(rootEntry.Locked, Is.True);
+            Assert.That(rootEntry.TransitionPhase,
+                Is.EqualTo(VirtualTexturePageTableEntry.MaxTransitionPhase));
 
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
@@ -294,6 +323,7 @@ namespace VividRP.Editor.Tests
             Assert.That(childFallbackEntry.Fallback, Is.True);
             Assert.That(childFallbackEntry.ResolvedMip, Is.EqualTo(1));
             Assert.That(childFallbackEntry.PhysicalPageId, Is.EqualTo(childRequest.PhysicalPageId));
+            Assert.That(childFallbackEntry.TransitionPhase, Is.Zero);
         }
 
         [Test]

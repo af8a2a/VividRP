@@ -1123,6 +1123,10 @@ namespace VividRP.Editor.Tests
             Assert.That(feedbackSource, Does.Contain("internal Dictionary<int, VirtualTextureFeedbackBufferState> EnumerateSpaceStates()"));
             Assert.That(feedbackSource, Does.Contain("m_ZeroCounterData = new NativeArray<uint>("));
             Assert.That(feedbackSource, Does.Contain("cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);"));
+            Assert.That(feedbackSource, Does.Contain("private const int FeedbackBufferCount = 4;"));
+            Assert.That(feedbackSource, Does.Contain("&& !readPair.HasCompletedReadback"));
+            Assert.That(feedbackSource, Does.Contain("pair.WasWritten = false;"));
+            Assert.That(feedbackSource, Does.Contain("FindWritableBufferIndex()"));
             Assert.That(feedbackSource, Does.Contain("public AsyncGPUReadbackRequest RequestsReadbackRequest;"));
             Assert.That(feedbackSource, Does.Contain("pair.PollReadback();"));
             Assert.That(feedbackSource, Does.Contain("AsyncGPUReadback.RequestIntoNativeArray("));

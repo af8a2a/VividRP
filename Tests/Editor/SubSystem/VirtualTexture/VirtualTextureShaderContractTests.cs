@@ -42,6 +42,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS 20u"));
             Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_RESOLVED_MIP_BITS 6u"));
             Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_LOCKED_BIT 29u"));
+            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_TRANSITION_PHASE_BIT 30u"));
+            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_TRANSITION_PHASE_MASK 3u"));
             Assert.That(source, Does.Contain("packedEntry & VT_PAGE_TABLE_PHYSICAL_PAGE_ID_MASK"));
             Assert.That(source, Does.Contain("struct VTMipRange"));
             Assert.That(source, Does.Contain("float VTComputeRequestedMipLevel"));
@@ -59,6 +61,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float2 VTComputePhysicalAtlasUv"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheGroup"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCache"));
+            Assert.That(source, Does.Contain("VTResolvedAddress VTFindStableTransitionAncestor"));
+            Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheLayerTransitioned"));
             Assert.That(source, Does.Contain("_VTPhysicalCache3.GetDimensions(width, height)"));
             Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, atlasUv, 0.0)"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheTrilinear"));

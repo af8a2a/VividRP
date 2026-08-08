@@ -412,6 +412,12 @@ namespace VividRP.Runtime
                 activeViewSignature = VirtualTextureFeedbackViewSignature.FromCameraData(cameraData);
             }
 
+            // Protect both sides of an in-progress page fade before this frame can select
+            // eviction candidates. Phase changes stay dirty until the normal frame-end
+            // page-table rebuild/scatter submission.
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                addressSpace.AdvancePageTransitions(frameIndex);
+
             int lastReadbackFrame = -1;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackMarker.Auto())
                 CollectCompletedReadbacks(ref lastReadbackFrame);
@@ -629,6 +635,7 @@ namespace VividRP.Runtime
                     evictionCount));
             if (virtualTextureFrameData != null)
                 virtualTextureFrameData.AdaptiveMipBias = adaptiveMipBias;
+            activeViewSignature = activeViewSignature.WithAdaptiveMipBias(adaptiveMipBias);
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableMarker.Auto())
             {
                 foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
@@ -664,6 +671,7 @@ namespace VividRP.Runtime
                 VTPageTableSpace addressSpace = pair.Value;
                 ComputeBuffer feedbackRequests = null;
                 ComputeBuffer feedbackCounter = null;
+                VirtualTextureFeedbackBufferState feedbackBufferState = null;
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsMarker.Auto())
                 {
                     feedbackCapacity += addressSpace.StackDesc.FeedbackCapacity;
@@ -673,8 +681,8 @@ namespace VividRP.Runtime
 
                     if (supportsFeedback && cameraFeedbackState != null)
                     {
-                        VirtualTextureFeedbackBufferState feedbackBufferState =
-                            cameraFeedbackState.GetOrCreateSpaceState(addressSpace.SpaceId);
+                        feedbackBufferState = cameraFeedbackState.GetOrCreateSpaceState(
+                            addressSpace.SpaceId);
                         if (!feedbackBufferState.TryPrepareForFrame(
                                 cmd,
                                 addressSpace.Descriptor.SpaceName,
@@ -710,7 +718,8 @@ namespace VividRP.Runtime
                         allocationId,
                         privateSpace,
                         feedbackRequests,
-                        feedbackCounter));
+                        feedbackCounter,
+                        feedbackBufferState));
                 }
             }
 

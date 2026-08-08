@@ -404,24 +404,6 @@ namespace VividRP.Runtime
             int spaceCount = s_TransitionSchedulingSpaces.Count;
             int frameOffset = frameIndex >= 0 ? frameIndex % spaceCount : 0;
             for (int round = 0;
-                 round < VTResidencyManager.MaxTransitionPhaseAdvancesPerFrame;
-                 round++)
-            {
-                bool advancedAny = false;
-                for (int relativeIndex = 0; relativeIndex < spaceCount; relativeIndex++)
-                {
-                    int spaceIndex = (frameOffset + relativeIndex) % spaceCount;
-                    advancedAny |= s_TransitionSchedulingSpaces[spaceIndex]
-                        .AdvancePageTransitionPhases(
-                            frameIndex,
-                            maxPhaseAdvancesThisCall: 1);
-                }
-
-                if (!advancedAny)
-                    break;
-            }
-
-            for (int round = 0;
                  round < VTResidencyManager.MaxTransitionStartsPerFrame;
                  round++)
             {
@@ -435,6 +417,22 @@ namespace VividRP.Runtime
 
                 if (!startedAny)
                     break;
+            }
+
+            for (int relativeIndex = 0; relativeIndex < spaceCount; relativeIndex++)
+            {
+                int spaceIndex = (frameOffset + relativeIndex) % spaceCount;
+                VTPageTableSpace addressSpace = s_TransitionSchedulingSpaces[spaceIndex];
+                bool hasFeedbackRequests = s_FeedbackAggregator != null
+                                           && s_FeedbackAggregator.TryGetRequestsForSpace(
+                                               addressSpace.SpaceId,
+                                               out NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests)
+                                           && requests.Length > 0;
+                bool revealCohort = !hasFeedbackRequests
+                                    && addressSpace.IsTransitionCohortReady(frameIndex);
+                addressSpace.AdvancePageTransitionPhases(
+                    frameIndex,
+                    revealCohort ? int.MaxValue : 0);
             }
         }
 
@@ -469,14 +467,12 @@ namespace VividRP.Runtime
                 activeViewSignature = VirtualTextureFeedbackViewSignature.FromCameraData(cameraData);
             }
 
-            // Protect both sides of an in-progress page fade before this frame can select
-            // eviction candidates. Phase changes stay dirty until the normal frame-end
-            // page-table rebuild/scatter submission.
+            // Advance the diagnostics clock before readback collection. Transition pages
+            // are touched after feedback aggregation and before residency can evict them.
 #if VT_DEBUG
             foreach (VTPhysicalPool physicalPool in s_PhysicalPools.Values)
                 physicalPool.DebugAdvanceTimelineFrame(frameIndex);
 #endif
-            AdvanceAndSchedulePageTransitions(frameIndex);
 
             int lastReadbackFrame = -1;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackMarker.Auto())
@@ -522,6 +518,11 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrefetchBiasMarker.Auto())
                 ResolvePrefetchBiasBySpace(cachePriorityViewId);
+
+            // Starts are invisible (phase zero resolves the stable ancestor), so upload
+            // work may continue in parallel. Publication is a single cohort transaction
+            // after the space has no feedback, pending uploads, or recent commit activity.
+            AdvanceAndSchedulePageTransitions(frameIndex);
 
             int evictionCount = 0;
             int pendingMipGapSum = 0;

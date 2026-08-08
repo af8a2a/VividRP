@@ -1498,8 +1498,6 @@ namespace VividRP.Runtime
         private int m_EvictedPageCount;
         private int m_LastTransitionStartFrame = int.MinValue;
         private int m_TransitionStartsThisFrame;
-        private int m_LastTransitionPhaseAdvanceFrame = int.MinValue;
-        private int m_TransitionPhaseAdvancesThisFrame;
 
         internal VTPhysicalPool(string name, in VTPhysicalPoolDesc desc)
         {
@@ -1682,8 +1680,6 @@ namespace VividRP.Runtime
             m_EvictedPageCount = 0;
             m_LastTransitionStartFrame = int.MinValue;
             m_TransitionStartsThisFrame = 0;
-            m_LastTransitionPhaseAdvanceFrame = int.MinValue;
-            m_TransitionPhaseAdvancesThisFrame = 0;
 #if VT_DEBUG
             m_DebugTimeline.Reset();
 #endif
@@ -1782,26 +1778,6 @@ namespace VividRP.Runtime
                 return false;
 
             m_TransitionStartsThisFrame += 1;
-            return true;
-        }
-
-        internal bool TryAcquireTransitionPhaseAdvance(
-            int frameIndex,
-            int maxAdvancesPerFrame)
-        {
-            if (frameIndex < 0 || maxAdvancesPerFrame <= 0)
-                return false;
-
-            if (m_LastTransitionPhaseAdvanceFrame != frameIndex)
-            {
-                m_LastTransitionPhaseAdvanceFrame = frameIndex;
-                m_TransitionPhaseAdvancesThisFrame = 0;
-            }
-
-            if (m_TransitionPhaseAdvancesThisFrame >= maxAdvancesPerFrame)
-                return false;
-
-            m_TransitionPhaseAdvancesThisFrame += 1;
             return true;
         }
 

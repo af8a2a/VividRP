@@ -67,19 +67,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PageTransitionPhase_KeepsAncestorUntilAtomicReveal()
-        {
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 100), Is.EqualTo(0));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 102), Is.EqualTo(0));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 103), Is.EqualTo(0));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 105), Is.EqualTo(0));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 106), Is.EqualTo(0));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 107), Is.EqualTo(0));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 108), Is.EqualTo(3));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 1000), Is.EqualTo(3));
-        }
-
-        [Test]
         public void SpaceDesc_ComposesExpectedVTStackDesc()
         {
             var stackDesc = new VTStackDesc(
@@ -327,11 +314,11 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PageTransition_WaitsForImmediateResolvedAncestorToBecomeStable()
+        public void PageTransition_DescendantRemainsHiddenUntilCohortReveal()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(
                 CreateDesc("StableAncestorGate", 4, 4, 3, 8, 4));
-            VirtualTextureUploadRequest parentRequest = RequestAndCommit(
+            _ = RequestAndCommit(
                 spaceId,
                 new VirtualTexturePageCoord(0, 0, 1));
             VirtualTextureUploadRequest childRequest = RequestAndCommit(
@@ -341,23 +328,34 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 childRequest.PageCoord,
-                out VirtualTexturePageTableEntry queuedChildEntry), Is.True);
-            Assert.That(queuedChildEntry.Resident, Is.False);
-            Assert.That(queuedChildEntry.Fallback, Is.True);
-            Assert.That(queuedChildEntry.PendingUpload, Is.True);
-            Assert.That(queuedChildEntry.PhysicalPageId, Is.EqualTo(parentRequest.PhysicalPageId));
+                out VirtualTexturePageTableEntry stagedChildEntry), Is.True);
+            Assert.That(stagedChildEntry.Resident, Is.True);
+            Assert.That(stagedChildEntry.PendingUpload, Is.False);
+            Assert.That(stagedChildEntry.PhysicalPageId, Is.EqualTo(childRequest.PhysicalPageId));
+            Assert.That(stagedChildEntry.TransitionPhase, Is.Zero);
 
             VirtualTextureSystem.AdvancePageTransitionsForTesting(
-                parentRequest.RequestFrame + VTResidencyManager.PageTransitionFrameCount);
+                childRequest.RequestFrame
+                + VTResidencyManager.TransitionCohortQuietFrameCount
+                - 1);
 
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 childRequest.PageCoord,
-                out VirtualTexturePageTableEntry transitioningChildEntry), Is.True);
-            Assert.That(transitioningChildEntry.Resident, Is.True);
-            Assert.That(transitioningChildEntry.PendingUpload, Is.False);
-            Assert.That(transitioningChildEntry.PhysicalPageId, Is.EqualTo(childRequest.PhysicalPageId));
-            Assert.That(transitioningChildEntry.TransitionPhase, Is.Zero);
+                out VirtualTexturePageTableEntry stillStagedChildEntry), Is.True);
+            Assert.That(stillStagedChildEntry.TransitionPhase, Is.Zero);
+
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(
+                childRequest.RequestFrame
+                + VTResidencyManager.TransitionCohortQuietFrameCount);
+
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                childRequest.PageCoord,
+                out VirtualTexturePageTableEntry revealedChildEntry), Is.True);
+            Assert.That(
+                revealedChildEntry.TransitionPhase,
+                Is.EqualTo(VirtualTexturePageTableEntry.MaxTransitionPhase));
         }
 
         [Test]
@@ -407,9 +405,8 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PageTransition_RevealsAtMostFourPagesPerFrame()
+        public void PageTransition_RevealsWholeCohortAfterQuietWindow()
         {
-            Assert.That(VTResidencyManager.MaxTransitionPhaseAdvancesPerFrame, Is.EqualTo(4));
             int spaceId = VirtualTextureSystem.RegisterSpace(
                 CreateDesc("TransitionPhaseBudget", 16, 16, 5, 24, 8));
             var coords = new VirtualTexturePageCoord[8];
@@ -426,29 +423,18 @@ namespace VividRP.Editor.Tests
                 Assert.That(VirtualTextureSystem.CommitUpload(request), Is.True);
 
             VirtualTextureSystem.AdvancePageTransitionsForTesting(
-                cohortFrame + VTResidencyManager.PageTransitionFrameCount);
-            int revealedCount = 0;
-            int phaseZeroCount = 0;
+                cohortFrame + VTResidencyManager.TransitionCohortQuietFrameCount - 1);
             foreach (VirtualTexturePageCoord coord in coords)
             {
                 Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                     spaceId,
                     coord,
                     out VirtualTexturePageTableEntry entry), Is.True);
-                revealedCount += entry.TransitionPhase
-                                 == VirtualTexturePageTableEntry.MaxTransitionPhase
-                    ? 1
-                    : 0;
-                phaseZeroCount += entry.TransitionPhase == 0 ? 1 : 0;
+                Assert.That(entry.TransitionPhase, Is.Zero);
             }
 
-            Assert.That(
-                revealedCount,
-                Is.EqualTo(VTResidencyManager.MaxTransitionPhaseAdvancesPerFrame));
-            Assert.That(phaseZeroCount, Is.EqualTo(coords.Length - revealedCount));
-
             VirtualTextureSystem.AdvancePageTransitionsForTesting(
-                cohortFrame + VTResidencyManager.PageTransitionFrameCount + 1);
+                cohortFrame + VTResidencyManager.TransitionCohortQuietFrameCount);
             foreach (VirtualTexturePageCoord coord in coords)
             {
                 Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(

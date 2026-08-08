@@ -342,6 +342,11 @@ namespace VividRP.Runtime
                 maxStartsThisCall);
         }
 
+        internal bool IsTransitionCohortReady(int frameIndex)
+        {
+            return m_ResidencyManager.IsTransitionCohortReady(frameIndex);
+        }
+
         internal bool RebuildPageTableIfDirty(int frameIndex = -1)
         {
             m_ResidencyManager.AdvancePageTransitions(
@@ -414,6 +419,8 @@ namespace VividRP.Runtime
                     mip,
                     new RectInt(0, 0, pageCountX, pageCountY));
             }
+
+            m_ResidencyManager.ResetTransitionCohortForRuntimeReset();
 
             return flushedCount;
         }

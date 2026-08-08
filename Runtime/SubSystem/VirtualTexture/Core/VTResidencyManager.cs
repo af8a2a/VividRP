@@ -212,7 +212,7 @@ namespace VividRP.Runtime
         private const int k_MaxRefinementMipStep = 2;
         internal const int PageTransitionFrameCount = 8;
         internal const int MaxTransitionStartsPerFrame = 8;
-        internal const int MaxTransitionPhaseAdvancesPerFrame = 4;
+        internal const int TransitionCohortQuietFrameCount = 32;
 
         private static readonly Vector2Int[] s_NeighborOffsets =
         {
@@ -327,6 +327,8 @@ namespace VividRP.Runtime
         private NativeArray<VTResidencyClassificationResult> m_ClassificationResults;
 
         private int m_ResidentPageCount;
+        private int m_TransitionCohortFirstFrame = int.MaxValue;
+        private int m_TransitionCohortLastActivityFrame = int.MinValue;
         private uint m_PendingRequestRevision;
         private bool m_PageTableDirty;
         private bool m_LastClassificationUsedParallelJob;
@@ -1001,14 +1003,19 @@ namespace VividRP.Runtime
 
         internal bool AdvancePageTransitions(
             int frameIndex,
-            int maxPhaseAdvancesThisCall = MaxTransitionPhaseAdvancesPerFrame,
+            int maxPhaseAdvancesThisCall = int.MaxValue,
             int maxTransitionStartsThisCall = MaxTransitionStartsPerFrame)
         {
             if (frameIndex < 0)
                 return false;
 
             bool changed = false;
+            bool revealCohort = IsTransitionCohortReady(frameIndex);
             int phaseAdvancesThisCall = 0;
+#if VT_DEBUG
+            if (revealCohort)
+                DebugValidateTransitionCohortAncestors(frameIndex);
+#endif
             for (int transitionIndex = 0;
                  transitionIndex < m_TransitioningPageIndices.Count;
                  transitionIndex++)
@@ -1046,32 +1053,27 @@ namespace VividRP.Runtime
                     updateAffinity: false);
                 TouchTransitionAncestors(pageIndex, frameIndex);
 #if VT_DEBUG
-                VTDebugTransitionAncestor observedAncestor = ResolveDebugTransitionAncestor(pageIndex);
-                m_PhysicalPool.DebugValidatePageTransitionAncestor(
-                    m_SpaceId,
-                    pageIndex,
-                    m_PageMips[pageIndex],
-                    pageState.PhysicalPageId,
-                    pageState.Generation,
-                    frameIndex,
-                    pageState.TransitionPhase,
-                    observedAncestor);
+                if (!revealCohort)
+                {
+                    VTDebugTransitionAncestor observedAncestor = ResolveDebugTransitionAncestor(pageIndex);
+                    m_PhysicalPool.DebugValidatePageTransitionAncestor(
+                        m_SpaceId,
+                        pageIndex,
+                        m_PageMips[pageIndex],
+                        pageState.PhysicalPageId,
+                        pageState.Generation,
+                        frameIndex,
+                        pageState.TransitionPhase,
+                        observedAncestor);
+                }
 #endif
 
-                byte targetPhase = pageState.Locked
+                byte targetPhase = pageState.Locked || revealCohort
                     ? (byte)VirtualTexturePageTableEntry.MaxTransitionPhase
-                    : CalculateTransitionPhase(pageState.LastAllocationFrame, frameIndex);
+                    : (byte)0;
                 if (targetPhase <= pageState.TransitionPhase
                     || pageState.LastTransitionPhaseFrame == frameIndex
                     || phaseAdvancesThisCall >= maxPhaseAdvancesThisCall)
-                {
-                    continue;
-                }
-
-                if (!pageState.Locked
-                    && !m_PhysicalPool.TryAcquireTransitionPhaseAdvance(
-                        frameIndex,
-                        MaxTransitionPhaseAdvancesPerFrame))
                 {
                     continue;
                 }
@@ -1108,14 +1110,54 @@ namespace VividRP.Runtime
                     + $"mip={m_PageMips[pageIndex]} slot={pageState.PhysicalPageId} "
                     + $"phase={previousPhase}->{nextPhase} targetPhase={targetPhase} "
                     + $"mode=atomic ancestorVisibleBeforeReveal=True "
-                    + $"cohortFrame={pageState.LastAllocationFrame} "
+                    + $"cohortFrame={m_TransitionCohortFirstFrame} "
+                    + $"cohortLastActivityFrame={m_TransitionCohortLastActivityFrame} "
                     + $"ageFrames={frameIndex - pageState.LastAllocationFrame} completed={completed}");
 #endif
                 phaseAdvancesThisCall += 1;
                 changed = true;
             }
 
+#if VT_DEBUG
+            if (revealCohort && phaseAdvancesThisCall > 0)
+            {
+                Debug.Log(
+                    $"[VividRP][VT_DEBUG][TransitionCohortReveal] space={m_Desc.SpaceName} "
+                    + $"spaceId={m_SpaceId} producer={m_ProducerName} frame={frameIndex} "
+                    + $"pageCount={phaseAdvancesThisCall} "
+                    + $"cohortFrame={m_TransitionCohortFirstFrame} "
+                    + $"lastActivityFrame={m_TransitionCohortLastActivityFrame} "
+                    + $"quietFrames={frameIndex - m_TransitionCohortLastActivityFrame}");
+            }
+#endif
+
+            if (revealCohort
+                && m_TransitioningPageIndices.Count == 0
+                && m_QueuedTransitionPageIndices.Count == 0
+                && m_PendingRequests.Count == 0)
+            {
+                ResetTransitionCohort();
+            }
+
             return StartQueuedPageTransitions(frameIndex, maxTransitionStartsThisCall) || changed;
+        }
+
+        internal bool IsTransitionCohortReady(int frameIndex)
+        {
+            return frameIndex >= 0
+                   && m_TransitioningPageIndices.Count > 0
+                   && m_QueuedTransitionPageIndices.Count == 0
+                   && m_PendingRequests.Count == 0
+                   && m_TransitionCohortLastActivityFrame != int.MinValue
+                   && frameIndex - m_TransitionCohortLastActivityFrame
+                   >= TransitionCohortQuietFrameCount;
+        }
+
+        internal void ResetTransitionCohortForRuntimeReset()
+        {
+            m_TransitioningPageIndices.Clear();
+            m_QueuedTransitionPageIndices.Clear();
+            ResetTransitionCohort();
         }
 
         internal bool StartQueuedPageTransitionsOnly(int frameIndex, int maxStartsThisCall)
@@ -1185,6 +1227,7 @@ namespace VividRP.Runtime
             m_DirtyPageTableUpdates.Clear();
             m_TransitioningPageIndices.Clear();
             m_QueuedTransitionPageIndices.Clear();
+            ResetTransitionCohort();
             m_PageTableDirty = false;
 
             if (m_ClassificationInputs.IsCreated)
@@ -1752,6 +1795,7 @@ namespace VividRP.Runtime
             }
 
             pageState.TransitionPhase = 0;
+            TrackTransitionCohortActivity(frameIndex);
             if (pageState.TransitionTracked || pageState.TransitionQueued)
                 return;
 
@@ -1800,7 +1844,8 @@ namespace VividRP.Runtime
                 + $"producer={m_ProducerName} frame={frameIndex} pageIndex={pageIndex} "
                 + $"mip={m_PageMips[pageIndex]} slot={pageState.PhysicalPageId} "
                 + $"ancestor={FormatDebugTransitionAncestor(in ancestor)} "
-                + $"cohortFrame={frameIndex} durationFrames={PageTransitionFrameCount}");
+                + $"cohortFrame={m_TransitionCohortFirstFrame} mode=cohort "
+                + $"quietFramesRequired={TransitionCohortQuietFrameCount}");
 #endif
         }
 
@@ -1844,8 +1889,7 @@ namespace VividRP.Runtime
                         VirtualTextureViewId.Invalid,
                         frameIndex,
                         updateAffinity: false);
-                    if (WouldChangeActiveTransitionAncestor(pageIndex)
-                        || !TryResolveStableTransitionStartAncestor(
+                    if (!TryResolveStableTransitionStartAncestor(
                             pageIndex,
                             out int ancestorPageIndex))
                     {
@@ -1907,7 +1951,7 @@ namespace VividRP.Runtime
                 int parentPageIndex = GetPageIndex(x, y, parentMip);
                 VTPageRuntimeState parentState = m_PageStates[parentPageIndex];
                 if (parentState.PendingUpload)
-                    return false;
+                    continue;
                 if (!parentState.Resident)
                     continue;
                 if (parentState.TransitionQueued
@@ -1916,7 +1960,7 @@ namespace VividRP.Runtime
                         && parentState.TransitionPhase
                         < VirtualTexturePageTableEntry.MaxTransitionPhase))
                 {
-                    return false;
+                    continue;
                 }
 
                 ancestorPageIndex = parentPageIndex;
@@ -1926,47 +1970,23 @@ namespace VividRP.Runtime
             return true;
         }
 
-        private bool WouldChangeActiveTransitionAncestor(int candidatePageIndex)
+        private void TrackTransitionCohortActivity(int frameIndex)
         {
-            int candidateMip = m_PageMips[candidatePageIndex];
-            for (int transitionIndex = 0;
-                 transitionIndex < m_TransitioningPageIndices.Count;
-                 transitionIndex++)
-            {
-                int childPageIndex = m_TransitioningPageIndices[transitionIndex];
-                if (childPageIndex < 0 || childPageIndex >= m_PageStates.Length)
-                    continue;
+            if (frameIndex < 0)
+                return;
 
-                VTPageRuntimeState childState = m_PageStates[childPageIndex];
-                if (!childState.TransitionTracked
-                    || !IsAncestorPage(candidatePageIndex, childPageIndex))
-                {
-                    continue;
-                }
-
-                int currentAncestorPageIndex = childState.TransitionAncestorPageIndex;
-                if (currentAncestorPageIndex < 0
-                    || candidateMip < m_PageMips[currentAncestorPageIndex])
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            m_TransitionCohortFirstFrame = Math.Min(
+                m_TransitionCohortFirstFrame,
+                frameIndex);
+            m_TransitionCohortLastActivityFrame = Math.Max(
+                m_TransitionCohortLastActivityFrame,
+                frameIndex);
         }
 
-        private bool IsAncestorPage(int ancestorPageIndex, int descendantPageIndex)
+        private void ResetTransitionCohort()
         {
-            int ancestorMip = m_PageMips[ancestorPageIndex];
-            int descendantMip = m_PageMips[descendantPageIndex];
-            if (ancestorMip <= descendantMip)
-                return false;
-
-            GetPageLocalCoord(ancestorPageIndex, out int ancestorX, out int ancestorY, out _);
-            GetPageLocalCoord(descendantPageIndex, out int descendantX, out int descendantY, out _);
-            int mipDelta = ancestorMip - descendantMip;
-            return descendantX >> mipDelta == ancestorX
-                   && descendantY >> mipDelta == ancestorY;
+            m_TransitionCohortFirstFrame = int.MaxValue;
+            m_TransitionCohortLastActivityFrame = int.MinValue;
         }
 
         private int ResolveStableTransitionAncestorPageIndex(int pageIndex)
@@ -2010,6 +2030,33 @@ namespace VividRP.Runtime
         }
 
 #if VT_DEBUG
+        private void DebugValidateTransitionCohortAncestors(int frameIndex)
+        {
+            for (int transitionIndex = 0;
+                 transitionIndex < m_TransitioningPageIndices.Count;
+                 transitionIndex++)
+            {
+                int pageIndex = m_TransitioningPageIndices[transitionIndex];
+                if (pageIndex < 0 || pageIndex >= m_PageStates.Length)
+                    continue;
+
+                VTPageRuntimeState pageState = m_PageStates[pageIndex];
+                if (!pageState.Resident || !pageState.TransitionTracked)
+                    continue;
+
+                VTDebugTransitionAncestor observedAncestor = ResolveDebugTransitionAncestor(pageIndex);
+                m_PhysicalPool.DebugValidatePageTransitionAncestor(
+                    m_SpaceId,
+                    pageIndex,
+                    m_PageMips[pageIndex],
+                    pageState.PhysicalPageId,
+                    pageState.Generation,
+                    frameIndex,
+                    pageState.TransitionPhase,
+                    observedAncestor);
+            }
+        }
+
         private VTDebugTransitionAncestor ResolveDebugTransitionAncestor(int pageIndex)
         {
             return CreateDebugTransitionAncestor(

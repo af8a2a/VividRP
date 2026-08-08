@@ -252,7 +252,7 @@ bool TryResolveCulledMeshlet(
     const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
     const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
     rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
-    const VividMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+    const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
     boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
 
     if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
@@ -363,7 +363,7 @@ void ExecuteOcclusionTestCulled(const uint3 dispatchThreadID)
     const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
     const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
     const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
-    const VividMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+    const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
     const float4 boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
     if (!IsMeshletVisibleAfterOcclusion(boundingSphereWS))
         return;

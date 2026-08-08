@@ -10,11 +10,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 {
     internal static class VividMeshletCollectionBinarySerializer
     {
-        public const uint CurrentVersion = 3u;
+        public const uint CurrentVersion = 4u;
 
         private const uint Magic = 0x564D4342u;
         private const uint LegacyGZipVersion = 1u;
         private const uint LegacyLZ4Version = 2u;
+        private const uint PackedVertexLegacyMetadataVersion = 3u;
 
         internal const uint LZ4CompressionCodec = 1u;
 
@@ -86,24 +87,30 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             uint version = headerReader.ReadUInt32();
-            bool usesLegacyVertexLayout;
             byte[] payload = version switch
             {
                 LegacyGZipVersion => ReadLegacyGZipPayload(inputStream, headerReader),
                 LegacyLZ4Version => ReadLZ4Payload(inputStream, headerReader),
+                PackedVertexLegacyMetadataVersion => ReadLZ4Payload(inputStream, headerReader),
                 CurrentVersion => ReadLZ4Payload(inputStream, headerReader),
                 _ => throw new InvalidDataException(
                     $"Unsupported meshlet blob version {version}. Expected versions " +
-                    $"{LegacyGZipVersion}, {LegacyLZ4Version}, or {CurrentVersion}."
+                    $"{LegacyGZipVersion}, {LegacyLZ4Version}, " +
+                    $"{PackedVertexLegacyMetadataVersion}, or {CurrentVersion}."
                 ),
             };
-            usesLegacyVertexLayout = version == LegacyGZipVersion || version == LegacyLZ4Version;
+            bool usesLegacyVertexLayout = version <= LegacyLZ4Version;
+            bool usesLegacyMetadataLayout = version <= PackedVertexLegacyMetadataVersion;
 
             using var payloadStream = new MemoryStream(payload, writable: false);
             using var payloadReader = new BinaryReader(payloadStream, Encoding.UTF8, leaveOpen: true);
             meshLODLevelNodeCounts = ReadIntArray(payloadReader);
-            meshLODNodes = ReadStructArray<VividMeshLODNode>(payloadReader);
-            meshlets = ReadStructArray<VividMeshlet>(payloadReader);
+            meshLODNodes = usesLegacyMetadataLayout
+                ? ConvertLegacyMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy64>(payloadReader))
+                : ReadStructArray<VividMeshLODNode>(payloadReader);
+            meshlets = usesLegacyMetadataLayout
+                ? ConvertLegacyMeshlets(ReadStructArray<VividMeshletLegacy64>(payloadReader))
+                : ReadStructArray<VividMeshlet>(payloadReader);
             vertexBuffer = usesLegacyVertexLayout
                 ? ConvertLegacyVertices(ReadStructArray<VividMeshletVertexLegacy64>(payloadReader))
                 : ReadStructArray<VividMeshletVertex>(payloadReader);
@@ -130,6 +137,55 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             return vertices;
+        }
+
+        internal static VividMeshLODNode[] ConvertLegacyMeshLODNodes(
+            VividMeshLODNodeLegacy64[] legacyNodes)
+        {
+            if (legacyNodes == null || legacyNodes.Length == 0)
+            {
+                return Array.Empty<VividMeshLODNode>();
+            }
+
+            var nodes = new VividMeshLODNode[legacyNodes.Length];
+            for (int index = 0; index < legacyNodes.Length; index++)
+            {
+                VividMeshLODNodeLegacy64 legacyNode = legacyNodes[index];
+                nodes[index] = VividMeshletMetadataPacking.PackMeshLODNode(
+                    legacyNode.Bounds,
+                    legacyNode.ParentBounds,
+                    legacyNode.ParentError,
+                    legacyNode.Error,
+                    legacyNode.MeshletStartIndex,
+                    legacyNode.MeshletCount,
+                    legacyNode.LevelIndex);
+            }
+
+            return nodes;
+        }
+
+        internal static VividMeshlet[] ConvertLegacyMeshlets(VividMeshletLegacy64[] legacyMeshlets)
+        {
+            if (legacyMeshlets == null || legacyMeshlets.Length == 0)
+            {
+                return Array.Empty<VividMeshlet>();
+            }
+
+            var meshlets = new VividMeshlet[legacyMeshlets.Length];
+            for (int index = 0; index < legacyMeshlets.Length; index++)
+            {
+                VividMeshletLegacy64 legacyMeshlet = legacyMeshlets[index];
+                meshlets[index] = VividMeshletMetadataPacking.PackMeshlet(
+                    legacyMeshlet.VertexOffset,
+                    legacyMeshlet.TriangleOffset,
+                    legacyMeshlet.VertexCount,
+                    legacyMeshlet.TriangleCount,
+                    legacyMeshlet.BoundingSphere,
+                    legacyMeshlet.ConeAxis.xyz,
+                    legacyMeshlet.ConeApexCutoff.w);
+            }
+
+            return meshlets;
         }
 
         private static byte[] ReadLZ4Payload(MemoryStream inputStream, BinaryReader headerReader)
@@ -300,5 +356,34 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         public float4 Normal;
         public float4 Tangent;
         public float4 UV;
+    }
+
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VividMeshletLegacy64
+    {
+        public uint VertexOffset;
+        public uint TriangleOffset;
+        public uint VertexCount;
+        public uint TriangleCount;
+        public float4 BoundingSphere;
+        public float4 ConeApexCutoff;
+        public float4 ConeAxis;
+    }
+
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VividMeshLODNodeLegacy64
+    {
+        public float4 Bounds;
+        public float4 ParentBounds;
+        public float ParentError;
+        public float Error;
+        public uint MeshletStartIndex;
+        public uint MeshletCount;
+        public uint LevelIndex;
+        public uint Padding0;
+        public uint Padding1;
+        public uint Padding2;
     }
 }

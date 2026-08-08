@@ -14,10 +14,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private int[] m_LegacyMeshLODLevelNodeCounts = Array.Empty<int>();
 
         [SerializeField, HideInInspector, FormerlySerializedAs("MeshLODNodes")]
-        private VividMeshLODNode[] m_LegacyMeshLODNodes = Array.Empty<VividMeshLODNode>();
+        private VividMeshLODNodeLegacy64[] m_LegacyMeshLODNodes = Array.Empty<VividMeshLODNodeLegacy64>();
 
         [SerializeField, HideInInspector, FormerlySerializedAs("Meshlets")]
-        private VividMeshlet[] m_LegacyMeshlets = Array.Empty<VividMeshlet>();
+        private VividMeshletLegacy64[] m_LegacyMeshlets = Array.Empty<VividMeshletLegacy64>();
 
         [SerializeField, HideInInspector, FormerlySerializedAs("VertexBuffer")]
         private VividMeshletVertexLegacy64[] m_LegacyVertexBuffer = Array.Empty<VividMeshletVertexLegacy64>();
@@ -193,8 +193,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
             SetMeshData(
                 m_LegacyMeshLODLevelNodeCounts,
-                m_LegacyMeshLODNodes,
-                m_LegacyMeshlets,
+                VividMeshletCollectionBinarySerializer.ConvertLegacyMeshLODNodes(m_LegacyMeshLODNodes),
+                VividMeshletCollectionBinarySerializer.ConvertLegacyMeshlets(m_LegacyMeshlets),
                 VividMeshletCollectionBinarySerializer.ConvertLegacyVertices(m_LegacyVertexBuffer),
                 m_LegacyIndexBuffer
             );
@@ -223,8 +223,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private void ClearLegacyMeshData()
         {
             m_LegacyMeshLODLevelNodeCounts = Array.Empty<int>();
-            m_LegacyMeshLODNodes = Array.Empty<VividMeshLODNode>();
-            m_LegacyMeshlets = Array.Empty<VividMeshlet>();
+            m_LegacyMeshLODNodes = Array.Empty<VividMeshLODNodeLegacy64>();
+            m_LegacyMeshlets = Array.Empty<VividMeshletLegacy64>();
             m_LegacyVertexBuffer = Array.Empty<VividMeshletVertexLegacy64>();
             m_LegacyIndexBuffer = Array.Empty<byte>();
         }

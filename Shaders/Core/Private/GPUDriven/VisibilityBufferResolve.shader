@@ -98,7 +98,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 return output;
             }
 
-            uint PullIndex(const VividMeshlet meshlet, const uint indexID)
+            uint PullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
             {
                 const uint absoluteIndexID = meshlet.TriangleOffset + indexID;
                 const uint packedIndices = _SharedIndexBuffer.Load((absoluteIndexID / 4u) * 4u);
@@ -106,7 +106,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 return (packedIndices >> shiftAmount) & 0xFFu;
             }
 
-            VividDecodedMeshletVertex PullVertex(const VividMeshlet meshlet, const uint index)
+            VividDecodedMeshletVertex PullVertex(const VividDecodedMeshlet meshlet, const uint index)
             {
                 return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
             }
@@ -148,7 +148,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
             struct TriangleData
             {
                 VividInstanceData instanceData;
-                VividMeshlet meshlet;
+                VividDecodedMeshlet meshlet;
                 uint3 indices;
                 VividDecodedMeshletVertex vertex0;
                 VividDecodedMeshletVertex vertex1;
@@ -196,7 +196,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 UNITY_LOOP
                 for (uint nodeIndex = nodeStart; nodeIndex < nodeEnd; ++nodeIndex)
                 {
-                    VividMeshLODNode node = PullMeshLODNode(nodeIndex);
+                    VividDecodedMeshLODNode node = PullMeshLODNode(nodeIndex);
                     uint meshletStart = node.MeshletStartIndex;
                     uint meshletEnd = meshletStart + node.MeshletCount;
                     if (value.MeshletID >= meshletStart && value.MeshletID < meshletEnd)

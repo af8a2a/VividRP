@@ -244,16 +244,14 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                             MeshLODNode node = level.Nodes[nodeIndex];
 
                             ref VividMeshLODNode destinationNode = ref pMeshLODNodes[meshLODNodeWriteOffset++];
-                            destinationNode = new VividMeshLODNode
-                            {
-                                MeshletCount = 1u,
-                                MeshletStartIndex = meshletWriteOffset + (uint) index,
-                                LevelIndex = (uint) levelIndex,
-                                Error = node.Error,
-                                Bounds = node.Bounds,
-                                ParentError = node.ParentError,
-                                ParentBounds = node.ParentBounds,
-                            };
+                            destinationNode = VividMeshletMetadataPacking.PackMeshLODNode(
+                                node.Bounds,
+                                node.ParentBounds,
+                                node.ParentError,
+                                node.Error,
+                                meshletWriteOffset + (uint) index,
+                                1u,
+                                (uint) levelIndex);
                         }
 
                         foreach (int nodeIndex in group)
@@ -270,31 +268,23 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                                 positionStride
                             );
 
-                            pDestinationMeshlets[meshletWriteOffset++] = new VividMeshlet
-                            {
-                                VertexOffset = vertexWriteOffset,
-                                TriangleOffset = indexWriteOffset,
-                                VertexCount = meshoptMeshlet.VertexCount,
-                                TriangleCount = meshoptMeshlet.TriangleCount,
-                                BoundingSphere = math.float4(
+                            pDestinationMeshlets[meshletWriteOffset++] = VividMeshletMetadataPacking.PackMeshlet(
+                                vertexWriteOffset,
+                                indexWriteOffset,
+                                meshoptMeshlet.VertexCount,
+                                meshoptMeshlet.TriangleCount,
+                                math.float4(
                                     meshoptBounds.Center[0],
                                     meshoptBounds.Center[1],
                                     meshoptBounds.Center[2],
                                     meshoptBounds.Radius
                                 ),
-                                ConeApexCutoff = math.float4(
-                                    meshoptBounds.ConeApex[0],
-                                    meshoptBounds.ConeApex[1],
-                                    meshoptBounds.ConeApex[2],
-                                    meshoptBounds.ConeCutoff
-                                ),
-                                ConeAxis = math.float4(
+                                math.float3(
                                     meshoptBounds.ConeAxis[0],
                                     meshoptBounds.ConeAxis[1],
-                                    meshoptBounds.ConeAxis[2],
-                                    0.0f
+                                    meshoptBounds.ConeAxis[2]
                                 ),
-                            };
+                                meshoptBounds.ConeCutoff);
 
                             jobHandles.Add(new WriteVerticesJob
                             {

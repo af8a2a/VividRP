@@ -97,29 +97,42 @@ struct VividTerrainLayerGPUData
 struct VividMeshLODNode
 {
     float4 Bounds;
-    float4 ParentBounds;
-
-    float ParentError;
     float Error;
+    uint PackedParentErrorRadius;
     uint MeshletStartIndex;
-    uint MeshletCount;
-
-    uint LevelIndex;
-    uint Padding0;
-    uint Padding1;
-    uint Padding2;
+    uint PackedMeshletCountLevel;
 };
 
 struct VividMeshlet
 {
     uint VertexOffset;
     uint TriangleOffset;
+    uint PackedVertexTriangleCounts;
+    uint PackedCone;
+    float4 BoundingSphere;
+};
+
+struct VividDecodedMeshLODNode
+{
+    float4 Bounds;
+    float4 ParentBounds;
+    float ParentError;
+    float Error;
+    uint MeshletStartIndex;
+    uint MeshletCount;
+    uint LevelIndex;
+};
+
+struct VividDecodedMeshlet
+{
+    uint VertexOffset;
+    uint TriangleOffset;
     uint VertexCount;
     uint TriangleCount;
-
     float4 BoundingSphere;
-    float4 ConeApexCutoff;
-    float4 ConeAxis;
+    float3 ConeAxis;
+    float ConeCutoff;
+    uint ConeValid;
 };
 
 struct VividMeshletVertex
@@ -145,6 +158,9 @@ static const uint VIVID_MESHLET_OCTAHEDRAL_COMPONENT_MASK = 0x7FFFu;
 static const uint VIVID_MESHLET_NORMAL_VALID_BIT = 1u << 30;
 static const uint VIVID_MESHLET_TANGENT_NEGATIVE_HANDEDNESS_BIT = 1u << 30;
 static const uint VIVID_MESHLET_TANGENT_VALID_BIT = 1u << 31;
+static const uint VIVID_MESHLET_CONE_OCTAHEDRAL_COMPONENT_MASK = 0x3FFu;
+static const uint VIVID_MESHLET_CONE_CUTOFF_MASK = 0x7FFu;
+static const uint VIVID_MESHLET_CONE_VALID_BIT = 1u << 31;
 
 float3 DecodeVividMeshletOctahedral15(const uint packedDirection)
 {
@@ -162,6 +178,57 @@ float3 DecodeVividMeshletOctahedral15(const uint packedDirection)
     const float2 foldSign = step(0.0f, direction.xy) * 2.0f - 1.0f;
     direction.xy -= foldSign * fold;
     return direction * rsqrt(max(dot(direction, direction), 1e-20f));
+}
+
+float3 DecodeVividMeshletOctahedral10(const uint packedDirection)
+{
+    float2 octahedral = float2(
+        packedDirection & VIVID_MESHLET_CONE_OCTAHEDRAL_COMPONENT_MASK,
+        (packedDirection >> 10) & VIVID_MESHLET_CONE_OCTAHEDRAL_COMPONENT_MASK
+    );
+    octahedral = octahedral / float(VIVID_MESHLET_CONE_OCTAHEDRAL_COMPONENT_MASK) * 2.0f - 1.0f;
+
+    float3 direction = float3(
+        octahedral,
+        1.0f - abs(octahedral.x) - abs(octahedral.y)
+    );
+    const float fold = saturate(-direction.z);
+    const float2 foldSign = step(0.0f, direction.xy) * 2.0f - 1.0f;
+    direction.xy -= foldSign * fold;
+    return direction * rsqrt(max(dot(direction, direction), 1e-20f));
+}
+
+VividDecodedMeshlet DecodeVividMeshlet(const VividMeshlet packedMeshlet)
+{
+    VividDecodedMeshlet meshlet;
+    meshlet.VertexOffset = packedMeshlet.VertexOffset;
+    meshlet.TriangleOffset = packedMeshlet.TriangleOffset;
+    meshlet.VertexCount = packedMeshlet.PackedVertexTriangleCounts & 0xFFFFu;
+    meshlet.TriangleCount = packedMeshlet.PackedVertexTriangleCounts >> 16;
+    meshlet.BoundingSphere = packedMeshlet.BoundingSphere;
+    meshlet.ConeValid = (packedMeshlet.PackedCone & VIVID_MESHLET_CONE_VALID_BIT) != 0u;
+    meshlet.ConeAxis = meshlet.ConeValid != 0u
+        ? DecodeVividMeshletOctahedral10(packedMeshlet.PackedCone)
+        : 0.0f;
+    const uint packedCutoff = (packedMeshlet.PackedCone >> 20) & VIVID_MESHLET_CONE_CUTOFF_MASK;
+    meshlet.ConeCutoff = packedCutoff / float(VIVID_MESHLET_CONE_CUTOFF_MASK) * 2.0f - 1.0f;
+    return meshlet;
+}
+
+VividDecodedMeshLODNode DecodeVividMeshLODNode(const VividMeshLODNode packedNode)
+{
+    VividDecodedMeshLODNode node;
+    node.Bounds = packedNode.Bounds;
+    node.ParentError = asfloat((packedNode.PackedParentErrorRadius & 0xFFFFu) << 16);
+    const float parentRadius = asfloat(packedNode.PackedParentErrorRadius & 0xFFFF0000u);
+    node.ParentBounds = node.ParentError < 0.0f
+        ? 0.0f
+        : float4(packedNode.Bounds.xyz, parentRadius);
+    node.Error = packedNode.Error;
+    node.MeshletStartIndex = packedNode.MeshletStartIndex;
+    node.MeshletCount = packedNode.PackedMeshletCountLevel & 0xFFFFu;
+    node.LevelIndex = packedNode.PackedMeshletCountLevel >> 16;
+    return node;
 }
 
 VividDecodedMeshletVertex DecodeVividMeshletVertex(const VividMeshletVertex packedVertex)
@@ -290,14 +357,14 @@ VividTerrainLayerGPUData PullTerrainLayerData(const uint terrainLayerIndex)
     return _TerrainLayerData[terrainLayerIndex];
 }
 
-VividMeshLODNode PullMeshLODNode(const uint nodeIndex)
+VividDecodedMeshLODNode PullMeshLODNode(const uint nodeIndex)
 {
-    return _MeshLODNodes[nodeIndex];
+    return DecodeVividMeshLODNode(_MeshLODNodes[nodeIndex]);
 }
 
-VividMeshlet PullMeshletData(const uint meshletIndex)
+VividDecodedMeshlet PullMeshletData(const uint meshletIndex)
 {
-    return _Meshlets[meshletIndex];
+    return DecodeVividMeshlet(_Meshlets[meshletIndex]);
 }
 
 float LengthSq(const float3 value)
@@ -448,11 +515,15 @@ float3 GetViewForwardDir(const float4x4 viewMatrix)
 bool ConeCulling(
     const VividGPUCullingContext cullingContext,
     const VividInstanceData instanceData,
-    const VividMeshlet meshlet
+    const VividDecodedMeshlet meshlet
 )
 {
-    const float3 coneApexWS = TransformPosition(instanceData.ObjectToWorldMatrix, meshlet.ConeApexCutoff.xyz);
-    float3 coneAxisWS = mul(meshlet.ConeAxis.xyz, (float3x3) instanceData.WorldToObjectMatrix);
+    if (meshlet.ConeValid == 0u)
+    {
+        return true;
+    }
+
+    float3 coneAxisWS = mul(meshlet.ConeAxis, (float3x3) instanceData.WorldToObjectMatrix);
     const float axisLengthSq = LengthSq(coneAxisWS);
 
     if (axisLengthSq <= 1e-8f)
@@ -462,16 +533,45 @@ bool ConeCulling(
 
     coneAxisWS *= rsqrt(axisLengthSq);
 
-    const float3 viewDirWS = cullingContext.CameraIsPerspective != 0
-        ? normalize(coneApexWS - cullingContext.CameraPosition.xyz)
-        : GetViewForwardDir(cullingContext.ViewMatrix);
+    float3 viewDirWS;
+    float coneCutoff = meshlet.ConeCutoff;
+    if (cullingContext.CameraIsPerspective != 0)
+    {
+        const float4 boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+        const float3 viewVectorWS = boundingSphereWS.xyz - cullingContext.CameraPosition.xyz;
+        const float viewDistanceSq = LengthSq(viewVectorWS);
+        const float radiusSq = boundingSphereWS.w * boundingSphereWS.w;
+        if (viewDistanceSq <= max(radiusSq, 1e-8f))
+        {
+            return true;
+        }
+
+        const float inverseViewDistance = rsqrt(viewDistanceSq);
+        viewDirWS = viewVectorWS * inverseViewDistance;
+        const float sinViewCone = saturate(boundingSphereWS.w * inverseViewDistance);
+        const float cosViewCone = sqrt(max(0.0f, 1.0f - sinViewCone * sinViewCone));
+        const float sinNormalCone = sqrt(max(0.0f, 1.0f - coneCutoff * coneCutoff));
+        if (coneCutoff >= 0.0f && sinViewCone >= sinNormalCone)
+        {
+            return true;
+        }
+
+        coneCutoff = min(
+            1.0f,
+            coneCutoff * cosViewCone + sinNormalCone * sinViewCone);
+    }
+    else
+    {
+        viewDirWS = GetViewForwardDir(cullingContext.ViewMatrix);
+    }
+
     const float dotResult = dot(viewDirWS, coneAxisWS);
-    return !(dotResult >= meshlet.ConeApexCutoff.w);
+    return !(dotResult >= coneCutoff);
 }
 
 bool ShouldSelectMeshLODNode(
     const VividGPULODSelectionContext lodSelectionContext,
-    const VividMeshLODNode meshLODNode,
+    const VividDecodedMeshLODNode meshLODNode,
     const VividInstanceData instanceData,
     const float distanceToViewSq,
     const uint forcedMeshLODNodeDepth,

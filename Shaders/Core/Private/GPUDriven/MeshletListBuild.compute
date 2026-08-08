@@ -46,7 +46,7 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
             continue;
         }
 
-        const VividMeshLODNode meshLODNode = PullMeshLODNode(nodeIndex);
+        const VividDecodedMeshLODNode meshLODNode = PullMeshLODNode(nodeIndex);
         if (!ShouldSelectMeshLODNode(
                 lodSelectionContext,
                 meshLODNode,

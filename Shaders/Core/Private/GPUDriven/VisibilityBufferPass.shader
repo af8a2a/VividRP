@@ -58,7 +58,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 #endif
             };
 
-            uint PullIndex(const VividMeshlet meshlet, const uint indexID)
+            uint PullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
             {
                 const uint absoluteIndexID = meshlet.TriangleOffset + indexID;
                 const uint packedIndices = _SharedIndexBuffer.Load((absoluteIndexID / 4u) * 4u);
@@ -66,7 +66,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 return (packedIndices >> shiftAmount) & 0xFFu;
             }
 
-            VividDecodedMeshletVertex PullVertex(const VividMeshlet meshlet, const uint index)
+            VividDecodedMeshletVertex PullVertex(const VividDecodedMeshlet meshlet, const uint index)
             {
                 return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
             }
@@ -100,7 +100,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
                 const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
                 const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
-                const VividMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+                const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
                 const uint indexCount = meshlet.TriangleCount * 3u;
 
                 if (vertexID >= indexCount)

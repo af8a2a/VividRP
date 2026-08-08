@@ -83,7 +83,7 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
                 return true;
             }
 
-            uint PullDebugIndex(const VividMeshlet meshlet, const uint indexID)
+            uint PullDebugIndex(const VividDecodedMeshlet meshlet, const uint indexID)
             {
                 const uint absoluteIndexID = meshlet.TriangleOffset + indexID;
                 const uint packedIndices = _SharedIndexBuffer.Load((absoluteIndexID / 4u) * 4u);
@@ -93,7 +93,7 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
 
             float4 PullDebugClipPosition(
                 const VividInstanceData instanceData,
-                const VividMeshlet meshlet,
+                const VividDecodedMeshlet meshlet,
                 const uint indexID)
             {
                 uint vertexIndex = PullDebugIndex(meshlet, indexID);
@@ -108,7 +108,7 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
                 float4 positionCS)
             {
                 VividInstanceData instanceData = PullInstanceData(value.InstanceID);
-                VividMeshlet meshlet = PullMeshletData(value.MeshletID);
+                VividDecodedMeshlet meshlet = PullMeshletData(value.MeshletID);
                 float4 clipPosition0 = PullDebugClipPosition(instanceData, meshlet, value.IndexID + 0u);
                 float4 clipPosition1 = PullDebugClipPosition(instanceData, meshlet, value.IndexID + 1u);
                 float4 clipPosition2 = PullDebugClipPosition(instanceData, meshlet, value.IndexID + 2u);
@@ -134,7 +134,7 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
                 UNITY_LOOP
                 for (uint nodeIndex = nodeStart; nodeIndex < nodeEnd; ++nodeIndex)
                 {
-                    VividMeshLODNode node = PullMeshLODNode(nodeIndex);
+                    VividDecodedMeshLODNode node = PullMeshLODNode(nodeIndex);
                     uint meshletStart = node.MeshletStartIndex;
                     uint meshletEnd = meshletStart + node.MeshletCount;
                     if (value.MeshletID >= meshletStart && value.MeshletID < meshletEnd)

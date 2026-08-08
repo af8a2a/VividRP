@@ -157,11 +157,9 @@ struct VividMeshlet
 {
     uint VertexOffset;
     uint TriangleOffset;
-    uint VertexCount;
-    uint TriangleCount;
+    uint PackedVertexTriangleCounts;
+    uint PackedCone;
     float4 BoundingSphere;
-    float4 ConeApexCutoff;
-    float4 ConeAxis;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividMeshletRenderRequestPacked
@@ -190,15 +188,10 @@ struct VividMeshletVertex
 struct VividMeshLODNode
 {
     float4 Bounds;
-    float4 ParentBounds;
-    float ParentError;
     float Error;
+    uint PackedParentErrorRadius;
     uint MeshletStartIndex;
-    uint MeshletCount;
-    uint LevelIndex;
-    uint Padding0;
-    uint Padding1;
-    uint Padding2;
+    uint PackedMeshletCountLevel;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividSurfaceBindingData

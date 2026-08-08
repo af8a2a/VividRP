@@ -210,7 +210,7 @@ namespace VividRP.Runtime
     [CreateAssetMenu(menuName = "VividRP/Terrain Data", fileName = "New Vivid Terrain Data")]
     public sealed class VividTerrainData : ScriptableObject
     {
-        public const uint CurrentBakeVersion = 3u;
+        public const uint CurrentBakeVersion = 4u;
         public const int MaximumSurfaceLayerCount = 8;
         public const int MaximumControlMapCount = MaximumSurfaceLayerCount / 4;
         public const int MinimumChunkLODCount = VividTerrainBakeSettings.LegacyMaxMeshLODLevelCount;

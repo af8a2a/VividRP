@@ -163,12 +163,41 @@ namespace VividRP.Runtime.GPUDriven
     {
         public uint VertexOffset;
         public uint TriangleOffset;
-        public uint VertexCount;
-        public uint TriangleCount;
-
+        public uint PackedVertexTriangleCounts;
+        public uint PackedCone;
         public float4 BoundingSphere;
-        public float4 ConeApexCutoff;
-        public float4 ConeAxis;
+
+        public uint VertexCount
+        {
+            readonly get => PackedVertexTriangleCounts & VividMeshletMetadataPacking.UInt16Mask;
+            set => PackedVertexTriangleCounts = VividMeshletMetadataPacking.SetLowUInt16(
+                PackedVertexTriangleCounts,
+                value,
+                nameof(VertexCount));
+        }
+
+        public uint TriangleCount
+        {
+            readonly get => PackedVertexTriangleCounts >> 16;
+            set => PackedVertexTriangleCounts = VividMeshletMetadataPacking.SetHighUInt16(
+                PackedVertexTriangleCounts,
+                value,
+                nameof(TriangleCount));
+        }
+
+        public float4 ConeApexCutoff
+        {
+            // The packed layout uses conservative sphere-cone culling and no longer stores
+            // meshoptimizer's apex. Expose the sphere center to keep the legacy CPU API usable.
+            readonly get => new(BoundingSphere.xyz, VividMeshletMetadataPacking.UnpackConeCutoff(PackedCone));
+            set => PackedCone = VividMeshletMetadataPacking.SetConeCutoff(PackedCone, value.w);
+        }
+
+        public float4 ConeAxis
+        {
+            readonly get => new(VividMeshletMetadataPacking.UnpackConeAxis(PackedCone), 0.0f);
+            set => PackedCone = VividMeshletMetadataPacking.SetConeAxis(PackedCone, value.xyz);
+        }
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
@@ -177,17 +206,378 @@ namespace VividRP.Runtime.GPUDriven
     public struct VividMeshLODNode
     {
         public float4 Bounds;
-        public float4 ParentBounds;
-
-        public float ParentError;
         public float Error;
+        public uint PackedParentErrorRadius;
         public uint MeshletStartIndex;
-        public uint MeshletCount;
+        public uint PackedMeshletCountLevel;
 
-        public uint LevelIndex;
-        public uint Padding0;
-        public uint Padding1;
-        public uint Padding2;
+        public float4 ParentBounds
+        {
+            readonly get => ParentError < 0.0f
+                ? default
+                : new float4(Bounds.xyz, VividMeshletMetadataPacking.UnpackParentRadius(PackedParentErrorRadius));
+            set => PackedParentErrorRadius = VividMeshletMetadataPacking.SetParentBounds(
+                PackedParentErrorRadius,
+                Bounds,
+                value);
+        }
+
+        public float ParentError
+        {
+            readonly get => VividMeshletMetadataPacking.UnpackParentError(PackedParentErrorRadius);
+            set => PackedParentErrorRadius = VividMeshletMetadataPacking.SetParentError(
+                PackedParentErrorRadius,
+                value);
+        }
+
+        public uint MeshletCount
+        {
+            readonly get => PackedMeshletCountLevel & VividMeshletMetadataPacking.UInt16Mask;
+            set => PackedMeshletCountLevel = VividMeshletMetadataPacking.SetLowUInt16(
+                PackedMeshletCountLevel,
+                value,
+                nameof(MeshletCount));
+        }
+
+        public uint LevelIndex
+        {
+            readonly get => PackedMeshletCountLevel >> 16;
+            set => PackedMeshletCountLevel = VividMeshletMetadataPacking.SetHighUInt16(
+                PackedMeshletCountLevel,
+                value,
+                nameof(LevelIndex));
+        }
+    }
+
+    public static class VividMeshletMetadataPacking
+    {
+        public const uint UInt16Mask = 0xFFFFu;
+        public const uint ConeOctahedralComponentMask = 0x3FFu;
+        public const uint ConeCutoffMask = 0x7FFu;
+        public const uint ConeValidBit = 1u << 31;
+
+        private const int ConeOctahedralComponentBits = 10;
+        private const int ConeCutoffShift = 20;
+        private const float DirectionLengthSquaredEpsilon = 1e-20f;
+        private const float ConservativeConeAxisSetterErrorRadians = 0.00872664626f;
+        // Parent error and radius use the high 16 bits of a float (bfloat16 style). Positive
+        // values are rounded upward so LOD selection remains conservative across the full float range.
+        private const uint MaximumFiniteFloat16 = 0x7F7Fu;
+
+        public static VividMeshlet PackMeshlet(
+            uint vertexOffset,
+            uint triangleOffset,
+            uint vertexCount,
+            uint triangleCount,
+            float4 boundingSphere,
+            float3 coneAxis,
+            float coneCutoff)
+        {
+            return new VividMeshlet
+            {
+                VertexOffset = vertexOffset,
+                TriangleOffset = triangleOffset,
+                PackedVertexTriangleCounts = PackUInt16Pair(
+                    vertexCount,
+                    triangleCount,
+                    nameof(vertexCount),
+                    nameof(triangleCount)),
+                PackedCone = PackCone(coneAxis, coneCutoff),
+                BoundingSphere = boundingSphere,
+            };
+        }
+
+        public static VividMeshLODNode PackMeshLODNode(
+            float4 bounds,
+            float4 parentBounds,
+            float parentError,
+            float error,
+            uint meshletStartIndex,
+            uint meshletCount,
+            uint levelIndex)
+        {
+            return new VividMeshLODNode
+            {
+                Bounds = bounds,
+                Error = error,
+                PackedParentErrorRadius = PackParentErrorRadius(bounds, parentBounds, parentError),
+                MeshletStartIndex = meshletStartIndex,
+                PackedMeshletCountLevel = PackUInt16Pair(
+                    meshletCount,
+                    levelIndex,
+                    nameof(meshletCount),
+                    nameof(levelIndex)),
+            };
+        }
+
+        public static uint PackCone(float3 coneAxis, float coneCutoff)
+        {
+            if (!math.isfinite(coneCutoff)
+                || !TryNormalizeDirection(coneAxis, out float3 normalizedAxis))
+            {
+                return 0u;
+            }
+
+            uint packedAxis = PackOctahedral10(normalizedAxis);
+            float3 decodedAxis = UnpackOctahedral10(packedAxis);
+            float expandedCutoff = ExpandConeCutoffForAxisQuantization(
+                math.clamp(coneCutoff, -1.0f, 1.0f),
+                normalizedAxis,
+                decodedAxis);
+            uint packedCutoff = PackSignedUNorm11Up(expandedCutoff);
+            return packedAxis | (packedCutoff << ConeCutoffShift) | ConeValidBit;
+        }
+
+        public static uint SetConeAxis(uint packedCone, float3 coneAxis)
+        {
+            uint packedCutoffBits = packedCone & (ConeCutoffMask << ConeCutoffShift);
+            float cutoff = IsConeValid(packedCone) || packedCutoffBits != 0u
+                ? UnpackConeCutoff(packedCone)
+                : 1.0f;
+            if (!TryNormalizeDirection(coneAxis, out float3 normalizedAxis))
+            {
+                return packedCone & (ConeCutoffMask << ConeCutoffShift);
+            }
+
+            uint packedAxis = PackOctahedral10(normalizedAxis);
+            float3 decodedAxis = UnpackOctahedral10(packedAxis);
+            float expandedCutoff = ExpandConeCutoffForAxisQuantization(
+                cutoff,
+                normalizedAxis,
+                decodedAxis);
+            uint packedCutoff = PackSignedUNorm11Up(expandedCutoff);
+            return packedAxis | (packedCutoff << ConeCutoffShift) | ConeValidBit;
+        }
+
+        public static uint SetConeCutoff(uint packedCone, float coneCutoff)
+        {
+            uint packedCutoff = math.isfinite(coneCutoff)
+                ? PackSignedUNorm11Up(ExpandConeCutoffByAngle(
+                    math.clamp(coneCutoff, -1.0f, 1.0f),
+                    ConservativeConeAxisSetterErrorRadians))
+                : ConeCutoffMask;
+            return (packedCone & ~(ConeCutoffMask << ConeCutoffShift))
+                   | (packedCutoff << ConeCutoffShift);
+        }
+
+        public static bool IsConeValid(uint packedCone)
+        {
+            return (packedCone & ConeValidBit) != 0u;
+        }
+
+        public static float3 UnpackConeAxis(uint packedCone)
+        {
+            return IsConeValid(packedCone) ? UnpackOctahedral10(packedCone) : default;
+        }
+
+        public static float UnpackConeCutoff(uint packedCone)
+        {
+            uint quantized = (packedCone >> ConeCutoffShift) & ConeCutoffMask;
+            return quantized / (float) ConeCutoffMask * 2.0f - 1.0f;
+        }
+
+        public static float UnpackParentError(uint packedParentErrorRadius)
+        {
+            return Float16ToFloat(packedParentErrorRadius & UInt16Mask);
+        }
+
+        public static float UnpackParentRadius(uint packedParentErrorRadius)
+        {
+            return Float16ToFloat(packedParentErrorRadius >> 16);
+        }
+
+        public static uint SetParentError(uint packedParentErrorRadius, float parentError)
+        {
+            uint packedError = parentError < 0.0f
+                ? FloatToFloat16(-1.0f)
+                : PackPositiveFloat16Up(parentError);
+            return (packedParentErrorRadius & 0xFFFF0000u) | packedError;
+        }
+
+        public static uint SetParentBounds(
+            uint packedParentErrorRadius,
+            float4 bounds,
+            float4 parentBounds)
+        {
+            float parentRadius = ComputeConservativeParentRadius(bounds, parentBounds);
+            return (packedParentErrorRadius & UInt16Mask) | (PackPositiveFloat16Up(parentRadius) << 16);
+        }
+
+        public static uint SetLowUInt16(uint packedValue, uint value, string parameterName)
+        {
+            ValidateUInt16(value, parameterName);
+            return (packedValue & 0xFFFF0000u) | value;
+        }
+
+        public static uint SetHighUInt16(uint packedValue, uint value, string parameterName)
+        {
+            ValidateUInt16(value, parameterName);
+            return (packedValue & UInt16Mask) | (value << 16);
+        }
+
+        private static uint PackParentErrorRadius(float4 bounds, float4 parentBounds, float parentError)
+        {
+            uint packedError = parentError < 0.0f
+                ? FloatToFloat16(-1.0f)
+                : PackPositiveFloat16Up(parentError);
+            uint packedRadius = parentError < 0.0f
+                ? 0u
+                : PackPositiveFloat16Up(ComputeConservativeParentRadius(bounds, parentBounds));
+            return packedError | (packedRadius << 16);
+        }
+
+        private static float ComputeConservativeParentRadius(float4 bounds, float4 parentBounds)
+        {
+            if (!math.all(math.isfinite(bounds)) || !math.all(math.isfinite(parentBounds)))
+            {
+                return Float16ToFloat(MaximumFiniteFloat16);
+            }
+
+            return math.max(0.0f, parentBounds.w) + math.distance(bounds.xyz, parentBounds.xyz);
+        }
+
+        private static uint PackUInt16Pair(
+            uint lowValue,
+            uint highValue,
+            string lowParameterName,
+            string highParameterName)
+        {
+            ValidateUInt16(lowValue, lowParameterName);
+            ValidateUInt16(highValue, highParameterName);
+            return lowValue | (highValue << 16);
+        }
+
+        private static void ValidateUInt16(uint value, string parameterName)
+        {
+            if (value > UInt16Mask)
+            {
+                throw new ArgumentOutOfRangeException(
+                    parameterName,
+                    value,
+                    $"Packed meshlet metadata values must not exceed {UInt16Mask}.");
+            }
+        }
+
+        private static bool TryNormalizeDirection(float3 direction, out float3 normalizedDirection)
+        {
+            normalizedDirection = default;
+            if (!math.all(math.isfinite(direction)))
+            {
+                return false;
+            }
+
+            float lengthSquared = math.lengthsq(direction);
+            if (!math.isfinite(lengthSquared) || lengthSquared <= DirectionLengthSquaredEpsilon)
+            {
+                return false;
+            }
+
+            normalizedDirection = direction * math.rsqrt(lengthSquared);
+            return true;
+        }
+
+        private static uint PackOctahedral10(float3 direction)
+        {
+            float reciprocalL1Norm = math.rcp(math.csum(math.abs(direction)));
+            float2 octahedral = direction.xy * reciprocalL1Norm;
+            if (direction.z < 0.0f)
+            {
+                octahedral = (1.0f - math.abs(octahedral.yx)) * SignNotZero(octahedral);
+            }
+
+            uint2 quantized = (uint2) math.round(
+                math.saturate(octahedral * 0.5f + 0.5f) * ConeOctahedralComponentMask);
+            return (quantized.x & ConeOctahedralComponentMask)
+                   | ((quantized.y & ConeOctahedralComponentMask) << ConeOctahedralComponentBits);
+        }
+
+        private static float3 UnpackOctahedral10(uint packedDirection)
+        {
+            float2 octahedral = new float2(
+                packedDirection & ConeOctahedralComponentMask,
+                (packedDirection >> ConeOctahedralComponentBits) & ConeOctahedralComponentMask);
+            octahedral = octahedral / ConeOctahedralComponentMask * 2.0f - 1.0f;
+
+            var direction = new float3(
+                octahedral,
+                1.0f - math.abs(octahedral.x) - math.abs(octahedral.y));
+            float fold = math.saturate(-direction.z);
+            direction.xy += math.select(new float2(fold), new float2(-fold), direction.xy >= 0.0f);
+            return math.normalizesafe(direction);
+        }
+
+        private static float ExpandConeCutoffForAxisQuantization(
+            float coneCutoff,
+            float3 sourceAxis,
+            float3 decodedAxis)
+        {
+            float cosDelta = math.clamp(math.dot(sourceAxis, decodedAxis), -1.0f, 1.0f);
+            if (cosDelta <= coneCutoff)
+            {
+                return 1.0f;
+            }
+
+            float sinDelta = math.sqrt(math.max(0.0f, 1.0f - cosDelta * cosDelta));
+            float sinCone = math.sqrt(math.max(0.0f, 1.0f - coneCutoff * coneCutoff));
+            return math.min(1.0f, coneCutoff * cosDelta + sinCone * sinDelta);
+        }
+
+        private static float ExpandConeCutoffByAngle(float coneCutoff, float angleRadians)
+        {
+            float cosDelta = math.cos(angleRadians);
+            if (cosDelta <= coneCutoff)
+            {
+                return 1.0f;
+            }
+
+            float sinCone = math.sqrt(math.max(0.0f, 1.0f - coneCutoff * coneCutoff));
+            return math.min(
+                1.0f,
+                coneCutoff * cosDelta + sinCone * math.sin(angleRadians));
+        }
+
+        private static uint PackSignedUNorm11Up(float value)
+        {
+            float encoded = math.saturate(value * 0.5f + 0.5f) * ConeCutoffMask;
+            return math.min((uint) math.ceil(encoded), ConeCutoffMask);
+        }
+
+        private static uint PackPositiveFloat16Up(float value)
+        {
+            if (float.IsNaN(value) || value <= 0.0f)
+            {
+                return 0u;
+            }
+
+            if (float.IsPositiveInfinity(value))
+            {
+                return MaximumFiniteFloat16;
+            }
+
+            uint bits = math.asuint(value);
+            uint packed = bits >> 16;
+            if ((bits & UInt16Mask) != 0u && packed < MaximumFiniteFloat16)
+            {
+                packed++;
+            }
+
+            return math.min(packed, MaximumFiniteFloat16);
+        }
+
+        private static uint FloatToFloat16(float value)
+        {
+            return math.asuint(value) >> 16;
+        }
+
+        private static float Float16ToFloat(uint value)
+        {
+            return math.asfloat((value & UInt16Mask) << 16);
+        }
+
+        private static float2 SignNotZero(float2 value)
+        {
+            return math.select(new float2(-1.0f), new float2(1.0f), value >= 0.0f);
+        }
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]

@@ -18,7 +18,110 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividSurfaceBindingData>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(32));
+        }
+
+        [Test]
+        public void MeshletMetadataPacking_PreservesOffsetsCountsAndConservativeCone()
+        {
+            var random = new System.Random(28471);
+            for (int index = 0; index < 4096; index++)
+            {
+                float3 sourceAxis = NextUnitVector(random);
+                float sourceCutoff = (float) (random.NextDouble() * 1.8 - 0.9);
+                VividMeshlet meshlet = VividMeshletMetadataPacking.PackMeshlet(
+                    123456789u,
+                    987654321u,
+                    128u,
+                    127u,
+                    new float4(1000.25f, -2000.5f, 3.75f, 42.0f),
+                    sourceAxis,
+                    sourceCutoff);
+
+                Assert.That(meshlet.VertexOffset, Is.EqualTo(123456789u));
+                Assert.That(meshlet.TriangleOffset, Is.EqualTo(987654321u));
+                Assert.That(meshlet.VertexCount, Is.EqualTo(128u));
+                Assert.That(meshlet.TriangleCount, Is.EqualTo(127u));
+                Assert.That(VividMeshletMetadataPacking.IsConeValid(meshlet.PackedCone), Is.True);
+                Assert.That(math.all(math.isfinite(meshlet.ConeAxis)), Is.True);
+
+                float3 decodedAxis = meshlet.ConeAxis.xyz;
+                float decodedCutoff = meshlet.ConeApexCutoff.w;
+                for (int sampleIndex = 0; sampleIndex < 16; sampleIndex++)
+                {
+                    float3 viewDirection = NextUnitVector(random);
+                    if (math.dot(viewDirection, decodedAxis) >= decodedCutoff)
+                    {
+                        Assert.That(
+                            math.dot(viewDirection, sourceAxis),
+                            Is.GreaterThanOrEqualTo(sourceCutoff - 1e-5f));
+                    }
+                }
+            }
+        }
+
+        [Test]
+        public void MeshletMetadataPacking_RejectsInvalidConeAndBuildsConservativeParentSphere()
+        {
+            VividMeshlet meshlet = VividMeshletMetadataPacking.PackMeshlet(
+                1u,
+                2u,
+                3u,
+                4u,
+                new float4(0.0f, 0.0f, 0.0f, 1.0f),
+                new float3(float.NaN, 0.0f, 1.0f),
+                0.25f);
+            Assert.That(VividMeshletMetadataPacking.IsConeValid(meshlet.PackedCone), Is.False);
+            Assert.That(meshlet.ConeAxis, Is.EqualTo(float4.zero));
+
+            float3 sourceAxis = math.normalize(new float3(1.0f, 2.0f, 3.0f));
+            var propertyPackedMeshlet = new VividMeshlet
+            {
+                ConeAxis = new float4(sourceAxis, 0.0f),
+                ConeApexCutoff = new float4(0.0f, 0.0f, 0.0f, 0.4f),
+            };
+            Assert.That(VividMeshletMetadataPacking.IsConeValid(propertyPackedMeshlet.PackedCone), Is.True);
+            Assert.That(propertyPackedMeshlet.ConeApexCutoff.w, Is.GreaterThan(0.4f));
+
+            var bounds = new float4(10.0f, -4.0f, 3.0f, 2.0f);
+            var parentBounds = new float4(14.0f, -1.0f, 3.0f, 8.0f);
+            VividMeshLODNode node = VividMeshletMetadataPacking.PackMeshLODNode(
+                bounds,
+                parentBounds,
+                0.03125f,
+                0.0078125f,
+                uint.MaxValue - 7u,
+                17u,
+                9u);
+
+            float requiredParentRadius = parentBounds.w + math.distance(bounds.xyz, parentBounds.xyz);
+            Assert.That(node.Bounds, Is.EqualTo(bounds));
+            Assert.That(node.ParentBounds.xyz, Is.EqualTo(bounds.xyz));
+            Assert.That(node.ParentBounds.w, Is.GreaterThanOrEqualTo(requiredParentRadius));
+            Assert.That(node.ParentError, Is.GreaterThanOrEqualTo(0.03125f));
+            Assert.That(node.Error, Is.EqualTo(0.0078125f));
+            Assert.That(node.MeshletStartIndex, Is.EqualTo(uint.MaxValue - 7u));
+            Assert.That(node.MeshletCount, Is.EqualTo(17u));
+            Assert.That(node.LevelIndex, Is.EqualTo(9u));
+
+            var largeBounds = new float4(1.0e10f, -2.0e10f, 3.0e10f, 1.0e8f);
+            var largeParentBounds = new float4(1.1e10f, -1.8e10f, 3.3e10f, 4.0e8f);
+            VividMeshLODNode largeNode = VividMeshletMetadataPacking.PackMeshLODNode(
+                largeBounds,
+                largeParentBounds,
+                0.0012345f,
+                0.0005f,
+                0u,
+                1u,
+                0u);
+            Assert.That(math.isfinite(largeNode.ParentBounds.w), Is.True);
+            Assert.That(
+                largeNode.ParentBounds.w,
+                Is.GreaterThanOrEqualTo(
+                    largeParentBounds.w + math.distance(largeBounds.xyz, largeParentBounds.xyz)));
+            Assert.That(largeNode.ParentError, Is.GreaterThanOrEqualTo(0.0012345f));
         }
 
         [Test]
@@ -92,6 +195,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("uint PackedTangent;"));
             Assert.That(source, Does.Contain("float2 UV;"));
             Assert.That(source, Does.Contain("uint Reserved;"));
+            Assert.That(source, Does.Contain("uint PackedVertexTriangleCounts;"));
+            Assert.That(source, Does.Contain("uint PackedCone;"));
+            Assert.That(source, Does.Contain("uint PackedParentErrorRadius;"));
+            Assert.That(source, Does.Contain("uint PackedMeshletCountLevel;"));
+            Assert.That(source, Does.Not.Contain("float4 ConeApexCutoff;"));
         }
 
         [Test]
@@ -109,6 +217,10 @@ namespace VividRP.Editor.Tests
             Assert.That(commonSource, Does.Contain("packedVertex.PositionX"));
             Assert.That(commonSource, Does.Contain("packedVertex.PackedNormal"));
             Assert.That(commonSource, Does.Contain("packedVertex.PackedTangent"));
+            Assert.That(commonSource, Does.Contain("DecodeVividMeshlet("));
+            Assert.That(commonSource, Does.Contain("DecodeVividMeshLODNode("));
+            Assert.That(commonSource, Does.Contain("VividDecodedMeshlet"));
+            Assert.That(commonSource, Does.Contain("VividDecodedMeshLODNode"));
 
             string[][] shaderPaths =
             {

@@ -229,10 +229,13 @@ namespace VividRP.Editor.Tests
 
             Assert.That(
                 source,
-                Does.Contain("mul(meshlet.ConeAxis.xyz, (float3x3) instanceData.WorldToObjectMatrix)"));
+                Does.Contain("mul(meshlet.ConeAxis, (float3x3) instanceData.WorldToObjectMatrix)"));
             Assert.That(
                 source,
-                Does.Not.Contain("mul((float3x3) instanceData.ObjectToWorldMatrix, meshlet.ConeAxis.xyz)"));
+                Does.Not.Contain("mul((float3x3) instanceData.ObjectToWorldMatrix, meshlet.ConeAxis)"));
+            Assert.That(source, Does.Contain("const float4 boundingSphereWS = TransformSphere("));
+            Assert.That(source, Does.Contain("sinViewCone"));
+            Assert.That(source, Does.Contain("return true;"));
         }
 
         [Test]

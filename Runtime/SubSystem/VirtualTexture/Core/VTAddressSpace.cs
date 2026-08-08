@@ -325,10 +325,13 @@ namespace VividRP.Runtime
             m_ResidencyManager.AdvancePageTransitions(frameIndex);
         }
 
-        internal void AdvancePageTransitionPhases(int frameIndex)
+        internal bool AdvancePageTransitionPhases(
+            int frameIndex,
+            int maxPhaseAdvancesThisCall)
         {
-            m_ResidencyManager.AdvancePageTransitions(
+            return m_ResidencyManager.AdvancePageTransitions(
                 frameIndex,
+                maxPhaseAdvancesThisCall,
                 maxTransitionStartsThisCall: 0);
         }
 
@@ -343,6 +346,7 @@ namespace VividRP.Runtime
         {
             m_ResidencyManager.AdvancePageTransitions(
                 frameIndex,
+                maxPhaseAdvancesThisCall: 0,
                 maxTransitionStartsThisCall: 0);
             if (!m_ResidencyManager.ConsumePageTableDirtyFlag())
                 return false;

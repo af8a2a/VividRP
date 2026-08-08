@@ -578,6 +578,7 @@ namespace VividRP.Runtime
             internal int ReserveFrame;
             internal int CommitFrame = -1;
             internal int TransitionFrame = -1;
+            internal int LastTransitionObservationFrame = -1;
             internal byte LastTransitionPhase;
             internal PageStage Stage;
             internal bool Pending;
@@ -917,6 +918,7 @@ namespace VividRP.Runtime
 
             timeline.TransitionFrame = frameIndex;
             timeline.TransitionCohortFrame = frameIndex;
+            timeline.LastTransitionObservationFrame = frameIndex;
             timeline.TransitionAncestor = ancestor.IsValid
                 ? ancestor
                 : VTDebugTransitionAncestor.Invalid;
@@ -959,6 +961,7 @@ namespace VividRP.Runtime
                 return;
             }
 
+            timeline.LastTransitionObservationFrame = frameIndex;
             if (timeline.TransitionAncestor.Equals(ancestor))
                 return;
 
@@ -1030,6 +1033,7 @@ namespace VividRP.Runtime
             }
 
             timeline.LastTransitionPhase = nextPhase;
+            timeline.LastTransitionObservationFrame = frameIndex;
             timeline.Stage = nextPhase >= VirtualTexturePageTableEntry.MaxTransitionPhase
                 ? PageStage.Stable
                 : PageStage.Transitioning;
@@ -1245,7 +1249,7 @@ namespace VividRP.Runtime
 
                 if (timeline.Stage == PageStage.Transitioning
                     && !timeline.TransitionTimeoutReported
-                    && frameIndex - timeline.TransitionFrame
+                    && frameIndex - timeline.LastTransitionObservationFrame
                         > VTResidencyManager.PageTransitionFrameCount + TransitionTimeoutGraceFrames)
                 {
                     timeline.TransitionTimeoutReported = true;
@@ -1254,6 +1258,7 @@ namespace VividRP.Runtime
                         frameIndex,
                         timeline,
                         $"phase={timeline.LastTransitionPhase} ageFrames={frameIndex - timeline.TransitionFrame} "
+                        + $"unobservedFrames={frameIndex - timeline.LastTransitionObservationFrame} "
                         + $"sequence={FormatSequence(timeline)}>timeout");
                 }
             }
@@ -1490,6 +1495,8 @@ namespace VividRP.Runtime
         private int m_EvictedPageCount;
         private int m_LastTransitionStartFrame = int.MinValue;
         private int m_TransitionStartsThisFrame;
+        private int m_LastTransitionPhaseAdvanceFrame = int.MinValue;
+        private int m_TransitionPhaseAdvancesThisFrame;
 
         internal VTPhysicalPool(string name, in VTPhysicalPoolDesc desc)
         {
@@ -1672,6 +1679,8 @@ namespace VividRP.Runtime
             m_EvictedPageCount = 0;
             m_LastTransitionStartFrame = int.MinValue;
             m_TransitionStartsThisFrame = 0;
+            m_LastTransitionPhaseAdvanceFrame = int.MinValue;
+            m_TransitionPhaseAdvancesThisFrame = 0;
 #if VT_DEBUG
             m_DebugTimeline.Reset();
 #endif
@@ -1770,6 +1779,26 @@ namespace VividRP.Runtime
                 return false;
 
             m_TransitionStartsThisFrame += 1;
+            return true;
+        }
+
+        internal bool TryAcquireTransitionPhaseAdvance(
+            int frameIndex,
+            int maxAdvancesPerFrame)
+        {
+            if (frameIndex < 0 || maxAdvancesPerFrame <= 0)
+                return false;
+
+            if (m_LastTransitionPhaseAdvanceFrame != frameIndex)
+            {
+                m_LastTransitionPhaseAdvanceFrame = frameIndex;
+                m_TransitionPhaseAdvancesThisFrame = 0;
+            }
+
+            if (m_TransitionPhaseAdvancesThisFrame >= maxAdvancesPerFrame)
+                return false;
+
+            m_TransitionPhaseAdvancesThisFrame += 1;
             return true;
         }
 

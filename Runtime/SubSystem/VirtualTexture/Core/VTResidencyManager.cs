@@ -212,6 +212,7 @@ namespace VividRP.Runtime
         private const int k_MaxRefinementMipStep = 2;
         internal const int PageTransitionFrameCount = 8;
         internal const int MaxTransitionStartsPerFrame = 8;
+        internal const int MaxTransitionPhaseAdvancesPerFrame = 4;
 
         private static readonly Vector2Int[] s_NeighborOffsets =
         {
@@ -233,6 +234,7 @@ namespace VividRP.Runtime
             public bool TransitionTracked;
             public bool TransitionQueued;
             public int TransitionAncestorPageIndex;
+            public int LastTransitionPhaseFrame;
         }
 
         private readonly struct VTRefinementRequest
@@ -999,20 +1001,23 @@ namespace VividRP.Runtime
 
         internal bool AdvancePageTransitions(
             int frameIndex,
+            int maxPhaseAdvancesThisCall = MaxTransitionPhaseAdvancesPerFrame,
             int maxTransitionStartsThisCall = MaxTransitionStartsPerFrame)
         {
             if (frameIndex < 0)
                 return false;
 
             bool changed = false;
-            for (int transitionIndex = m_TransitioningPageIndices.Count - 1;
-                 transitionIndex >= 0;
-                 transitionIndex--)
+            int phaseAdvancesThisCall = 0;
+            for (int transitionIndex = 0;
+                 transitionIndex < m_TransitioningPageIndices.Count;
+                 transitionIndex++)
             {
                 int pageIndex = m_TransitioningPageIndices[transitionIndex];
                 if (pageIndex < 0 || pageIndex >= m_PageStates.Length)
                 {
                     m_TransitioningPageIndices.RemoveAt(transitionIndex);
+                    transitionIndex -= 1;
                     continue;
                 }
 
@@ -1020,14 +1025,17 @@ namespace VividRP.Runtime
                 if (!pageState.TransitionTracked)
                 {
                     m_TransitioningPageIndices.RemoveAt(transitionIndex);
+                    transitionIndex -= 1;
                     continue;
                 }
 
                 if (!pageState.Resident)
                 {
                     pageState.TransitionTracked = false;
+                    pageState.TransitionAncestorPageIndex = -1;
                     SetPageState(pageIndex, pageState);
                     m_TransitioningPageIndices.RemoveAt(transitionIndex);
+                    transitionIndex -= 1;
                     continue;
                 }
 
@@ -1050,25 +1058,38 @@ namespace VividRP.Runtime
                     observedAncestor);
 #endif
 
-                byte nextPhase = pageState.Locked
+                byte targetPhase = pageState.Locked
                     ? (byte)VirtualTexturePageTableEntry.MaxTransitionPhase
                     : CalculateTransitionPhase(pageState.LastAllocationFrame, frameIndex);
-                bool completed = nextPhase >= VirtualTexturePageTableEntry.MaxTransitionPhase;
-                if (nextPhase == pageState.TransitionPhase && !completed)
+                if (targetPhase <= pageState.TransitionPhase
+                    || pageState.LastTransitionPhaseFrame == frameIndex
+                    || phaseAdvancesThisCall >= maxPhaseAdvancesThisCall)
+                {
                     continue;
+                }
+
+                if (!pageState.Locked
+                    && !m_PhysicalPool.TryAcquireTransitionPhaseAdvance(
+                        frameIndex,
+                        MaxTransitionPhaseAdvancesPerFrame))
+                {
+                    continue;
+                }
 
                 byte previousPhase = pageState.TransitionPhase;
-                bool phaseChanged = nextPhase != previousPhase;
+                byte nextPhase = (byte)Math.Min(previousPhase + 1, targetPhase);
+                bool completed = nextPhase >= VirtualTexturePageTableEntry.MaxTransitionPhase;
                 pageState.TransitionPhase = nextPhase;
                 pageState.TransitionTracked = !completed;
+                pageState.LastTransitionPhaseFrame = frameIndex;
                 if (completed)
                     pageState.TransitionAncestorPageIndex = -1;
                 SetPageState(pageIndex, pageState);
                 if (completed)
+                {
                     m_TransitioningPageIndices.RemoveAt(transitionIndex);
-
-                if (!phaseChanged)
-                    continue;
+                    transitionIndex -= 1;
+                }
 
                 MarkPageTableDirty(pageIndex);
 #if VT_DEBUG
@@ -1085,8 +1106,11 @@ namespace VividRP.Runtime
                     $"[VividRP][VT_DEBUG][PageTransitionPhase] space={m_Desc.SpaceName} "
                     + $"producer={m_ProducerName} frame={frameIndex} pageIndex={pageIndex} "
                     + $"mip={m_PageMips[pageIndex]} slot={pageState.PhysicalPageId} "
-                    + $"phase={previousPhase}->{nextPhase} completed={completed}");
+                    + $"phase={previousPhase}->{nextPhase} targetPhase={targetPhase} "
+                    + $"phaseLag={targetPhase - nextPhase} cohortFrame={pageState.LastAllocationFrame} "
+                    + $"ageFrames={frameIndex - pageState.LastAllocationFrame} completed={completed}");
 #endif
+                phaseAdvancesThisCall += 1;
                 changed = true;
             }
 
@@ -1147,6 +1171,7 @@ namespace VividRP.Runtime
             pageState.TransitionTracked = false;
             pageState.TransitionQueued = false;
             pageState.TransitionAncestorPageIndex = -1;
+            pageState.LastTransitionPhaseFrame = int.MinValue;
             SetPageState(pageIndex, pageState);
             RemovePendingRequest(pageIndex, generation);
             MarkPageTableDirty(pageIndex);
@@ -1752,6 +1777,7 @@ namespace VividRP.Runtime
             pageState.TransitionQueued = false;
             pageState.TransitionAncestorPageIndex = ancestorPageIndex;
             pageState.TransitionTracked = true;
+            pageState.LastTransitionPhaseFrame = int.MinValue;
             m_TransitioningPageIndices.Add(pageIndex);
             m_PhysicalPool.TrySetVisibilityPending(
                 pageState.PhysicalPageId,

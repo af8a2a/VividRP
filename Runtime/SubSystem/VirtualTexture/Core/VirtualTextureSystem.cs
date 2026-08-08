@@ -401,15 +401,26 @@ namespace VividRP.Runtime
 
             s_TransitionSchedulingSpaces.Sort(
                 static (left, right) => left.SpaceId.CompareTo(right.SpaceId));
-            for (int spaceIndex = 0;
-                 spaceIndex < s_TransitionSchedulingSpaces.Count;
-                 spaceIndex++)
-            {
-                s_TransitionSchedulingSpaces[spaceIndex].AdvancePageTransitionPhases(frameIndex);
-            }
-
             int spaceCount = s_TransitionSchedulingSpaces.Count;
             int frameOffset = frameIndex >= 0 ? frameIndex % spaceCount : 0;
+            for (int round = 0;
+                 round < VTResidencyManager.MaxTransitionPhaseAdvancesPerFrame;
+                 round++)
+            {
+                bool advancedAny = false;
+                for (int relativeIndex = 0; relativeIndex < spaceCount; relativeIndex++)
+                {
+                    int spaceIndex = (frameOffset + relativeIndex) % spaceCount;
+                    advancedAny |= s_TransitionSchedulingSpaces[spaceIndex]
+                        .AdvancePageTransitionPhases(
+                            frameIndex,
+                            maxPhaseAdvancesThisCall: 1);
+                }
+
+                if (!advancedAny)
+                    break;
+            }
+
             for (int round = 0;
                  round < VTResidencyManager.MaxTransitionStartsPerFrame;
                  round++)

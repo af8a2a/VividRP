@@ -172,27 +172,21 @@ namespace VividRP.Editor.Tests
                 };
                 asset.VertexBuffer = new[]
                 {
-                    new VividMeshletVertex
-                    {
-                        Position = new Unity.Mathematics.float4(0.0f, 0.0f, 0.0f, 1.0f),
-                        Normal = new Unity.Mathematics.float4(0.0f, 0.0f, 1.0f, 0.0f),
-                        Tangent = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
-                        UV = new Unity.Mathematics.float4(0.0f, 0.0f, 0.0f, 0.0f),
-                    },
-                    new VividMeshletVertex
-                    {
-                        Position = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
-                        Normal = new Unity.Mathematics.float4(0.0f, 0.0f, 1.0f, 0.0f),
-                        Tangent = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
-                        UV = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 0.0f),
-                    },
-                    new VividMeshletVertex
-                    {
-                        Position = new Unity.Mathematics.float4(0.0f, 1.0f, 0.0f, 1.0f),
-                        Normal = new Unity.Mathematics.float4(0.0f, 0.0f, 1.0f, 0.0f),
-                        Tangent = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
-                        UV = new Unity.Mathematics.float4(0.0f, 1.0f, 0.0f, 0.0f),
-                    },
+                    VividMeshletVertexPacking.Pack(
+                        new Unity.Mathematics.float3(0.0f, 0.0f, 0.0f),
+                        new Unity.Mathematics.float3(0.0f, 0.0f, 1.0f),
+                        new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        new Unity.Mathematics.float2(0.0f, 0.0f)),
+                    VividMeshletVertexPacking.Pack(
+                        new Unity.Mathematics.float3(1.0f, 0.0f, 0.0f),
+                        new Unity.Mathematics.float3(0.0f, 0.0f, 1.0f),
+                        new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        new Unity.Mathematics.float2(1.0f, 0.0f)),
+                    VividMeshletVertexPacking.Pack(
+                        new Unity.Mathematics.float3(0.0f, 1.0f, 0.0f),
+                        new Unity.Mathematics.float3(0.0f, 0.0f, 1.0f),
+                        new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        new Unity.Mathematics.float2(0.0f, 1.0f)),
                 };
                 asset.IndexBuffer = new byte[] { 0, 1, 2 };
                 asset.MarkChanged();

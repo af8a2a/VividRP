@@ -38,6 +38,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PageTableEntry_AllowsResidentPageToExposeStableFallbackDuringTransition()
+        {
+            var entry = new VirtualTexturePageTableEntry(
+                physicalPageId: 9,
+                resolvedMip: 2,
+                resident: true,
+                fallback: true,
+                pendingUpload: false,
+                locked: false);
+
+            Assert.That(entry.Resident, Is.True);
+            Assert.That(entry.Fallback, Is.True);
+            Assert.That(entry.IsMapped, Is.True);
+        }
+
+        [Test]
         public void PageTableEntry_ReservesInvalidPhysicalIdAndUsesHighBitsForTransitionPhase()
         {
             Assert.That(VirtualTexturePageTableEntry.MaxPhysicalPageId,

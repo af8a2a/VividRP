@@ -1167,6 +1167,12 @@ namespace VividRP.Editor.Tests
             string addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTAddressSpace.cs"));
             string residencySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTResidencyManager.cs"));
             string uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTUploadScheduler.cs"));
+            string streamManagerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTStreamChunkManager.cs"));
+            string streamIOSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTStreamIO.cs"));
+            string streamCompressionSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTStreamingCompression.cs"));
+            string directStorageSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTDirectStorageBackend.cs"));
+            string assetProducerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VividVirtualTextureAssetProducer.cs"));
+            string profilingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "RenderPassProfiling.cs"));
 
             Assert.That(systemSource, Does.Contain("private static VTFeedbackNativeAggregator s_FeedbackAggregator;"));
             Assert.That(systemSource, Does.Contain("s_FeedbackAggregator.Aggregate("));
@@ -1227,6 +1233,33 @@ namespace VividRP.Editor.Tests
             Assert.That(uploadSchedulerSource, Does.Contain("IVTUploadRequestCommitterResolver committerResolver,"));
             Assert.That(uploadSchedulerSource, Does.Contain("committer.TryCommitUpload(request, frameIndex)"));
             Assert.That(uploadSchedulerSource, Does.Not.Contain("Func<VTRequest"));
+            Assert.That(uploadSchedulerSource, Does.Contain("m_TouchedEncodedGroups"));
+            Assert.That(uploadSchedulerSource, Does.Not.Contain("var touchedEncodedGroups = new bool"));
+            Assert.That(addressSpaceSource, Does.Contain("m_ResidentPageTouchedGroups"));
+            Assert.That(addressSpaceSource, Does.Not.Contain("var touchedGroups = new bool"));
+            Assert.That(streamManagerSource, Does.Contain("m_SubmissionEntries"));
+            Assert.That(streamManagerSource, Does.Contain("m_SubmissionCommands"));
+            Assert.That(streamManagerSource, Does.Contain("m_ActiveBatchPool"));
+            Assert.That(streamManagerSource, Does.Contain("m_LeasePool"));
+            Assert.That(streamManagerSource, Does.Contain("m_InFlightChunkCount"));
+            Assert.That(streamManagerSource, Does.Not.Contain("CountInFlightChunks()"));
+            Assert.That(streamManagerSource, Does.Contain("Task.Factory.StartNew("));
+            Assert.That(streamManagerSource, Does.Not.Contain("Task.Run(() => Decode"));
+            Assert.That(streamIOSource, Does.Contain("m_BatchIntBufferPool"));
+            Assert.That(streamIOSource, Does.Not.Contain("new int[commands.Count]"));
+            Assert.That(streamCompressionSource, Does.Contain("decodedData = storedData;"));
+            Assert.That(streamCompressionSource, Does.Not.Contain("decodedData = (byte[])storedData.Clone();"));
+            Assert.That(directStorageSource, Does.Contain("m_BatchOffsets"));
+            Assert.That(directStorageSource, Does.Not.Contain("new long[commands.Count]"));
+            Assert.That(assetProducerSource, Does.Contain("m_ChunkRequestPool"));
+            Assert.That(assetProducerSource, Does.Contain("m_FinalizerPool"));
+            Assert.That(assetProducerSource, Does.Contain("m_EncodedFinalizerPool"));
+            Assert.That(assetProducerSource, Does.Contain("GetCachedLayers(desc.StackDesc)"));
+            Assert.That(assetProducerSource, Does.Not.Contain("CopyLayers(desc.StackDesc)"));
+            Assert.That(profilingSource, Does.Contain("VirtualTextureSystem/Transitions/AdvancePhases"));
+            Assert.That(profilingSource, Does.Contain("VirtualTextureSystem/Residency/Budget/AssignPerSpace"));
+            Assert.That(profilingSource, Does.Contain("VirtualTextureSystem/Uploads/CollectPending/SortCandidates"));
+            Assert.That(profilingSource, Does.Contain("VirtualTextureSystem/Uploads/Stream/SubmitReads/CreateIOBatch"));
         }
 
         [Test]

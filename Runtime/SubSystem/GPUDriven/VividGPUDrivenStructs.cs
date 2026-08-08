@@ -195,10 +195,141 @@ namespace VividRP.Runtime.GPUDriven
     [Serializable]
     public struct VividMeshletVertex
     {
-        public float4 Position;
-        public float4 Normal;
-        public float4 Tangent;
-        public float4 UV;
+        public float PositionX;
+        public float PositionY;
+        public float PositionZ;
+        public uint PackedNormal;
+        public uint PackedTangent;
+        public float2 UV;
+        public uint Reserved;
+
+        public float3 Position
+        {
+            readonly get => new(PositionX, PositionY, PositionZ);
+            set
+            {
+                PositionX = value.x;
+                PositionY = value.y;
+                PositionZ = value.z;
+            }
+        }
+    }
+
+    public static class VividMeshletVertexPacking
+    {
+        public const uint OctahedralComponentMask = 0x7FFFu;
+        public const uint NormalValidBit = 1u << 30;
+        public const uint TangentNegativeHandednessBit = 1u << 30;
+        public const uint TangentValidBit = 1u << 31;
+
+        private const float DirectionLengthSquaredEpsilon = 1e-20f;
+        private const float OctahedralComponentMaximum = OctahedralComponentMask;
+
+        public static VividMeshletVertex Pack(
+            float3 position,
+            float3 normal,
+            float4 tangent,
+            float2 uv)
+        {
+            return new VividMeshletVertex
+            {
+                PositionX = position.x,
+                PositionY = position.y,
+                PositionZ = position.z,
+                PackedNormal = PackNormal(normal),
+                PackedTangent = PackTangent(tangent),
+                UV = uv,
+                Reserved = 0u,
+            };
+        }
+
+        public static uint PackNormal(float3 normal)
+        {
+            return TryPackDirection(normal, out uint packedDirection)
+                ? packedDirection | NormalValidBit
+                : 0u;
+        }
+
+        public static uint PackTangent(float4 tangent)
+        {
+            if (!TryPackDirection(tangent.xyz, out uint packedDirection))
+            {
+                return 0u;
+            }
+
+            uint handedness = tangent.w < 0.0f ? TangentNegativeHandednessBit : 0u;
+            return packedDirection | handedness | TangentValidBit;
+        }
+
+        public static float3 UnpackNormal(uint packedNormal)
+        {
+            return (packedNormal & NormalValidBit) != 0u
+                ? UnpackDirection(packedNormal)
+                : default;
+        }
+
+        public static float4 UnpackTangent(uint packedTangent)
+        {
+            if ((packedTangent & TangentValidBit) == 0u)
+            {
+                return default;
+            }
+
+            float3 direction = UnpackDirection(packedTangent);
+            float handedness = (packedTangent & TangentNegativeHandednessBit) != 0u ? -1.0f : 1.0f;
+            return new float4(direction, handedness);
+        }
+
+        private static bool TryPackDirection(float3 direction, out uint packedDirection)
+        {
+            packedDirection = 0u;
+            if (!math.all(math.isfinite(direction)))
+            {
+                return false;
+            }
+
+            float lengthSquared = math.lengthsq(direction);
+            if (!math.isfinite(lengthSquared) || lengthSquared <= DirectionLengthSquaredEpsilon)
+            {
+                return false;
+            }
+
+            direction *= math.rsqrt(lengthSquared);
+            float reciprocalL1Norm = math.rcp(math.abs(direction.x) + math.abs(direction.y) + math.abs(direction.z));
+            float2 octahedral = direction.xy * reciprocalL1Norm;
+            if (direction.z < 0.0f)
+            {
+                octahedral = (1.0f - math.abs(octahedral.yx)) * SignNotZero(octahedral);
+            }
+
+            float2 encoded = math.saturate(octahedral * 0.5f + 0.5f);
+            uint2 quantized = (uint2) math.round(encoded * OctahedralComponentMaximum);
+            packedDirection = (quantized.x & OctahedralComponentMask)
+                              | ((quantized.y & OctahedralComponentMask) << 15);
+            return true;
+        }
+
+        private static float3 UnpackDirection(uint packedDirection)
+        {
+            float2 octahedral = new float2(
+                packedDirection & OctahedralComponentMask,
+                (packedDirection >> 15) & OctahedralComponentMask
+            );
+            octahedral = octahedral / OctahedralComponentMaximum * 2.0f - 1.0f;
+
+            var direction = new float3(
+                octahedral,
+                1.0f - math.abs(octahedral.x) - math.abs(octahedral.y)
+            );
+            float fold = math.saturate(-direction.z);
+            direction.xy += math.select(new float2(fold), new float2(-fold), direction.xy >= 0.0f);
+            return math.normalizesafe(direction);
+        }
+
+        private static float2 SignNotZero(float2 value)
+        {
+            return math.select(new float2(-1.0f), new float2(1.0f), value >= 0.0f);
+        }
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]

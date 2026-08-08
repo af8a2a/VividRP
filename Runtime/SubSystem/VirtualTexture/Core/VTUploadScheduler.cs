@@ -583,11 +583,13 @@ namespace VividRP.Runtime
             private readonly string m_Name;
             private readonly UploadPoolKey m_Key;
             private readonly List<UploadBatch> m_Batches = new();
+            private readonly bool[] m_TouchedEncodedGroups;
 
             internal UploadPool(string name, in UploadPoolKey key, int batchCapacity)
             {
                 m_Name = string.IsNullOrWhiteSpace(name) ? "Global" : name;
                 m_Key = key;
+                m_TouchedEncodedGroups = new bool[Mathf.Max(1, m_Key.PhysicalGroupCount)];
                 BatchCapacity = Mathf.Max(1, batchCapacity);
                 for (int batchIndex = 0; batchIndex < 2; batchIndex++)
                     m_Batches.Add(CreateBatch(batchIndex));
@@ -755,7 +757,7 @@ namespace VividRP.Runtime
 
                 int requestCount = 0;
                 bool usedCpuStaging = false;
-                var touchedEncodedGroups = new bool[Mathf.Max(1, m_Key.PhysicalGroupCount)];
+                Array.Clear(m_TouchedEncodedGroups, 0, m_TouchedEncodedGroups.Length);
                 try
                 {
                     using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeRenderPayloadsMarker.Auto())
@@ -797,7 +799,7 @@ namespace VividRP.Runtime
                                         batch.GetEncodedStagingTexture(physicalGroup),
                                         encodedSlice,
                                         layerIndex);
-                                    touchedEncodedGroups[physicalGroup] = true;
+                                    m_TouchedEncodedGroups[physicalGroup] = true;
                                 }
 
                                 usesGpuStaging = false;
@@ -866,9 +868,9 @@ namespace VividRP.Runtime
                     using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeApplyStagingMarker.Auto())
                         batch.CpuStagingTexture.Apply(false, false);
                 }
-                for (int physicalGroup = 0; physicalGroup < touchedEncodedGroups.Length; physicalGroup++)
+                for (int physicalGroup = 0; physicalGroup < m_TouchedEncodedGroups.Length; physicalGroup++)
                 {
-                    if (touchedEncodedGroups[physicalGroup])
+                    if (m_TouchedEncodedGroups[physicalGroup])
                         batch.GetEncodedStagingTexture(physicalGroup).Apply(false, false);
                 }
 

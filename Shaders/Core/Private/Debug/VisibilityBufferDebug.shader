@@ -97,7 +97,8 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
                 const uint indexID)
             {
                 uint vertexIndex = PullDebugIndex(meshlet, indexID);
-                VividMeshletVertex vertex = _SharedVertexBuffer[meshlet.VertexOffset + vertexIndex];
+                VividDecodedMeshletVertex vertex = DecodeVividMeshletVertex(
+                    _SharedVertexBuffer[meshlet.VertexOffset + vertexIndex]);
                 float3 positionWS = TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz);
                 return TransformWorldToHClip(positionWS);
             }

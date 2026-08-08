@@ -392,49 +392,60 @@ namespace VividRP.Runtime
 
         private static void AdvanceAndSchedulePageTransitions(int frameIndex)
         {
-            s_TransitionSchedulingSpaces.Clear();
-            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
-                s_TransitionSchedulingSpaces.Add(addressSpace);
-
-            if (s_TransitionSchedulingSpaces.Count == 0)
-                return;
-
-            s_TransitionSchedulingSpaces.Sort(
-                static (left, right) => left.SpaceId.CompareTo(right.SpaceId));
-            int spaceCount = s_TransitionSchedulingSpaces.Count;
-            int frameOffset = frameIndex >= 0 ? frameIndex % spaceCount : 0;
-            int maxTransitionStartRounds = VTResidencyManager.MaxTransitionStartsPerFrame;
-            for (int spaceIndex = 0; spaceIndex < spaceCount; spaceIndex++)
+            int spaceCount;
+            int frameOffset;
+            int maxTransitionStartRounds;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureTransitionsCollectMarker.Auto())
             {
-                maxTransitionStartRounds = Mathf.Max(
-                    maxTransitionStartRounds,
-                    s_TransitionSchedulingSpaces[spaceIndex]
-                        .ResolveTransitionStartBudget(frameIndex));
+                s_TransitionSchedulingSpaces.Clear();
+                foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                    s_TransitionSchedulingSpaces.Add(addressSpace);
+
+                if (s_TransitionSchedulingSpaces.Count == 0)
+                    return;
+
+                s_TransitionSchedulingSpaces.Sort(CompareAddressSpacesById);
+                spaceCount = s_TransitionSchedulingSpaces.Count;
+                frameOffset = frameIndex >= 0 ? frameIndex % spaceCount : 0;
+                maxTransitionStartRounds = VTResidencyManager.MaxTransitionStartsPerFrame;
+                for (int spaceIndex = 0; spaceIndex < spaceCount; spaceIndex++)
+                {
+                    maxTransitionStartRounds = Mathf.Max(
+                        maxTransitionStartRounds,
+                        s_TransitionSchedulingSpaces[spaceIndex]
+                            .ResolveTransitionStartBudget(frameIndex));
+                }
             }
 
-            for (int round = 0;
-                 round < maxTransitionStartRounds;
-                 round++)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureTransitionsStartMarker.Auto())
             {
-                bool startedAny = false;
+                for (int round = 0;
+                     round < maxTransitionStartRounds;
+                     round++)
+                {
+                    bool startedAny = false;
+                    for (int relativeIndex = 0; relativeIndex < spaceCount; relativeIndex++)
+                    {
+                        int spaceIndex = (frameOffset + relativeIndex) % spaceCount;
+                        startedAny |= s_TransitionSchedulingSpaces[spaceIndex]
+                            .StartQueuedPageTransitions(frameIndex, maxStartsThisCall: 1);
+                    }
+
+                    if (!startedAny)
+                        break;
+                }
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureTransitionsAdvanceMarker.Auto())
+            {
                 for (int relativeIndex = 0; relativeIndex < spaceCount; relativeIndex++)
                 {
                     int spaceIndex = (frameOffset + relativeIndex) % spaceCount;
-                    startedAny |= s_TransitionSchedulingSpaces[spaceIndex]
-                        .StartQueuedPageTransitions(frameIndex, maxStartsThisCall: 1);
+                    VTPageTableSpace addressSpace = s_TransitionSchedulingSpaces[spaceIndex];
+                    addressSpace.AdvancePageTransitionPhases(
+                        frameIndex,
+                        int.MaxValue);
                 }
-
-                if (!startedAny)
-                    break;
-            }
-
-            for (int relativeIndex = 0; relativeIndex < spaceCount; relativeIndex++)
-            {
-                int spaceIndex = (frameOffset + relativeIndex) % spaceCount;
-                VTPageTableSpace addressSpace = s_TransitionSchedulingSpaces[spaceIndex];
-                addressSpace.AdvancePageTransitionPhases(
-                    frameIndex,
-                    int.MaxValue);
             }
         }
 
@@ -526,7 +537,8 @@ namespace VividRP.Runtime
             // Starts are invisible (phase zero resolves the stable ancestor), so upload
             // work may continue in parallel. Each page publishes after its own transition
             // interval; unrelated feedback and uploads in the same space cannot delay it.
-            AdvanceAndSchedulePageTransitions(frameIndex);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureTransitionsMarker.Auto())
+                AdvanceAndSchedulePageTransitions(frameIndex);
 
             int evictionCount = 0;
             int pendingMipGapSum = 0;
@@ -536,88 +548,103 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsBeginFrameMarker.Auto())
             {
                 VTVirtualTextureStreamRequestGate.BeginFrame();
-                VTStreamChunkManager.Shared.BeginFrame();
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamBeginFrameMarker.Auto())
+                    VTStreamChunkManager.Shared.BeginFrame();
                 s_UploadScheduler.BeginFrame();
             }
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCommitCompletedMarker.Auto())
                 s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver, frameIndex);
 
-            int freePhysicalPageCountBeforeResidency = CollectPhysicalPoolStats().FreePageCount;
-            if (s_DemandEvictionBudgetFrameIndex != frameIndex)
+            int globalResidencyRequestBudget;
+            int remainingResidencyRequestBudget;
+            NativeArray<VirtualTextureAggregatedFeedbackRequest> aggregatedRequests;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyBudgetMarker.Auto())
             {
-                s_DemandEvictionBudgetFrameIndex = frameIndex;
-                s_RemainingDemandEvictionBudget = MaxDemandEvictionsPerFrame;
-            }
-
-            int guardedResidencyRequestBudget = freePhysicalPageCountBeforeResidency > int.MaxValue - s_RemainingDemandEvictionBudget
-                ? int.MaxValue
-                : freePhysicalPageCountBeforeResidency + s_RemainingDemandEvictionBudget;
-            int globalResidencyRequestBudget = Mathf.Min(
-                s_UploadScheduler.MaxUploadsPerFrame,
-                guardedResidencyRequestBudget);
-            int remainingResidencyRequestBudget = globalResidencyRequestBudget;
-            s_RemainingResidencyBudgetBySpace.Clear();
-            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
-                s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] = 0;
-
-            NativeArray<VirtualTextureAggregatedFeedbackRequest> aggregatedRequests =
-                s_FeedbackAggregator.AggregatedRequests;
-            for (int requestIndex = 0;
-                 requestIndex < aggregatedRequests.Length && remainingResidencyRequestBudget > 0;
-                 requestIndex++)
-            {
-                VirtualTextureAggregatedFeedbackRequest request = aggregatedRequests[requestIndex];
-                if (!s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace))
-                    continue;
-
-                int assignedSpaceBudget = s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId];
-                if (assignedSpaceBudget >= addressSpace.Descriptor.MaxUploadsPerFrame
-                    || !addressSpace.RequiresNewPhysicalPage(request.PageCoord))
+                int freePhysicalPageCountBeforeResidency;
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyBudgetPoolStatsMarker.Auto())
+                    freePhysicalPageCountBeforeResidency = CollectPhysicalPoolStats().FreePageCount;
+                if (s_DemandEvictionBudgetFrameIndex != frameIndex)
                 {
-                    continue;
+                    s_DemandEvictionBudgetFrameIndex = frameIndex;
+                    s_RemainingDemandEvictionBudget = MaxDemandEvictionsPerFrame;
                 }
 
-                s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] = assignedSpaceBudget + 1;
-                remainingResidencyRequestBudget -= 1;
+                int guardedResidencyRequestBudget = freePhysicalPageCountBeforeResidency > int.MaxValue - s_RemainingDemandEvictionBudget
+                    ? int.MaxValue
+                    : freePhysicalPageCountBeforeResidency + s_RemainingDemandEvictionBudget;
+                globalResidencyRequestBudget = Mathf.Min(
+                    s_UploadScheduler.MaxUploadsPerFrame,
+                    guardedResidencyRequestBudget);
+                remainingResidencyRequestBudget = globalResidencyRequestBudget;
+                aggregatedRequests = s_FeedbackAggregator.AggregatedRequests;
+
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyBudgetAssignMarker.Auto())
+                {
+                    s_RemainingResidencyBudgetBySpace.Clear();
+                    foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                        s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] = 0;
+
+                    for (int requestIndex = 0;
+                         requestIndex < aggregatedRequests.Length && remainingResidencyRequestBudget > 0;
+                         requestIndex++)
+                    {
+                        VirtualTextureAggregatedFeedbackRequest request = aggregatedRequests[requestIndex];
+                        if (!s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace))
+                            continue;
+
+                        int assignedSpaceBudget = s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId];
+                        if (assignedSpaceBudget >= addressSpace.Descriptor.MaxUploadsPerFrame
+                            || !addressSpace.RequiresNewPhysicalPage(request.PageCoord))
+                        {
+                            continue;
+                        }
+
+                        s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] = assignedSpaceBudget + 1;
+                        remainingResidencyRequestBudget -= 1;
+                    }
+                }
             }
 
             int allocatedResidencyRequestCount = 0;
-            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyDemandPassMarker.Auto())
             {
-                int assignedSpaceBudget = s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId];
-                if (!s_FeedbackAggregator.TryGetRequestsForSpace(
-                        addressSpace.SpaceId,
-                        out NativeSlice<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
+                foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
                 {
-                    s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] =
-                        addressSpace.Descriptor.MaxUploadsPerFrame;
-                    continue;
-                }
-
-                s_PrefetchBiasBySpace.TryGetValue(addressSpace.SpaceId, out Vector2Int prefetchBias);
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyMarker.Auto())
-                {
-                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyProcessRequestsMarker.Auto())
+                    int assignedSpaceBudget = s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId];
+                    if (!s_FeedbackAggregator.TryGetRequestsForSpace(
+                            addressSpace.SpaceId,
+                            out NativeSlice<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
                     {
-                        VTResidencyProcessResult residencyResult = addressSpace.ProcessRequests(
-                            spaceRequests,
-                            cachePriorityViewId,
-                            prefetchBias,
-                            frameIndex,
-                            assignedSpaceBudget,
-                            allowNeighborPrefetch: false,
-                            rebuildPageTable: false);
-                        allocatedResidencyRequestCount += residencyResult.AllocatedRequestCount;
-                        s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] = Mathf.Max(
-                            0,
-                            addressSpace.Descriptor.MaxUploadsPerFrame - residencyResult.AllocatedRequestCount);
-                        AccumulateResidencyStats(
-                            residencyResult,
-                            ref evictionCount,
-                            ref pendingMipGapSum,
-                            ref pendingMipGapMax,
-                            ref pendingMipGapSampleCount,
-                            ref prefetchRequestCount);
+                        s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] =
+                            addressSpace.Descriptor.MaxUploadsPerFrame;
+                        continue;
+                    }
+
+                    s_PrefetchBiasBySpace.TryGetValue(addressSpace.SpaceId, out Vector2Int prefetchBias);
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyMarker.Auto())
+                    {
+                        using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyProcessRequestsMarker.Auto())
+                        {
+                            VTResidencyProcessResult residencyResult = addressSpace.ProcessRequests(
+                                spaceRequests,
+                                cachePriorityViewId,
+                                prefetchBias,
+                                frameIndex,
+                                assignedSpaceBudget,
+                                allowNeighborPrefetch: false,
+                                rebuildPageTable: false);
+                            allocatedResidencyRequestCount += residencyResult.AllocatedRequestCount;
+                            s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] = Mathf.Max(
+                                0,
+                                addressSpace.Descriptor.MaxUploadsPerFrame - residencyResult.AllocatedRequestCount);
+                            AccumulateResidencyStats(
+                                residencyResult,
+                                ref evictionCount,
+                                ref pendingMipGapSum,
+                                ref pendingMipGapMax,
+                                ref pendingMipGapSampleCount,
+                                ref prefetchRequestCount);
+                        }
                     }
                 }
             }
@@ -626,42 +653,45 @@ namespace VividRP.Runtime
                 0,
                 globalResidencyRequestBudget - allocatedResidencyRequestCount);
 
-            for (int requestIndex = 0;
-                 requestIndex < aggregatedRequests.Length && remainingResidencyRequestBudget > 0;
-                 requestIndex++)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyPrefetchPassMarker.Auto())
             {
-                VirtualTextureAggregatedFeedbackRequest request = aggregatedRequests[requestIndex];
-                if (!s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace)
-                    || addressSpace.Descriptor.NeighborPrefetchCount <= 0)
+                for (int requestIndex = 0;
+                     requestIndex < aggregatedRequests.Length && remainingResidencyRequestBudget > 0;
+                     requestIndex++)
                 {
-                    continue;
+                    VirtualTextureAggregatedFeedbackRequest request = aggregatedRequests[requestIndex];
+                    if (!s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace)
+                        || addressSpace.Descriptor.NeighborPrefetchCount <= 0)
+                    {
+                        continue;
+                    }
+
+                    int spaceResidencyRequestBudget = s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId];
+                    if (spaceResidencyRequestBudget <= 0 || addressSpace.FreePageCount <= 0)
+                        continue;
+
+                    s_PrefetchBiasBySpace.TryGetValue(addressSpace.SpaceId, out Vector2Int prefetchBias);
+                    var requestSlice = new NativeSlice<VirtualTextureAggregatedFeedbackRequest>(
+                        aggregatedRequests,
+                        requestIndex,
+                        1);
+                    VTResidencyProcessResult residencyResult = addressSpace.ProcessRequests(
+                        requestSlice,
+                        cachePriorityViewId,
+                        prefetchBias,
+                        frameIndex,
+                        Mathf.Min(remainingResidencyRequestBudget, spaceResidencyRequestBudget),
+                        allowNeighborPrefetch: true,
+                        rebuildPageTable: false);
+                    remainingResidencyRequestBudget = Mathf.Max(
+                        0,
+                        remainingResidencyRequestBudget - residencyResult.AllocatedRequestCount);
+                    s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] = Mathf.Max(
+                        0,
+                        spaceResidencyRequestBudget - residencyResult.AllocatedRequestCount);
+                    evictionCount += residencyResult.EvictionCount;
+                    prefetchRequestCount += residencyResult.PrefetchRequestCount;
                 }
-
-                int spaceResidencyRequestBudget = s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId];
-                if (spaceResidencyRequestBudget <= 0 || addressSpace.FreePageCount <= 0)
-                    continue;
-
-                s_PrefetchBiasBySpace.TryGetValue(addressSpace.SpaceId, out Vector2Int prefetchBias);
-                var requestSlice = new NativeSlice<VirtualTextureAggregatedFeedbackRequest>(
-                    aggregatedRequests,
-                    requestIndex,
-                    1);
-                VTResidencyProcessResult residencyResult = addressSpace.ProcessRequests(
-                    requestSlice,
-                    cachePriorityViewId,
-                    prefetchBias,
-                    frameIndex,
-                    Mathf.Min(remainingResidencyRequestBudget, spaceResidencyRequestBudget),
-                    allowNeighborPrefetch: true,
-                    rebuildPageTable: false);
-                remainingResidencyRequestBudget = Mathf.Max(
-                    0,
-                    remainingResidencyRequestBudget - residencyResult.AllocatedRequestCount);
-                s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId] = Mathf.Max(
-                    0,
-                    spaceResidencyRequestBudget - residencyResult.AllocatedRequestCount);
-                evictionCount += residencyResult.EvictionCount;
-                prefetchRequestCount += residencyResult.PrefetchRequestCount;
             }
 
             s_RemainingDemandEvictionBudget = Mathf.Max(
@@ -669,7 +699,8 @@ namespace VividRP.Runtime
                 s_RemainingDemandEvictionBudget - evictionCount);
 
             CollectAndSchedulePendingUploads(frameIndex, cmd);
-            VTStreamChunkManager.Shared.SubmitPendingReads();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamSubmitReadsMarker.Auto())
+                VTStreamChunkManager.Shared.SubmitPendingReads();
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeMarker.Auto())
                 s_UploadScheduler.FinalizeUploads(cmd);
@@ -687,17 +718,21 @@ namespace VividRP.Runtime
             VTPhysicalPoolStats physicalPoolStats;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsPhysicalPoolsMarker.Auto())
                 physicalPoolStats = CollectPhysicalPoolStats();
-            float adaptiveMipBias = s_AdaptiveMipBiasController.Update(
-                frameIndex,
-                new VTAdaptiveMipBiasInputs(
-                    globalResidencyRequestBudget,
-                    pendingUploadCount,
-                    blockedUploadCount,
-                    streamSaturatedRequestCount,
-                    feedbackOverflowCount,
-                    fallbackSampleCount,
-                    physicalPoolStats.FreePageCount,
-                    evictionCount));
+            float adaptiveMipBias;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsAdaptiveMipBiasMarker.Auto())
+            {
+                adaptiveMipBias = s_AdaptiveMipBiasController.Update(
+                    frameIndex,
+                    new VTAdaptiveMipBiasInputs(
+                        globalResidencyRequestBudget,
+                        pendingUploadCount,
+                        blockedUploadCount,
+                        streamSaturatedRequestCount,
+                        feedbackOverflowCount,
+                        fallbackSampleCount,
+                        physicalPoolStats.FreePageCount,
+                        evictionCount));
+            }
             if (virtualTextureFrameData != null)
                 virtualTextureFrameData.AdaptiveMipBias = adaptiveMipBias;
             activeViewSignature = activeViewSignature.WithAdaptiveMipBias(adaptiveMipBias);
@@ -1701,15 +1736,24 @@ namespace VividRP.Runtime
 
         private static void CollectAndSchedulePendingUploads(int frameIndex, CommandBuffer cmd)
         {
-            s_UploadSpaceOrder.Clear();
-            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
-                s_UploadSpaceOrder.Add(addressSpace);
-            s_UploadSpaceOrder.Sort(CompareAddressSpacesById);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingMarker.Auto())
+                CollectAndSchedulePendingUploadsCore(frameIndex, cmd);
+        }
+
+        private static void CollectAndSchedulePendingUploadsCore(int frameIndex, CommandBuffer cmd)
+        {
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingBuildSpaceOrderMarker.Auto())
+            {
+                s_UploadSpaceOrder.Clear();
+                foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                    s_UploadSpaceOrder.Add(addressSpace);
+                s_UploadSpaceOrder.Sort(CompareAddressSpacesById);
+            }
 
             s_PendingUploadCandidates.Clear();
             int spaceCount = s_UploadSpaceOrder.Count;
             int rotation = spaceCount > 0 ? (int)((uint)frameIndex % (uint)spaceCount) : 0;
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingMarker.Auto())
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingGatherCandidatesMarker.Auto())
             {
                 for (int spaceIndex = 0; spaceIndex < spaceCount; spaceIndex++)
                 {
@@ -1721,19 +1765,25 @@ namespace VividRP.Runtime
                 }
             }
 
-            if (s_PendingUploadCandidates.Count > 1)
-                s_PendingUploadCandidates.Sort(PendingUploadCandidateComparer.Instance);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingSortCandidatesMarker.Auto())
+            {
+                if (s_PendingUploadCandidates.Count > 1)
+                    s_PendingUploadCandidates.Sort(PendingUploadCandidateComparer.Instance);
+            }
 
             int skippedUploadCount = 0;
-            for (int candidateIndex = 0; candidateIndex < s_PendingUploadCandidates.Count; candidateIndex++)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingScheduleCandidatesMarker.Auto())
             {
-                VTPendingUploadCandidate candidate = s_PendingUploadCandidates[candidateIndex];
-                if (!candidate.AddressSpace.TrySchedulePendingUpload(
-                        s_UploadScheduler,
-                        cmd,
-                        candidate.Request))
+                for (int candidateIndex = 0; candidateIndex < s_PendingUploadCandidates.Count; candidateIndex++)
                 {
-                    skippedUploadCount += 1;
+                    VTPendingUploadCandidate candidate = s_PendingUploadCandidates[candidateIndex];
+                    if (!candidate.AddressSpace.TrySchedulePendingUpload(
+                            s_UploadScheduler,
+                            cmd,
+                            candidate.Request))
+                    {
+                        skippedUploadCount += 1;
+                    }
                 }
             }
 

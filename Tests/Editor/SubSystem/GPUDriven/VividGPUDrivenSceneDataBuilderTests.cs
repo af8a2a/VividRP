@@ -1556,13 +1556,12 @@ namespace VividRP.Editor.Tests
 
         private static VividMeshletVertex CreateVertex(float x, float y, float z)
         {
-            return new VividMeshletVertex
-            {
-                Position = new float4(x, y, z, 1.0f),
-                Normal = new float4(0.0f, 0.0f, 1.0f, 0.0f),
-                Tangent = new float4(1.0f, 0.0f, 0.0f, 1.0f),
-                UV = new float4(x, y, 0.0f, 0.0f),
-            };
+            return VividMeshletVertexPacking.Pack(
+                new float3(x, y, z),
+                new float3(0.0f, 0.0f, 1.0f),
+                new float4(1.0f, 0.0f, 0.0f, 1.0f),
+                new float2(x, y)
+            );
         }
 
         private static void DestroyTestObjects(

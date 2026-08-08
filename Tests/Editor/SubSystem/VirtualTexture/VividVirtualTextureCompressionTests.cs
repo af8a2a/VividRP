@@ -162,6 +162,7 @@ namespace VividRP.Editor.Tests
                 manager.SubmitPendingReads();
                 WaitForLease(manager, first);
                 Assert.That(first.State, Is.EqualTo(VTStreamChunkState.Ready), first.Error);
+                Assert.That(manager.PendingChunkCount, Is.Zero);
                 Assert.That(first.TryGetTilePayload(location, out VividVirtualTextureTilePayload payload), Is.True);
                 Assert.That(payload.Data, Is.EqualTo(decoded));
 
@@ -245,6 +246,16 @@ namespace VividRP.Editor.Tests
                     $"level {level}: {decodeError}");
                 Assert.That(roundTrip, Is.EqualTo(decoded));
             }
+        }
+
+        [Test]
+        public void RawStreamCodec_TransfersReadBufferWithoutCopy()
+        {
+            var codec = new VTNoneStreamCodec();
+            byte[] stored = { 1, 2, 3, 4 };
+
+            Assert.That(codec.TryDecode(stored, stored.Length, out byte[] decoded, out string error), Is.True, error);
+            Assert.That(decoded, Is.SameAs(stored));
         }
 
         [Test]

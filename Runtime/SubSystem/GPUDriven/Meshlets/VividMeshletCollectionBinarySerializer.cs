@@ -1,17 +1,20 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Text;
 using Unity.Collections.LowLevel.Unsafe;
+using Unity.Mathematics;
 
 namespace VividRP.Runtime.GPUDriven.Meshlets
 {
     internal static class VividMeshletCollectionBinarySerializer
     {
-        public const uint CurrentVersion = 2u;
+        public const uint CurrentVersion = 3u;
 
         private const uint Magic = 0x564D4342u;
         private const uint LegacyGZipVersion = 1u;
+        private const uint LegacyLZ4Version = 2u;
 
         internal const uint LZ4CompressionCodec = 1u;
 
@@ -83,25 +86,53 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             uint version = headerReader.ReadUInt32();
+            bool usesLegacyVertexLayout;
             byte[] payload = version switch
             {
                 LegacyGZipVersion => ReadLegacyGZipPayload(inputStream, headerReader),
-                CurrentVersion => ReadCurrentPayload(inputStream, headerReader),
+                LegacyLZ4Version => ReadLZ4Payload(inputStream, headerReader),
+                CurrentVersion => ReadLZ4Payload(inputStream, headerReader),
                 _ => throw new InvalidDataException(
-                    $"Unsupported meshlet blob version {version}. Expected {LegacyGZipVersion} or {CurrentVersion}."
+                    $"Unsupported meshlet blob version {version}. Expected versions " +
+                    $"{LegacyGZipVersion}, {LegacyLZ4Version}, or {CurrentVersion}."
                 ),
             };
+            usesLegacyVertexLayout = version == LegacyGZipVersion || version == LegacyLZ4Version;
 
             using var payloadStream = new MemoryStream(payload, writable: false);
             using var payloadReader = new BinaryReader(payloadStream, Encoding.UTF8, leaveOpen: true);
             meshLODLevelNodeCounts = ReadIntArray(payloadReader);
             meshLODNodes = ReadStructArray<VividMeshLODNode>(payloadReader);
             meshlets = ReadStructArray<VividMeshlet>(payloadReader);
-            vertexBuffer = ReadStructArray<VividMeshletVertex>(payloadReader);
+            vertexBuffer = usesLegacyVertexLayout
+                ? ConvertLegacyVertices(ReadStructArray<VividMeshletVertexLegacy64>(payloadReader))
+                : ReadStructArray<VividMeshletVertex>(payloadReader);
             indexBuffer = ReadByteArray(payloadReader);
         }
 
-        private static byte[] ReadCurrentPayload(MemoryStream inputStream, BinaryReader headerReader)
+        internal static VividMeshletVertex[] ConvertLegacyVertices(VividMeshletVertexLegacy64[] legacyVertices)
+        {
+            if (legacyVertices == null || legacyVertices.Length == 0)
+            {
+                return Array.Empty<VividMeshletVertex>();
+            }
+
+            var vertices = new VividMeshletVertex[legacyVertices.Length];
+            for (int index = 0; index < legacyVertices.Length; index++)
+            {
+                VividMeshletVertexLegacy64 legacyVertex = legacyVertices[index];
+                vertices[index] = VividMeshletVertexPacking.Pack(
+                    legacyVertex.Position.xyz,
+                    legacyVertex.Normal.xyz,
+                    legacyVertex.Tangent,
+                    legacyVertex.UV.xy
+                );
+            }
+
+            return vertices;
+        }
+
+        private static byte[] ReadLZ4Payload(MemoryStream inputStream, BinaryReader headerReader)
         {
             uint compressionCodec = headerReader.ReadUInt32();
             if (compressionCodec != LZ4CompressionCodec)
@@ -259,5 +290,15 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
             return values;
         }
+    }
+
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VividMeshletVertexLegacy64
+    {
+        public float4 Position;
+        public float4 Normal;
+        public float4 Tangent;
+        public float4 UV;
     }
 }

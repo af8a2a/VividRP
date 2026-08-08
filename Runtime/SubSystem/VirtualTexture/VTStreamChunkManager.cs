@@ -22,8 +22,7 @@ namespace VividRP.Runtime
 
         internal VTChunkLease(VTStreamChunkManager manager, VTStreamChunkManager.ChunkEntry entry)
         {
-            m_Manager = manager;
-            m_Entry = entry;
+            Reset(manager, entry);
         }
 
         internal VTStreamChunkState State => m_Entry?.State ?? VTStreamChunkState.Failed;
@@ -46,7 +45,17 @@ namespace VividRP.Runtime
             VTStreamChunkManager.ChunkEntry entry = m_Entry;
             m_Manager = null;
             m_Entry = null;
-            manager?.Release(entry);
+            if (manager == null)
+                return;
+
+            manager.Release(entry);
+            manager.ReturnLease(this);
+        }
+
+        internal void Reset(VTStreamChunkManager manager, VTStreamChunkManager.ChunkEntry entry)
+        {
+            m_Manager = manager ?? throw new ArgumentNullException(nameof(manager));
+            m_Entry = entry ?? throw new ArgumentNullException(nameof(entry));
         }
     }
 
@@ -133,6 +142,39 @@ namespace VividRP.Runtime
             internal readonly List<ChunkEntry> Entries = new();
         }
 
+        private sealed class QueuedEntryComparer : IComparer<ChunkEntry>
+        {
+            internal QueuedEntryComparer()
+            {
+            }
+
+            public int Compare(ChunkEntry left, ChunkEntry right)
+            {
+                if (ReferenceEquals(left, right))
+                    return 0;
+                if (left == null)
+                    return 1;
+                if (right == null)
+                    return -1;
+
+                bool leftHighPriority =
+                    (left.Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
+                bool rightHighPriority =
+                    (right.Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
+                int priorityCompare = rightHighPriority.CompareTo(leftHighPriority);
+                if (priorityCompare != 0)
+                    return priorityCompare;
+
+                int pathCompare = string.Compare(
+                    left.Key.Path,
+                    right.Key.Path,
+                    StringComparison.OrdinalIgnoreCase);
+                return pathCompare != 0
+                    ? pathCompare
+                    : left.Location.FileOffset.CompareTo(right.Location.FileOffset);
+            }
+        }
+
         private static VTStreamChunkManager s_Shared;
         private static bool s_DirectStorageFallbackWarningLogged;
 
@@ -140,9 +182,15 @@ namespace VividRP.Runtime
         private readonly List<ChunkEntry> m_QueuedEntries = new();
         private readonly List<ChunkEntry> m_DecodingEntries = new();
         private readonly List<ActiveBatch> m_ActiveBatches = new();
+        private readonly QueuedEntryComparer m_QueuedEntryComparer = new();
+        private readonly Stack<ActiveBatch> m_ActiveBatchPool = new();
+        private readonly List<ChunkEntry> m_SubmissionEntries = new();
+        private readonly List<VTIOReadCommand> m_SubmissionCommands = new(64);
+        private readonly Stack<VTChunkLease> m_LeasePool = new();
         private readonly LinkedList<ChunkEntry> m_UnreferencedReadyLru = new();
         private readonly HashSet<string> m_DirectStorageRejectedPaths =
             new(StringComparer.OrdinalIgnoreCase);
+        private readonly Func<object, DecodeResult> m_DecodeWork;
         private SemaphoreSlim m_DecodeSemaphore;
         private IVTIOBackend m_IOBackend;
         private IVTIOBackend m_FallbackIOBackend;
@@ -151,6 +199,7 @@ namespace VividRP.Runtime
         private int m_DecodeConcurrency = Mathf.Clamp(SystemInfo.processorCount / 4, 2, 8);
         private long m_DecodedCacheBudget = 32L * 1024 * 1024;
         private long m_ReadyByteCount;
+        private int m_InFlightChunkCount;
         private int m_LastIOSaturationCount;
         private int m_LastDecodeSaturationCount;
         private int m_LastCacheAllocationFailureCount;
@@ -161,6 +210,7 @@ namespace VividRP.Runtime
         {
             m_DecodeSemaphore = new SemaphoreSlim(m_DecodeConcurrency, m_DecodeConcurrency);
             m_IOBackend = CreateBackend(m_BackendMode);
+            m_DecodeWork = DecodeEntry;
         }
 
         internal static VTStreamChunkManager Shared => s_Shared ??= new VTStreamChunkManager();
@@ -201,7 +251,7 @@ namespace VividRP.Runtime
             s_Shared = replacement;
         }
 
-        internal int PendingChunkCount => CountInFlightChunks();
+        internal int PendingChunkCount => m_InFlightChunkCount;
 
         internal int LastIOSaturationCount => m_LastIOSaturationCount;
 
@@ -244,10 +294,14 @@ namespace VividRP.Runtime
             m_LastIOSaturationCount = 0;
             m_LastDecodeSaturationCount = 0;
             m_LastCacheAllocationFailureCount = 0;
-            PollReadBatches();
-            TryReplaceBackend();
-            PollDecodeTasks();
-            TrimCache();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamPollReadBatchesMarker.Auto())
+                PollReadBatches();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamReplaceBackendMarker.Auto())
+                TryReplaceBackend();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamPollDecodeTasksMarker.Auto())
+                PollDecodeTasks();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamTrimCacheMarker.Auto())
+                TrimCache();
         }
 
         internal VTChunkLease Acquire(
@@ -264,10 +318,10 @@ namespace VividRP.Runtime
             {
                 existing.ReferenceCount += 1;
                 RemoveFromLru(existing);
-                return new VTChunkLease(this, existing);
+                return RentLease(existing);
             }
 
-            if (CountInFlightChunks() >= m_MaxInFlightChunkCount)
+            if (m_InFlightChunkCount >= m_MaxInFlightChunkCount)
             {
                 m_LastIOSaturationCount += 1;
                 return null;
@@ -282,7 +336,8 @@ namespace VividRP.Runtime
             };
             m_Entries.Add(key, entry);
             InsertQueuedEntry(entry, highPriority);
-            return new VTChunkLease(this, entry);
+            m_InFlightChunkCount += 1;
+            return RentLease(entry);
         }
 
         internal void SubmitPendingReads()
@@ -290,93 +345,100 @@ namespace VividRP.Runtime
             if (m_QueuedEntries.Count == 0)
                 return;
 
-            var pendingEntries = new List<ChunkEntry>(m_QueuedEntries);
-            m_QueuedEntries.Clear();
-            pendingEntries.Sort((left, right) =>
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamSubmitReadsSortMarker.Auto())
             {
-                bool leftHighPriority = (left.Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
-                bool rightHighPriority = (right.Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
-                int priorityCompare = rightHighPriority.CompareTo(leftHighPriority);
-                if (priorityCompare != 0)
-                    return priorityCompare;
-                int pathCompare = string.Compare(left.Key.Path, right.Key.Path, StringComparison.OrdinalIgnoreCase);
-                if (pathCompare != 0)
-                    return pathCompare;
-                return left.Location.FileOffset.CompareTo(right.Location.FileOffset);
-            });
+                m_SubmissionEntries.Clear();
+                m_SubmissionEntries.AddRange(m_QueuedEntries);
+                m_QueuedEntries.Clear();
+                m_SubmissionEntries.Sort(m_QueuedEntryComparer);
+            }
 
             int entryIndex = 0;
-            while (entryIndex < pendingEntries.Count)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamSubmitReadsBuildBatchesMarker.Auto())
             {
-                string path = pendingEntries[entryIndex].Key.Path;
-                bool highPriority =
-                    (pendingEntries[entryIndex].Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
-                var entries = new List<ChunkEntry>(64);
-                var commands = new List<VTIOReadCommand>(64);
-                while (entryIndex < pendingEntries.Count
-                       && entries.Count < 64
-                       && string.Equals(pendingEntries[entryIndex].Key.Path, path, StringComparison.OrdinalIgnoreCase)
-                       && ((pendingEntries[entryIndex].Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0)
-                          == highPriority)
+                while (entryIndex < m_SubmissionEntries.Count)
                 {
-                    ChunkEntry entry = pendingEntries[entryIndex++];
-                    if (entry.ReferenceCount <= 0 || entry.State != VTStreamChunkState.Queued)
+                    string path = m_SubmissionEntries[entryIndex].Key.Path;
+                    bool highPriority =
+                        (m_SubmissionEntries[entryIndex].Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
+                    ActiveBatch activeBatch = RentActiveBatch();
+                    m_SubmissionCommands.Clear();
+                    while (entryIndex < m_SubmissionEntries.Count
+                           && activeBatch.Entries.Count < 64
+                           && string.Equals(
+                               m_SubmissionEntries[entryIndex].Key.Path,
+                               path,
+                               StringComparison.OrdinalIgnoreCase)
+                           && ((m_SubmissionEntries[entryIndex].Location.Flags
+                                & VividVirtualTextureChunkFlags.MipTail) != 0) == highPriority)
+                    {
+                        ChunkEntry entry = m_SubmissionEntries[entryIndex++];
+                        if (entry.ReferenceCount <= 0 || entry.State != VTStreamChunkState.Queued)
+                            continue;
+
+                        activeBatch.Entries.Add(entry);
+                        m_SubmissionCommands.Add(new VTIOReadCommand(
+                            entry.Location.FileOffset,
+                            entry.Location.StoredByteSize,
+                            (entry.Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0));
+                    }
+
+                    if (activeBatch.Entries.Count == 0)
+                    {
+                        ReturnActiveBatch(activeBatch);
                         continue;
-
-                    entries.Add(entry);
-                    commands.Add(new VTIOReadCommand(
-                        entry.Location.FileOffset,
-                        entry.Location.StoredByteSize,
-                        (entry.Location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0));
-                }
-
-                if (entries.Count == 0)
-                    continue;
-
-                try
-                {
-                    IVTIOBatch ioBatch;
-                    if (m_IOBackend is VTDirectStorageBackend
-                        && m_DirectStorageRejectedPaths.Contains(path))
-                    {
-                        m_FallbackIOBackend ??= new VTAsyncReadManagerBackend();
-                        ioBatch = m_FallbackIOBackend.CreateBatch(path, commands);
                     }
-                    else
+
+                    try
                     {
-                        try
+                        IVTIOBatch ioBatch;
+                        using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamSubmitReadsCreateIOMarker.Auto())
                         {
-                            ioBatch = m_IOBackend.CreateBatch(path, commands);
-                        }
-                        catch (Exception exception) when (m_IOBackend is VTDirectStorageBackend)
-                        {
-                            m_DirectStorageRejectedPaths.Add(path);
-                            if (m_BackendMode == VividVirtualTextureIOBackendMode.DirectStorage
-                                && !s_DirectStorageFallbackWarningLogged)
+                            if (m_IOBackend is VTDirectStorageBackend
+                                && m_DirectStorageRejectedPaths.Contains(path))
                             {
-                                s_DirectStorageFallbackWarningLogged = true;
-                                Debug.LogWarning(
-                                    "[VividRP] DirectStorage could not read the requested VT stream file and is "
-                                    + $"falling back to AsyncReadManager: {exception.Message}");
+                                m_FallbackIOBackend ??= new VTAsyncReadManagerBackend();
+                                ioBatch = m_FallbackIOBackend.CreateBatch(path, m_SubmissionCommands);
                             }
+                            else
+                            {
+                                try
+                                {
+                                    ioBatch = m_IOBackend.CreateBatch(path, m_SubmissionCommands);
+                                }
+                                catch (Exception exception) when (m_IOBackend is VTDirectStorageBackend)
+                                {
+                                    m_DirectStorageRejectedPaths.Add(path);
+                                    if (m_BackendMode == VividVirtualTextureIOBackendMode.DirectStorage
+                                        && !s_DirectStorageFallbackWarningLogged)
+                                    {
+                                        s_DirectStorageFallbackWarningLogged = true;
+                                        Debug.LogWarning(
+                                            "[VividRP] DirectStorage could not read the requested VT stream file and is "
+                                            + $"falling back to AsyncReadManager: {exception.Message}");
+                                    }
 
-                            m_FallbackIOBackend ??= new VTAsyncReadManagerBackend();
-                            ioBatch = m_FallbackIOBackend.CreateBatch(path, commands);
+                                    m_FallbackIOBackend ??= new VTAsyncReadManagerBackend();
+                                    ioBatch = m_FallbackIOBackend.CreateBatch(path, m_SubmissionCommands);
+                                }
+                            }
                         }
+                        activeBatch.Batch = ioBatch;
+                        m_ActiveBatches.Add(activeBatch);
+                        for (int index = 0; index < activeBatch.Entries.Count; index++)
+                            activeBatch.Entries[index].State = VTStreamChunkState.Reading;
                     }
-                    var activeBatch = new ActiveBatch { Batch = ioBatch };
-                    activeBatch.Entries.AddRange(entries);
-                    m_ActiveBatches.Add(activeBatch);
-                    for (int index = 0; index < entries.Count; index++)
-                        entries[index].State = VTStreamChunkState.Reading;
-                }
-                catch (Exception exception)
-                {
-                    for (int index = 0; index < entries.Count; index++)
-                        RetryOrFail(entries[index], exception.Message);
+                    catch (Exception exception)
+                    {
+                        for (int index = 0; index < activeBatch.Entries.Count; index++)
+                            RetryOrFail(activeBatch.Entries[index], exception.Message);
+                        ReturnActiveBatch(activeBatch);
+                    }
                 }
             }
 
+            m_SubmissionCommands.Clear();
+            m_SubmissionEntries.Clear();
         }
 
         internal bool TryGetTilePayload(
@@ -416,6 +478,7 @@ namespace VividRP.Runtime
             }
             else if (entry.State == VTStreamChunkState.Queued)
             {
+                RetireInFlightChunk();
                 m_Entries.Remove(entry.Key);
                 m_QueuedEntries.Remove(entry);
             }
@@ -433,6 +496,10 @@ namespace VividRP.Runtime
             for (int batchIndex = 0; batchIndex < m_ActiveBatches.Count; batchIndex++)
                 m_ActiveBatches[batchIndex].Batch.Dispose();
             m_ActiveBatches.Clear();
+            m_ActiveBatchPool.Clear();
+            m_SubmissionEntries.Clear();
+            m_SubmissionCommands.Clear();
+            m_LeasePool.Clear();
 
             if (m_DecodingEntries.Count > 0)
             {
@@ -464,6 +531,7 @@ namespace VividRP.Runtime
             m_IOBackend?.Dispose();
             m_FallbackIOBackend?.Dispose();
             m_ReadyByteCount = 0;
+            m_InFlightChunkCount = 0;
             m_Disposed = true;
         }
 
@@ -498,6 +566,7 @@ namespace VividRP.Runtime
 
                 activeBatch.Batch.Dispose();
                 m_ActiveBatches.RemoveAt(batchIndex);
+                ReturnActiveBatch(activeBatch);
             }
         }
 
@@ -505,6 +574,7 @@ namespace VividRP.Runtime
         {
             if (entry.ReferenceCount <= 0)
             {
+                RetireInFlightChunk();
                 m_Entries.Remove(entry.Key);
                 return;
             }
@@ -513,8 +583,25 @@ namespace VividRP.Runtime
             entry.State = VTStreamChunkState.Decoding;
             if (m_DecodingEntries.Count >= m_DecodeConcurrency)
                 m_LastDecodeSaturationCount += 1;
-            entry.DecodeTask = Task.Run(() => Decode(entry, storedData));
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamStartDecodeMarker.Auto())
+            {
+                entry.DecodeTask = Task.Factory.StartNew(
+                    m_DecodeWork,
+                    entry,
+                    CancellationToken.None,
+                    TaskCreationOptions.DenyChildAttach,
+                    TaskScheduler.Default);
+            }
             m_DecodingEntries.Add(entry);
+        }
+
+        private DecodeResult DecodeEntry(object state)
+        {
+            if (state is not ChunkEntry entry)
+                return new DecodeResult(null, "VT chunk decode received invalid work state.");
+
+            using (RenderPassProfilingUtility.VirtualTextureStreamDecodeMarker.Auto())
+                return Decode(entry, entry.StoredData);
         }
 
         private DecodeResult Decode(ChunkEntry entry, byte[] storedData)
@@ -569,6 +656,7 @@ namespace VividRP.Runtime
                 entry.DecodeTask = null;
                 entry.StoredData = null;
                 m_DecodingEntries.RemoveAt(entryIndex);
+                RetireInFlightChunk();
                 if (!result.Succeeded)
                 {
                     entry.State = VTStreamChunkState.Failed;
@@ -589,6 +677,7 @@ namespace VividRP.Runtime
         {
             if (entry.ReferenceCount <= 0)
             {
+                RetireInFlightChunk();
                 m_Entries.Remove(entry.Key);
                 return;
             }
@@ -601,6 +690,7 @@ namespace VividRP.Runtime
                 return;
             }
 
+            RetireInFlightChunk();
             entry.State = VTStreamChunkState.Failed;
             entry.Error = error;
         }
@@ -639,20 +729,46 @@ namespace VividRP.Runtime
                 m_QueuedEntries.Add(entry);
         }
 
-        private int CountInFlightChunks()
+        private ActiveBatch RentActiveBatch()
         {
-            int count = 0;
-            foreach (ChunkEntry entry in m_Entries.Values)
-            {
-                if (entry.State is VTStreamChunkState.Queued
-                    or VTStreamChunkState.Reading
-                    or VTStreamChunkState.Decoding)
-                {
-                    count += 1;
-                }
-            }
+            ActiveBatch activeBatch = m_ActiveBatchPool.Count > 0
+                ? m_ActiveBatchPool.Pop()
+                : new ActiveBatch();
+            activeBatch.Batch = null;
+            activeBatch.Entries.Clear();
+            return activeBatch;
+        }
 
-            return count;
+        private void ReturnActiveBatch(ActiveBatch activeBatch)
+        {
+            if (activeBatch == null)
+                return;
+
+            activeBatch.Batch = null;
+            activeBatch.Entries.Clear();
+            if (!m_Disposed)
+                m_ActiveBatchPool.Push(activeBatch);
+        }
+
+        private VTChunkLease RentLease(ChunkEntry entry)
+        {
+            if (m_LeasePool.Count == 0)
+                return new VTChunkLease(this, entry);
+
+            VTChunkLease lease = m_LeasePool.Pop();
+            lease.Reset(this, entry);
+            return lease;
+        }
+
+        internal void ReturnLease(VTChunkLease lease)
+        {
+            if (!m_Disposed && lease != null)
+                m_LeasePool.Push(lease);
+        }
+
+        private void RetireInFlightChunk()
+        {
+            m_InFlightChunkCount = Math.Max(0, m_InFlightChunkCount - 1);
         }
 
         private void TryReplaceBackend()

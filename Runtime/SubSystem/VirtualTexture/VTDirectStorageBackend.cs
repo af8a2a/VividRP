@@ -9,6 +9,9 @@ namespace VividRP.Runtime
         private const string NativeLibrary = "VividVTStreamingNative";
 
         private readonly Dictionary<string, FileState> m_Files = new(StringComparer.OrdinalIgnoreCase);
+        private readonly long[] m_BatchOffsets = new long[64];
+        private readonly int[] m_BatchSizes = new int[64];
+        private readonly byte[] m_BatchPriorities = new byte[64];
         private readonly bool m_IsAvailable;
         private bool m_Disposed;
 
@@ -131,21 +134,18 @@ namespace VividRP.Runtime
                 m_Path = path;
                 m_File = file;
                 Count = commands.Count;
-                var offsets = new long[commands.Count];
-                var sizes = new int[commands.Count];
-                var priorities = new byte[commands.Count];
                 for (int commandIndex = 0; commandIndex < commands.Count; commandIndex++)
                 {
-                    offsets[commandIndex] = commands[commandIndex].FileOffset;
-                    sizes[commandIndex] = commands[commandIndex].ByteSize;
-                    priorities[commandIndex] = commands[commandIndex].HighPriority ? (byte)1 : (byte)0;
+                    owner.m_BatchOffsets[commandIndex] = commands[commandIndex].FileOffset;
+                    owner.m_BatchSizes[commandIndex] = commands[commandIndex].ByteSize;
+                    owner.m_BatchPriorities[commandIndex] = commands[commandIndex].HighPriority ? (byte)1 : (byte)0;
                 }
 
                 m_Handle = VividVT_DSCreateMemoryBatch(
                     file.Handle,
-                    offsets,
-                    sizes,
-                    priorities,
+                    owner.m_BatchOffsets,
+                    owner.m_BatchSizes,
+                    owner.m_BatchPriorities,
                     commands.Count);
                 if (m_Handle == IntPtr.Zero)
                     throw new InvalidOperationException(GetLastError("DirectStorage failed to create a VT read batch."));

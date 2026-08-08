@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
@@ -17,6 +18,57 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividSurfaceBindingData>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(32));
+        }
+
+        [Test]
+        public void MeshletVertexPacking_PreservesLosslessFieldsAndDirectionPrecision()
+        {
+            var random = new System.Random(918273);
+            var position = new float3(-1234.125f, 0.0009765625f, 87654.5f);
+            var uv = new float2(-17.25f, 8192.125f);
+
+            for (int index = 0; index < 4096; index++)
+            {
+                float3 normal = NextUnitVector(random);
+                float3 tangentDirection = NextUnitVector(random);
+                float handedness = (index & 1) == 0 ? 1.0f : -1.0f;
+                VividMeshletVertex packed = VividMeshletVertexPacking.Pack(
+                    position,
+                    normal,
+                    new float4(tangentDirection, handedness),
+                    uv
+                );
+
+                Assert.That(math.all(math.asuint(packed.Position) == math.asuint(position)), Is.True);
+                Assert.That(math.all(math.asuint(packed.UV) == math.asuint(uv)), Is.True);
+                Assert.That(packed.Reserved, Is.Zero);
+
+                float3 decodedNormal = VividMeshletVertexPacking.UnpackNormal(packed.PackedNormal);
+                float4 decodedTangent = VividMeshletVertexPacking.UnpackTangent(packed.PackedTangent);
+                Assert.That(DirectionErrorDegrees(normal, decodedNormal), Is.LessThanOrEqualTo(0.02f));
+                Assert.That(
+                    DirectionErrorDegrees(tangentDirection, decodedTangent.xyz),
+                    Is.LessThanOrEqualTo(0.02f)
+                );
+                Assert.That(decodedTangent.w, Is.EqualTo(handedness));
+            }
+        }
+
+        [Test]
+        public void MeshletVertexPacking_RejectsInvalidDirectionsWithoutProducingNaN()
+        {
+            VividMeshletVertex packed = VividMeshletVertexPacking.Pack(
+                new float3(1.0f, 2.0f, 3.0f),
+                new float3(float.NaN, 0.0f, 1.0f),
+                new float4(float.PositiveInfinity, 0.0f, 0.0f, -1.0f),
+                new float2(4.0f, 5.0f)
+            );
+
+            Assert.That(packed.PackedNormal, Is.Zero);
+            Assert.That(packed.PackedTangent, Is.Zero);
+            Assert.That(VividMeshletVertexPacking.UnpackNormal(packed.PackedNormal), Is.EqualTo(float3.zero));
+            Assert.That(VividMeshletVertexPacking.UnpackTangent(packed.PackedTangent), Is.EqualTo(float4.zero));
         }
 
         [Test]
@@ -32,6 +84,45 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("uint Flags;"));
             Assert.That(source, Does.Contain("float4 UVScaleBias;"));
             Assert.That(source, Does.Not.Contain("uint AlbedoIndex;"));
+            Assert.That(source, Does.Contain("struct VividMeshletVertex"));
+            Assert.That(source, Does.Contain("float PositionX;"));
+            Assert.That(source, Does.Contain("float PositionY;"));
+            Assert.That(source, Does.Contain("float PositionZ;"));
+            Assert.That(source, Does.Contain("uint PackedNormal;"));
+            Assert.That(source, Does.Contain("uint PackedTangent;"));
+            Assert.That(source, Does.Contain("float2 UV;"));
+            Assert.That(source, Does.Contain("uint Reserved;"));
+        }
+
+        [Test]
+        public void GPUDrivenShaders_DecodePackedMeshletVerticesThroughCommonHelper()
+        {
+            string commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividGPUDrivenCommon.hlsl"));
+            Assert.That(commonSource, Does.Contain("struct VividDecodedMeshletVertex"));
+            Assert.That(commonSource, Does.Contain("DecodeVividMeshletOctahedral15"));
+            Assert.That(commonSource, Does.Contain("DecodeVividMeshletVertex"));
+            Assert.That(commonSource, Does.Contain("packedVertex.PositionX"));
+            Assert.That(commonSource, Does.Contain("packedVertex.PackedNormal"));
+            Assert.That(commonSource, Does.Contain("packedVertex.PackedTangent"));
+
+            string[][] shaderPaths =
+            {
+                new[] { "Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferPass.shader" },
+                new[] { "Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferShadowCasterPass.shader" },
+                new[] { "Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferResolve.shader" },
+                new[] { "Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferGBufferResolve.shader" },
+                new[] { "Shaders", "Core", "Private", "Debug", "VisibilityBufferDebug.shader" },
+            };
+            foreach (string[] shaderPath in shaderPaths)
+            {
+                string shaderSource = File.ReadAllText(GetPackageFilePath(shaderPath));
+                Assert.That(shaderSource, Does.Contain("DecodeVividMeshletVertex("));
+            }
         }
 
         [Test]
@@ -64,7 +155,7 @@ namespace VividRP.Editor.Tests
             });
             sceneData.MutableVertices.Add(new VividMeshletVertex
             {
-                Position = new float4(0.0f, 0.0f, 0.0f, 1.0f),
+                Position = new float3(0.0f, 0.0f, 0.0f),
             });
             sceneData.MutableIndices.Add(0);
             sceneData.MutableIndices.Add(1);
@@ -93,6 +184,7 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.MeshLODNodesBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletsBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.SharedVertexBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.SharedVertexBuffer.stride, Is.EqualTo(32));
             Assert.That(bufferSet.SharedIndexBuffer.count, Is.EqualTo(1));
         }
 
@@ -170,7 +262,7 @@ namespace VividRP.Editor.Tests
             });
             sceneData.MutableVertices.Add(new VividMeshletVertex
             {
-                Position = new float4(1.0f, 2.0f, 3.0f, 1.0f),
+                Position = new float3(1.0f, 2.0f, 3.0f),
             });
             sceneData.MutableIndices.Add(0);
             sceneData.MutableIndices.Add(0);
@@ -182,7 +274,7 @@ namespace VividRP.Editor.Tests
             sceneData.MutableInstances.Add(default);
             sceneData.MutableVertices[0] = new VividMeshletVertex
             {
-                Position = new float4(9.0f, 9.0f, 9.0f, 1.0f),
+                Position = new float3(9.0f, 9.0f, 9.0f),
             };
 
             bufferSet.Upload(sceneData, uploadMaterialData: false, uploadStaticData: false);
@@ -334,6 +426,15 @@ namespace VividRP.Editor.Tests
 
         private static string GetGeneratedStructIncludePath()
         {
+            return GetPackageFilePath(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenStructs.cs.hlsl");
+        }
+
+        private static string GetPackageFilePath(params string[] relativePathSegments)
+        {
             string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             string[] packageRoots =
             {
@@ -344,20 +445,37 @@ namespace VividRP.Editor.Tests
 
             foreach (string packageRoot in packageRoots)
             {
-                string path = Path.Combine(
-                    packageRoot,
-                    "Runtime",
-                    "SubSystem",
-                    "GPUDriven",
-                    "VividGPUDrivenStructs.cs.hlsl");
+                string path = Path.Combine(new[] { packageRoot }.Concat(relativePathSegments).ToArray());
                 if (File.Exists(path))
                 {
                     return path;
                 }
             }
 
-            Assert.Fail("Could not locate VividGPUDrivenStructs.cs.hlsl.");
+            Assert.Fail($"Could not locate package file '{Path.Combine(relativePathSegments)}'.");
             return string.Empty;
+        }
+
+        private static float3 NextUnitVector(System.Random random)
+        {
+            float3 value;
+            do
+            {
+                value = new float3(
+                    (float) random.NextDouble() * 2.0f - 1.0f,
+                    (float) random.NextDouble() * 2.0f - 1.0f,
+                    (float) random.NextDouble() * 2.0f - 1.0f
+                );
+            }
+            while (math.lengthsq(value) <= 1e-6f);
+
+            return math.normalize(value);
+        }
+
+        private static float DirectionErrorDegrees(float3 expected, float3 actual)
+        {
+            float chordLength = math.length(math.normalize(expected) - math.normalize(actual));
+            return math.degrees(2.0f * math.asin(math.saturate(chordLength * 0.5f)));
         }
     }
 }

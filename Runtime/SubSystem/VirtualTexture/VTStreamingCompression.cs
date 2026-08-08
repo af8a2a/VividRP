@@ -52,7 +52,9 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            decodedData = (byte[])storedData.Clone();
+            // The stream manager transfers ownership of the read buffer to the decoded
+            // cache. Reusing it avoids a full chunk copy and a second managed allocation.
+            decodedData = storedData;
             error = null;
             return true;
         }

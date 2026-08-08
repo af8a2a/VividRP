@@ -673,24 +673,21 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 meshopt_Meshlet meshlet = MeshletBuildResults.Meshlets[MeshletIndex];
                 uint sourceVertexIndex = MeshletBuildResults.Vertices[(int) (meshlet.VertexOffset + (uint) index)];
 
-                var meshletVertex = new VividMeshletVertex
-                {
-                    Position = ReadPosition(sourceVertexIndex),
-                    Normal = ReadNormal(sourceVertexIndex),
-                    Tangent = ReadTangent(sourceVertexIndex),
-                    UV = ReadUV(sourceVertexIndex),
-                };
-
-                DestinationPtr[index] = meshletVertex;
+                DestinationPtr[index] = VividMeshletVertexPacking.Pack(
+                    ReadPosition(sourceVertexIndex),
+                    ReadNormal(sourceVertexIndex),
+                    ReadTangent(sourceVertexIndex),
+                    ReadUV(sourceVertexIndex)
+                );
             }
 
-            private float4 ReadPosition(uint sourceVertexIndex)
+            private float3 ReadPosition(uint sourceVertexIndex)
             {
                 byte* source = PositionPtr + sourceVertexIndex * PositionStride;
-                return math.float4(*(float3*) (source + PositionOffset), 1.0f);
+                return *(float3*) (source + PositionOffset);
             }
 
-            private float4 ReadNormal(uint sourceVertexIndex)
+            private float3 ReadNormal(uint sourceVertexIndex)
             {
                 if (NormalPtr == null || NormalOffset == uint.MaxValue)
                 {
@@ -698,7 +695,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 }
 
                 byte* source = NormalPtr + sourceVertexIndex * NormalStride;
-                return math.float4(*(float3*) (source + NormalOffset), 0.0f);
+                return *(float3*) (source + NormalOffset);
             }
 
             private float4 ReadTangent(uint sourceVertexIndex)
@@ -712,7 +709,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 return *(float4*) (source + TangentOffset);
             }
 
-            private float4 ReadUV(uint sourceVertexIndex)
+            private float2 ReadUV(uint sourceVertexIndex)
             {
                 if (UVPtr == null || UVOffset == uint.MaxValue)
                 {
@@ -720,7 +717,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 }
 
                 byte* source = UVPtr + sourceVertexIndex * UVStride;
-                return math.float4(*(float2*) (source + UVOffset), 0.0f, 0.0f);
+                return *(float2*) (source + UVOffset);
             }
         }
     }

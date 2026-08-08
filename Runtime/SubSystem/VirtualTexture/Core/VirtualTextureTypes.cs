@@ -235,8 +235,8 @@ namespace VividRP.Runtime
                 throw new ArgumentOutOfRangeException(nameof(resolvedMip));
             if ((uint)transitionPhase > TransitionPhaseMask)
                 throw new ArgumentOutOfRangeException(nameof(transitionPhase));
-            if (resident && fallback)
-                throw new ArgumentException("A page table entry cannot be both directly resident and a fallback.");
+            // During a staged transition the target page is resident while sampling still
+            // resolves through its stable ancestor, so Resident and Fallback may coexist.
             if ((resident || fallback) && physicalPageId == InvalidPhysicalPageId)
             {
                 throw new ArgumentOutOfRangeException(

@@ -29,6 +29,7 @@
 //
 #define VIVIDMATERIALFLAGS_NONE (0)
 #define VIVIDMATERIALFLAGS_UNLIT (1)
+#define VIVIDMATERIALFLAGS_TERRAIN (2)
 
 //
 // VividRP.Runtime.GPUDriven.VividRendererListID:  static fields
@@ -175,10 +176,13 @@ struct VividMeshletRenderRequestPacked
 // PackingRules = Exact
 struct VividMeshletVertex
 {
-    float4 Position;
-    float4 Normal;
-    float4 Tangent;
-    float4 UV;
+    float PositionX;
+    float PositionY;
+    float PositionZ;
+    uint PackedNormal;
+    uint PackedTangent;
+    float2 UV;
+    uint Reserved;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividMeshLODNode
@@ -206,6 +210,31 @@ struct VividSurfaceBindingData
     uint MaskResource;
     uint Flags;
     float4 UVScaleBias;
+};
+
+// Generated from VividRP.Runtime.GPUDriven.VividTerrainLayerGPUData
+// PackingRules = Exact
+struct VividTerrainLayerGPUData
+{
+    float4 TextureTilingOffset;
+    uint SurfaceBindingIndex;
+    float NormalsStrength;
+    float Roughness;
+    float Metallic;
+    uint MaskMode;
+    uint Padding0;
+    uint Padding1;
+    uint Padding2;
+};
+
+// Generated from VividRP.Runtime.GPUDriven.VividTerrainMaterialData
+// PackingRules = Exact
+struct VividTerrainMaterialData
+{
+    uint LayerStartIndex;
+    uint LayerCount;
+    uint ControlBindingIndex0;
+    uint ControlBindingIndex1;
 };
 
 

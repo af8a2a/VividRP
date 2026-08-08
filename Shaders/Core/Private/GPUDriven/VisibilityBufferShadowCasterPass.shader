@@ -71,12 +71,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 return (packedIndices >> shiftAmount) & 0xFFu;
             }
 
-            VividMeshletVertex PullVertex(const VividMeshlet meshlet, const uint index)
+            VividDecodedMeshletVertex PullVertex(const VividMeshlet meshlet, const uint index)
             {
-                return _SharedVertexBuffer[meshlet.VertexOffset + index];
+                return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
             }
 
-            float2 GetUV0(const VividMeshletVertex vertex, const VividMaterialData materialData)
+            float2 GetUV0(const VividDecodedMeshletVertex vertex, const VividMaterialData materialData)
             {
                 return vertex.UV.xy * materialData.TextureTilingOffset.xy + materialData.TextureTilingOffset.zw;
             }
@@ -126,7 +126,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 }
 
                 const uint vertexIndex = PullIndex(meshlet, vertexID);
-                const VividMeshletVertex vertex = PullVertex(meshlet, vertexIndex);
+                const VividDecodedMeshletVertex vertex = PullVertex(meshlet, vertexIndex);
 
                 output.positionCS = TransformWorldToHClip(TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz));
                 output.positionCS = ApplyVividShadowClamping(output.positionCS);

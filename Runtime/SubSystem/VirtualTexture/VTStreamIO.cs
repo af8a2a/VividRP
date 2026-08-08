@@ -54,6 +54,7 @@ namespace VividRP.Runtime
     internal sealed unsafe class VTAsyncReadManagerBackend : IVTIOBackend
     {
         private readonly Dictionary<string, SharedFile> m_Files = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Stack<int[]> m_BatchIntBufferPool = new();
         private bool m_Disposed;
 
         private sealed class SharedFile
@@ -91,7 +92,21 @@ namespace VividRP.Runtime
             foreach (SharedFile file in m_Files.Values)
                 CloseFile(file);
             m_Files.Clear();
+            m_BatchIntBufferPool.Clear();
             m_Disposed = true;
+        }
+
+        private int[] RentBatchIntBuffer()
+        {
+            return m_BatchIntBufferPool.Count > 0
+                ? m_BatchIntBufferPool.Pop()
+                : new int[64];
+        }
+
+        private void ReturnBatchIntBuffer(int[] buffer)
+        {
+            if (!m_Disposed && buffer != null && buffer.Length >= 64)
+                m_BatchIntBufferPool.Push(buffer);
         }
 
         private SharedFile AcquireFile(string path)
@@ -164,36 +179,48 @@ namespace VividRP.Runtime
                 m_File = file;
 
                 Count = commands.Count;
-                m_BufferOffsets = new int[commands.Count];
-                m_ByteSizes = new int[commands.Count];
-                int totalByteSize = 0;
-                for (int commandIndex = 0; commandIndex < commands.Count; commandIndex++)
+                m_BufferOffsets = owner.RentBatchIntBuffer();
+                m_ByteSizes = owner.RentBatchIntBuffer();
+                try
                 {
-                    m_BufferOffsets[commandIndex] = totalByteSize;
-                    m_ByteSizes[commandIndex] = commands[commandIndex].ByteSize;
-                    totalByteSize = checked(totalByteSize + commands[commandIndex].ByteSize);
-                }
-
-                m_Buffer = new NativeArray<byte>(
-                    Math.Max(1, totalByteSize),
-                    Allocator.Persistent,
-                    NativeArrayOptions.UninitializedMemory);
-                m_ReadCommands = new NativeArray<ReadCommand>(
-                    commands.Count,
-                    Allocator.Persistent,
-                    NativeArrayOptions.UninitializedMemory);
-                byte* buffer = (byte*)NativeArrayUnsafeUtility.GetUnsafePtr(m_Buffer);
-                for (int commandIndex = 0; commandIndex < commands.Count; commandIndex++)
-                {
-                    VTIOReadCommand command = commands[commandIndex];
-                    m_ReadCommands[commandIndex] = new ReadCommand
+                    int totalByteSize = 0;
+                    for (int commandIndex = 0; commandIndex < commands.Count; commandIndex++)
                     {
-                        Buffer = buffer + m_BufferOffsets[commandIndex],
-                        Offset = command.FileOffset,
-                        Size = command.ByteSize,
-                    };
-                }
+                        m_BufferOffsets[commandIndex] = totalByteSize;
+                        m_ByteSizes[commandIndex] = commands[commandIndex].ByteSize;
+                        totalByteSize = checked(totalByteSize + commands[commandIndex].ByteSize);
+                    }
 
+                    m_Buffer = new NativeArray<byte>(
+                        Math.Max(1, totalByteSize),
+                        Allocator.Persistent,
+                        NativeArrayOptions.UninitializedMemory);
+                    m_ReadCommands = new NativeArray<ReadCommand>(
+                        commands.Count,
+                        Allocator.Persistent,
+                        NativeArrayOptions.UninitializedMemory);
+                    byte* buffer = (byte*)NativeArrayUnsafeUtility.GetUnsafePtr(m_Buffer);
+                    for (int commandIndex = 0; commandIndex < commands.Count; commandIndex++)
+                    {
+                        VTIOReadCommand command = commands[commandIndex];
+                        m_ReadCommands[commandIndex] = new ReadCommand
+                        {
+                            Buffer = buffer + m_BufferOffsets[commandIndex],
+                            Offset = command.FileOffset,
+                            Size = command.ByteSize,
+                        };
+                    }
+                }
+                catch
+                {
+                    if (m_ReadCommands.IsCreated)
+                        m_ReadCommands.Dispose();
+                    if (m_Buffer.IsCreated)
+                        m_Buffer.Dispose();
+                    owner.ReturnBatchIntBuffer(m_BufferOffsets);
+                    owner.ReturnBatchIntBuffer(m_ByteSizes);
+                    throw;
+                }
             }
 
             public int Count { get; }
@@ -272,6 +299,8 @@ namespace VividRP.Runtime
                 if (m_Buffer.IsCreated)
                     m_Buffer.Dispose();
                 m_Owner.ReleaseFile(m_Path, m_File);
+                m_Owner.ReturnBatchIntBuffer(m_BufferOffsets);
+                m_Owner.ReturnBatchIntBuffer(m_ByteSizes);
                 m_File = null;
                 m_Disposed = true;
             }

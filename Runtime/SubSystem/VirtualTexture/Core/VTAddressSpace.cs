@@ -53,6 +53,7 @@ namespace VividRP.Runtime
             new Texture2D[VTStackDesc.MaxLayerCount];
         private readonly Texture2DArray[] m_ResidentPageEncodedStagingTextures =
             new Texture2DArray[VTStackDesc.MaxLayerCount];
+        private readonly bool[] m_ResidentPageTouchedGroups = new bool[VTStackDesc.MaxLayerCount];
         private Color32[] m_ResidentPageScratchPixels;
         private IVTPageProducer m_FallbackResidentPageProducer;
 
@@ -841,7 +842,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            var touchedGroups = new bool[PhysicalPool.Desc.PhysicalGroupCount];
+            Array.Clear(m_ResidentPageTouchedGroups, 0, m_ResidentPageTouchedGroups.Length);
             try
             {
                 for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
@@ -850,12 +851,14 @@ namespace VividRP.Runtime
                     int physicalLayerIndex = PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
                     Texture2DArray stagingTexture = GetResidentPageEncodedStagingTexture(physicalGroup);
                     encodedFinalizer.FinalizeEncodedUploadLayer(stagingTexture, physicalLayerIndex, layerIndex);
-                    touchedGroups[physicalGroup] = true;
+                    m_ResidentPageTouchedGroups[physicalGroup] = true;
                 }
 
-                for (int physicalGroup = 0; physicalGroup < touchedGroups.Length; physicalGroup++)
+                for (int physicalGroup = 0;
+                     physicalGroup < PhysicalPool.Desc.PhysicalGroupCount;
+                     physicalGroup++)
                 {
-                    if (touchedGroups[physicalGroup])
+                    if (m_ResidentPageTouchedGroups[physicalGroup])
                         GetResidentPageEncodedStagingTexture(physicalGroup).Apply(false, false);
                 }
 

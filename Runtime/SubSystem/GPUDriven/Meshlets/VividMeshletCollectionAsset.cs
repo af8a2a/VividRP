@@ -20,7 +20,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private VividMeshlet[] m_LegacyMeshlets = Array.Empty<VividMeshlet>();
 
         [SerializeField, HideInInspector, FormerlySerializedAs("VertexBuffer")]
-        private VividMeshletVertex[] m_LegacyVertexBuffer = Array.Empty<VividMeshletVertex>();
+        private VividMeshletVertexLegacy64[] m_LegacyVertexBuffer = Array.Empty<VividMeshletVertexLegacy64>();
 
         [SerializeField, HideInInspector, FormerlySerializedAs("IndexBuffer")]
         private byte[] m_LegacyIndexBuffer = Array.Empty<byte>();
@@ -195,7 +195,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 m_LegacyMeshLODLevelNodeCounts,
                 m_LegacyMeshLODNodes,
                 m_LegacyMeshlets,
-                m_LegacyVertexBuffer,
+                VividMeshletCollectionBinarySerializer.ConvertLegacyVertices(m_LegacyVertexBuffer),
                 m_LegacyIndexBuffer
             );
             ClearLegacyMeshData();
@@ -225,7 +225,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_LegacyMeshLODLevelNodeCounts = Array.Empty<int>();
             m_LegacyMeshLODNodes = Array.Empty<VividMeshLODNode>();
             m_LegacyMeshlets = Array.Empty<VividMeshlet>();
-            m_LegacyVertexBuffer = Array.Empty<VividMeshletVertex>();
+            m_LegacyVertexBuffer = Array.Empty<VividMeshletVertexLegacy64>();
             m_LegacyIndexBuffer = Array.Empty<byte>();
         }
 

@@ -43,6 +43,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TerrainData_RejectsPreviousBakeVersion()
+        {
+            var data = ScriptableObject.CreateInstance<VividTerrainData>();
+
+            try
+            {
+                FieldInfo bakeVersionField = typeof(VividTerrainData).GetField(
+                    "m_BakeVersion",
+                    BindingFlags.Instance | BindingFlags.NonPublic
+                );
+                Assert.That(bakeVersionField, Is.Not.Null);
+                bakeVersionField.SetValue(data, VividTerrainData.CurrentBakeVersion - 1u);
+
+                Assert.That(data.TryValidate(out string reason), Is.False);
+                Assert.That(reason, Does.Contain("Bake version 2 is not supported"));
+                Assert.That(reason, Does.Contain($"expected {VividTerrainData.CurrentBakeVersion}"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(data);
+            }
+        }
+
+        [Test]
         public void BakeToAsset_SamplesHeightmapAndPersistsCompressedMeshletSubAssets()
         {
             EnsureSupportedPlatform();

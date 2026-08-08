@@ -124,11 +124,67 @@ struct VividMeshlet
 
 struct VividMeshletVertex
 {
+    float PositionX;
+    float PositionY;
+    float PositionZ;
+    uint PackedNormal;
+    uint PackedTangent;
+    float2 UV;
+    uint Reserved;
+};
+
+struct VividDecodedMeshletVertex
+{
     float4 Position;
     float4 Normal;
     float4 Tangent;
     float4 UV;
 };
+
+static const uint VIVID_MESHLET_OCTAHEDRAL_COMPONENT_MASK = 0x7FFFu;
+static const uint VIVID_MESHLET_NORMAL_VALID_BIT = 1u << 30;
+static const uint VIVID_MESHLET_TANGENT_NEGATIVE_HANDEDNESS_BIT = 1u << 30;
+static const uint VIVID_MESHLET_TANGENT_VALID_BIT = 1u << 31;
+
+float3 DecodeVividMeshletOctahedral15(const uint packedDirection)
+{
+    float2 octahedral = float2(
+        packedDirection & VIVID_MESHLET_OCTAHEDRAL_COMPONENT_MASK,
+        (packedDirection >> 15) & VIVID_MESHLET_OCTAHEDRAL_COMPONENT_MASK
+    );
+    octahedral = octahedral / float(VIVID_MESHLET_OCTAHEDRAL_COMPONENT_MASK) * 2.0f - 1.0f;
+
+    float3 direction = float3(
+        octahedral,
+        1.0f - abs(octahedral.x) - abs(octahedral.y)
+    );
+    const float fold = saturate(-direction.z);
+    const float2 foldSign = step(0.0f, direction.xy) * 2.0f - 1.0f;
+    direction.xy -= foldSign * fold;
+    return direction * rsqrt(max(dot(direction, direction), 1e-20f));
+}
+
+VividDecodedMeshletVertex DecodeVividMeshletVertex(const VividMeshletVertex packedVertex)
+{
+    VividDecodedMeshletVertex vertex;
+    vertex.Position = float4(
+        packedVertex.PositionX,
+        packedVertex.PositionY,
+        packedVertex.PositionZ,
+        1.0f);
+    vertex.Normal = (packedVertex.PackedNormal & VIVID_MESHLET_NORMAL_VALID_BIT) != 0u
+        ? float4(DecodeVividMeshletOctahedral15(packedVertex.PackedNormal), 0.0f)
+        : 0.0f;
+    vertex.Tangent = (packedVertex.PackedTangent & VIVID_MESHLET_TANGENT_VALID_BIT) != 0u
+        ? float4(
+            DecodeVividMeshletOctahedral15(packedVertex.PackedTangent),
+            (packedVertex.PackedTangent & VIVID_MESHLET_TANGENT_NEGATIVE_HANDEDNESS_BIT) != 0u
+                ? -1.0f
+                : 1.0f)
+        : 0.0f;
+    vertex.UV = float4(packedVertex.UV, 0.0f, 0.0f);
+    return vertex;
+}
 
 struct VividMeshletRenderRequestPacked
 {

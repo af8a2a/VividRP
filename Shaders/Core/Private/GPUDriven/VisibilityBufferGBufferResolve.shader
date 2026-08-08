@@ -69,9 +69,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 VividSurfaceBindingData surfaceBindingData;
                 VividMeshlet meshlet;
                 uint3 indices;
-                VividMeshletVertex vertex0;
-                VividMeshletVertex vertex1;
-                VividMeshletVertex vertex2;
+                VividDecodedMeshletVertex vertex0;
+                VividDecodedMeshletVertex vertex1;
+                VividDecodedMeshletVertex vertex2;
                 float3 positionWS0;
                 float3 positionWS1;
                 float3 positionWS2;
@@ -110,12 +110,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return (packedIndices >> shiftAmount) & 0xFFu;
             }
 
-            VividMeshletVertex PullVertex(const VividMeshlet meshlet, const uint index)
+            VividDecodedMeshletVertex PullVertex(const VividMeshlet meshlet, const uint index)
             {
-                return _SharedVertexBuffer[meshlet.VertexOffset + index];
+                return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
             }
 
-            float2 GetUV0(const VividMeshletVertex vertex)
+            float2 GetUV0(const VividDecodedMeshletVertex vertex)
             {
                 return vertex.UV.xy;
             }
@@ -154,9 +154,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             InterpolatedUV InterpolateUV(
                 const VividBarycentricDerivatives barycentric,
-                const VividMeshletVertex vertex0,
-                const VividMeshletVertex vertex1,
-                const VividMeshletVertex vertex2)
+                const VividDecodedMeshletVertex vertex0,
+                const VividDecodedMeshletVertex vertex1,
+                const VividDecodedMeshletVertex vertex2)
             {
                 const float3 u = InterpolateWithBarycentric(
                     barycentric,

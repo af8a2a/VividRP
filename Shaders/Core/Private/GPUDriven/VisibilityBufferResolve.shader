@@ -106,9 +106,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 return (packedIndices >> shiftAmount) & 0xFFu;
             }
 
-            VividMeshletVertex PullVertex(const VividMeshlet meshlet, const uint index)
+            VividDecodedMeshletVertex PullVertex(const VividMeshlet meshlet, const uint index)
             {
-                return _SharedVertexBuffer[meshlet.VertexOffset + index];
+                return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
             }
 
             float3 HashColor(uint seed)
@@ -150,9 +150,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 VividInstanceData instanceData;
                 VividMeshlet meshlet;
                 uint3 indices;
-                VividMeshletVertex vertex0;
-                VividMeshletVertex vertex1;
-                VividMeshletVertex vertex2;
+                VividDecodedMeshletVertex vertex0;
+                VividDecodedMeshletVertex vertex1;
+                VividDecodedMeshletVertex vertex2;
                 float4 clipPosition0;
                 float4 clipPosition1;
                 float4 clipPosition2;

@@ -1022,7 +1022,10 @@ namespace VividRP.Runtime
                     + $"sequence={FormatSequence(timeline)}>phase(discontinuous)");
             }
 
-            if (nextPhase <= previousPhase || nextPhase > previousPhase + 1)
+            bool atomicReveal = previousPhase == 0
+                                && nextPhase == VirtualTexturePageTableEntry.MaxTransitionPhase;
+            if (nextPhase <= previousPhase
+                || (!atomicReveal && nextPhase > previousPhase + 1))
             {
                 Report(
                     "TransitionPhaseJump",

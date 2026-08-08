@@ -96,9 +96,7 @@ namespace VividRP.Editor.Tests
             diagnostics.OnReserve(4, 1, 12, 0, 7, 1, true, false, debugInfo);
             diagnostics.OnResidentCommit(4, 1, 12, 0, 7, 2, true, false, false, debugInfo);
             diagnostics.OnTransitionBegin(1, 12, 0, 4, 7, 2);
-            diagnostics.OnTransitionPhase(1, 12, 0, 4, 7, 5, 0, 1);
-            diagnostics.OnTransitionPhase(1, 12, 0, 4, 7, 8, 1, 2);
-            diagnostics.OnTransitionPhase(1, 12, 0, 4, 7, 10, 2, 3);
+            diagnostics.OnTransitionPhase(1, 12, 0, 4, 7, 10, 0, 3);
 
             Assert.That(errors, Is.Empty);
         }
@@ -166,7 +164,7 @@ namespace VividRP.Editor.Tests
             diagnostics.OnReserve(6, 4, 33, 1, 9, 1, true, false, debugInfo);
             diagnostics.OnResidentCommit(6, 4, 33, 1, 9, 2, true, false, false, debugInfo);
             diagnostics.OnTransitionBegin(4, 33, 1, 6, 9, 2);
-            diagnostics.OnTransitionPhase(4, 33, 1, 6, 9, 10, 0, 3);
+            diagnostics.OnTransitionPhase(4, 33, 1, 6, 9, 10, 0, 2);
 
             Assert.That(errors.Any(error => error.Contains("code=TransitionPhaseJump")), Is.True);
         }

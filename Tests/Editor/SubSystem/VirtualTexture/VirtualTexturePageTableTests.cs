@@ -67,14 +67,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PageTransitionPhase_ReachesStableOverEightFrames()
+        public void PageTransitionPhase_KeepsAncestorUntilAtomicReveal()
         {
             Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 100), Is.EqualTo(0));
             Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 102), Is.EqualTo(0));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 103), Is.EqualTo(1));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 105), Is.EqualTo(1));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 106), Is.EqualTo(2));
-            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 107), Is.EqualTo(2));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 103), Is.EqualTo(0));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 105), Is.EqualTo(0));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 106), Is.EqualTo(0));
+            Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 107), Is.EqualTo(0));
             Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 108), Is.EqualTo(3));
             Assert.That(VTResidencyManager.CalculateTransitionPhase(100, 1000), Is.EqualTo(3));
         }
@@ -407,7 +407,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PageTransition_AdvancesAtMostFourVisiblePhasesPerFrame()
+        public void PageTransition_RevealsAtMostFourPagesPerFrame()
         {
             Assert.That(VTResidencyManager.MaxTransitionPhaseAdvancesPerFrame, Is.EqualTo(4));
             int spaceId = VirtualTextureSystem.RegisterSpace(
@@ -425,8 +425,9 @@ namespace VividRP.Editor.Tests
             foreach (VirtualTextureUploadRequest request in requests.ToArray())
                 Assert.That(VirtualTextureSystem.CommitUpload(request), Is.True);
 
-            VirtualTextureSystem.AdvancePageTransitionsForTesting(cohortFrame + 3);
-            int phaseOneCount = 0;
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(
+                cohortFrame + VTResidencyManager.PageTransitionFrameCount);
+            int revealedCount = 0;
             int phaseZeroCount = 0;
             foreach (VirtualTexturePageCoord coord in coords)
             {
@@ -434,23 +435,29 @@ namespace VividRP.Editor.Tests
                     spaceId,
                     coord,
                     out VirtualTexturePageTableEntry entry), Is.True);
-                phaseOneCount += entry.TransitionPhase == 1 ? 1 : 0;
+                revealedCount += entry.TransitionPhase
+                                 == VirtualTexturePageTableEntry.MaxTransitionPhase
+                    ? 1
+                    : 0;
                 phaseZeroCount += entry.TransitionPhase == 0 ? 1 : 0;
             }
 
             Assert.That(
-                phaseOneCount,
+                revealedCount,
                 Is.EqualTo(VTResidencyManager.MaxTransitionPhaseAdvancesPerFrame));
-            Assert.That(phaseZeroCount, Is.EqualTo(coords.Length - phaseOneCount));
+            Assert.That(phaseZeroCount, Is.EqualTo(coords.Length - revealedCount));
 
-            VirtualTextureSystem.AdvancePageTransitionsForTesting(cohortFrame + 4);
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(
+                cohortFrame + VTResidencyManager.PageTransitionFrameCount + 1);
             foreach (VirtualTexturePageCoord coord in coords)
             {
                 Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                     spaceId,
                     coord,
                     out VirtualTexturePageTableEntry entry), Is.True);
-                Assert.That(entry.TransitionPhase, Is.EqualTo(1));
+                Assert.That(
+                    entry.TransitionPhase,
+                    Is.EqualTo(VirtualTexturePageTableEntry.MaxTransitionPhase));
             }
         }
 

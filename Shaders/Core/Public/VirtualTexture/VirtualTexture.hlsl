@@ -434,12 +434,11 @@ float4 VTSamplePhysicalCacheTransitioned(
     float2 virtualUv,
     VTResolvedAddress resolved)
 {
-    float4 currentColor = VTSamplePhysicalCache(virtualUv, resolved);
     if (!resolved.valid
         || resolved.locked
         || resolved.transitionPhase >= VT_PAGE_TABLE_TRANSITION_PHASE_MASK)
     {
-        return currentColor;
+        return VTSamplePhysicalCache(virtualUv, resolved);
     }
 
     VTResolvedAddress ancestor = VTFindStableTransitionAncestor(virtualUv, resolved);
@@ -447,13 +446,13 @@ float4 VTSamplePhysicalCacheTransitioned(
         || (ancestor.physicalPageId == resolved.physicalPageId
             && ancestor.resolvedMip == resolved.resolvedMip))
     {
-        return currentColor;
+        return VTSamplePhysicalCache(virtualUv, resolved);
     }
 
-    float4 ancestorColor = VTSamplePhysicalCache(virtualUv, ancestor);
-    float transitionWeight =
-        (float)resolved.transitionPhase / (float)VT_PAGE_TABLE_TRANSITION_PHASE_MASK;
-    return lerp(ancestorColor, currentColor, saturate(transitionWeight));
+    // Keep the last stable ancestor fully visible while the child waits in the
+    // transition cohort. Revealing the child atomically avoids three separate
+    // full-screen blend waves during initial VT refinement.
+    return VTSamplePhysicalCache(virtualUv, ancestor);
 }
 
 float4 VTSamplePhysicalCacheLayerTransitioned(
@@ -461,12 +460,11 @@ float4 VTSamplePhysicalCacheLayerTransitioned(
     VTResolvedAddress resolved,
     uint layerIndex)
 {
-    float4 currentColor = VTSamplePhysicalCacheLayer(virtualUv, resolved, layerIndex);
     if (!resolved.valid
         || resolved.locked
         || resolved.transitionPhase >= VT_PAGE_TABLE_TRANSITION_PHASE_MASK)
     {
-        return currentColor;
+        return VTSamplePhysicalCacheLayer(virtualUv, resolved, layerIndex);
     }
 
     VTResolvedAddress ancestor = VTFindStableTransitionAncestor(virtualUv, resolved);
@@ -474,13 +472,10 @@ float4 VTSamplePhysicalCacheLayerTransitioned(
         || (ancestor.physicalPageId == resolved.physicalPageId
             && ancestor.resolvedMip == resolved.resolvedMip))
     {
-        return currentColor;
+        return VTSamplePhysicalCacheLayer(virtualUv, resolved, layerIndex);
     }
 
-    float4 ancestorColor = VTSamplePhysicalCacheLayer(virtualUv, ancestor, layerIndex);
-    float transitionWeight =
-        (float)resolved.transitionPhase / (float)VT_PAGE_TABLE_TRANSITION_PHASE_MASK;
-    return lerp(ancestorColor, currentColor, saturate(transitionWeight));
+    return VTSamplePhysicalCacheLayer(virtualUv, ancestor, layerIndex);
 }
 
 float4 VTSamplePhysicalCacheTrilinear(

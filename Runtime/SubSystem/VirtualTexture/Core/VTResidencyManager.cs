@@ -1077,7 +1077,7 @@ namespace VividRP.Runtime
                 }
 
                 byte previousPhase = pageState.TransitionPhase;
-                byte nextPhase = (byte)Math.Min(previousPhase + 1, targetPhase);
+                byte nextPhase = (byte)VirtualTexturePageTableEntry.MaxTransitionPhase;
                 bool completed = nextPhase >= VirtualTexturePageTableEntry.MaxTransitionPhase;
                 pageState.TransitionPhase = nextPhase;
                 pageState.TransitionTracked = !completed;
@@ -1103,11 +1103,12 @@ namespace VividRP.Runtime
                     previousPhase,
                     nextPhase);
                 Debug.Log(
-                    $"[VividRP][VT_DEBUG][PageTransitionPhase] space={m_Desc.SpaceName} "
+                    $"[VividRP][VT_DEBUG][PageTransitionReveal] space={m_Desc.SpaceName} "
                     + $"producer={m_ProducerName} frame={frameIndex} pageIndex={pageIndex} "
                     + $"mip={m_PageMips[pageIndex]} slot={pageState.PhysicalPageId} "
                     + $"phase={previousPhase}->{nextPhase} targetPhase={targetPhase} "
-                    + $"phaseLag={targetPhase - nextPhase} cohortFrame={pageState.LastAllocationFrame} "
+                    + $"mode=atomic ancestorVisibleBeforeReveal=True "
+                    + $"cohortFrame={pageState.LastAllocationFrame} "
                     + $"ageFrames={frameIndex - pageState.LastAllocationFrame} completed={completed}");
 #endif
                 phaseAdvancesThisCall += 1;
@@ -1128,10 +1129,9 @@ namespace VividRP.Runtime
                 return 0;
 
             long age = (long)frameIndex - residencyFrameIndex;
-            long scaledPhase = age * VirtualTexturePageTableEntry.MaxTransitionPhase;
-            return (byte)Math.Min(
-                VirtualTexturePageTableEntry.MaxTransitionPhase,
-                scaledPhase / PageTransitionFrameCount);
+            return age >= PageTransitionFrameCount
+                ? (byte)VirtualTexturePageTableEntry.MaxTransitionPhase
+                : (byte)0;
         }
 
         internal bool ConsumePageTableDirtyFlag()

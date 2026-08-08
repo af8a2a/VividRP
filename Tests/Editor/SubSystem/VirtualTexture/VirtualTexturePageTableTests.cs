@@ -327,6 +327,86 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PageTransition_WaitsForImmediateResolvedAncestorToBecomeStable()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(
+                CreateDesc("StableAncestorGate", 4, 4, 3, 8, 4));
+            VirtualTextureUploadRequest parentRequest = RequestAndCommit(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 1));
+            VirtualTextureUploadRequest childRequest = RequestAndCommit(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0));
+
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                childRequest.PageCoord,
+                out VirtualTexturePageTableEntry queuedChildEntry), Is.True);
+            Assert.That(queuedChildEntry.Resident, Is.False);
+            Assert.That(queuedChildEntry.Fallback, Is.True);
+            Assert.That(queuedChildEntry.PendingUpload, Is.True);
+            Assert.That(queuedChildEntry.PhysicalPageId, Is.EqualTo(parentRequest.PhysicalPageId));
+
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(
+                parentRequest.RequestFrame + VTResidencyManager.PageTransitionFrameCount);
+
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                childRequest.PageCoord,
+                out VirtualTexturePageTableEntry transitioningChildEntry), Is.True);
+            Assert.That(transitioningChildEntry.Resident, Is.True);
+            Assert.That(transitioningChildEntry.PendingUpload, Is.False);
+            Assert.That(transitioningChildEntry.PhysicalPageId, Is.EqualTo(childRequest.PhysicalPageId));
+            Assert.That(transitioningChildEntry.TransitionPhase, Is.Zero);
+        }
+
+        [Test]
+        public void PageTransition_StartsAtMostEightPagesPerFrame()
+        {
+            Assert.That(VTResidencyManager.MaxTransitionStartsPerFrame, Is.EqualTo(8));
+            int spaceId = VirtualTextureSystem.RegisterSpace(
+                CreateDesc("TransitionStartBudget", 16, 16, 5, 32, 16));
+            var coords = new VirtualTexturePageCoord[16];
+            for (int pageIndex = 0; pageIndex < coords.Length; pageIndex++)
+                coords[pageIndex] = new VirtualTexturePageCoord(pageIndex % 4, pageIndex / 4, 2);
+
+            RequestPages(spaceId, coords);
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out var requests), Is.True);
+            Assert.That(requests, Has.Count.EqualTo(coords.Length));
+            int cohortFrame = requests[0].RequestFrame;
+            foreach (VirtualTextureUploadRequest request in requests.ToArray())
+                Assert.That(VirtualTextureSystem.CommitUpload(request), Is.True);
+
+            int residentCount = 0;
+            int queuedCount = 0;
+            foreach (VirtualTexturePageCoord coord in coords)
+            {
+                Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                    spaceId,
+                    coord,
+                    out VirtualTexturePageTableEntry entry), Is.True);
+                residentCount += entry.Resident ? 1 : 0;
+                queuedCount += entry.PendingUpload ? 1 : 0;
+            }
+
+            Assert.That(residentCount, Is.EqualTo(VTResidencyManager.MaxTransitionStartsPerFrame));
+            Assert.That(queuedCount, Is.EqualTo(coords.Length - residentCount));
+
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(cohortFrame + 1);
+            foreach (VirtualTexturePageCoord coord in coords)
+            {
+                Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                    spaceId,
+                    coord,
+                    out VirtualTexturePageTableEntry entry), Is.True);
+                Assert.That(entry.Resident, Is.True);
+                Assert.That(entry.PendingUpload, Is.False);
+            }
+        }
+
+        [Test]
         public void PageTable_RebuildsDirtySubtreeAndQueuesOnlyChangedEntries()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("PartialPageTable", 8, 8, 4, 16, 4);

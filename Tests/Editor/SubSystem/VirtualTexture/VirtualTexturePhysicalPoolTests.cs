@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
@@ -78,6 +79,185 @@ namespace VividRP.Editor.Tests
             Assert.That(namedIdentity.GetHashCode(), Is.EqualTo(sameNamedIdentity.GetHashCode()));
             Assert.That(firstHandleIdentity.Equals(namedIdentity), Is.False);
         }
+
+#if VT_DEBUG
+        [Test]
+        public void DebugTimeline_ValidResidentTransitionSequence_DoesNotReportError()
+        {
+            var errors = new List<string>();
+            var diagnostics = new VTDebugPageTimelineDiagnostics(
+                "TestPool",
+                errors.Add,
+                _ => { });
+            VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
+                VTPageRequestKind.Demand,
+                new VirtualTexturePageCoord(2, 3, 0));
+
+            diagnostics.OnReserve(4, 1, 12, 0, 7, 1, true, false, debugInfo);
+            diagnostics.OnResidentCommit(4, 1, 12, 0, 7, 2, true, false, false, debugInfo);
+            diagnostics.OnTransitionBegin(1, 12, 0, 4, 7, 2);
+            diagnostics.OnTransitionPhase(1, 12, 0, 4, 7, 5, 0, 1);
+            diagnostics.OnTransitionPhase(1, 12, 0, 4, 7, 8, 1, 2);
+            diagnostics.OnTransitionPhase(1, 12, 0, 4, 7, 10, 2, 3);
+
+            Assert.That(errors, Is.Empty);
+        }
+
+        [Test]
+        public void DebugTimeline_PendingCommitTimeout_ReportsErrorSequence()
+        {
+            var errors = new List<string>();
+            var diagnostics = new VTDebugPageTimelineDiagnostics(
+                "TestPool",
+                errors.Add,
+                _ => { });
+            VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
+                VTPageRequestKind.Demand,
+                new VirtualTexturePageCoord(1, 1, 0));
+
+            diagnostics.OnReserve(3, 2, 21, 0, 5, 1, true, false, debugInfo);
+            diagnostics.AdvanceFrame(10);
+
+            Assert.That(errors, Has.Count.EqualTo(1));
+            Assert.That(errors[0], Does.Contain("code=CommitTimeout"));
+            Assert.That(errors[0], Does.Contain("sequence=reserve@1>timeout"));
+        }
+
+        [Test]
+        public void DebugTimeline_CancelledNeighborRetriedQuickly_ReportsWarning()
+        {
+            var errors = new List<string>();
+            var traces = new List<string>();
+            var warnings = new List<string>();
+            var diagnostics = new VTDebugPageTimelineDiagnostics(
+                "TestPool",
+                errors.Add,
+                traces.Add,
+                warnings.Add);
+            var coord = new VirtualTexturePageCoord(0, 4, 2);
+            VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
+                VTPageRequestKind.Neighbor,
+                coord);
+
+            diagnostics.OnReserve(78, 3, 41, 2, 79, 9, true, false, debugInfo);
+            diagnostics.OnSlotReleased(78, 79, 10, releaseToFreeList: true);
+            diagnostics.OnReserve(83, 3, 41, 2, 85, 10, true, false, debugInfo);
+
+            Assert.That(traces, Has.Count.EqualTo(1));
+            Assert.That(traces[0], Does.Contain("[PageReserveCancel]"));
+            Assert.That(errors, Is.Empty);
+            Assert.That(warnings, Has.Count.EqualTo(1));
+            Assert.That(warnings[0], Does.Contain("code=ReserveCancelRetryLoop"));
+            Assert.That(warnings[0], Does.Contain("sequence=reserve>cancel>reserve"));
+        }
+
+        [Test]
+        public void DebugTimeline_TransitionPhaseJump_ReportsError()
+        {
+            var errors = new List<string>();
+            var diagnostics = new VTDebugPageTimelineDiagnostics(
+                "TestPool",
+                errors.Add,
+                _ => { });
+            VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
+                VTPageRequestKind.Refinement,
+                new VirtualTexturePageCoord(2, 2, 1));
+
+            diagnostics.OnReserve(6, 4, 33, 1, 9, 1, true, false, debugInfo);
+            diagnostics.OnResidentCommit(6, 4, 33, 1, 9, 2, true, false, false, debugInfo);
+            diagnostics.OnTransitionBegin(4, 33, 1, 6, 9, 2);
+            diagnostics.OnTransitionPhase(4, 33, 1, 6, 9, 10, 0, 3);
+
+            Assert.That(errors.Any(error => error.Contains("code=TransitionPhaseJump")), Is.True);
+        }
+
+        [Test]
+        public void DebugTimeline_CommitBurst_ReportsOneFrameWaveWarning()
+        {
+            var errors = new List<string>();
+            var warnings = new List<string>();
+            var diagnostics = new VTDebugPageTimelineDiagnostics(
+                "TestPool",
+                errors.Add,
+                _ => { },
+                warnings.Add);
+
+            for (int index = 0; index < VTDebugPageTimelineDiagnostics.CommitBurstThreshold; index++)
+            {
+                var coord = new VirtualTexturePageCoord(index, 0, 0);
+                VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
+                    VTPageRequestKind.Demand,
+                    coord);
+                diagnostics.OnReserve(index, 5, index, 0, index + 1, 7, true, false, debugInfo);
+                diagnostics.OnResidentCommit(
+                    index,
+                    5,
+                    index,
+                    0,
+                    index + 1,
+                    7,
+                    true,
+                    false,
+                    false,
+                    debugInfo);
+            }
+
+            diagnostics.AdvanceFrame(8);
+
+            Assert.That(errors, Is.Empty);
+            Assert.That(warnings.Count(warning => warning.Contains("code=CommitBurst")), Is.EqualTo(1));
+            Assert.That(
+                warnings.Single(warning => warning.Contains("code=CommitBurst")),
+                Does.Contain("commits=8"));
+        }
+
+        [Test]
+        public void DebugTimeline_TransitionAncestorChanged_ReportsErrorWithCohort()
+        {
+            var errors = new List<string>();
+            var diagnostics = new VTDebugPageTimelineDiagnostics(
+                "TestPool",
+                errors.Add,
+                _ => { });
+            VTPageRequestDebugInfo debugInfo = CreateTimelineDebugInfo(
+                VTPageRequestKind.Refinement,
+                new VirtualTexturePageCoord(2, 0, 0));
+            var oldAncestor = new VTDebugTransitionAncestor(8, 2, 4, 3);
+            var newAncestor = new VTDebugTransitionAncestor(5, 1, 7, 6);
+
+            diagnostics.OnReserve(9, 6, 12, 0, 10, 11, true, false, debugInfo);
+            diagnostics.OnResidentCommit(9, 6, 12, 0, 10, 12, true, false, false, debugInfo);
+            diagnostics.OnTransitionBegin(6, 12, 0, 9, 10, 13, oldAncestor);
+            diagnostics.OnTransitionAncestorObserved(
+                6,
+                12,
+                0,
+                9,
+                10,
+                15,
+                1,
+                newAncestor);
+
+            Assert.That(errors, Has.Count.EqualTo(1));
+            Assert.That(errors[0], Does.Contain("code=TransitionAncestorChanged"));
+            Assert.That(errors[0], Does.Contain("child=(space:6,page:12,mip:0,slot:9,generation:10)"));
+            Assert.That(errors[0], Does.Contain("oldAncestor=(page:8,mip:2,slot:4,generation:3)"));
+            Assert.That(errors[0], Does.Contain("newAncestor=(page:5,mip:1,slot:7,generation:6)"));
+            Assert.That(errors[0], Does.Contain("phase=1 cohortFrame=13"));
+        }
+
+        private static VTPageRequestDebugInfo CreateTimelineDebugInfo(
+            VTPageRequestKind requestKind,
+            in VirtualTexturePageCoord coord)
+        {
+            return new VTPageRequestDebugInfo(
+                requestKind,
+                coord,
+                coord,
+                mipGap: 0,
+                weightedScore: 100);
+        }
+#endif
 
         [Test]
         public void RegisterAddressSpace_SeparatesPhysicalPools_WhenLayerPhysicalGroupDiffers()

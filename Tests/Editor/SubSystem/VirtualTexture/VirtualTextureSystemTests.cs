@@ -1070,6 +1070,11 @@ namespace VividRP.Editor.Tests
                 "[VividRP][VT_DEBUG][PageReplaceCommit]",
                 "[VividRP][VT_DEBUG][PageFillReserve]",
                 "[VividRP][VT_DEBUG][PageResidentCommit]",
+                "[VividRP][VT_DEBUG][PageResidentAttach]",
+                "[VividRP][VT_DEBUG][PageReserveCancel]",
+                "[VividRP][VT_DEBUG][PageTransitionForcedStable]",
+                "[VividRP][VT_DEBUG][TimelineError]",
+                "[VividRP][VT_DEBUG][TimelineWarning]",
             };
 
             foreach (string diagnosticTag in diagnosticTags)

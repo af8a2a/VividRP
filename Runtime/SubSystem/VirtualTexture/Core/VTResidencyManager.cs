@@ -139,6 +139,7 @@ namespace VividRP.Runtime
             int lastAllocationFrame,
             bool resident,
             bool pendingUpload,
+            bool transitionQueued,
             bool locked,
             int transitionPhase)
         {
@@ -147,6 +148,7 @@ namespace VividRP.Runtime
             LastAllocationFrame = lastAllocationFrame;
             Resident = resident;
             PendingUpload = pendingUpload;
+            TransitionQueued = transitionQueued;
             Locked = locked;
             TransitionPhase = transitionPhase;
         }
@@ -160,6 +162,8 @@ namespace VividRP.Runtime
         internal bool Resident { get; }
 
         internal bool PendingUpload { get; }
+
+        internal bool TransitionQueued { get; }
 
         internal bool Locked { get; }
 
@@ -207,6 +211,7 @@ namespace VividRP.Runtime
         private const int k_ClassificationBatchSize = 64;
         private const int k_MaxRefinementMipStep = 2;
         internal const int PageTransitionFrameCount = 8;
+        internal const int MaxTransitionStartsPerFrame = 8;
 
         private static readonly Vector2Int[] s_NeighborOffsets =
         {
@@ -226,6 +231,8 @@ namespace VividRP.Runtime
             public bool Locked;
             public byte TransitionPhase;
             public bool TransitionTracked;
+            public bool TransitionQueued;
+            public int TransitionAncestorPageIndex;
         }
 
         private readonly struct VTRefinementRequest
@@ -312,6 +319,7 @@ namespace VividRP.Runtime
         private readonly int[] m_PendingRequestIndices;
         private readonly List<int> m_DirtyPageTableUpdates = new();
         private readonly List<int> m_TransitioningPageIndices = new();
+        private readonly List<int> m_QueuedTransitionPageIndices = new();
 
         private NativeArray<VTResidencyClassificationInput> m_ClassificationInputs;
         private NativeArray<VTResidencyClassificationResult> m_ClassificationResults;
@@ -349,6 +357,7 @@ namespace VividRP.Runtime
             for (int pageIndex = 0; pageIndex < m_PageStates.Length; pageIndex++)
             {
                 m_PageStates[pageIndex].PhysicalPageId = -1;
+                m_PageStates[pageIndex].TransitionAncestorPageIndex = -1;
                 m_PendingRequestIndices[pageIndex] = -1;
             }
 
@@ -429,7 +438,7 @@ namespace VividRP.Runtime
                 pageState.PendingUpload = false;
                 pageState.Resident = true;
                 pageState.Locked = locked;
-                BeginPageTransition(pageIndex, ref pageState, frameIndex);
+                SchedulePageTransition(pageIndex, ref pageState, frameIndex);
                 SetPageState(pageIndex, pageState);
                 m_ResidentPageCount += 1;
                 MarkPageTableDirty(pageIndex);
@@ -480,7 +489,7 @@ namespace VividRP.Runtime
             pageState.PendingUpload = false;
             pageState.Resident = true;
             pageState.Locked = locked;
-            BeginPageTransition(pageIndex, ref pageState, frameIndex);
+            SchedulePageTransition(pageIndex, ref pageState, frameIndex);
             SetPageState(pageIndex, pageState);
             m_ResidentPageCount += 1;
             MarkPageTableDirty(pageIndex);
@@ -543,7 +552,7 @@ namespace VividRP.Runtime
                 pageState.PendingUpload = false;
                 pageState.Resident = true;
                 pageState.Locked = locked;
-                BeginPageTransition(pageIndex, ref pageState, frameIndex);
+                SchedulePageTransition(pageIndex, ref pageState, frameIndex);
                 SetPageState(pageIndex, pageState);
                 m_ResidentPageCount += 1;
                 MarkPageTableDirty(pageIndex);
@@ -898,7 +907,7 @@ namespace VividRP.Runtime
             int residencyFrameIndex = commitFrameIndex >= 0
                 ? commitFrameIndex
                 : request.RequestFrame;
-            BeginPageTransition(pageIndex, ref pageState, residencyFrameIndex);
+            SchedulePageTransition(pageIndex, ref pageState, residencyFrameIndex);
             SetPageState(pageIndex, pageState);
             m_ResidentPageCount += 1;
             RemovePendingRequest(pageIndex, request.Generation);
@@ -908,6 +917,8 @@ namespace VividRP.Runtime
                 residencyFrameIndex,
                 updateAffinity: false);
             MarkPageTableDirty(pageIndex);
+            if (commitFrameIndex < 0)
+                StartQueuedPageTransitions(residencyFrameIndex, MaxTransitionStartsPerFrame);
             return true;
         }
 
@@ -926,6 +937,18 @@ namespace VividRP.Runtime
                 return true;
 
             pageState.Locked = locked;
+            if (locked && pageState.TransitionQueued)
+            {
+                pageState.TransitionQueued = false;
+                pageState.TransitionAncestorPageIndex = -1;
+                pageState.TransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
+                m_PhysicalPool.TrySetVisibilityPending(
+                    pageState.PhysicalPageId,
+                    pageState.Generation,
+                    this,
+                    pageIndex,
+                    visibilityPending: false);
+            }
             if (locked && pageState.TransitionTracked)
             {
                 pageState.TransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
@@ -969,13 +992,16 @@ namespace VividRP.Runtime
                 pageState.LastAllocationFrame,
                 pageState.Resident,
                 pageState.PendingUpload,
+                pageState.TransitionQueued,
                 pageState.Locked,
                 pageState.TransitionPhase);
         }
 
-        internal bool AdvancePageTransitions(int frameIndex)
+        internal bool AdvancePageTransitions(
+            int frameIndex,
+            int maxTransitionStartsThisCall = MaxTransitionStartsPerFrame)
         {
-            if (frameIndex < 0 || m_TransitioningPageIndices.Count == 0)
+            if (frameIndex < 0)
                 return false;
 
             bool changed = false;
@@ -1011,6 +1037,18 @@ namespace VividRP.Runtime
                     frameIndex,
                     updateAffinity: false);
                 TouchTransitionAncestors(pageIndex, frameIndex);
+#if VT_DEBUG
+                VTDebugTransitionAncestor observedAncestor = ResolveDebugTransitionAncestor(pageIndex);
+                m_PhysicalPool.DebugValidatePageTransitionAncestor(
+                    m_SpaceId,
+                    pageIndex,
+                    m_PageMips[pageIndex],
+                    pageState.PhysicalPageId,
+                    pageState.Generation,
+                    frameIndex,
+                    pageState.TransitionPhase,
+                    observedAncestor);
+#endif
 
                 byte nextPhase = pageState.Locked
                     ? (byte)VirtualTexturePageTableEntry.MaxTransitionPhase
@@ -1023,6 +1061,8 @@ namespace VividRP.Runtime
                 bool phaseChanged = nextPhase != previousPhase;
                 pageState.TransitionPhase = nextPhase;
                 pageState.TransitionTracked = !completed;
+                if (completed)
+                    pageState.TransitionAncestorPageIndex = -1;
                 SetPageState(pageIndex, pageState);
                 if (completed)
                     m_TransitioningPageIndices.RemoveAt(transitionIndex);
@@ -1032,6 +1072,15 @@ namespace VividRP.Runtime
 
                 MarkPageTableDirty(pageIndex);
 #if VT_DEBUG
+                m_PhysicalPool.DebugNotifyPageTransitionPhase(
+                    m_SpaceId,
+                    pageIndex,
+                    m_PageMips[pageIndex],
+                    pageState.PhysicalPageId,
+                    pageState.Generation,
+                    frameIndex,
+                    previousPhase,
+                    nextPhase);
                 Debug.Log(
                     $"[VividRP][VT_DEBUG][PageTransitionPhase] space={m_Desc.SpaceName} "
                     + $"producer={m_ProducerName} frame={frameIndex} pageIndex={pageIndex} "
@@ -1041,7 +1090,12 @@ namespace VividRP.Runtime
                 changed = true;
             }
 
-            return changed;
+            return StartQueuedPageTransitions(frameIndex, maxTransitionStartsThisCall) || changed;
+        }
+
+        internal bool StartQueuedPageTransitionsOnly(int frameIndex, int maxStartsThisCall)
+        {
+            return StartQueuedPageTransitions(frameIndex, maxStartsThisCall);
         }
 
         internal static byte CalculateTransitionPhase(int residencyFrameIndex, int frameIndex)
@@ -1091,6 +1145,8 @@ namespace VividRP.Runtime
             pageState.PhysicalPageId = -1;
             pageState.TransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
             pageState.TransitionTracked = false;
+            pageState.TransitionQueued = false;
+            pageState.TransitionAncestorPageIndex = -1;
             SetPageState(pageIndex, pageState);
             RemovePendingRequest(pageIndex, generation);
             MarkPageTableDirty(pageIndex);
@@ -1103,6 +1159,7 @@ namespace VividRP.Runtime
             m_PendingRequests.Clear();
             m_DirtyPageTableUpdates.Clear();
             m_TransitioningPageIndices.Clear();
+            m_QueuedTransitionPageIndices.Clear();
             m_PageTableDirty = false;
 
             if (m_ClassificationInputs.IsCreated)
@@ -1342,7 +1399,7 @@ namespace VividRP.Runtime
                 pageState.PendingUpload = false;
                 pageState.Resident = true;
                 pageState.Locked = false;
-                BeginPageTransition(pageIndex, ref pageState, frameIndex);
+                SchedulePageTransition(pageIndex, ref pageState, frameIndex);
                 SetPageState(pageIndex, pageState);
                 m_ResidentPageCount += 1;
                 MarkPageTableDirty(pageIndex);
@@ -1654,7 +1711,7 @@ namespace VividRP.Runtime
             m_PageStateFlags[pageIndex] = flags;
         }
 
-        private void BeginPageTransition(
+        private void SchedulePageTransition(
             int pageIndex,
             ref VTPageRuntimeState pageState,
             int frameIndex)
@@ -1664,23 +1721,296 @@ namespace VividRP.Runtime
             {
                 pageState.TransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
                 pageState.TransitionTracked = false;
+                pageState.TransitionQueued = false;
+                pageState.TransitionAncestorPageIndex = -1;
                 return;
             }
 
             pageState.TransitionPhase = 0;
-            if (pageState.TransitionTracked)
+            if (pageState.TransitionTracked || pageState.TransitionQueued)
                 return;
 
+            pageState.TransitionQueued = true;
+            pageState.TransitionAncestorPageIndex = -1;
+            m_QueuedTransitionPageIndices.Add(pageIndex);
+            m_PhysicalPool.TrySetVisibilityPending(
+                pageState.PhysicalPageId,
+                pageState.Generation,
+                this,
+                pageIndex,
+                visibilityPending: true);
+        }
+
+        private void BeginPageTransition(
+            int pageIndex,
+            ref VTPageRuntimeState pageState,
+            int frameIndex,
+            int ancestorPageIndex)
+        {
+            pageState.LastAllocationFrame = frameIndex;
+            pageState.TransitionPhase = 0;
+            pageState.TransitionQueued = false;
+            pageState.TransitionAncestorPageIndex = ancestorPageIndex;
             pageState.TransitionTracked = true;
             m_TransitioningPageIndices.Add(pageIndex);
+            m_PhysicalPool.TrySetVisibilityPending(
+                pageState.PhysicalPageId,
+                pageState.Generation,
+                this,
+                pageIndex,
+                visibilityPending: false);
 #if VT_DEBUG
+            VTDebugTransitionAncestor ancestor = CreateDebugTransitionAncestor(ancestorPageIndex);
+            m_PhysicalPool.DebugNotifyPageTransitionBegin(
+                m_SpaceId,
+                pageIndex,
+                m_PageMips[pageIndex],
+                pageState.PhysicalPageId,
+                pageState.Generation,
+                frameIndex,
+                ancestor);
             Debug.Log(
                 $"[VividRP][VT_DEBUG][PageTransitionBegin] space={m_Desc.SpaceName} "
                 + $"producer={m_ProducerName} frame={frameIndex} pageIndex={pageIndex} "
                 + $"mip={m_PageMips[pageIndex]} slot={pageState.PhysicalPageId} "
-                + $"durationFrames={PageTransitionFrameCount}");
+                + $"ancestor={FormatDebugTransitionAncestor(in ancestor)} "
+                + $"cohortFrame={frameIndex} durationFrames={PageTransitionFrameCount}");
 #endif
         }
+
+        private bool StartQueuedPageTransitions(int frameIndex, int maxStartsThisCall)
+        {
+            if (frameIndex < 0
+                || maxStartsThisCall <= 0
+                || m_QueuedTransitionPageIndices.Count == 0)
+            {
+                return false;
+            }
+
+            bool changed = false;
+            int startedThisCall = 0;
+            while (startedThisCall < maxStartsThisCall)
+            {
+                int bestListIndex = -1;
+                int bestPageIndex = -1;
+                int bestAncestorPageIndex = -1;
+                int bestMip = int.MinValue;
+                for (int listIndex = m_QueuedTransitionPageIndices.Count - 1;
+                     listIndex >= 0;
+                     listIndex--)
+                {
+                    int pageIndex = m_QueuedTransitionPageIndices[listIndex];
+                    if (pageIndex < 0 || pageIndex >= m_PageStates.Length)
+                    {
+                        m_QueuedTransitionPageIndices.RemoveAt(listIndex);
+                        continue;
+                    }
+
+                    VTPageRuntimeState pageState = m_PageStates[pageIndex];
+                    if (!pageState.Resident || !pageState.TransitionQueued)
+                    {
+                        m_QueuedTransitionPageIndices.RemoveAt(listIndex);
+                        continue;
+                    }
+
+                    m_PhysicalPool.Touch(
+                        pageState.PhysicalPageId,
+                        VirtualTextureViewId.Invalid,
+                        frameIndex,
+                        updateAffinity: false);
+                    if (WouldChangeActiveTransitionAncestor(pageIndex)
+                        || !TryResolveStableTransitionStartAncestor(
+                            pageIndex,
+                            out int ancestorPageIndex))
+                    {
+                        continue;
+                    }
+
+                    int mip = m_PageMips[pageIndex];
+                    if (bestListIndex >= 0
+                        && (mip < bestMip || (mip == bestMip && pageIndex > bestPageIndex)))
+                    {
+                        continue;
+                    }
+
+                    bestListIndex = listIndex;
+                    bestPageIndex = pageIndex;
+                    bestAncestorPageIndex = ancestorPageIndex;
+                    bestMip = mip;
+                }
+
+                if (bestListIndex < 0)
+                    break;
+
+                if (!m_PhysicalPool.TryAcquireTransitionStart(
+                        frameIndex,
+                        MaxTransitionStartsPerFrame))
+                {
+                    break;
+                }
+
+                m_QueuedTransitionPageIndices.RemoveAt(bestListIndex);
+                VTPageRuntimeState bestPageState = m_PageStates[bestPageIndex];
+                if (!bestPageState.Resident || !bestPageState.TransitionQueued)
+                    continue;
+
+                BeginPageTransition(
+                    bestPageIndex,
+                    ref bestPageState,
+                    frameIndex,
+                    bestAncestorPageIndex);
+                SetPageState(bestPageIndex, bestPageState);
+                MarkPageTableDirty(bestPageIndex);
+                startedThisCall += 1;
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private bool TryResolveStableTransitionStartAncestor(
+            int pageIndex,
+            out int ancestorPageIndex)
+        {
+            ancestorPageIndex = -1;
+            GetPageLocalCoord(pageIndex, out int x, out int y, out int mip);
+            for (int parentMip = mip + 1; parentMip < m_Desc.MipCount; parentMip++)
+            {
+                x >>= 1;
+                y >>= 1;
+                int parentPageIndex = GetPageIndex(x, y, parentMip);
+                VTPageRuntimeState parentState = m_PageStates[parentPageIndex];
+                if (parentState.PendingUpload)
+                    return false;
+                if (!parentState.Resident)
+                    continue;
+                if (parentState.TransitionQueued
+                    || parentState.TransitionTracked
+                    || (!parentState.Locked
+                        && parentState.TransitionPhase
+                        < VirtualTexturePageTableEntry.MaxTransitionPhase))
+                {
+                    return false;
+                }
+
+                ancestorPageIndex = parentPageIndex;
+                return true;
+            }
+
+            return true;
+        }
+
+        private bool WouldChangeActiveTransitionAncestor(int candidatePageIndex)
+        {
+            int candidateMip = m_PageMips[candidatePageIndex];
+            for (int transitionIndex = 0;
+                 transitionIndex < m_TransitioningPageIndices.Count;
+                 transitionIndex++)
+            {
+                int childPageIndex = m_TransitioningPageIndices[transitionIndex];
+                if (childPageIndex < 0 || childPageIndex >= m_PageStates.Length)
+                    continue;
+
+                VTPageRuntimeState childState = m_PageStates[childPageIndex];
+                if (!childState.TransitionTracked
+                    || !IsAncestorPage(candidatePageIndex, childPageIndex))
+                {
+                    continue;
+                }
+
+                int currentAncestorPageIndex = childState.TransitionAncestorPageIndex;
+                if (currentAncestorPageIndex < 0
+                    || candidateMip < m_PageMips[currentAncestorPageIndex])
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsAncestorPage(int ancestorPageIndex, int descendantPageIndex)
+        {
+            int ancestorMip = m_PageMips[ancestorPageIndex];
+            int descendantMip = m_PageMips[descendantPageIndex];
+            if (ancestorMip <= descendantMip)
+                return false;
+
+            GetPageLocalCoord(ancestorPageIndex, out int ancestorX, out int ancestorY, out _);
+            GetPageLocalCoord(descendantPageIndex, out int descendantX, out int descendantY, out _);
+            int mipDelta = ancestorMip - descendantMip;
+            return descendantX >> mipDelta == ancestorX
+                   && descendantY >> mipDelta == ancestorY;
+        }
+
+        private int ResolveStableTransitionAncestorPageIndex(int pageIndex)
+        {
+            GetPageLocalCoord(pageIndex, out int x, out int y, out int mip);
+            for (int parentMip = mip + 1; parentMip < m_Desc.MipCount; parentMip++)
+            {
+                x >>= 1;
+                y >>= 1;
+                int parentPageIndex = GetPageIndex(x, y, parentMip);
+                VTPageRuntimeState parentState = m_PageStates[parentPageIndex];
+                if (!parentState.Resident || parentState.TransitionQueued)
+                    continue;
+                if (parentState.Locked
+                    || parentState.TransitionPhase >= VirtualTexturePageTableEntry.MaxTransitionPhase)
+                {
+                    return parentPageIndex;
+                }
+            }
+
+            return -1;
+        }
+
+        private void GetPageLocalCoord(int pageIndex, out int x, out int y, out int mip)
+        {
+            mip = m_PageMips[pageIndex];
+            int mipWidth = VirtualTextureSpaceUtility.GetPageCountX(
+                m_Desc.VirtualPageCountX,
+                mip);
+            int localIndex = pageIndex - m_MipOffsets[mip];
+            x = localIndex % mipWidth;
+            y = localIndex / mipWidth;
+        }
+
+        private int GetPageIndex(int x, int y, int mip)
+        {
+            int mipWidth = VirtualTextureSpaceUtility.GetPageCountX(
+                m_Desc.VirtualPageCountX,
+                mip);
+            return m_MipOffsets[mip] + y * mipWidth + x;
+        }
+
+#if VT_DEBUG
+        private VTDebugTransitionAncestor ResolveDebugTransitionAncestor(int pageIndex)
+        {
+            return CreateDebugTransitionAncestor(
+                ResolveStableTransitionAncestorPageIndex(pageIndex));
+        }
+
+        private VTDebugTransitionAncestor CreateDebugTransitionAncestor(int ancestorPageIndex)
+        {
+            if (ancestorPageIndex < 0 || ancestorPageIndex >= m_PageStates.Length)
+                return VTDebugTransitionAncestor.Invalid;
+
+            VTPageRuntimeState ancestorState = m_PageStates[ancestorPageIndex];
+            return new VTDebugTransitionAncestor(
+                ancestorPageIndex,
+                m_PageMips[ancestorPageIndex],
+                ancestorState.PhysicalPageId,
+                ancestorState.Generation);
+        }
+
+        private static string FormatDebugTransitionAncestor(
+            in VTDebugTransitionAncestor ancestor)
+        {
+            return ancestor.IsValid
+                ? $"(page:{ancestor.PageIndex},mip:{ancestor.Mip},slot:{ancestor.PhysicalPageId},generation:{ancestor.Generation})"
+                : "invalid";
+        }
+#endif
 
         private void TouchTransitionAncestors(int pageIndex, int frameIndex)
         {

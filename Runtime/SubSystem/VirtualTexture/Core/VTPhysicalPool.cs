@@ -477,6 +477,959 @@ namespace VividRP.Runtime
 
         internal long WeightedScore { get; }
     }
+
+    internal readonly struct VTDebugTransitionAncestor : IEquatable<VTDebugTransitionAncestor>
+    {
+        internal VTDebugTransitionAncestor(
+            int pageIndex,
+            int mip,
+            int physicalPageId,
+            int generation)
+        {
+            PageIndex = pageIndex;
+            Mip = mip;
+            PhysicalPageId = physicalPageId;
+            Generation = generation;
+        }
+
+        internal static VTDebugTransitionAncestor Invalid => new(-1, -1, -1, 0);
+
+        internal int PageIndex { get; }
+
+        internal int Mip { get; }
+
+        internal int PhysicalPageId { get; }
+
+        internal int Generation { get; }
+
+        internal bool IsValid => PageIndex >= 0 && PhysicalPageId >= 0 && Generation > 0;
+
+        public bool Equals(VTDebugTransitionAncestor other)
+        {
+            return PageIndex == other.PageIndex
+                   && Mip == other.Mip
+                   && PhysicalPageId == other.PhysicalPageId
+                   && Generation == other.Generation;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VTDebugTransitionAncestor other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(PageIndex, Mip, PhysicalPageId, Generation);
+        }
+    }
+
+    internal sealed class VTDebugPageTimelineDiagnostics
+    {
+        internal const int PendingCommitTimeoutFrames = 8;
+        internal const int TransitionTimeoutGraceFrames = 2;
+        internal const int CancelRetryWindowFrames = 4;
+        internal const int CommitBurstThreshold = 8;
+        internal const int TransitionBurstThreshold = 16;
+        internal const int VisibilityWaveThreshold = 16;
+
+        private enum PageStage : byte
+        {
+            Reserved,
+            Resident,
+            Transitioning,
+            Stable,
+            Replacing,
+        }
+
+        private readonly struct PageKey : IEquatable<PageKey>
+        {
+            internal PageKey(int spaceId, int pageIndex)
+            {
+                SpaceId = spaceId;
+                PageIndex = pageIndex;
+            }
+
+            internal int SpaceId { get; }
+
+            internal int PageIndex { get; }
+
+            public bool Equals(PageKey other)
+            {
+                return SpaceId == other.SpaceId && PageIndex == other.PageIndex;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is PageKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                return HashCode.Combine(SpaceId, PageIndex);
+            }
+        }
+
+        private sealed class PageTimeline
+        {
+            internal PageKey Key;
+            internal int Mip;
+            internal int Slot;
+            internal int Generation;
+            internal int ReserveFrame;
+            internal int CommitFrame = -1;
+            internal int TransitionFrame = -1;
+            internal byte LastTransitionPhase;
+            internal PageStage Stage;
+            internal bool Pending;
+            internal bool Locked;
+            internal bool PendingTimeoutReported;
+            internal bool TransitionTimeoutReported;
+            internal VTDebugTransitionAncestor TransitionAncestor;
+            internal int TransitionCohortFrame = -1;
+            internal VTPageRequestDebugInfo RequestDebugInfo;
+        }
+
+        private readonly struct CancelledReserve
+        {
+            internal CancelledReserve(
+                int frame,
+                int slot,
+                int generation,
+                int ageFrames,
+                VTPageRequestKind requestKind)
+            {
+                Frame = frame;
+                Slot = slot;
+                Generation = generation;
+                AgeFrames = ageFrames;
+                RequestKind = requestKind;
+            }
+
+            internal int Frame { get; }
+
+            internal int Slot { get; }
+
+            internal int Generation { get; }
+
+            internal int AgeFrames { get; }
+
+            internal VTPageRequestKind RequestKind { get; }
+        }
+
+        private sealed class FrameWave
+        {
+            internal int CommitCount;
+            internal int DemandCommitCount;
+            internal int RefinementCommitCount;
+            internal int NeighborCommitCount;
+            internal int TransitionCount;
+            internal int MinMip = int.MaxValue;
+            internal int MaxMip = int.MinValue;
+            internal long MaxWeightedScore;
+        }
+
+        private readonly string m_PoolName;
+        private readonly Action<string> m_ErrorReporter;
+        private readonly Action<string> m_TraceReporter;
+        private readonly Action<string> m_WarningReporter;
+        private readonly Dictionary<PageKey, PageTimeline> m_Pages = new();
+        private readonly Dictionary<int, int> m_SlotGenerations = new();
+        private readonly Dictionary<PageKey, CancelledReserve> m_CancelledReserves = new();
+        private readonly Dictionary<int, FrameWave> m_FrameWaves = new();
+        private readonly List<PageKey> m_KeysToRemove = new();
+        private int m_CurrentFrame = -1;
+
+        internal VTDebugPageTimelineDiagnostics(
+            string poolName,
+            Action<string> errorReporter = null,
+            Action<string> traceReporter = null,
+            Action<string> warningReporter = null)
+        {
+            m_PoolName = string.IsNullOrWhiteSpace(poolName) ? "Shared" : poolName;
+            m_ErrorReporter = errorReporter ?? Debug.LogError;
+            m_TraceReporter = traceReporter ?? Debug.Log;
+            m_WarningReporter = warningReporter ?? Debug.LogWarning;
+        }
+
+        internal int CurrentFrame => m_CurrentFrame;
+
+        internal void AdvanceFrame(int frameIndex)
+        {
+            if (frameIndex < 0)
+                return;
+
+            if (m_CurrentFrame >= 0 && frameIndex < m_CurrentFrame)
+            {
+                Report(
+                    "FrameRegression",
+                    frameIndex,
+                    null,
+                    $"previousFrame={m_CurrentFrame}>currentFrame={frameIndex}");
+                return;
+            }
+
+            if (frameIndex == m_CurrentFrame)
+                return;
+
+            if (m_CurrentFrame >= 0)
+                FinalizeFrameWaves(m_CurrentFrame);
+            m_CurrentFrame = frameIndex;
+            m_FrameWaves.Clear();
+            CheckTimeouts(frameIndex);
+            PruneCancelledReserves(frameIndex);
+        }
+
+        internal void OnReserve(
+            int slot,
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int generation,
+            int frameIndex,
+            bool pending,
+            bool locked,
+            in VTPageRequestDebugInfo requestDebugInfo)
+        {
+            ObserveFrame(frameIndex);
+            var key = new PageKey(spaceId, pageIndex);
+            if (m_SlotGenerations.TryGetValue(slot, out int activeGeneration)
+                && activeGeneration != generation)
+            {
+                Report(
+                    "SlotGenerationOverlap",
+                    frameIndex,
+                    null,
+                    $"slot={slot} activeGeneration={activeGeneration} newGeneration={generation} "
+                    + $"sequence=reserve(new) before release(old)");
+            }
+
+            if (m_Pages.TryGetValue(key, out PageTimeline existing)
+                && (existing.Slot != slot || existing.Generation != generation))
+            {
+                Report(
+                    "PageReservationOverlap",
+                    frameIndex,
+                    existing,
+                    $"newSlot={slot} newGeneration={generation} sequence={FormatSequence(existing)}>reserve(new)");
+            }
+
+            if (m_CancelledReserves.TryGetValue(key, out CancelledReserve cancelled))
+            {
+                int retryAge = frameIndex - cancelled.Frame;
+                if (retryAge >= 0 && retryAge <= CancelRetryWindowFrames)
+                {
+                    ReportWarning(
+                        "ReserveCancelRetryLoop",
+                        frameIndex,
+                        null,
+                        $"space={spaceId} pageIndex={pageIndex} mip={mip} oldSlot={cancelled.Slot} "
+                        + $"oldGeneration={cancelled.Generation} cancelFrame={cancelled.Frame} "
+                        + $"newSlot={slot} newGeneration={generation} retryAgeFrames={retryAge} "
+                        + $"cancelledAgeFrames={cancelled.AgeFrames} "
+                        + $"oldRequestKind={FormatRequestKind(cancelled.RequestKind)} "
+                        + $"newRequestKind={FormatRequestKind(requestDebugInfo.RequestKind)} "
+                        + $"sequence=reserve>cancel>reserve");
+                }
+
+                m_CancelledReserves.Remove(key);
+            }
+
+            m_SlotGenerations[slot] = generation;
+            m_Pages[key] = new PageTimeline
+            {
+                Key = key,
+                Mip = mip,
+                Slot = slot,
+                Generation = generation,
+                ReserveFrame = frameIndex,
+                Stage = pending ? PageStage.Reserved : PageStage.Resident,
+                Pending = pending,
+                Locked = locked,
+                RequestDebugInfo = requestDebugInfo,
+            };
+        }
+
+        internal void OnResidentAttach(
+            int slot,
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int generation,
+            int frameIndex,
+            bool locked)
+        {
+            ObserveFrame(frameIndex);
+            var key = new PageKey(spaceId, pageIndex);
+            m_SlotGenerations[slot] = generation;
+            m_Pages[key] = new PageTimeline
+            {
+                Key = key,
+                Mip = mip,
+                Slot = slot,
+                Generation = generation,
+                ReserveFrame = frameIndex,
+                CommitFrame = frameIndex,
+                Stage = PageStage.Resident,
+                Pending = false,
+                Locked = locked,
+            };
+        }
+
+        internal void OnResidentCommit(
+            int slot,
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int generation,
+            int frameIndex,
+            bool wasPending,
+            bool wasResident,
+            bool locked,
+            in VTPageRequestDebugInfo requestDebugInfo)
+        {
+            ObserveFrame(frameIndex);
+            var key = new PageKey(spaceId, pageIndex);
+            if (!m_Pages.TryGetValue(key, out PageTimeline timeline))
+            {
+                Report(
+                    "CommitWithoutReserve",
+                    frameIndex,
+                    null,
+                    $"space={spaceId} pageIndex={pageIndex} mip={mip} slot={slot} "
+                    + $"generation={generation} sequence=commit");
+                timeline = new PageTimeline
+                {
+                    Key = key,
+                    Mip = mip,
+                    Slot = slot,
+                    Generation = generation,
+                    ReserveFrame = frameIndex,
+                    RequestDebugInfo = requestDebugInfo,
+                };
+                m_Pages[key] = timeline;
+            }
+            else if (timeline.Slot != slot || timeline.Generation != generation)
+            {
+                Report(
+                    "CommitGenerationMismatch",
+                    frameIndex,
+                    timeline,
+                    $"commitSlot={slot} commitGeneration={generation} sequence={FormatSequence(timeline)}>commit(mismatch)");
+            }
+            else if (timeline.CommitFrame >= 0 || wasResident)
+            {
+                Report(
+                    "DuplicateCommit",
+                    frameIndex,
+                    timeline,
+                    $"wasPending={wasPending} wasResident={wasResident} sequence={FormatSequence(timeline)}>commit");
+            }
+
+            timeline.Mip = mip;
+            timeline.Slot = slot;
+            timeline.Generation = generation;
+            timeline.CommitFrame = frameIndex;
+            timeline.Stage = PageStage.Resident;
+            timeline.Pending = false;
+            timeline.Locked = locked;
+            timeline.RequestDebugInfo = requestDebugInfo;
+            RecordCommitWave(frameIndex, timeline);
+        }
+
+        internal void OnLockChanged(
+            int slot,
+            int spaceId,
+            int pageIndex,
+            int generation,
+            bool locked)
+        {
+            var key = new PageKey(spaceId, pageIndex);
+            if (!m_Pages.TryGetValue(key, out PageTimeline timeline)
+                || timeline.Slot != slot
+                || timeline.Generation != generation)
+            {
+                return;
+            }
+
+            timeline.Locked = locked;
+            if (!locked || timeline.Stage != PageStage.Transitioning)
+                return;
+
+            byte previousPhase = timeline.LastTransitionPhase;
+            timeline.LastTransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
+            timeline.Stage = PageStage.Stable;
+            m_TraceReporter(
+                $"[VividRP][VT_DEBUG][PageTransitionForcedStable] pool={m_PoolName} "
+                + $"frame={m_CurrentFrame} slot={slot} space={spaceId} pageIndex={pageIndex} "
+                + $"mip={timeline.Mip} generation={generation} phase={previousPhase}->"
+                + $"{VirtualTexturePageTableEntry.MaxTransitionPhase} reason=locked");
+        }
+
+        internal void OnTransitionBegin(
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int slot,
+            int generation,
+            int frameIndex,
+            VTDebugTransitionAncestor ancestor = default)
+        {
+            ObserveFrame(frameIndex);
+            var key = new PageKey(spaceId, pageIndex);
+            if (!m_Pages.TryGetValue(key, out PageTimeline timeline))
+            {
+                Report(
+                    "TransitionBeforeCommit",
+                    frameIndex,
+                    null,
+                    $"space={spaceId} pageIndex={pageIndex} mip={mip} slot={slot} "
+                    + $"generation={generation} sequence=transitionBegin");
+                return;
+            }
+
+            if (timeline.Slot != slot || timeline.Generation != generation)
+            {
+                Report(
+                    "TransitionGenerationMismatch",
+                    frameIndex,
+                    timeline,
+                    $"transitionSlot={slot} transitionGeneration={generation} "
+                    + $"sequence={FormatSequence(timeline)}>transitionBegin(mismatch)");
+                return;
+            }
+
+            if (timeline.Pending || timeline.CommitFrame < 0)
+            {
+                Report(
+                    "TransitionBeforeCommit",
+                    frameIndex,
+                    timeline,
+                    $"sequence={FormatSequence(timeline)}>transitionBegin");
+            }
+            else if (timeline.Stage == PageStage.Transitioning)
+            {
+                Report(
+                    "DuplicateTransitionBegin",
+                    frameIndex,
+                    timeline,
+                    $"sequence={FormatSequence(timeline)}>transitionBegin");
+            }
+
+            timeline.TransitionFrame = frameIndex;
+            timeline.TransitionCohortFrame = frameIndex;
+            timeline.TransitionAncestor = ancestor.IsValid
+                ? ancestor
+                : VTDebugTransitionAncestor.Invalid;
+            timeline.LastTransitionPhase = 0;
+            timeline.Stage = PageStage.Transitioning;
+        }
+
+        internal void OnTransitionAncestorObserved(
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int slot,
+            int generation,
+            int frameIndex,
+            byte phase,
+            in VTDebugTransitionAncestor ancestor)
+        {
+            ObserveFrame(frameIndex);
+            var key = new PageKey(spaceId, pageIndex);
+            if (!m_Pages.TryGetValue(key, out PageTimeline timeline)
+                || timeline.TransitionFrame < 0)
+            {
+                Report(
+                    "TransitionAncestorWithoutBegin",
+                    frameIndex,
+                    timeline,
+                    $"child=(space:{spaceId},page:{pageIndex},mip:{mip},slot:{slot},generation:{generation}) "
+                    + $"ancestor={FormatAncestor(in ancestor)} phase={phase} cohortFrame=unknown");
+                return;
+            }
+
+            if (timeline.Slot != slot || timeline.Generation != generation)
+            {
+                Report(
+                    "TransitionAncestorGenerationMismatch",
+                    frameIndex,
+                    timeline,
+                    $"childSlot={slot} childGeneration={generation} ancestor={FormatAncestor(in ancestor)} "
+                    + $"phase={phase} cohortFrame={timeline.TransitionCohortFrame}");
+                return;
+            }
+
+            if (timeline.TransitionAncestor.Equals(ancestor))
+                return;
+
+            VTDebugTransitionAncestor oldAncestor = timeline.TransitionAncestor;
+            Report(
+                "TransitionAncestorChanged",
+                frameIndex,
+                timeline,
+                $"child=(space:{spaceId},page:{pageIndex},mip:{mip},slot:{slot},generation:{generation}) "
+                + $"oldAncestor={FormatAncestor(in oldAncestor)} newAncestor={FormatAncestor(in ancestor)} "
+                + $"phase={phase} cohortFrame={timeline.TransitionCohortFrame} "
+                + $"sequence={FormatSequence(timeline)}>ancestorChanged");
+            timeline.TransitionAncestor = ancestor;
+        }
+
+        internal void OnTransitionPhase(
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int slot,
+            int generation,
+            int frameIndex,
+            byte previousPhase,
+            byte nextPhase)
+        {
+            ObserveFrame(frameIndex);
+            var key = new PageKey(spaceId, pageIndex);
+            if (!m_Pages.TryGetValue(key, out PageTimeline timeline)
+                || timeline.TransitionFrame < 0)
+            {
+                Report(
+                    "TransitionPhaseWithoutBegin",
+                    frameIndex,
+                    timeline,
+                    $"space={spaceId} pageIndex={pageIndex} mip={mip} slot={slot} "
+                    + $"generation={generation} phase={previousPhase}->{nextPhase} sequence=transitionPhase");
+                return;
+            }
+
+            if (timeline.Slot != slot || timeline.Generation != generation)
+            {
+                Report(
+                    "TransitionPhaseGenerationMismatch",
+                    frameIndex,
+                    timeline,
+                    $"phaseSlot={slot} phaseGeneration={generation} phase={previousPhase}->{nextPhase} "
+                    + $"sequence={FormatSequence(timeline)}>phase(mismatch)");
+                return;
+            }
+
+            if (timeline.LastTransitionPhase != previousPhase)
+            {
+                Report(
+                    "TransitionPhaseDiscontinuity",
+                    frameIndex,
+                    timeline,
+                    $"trackedPhase={timeline.LastTransitionPhase} loggedPhase={previousPhase}->{nextPhase} "
+                    + $"sequence={FormatSequence(timeline)}>phase(discontinuous)");
+            }
+
+            if (nextPhase <= previousPhase || nextPhase > previousPhase + 1)
+            {
+                Report(
+                    "TransitionPhaseJump",
+                    frameIndex,
+                    timeline,
+                    $"phase={previousPhase}->{nextPhase} ageFrames={frameIndex - timeline.TransitionFrame} "
+                    + $"sequence={FormatSequence(timeline)}>phase(jump)");
+            }
+
+            timeline.LastTransitionPhase = nextPhase;
+            timeline.Stage = nextPhase >= VirtualTexturePageTableEntry.MaxTransitionPhase
+                ? PageStage.Stable
+                : PageStage.Transitioning;
+            RecordTransitionWave(frameIndex, timeline);
+        }
+
+        internal void OnReplacementBegin(
+            int slot,
+            int spaceId,
+            int pageIndex,
+            int generation,
+            int frameIndex)
+        {
+            ObserveFrame(frameIndex);
+            var key = new PageKey(spaceId, pageIndex);
+            if (!m_Pages.TryGetValue(key, out PageTimeline timeline))
+                return;
+
+            if (timeline.Pending)
+            {
+                Report(
+                    "ReplacePendingPage",
+                    frameIndex,
+                    timeline,
+                    $"sequence={FormatSequence(timeline)}>replaceBegin");
+            }
+            else if (timeline.Stage == PageStage.Transitioning)
+            {
+                Report(
+                    "ReplaceTransitioningPage",
+                    frameIndex,
+                    timeline,
+                    $"phase={timeline.LastTransitionPhase} sequence={FormatSequence(timeline)}>replaceBegin");
+            }
+
+            timeline.Stage = PageStage.Replacing;
+        }
+
+        internal void OnReplacementInvalidation(
+            int slot,
+            int spaceId,
+            int pageIndex,
+            int generation,
+            int frameIndex,
+            bool accepted)
+        {
+            ObserveFrame(frameIndex);
+            var key = new PageKey(spaceId, pageIndex);
+            m_Pages.TryGetValue(key, out PageTimeline timeline);
+            if (accepted)
+            {
+                if (timeline?.Stage == PageStage.Transitioning)
+                {
+                    Report(
+                        "ReplaceTransitioningBinding",
+                        frameIndex,
+                        timeline,
+                        $"phase={timeline.LastTransitionPhase} "
+                        + $"sequence={FormatSequence(timeline)}>replaceInvalidate");
+                }
+
+                return;
+            }
+
+            Report(
+                "ReplacementInvalidationRejected",
+                frameIndex,
+                timeline,
+                $"space={spaceId} pageIndex={pageIndex} slot={slot} generation={generation} "
+                + $"sequence={FormatSequence(timeline)}>replaceInvalidate(rejected)");
+        }
+
+        internal void OnReplacementCommit(
+            int slot,
+            int oldGeneration,
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int newGeneration,
+            int frameIndex,
+            bool pending,
+            bool locked,
+            in VTPageRequestDebugInfo requestDebugInfo)
+        {
+            ObserveFrame(frameIndex);
+            if (m_SlotGenerations.TryGetValue(slot, out int activeGeneration)
+                && activeGeneration != oldGeneration)
+            {
+                Report(
+                    "ReplacementCommitWithoutMatchingBegin",
+                    frameIndex,
+                    null,
+                    $"slot={slot} expectedOldGeneration={oldGeneration} activeGeneration={activeGeneration} "
+                    + $"newGeneration={newGeneration} sequence=replaceCommit");
+            }
+
+            OnReserve(
+                slot,
+                spaceId,
+                pageIndex,
+                mip,
+                newGeneration,
+                frameIndex,
+                pending,
+                locked,
+                requestDebugInfo);
+        }
+
+        internal void OnSlotReleased(
+            int slot,
+            int generation,
+            int frameIndex,
+            bool releaseToFreeList)
+        {
+            ObserveFrame(frameIndex);
+            m_KeysToRemove.Clear();
+            foreach (KeyValuePair<PageKey, PageTimeline> pair in m_Pages)
+            {
+                PageTimeline timeline = pair.Value;
+                if (timeline.Slot != slot || timeline.Generation != generation)
+                    continue;
+
+                if (timeline.Pending && releaseToFreeList)
+                {
+                    int ageFrames = Math.Max(0, frameIndex - timeline.ReserveFrame);
+                    string trace =
+                        $"[VividRP][VT_DEBUG][PageReserveCancel] pool={m_PoolName} frame={frameIndex} "
+                        + $"slot={slot} space={timeline.Key.SpaceId} pageIndex={timeline.Key.PageIndex} "
+                        + $"mip={timeline.Mip} generation={generation} ageFrames={ageFrames} "
+                        + $"{FormatRequest(in timeline.RequestDebugInfo)}";
+                    m_TraceReporter(trace);
+                    m_CancelledReserves[timeline.Key] = new CancelledReserve(
+                        frameIndex,
+                        slot,
+                        generation,
+                        ageFrames,
+                        timeline.RequestDebugInfo.RequestKind);
+
+                    if (timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Demand
+                        || timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Refinement
+                        || timeline.RequestDebugInfo.RequestKind == VTPageRequestKind.Locked)
+                    {
+                        Report(
+                            "PendingDemandCancelled",
+                            frameIndex,
+                            timeline,
+                            $"ageFrames={ageFrames} sequence={FormatSequence(timeline)}>cancel");
+                    }
+                }
+
+                m_KeysToRemove.Add(pair.Key);
+            }
+
+            for (int keyIndex = 0; keyIndex < m_KeysToRemove.Count; keyIndex++)
+                m_Pages.Remove(m_KeysToRemove[keyIndex]);
+
+            if (m_SlotGenerations.TryGetValue(slot, out int activeGeneration)
+                && activeGeneration == generation)
+            {
+                m_SlotGenerations.Remove(slot);
+            }
+        }
+
+        internal void OnSharedBindingReleased(
+            int slot,
+            int spaceId,
+            int pageIndex,
+            int generation)
+        {
+            var key = new PageKey(spaceId, pageIndex);
+            if (!m_Pages.TryGetValue(key, out PageTimeline timeline)
+                || timeline.Slot != slot
+                || timeline.Generation != generation)
+            {
+                return;
+            }
+
+            m_Pages.Remove(key);
+        }
+
+        internal void Reset()
+        {
+            m_Pages.Clear();
+            m_SlotGenerations.Clear();
+            m_CancelledReserves.Clear();
+            m_FrameWaves.Clear();
+            m_KeysToRemove.Clear();
+            m_CurrentFrame = -1;
+        }
+
+        private void ObserveFrame(int frameIndex)
+        {
+            if (frameIndex >= 0 && frameIndex != m_CurrentFrame)
+                AdvanceFrame(frameIndex);
+        }
+
+        private void CheckTimeouts(int frameIndex)
+        {
+            foreach (PageTimeline timeline in m_Pages.Values)
+            {
+                if (timeline.Pending
+                    && !timeline.PendingTimeoutReported
+                    && frameIndex - timeline.ReserveFrame > PendingCommitTimeoutFrames)
+                {
+                    timeline.PendingTimeoutReported = true;
+                    Report(
+                        "CommitTimeout",
+                        frameIndex,
+                        timeline,
+                        $"ageFrames={frameIndex - timeline.ReserveFrame} "
+                        + $"timeoutFrames={PendingCommitTimeoutFrames} sequence={FormatSequence(timeline)}>timeout");
+                }
+
+                if (timeline.Stage == PageStage.Transitioning
+                    && !timeline.TransitionTimeoutReported
+                    && frameIndex - timeline.TransitionFrame
+                        > VTResidencyManager.PageTransitionFrameCount + TransitionTimeoutGraceFrames)
+                {
+                    timeline.TransitionTimeoutReported = true;
+                    Report(
+                        "TransitionTimeout",
+                        frameIndex,
+                        timeline,
+                        $"phase={timeline.LastTransitionPhase} ageFrames={frameIndex - timeline.TransitionFrame} "
+                        + $"sequence={FormatSequence(timeline)}>timeout");
+                }
+            }
+        }
+
+        private void PruneCancelledReserves(int frameIndex)
+        {
+            m_KeysToRemove.Clear();
+            foreach (KeyValuePair<PageKey, CancelledReserve> pair in m_CancelledReserves)
+            {
+                if (frameIndex - pair.Value.Frame > CancelRetryWindowFrames)
+                    m_KeysToRemove.Add(pair.Key);
+            }
+
+            for (int keyIndex = 0; keyIndex < m_KeysToRemove.Count; keyIndex++)
+                m_CancelledReserves.Remove(m_KeysToRemove[keyIndex]);
+        }
+
+        private void RecordCommitWave(int frameIndex, PageTimeline timeline)
+        {
+            VTPageRequestKind requestKind = timeline.RequestDebugInfo.RequestKind;
+            if (timeline.Locked
+                || requestKind == VTPageRequestKind.Bootstrap
+                || requestKind == VTPageRequestKind.Locked)
+            {
+                return;
+            }
+
+            FrameWave wave = GetFrameWave(timeline.Key.SpaceId);
+            wave.CommitCount += 1;
+            AccumulateWaveDetails(wave, timeline);
+            switch (requestKind)
+            {
+                case VTPageRequestKind.Demand:
+                    wave.DemandCommitCount += 1;
+                    break;
+                case VTPageRequestKind.Refinement:
+                    wave.RefinementCommitCount += 1;
+                    break;
+                case VTPageRequestKind.Neighbor:
+                    wave.NeighborCommitCount += 1;
+                    break;
+            }
+
+        }
+
+        private void RecordTransitionWave(int frameIndex, PageTimeline timeline)
+        {
+            FrameWave wave = GetFrameWave(timeline.Key.SpaceId);
+            wave.TransitionCount += 1;
+            AccumulateWaveDetails(wave, timeline);
+        }
+
+        private FrameWave GetFrameWave(int spaceId)
+        {
+            if (!m_FrameWaves.TryGetValue(spaceId, out FrameWave wave))
+            {
+                wave = new FrameWave();
+                m_FrameWaves.Add(spaceId, wave);
+            }
+
+            return wave;
+        }
+
+        private void FinalizeFrameWaves(int frameIndex)
+        {
+            foreach (KeyValuePair<int, FrameWave> pair in m_FrameWaves)
+            {
+                int spaceId = pair.Key;
+                FrameWave wave = pair.Value;
+                if (wave.CommitCount >= CommitBurstThreshold)
+                    ReportWaveWarning("CommitBurst", frameIndex, spaceId, wave);
+                if (wave.TransitionCount >= TransitionBurstThreshold)
+                    ReportWaveWarning("TransitionBurst", frameIndex, spaceId, wave);
+                if (wave.CommitCount > 0
+                    && wave.TransitionCount > 0
+                    && wave.CommitCount + wave.TransitionCount >= VisibilityWaveThreshold)
+                {
+                    ReportWaveWarning("VisibilityWaveOverlap", frameIndex, spaceId, wave);
+                }
+            }
+        }
+
+        private static void AccumulateWaveDetails(FrameWave wave, PageTimeline timeline)
+        {
+            wave.MinMip = Math.Min(wave.MinMip, timeline.Mip);
+            wave.MaxMip = Math.Max(wave.MaxMip, timeline.Mip);
+            wave.MaxWeightedScore = Math.Max(
+                wave.MaxWeightedScore,
+                timeline.RequestDebugInfo.WeightedScore);
+        }
+
+        private void ReportWaveWarning(string code, int frameIndex, int spaceId, FrameWave wave)
+        {
+            ReportWarning(
+                code,
+                frameIndex,
+                null,
+                $"space={spaceId} commits={wave.CommitCount} transitions={wave.TransitionCount} "
+                + $"demandCommits={wave.DemandCommitCount} refinementCommits={wave.RefinementCommitCount} "
+                + $"neighborCommits={wave.NeighborCommitCount} "
+                + $"mipRange={FormatMipRange(wave)} maxWeightedScore={wave.MaxWeightedScore} "
+                + $"sequence=frameWave(commit+transitionPhase)");
+        }
+
+        private static string FormatMipRange(FrameWave wave)
+        {
+            return wave.MinMip == int.MaxValue
+                ? "unknown"
+                : $"{wave.MinMip}-{wave.MaxMip}";
+        }
+
+        private void Report(string code, int frameIndex, PageTimeline timeline, string details)
+        {
+            string pageDetails = timeline == null
+                ? string.Empty
+                : $" space={timeline.Key.SpaceId} pageIndex={timeline.Key.PageIndex} mip={timeline.Mip} "
+                  + $"slot={timeline.Slot} generation={timeline.Generation} "
+                  + $"{FormatRequest(in timeline.RequestDebugInfo)}";
+            m_ErrorReporter(
+                $"[VividRP][VT_DEBUG][TimelineError] code={code} pool={m_PoolName} "
+                + $"frame={frameIndex}{pageDetails} {details}");
+        }
+
+        private void ReportWarning(string code, int frameIndex, PageTimeline timeline, string details)
+        {
+            string pageDetails = timeline == null
+                ? string.Empty
+                : $" space={timeline.Key.SpaceId} pageIndex={timeline.Key.PageIndex} mip={timeline.Mip} "
+                  + $"slot={timeline.Slot} generation={timeline.Generation} "
+                  + $"{FormatRequest(in timeline.RequestDebugInfo)}";
+            m_WarningReporter(
+                $"[VividRP][VT_DEBUG][TimelineWarning] code={code} pool={m_PoolName} "
+                + $"frame={frameIndex}{pageDetails} {details}");
+        }
+
+        private static string FormatAncestor(in VTDebugTransitionAncestor ancestor)
+        {
+            return ancestor.IsValid
+                ? $"(page:{ancestor.PageIndex},mip:{ancestor.Mip},slot:{ancestor.PhysicalPageId},generation:{ancestor.Generation})"
+                : "invalid";
+        }
+
+        private static string FormatSequence(PageTimeline timeline)
+        {
+            if (timeline == null)
+                return "unknown";
+
+            string sequence = $"reserve@{timeline.ReserveFrame}";
+            if (timeline.CommitFrame >= 0)
+                sequence += $">commit@{timeline.CommitFrame}";
+            if (timeline.TransitionFrame >= 0)
+                sequence += $">transition@{timeline.TransitionFrame}>phase{timeline.LastTransitionPhase}";
+            return sequence;
+        }
+
+        private static string FormatRequest(in VTPageRequestDebugInfo debugInfo)
+        {
+            return $"requestKind={FormatRequestKind(debugInfo.RequestKind)} "
+                   + $"sourceCoord={debugInfo.SourceCoord} effectiveCoord={debugInfo.EffectiveCoord} "
+                   + $"mipGap={debugInfo.MipGap} weightedScore={debugInfo.WeightedScore}";
+        }
+
+        private static string FormatRequestKind(VTPageRequestKind requestKind)
+        {
+            return requestKind switch
+            {
+                VTPageRequestKind.Bootstrap => "bootstrap",
+                VTPageRequestKind.Locked => "locked",
+                VTPageRequestKind.Demand => "demand",
+                VTPageRequestKind.Refinement => "refinement",
+                VTPageRequestKind.Neighbor => "neighbor",
+                _ => "unknown",
+            };
+        }
+    }
 #endif
 
     internal sealed class VTPhysicalPool : IDisposable
@@ -490,6 +1443,7 @@ namespace VividRP.Runtime
             public int SpaceId;
             public int VirtualPageIndex;
             public bool Locked;
+            public bool VisibilityPending;
         }
 
         private struct PhysicalPageSlotState
@@ -507,6 +1461,7 @@ namespace VividRP.Runtime
             public bool Resident;
             public bool PendingUpload;
             public bool Locked;
+            public bool VisibilityPending;
 #if VT_DEBUG
             public VTPageRequestDebugInfo RequestDebugInfo;
 #endif
@@ -527,11 +1482,14 @@ namespace VividRP.Runtime
         private readonly long m_BytesPerPhysicalPage;
 #if VT_DEBUG
         private readonly string m_DebugName;
+        private readonly VTDebugPageTimelineDiagnostics m_DebugTimeline;
 #endif
 
         private int m_NextGeneration;
         private int m_RefCount;
         private int m_EvictedPageCount;
+        private int m_LastTransitionStartFrame = int.MinValue;
+        private int m_TransitionStartsThisFrame;
 
         internal VTPhysicalPool(string name, in VTPhysicalPoolDesc desc)
         {
@@ -540,6 +1498,7 @@ namespace VividRP.Runtime
             m_PoolName = poolName;
 #if VT_DEBUG
             m_DebugName = poolName;
+            m_DebugTimeline = new VTDebugPageTimelineDiagnostics(poolName);
 #endif
             m_Slots = new PhysicalPageSlotState[Mathf.Max(1, desc.PageCount)];
             for (int slotIndex = 0; slotIndex < m_Slots.Length; slotIndex++)
@@ -711,12 +1670,108 @@ namespace VividRP.Runtime
         internal void ResetRuntimeState()
         {
             m_EvictedPageCount = 0;
+            m_LastTransitionStartFrame = int.MinValue;
+            m_TransitionStartsThisFrame = 0;
+#if VT_DEBUG
+            m_DebugTimeline.Reset();
+#endif
             RecreatePhysicalTextures();
         }
+
+#if VT_DEBUG
+        internal void DebugAdvanceTimelineFrame(int frameIndex)
+        {
+            m_DebugTimeline.AdvanceFrame(frameIndex);
+        }
+
+        internal void DebugResetTimeline()
+        {
+            m_DebugTimeline.Reset();
+        }
+
+        internal void DebugNotifyPageTransitionBegin(
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int physicalPageId,
+            int generation,
+            int frameIndex,
+            in VTDebugTransitionAncestor ancestor)
+        {
+            m_DebugTimeline.OnTransitionBegin(
+                spaceId,
+                pageIndex,
+                mip,
+                physicalPageId,
+                generation,
+                frameIndex,
+                ancestor);
+        }
+
+        internal void DebugValidatePageTransitionAncestor(
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int physicalPageId,
+            int generation,
+            int frameIndex,
+            byte phase,
+            in VTDebugTransitionAncestor ancestor)
+        {
+            m_DebugTimeline.OnTransitionAncestorObserved(
+                spaceId,
+                pageIndex,
+                mip,
+                physicalPageId,
+                generation,
+                frameIndex,
+                phase,
+                ancestor);
+        }
+
+        internal void DebugNotifyPageTransitionPhase(
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int physicalPageId,
+            int generation,
+            int frameIndex,
+            byte previousPhase,
+            byte nextPhase)
+        {
+            m_DebugTimeline.OnTransitionPhase(
+                spaceId,
+                pageIndex,
+                mip,
+                physicalPageId,
+                generation,
+                frameIndex,
+                previousPhase,
+                nextPhase);
+        }
+#endif
 
         internal long AllocatedByteCount => m_AllocatedByteCount;
 
         internal long ResidentByteCount => checked((long)ResidentPageCount * m_BytesPerPhysicalPage);
+
+        internal bool TryAcquireTransitionStart(int frameIndex, int maxStartsPerFrame)
+        {
+            if (frameIndex < 0 || maxStartsPerFrame <= 0)
+                return false;
+
+            if (m_LastTransitionStartFrame != frameIndex)
+            {
+                m_LastTransitionStartFrame = frameIndex;
+                m_TransitionStartsThisFrame = 0;
+            }
+
+            if (m_TransitionStartsThisFrame >= maxStartsPerFrame)
+                return false;
+
+            m_TransitionStartsThisFrame += 1;
+            return true;
+        }
 
         internal void AddRef()
         {
@@ -810,6 +1865,7 @@ namespace VividRP.Runtime
             slotState.Resident = !pendingUpload;
             slotState.PendingUpload = pendingUpload;
             slotState.Locked = locked;
+            slotState.VisibilityPending = false;
 #if VT_DEBUG
             slotState.RequestDebugInfo = requestDebugInfo;
 #endif
@@ -886,6 +1942,16 @@ namespace VividRP.Runtime
 
             AddBinding(physicalPageId, owner, pageIndex, locked);
             Touch(physicalPageId, viewId, frameIndex, HasViewAffinity(viewId));
+#if VT_DEBUG
+            LogPageResidentAttach(
+                physicalPageId,
+                owner.SpaceId,
+                pageIndex,
+                pageCoord.Mip,
+                generation,
+                frameIndex,
+                locked);
+#endif
             return true;
         }
 
@@ -962,6 +2028,46 @@ namespace VividRP.Runtime
                 return false;
 
             slotState.Locked = IsAnyBindingLocked(physicalPageId);
+            m_Slots[physicalPageId] = slotState;
+#if VT_DEBUG
+            m_DebugTimeline.OnLockChanged(
+                physicalPageId,
+                owner?.SpaceId ?? slotState.SpaceId,
+                pageIndex,
+                generation,
+                locked);
+#endif
+            return true;
+        }
+
+        internal bool TrySetVisibilityPending(
+            int physicalPageId,
+            int generation,
+            IVTPhysicalPoolOwner owner,
+            int pageIndex,
+            bool visibilityPending)
+        {
+            if (!TryGetSlot(physicalPageId, generation, out PhysicalPageSlotState slotState))
+                return false;
+
+            List<PhysicalPageBinding> bindings = m_Bindings[physicalPageId];
+            bool found = false;
+            for (int bindingIndex = 0; bindingIndex < bindings.Count; bindingIndex++)
+            {
+                PhysicalPageBinding binding = bindings[bindingIndex];
+                if (!ReferenceEquals(binding.Owner, owner) || binding.VirtualPageIndex != pageIndex)
+                    continue;
+
+                binding.VisibilityPending = visibilityPending;
+                bindings[bindingIndex] = binding;
+                found = true;
+                break;
+            }
+
+            if (!found)
+                return false;
+
+            slotState.VisibilityPending = IsAnyBindingVisibilityPending(physicalPageId);
             m_Slots[physicalPageId] = slotState;
             return true;
         }
@@ -1067,6 +2173,9 @@ namespace VividRP.Runtime
 
         public void Dispose()
         {
+#if VT_DEBUG
+            m_DebugTimeline.Reset();
+#endif
             m_LruPhysicalPages.Clear();
             m_PhysicalPageLookup.Clear();
             m_FreePhysicalPages.Clear();
@@ -1214,6 +2323,7 @@ namespace VividRP.Runtime
                 SpaceId = owner.SpaceId,
                 VirtualPageIndex = pageIndex,
                 Locked = locked,
+                VisibilityPending = false,
             });
 
             PhysicalPageSlotState slotState = m_Slots[physicalPageId];
@@ -1263,6 +2373,18 @@ namespace VividRP.Runtime
             return false;
         }
 
+        private bool IsAnyBindingVisibilityPending(int physicalPageId)
+        {
+            List<PhysicalPageBinding> bindings = m_Bindings[physicalPageId];
+            for (int bindingIndex = 0; bindingIndex < bindings.Count; bindingIndex++)
+            {
+                if (bindings[bindingIndex].VisibilityPending)
+                    return true;
+            }
+
+            return false;
+        }
+
         private bool HasBindingForSpace(int physicalPageId, int spaceId)
         {
             List<PhysicalPageBinding> bindings = m_Bindings[physicalPageId];
@@ -1302,6 +2424,16 @@ namespace VividRP.Runtime
                     continue;
 
                 binding.Owner?.OnPhysicalPageInvalidated(binding.VirtualPageIndex, generation);
+#if VT_DEBUG
+                if (bindings.Count > 1)
+                {
+                    m_DebugTimeline.OnSharedBindingReleased(
+                        physicalPageId,
+                        binding.SpaceId,
+                        binding.VirtualPageIndex,
+                        generation);
+                }
+#endif
                 bindings.RemoveAt(bindingIndex);
                 flushedCount += 1;
             }
@@ -1352,6 +2484,13 @@ namespace VividRP.Runtime
                     Debug.Log(message);
                 else
                     Debug.LogWarning(message);
+                m_DebugTimeline.OnReplacementInvalidation(
+                    physicalPageId,
+                    binding.SpaceId,
+                    binding.VirtualPageIndex,
+                    generation,
+                    frameIndex,
+                    invalidated);
             }
         }
 
@@ -1373,6 +2512,12 @@ namespace VividRP.Runtime
             bool newPendingUpload,
             in VTPageRequestDebugInfo requestDebugInfo)
         {
+            m_DebugTimeline.OnReplacementBegin(
+                physicalPageId,
+                oldSlot.SpaceId,
+                oldSlot.VirtualPageIndex,
+                oldSlot.Generation,
+                frameIndex);
             Debug.Log(
                 $"[VividRP][VT_DEBUG][PageReplaceBegin] pool={m_DebugName} frame={frameIndex} slot={physicalPageId} "
                 + $"old=(space:{oldSlot.SpaceId},pageIndex:{oldSlot.VirtualPageIndex},mip:{oldSlot.VirtualPageMip},"
@@ -1395,6 +2540,17 @@ namespace VividRP.Runtime
             in PhysicalPageSlotState newSlot,
             int frameIndex)
         {
+            m_DebugTimeline.OnReplacementCommit(
+                physicalPageId,
+                oldSlot.Generation,
+                newSlot.SpaceId,
+                newSlot.VirtualPageIndex,
+                newSlot.VirtualPageMip,
+                newSlot.Generation,
+                frameIndex,
+                newSlot.PendingUpload,
+                newSlot.Locked,
+                newSlot.RequestDebugInfo);
             Debug.Log(
                 $"[VividRP][VT_DEBUG][PageReplaceCommit] pool={m_DebugName} frame={frameIndex} slot={physicalPageId} "
                 + $"old=(space:{oldSlot.SpaceId},pageIndex:{oldSlot.VirtualPageIndex},mip:{oldSlot.VirtualPageMip},"
@@ -1414,6 +2570,16 @@ namespace VividRP.Runtime
             VirtualTextureViewId allocationViewId,
             int frameIndex)
         {
+            m_DebugTimeline.OnReserve(
+                physicalPageId,
+                slot.SpaceId,
+                slot.VirtualPageIndex,
+                slot.VirtualPageMip,
+                slot.Generation,
+                frameIndex,
+                slot.PendingUpload,
+                slot.Locked,
+                slot.RequestDebugInfo);
             Debug.Log(
                 $"[VividRP][VT_DEBUG][PageFillReserve] pool={m_DebugName} frame={frameIndex} slot={physicalPageId} "
                 + $"space={slot.SpaceId} pageIndex={slot.VirtualPageIndex} mip={slot.VirtualPageMip} "
@@ -1438,6 +2604,17 @@ namespace VividRP.Runtime
             int latencyFrames = resolvedCommitFrameIndex >= 0 && allocationFrameIndex >= 0
                 ? Mathf.Max(0, resolvedCommitFrameIndex - allocationFrameIndex)
                 : -1;
+            m_DebugTimeline.OnResidentCommit(
+                physicalPageId,
+                slot.SpaceId,
+                slot.VirtualPageIndex,
+                slot.VirtualPageMip,
+                slot.Generation,
+                resolvedCommitFrameIndex,
+                wasPendingUpload,
+                wasResident,
+                slot.Locked,
+                slot.RequestDebugInfo);
             Debug.Log(
                 $"[VividRP][VT_DEBUG][PageResidentCommit] pool={m_DebugName} frame={resolvedCommitFrameIndex} slot={physicalPageId} "
                 + $"space={slot.SpaceId} pageIndex={slot.VirtualPageIndex} mip={slot.VirtualPageMip} "
@@ -1466,6 +2643,29 @@ namespace VividRP.Runtime
                    + $"weightedScore={debugInfo.WeightedScore}";
         }
 
+        private void LogPageResidentAttach(
+            int physicalPageId,
+            int spaceId,
+            int pageIndex,
+            int mip,
+            int generation,
+            int frameIndex,
+            bool locked)
+        {
+            m_DebugTimeline.OnResidentAttach(
+                physicalPageId,
+                spaceId,
+                pageIndex,
+                mip,
+                generation,
+                frameIndex,
+                locked);
+            Debug.Log(
+                $"[VividRP][VT_DEBUG][PageResidentAttach] pool={m_DebugName} frame={frameIndex} "
+                + $"slot={physicalPageId} space={spaceId} pageIndex={pageIndex} mip={mip} "
+                + $"generation={generation} locked={locked}");
+        }
+
         private static string FormatProducer(VTProducerHandle producerHandle, string producerName)
         {
             string name = string.IsNullOrEmpty(producerName) ? "<unnamed>" : producerName;
@@ -1489,12 +2689,23 @@ namespace VividRP.Runtime
             slotState.SpaceId = primary.SpaceId;
             slotState.VirtualPageIndex = primary.VirtualPageIndex;
             slotState.Locked = locked;
+            slotState.VisibilityPending = IsAnyBindingVisibilityPending(physicalPageId);
             m_Slots[physicalPageId] = slotState;
         }
 
         private void ClearPhysicalPage(int physicalPageId, bool releaseToFreeList)
         {
             PhysicalPageSlotState slotState = m_Slots[physicalPageId];
+#if VT_DEBUG
+            int diagnosticFrameIndex = m_DebugTimeline.CurrentFrame >= 0
+                ? m_DebugTimeline.CurrentFrame
+                : slotState.LastAllocationFrame;
+            m_DebugTimeline.OnSlotReleased(
+                physicalPageId,
+                slotState.Generation,
+                diagnosticFrameIndex,
+                releaseToFreeList);
+#endif
             RemovePhysicalPageLookup(physicalPageId, slotState.Identity);
             slotState.Owner = null;
             slotState.SpaceId = 0;
@@ -1509,6 +2720,7 @@ namespace VividRP.Runtime
             slotState.Resident = false;
             slotState.PendingUpload = false;
             slotState.Locked = false;
+            slotState.VisibilityPending = false;
 #if VT_DEBUG
             slotState.RequestDebugInfo = default;
 #endif
@@ -1667,6 +2879,7 @@ namespace VividRP.Runtime
                        || frameIndex - slotState.LastAsyncCommitFrame
                        >= AsyncCommitEvictionProtectionFrames)
                    && !slotState.PendingUpload
+                   && !slotState.VisibilityPending
                    && !slotState.Locked;
         }
 

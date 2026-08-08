@@ -18,6 +18,7 @@ namespace VividRP.Runtime
         private static readonly VTProducerRegistry s_ProducerRegistry = new();
         private static readonly VirtualTextureFeedbackCameraSystem s_FeedbackCameraSystem = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_CompletedReadbacks = new();
+        private static readonly List<VTPageTableSpace> s_TransitionSchedulingSpaces = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_InjectedReadbacks = new();
         private static readonly Dictionary<FeedbackMotionKey, FeedbackMotionState> s_FeedbackMotionStates = new();
         private static readonly Dictionary<int, Vector2Int> s_PrefetchBiasBySpace = new();
@@ -167,6 +168,7 @@ namespace VividRP.Runtime
             s_ProducerRegistry.Dispose();
             VTStreamChunkManager.ResetShared();
             s_CompletedReadbacks.Clear();
+            s_TransitionSchedulingSpaces.Clear();
             s_InjectedReadbacks.Clear();
             s_FeedbackAggregator?.Dispose();
             s_FeedbackAggregator = null;
@@ -333,6 +335,13 @@ namespace VividRP.Runtime
                 RemoveFeedbackStateForSpace(spaceId);
             }
 
+#if VT_DEBUG
+            // A user-requested reset intentionally cancels every pending page. Keep it
+            // out of the runtime anomaly timeline so it cannot masquerade as flicker.
+            foreach (VTPhysicalPool physicalPool in s_PhysicalPools.Values)
+                physicalPool.DebugResetTimeline();
+#endif
+
             int flushedPageCount = 0;
             foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
                 flushedPageCount += addressSpace.ClearRuntimeState();
@@ -381,6 +390,43 @@ namespace VividRP.Runtime
             Update(frameData, cmd);
         }
 
+        private static void AdvanceAndSchedulePageTransitions(int frameIndex)
+        {
+            s_TransitionSchedulingSpaces.Clear();
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                s_TransitionSchedulingSpaces.Add(addressSpace);
+
+            if (s_TransitionSchedulingSpaces.Count == 0)
+                return;
+
+            s_TransitionSchedulingSpaces.Sort(
+                static (left, right) => left.SpaceId.CompareTo(right.SpaceId));
+            for (int spaceIndex = 0;
+                 spaceIndex < s_TransitionSchedulingSpaces.Count;
+                 spaceIndex++)
+            {
+                s_TransitionSchedulingSpaces[spaceIndex].AdvancePageTransitionPhases(frameIndex);
+            }
+
+            int spaceCount = s_TransitionSchedulingSpaces.Count;
+            int frameOffset = frameIndex >= 0 ? frameIndex % spaceCount : 0;
+            for (int round = 0;
+                 round < VTResidencyManager.MaxTransitionStartsPerFrame;
+                 round++)
+            {
+                bool startedAny = false;
+                for (int relativeIndex = 0; relativeIndex < spaceCount; relativeIndex++)
+                {
+                    int spaceIndex = (frameOffset + relativeIndex) % spaceCount;
+                    startedAny |= s_TransitionSchedulingSpaces[spaceIndex]
+                        .StartQueuedPageTransitions(frameIndex, maxStartsThisCall: 1);
+                }
+
+                if (!startedAny)
+                    break;
+            }
+        }
+
         private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
         {
             VividVirtualTextureFrameData virtualTextureFrameData;
@@ -415,8 +461,11 @@ namespace VividRP.Runtime
             // Protect both sides of an in-progress page fade before this frame can select
             // eviction candidates. Phase changes stay dirty until the normal frame-end
             // page-table rebuild/scatter submission.
-            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
-                addressSpace.AdvancePageTransitions(frameIndex);
+#if VT_DEBUG
+            foreach (VTPhysicalPool physicalPool in s_PhysicalPools.Values)
+                physicalPool.DebugAdvanceTimelineFrame(frameIndex);
+#endif
+            AdvanceAndSchedulePageTransitions(frameIndex);
 
             int lastReadbackFrame = -1;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackMarker.Auto())
@@ -1059,6 +1108,13 @@ namespace VividRP.Runtime
             out VirtualTexturePageTableEntry entry)
         {
             return TryGetPageTableEntry(spaceId, coord, out entry);
+        }
+
+        internal static void AdvancePageTransitionsForTesting(int frameIndex)
+        {
+            AdvanceAndSchedulePageTransitions(frameIndex);
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                addressSpace.RebuildPageTableIfDirty(frameIndex);
         }
 
         internal static bool TryGetPageTableEntry(

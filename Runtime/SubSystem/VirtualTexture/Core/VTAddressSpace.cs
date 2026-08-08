@@ -325,9 +325,25 @@ namespace VividRP.Runtime
             m_ResidencyManager.AdvancePageTransitions(frameIndex);
         }
 
+        internal void AdvancePageTransitionPhases(int frameIndex)
+        {
+            m_ResidencyManager.AdvancePageTransitions(
+                frameIndex,
+                maxTransitionStartsThisCall: 0);
+        }
+
+        internal bool StartQueuedPageTransitions(int frameIndex, int maxStartsThisCall)
+        {
+            return m_ResidencyManager.StartQueuedPageTransitionsOnly(
+                frameIndex,
+                maxStartsThisCall);
+        }
+
         internal bool RebuildPageTableIfDirty(int frameIndex = -1)
         {
-            m_ResidencyManager.AdvancePageTransitions(frameIndex);
+            m_ResidencyManager.AdvancePageTransitions(
+                frameIndex,
+                maxTransitionStartsThisCall: 0);
             if (!m_ResidencyManager.ConsumePageTableDirtyFlag())
                 return false;
 

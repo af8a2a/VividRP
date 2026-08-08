@@ -345,7 +345,7 @@ namespace VividRP.Runtime
             int bestTransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
             VirtualTexturePageTableEntry entry;
 
-            if (pageState.Resident)
+            if (pageState.Resident && !pageState.TransitionQueued)
             {
                 hasBestMapping = true;
                 bestPhysicalPageId = pageState.PhysicalPageId;
@@ -384,10 +384,12 @@ namespace VividRP.Runtime
                         bestResolvedMip,
                         false,
                         true,
-                        pageState.PendingUpload,
+                        pageState.PendingUpload || pageState.TransitionQueued,
                         pageState.Locked,
                         bestTransitionPhase)
-                    : VirtualTexturePageTableEntry.Invalid(pageState.PendingUpload, pageState.Locked);
+                    : VirtualTexturePageTableEntry.Invalid(
+                        pageState.PendingUpload || pageState.TransitionQueued,
+                        pageState.Locked);
             }
 
             m_PageTableEntries[pageIndex] = entry;

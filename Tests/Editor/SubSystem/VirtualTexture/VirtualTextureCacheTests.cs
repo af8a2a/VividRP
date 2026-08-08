@@ -96,9 +96,9 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Cache_PrefersEvictingFinerPagesBeforeCoarserFallbackPages()
+        public void Cache_PrioritizesOldestTouchFrameBeforeMip()
         {
-            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("MipBiasEviction", cachePageCount: 3));
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("AgeFirstEviction", cachePageCount: 3));
 
             VirtualTextureUploadRequest coarse = RequestPage(spaceId, new VirtualTexturePageCoord(0, 0, 1));
             VirtualTextureUploadRequest fine = RequestPage(spaceId, new VirtualTexturePageCoord(0, 0, 0));
@@ -106,20 +106,20 @@ namespace VividRP.Editor.Tests
             VirtualTextureUploadRequest replacement = GetLastPendingUpload(spaceId, new VirtualTexturePageCoord(2, 0, 0));
             Assert.That(VirtualTextureSystem.CommitUpload(replacement), Is.True);
 
-            Assert.That(replacement.PhysicalPageId, Is.EqualTo(fine.PhysicalPageId));
+            Assert.That(replacement.PhysicalPageId, Is.EqualTo(coarse.PhysicalPageId));
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 new VirtualTexturePageCoord(0, 0, 1),
                 out VirtualTexturePageTableEntry coarseEntry), Is.True);
-            Assert.That(coarseEntry.Resident, Is.True);
-            Assert.That(coarseEntry.PhysicalPageId, Is.EqualTo(coarse.PhysicalPageId));
+            Assert.That(coarseEntry.Resident, Is.False);
+            Assert.That(coarseEntry.Fallback, Is.True);
+            Assert.That(coarseEntry.ResolvedMip, Is.EqualTo(2));
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 new VirtualTexturePageCoord(0, 0, 0),
                 out VirtualTexturePageTableEntry fineEntry), Is.True);
-            Assert.That(fineEntry.Resident, Is.False);
-            Assert.That(fineEntry.Fallback, Is.True);
-            Assert.That(fineEntry.ResolvedMip, Is.EqualTo(1));
+            Assert.That(fineEntry.Resident, Is.True);
+            Assert.That(fineEntry.PhysicalPageId, Is.EqualTo(fine.PhysicalPageId));
         }
 
         [Test]

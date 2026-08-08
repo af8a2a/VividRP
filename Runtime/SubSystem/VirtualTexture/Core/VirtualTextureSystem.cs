@@ -38,6 +38,7 @@ namespace VividRP.Runtime
         private static int s_NextSpaceId = 1;
         private static int s_NextAllocationId = 1;
         private static int s_FallbackFrameIndex = -1;
+        private static bool s_RuntimeStateResetRequested;
 
         private sealed class PendingUploadCandidateComparer : IComparer<VTPendingUploadCandidate>
         {
@@ -61,6 +62,18 @@ namespace VividRP.Runtime
                 if (cameraCompare != 0)
                     return cameraCompare;
 
+                int scoreCompare = VTRequestPriorityUtility.CompareMipWeightedScoreDescending(
+                    leftRequest.Priority,
+                    leftRequest.PageCoord.Mip,
+                    rightRequest.Priority,
+                    rightRequest.PageCoord.Mip);
+                if (scoreCompare != 0)
+                    return scoreCompare;
+
+                int mipCompare = rightRequest.PageCoord.Mip.CompareTo(leftRequest.PageCoord.Mip);
+                if (mipCompare != 0)
+                    return mipCompare;
+
                 int priorityCompare = rightRequest.Priority.CompareTo(leftRequest.Priority);
                 if (priorityCompare != 0)
                     return priorityCompare;
@@ -68,10 +81,6 @@ namespace VividRP.Runtime
                 int frameCompare = leftRequest.RequestFrame.CompareTo(rightRequest.RequestFrame);
                 if (frameCompare != 0)
                     return frameCompare;
-
-                int mipCompare = leftRequest.PageCoord.Mip.CompareTo(rightRequest.PageCoord.Mip);
-                if (mipCompare != 0)
-                    return mipCompare;
 
                 int fairnessCompare = left.FairnessRank.CompareTo(right.FairnessRank);
                 if (fairnessCompare != 0)
@@ -171,6 +180,7 @@ namespace VividRP.Runtime
             s_NextSpaceId = 1;
             s_NextAllocationId = 1;
             s_FallbackFrameIndex = -1;
+            s_RuntimeStateResetRequested = false;
             s_DemandEvictionBudgetFrameIndex = int.MinValue;
             s_RemainingDemandEvictionBudget = 0;
             s_AdaptiveMipBiasController.Reset();
@@ -306,6 +316,58 @@ namespace VividRP.Runtime
             return true;
         }
 
+        internal static void RequestRuntimeStateReset()
+        {
+            Initialize();
+            s_RuntimeStateResetRequested = true;
+        }
+
+        private static void ResetRuntimeState(int frameIndex)
+        {
+            s_RuntimeStateResetRequested = false;
+            s_PageTableScatterUploader.Reset();
+
+            foreach (int spaceId in s_PageTableSpaces.Keys)
+            {
+                s_UploadScheduler.CancelUploadsForSpace(spaceId);
+                RemoveFeedbackStateForSpace(spaceId);
+            }
+
+            int flushedPageCount = 0;
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                flushedPageCount += addressSpace.ClearRuntimeState();
+
+            int recreatedAtlasCount = 0;
+            foreach (VTPhysicalPool physicalPool in s_PhysicalPools.Values)
+            {
+                physicalPool.ResetRuntimeState();
+                recreatedAtlasCount += physicalPool.Textures.Count;
+            }
+
+            VTStreamChunkManager.ResetSharedState();
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                addressSpace.BootstrapRuntimeState(frameIndex);
+
+            s_FeedbackAggregator.Clear();
+            s_CompletedReadbacks.Clear();
+            s_InjectedReadbacks.Clear();
+            s_FeedbackMotionStates.Clear();
+            s_PrefetchBiasBySpace.Clear();
+            s_RemainingResidencyBudgetBySpace.Clear();
+            s_FeedbackMotionKeysToRemove.Clear();
+            s_UploadSpaceOrder.Clear();
+            s_PendingUploadCandidates.Clear();
+            s_DemandEvictionBudgetFrameIndex = int.MinValue;
+            s_RemainingDemandEvictionBudget = 0;
+            s_AdaptiveMipBiasController.Reset();
+            VirtualTextureStatsRegistry.Clear();
+
+            Debug.Log(
+                $"[VividRP] Reset virtual texture runtime state. "
+                + $"spaces={s_PageTableSpaces.Count}, flushedPages={flushedPageCount}, "
+                + $"recreatedAtlases={recreatedAtlasCount}.");
+        }
+
         internal static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureMarker.Auto())
@@ -328,10 +390,15 @@ namespace VividRP.Runtime
             CameraType activeCameraType;
             VirtualTextureViewId cachePriorityViewId;
             VirtualTextureFeedbackViewSignature activeViewSignature;
+            int frameIndex;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFrameSetupMarker.Auto())
             {
                 if (!IsInitialized)
                     Initialize();
+
+                frameIndex = ResolveFrameIndex(frameData);
+                if (s_RuntimeStateResetRequested)
+                    ResetRuntimeState(frameIndex);
 
                 virtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
                 virtualTextureFrameData?.Reset();
@@ -390,7 +457,6 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrefetchBiasMarker.Auto())
                 ResolvePrefetchBiasBySpace(cachePriorityViewId);
 
-            int frameIndex = ResolveFrameIndex(frameData);
             int evictionCount = 0;
             int pendingMipGapSum = 0;
             int pendingMipGapMax = 0;

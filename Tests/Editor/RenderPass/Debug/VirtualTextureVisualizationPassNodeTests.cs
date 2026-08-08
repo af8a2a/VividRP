@@ -24,6 +24,7 @@ namespace VividRP.Editor.Tests
                 RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_SourceTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_OutputTexture"), Is.Not.Null);
             }
             finally

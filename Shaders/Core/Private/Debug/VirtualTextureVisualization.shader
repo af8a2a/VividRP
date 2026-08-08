@@ -25,6 +25,7 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             #define VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS_AND_PAGE_TABLE_RESIDENCY 4
             #define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESOLVED_MIP 5
             #define VIVID_VT_VISUALIZATION_PAGE_TABLE_PHYSICAL_PAGE 6
+            #define VIVID_VT_VISUALIZATION_RESOLVED_WORLD_POSITION 7
 
             #define VIVID_VT_VISUALIZATION_LAYER_BASE_COLOR 0
             #define VIVID_VT_VISUALIZATION_LAYER_NORMAL 1
@@ -32,12 +33,15 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
 
             TEXTURE2D(_SourceTexture);
             SAMPLER(sampler_SourceTexture);
+            TEXTURE2D(_DepthTexture);
 
             float4 _SourceTextureScaleBias;
+            float4 _DepthTextureScaleBias;
             int _VTVisualizationMode;
             int _VTVisualizationLayer;
             int _VTVisualizationAvailable;
             int _VTVisualizationSpaceId;
+            float _VTVisualizationWorldPageSize;
 
             struct Attributes
             {
@@ -53,6 +57,11 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             float2 ApplyScaleBias(float2 uv, float4 scaleBias)
             {
                 return uv * scaleBias.xy + scaleBias.zw;
+            }
+
+            bool IsSkyDepth(float deviceDepth)
+            {
+                return abs(deviceDepth - UNITY_RAW_FAR_CLIP_VALUE) <= 1e-6;
             }
 
             Varyings Vert(Attributes input)
@@ -251,6 +260,89 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                 return float4(lerp(color, float3(1.0, 1.0, 1.0), separator), 1.0);
             }
 
+            float4 ApplyResolvedLayerDisplay(float4 value, uint layerIndex)
+            {
+                if (_VTVisualizationLayer == VIVID_VT_VISUALIZATION_LAYER_BASE_COLOR)
+                    value.rgb = VTApplyLayerColorSpace(value.rgb, layerIndex);
+                else if (_VTVisualizationLayer == VIVID_VT_VISUALIZATION_LAYER_NORMAL)
+                {
+                    float3 decodedNormal = normalize(value.xyz * 2.0 - 1.0);
+                    value.rgb = decodedNormal * 0.5 + 0.5;
+                }
+
+                return value;
+            }
+
+            float4 EvaluateResolvedWorldPositionColor(float2 pixelUv, float4 sourceColor)
+            {
+                float2 depthUv = ApplyScaleBias(pixelUv, _DepthTextureScaleBias);
+                float deviceDepth = SAMPLE_TEXTURE2D_LOD(_DepthTexture, sampler_PointClamp, depthUv, 0.0).r;
+                if (IsSkyDepth(deviceDepth))
+                    return sourceColor;
+
+                float3 worldPosition = ComputeWorldSpacePosition(pixelUv, deviceDepth, UNITY_MATRIX_I_VP);
+                float worldPageSize = max(_VTVisualizationWorldPageSize, 0.001);
+                float2 virtualPageCount = max(
+                    float2(VT_VIRTUAL_PAGE_COUNT_X, VT_VIRTUAL_PAGE_COUNT_Y),
+                    float2(1.0, 1.0));
+                float2 unwrappedVirtualUv = worldPosition.xz / (worldPageSize * virtualPageCount);
+                float2 virtualUv = frac(unwrappedVirtualUv);
+                VTMipRange mipRange = VTComputeRequestedMipRangeGrad(
+                    virtualUv,
+                    ddx(unwrappedVirtualUv),
+                    ddy(unwrappedVirtualUv),
+                    (uint)max(VT_MIP_COUNT - 1, 0));
+                VTResolvedAddress lowerResolved = VTResolveAddress(virtualUv, mipRange.lowerMip);
+                VTResolvedAddress upperResolved = VTResolveAddress(virtualUv, mipRange.upperMip);
+
+                uint2 requestedPageCoord = VTGetPageCoord(virtualUv, mipRange.lowerMip);
+                uint requestedPackedEntry = ReadPackedPageTableEntry(
+                    requestedPageCoord,
+                    mipRange.lowerMip);
+                uint borderMip = lowerResolved.valid
+                    ? lowerResolved.resolvedMip
+                    : (upperResolved.valid ? upperResolved.resolvedMip : mipRange.lowerMip);
+                float2 resolvedPageCount = float2(
+                    VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_X, borderMip),
+                    VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_Y, borderMip));
+                float borderMask = GridBorderMask(frac(virtualUv * resolvedPageCount));
+
+                if (!lowerResolved.valid && !upperResolved.valid)
+                {
+                    float3 stateColor = EvaluatePageStateColor(requestedPackedEntry);
+                    return float4(lerp(stateColor, 1.0, borderMask * 0.65), 1.0);
+                }
+
+                int configuredLayerIndex = ResolveVisualizationLayerIndex();
+                if (configuredLayerIndex < 0)
+                {
+                    float missingLayerChecker = fmod(
+                        floor(virtualUv.x * 16.0) + floor(virtualUv.y * 16.0),
+                        2.0);
+                    return float4(1.0, missingLayerChecker * 0.25, 1.0, 1.0);
+                }
+
+                uint layerIndex = VTResolveLayerIndex(configuredLayerIndex, 0u);
+                float4 pageColor = VTSamplePhysicalCacheTrilinearLayer(
+                    virtualUv,
+                    lowerResolved,
+                    upperResolved,
+                    mipRange.blend,
+                    layerIndex);
+                pageColor = ApplyResolvedLayerDisplay(pageColor, layerIndex);
+
+                bool fallback = lowerResolved.fallback || upperResolved.fallback;
+                bool pendingUpload = lowerResolved.pendingUpload || upperResolved.pendingUpload;
+                if (fallback)
+                    pageColor.rgb = lerp(pageColor.rgb, float3(1.0, 0.68, 0.08), 0.22);
+                if (pendingUpload)
+                    pageColor.rgb = lerp(pageColor.rgb, float3(0.10, 0.72, 1.0), 0.38);
+
+                pageColor.rgb = lerp(pageColor.rgb, float3(1.0, 1.0, 1.0), borderMask * 0.8);
+                pageColor.a = 1.0;
+                return pageColor;
+            }
+
             float4 EvaluateVisualizationColor(float2 overlayUv)
             {
                 if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS)
@@ -283,6 +375,9 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                     return sourceColor;
                 if (_VTVisualizationAvailable == 0)
                     return EvaluateUnavailableColor(input.uv);
+
+                if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_RESOLVED_WORLD_POSITION)
+                    return EvaluateResolvedWorldPositionColor(input.uv, sourceColor);
 
                 return EvaluateVisualizationColor(input.uv);
             }

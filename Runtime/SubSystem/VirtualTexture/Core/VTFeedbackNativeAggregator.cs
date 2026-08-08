@@ -89,13 +89,22 @@ namespace VividRP.Runtime
             if (cameraCompare != 0)
                 return cameraCompare;
 
+            int scoreCompare = VTRequestPriorityUtility.CompareMipWeightedScoreDescending(
+                left.HitCount,
+                left.PageCoord.Mip,
+                right.HitCount,
+                right.PageCoord.Mip);
+            if (scoreCompare != 0)
+                return scoreCompare;
+
+            // Equal weighted value still favors broader coverage deterministically.
+            int mipCompare = right.PageCoord.Mip.CompareTo(left.PageCoord.Mip);
+            if (mipCompare != 0)
+                return mipCompare;
+
             int hitCompare = right.HitCount.CompareTo(left.HitCount);
             if (hitCompare != 0)
                 return hitCompare;
-
-            int mipCompare = left.PageCoord.Mip.CompareTo(right.PageCoord.Mip);
-            if (mipCompare != 0)
-                return mipCompare;
 
             int spaceCompare = left.SpaceId.CompareTo(right.SpaceId);
             if (spaceCompare != 0)

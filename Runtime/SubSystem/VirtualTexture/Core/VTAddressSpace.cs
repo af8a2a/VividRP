@@ -82,7 +82,7 @@ namespace VividRP.Runtime
                 PhysicalPool);
             m_PageTableUpdater = new VTPageTableUpdater(desc.SpaceName, TotalPageCount);
             m_PageProducer = producer.PageProducer;
-            BootstrapLowestMip();
+            BootstrapLowestMip(frameIndex: 0);
             m_PageTableUpdater.Rebuild(desc, m_MipOffsets, m_ResidencyManager);
             m_ResidencyManager.ClearDirtyPageTableUpdates();
             m_PageTableUpdater.RefreshBufferImmediate();
@@ -362,6 +362,44 @@ namespace VividRP.Runtime
             return flushedCount;
         }
 
+        internal int ClearRuntimeState()
+        {
+            RetireProducerRequests(Array.Empty<VTRequest>());
+            m_LocalUploadCandidates.Clear();
+            m_ProducerTasks.Clear();
+            m_PendingUploadSortEntries.Clear();
+            m_SortedPendingRequests.Clear();
+            m_EligiblePendingRequests.Clear();
+            m_ResidentRefreshRequests.Clear();
+            m_LiveProducerRequests.Clear();
+            m_CachedPendingRequestRevision = 0;
+            m_HasPendingOrderCache = false;
+
+            int flushedCount = 0;
+            for (int mip = 0; mip < Descriptor.MipCount; mip++)
+            {
+                int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(
+                    Descriptor.VirtualPageCountX,
+                    mip);
+                int pageCountY = VirtualTextureSpaceUtility.GetPageCountY(
+                    Descriptor.VirtualPageCountY,
+                    mip);
+                flushedCount += m_ResidencyManager.FlushRegion(
+                    mip,
+                    new RectInt(0, 0, pageCountX, pageCountY));
+            }
+
+            return flushedCount;
+        }
+
+        internal void BootstrapRuntimeState(int frameIndex)
+        {
+            BootstrapLowestMip(frameIndex);
+            m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
+            m_ResidencyManager.ClearDirtyPageTableUpdates();
+            m_PageTableUpdater.RefreshBufferImmediate();
+        }
+
         internal VirtualTextureSpaceBinding CreateBinding(
             int allocationId,
             bool privateSpace,
@@ -401,7 +439,7 @@ namespace VividRP.Runtime
             m_ResidencyManager.Dispose();
         }
 
-        private void BootstrapLowestMip()
+        private void BootstrapLowestMip(int frameIndex)
         {
             int lowestMip = Descriptor.MipCount - 1;
             int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(Descriptor.VirtualPageCountX, lowestMip);
@@ -417,7 +455,7 @@ namespace VividRP.Runtime
                             SpaceId,
                             coord,
                             VirtualTextureViewId.Invalid,
-                            frameIndex: 0,
+                            frameIndex,
                             locked: true,
                             out VTRequest request))
                     {
@@ -922,6 +960,9 @@ namespace VividRP.Runtime
                 IsActiveView = request.IsActiveView;
                 CameraPriority = request.CameraPriority;
                 Priority = request.Priority;
+                MipWeightedPriority = VTRequestPriorityUtility.ComputeMipWeightedScore(
+                    request.Priority,
+                    request.PageCoord.Mip);
                 RequestFrame = request.RequestFrame;
                 Mip = request.PageCoord.Mip;
                 Y = request.PageCoord.Y;
@@ -937,6 +978,8 @@ namespace VividRP.Runtime
             internal int CameraPriority { get; }
 
             internal int Priority { get; }
+
+            internal long MipWeightedPriority { get; }
 
             internal int RequestFrame { get; }
 
@@ -967,6 +1010,14 @@ namespace VividRP.Runtime
                 if (cameraCompare != 0)
                     return cameraCompare;
 
+                int scoreCompare = right.MipWeightedPriority.CompareTo(left.MipWeightedPriority);
+                if (scoreCompare != 0)
+                    return scoreCompare;
+
+                int mipCompare = right.Mip.CompareTo(left.Mip);
+                if (mipCompare != 0)
+                    return mipCompare;
+
                 int priorityCompare = right.Priority.CompareTo(left.Priority);
                 if (priorityCompare != 0)
                     return priorityCompare;
@@ -974,10 +1025,6 @@ namespace VividRP.Runtime
                 int frameCompare = left.RequestFrame.CompareTo(right.RequestFrame);
                 if (frameCompare != 0)
                     return frameCompare;
-
-                int mipCompare = left.Mip.CompareTo(right.Mip);
-                if (mipCompare != 0)
-                    return mipCompare;
 
                 int yCompare = left.Y.CompareTo(right.Y);
                 if (yCompare != 0)

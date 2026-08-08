@@ -2,6 +2,27 @@ using System;
 
 namespace VividRP.Runtime
 {
+    internal static class VTRequestPriorityUtility
+    {
+        internal static long ComputeMipWeightedScore(int hitCount, int mip)
+        {
+            int resolvedHitCount = hitCount > 0 ? hitCount : 0;
+            int mipWeight = mip >= 0 ? mip + 1 : 1;
+            return (long)resolvedHitCount * mipWeight;
+        }
+
+        internal static int CompareMipWeightedScoreDescending(
+            int leftHitCount,
+            int leftMip,
+            int rightHitCount,
+            int rightMip)
+        {
+            long leftScore = ComputeMipWeightedScore(leftHitCount, leftMip);
+            long rightScore = ComputeMipWeightedScore(rightHitCount, rightMip);
+            return rightScore.CompareTo(leftScore);
+        }
+    }
+
     public readonly struct VTRequest : IEquatable<VTRequest>
     {
         public VTRequest(

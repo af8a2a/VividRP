@@ -105,6 +105,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResetSharedState_PreservesConfiguredDecodedCacheBudget()
+        {
+            VTStreamChunkManager.ResetShared();
+            try
+            {
+                VTStreamChunkManager.Shared.Configure(
+                    VividVirtualTextureIOBackendMode.AsyncReadManager,
+                    maxInFlightChunkCount: 17,
+                    decodeConcurrency: 3,
+                    decodedCacheBudgetMiB: 19);
+
+                VTStreamChunkManager.ResetSharedState();
+
+                Assert.That(
+                    VTStreamChunkManager.SharedDecodedCacheBudget,
+                    Is.EqualTo(19L * 1024L * 1024L));
+            }
+            finally
+            {
+                VTStreamChunkManager.ResetShared();
+            }
+        }
+
+        [Test]
         public void ChunkManager_SharesAsyncReadLeaseAndEvictsUnreferencedReadyData()
         {
             string streamPath = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");

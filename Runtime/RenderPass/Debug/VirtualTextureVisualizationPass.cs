@@ -15,13 +15,20 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int SourceTextureId = Shader.PropertyToID("_SourceTexture");
         private static readonly int SourceTextureScaleBiasId = Shader.PropertyToID("_SourceTextureScaleBias");
+        private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
+        private static readonly int DepthTextureScaleBiasId = Shader.PropertyToID("_DepthTextureScaleBias");
         private static readonly int VisualizationModeId = Shader.PropertyToID("_VTVisualizationMode");
         private static readonly int VisualizationLayerId = Shader.PropertyToID("_VTVisualizationLayer");
         private static readonly int VisualizationAvailableId = Shader.PropertyToID("_VTVisualizationAvailable");
         private static readonly int VisualizationSpaceId = Shader.PropertyToID("_VTVisualizationSpaceId");
+        private static readonly int VisualizationWorldPageSizeId =
+            Shader.PropertyToID("_VTVisualizationWorldPageSize");
 
         [RenderGraphResource(Name = "SourceTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SourceTexture;
+
+        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DepthTexture;
 
         [RenderGraphResource(
             Name = "OutputTexture",
@@ -39,12 +46,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private VirtualTextureVisualizationMode m_ResolvedVisualizationMode = VirtualTextureVisualizationMode.None;
         private VirtualTextureVisualizationTarget m_ResolvedVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
         private VirtualTextureVisualizationLayer m_ResolvedVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
+        private float m_ResolvedVisualizationWorldPageSize =
+            VividRenderingDebugSettingsData.DefaultVirtualTextureVisualizationWorldPageSize;
         private bool m_ShouldSkipExecution;
 
         public VirtualTextureVisualizationPass()
         {
             profilingSampler = new ProfilingSampler(nameof(VirtualTextureVisualizationPass));
             m_SourceTexture = RenderGraphTexture.CreateInput("SourceTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_DepthTexture.desc.FilterMode = FilterMode.Point;
             m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputTexture", GraphicsFormat.R8G8B8A8_UNorm);
             m_OutputTexture.desc.ClearBuffer = false;
         }
@@ -61,7 +72,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_Material = CoreUtils.CreateEngineMaterial(shader);
         }
-
+ 
         public override void Prepare(ContextContainer frameData)
         {
             m_VirtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
@@ -72,6 +83,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 ?? VirtualTextureVisualizationTarget.Auto;
             m_ResolvedVisualizationLayer = debugData?.virtualTextureVisualizationLayer
                 ?? VirtualTextureVisualizationLayer.BaseColor;
+            m_ResolvedVisualizationWorldPageSize = debugData?.virtualTextureVisualizationWorldPageSize
+                ?? VividRenderingDebugSettingsData.DefaultVirtualTextureVisualizationWorldPageSize;
 
             VividCameraData cameraData = frameData?.GetOrCreate<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
@@ -101,11 +114,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             Texture sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture?.innerHandle);
+            bool hasDepth = m_DepthTexture?.innerHandle.IsValid() ?? false;
+            Texture depthTexture = hasDepth
+                ? TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle)
+                : null;
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SourceTextureId, sourceTexture != null ? sourceTexture : Texture2D.blackTexture);
             mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture?.innerHandle));
+            mpb.SetTexture(DepthTextureId, depthTexture != null ? depthTexture : Texture2D.blackTexture);
+            mpb.SetVector(DepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture?.innerHandle));
             mpb.SetInt(VisualizationModeId, (int)m_ResolvedVisualizationMode);
             mpb.SetInt(VisualizationLayerId, (int)m_ResolvedVisualizationLayer);
+            mpb.SetFloat(VisualizationWorldPageSizeId, m_ResolvedVisualizationWorldPageSize);
 
             VirtualTextureSpaceBinding binding = default;
             int gpuDrivenAllocationId = VividGPUDrivenSystem.TryGetVirtualTextureAllocationId(out int allocationId)
@@ -116,7 +136,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ResolvedVisualizationTarget,
                 gpuDrivenAllocationId,
                 out binding);
-            mpb.SetInt(VisualizationAvailableId, hasBinding ? 1 : 0);
+            bool requiresDepth =
+                m_ResolvedVisualizationMode == VirtualTextureVisualizationMode.ResolvedWorldPosition;
+            bool visualizationAvailable = hasBinding && (!requiresDepth || depthTexture != null);
+            mpb.SetInt(VisualizationAvailableId, visualizationAvailable ? 1 : 0);
             mpb.SetInt(VisualizationSpaceId, hasBinding ? binding.SpaceId : 0);
 
             if (hasBinding)

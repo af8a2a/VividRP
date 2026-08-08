@@ -525,6 +525,7 @@ namespace VividRP.Runtime
 
         private const int FeedbackCounterElementCount = 2;
         internal const int StableReadbackIntervalFrames = 30;
+        internal const int QuiescentEmptyReadbackCount = 2;
         private readonly BufferPairState[] m_BufferPairs = { new(), new() };
         private readonly int m_SpaceId;
         private NativeArray<uint> m_ZeroCounterData;
@@ -532,6 +533,7 @@ namespace VividRP.Runtime
         private int m_WriteBufferIndex;
         private bool m_HasCompletedReadbackResult;
         private bool m_LastCompletedReadbackWasEmpty;
+        private int m_ConsecutiveEmptyReadbackCount;
         private int m_LastScheduledReadbackFrame = -1;
         private VirtualTextureFeedbackViewSignature m_LastCompletedReadbackSignature;
         private string m_ReadbackPendingStatusSpaceName;
@@ -572,6 +574,12 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsPollMarker.Auto())
                 PollReadbacks();
 
+            // Upload completion and page-table publication can make an empty readback stale in
+            // the same frame. Require fresh empty confirmations after activity before entering
+            // the long stable-view heartbeat interval.
+            if (forceImmediateReadback)
+                m_ConsecutiveEmptyReadbackCount = 0;
+
             int readBufferIndex = 1 - m_WriteBufferIndex;
             BufferPairState readPair = m_BufferPairs[readBufferIndex];
             if (readPair.WasWritten
@@ -580,6 +588,7 @@ namespace VividRP.Runtime
                     forceImmediateReadback,
                     m_HasCompletedReadbackResult,
                     m_LastCompletedReadbackWasEmpty,
+                    m_ConsecutiveEmptyReadbackCount,
                     m_LastScheduledReadbackFrame,
                     frameIndex,
                     readPair.LastViewSignature,
@@ -644,9 +653,20 @@ namespace VividRP.Runtime
                         fallbackSampleCount));
                     lastReadbackFrame = Mathf.Max(lastReadbackFrame, pair.ScheduledFrameIndex);
                     m_HasCompletedReadbackResult = true;
-                    m_LastCompletedReadbackWasEmpty = requestCount == 0
-                                                      && overflowCount == 0
-                                                      && fallbackSampleCount == 0;
+                    bool completedReadbackWasEmpty = requestCount == 0
+                                                     && overflowCount == 0
+                                                     && fallbackSampleCount == 0;
+                    bool sameViewAsPrevious = m_LastCompletedReadbackSignature.IsValid
+                                              && pair.LastViewSignature.Equals(
+                                                  m_LastCompletedReadbackSignature);
+                    m_ConsecutiveEmptyReadbackCount = completedReadbackWasEmpty
+                        ? sameViewAsPrevious
+                            ? Mathf.Min(
+                                QuiescentEmptyReadbackCount,
+                                m_ConsecutiveEmptyReadbackCount + 1)
+                            : 1
+                        : 0;
+                    m_LastCompletedReadbackWasEmpty = completedReadbackWasEmpty;
                     m_LastCompletedReadbackSignature = pair.LastViewSignature;
                     pair.HasCompletedReadback = false;
                     pair.CompletedRequestsValid = false;
@@ -673,6 +693,7 @@ namespace VividRP.Runtime
             m_RequestCapacity = 0;
             m_HasCompletedReadbackResult = false;
             m_LastCompletedReadbackWasEmpty = false;
+            m_ConsecutiveEmptyReadbackCount = 0;
             m_LastScheduledReadbackFrame = -1;
             m_LastCompletedReadbackSignature = VirtualTextureFeedbackViewSignature.Invalid;
             m_ReadbackPendingStatusSpaceName = null;
@@ -721,6 +742,7 @@ namespace VividRP.Runtime
             m_WriteBufferIndex = 0;
             m_HasCompletedReadbackResult = false;
             m_LastCompletedReadbackWasEmpty = false;
+            m_ConsecutiveEmptyReadbackCount = 0;
             m_LastScheduledReadbackFrame = -1;
             m_LastCompletedReadbackSignature = VirtualTextureFeedbackViewSignature.Invalid;
             for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
@@ -738,6 +760,7 @@ namespace VividRP.Runtime
             bool forceImmediateReadback,
             bool hasCompletedReadbackResult,
             bool lastCompletedReadbackWasEmpty,
+            int consecutiveEmptyReadbackCount,
             int lastScheduledReadbackFrame,
             int frameIndex,
             VirtualTextureFeedbackViewSignature readbackSignature,
@@ -747,6 +770,7 @@ namespace VividRP.Runtime
                 forceImmediateReadback,
                 hasCompletedReadbackResult,
                 lastCompletedReadbackWasEmpty,
+                consecutiveEmptyReadbackCount,
                 lastScheduledReadbackFrame,
                 frameIndex,
                 readbackSignature,
@@ -757,6 +781,7 @@ namespace VividRP.Runtime
             bool forceImmediateReadback,
             bool hasCompletedReadbackResult,
             bool lastCompletedReadbackWasEmpty,
+            int consecutiveEmptyReadbackCount,
             int lastScheduledReadbackFrame,
             int frameIndex,
             VirtualTextureFeedbackViewSignature readbackSignature,
@@ -765,8 +790,12 @@ namespace VividRP.Runtime
             if (forceImmediateReadback)
                 return true;
 
-            if (!hasCompletedReadbackResult || !lastCompletedReadbackWasEmpty)
+            if (!hasCompletedReadbackResult
+                || !lastCompletedReadbackWasEmpty
+                || consecutiveEmptyReadbackCount < QuiescentEmptyReadbackCount)
+            {
                 return true;
+            }
 
             if (readbackSignature.IsValid && !readbackSignature.Equals(lastCompletedReadbackSignature))
                 return true;

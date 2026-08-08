@@ -420,6 +420,29 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UploadOrder_SchedulesHigherMipWeightedHitCountFirst()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "MipWeightedUploadOrder",
+                maxUploadsPerFrame: 1);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+            var fineCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var coarseCoord = new VirtualTexturePageCoord(0, 0, 1);
+
+            IssueFeedback(spaceId, fineCoord, fineCoord, fineCoord, coarseCoord);
+
+            Assert.That(producer.RequestedCoords, Has.Count.EqualTo(1));
+            Assert.That(producer.RequestedCoords[0], Is.EqualTo(fineCoord));
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out IReadOnlyList<VirtualTextureUploadRequest> pendingRequests), Is.True);
+            Assert.That(pendingRequests, Has.Count.EqualTo(1));
+            Assert.That(pendingRequests[0].PageCoord, Is.EqualTo(fineCoord));
+        }
+
+        [Test]
         public void Uploads_RespectFrameMemoryBudget_AndKeepPageTablePending()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("MemoryBudget");

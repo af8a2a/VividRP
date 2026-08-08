@@ -33,6 +33,8 @@ namespace VividRP.Runtime
         PageTableResolvedMip = 5,
         [InspectorName("Page Table / Physical Page")]
         PageTablePhysicalPage = 6,
+        [InspectorName("Resolved Page Content (World XZ)")]
+        ResolvedWorldPosition = 7,
     }
 
     public enum VirtualTextureVisualizationTarget
@@ -73,6 +75,7 @@ namespace VividRP.Runtime
         internal const ReGIRDebugVisualizationMode DefaultReGIRDebugMode = ReGIRDebugVisualizationMode.None;
         internal const float DefaultReGIRDebugOpacity = 0.45f;
         internal const float DefaultVisibilityBufferWireframeThickness = 10f;
+        internal const float DefaultVirtualTextureVisualizationWorldPageSize = 1f;
         internal const ReferencedPathTracingTransportDebugMode
             DefaultReferencedPathTracingTransportDebugMode =
                 ReferencedPathTracingTransportDebugMode.Combined;
@@ -208,6 +211,10 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private VirtualTextureVisualizationLayer m_VirtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
+
+        [SerializeField]
+        private float m_VirtualTextureVisualizationWorldPageSize =
+            DefaultVirtualTextureVisualizationWorldPageSize;
 
         [SerializeField]
         private float m_VirtualTextureVisualizationOverlayAmount;
@@ -473,6 +480,12 @@ namespace VividRP.Runtime
             set => m_VirtualTextureVisualizationLayer = NormalizeVirtualTextureVisualizationLayer(value);
         }
 
+        internal float virtualTextureVisualizationWorldPageSize
+        {
+            get => Mathf.Max(m_VirtualTextureVisualizationWorldPageSize, 0.001f);
+            set => m_VirtualTextureVisualizationWorldPageSize = Mathf.Max(value, 0.001f);
+        }
+
         [Obsolete("VT visualization now emits a dedicated full-screen debug output.")]
         internal float virtualTextureVisualizationOverlayAmount
         {
@@ -597,6 +610,8 @@ namespace VividRP.Runtime
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.None;
             m_VirtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
             m_VirtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
+            m_VirtualTextureVisualizationWorldPageSize =
+                DefaultVirtualTextureVisualizationWorldPageSize;
             m_VirtualTextureVisualizationOverlayAmount = 0f;
             m_VirtualTextureVisualizationOpacity = 1f;
             m_VirtualTextureStatsViewMode = VirtualTextureStatsViewMode.Auto;
@@ -608,7 +623,7 @@ namespace VividRP.Runtime
         {
             return value == VirtualTextureVisualizationMode.None
                 || value is >= VirtualTextureVisualizationMode.PhysicalAtlas
-                    and <= VirtualTextureVisualizationMode.PageTablePhysicalPage
+                    and <= VirtualTextureVisualizationMode.ResolvedWorldPosition
                     ? value
                     : VirtualTextureVisualizationMode.None;
         }
@@ -967,8 +982,20 @@ namespace VividRP.Runtime
 
             public static readonly NameAndTooltip VirtualTextureVisualizationLayer = new()
             {
-                name = "Physical Atlas Layer",
-                tooltip = "Select the Base Color, Normal, or Mask atlas displayed by physical-atlas views."
+                name = "Visualization Layer",
+                tooltip = "Select the Base Color, Normal, or Mask layer displayed by atlas and resolved-page views."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureVisualizationWorldPageSize = new()
+            {
+                name = "World Units Per Page",
+                tooltip = "Set the XZ-world projection scale used by Resolved Page Content. One projected virtual page spans this many world units."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureResetState = new()
+            {
+                name = "Reset VT State",
+                tooltip = "Clear virtual texture residency, pending streaming work, feedback history, decoded chunks, and adaptive mip bias. Registered spaces and allocations are preserved."
             };
 
             public static readonly NameAndTooltip VirtualTextureStatsViewMode = new()
@@ -1416,8 +1443,25 @@ namespace VividRP.Runtime
                 layerField.isHiddenCallback = () =>
                     data.virtualTextureVisualizationMode != VirtualTextureVisualizationMode.PhysicalAtlas
                     && data.virtualTextureVisualizationMode
-                        != VirtualTextureVisualizationMode.PhysicalAtlasAndPageTableResidency;
+                        != VirtualTextureVisualizationMode.PhysicalAtlasAndPageTableResidency
+                    && data.virtualTextureVisualizationMode
+                        != VirtualTextureVisualizationMode.ResolvedWorldPosition;
                 foldout.children.Add(layerField);
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.VirtualTextureVisualizationWorldPageSize,
+                    getter = () => data.virtualTextureVisualizationWorldPageSize,
+                    setter = value => data.virtualTextureVisualizationWorldPageSize = value,
+                    min = () => 0.001f,
+                    isHiddenCallback = () =>
+                        data.virtualTextureVisualizationMode
+                            != VirtualTextureVisualizationMode.ResolvedWorldPosition,
+                });
+                foldout.children.Add(new DebugUI.Button
+                {
+                    nameAndTooltip = Strings.VirtualTextureResetState,
+                    action = VirtualTextureSystem.RequestRuntimeStateReset,
+                });
                 foldout.children.Add(CreateEnumField(
                     Strings.VirtualTextureStatsViewMode,
                     () => data.virtualTextureStatsViewMode,

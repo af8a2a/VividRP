@@ -81,7 +81,12 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Target"), Is.Not.Null);
-            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Physical Atlas Layer"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Layer"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> World Units Per Page"), Is.Not.Null);
+            var resetVirtualTextureState = DebugManager.instance.GetItem(
+                "Rendering -> VividRP Debug -> Virtual Texture -> Reset VT State") as DebugUI.Button;
+            Assert.That(resetVirtualTextureState, Is.Not.Null);
+            Assert.That(resetVirtualTextureState.action, Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Overlay Size"), Is.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Opacity"), Is.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Stats Source"), Is.Not.Null);
@@ -118,6 +123,7 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode = VirtualTextureVisualizationMode.PageTableResidency;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.FirstPublic;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.Mask;
+            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize = 16f;
             VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode = VirtualTextureStatsViewMode.SelectedCamera;
 
             VividRenderingDebugDisplaySettings.Data.Reset();
@@ -133,6 +139,9 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer,
                 Is.EqualTo(VirtualTextureVisualizationLayer.BaseColor));
             Assert.That(
+                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultVirtualTextureVisualizationWorldPageSize));
+            Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode,
                 Is.EqualTo(VirtualTextureStatsViewMode.Auto));
         }
@@ -146,6 +155,7 @@ namespace VividRP.Editor.Tests
                 (VirtualTextureVisualizationTarget)99;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer =
                 (VirtualTextureVisualizationLayer)99;
+            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize = -1f;
 
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode,
@@ -156,6 +166,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer,
                 Is.EqualTo(VirtualTextureVisualizationLayer.BaseColor));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize,
+                Is.EqualTo(0.001f));
         }
 
         [Test]
@@ -166,13 +179,17 @@ namespace VividRP.Editor.Tests
             var targetWidget = DebugManager.instance.GetItem(
                 "Rendering -> VividRP Debug -> Virtual Texture -> Visualization Target") as DebugUI.EnumField;
             var layerWidget = DebugManager.instance.GetItem(
-                "Rendering -> VividRP Debug -> Virtual Texture -> Physical Atlas Layer") as DebugUI.EnumField;
+                "Rendering -> VividRP Debug -> Virtual Texture -> Visualization Layer") as DebugUI.EnumField;
+            var worldPageSizeWidget = DebugManager.instance.GetItem(
+                "Rendering -> VividRP Debug -> Virtual Texture -> World Units Per Page") as DebugUI.FloatField;
 
             Assert.That(modeWidget, Is.Not.Null);
             Assert.That(targetWidget, Is.Not.Null);
             Assert.That(layerWidget, Is.Not.Null);
+            Assert.That(worldPageSizeWidget, Is.Not.Null);
             Assert.That(targetWidget.isHiddenCallback(), Is.True);
             Assert.That(layerWidget.isHiddenCallback(), Is.True);
+            Assert.That(worldPageSizeWidget.isHiddenCallback(), Is.True);
 
             int physicalAtlasIndex = Array.IndexOf(
                 modeWidget.enumValues,
@@ -183,12 +200,25 @@ namespace VividRP.Editor.Tests
 
             Assert.That(targetWidget.isHiddenCallback(), Is.False);
             Assert.That(layerWidget.isHiddenCallback(), Is.False);
+            Assert.That(worldPageSizeWidget.isHiddenCallback(), Is.True);
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationTarget,
                 Is.EqualTo(VirtualTextureVisualizationTarget.GPUDriven));
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer,
                 Is.EqualTo(VirtualTextureVisualizationLayer.Mask));
+
+            int resolvedWorldIndex = Array.IndexOf(
+                modeWidget.enumValues,
+                (int)VirtualTextureVisualizationMode.ResolvedWorldPosition);
+            modeWidget.setIndex(resolvedWorldIndex);
+            worldPageSizeWidget.setter(32f);
+
+            Assert.That(layerWidget.isHiddenCallback(), Is.False);
+            Assert.That(worldPageSizeWidget.isHiddenCallback(), Is.False);
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize,
+                Is.EqualTo(32f));
         }
 
         [Test]

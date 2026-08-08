@@ -176,6 +176,31 @@ namespace VividRP.Runtime
             previous?.Dispose();
         }
 
+        internal static void ResetSharedState()
+        {
+            VTStreamChunkManager previous = s_Shared;
+            if (previous == null)
+                return;
+
+            VividVirtualTextureIOBackendMode backendMode = previous.m_BackendMode;
+            int maxInFlightChunkCount = previous.m_MaxInFlightChunkCount;
+            int decodeConcurrency = previous.m_DecodeConcurrency;
+            int decodedCacheBudgetMiB = (int)Math.Min(
+                int.MaxValue,
+                previous.m_DecodedCacheBudget / (1024L * 1024L));
+
+            s_Shared = null;
+            previous.Dispose();
+
+            var replacement = new VTStreamChunkManager();
+            replacement.Configure(
+                backendMode,
+                maxInFlightChunkCount,
+                decodeConcurrency,
+                decodedCacheBudgetMiB);
+            s_Shared = replacement;
+        }
+
         internal int PendingChunkCount => CountInFlightChunks();
 
         internal int LastIOSaturationCount => m_LastIOSaturationCount;

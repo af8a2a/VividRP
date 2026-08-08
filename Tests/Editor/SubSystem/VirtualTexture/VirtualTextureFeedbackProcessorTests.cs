@@ -41,12 +41,13 @@ namespace VividRP.Editor.Tests
 
             Assert.That(aggregated.Count, Is.EqualTo(3));
 
-            Assert.That(aggregated[0].SpaceId, Is.EqualTo(2));
-            Assert.That(aggregated[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(1, 0, 0)));
+            Assert.That(aggregated[0].SpaceId, Is.EqualTo(1));
+            Assert.That(aggregated[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 1)));
             Assert.That(aggregated[0].HitCount, Is.EqualTo(2));
+            Assert.That(aggregated[0].CameraPriority, Is.EqualTo(0));
 
-            Assert.That(aggregated[1].SpaceId, Is.EqualTo(1));
-            Assert.That(aggregated[1].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 1)));
+            Assert.That(aggregated[1].SpaceId, Is.EqualTo(2));
+            Assert.That(aggregated[1].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(1, 0, 0)));
             Assert.That(aggregated[1].HitCount, Is.EqualTo(2));
             Assert.That(aggregated[1].CameraPriority, Is.EqualTo(0));
 
@@ -109,6 +110,54 @@ namespace VividRP.Editor.Tests
             Assert.That(aggregator.SpaceRanges.Length, Is.Zero);
             Assert.That(aggregator.RequestCapacity, Is.EqualTo(2));
             Assert.That(aggregator.BatchCapacity, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Aggregate_UsesMipWeightedHitCountInsteadOfStrictCoarseFirst()
+        {
+            ulong fine = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(3, 2, 0));
+            ulong coarse = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(0, 0, 2));
+            var batches = new List<VirtualTextureFeedbackBatch>
+            {
+                new(CameraType.Game, new[] { fine, fine, fine, fine, coarse }, 5, 12),
+            };
+
+            List<VirtualTextureAggregatedFeedbackRequest> aggregated =
+                VirtualTextureFeedbackProcessor.Aggregate(batches);
+
+            Assert.That(aggregated.Count, Is.EqualTo(2));
+            Assert.That(aggregated[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(3, 2, 0)));
+            Assert.That(aggregated[0].HitCount, Is.EqualTo(4));
+            Assert.That(aggregated[1].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 2)));
+            Assert.That(aggregated[1].HitCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Aggregate_StillPrioritizesCoarseCoverageWhenItsWeightedScoreIsHigher()
+        {
+            ulong fine = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(3, 2, 0));
+            ulong coarse = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(0, 0, 2));
+            var batches = new List<VirtualTextureFeedbackBatch>
+            {
+                new(CameraType.Game, new[] { fine, fine, fine, fine, coarse, coarse }, 6, 12),
+            };
+
+            List<VirtualTextureAggregatedFeedbackRequest> aggregated =
+                VirtualTextureFeedbackProcessor.Aggregate(batches);
+
+            Assert.That(aggregated.Count, Is.EqualTo(2));
+            Assert.That(aggregated[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 2)));
+            Assert.That(aggregated[0].HitCount, Is.EqualTo(2));
+            Assert.That(aggregated[1].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(3, 2, 0)));
+            Assert.That(aggregated[1].HitCount, Is.EqualTo(4));
         }
 
         [Test]
@@ -242,6 +291,8 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: false,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
+                    consecutiveEmptyReadbackCount:
+                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 100 + VirtualTextureFeedbackBufferState.StableReadbackIntervalFrames - 1,
                     signature,
@@ -253,11 +304,51 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: false,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
+                    consecutiveEmptyReadbackCount:
+                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 100 + VirtualTextureFeedbackBufferState.StableReadbackIntervalFrames,
                     signature,
                     signature),
                 Is.True);
+        }
+
+        [Test]
+        public void ShouldScheduleReadback_RequiresConsecutiveEmptyResultsBeforeThrottling()
+        {
+            var signature = new VirtualTextureFeedbackViewSignature(
+                Matrix4x4.identity,
+                Matrix4x4.Perspective(60f, 1f, 0.1f, 100f),
+                actualWidth: 1920,
+                actualHeight: 1080,
+                pixelWidth: 1920,
+                pixelHeight: 1080);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldScheduleReadbackForTesting(
+                    forceImmediateReadback: false,
+                    hasCompletedReadbackResult: true,
+                    lastCompletedReadbackWasEmpty: true,
+                    consecutiveEmptyReadbackCount:
+                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount - 1,
+                    lastScheduledReadbackFrame: 100,
+                    frameIndex: 101,
+                    signature,
+                    signature),
+                Is.True);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldScheduleReadbackForTesting(
+                    forceImmediateReadback: false,
+                    hasCompletedReadbackResult: true,
+                    lastCompletedReadbackWasEmpty: true,
+                    consecutiveEmptyReadbackCount:
+                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
+                    lastScheduledReadbackFrame: 100,
+                    frameIndex: 101,
+                    signature,
+                    signature),
+                Is.False);
         }
 
         [Test]
@@ -283,6 +374,8 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: false,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
+                    consecutiveEmptyReadbackCount:
+                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 101,
                     secondSignature,
@@ -294,6 +387,8 @@ namespace VividRP.Editor.Tests
                     forceImmediateReadback: true,
                     hasCompletedReadbackResult: true,
                     lastCompletedReadbackWasEmpty: true,
+                    consecutiveEmptyReadbackCount:
+                        VirtualTextureFeedbackBufferState.QuiescentEmptyReadbackCount,
                     lastScheduledReadbackFrame: 100,
                     frameIndex: 101,
                     firstSignature,

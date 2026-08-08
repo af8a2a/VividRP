@@ -32,18 +32,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersSourceAndOutputTextures()
+        public void Initialize_RegistersSourceDepthAndOutputTextures()
         {
             IRenderPass renderPass = new VirtualTextureVisualizationPass();
 
             var resources = renderPass.Initialize();
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(2));
+            Assert.That(resources.Textures, Has.Length.EqualTo(3));
             Assert.That(resources.Textures[0].Name, Is.EqualTo("SourceTexture"));
             Assert.That(resources.Textures[0].Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(resources.Textures[1].Name, Is.EqualTo("OutputTexture"));
-            Assert.That(resources.Textures[1].Access, Is.EqualTo(AccessFlags.Write));
-            Assert.That(resources.Textures[1].AttachmentIndex, Is.EqualTo(0));
+            Assert.That(resources.Textures[1].Name, Is.EqualTo("Depth"));
+            Assert.That(resources.Textures[1].Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures[2].Name, Is.EqualTo("OutputTexture"));
+            Assert.That(resources.Textures[2].Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures[2].AttachmentIndex, Is.EqualTo(0));
         }
 
         [Test]
@@ -98,6 +100,7 @@ namespace VividRP.Editor.Tests
                 VirtualTextureVisualizationTarget.FirstPublic;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer =
                 VirtualTextureVisualizationLayer.Mask;
+            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize = 24f;
             var pass = new VirtualTextureVisualizationPass();
 
             pass.Prepare(new ContextContainer());
@@ -111,6 +114,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 GetField<VirtualTextureVisualizationLayer>(pass, "m_ResolvedVisualizationLayer"),
                 Is.EqualTo(VirtualTextureVisualizationLayer.Mask));
+            Assert.That(
+                GetField<float>(pass, "m_ResolvedVisualizationWorldPageSize"),
+                Is.EqualTo(24f));
         }
 
         [Test]
@@ -180,12 +186,19 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESIDENCY 3"));
             Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESOLVED_MIP 5"));
             Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_PHYSICAL_PAGE 6"));
+            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_RESOLVED_WORLD_POSITION 7"));
             Assert.That(source, Does.Contain("EvaluatePhysicalAtlasColor"));
             Assert.That(source, Does.Contain("SamplePhysicalAtlas"));
             Assert.That(source, Does.Contain("EvaluatePageTableResidencyColor"));
             Assert.That(source, Does.Contain("EvaluateResolvedMipColor"));
             Assert.That(source, Does.Contain("EvaluatePhysicalPageColor"));
             Assert.That(source, Does.Contain("EvaluateUnavailableColor"));
+            Assert.That(source, Does.Contain("EvaluateResolvedWorldPositionColor"));
+            Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
+            Assert.That(source, Does.Contain("VTComputeRequestedMipRangeGrad"));
+            Assert.That(source, Does.Contain("VTSamplePhysicalCacheTrilinearLayer"));
+            Assert.That(source, Does.Contain("_DepthTexture"));
+            Assert.That(source, Does.Contain("_VTVisualizationWorldPageSize"));
             Assert.That(source, Does.Not.Contain("_VTOverlayRect"));
             Assert.That(source, Does.Not.Contain("_VTOverlayOpacity"));
             Assert.That(source, Does.Contain("_VTVisualizationLayer"));

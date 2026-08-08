@@ -265,6 +265,159 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ProcessRequests_ProtectsResidentBatchBeforeAllocatingHigherPriorityFault()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc("ResidentBatchProtection", cachePageCount: 2),
+                new NamedProducer("ResidentBatchProtectionProducer"));
+            var residentCoord = new VirtualTexturePageCoord(0, 0, 1);
+            var missingFineCoord = new VirtualTexturePageCoord(0, 0, 0);
+
+            RequestPage(spaceId, residentCoord);
+            for (int frameOffset = 0;
+                 frameOffset < VTPhysicalPool.FeedbackEvictionProtectionFrames;
+                 frameOffset++)
+            {
+                UpdateOnce();
+            }
+
+            // GPU feedback can be stale by several frames. The whole resolved batch must be
+            // touched before any fault is allowed to select an eviction candidate.
+            IssueFeedback(spaceId, missingFineCoord, residentCoord);
+
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                residentCoord,
+                out VirtualTexturePageTableEntry residentEntry), Is.True);
+            Assert.That(residentEntry.Resident, Is.True);
+            Assert.That(residentEntry.PendingUpload, Is.False);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                missingFineCoord,
+                out VirtualTexturePageTableEntry missingEntry), Is.True);
+            Assert.That(missingEntry.Resident, Is.False);
+            Assert.That(missingEntry.PendingUpload, Is.False);
+            Assert.That(missingEntry.Fallback, Is.True);
+            Assert.That(
+                VirtualTextureSystem.GetPhysicalPoolStatsForTesting().EvictedPageCount,
+                Is.Zero);
+        }
+
+        [Test]
+        public void ProcessRequests_TouchesResolvedFallbackAncestorBeforeAllocatingFault()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc("FallbackAncestorTouch", cachePageCount: 3),
+                new NamedProducer("FallbackAncestorTouchProducer"));
+            var ancestorCoord = new VirtualTexturePageCoord(0, 0, 1);
+            var victimCoord = new VirtualTexturePageCoord(3, 3, 0);
+            var missingChildCoord = new VirtualTexturePageCoord(0, 0, 0);
+
+            VirtualTextureUploadRequest ancestor = RequestPage(spaceId, ancestorCoord);
+            VirtualTextureUploadRequest victim = RequestPage(spaceId, victimCoord);
+            for (int frameOffset = 0;
+                 frameOffset < VTPhysicalPool.FeedbackEvictionProtectionFrames;
+                 frameOffset++)
+            {
+                UpdateOnce();
+            }
+
+            IssueFeedback(spaceId, missingChildCoord);
+
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                ancestorCoord,
+                out VirtualTexturePageTableEntry ancestorEntry), Is.True);
+            Assert.That(ancestorEntry.Resident, Is.True);
+            Assert.That(ancestorEntry.PhysicalPageId, Is.EqualTo(ancestor.PhysicalPageId));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                victimCoord,
+                out VirtualTexturePageTableEntry victimEntry), Is.True);
+            Assert.That(victimEntry.Resident, Is.False);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                missingChildCoord,
+                out VirtualTexturePageTableEntry childEntry), Is.True);
+            Assert.That(childEntry.PendingUpload, Is.True);
+            Assert.That(childEntry.PhysicalPageId, Is.EqualTo(victim.PhysicalPageId));
+        }
+
+        [Test]
+        public void ProcessRequests_RefinesTowardFaultByAtMostTwoMipsPerRequest()
+        {
+            var desc = new VirtualTextureSpaceDesc(
+                "TwoMipRefinement",
+                pageSize: 128,
+                borderSize: 4,
+                virtualPageCountX: 256,
+                virtualPageCountY: 256,
+                mipCount: 9,
+                cachePageCount: 6,
+                graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                desc,
+                new NamedProducer("TwoMipRefinementProducer"));
+            var requestedCoord = new VirtualTexturePageCoord(173, 91, 0);
+            var expectedRefinementCoords = new[]
+            {
+                new VirtualTexturePageCoord(2, 1, 6),
+                new VirtualTexturePageCoord(10, 5, 4),
+                new VirtualTexturePageCoord(43, 22, 2),
+                requestedCoord,
+            };
+
+            foreach (VirtualTexturePageCoord expectedCoord in expectedRefinementCoords)
+            {
+                IssueFeedback(spaceId, requestedCoord);
+                Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                    spaceId,
+                    out var pendingRequests), Is.True);
+                Assert.That(pendingRequests, Has.Count.EqualTo(1));
+                Assert.That(pendingRequests[0].PageCoord, Is.EqualTo(expectedCoord));
+                Assert.That(VirtualTextureSystem.CommitUpload(pendingRequests[0]), Is.True);
+            }
+        }
+
+        [Test]
+        public void ProcessRequests_MergesHitCountsForSharedRefinementAncestor()
+        {
+            var desc = new VirtualTextureSpaceDesc(
+                "MergedRefinementHits",
+                pageSize: 128,
+                borderSize: 4,
+                virtualPageCountX: 256,
+                virtualPageCountY: 256,
+                mipCount: 9,
+                cachePageCount: 2,
+                graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                desc,
+                new NamedProducer("MergedRefinementHitsProducer"));
+            var firstFineCoord = new VirtualTexturePageCoord(1, 1, 0);
+            var secondFineCoord = new VirtualTexturePageCoord(2, 2, 0);
+
+            IssueFeedback(
+                spaceId,
+                firstFineCoord,
+                firstFineCoord,
+                secondFineCoord,
+                secondFineCoord,
+                secondFineCoord);
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out var pendingRequests), Is.True);
+            Assert.That(pendingRequests, Has.Count.EqualTo(1));
+            Assert.That(pendingRequests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 6)));
+            Assert.That(pendingRequests[0].Priority, Is.EqualTo(5));
+        }
+
+        [Test]
         public void PhysicalPageLookup_PreservesDuplicateIdentityChainWhenFirstSlotIsFlushed()
         {
             VTPhysicalPool pool = CreatePhysicalPoolForTesting(pageCount: 2);
@@ -380,6 +533,51 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void EvictionCandidate_UsesMipOnlyToBreakSameFrameTouchTies()
+        {
+            VTPhysicalPool pool = CreatePhysicalPoolForTesting(pageCount: 2);
+            var owner = new PhysicalPoolOwner(1);
+            var producerHandle = new VTProducerHandle(1);
+
+            try
+            {
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    owner,
+                    producerHandle,
+                    pageIndex: 10,
+                    new VirtualTexturePageCoord(0, 0, 1),
+                    frameIndex: 1,
+                    out int coarsePhysicalPageId), Is.True);
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    owner,
+                    producerHandle,
+                    pageIndex: 20,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    frameIndex: 1,
+                    out int finePhysicalPageId), Is.True);
+
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    owner,
+                    producerHandle,
+                    pageIndex: 30,
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    frameIndex: 1 + VTPhysicalPool.FeedbackEvictionProtectionFrames,
+                    out int reusedPhysicalPageId), Is.True);
+
+                Assert.That(reusedPhysicalPageId, Is.EqualTo(finePhysicalPageId));
+                Assert.That(reusedPhysicalPageId, Is.Not.EqualTo(coarsePhysicalPageId));
+                Assert.That(owner.LastInvalidatedPageIndex, Is.EqualTo(20));
+            }
+            finally
+            {
+                pool.Dispose();
+            }
+        }
+
+        [Test]
         public void AsyncCommit_ProtectsNewlyVisiblePageUntilFeedbackCanTouchIt()
         {
             VTPhysicalPool pool = CreatePhysicalPoolForTesting(pageCount: 1);
@@ -401,6 +599,9 @@ namespace VividRP.Editor.Tests
                     frameIndex: 1,
                     locked: false,
                     pendingUpload: true,
+#if VT_DEBUG
+                    default(VTPageRequestDebugInfo),
+#endif
                     out int physicalPageId,
                     out int generation,
                     out _), Is.True);
@@ -625,6 +826,9 @@ namespace VividRP.Editor.Tests
                 frameIndex,
                 locked: false,
                 pendingUpload: false,
+#if VT_DEBUG
+                default(VTPageRequestDebugInfo),
+#endif
                 out physicalPageId,
                 out _,
                 out _);

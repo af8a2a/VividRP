@@ -48,6 +48,8 @@ namespace VividRP.Editor.Tests
 
                 Vector4 firstPlane = cullingContext.GetFrustumPlane(0);
                 Assert.That(firstPlane.sqrMagnitude, Is.GreaterThan(0.0f));
+                Vector4 nearPlane = cullingContext.GetFrustumPlane(4);
+                Assert.That(nearPlane.sqrMagnitude, Is.GreaterThan(0.0f));
             }
             finally
             {
@@ -188,6 +190,7 @@ namespace VividRP.Editor.Tests
                 isPerspective: false,
                 passMask: VividInstancePassMask.Shadows,
                 cullingSphereWS,
+                cullAgainstNearPlane: true,
                 out VividGPUCullingContext cullingContext,
                 out _);
 
@@ -196,6 +199,44 @@ namespace VividRP.Editor.Tests
             Assert.That(cullingContext.CullingSphereLS.y, Is.EqualTo(expectedCenterLS.y).Within(0.0001f));
             Assert.That(cullingContext.CullingSphereLS.z, Is.EqualTo(expectedCenterLS.z).Within(0.0001f));
             Assert.That(cullingContext.CullingSphereLS.w, Is.EqualTo(cullingSphereWS.w).Within(0.0001f));
+        }
+
+        [Test]
+        public void Build_DisablesOnlyRasterNearPlane_WhenNearPlaneCullingIsDisabled()
+        {
+            var viewMatrix = Matrix4x4.TRS(
+                new Vector3(2.0f, 3.0f, 4.0f),
+                Quaternion.Euler(15.0f, 30.0f, 0.0f),
+                Vector3.one
+            ).inverse;
+            var projectionMatrix = Matrix4x4.Ortho(-10.0f, 10.0f, -10.0f, 10.0f, 0.1f, 50.0f);
+
+            VividGPUDrivenCullingContextUtility.Build(
+                viewMatrix,
+                projectionMatrix,
+                cameraPositionWS: Vector3.zero,
+                cameraRightWS: Vector3.right,
+                cameraUpWS: Vector3.up,
+                pixelSize: new Vector2(512.0f, 512.0f),
+                isPerspective: false,
+                passMask: VividInstancePassMask.Shadows,
+                cullingSphereWS: Vector4.zero,
+                cullAgainstNearPlane: false,
+                out VividGPUCullingContext cullingContext,
+                out _);
+
+            for (int planeIndex = 0; planeIndex < 6; planeIndex++)
+            {
+                Vector4 plane = cullingContext.GetFrustumPlane(planeIndex);
+                if (planeIndex == 4)
+                {
+                    Assert.That(plane, Is.EqualTo(Vector4.zero));
+                }
+                else
+                {
+                    Assert.That(plane.sqrMagnitude, Is.GreaterThan(0.0f));
+                }
+            }
         }
 
         [Test]

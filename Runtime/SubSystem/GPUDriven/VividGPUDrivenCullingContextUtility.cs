@@ -8,6 +8,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         public const int DefaultForcedMeshLODNodeDepth = VividGPUDrivenDefaults.ForcedMeshLODNodeDepth;
         public const float DefaultMeshLODErrorThreshold = VividGPUDrivenDefaults.MeshLODErrorThreshold;
+        private const int NearFrustumPlaneIndex = 4;
         private static readonly Plane[] s_FrustumPlanes = new Plane[6];
 
         public static void Build(
@@ -63,6 +64,7 @@ namespace VividRP.Runtime.GPUDriven
                 isPerspective,
                 passMask,
                 Vector4.zero,
+                cullAgainstNearPlane: true,
                 out cullingContext,
                 out lodSelectionContext
             );
@@ -78,6 +80,7 @@ namespace VividRP.Runtime.GPUDriven
             bool isPerspective,
             VividInstancePassMask passMask,
             Vector4 cullingSphereWS,
+            bool cullAgainstNearPlane,
             out VividGPUCullingContext cullingContext,
             out VividGPULODSelectionContext lodSelectionContext
         )
@@ -102,7 +105,7 @@ namespace VividRP.Runtime.GPUDriven
                 MeshletListBuildJobsOffset = 0,
                 MeshletRenderRequestsOffset = 0,
             };
-            FillFrustumPlanes(ref cullingContext, s_FrustumPlanes);
+            FillFrustumPlanes(ref cullingContext, s_FrustumPlanes, cullAgainstNearPlane);
 
             lodSelectionContext = new VividGPULODSelectionContext
             {
@@ -163,7 +166,10 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        private static unsafe void FillFrustumPlanes(ref VividGPUCullingContext cullingContext, Plane[] frustumPlanes)
+        private static unsafe void FillFrustumPlanes(
+            ref VividGPUCullingContext cullingContext,
+            Plane[] frustumPlanes,
+            bool cullAgainstNearPlane)
         {
             fixed (float* destination = cullingContext.FrustumPlanes)
             {
@@ -172,10 +178,11 @@ namespace VividRP.Runtime.GPUDriven
                 {
                     Plane plane = frustumPlanes[planeIndex];
                     int offset = planeIndex * 4;
-                    destination[offset + 0] = plane.normal.x;
-                    destination[offset + 1] = plane.normal.y;
-                    destination[offset + 2] = plane.normal.z;
-                    destination[offset + 3] = plane.distance;
+                    bool disablePlane = !cullAgainstNearPlane && planeIndex == NearFrustumPlaneIndex;
+                    destination[offset + 0] = disablePlane ? 0.0f : plane.normal.x;
+                    destination[offset + 1] = disablePlane ? 0.0f : plane.normal.y;
+                    destination[offset + 2] = disablePlane ? 0.0f : plane.normal.z;
+                    destination[offset + 3] = disablePlane ? 0.0f : plane.distance;
                 }
 
                 for (int planeIndex = planeCount; planeIndex < 6; planeIndex++)

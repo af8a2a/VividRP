@@ -296,6 +296,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 isPerspective: false,
                 passMask: VividInstancePassMask.Shadows,
                 cullingSphereWS: cullingSphereWS,
+                // Directional shadow vertices are pancaked onto the raster near plane. Rejecting
+                // their bounds against that plane here would remove valid casters before the VS.
+                cullAgainstNearPlane: false,
                 cullingContext: out cullingContext,
                 lodSelectionContext: out _);
         }

@@ -6,6 +6,7 @@ VividRP is an experimental Scriptable Render Pipeline (SRP) package for Unity 6.
 
 > [!IMPORTANT]
 > - The current development baseline is Unity `6000.7.0a3` (commit `b08e599c`). `package.json` still declares `6000.6.0a3` as the minimum compatibility version; use `6000.7.0a3` for the current feature set.
+> - VividRP depends on [CoreRP](https://github.com/af8a2a/CoreRP.git). In Package Manager, use **Add package from git URL** to add `https://github.com/af8a2a/CoreRP.git` first.
 > - Windows + DirectX 12 is the most reliable runtime environment. Bindless and Ray Tracing workflows require DX12 / DXR capabilities.
 > - VividRP is under active development. Some subsystems are experimental and are not guaranteed to be cross-platform, production-ready, or backward-compatible.
 > - This repository no longer maps one-to-one to the feature list of the legacy [VividRP](https://github.com/af8a2a/VividRP). Treat the current source, this README, and `Documentation~` as the source of truth.
@@ -37,30 +38,35 @@ The modules below have implementations in the current package. Availability stil
 | Shadows and lighting | CSM / PCSS, clustered lighting, directional DXR shadows with SIGMA denoising, sky, and atmospheric scattering |
 | Post processing | Auto exposure with Unity, HDRP, and Unreal preset Inspectors; bloom with mip-scattering and FFT-convolution modes; color grading; depth of field; ambient occlusion with XeGTAO or FidelityFX CACAO; lens flares; SSR with ReBlur; local exposure; and final compositing |
 | Anti-aliasing and upscaling | CMAA2, TAA, TSR, and FSR3; DLSS Super Resolution / Ray Reconstruction require additional plugin integration |
+| NVIDIA integration | NVAPI Shader Execution Reordering (SER) |
 | Volumetrics | Global and local volumetric fog, VBuffer, volumetric lighting, and Max-Z generation |
-| GPU Driven | Meshlet import and rendering, Visibility Buffer, object dispatch, debug overlay, and bindless descriptor support |
+| GPU Driven | Meshlet import and rendering, Visibility Buffer, object dispatch, debug overlay, bindless descriptor support, and Unity Terrain duplication/conversion, chunked meshlet baking, multi-level LODs, and up to eight terrain material layers with control-map blending |
 | Ray Tracing | Serializable RTAS descriptors, RTAS construction, directional ray-traced shadows, and related debug passes |
-| Reference path tracing | OpenPBR-based multi-bounce DXR prototype with stochastic RGB geometry opacity, thin-walled transmission, and partially transmissive solid refraction using a four-level medium stack and Beer–Lambert absorption; also includes analytic-light and HDRI MIS / next-event estimation, rectangle / disc BSDF-segment evaluation, shading-point-aware mixed light selection and a spatial index, Rendering Debugger transport views, deterministic pixel capture, REBLUR signal routing for finite sun lighting, NRD REBLUR preview denoising, and a Unity Open Image Denoise backend |
-| Resources and subsystems | Virtual Texturing with SVT, DBuffer Decals, LTC area lights, reflection-probe atlas, ReGIR, and sky management |
+| Reference path tracing | OpenPBR-based multi-bounce DXR prototype with stochastic RGB geometry opacity, thin-walled transmission, and partially transmissive solid refraction using a four-level medium stack and Beer–Lambert absorption; also includes analytic-light and HDRI MIS / next-event estimation, rectangle / disc BSDF-segment evaluation, shading-point-aware mixed light selection and a spatial index, face subsurface-scattering ear transmission, Rendering Debugger transport views, deterministic pixel capture, REBLUR signal routing for finite sun lighting, NRD REBLUR preview denoising, and a Unity Open Image Denoise backend |
+| Hair path tracing | `VividRP/Material/Hair` DXR path based on the RTXCR Chiang near-field BCSDF, with DOTS strand geometry, persistent GPU strand updates, dynamic motion vectors, Reference PT, ReBLUR, and DLSS Ray Reconstruction guides; raster hair rendering and groom importing are not currently provided |
+| Resources and subsystems | Virtual Texturing with SVT, GPU Driven Terrain surface bindings, adaptive mip bias and residency transitions, DBuffer Decals, LTC area lights, reflection-probe atlas, ReGIR, and sky management |
 | Per-Object Buffer | Per-renderer shader data without `MaterialPropertyBlock`, centralized generated HLSL layouts, a color example, and an MPB CPU benchmark |
 | Experimental particles | ECS paged-storage simulation, culling, sorting, Billboard / Mesh / Stretch rendering, trails, collisions, and sub-emitters |
-| Editor and tests | RenderGraph editing, importing, compilation, validation, node-registry generation, resource drawers, and EditMode tests |
+| Editor and tools | DXC shader performance compiler backend, VividRP Wizard for Windows DX12 / DXC configuration, RenderGraph editing, importing, compilation, validation, node-registry generation, resource drawers, and EditMode tests |
+| Materials and PBR | `StandardLit`, including Metallic / Smoothness / AO PBR remap ranges, `SimpleLit`, `SimpleForward`, and `StandardLayeredLit`, plus URP Lit and HDRP Lit material conversion tools |
 
-The package includes `StandardLit`, `SimpleLit`, `SimpleForward`, and `StandardLayeredLit` shaders, plus URP Lit and HDRP Lit material conversion tools. Cameras, lights, reflection probes, and most Volume settings have VividRP companion components or custom Inspectors.
+Cameras, lights, reflection probes, and most Volume settings have VividRP companion components or custom Inspectors.
 
 ## Quick start
 
 1. Open the project with Unity `6000.7.0a3`, or a compatible `6000.7` release.
-2. Add the package through Package Manager as an embedded or local package.
-3. Create a `VividRenderPipelineAsset` through `Assets/Create/VividRP/Vivid Render Pipeline`.
-4. Set that asset as the active render pipeline in **Project Settings > Graphics**.
-5. Create and edit a **Standard Render Graph**, then assign its generated `RenderGraphData` to the pipeline asset.
-6. For post-processing or global rendering settings, initialize **Default Volume** in the pipeline asset Inspector, or create a scene Volume Profile.
-7. To enable temporal anti-aliasing, add `VividAdditionalCameraData` to a camera and select the desired mode.
+2. In Package Manager, use **Add package from git URL** to add `https://github.com/af8a2a/CoreRP.git`.
+3. Add this package through Package Manager as an embedded or local package.
+4. Create a `VividRenderPipelineAsset` through `Assets/Create/VividRP/Vivid Render Pipeline`.
+5. Set that asset as the active render pipeline in **Project Settings > Graphics**.
+6. Create and edit a **Standard Render Graph**, then assign its generated `RenderGraphData` to the pipeline asset.
+7. For post-processing or global rendering settings, initialize **Default Volume** in the pipeline asset Inspector, or create a scene Volume Profile.
+8. To enable temporal anti-aliasing, add `VividAdditionalCameraData` to a camera and select the desired mode.
 
 ### Optional: GPU Driven, Bindless, and Ray Tracing
 
 - Enable **GPU Driven** in the pipeline asset Inspector.
+- Open **Window > Rendering > VividRP Wizard** to place Direct3D 12 first for Windows Standalone and configure DXC for the active Build Profile; restart Unity after changing the graphics API.
 - Bindless requires running the following script from the project root, then restarting Unity:
 
 ```powershell
@@ -69,14 +75,18 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 
 - Ray Tracing requires DXR-compatible hardware and DX12. Add `VividRP/Ray Tracing/Settings` to a Volume Profile and configure it for the project.
 - DLSS requires the NVIDIA dependencies and the `DLSS_PLUGIN_INTEGRATE` scripting define symbol.
-- Reference path tracing uses a dedicated `.vrdg` asset and pipeline asset for controlled-scene validation; it is not intended for real-time use or complete ground truth. In addition to opaque / alpha-tested `StandardLit`, it supports stochastic RGB geometry opacity and OpenPBR transmission. Enable **Thin-Walled Transmission** for sheets; disable it for closed solids, where **Transmission Depth** specifies the Beer–Lambert distance represented by **Transmission Color**. Solid media can be nested up to four levels. The OIDN backend is enabled only in the Editor or 64-bit Standalone builds when `com.unity.rendering.denoising` is available.
+- NVIDIA Shader Execution Reordering (SER) is an optional Reference Path Tracing acceleration for Windows x86_64 + DX12 and requires NVAPI support.
+- Reference path tracing uses a dedicated `.vrdg` asset and pipeline asset for controlled-scene validation; it is not intended for real-time use or complete ground truth. `StandardLit` separates geometric coverage from material transmission: stochastic coverage is driven by `Base Color.a × Base Map.a × Opacity Map.r`, while `Transmission Weight × Transmission Map.r` controls OpenPBR transmission; both extra maps reuse the Base Map UV. Enable **Thin-Walled Transmission** for sheets; disable it for closed solids, where **Transmission Depth** specifies the Beer–Lambert distance represented by **Transmission Color**. Solid media can be nested up to four levels. Accumulation stops and history freezes at **Target Sample Count**. The OIDN backend is enabled only in the Editor or 64-bit Standalone builds when `com.unity.rendering.denoising` is available, and submits denoising once each convergence cycle. RTX Texture Filtering (RTXTF) can be enabled in the Reference Path Tracing Volume and is used by default only for opaque `StandardLit` surface texture reads.
+- Hair uses a dedicated `VividRP/Material/Hair` material and Reference Path Tracing graph. It covers the ray-tracing path only and is intended to validate strand geometry, motion vectors, and denoising guides rather than replace a conventional raster-hair workflow.
 
 ## Directory guide
 
 - `Runtime/RenderPipeline`: pipeline, pipeline asset, global settings, and Volume integration.
 - `Runtime/RenderGraph`: runtime graph data, resource descriptors, History / Preview, Pass Recorder, and Frame Context.
+- `Runtime/Core/History`: camera-owned persistent texture and buffer history, imported into RenderGraph through the bridge.
+- `Runtime/Core/Hair`: DOTS hair geometry and persistent GPU strand updates.
 - `Runtime/RenderPass`: Core, Debug, and Example passes.
-- `Runtime/SubSystem`: GPU Driven, Virtual Texture, Volumetric, Sky, Decal, Reflection, DLSS, and other subsystems.
+- `Runtime/SubSystem`: GPU Driven, Terrain, Virtual Texture, Volumetric, Sky, Decal, Reflection, DLSS, and other subsystems.
 - `Runtime/ComponentData`: companion camera, light, and reflection-probe data.
 - `Runtime/PerObjectBuffer`: per-renderer shader-data system and examples.
 - `Runtime/Experiment/Particle`: experimental ECS particle system.
@@ -92,6 +102,7 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 - Do not manually edit `Editor/RenderGraph/GeneratedRenderPassNodes.g.cs` or `Runtime/Resources/PipelineResources.asset`. The former is generated by the node-registry generator; the latter should be updated through the resource-collection workflow.
 - After changing `[PipelineResource]` or `[ResourcePath]` declarations, select `Runtime/Resources/PipelineResources.asset` and run **Recollect Engine Resources** in the Inspector.
 - RenderGraph resource field names are contracts for ports, previews, and compiled bindings. Review graph assets and tests when changing them.
+- Use camera-owned History resources for cross-frame textures and buffers. `PassRecorder` imports them through `CameraHistoryRenderGraphBridge` and commits them after successful graph execution, so a manual end-of-graph copy is unnecessary.
 
 ## Documentation and roadmap
 
@@ -103,6 +114,11 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 - [Local Exposure](Documentation~/LocalExposure.md)
 - [Ambient Occlusion (XeGTAO / FidelityFX CACAO)](Documentation~/AmbientOcclusion.md)
 - [FFT Convolution Bloom](Documentation~/FFTBloom.md)
+- [NVIDIA Shader Execution Reordering](Documentation~/NVAPIShaderExecutionReordering.md)
+- [RTX Texture Filtering](Documentation~/RTXTextureFiltering.md)
+- [Chiang Hair Path Tracing](Documentation~/HairPathTracing.md)
 - [Virtual Texture Architecture](Documentation~/VirtualTextureCoreArchitecture.md)
+- [VividTerrain Baking](Documentation~/VividTerrainBaking.md)
+- [VividRP Wizard](Documentation~/VividRPWizard.md)
 - [Per-Object Buffer](Documentation~/PerObjectBuffer.md)
-- Roadmaps: [Shadow](Roadmap~/Shadow.md), [Sky](Roadmap~/Sky.md), [Virtual Texture](Roadmap~/VirtualTextureSystem.md), [SVT](Roadmap~/SVTRoadmap.md), and [Reference Path Tracing](Roadmap~/ReferencePathTracingRoadmap.md)
+- Roadmaps: [Shadow](Roadmap~/Shadow.md), [Sky](Roadmap~/Sky.md), [Light Culling](Roadmap~/lightculling-roadmap.md), [Virtual Texture](Roadmap~/VirtualTextureSystem.md), [SVT](Roadmap~/SVTRoadmap.md), [Reference Path Tracing](Roadmap~/ReferencePathTracingRoadmap.md), and [Hair Path Tracing](Roadmap~/HairPathTracingRoadmap.md)

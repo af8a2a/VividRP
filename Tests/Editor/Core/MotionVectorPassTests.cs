@@ -181,7 +181,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SupportsAsyncCompute_ReturnsFalse_ForMotionVectorPass()
         {
-            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(MotionVectorPass)), Is.False);
+            Assert.That((typeof(MotionVectorPass)).SupportsAsyncCompute(), Is.False);
         }
 
         private static RenderGraphTexture GetTextureField(MotionVectorPass pass, string fieldName)

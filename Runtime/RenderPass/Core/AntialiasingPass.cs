@@ -360,7 +360,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_Cmaa2Pass.IsPassResourceLayoutDirty)
                 return m_Cmaa2Resources;
 
-            if (!PassResourceReferenceRefreshUtility.TryRefresh(m_Cmaa2Pass, m_Cmaa2Resources))
+            if (!m_Cmaa2Pass.TryRefresh(m_Cmaa2Resources))
                 m_Cmaa2Resources = ((IRenderPass)m_Cmaa2Pass).Initialize();
 
             m_Cmaa2Pass.ClearPassResourceLayoutDirty();
@@ -658,7 +658,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var outputDescriptor = m_OutputDescriptor;
             if (sourceDescriptor != null)
             {
-                RenderGraphTextureDescUtility.Copy(sourceDescriptor, outputDescriptor);
+                sourceDescriptor.Copy(outputDescriptor);
             }
             else
             {
@@ -850,8 +850,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var cmd = context.cmd;
             var unsafeCmd = CommandBufferHelpers.GetNativeCommandBuffer(cmd);
             RTHandle sourceHandle = data.Source;
-            var scaleBias = TextureScaleBiasUtility.GetScaleBias(
-                sourceHandle,
+            var scaleBias = sourceHandle.GetScaleBias(
                 context.GetTextureUVOrigin(data.Source),
                 context.GetTextureUVOrigin(data.Output));
 

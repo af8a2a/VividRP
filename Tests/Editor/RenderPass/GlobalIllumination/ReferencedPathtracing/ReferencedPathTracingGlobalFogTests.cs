@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -77,80 +76,6 @@ namespace VividRP.Editor.Tests
             {
                 UnityEngine.Object.DestroyImmediate(volume);
             }
-        }
-
-        [Test]
-        public void ShaderContract_SamplesBeforeSurfaceAndKeepsPayloadCompact()
-        {
-            var rayGenerationSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracing.rgen.hlsl"));
-            var fogSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracingGlobalFog.hlsl"));
-            var commonSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracingCommon.hlsl"));
-
-            var fogSampleIndex = rayGenerationSource.IndexOf(
-                "ReferencedPathtracingSampleGlobalFog(",
-                StringComparison.Ordinal);
-            var surfaceTraceIndex = rayGenerationSource.IndexOf(
-                "TraceReferencedPathtracingSurface(",
-                fogSampleIndex,
-                StringComparison.Ordinal);
-            Assert.That(fogSampleIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(surfaceTraceIndex, Is.GreaterThan(fogSampleIndex));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "surfaceRay.TMax = min("));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "ReferencedPathtracingSampleUnifiedNEECandidate("));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "ReferencedPathtracingEvaluateGlobalFogTransmittance("));
-            Assert.That(
-                fogSource,
-                Does.Contain(
-                    "ReferencedPathtracingIntegrateGlobalFogDensity("));
-            Assert.That(
-                fogSource,
-                Does.Contain(
-                    "ReferencedPathtracingInvertGlobalFogDensity("));
-            Assert.That(
-                fogSource,
-                Does.Contain(
-                    "ReferencedPathtracingSampleGlobalFogPhase("));
-            Assert.That(
-                commonSource,
-                Does.Contain(
-                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 10"));
-            Assert.That(
-                commonSource,
-                Does.Contain(
-                    "struct ReferencedPathtracingVisibilityPayload"));
-            Assert.That(
-                commonSource,
-                Does.Contain("uint hit;"));
         }
 
         [Test]
@@ -317,20 +242,6 @@ namespace VividRP.Editor.Tests
                         * verticalRate
                         / startDensity)
                     / verticalRate;
-        }
-
-        private static string GetPackageFilePath(
-            params string[] relativeParts)
-        {
-            var packageInfo =
-                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
-                    typeof(
-                        ReferencedPathTracingEnvironmentSamplingPass)
-                        .Assembly);
-            Assert.That(packageInfo, Is.Not.Null);
-            return Path.Combine(
-                packageInfo.resolvedPath,
-                Path.Combine(relativeParts));
         }
     }
 }

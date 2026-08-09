@@ -310,12 +310,12 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-            var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
+            var sourceTexture = m_SourceTexture.innerHandle.ResolveTexture();
             if (sourceTexture == null)
                 return;
 
             var debugTexture = m_DebugTexture != null && m_DebugTexture.innerHandle.IsValid()
-                ? TextureResolveUtility.ResolveTexture(m_DebugTexture.innerHandle)
+                ? m_DebugTexture.innerHandle.ResolveTexture()
                 : null;
             var isDebugTextureArray = IsTextureArray(m_DebugTexture?.desc, debugTexture);
             var resolvedSlice = isDebugTextureArray
@@ -335,14 +335,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ResolvedNearClipPlane,
                 m_ResolvedFarClipPlane);
             var debugTextureScaleBias = m_DebugTexture != null && m_DebugTexture.innerHandle.IsValid()
-                ? TextureScaleBiasUtility.GetScaleBias(m_DebugTexture.innerHandle)
+                ? m_DebugTexture.innerHandle.GetScaleBias()
                 : new Vector4(1f, 1f, 0f, 0f);
 
             m_MaterialPropertyBlock ??= new MaterialPropertyBlock();
             var mpb = m_MaterialPropertyBlock;
             mpb.Clear();
             mpb.SetTexture(SourceTextureId, sourceTexture);
-            mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture.innerHandle));
+            mpb.SetVector(SourceTextureScaleBiasId, m_SourceTexture.innerHandle.GetScaleBias());
             mpb.SetVector(DebugTextureScaleBiasId, debugTextureScaleBias);
             mpb.SetVector(OverlayRectId, m_OverlayRect);
             mpb.SetVector(OverlayScreenSizeId, m_OverlayScreenSize);
@@ -570,7 +570,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_OutputTexture.desc.Width = width;
             m_OutputTexture.desc.Height = height;
-            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(sourceDescriptor);
+            m_OutputTexture.desc.ColorFormat = sourceDescriptor.ResolveColorFormat();
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = sourceDescriptor?.FilterMode ?? FilterMode.Bilinear;
@@ -595,7 +595,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(m_SourceTexture?.desc))
+            if ((m_SourceTexture?.desc).HasExplicitSize())
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;

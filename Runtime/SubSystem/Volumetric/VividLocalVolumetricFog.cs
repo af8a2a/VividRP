@@ -351,7 +351,7 @@ namespace VividRP.Runtime
 
         public Bounds GetBounds()
         {
-            return BoundProxyUtility.CalculateWorldAabb(transform, BoundProxyShape);
+            return transform.CalculateWorldAabb(BoundProxyShape);
         }
 
         public VividLocalVolumetricFogEngineData ConvertToEngineData(Camera camera)
@@ -725,8 +725,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            worldData = BoundProxyUtility.CreateWorldData(
-                transform,
+            worldData = transform.CreateWorldData(
                 BoundProxyFeature,
                 BoundProxyShape,
                 transform.GetEntityId());

@@ -111,7 +111,7 @@ namespace VividRP.Runtime
             if (additionalData != null)
                 return additionalData.GetProjectionMatrixNoJitter(viewIndex);
 
-            return CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            return camera.GetNonJitteredProjectionMatrix();
         }
 
         public Matrix4x4 GetProjectionMatrix(int viewIndex = 0)
@@ -119,7 +119,7 @@ namespace VividRP.Runtime
             if (additionalData != null)
                 return additionalData.GetProjectionMatrix(viewIndex);
 
-            return CameraProjectionMatrixUtility.GetProjectionMatrix(camera);
+            return camera.GetProjectionMatrix();
         }
 
         public Matrix4x4 GetInverseProjectionMatrix(int viewIndex = 0)

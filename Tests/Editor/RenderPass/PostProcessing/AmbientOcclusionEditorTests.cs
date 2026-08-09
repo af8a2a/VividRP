@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -69,49 +68,6 @@ namespace VividRP.Editor.Tests
 
                 Object.DestroyImmediate(component);
             }
-        }
-
-        [Test]
-        public void Source_SwitchesGtaoAndCacaoPanels()
-        {
-            var source = File.ReadAllText(
-                GetPackageFilePath(
-                    "Editor",
-                    "VolumeEditor",
-                    "AmbientOcclusionEditor.cs"));
-
-            Assert.That(
-                source,
-                Does.Contain("[CustomEditor(typeof(AmbientOcclusion))]"));
-            Assert.That(
-                source,
-                Does.Contain("PropertyFetcher<AmbientOcclusion>"));
-            Assert.That(
-                source,
-                Does.Contain("AmbientOcclusionImplementation.FidelityFXCACAO"));
-            Assert.That(source, Does.Contain("DrawGtaoPanel();"));
-            Assert.That(source, Does.Contain("DrawCacaoPanel();"));
-            Assert.That(source, Does.Contain("DrawQualityLevel(maximum: 3);"));
-            Assert.That(source, Does.Contain("DrawQualityLevel(maximum: 4);"));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

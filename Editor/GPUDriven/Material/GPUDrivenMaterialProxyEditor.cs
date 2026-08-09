@@ -22,7 +22,7 @@ namespace VividRP.Editor.GPUDriven
             {
                 if (GUILayout.Button("Sync From Source Material"))
                 {
-                    GPUDrivenMaterialProxySyncResult syncResult = GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy);
+                    GPUDrivenMaterialProxySyncResult syncResult = materialProxy.SyncFromSourceMaterial();
                     if (!syncResult.Success)
                     {
                         Debug.LogWarning($"[VividRP] Failed to sync GPUDriven material proxy '{materialProxy.name}': {syncResult.ErrorMessage}", materialProxy);
@@ -86,7 +86,7 @@ namespace VividRP.Editor.GPUDriven
                 return;
             }
 
-            string[] warnings = GPUDrivenMaterialProxySyncUtility.CollectUnsupportedWarnings(materialProxy.SourceMaterial);
+            string[] warnings = materialProxy.SourceMaterial.CollectUnsupportedWarnings();
             for (int warningIndex = 0; warningIndex < warnings.Length; warningIndex++)
             {
                 EditorGUILayout.HelpBox(warnings[warningIndex], MessageType.Warning);

@@ -89,7 +89,7 @@ namespace VividRP.Editor.Tests
 
                 uint initialRevision = materialProxy.Revision;
                 GPUDrivenMaterialProxySyncResult result =
-                    GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy, material);
+                    materialProxy.SyncFromSourceMaterial(material);
 
                 Assert.That(result.Success, Is.True);
                 Assert.That(materialProxy.SourceMaterial, Is.SameAs(material));
@@ -171,7 +171,7 @@ namespace VividRP.Editor.Tests
                 material.SetFloat("_ClearCoatMask", 1.0f);
                 material.SetFloat("_SmoothnessTextureChannel", 1.0f);
 
-                string[] warnings = GPUDrivenMaterialProxySyncUtility.CollectUnsupportedWarnings(material);
+                string[] warnings = material.CollectUnsupportedWarnings();
                 string warningText = string.Join("\n", warnings);
 
                 Assert.That(warnings, Has.Length.GreaterThanOrEqualTo(6));

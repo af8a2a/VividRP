@@ -55,7 +55,7 @@ namespace VividRP.Runtime
                     continue;
                 }
 
-                if (BoundProxyUtility.TryCreateWorldData(provider, out BoundProxyWorldData worldData))
+                if (provider.TryCreateWorldData(out BoundProxyWorldData worldData))
                 {
                     results.Add(worldData);
                 }
@@ -74,7 +74,7 @@ namespace VividRP.Runtime
             }
 
             TProvider provider = m_Providers[providerIndex];
-            return provider != null && BoundProxyUtility.TryCreateWorldData(provider, out worldData);
+            return provider != null && provider.TryCreateWorldData(out worldData);
         }
 
         private void RebuildTrackedProviders()

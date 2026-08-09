@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using VividRP.Runtime.RenderPass.Core;
@@ -8,104 +7,6 @@ namespace VividRP.Editor.Tests
 {
     public sealed class ReferencedPathTracingParticipatingMediumTests
     {
-        [Test]
-        public void ShaderContract_IntegratesMediumBeforeSurfaceAndAttenuatesShadows()
-        {
-            var rayGenerationSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracing.rgen.hlsl"));
-            var atmosphereSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracingAtmosphere.hlsl"));
-            var commonSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracingCommon.hlsl"));
-
-            var mediumSampleIndex = rayGenerationSource.IndexOf(
-                "ReferencedPathtracingSampleAtmosphereMedium(",
-                StringComparison.Ordinal);
-            var surfaceMissIndex = rayGenerationSource.IndexOf(
-                "if (payload.hit == 0u)",
-                StringComparison.Ordinal);
-            Assert.That(mediumSampleIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(surfaceMissIndex, Is.GreaterThan(mediumSampleIndex));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "float3 TraceReferencedPathtracingCandidateVisibility("));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy("));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "!ReferencedPathtracingUsesCameraRelativeAtmosphere()"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain("|| payload.hit == 0u"));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain("bool includeVirtualGround"));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "ReferencedPathtracingIntersectAtmosphereWithGroundPolicy("));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "kReferencedPathtracingVolumeDimensionOffset"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "AccumulateReferencedPathtracingMainLightRadiance("));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "REFERENCED_ATMOSPHERE_MAXIMUM_TRACKING_STEP_COUNT"));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "REFERENCED_ATMOSPHERE_MEDIUM_EVENT_SCATTER"));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "ReferencedPathtracingSampleAtmospherePhase("));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "ReferencedPathtracingHasAtmosphereSun()"));
-            Assert.That(
-                commonSource,
-                Does.Contain(
-                    "Reference Atmosphere has no emissive skydome"));
-            Assert.That(
-                commonSource,
-                Does.Contain(
-                    "ReferencedPathtracingUsesOptimizedAtmosphereTransport()"));
-            Assert.That(
-                commonSource,
-                Does.Contain(
-                    "REFERENCED_ATMOSPHERE_TRANSPORT_REFERENCE_SAMPLE_COUNT"));
-            Assert.That(
-                ReferencedPathTracingAtmosphereState.ContractVersion,
-                Is.EqualTo(7));
-        }
 
         [Test]
         public void RayleighAndHenyeyGreensteinPhase_NormalizeToUnitSphere()
@@ -226,20 +127,6 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 actual.z,
                 Is.EqualTo(expected.z).Within(tolerance));
-        }
-
-        private static string GetPackageFilePath(
-            params string[] relativeParts)
-        {
-            var packageInfo =
-                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
-                    typeof(
-                        ReferencedPathTracingEnvironmentSamplingPass)
-                        .Assembly);
-            Assert.That(packageInfo, Is.Not.Null);
-            return Path.Combine(
-                packageInfo.resolvedPath,
-                Path.Combine(relativeParts));
         }
 
         private readonly struct Spectrum

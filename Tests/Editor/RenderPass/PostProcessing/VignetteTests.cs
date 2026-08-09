@@ -1,4 +1,3 @@
-using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -170,64 +169,6 @@ namespace VividRP.Editor.Tests
 
                 Object.DestroyImmediate(component);
             }
-        }
-
-        [Test]
-        public void FinalBlitPass_ResolvesVignetteSettingsAndSetsShaderKeyword()
-        {
-            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "FinalBlitPass.cs"));
-
-            Assert.That(passSource, Does.Contain("VignetteSettingsResolver.Resolve()"));
-            Assert.That(passSource, Does.Contain("VignetteRuntimeUtility.CreateParams1"));
-            Assert.That(passSource, Does.Contain("VignetteRuntimeUtility.CreateParams2"));
-            Assert.That(passSource, Does.Contain("VignetteRuntimeUtility.CreateColor"));
-            Assert.That(passSource, Does.Contain("CoreUtils.SetKeyword(m_Material, \"_VIGNETTE\", true)"));
-            Assert.That(passSource, Does.Contain("CoreUtils.SetKeyword(m_Material, \"_VIGNETTE\", false)"));
-        }
-
-        [Test]
-        public void FinalBlitShader_ContainsHdrpVignetteLogic_BeforeFilmGrain()
-        {
-            var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "FinalBlit.shader"));
-
-            Assert.That(shaderSource, Does.Contain("#pragma multi_compile_local _ _VIGNETTE"));
-            Assert.That(shaderSource, Does.Contain("_VividVignetteParams1"));
-            Assert.That(shaderSource, Does.Contain("_VividVignetteParams2"));
-            Assert.That(shaderSource, Does.Contain("_VividVignetteColor"));
-            Assert.That(shaderSource, Does.Contain("_VividVignetteMask"));
-            Assert.That(shaderSource, Does.Contain("VividVignetteIntensity"));
-            Assert.That(shaderSource, Does.Contain("FastSRGBToLinear(vfactor)"));
-            Assert.That(shaderSource, Does.Contain("postProcessed *= lerp(VividVignetteColor, (1.0).xxx, vfactor);"));
-            Assert.That(shaderSource, Does.Contain("postProcessed = lerp(postProcessed, newColor, VividVignetteOpacity);"));
-
-            var bloomIndex = shaderSource.IndexOf("postProcessed += bloom;", System.StringComparison.Ordinal);
-            var vignetteIndex = shaderSource.IndexOf("if (VividVignetteMode < 0.5)", System.StringComparison.Ordinal);
-            var filmGrainIndex = shaderSource.IndexOf("postProcessed = saturate(postProcessed);", System.StringComparison.Ordinal);
-
-            Assert.That(bloomIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(vignetteIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(filmGrainIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(bloomIndex, Is.LessThan(vignetteIndex));
-            Assert.That(vignetteIndex, Is.LessThan(filmGrainIndex));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

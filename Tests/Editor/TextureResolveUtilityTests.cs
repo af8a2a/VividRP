@@ -17,7 +17,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ResolveTexture_ReturnsNull_WhenHandleIsNull()
         {
-            Assert.That(TextureResolveUtility.ResolveTexture((RTHandle)null), Is.Null);
+            Assert.That(((RTHandle)null).ResolveTexture(), Is.Null);
         }
 
         [Test]
@@ -33,7 +33,7 @@ namespace VividRP.Editor.Tests
                     colorFormat: GraphicsFormat.R8G8B8A8_UNorm,
                     name: "ResolveTextureTestHandle");
 
-                Assert.That(TextureResolveUtility.ResolveTexture(handle), Is.SameAs(handle.rt));
+                Assert.That(handle.ResolveTexture(), Is.SameAs(handle.rt));
             }
             finally
             {
@@ -54,7 +54,7 @@ namespace VividRP.Editor.Tests
             {
                 handle = RTHandles.Alloc(texture);
 
-                Assert.That(TextureResolveUtility.ResolveTexture(handle), Is.SameAs(texture));
+                Assert.That(handle.ResolveTexture(), Is.SameAs(texture));
             }
             finally
             {
@@ -66,7 +66,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ResolveTexture_ReturnsNull_WhenRenderGraphTextureIsNull()
         {
-            Assert.That(TextureResolveUtility.ResolveTexture((RenderGraphTexture)null), Is.Null);
+            Assert.That(((RenderGraphTexture)null).ResolveTexture(), Is.Null);
         }
     }
 }

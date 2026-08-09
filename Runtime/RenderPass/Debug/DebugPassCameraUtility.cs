@@ -38,8 +38,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Blitter.BlitTexture(
                 context.cmd,
                 sourceHandle,
-                TextureScaleBiasUtility.GetScaleBias(
-                    sourceHandle,
+                sourceHandle.GetScaleBias(
                     context.GetTextureUVOrigin(sourceTexture.innerHandle),
                     context.GetTextureUVOrigin(outputTexture.innerHandle)),
                 0f,
@@ -66,8 +65,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Blitter.BlitTexture(
                 cmd,
                 sourceHandle,
-                TextureScaleBiasUtility.GetScaleBias(
-                    sourceHandle,
+                sourceHandle.GetScaleBias(
                     context.GetTextureUVOrigin(sourceTexture.innerHandle),
                     context.GetTextureUVOrigin(outputTexture.innerHandle)),
                 0f,

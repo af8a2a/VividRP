@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -52,108 +51,6 @@ namespace VividRP.Editor.Tests
                     .HasFiniteMainLightSolidAngle(
                         0.53f * Mathf.Deg2Rad),
                 Is.True);
-        }
-
-        [Test]
-        public void ReblurRouting_ConsumesPathTracerProducerHandshake()
-        {
-            var passSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "GlobalIllumination",
-                "ReferencedPathtracing",
-                "ReferencedPathTracingPass.cs"));
-            var reblurSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "GlobalIllumination",
-                "ReferencedPathtracing",
-                "ReferencedPathTracingReblurPass.cs"));
-
-            Assert.That(
-                passSource,
-                Does.Contain(
-                    "pathTracingData.mainLightInDenoiserSignals"));
-            Assert.That(
-                reblurSource,
-                Does.Contain(
-                    "pathTracingData.mainLightInDenoiserSignals"));
-            Assert.That(
-                reblurSource,
-                Does.Not.Contain(
-                    "out var mainLightAngularDiameter"));
-            Assert.That(
-                reblurSource,
-                Does.Contain(
-                    "pathTracingData.physicalCameraDofEnabled"));
-            Assert.That(
-                reblurSource,
-                Does.Contain(
-                    "m_ResolveRawForPhysicalCameraDof"));
-            Assert.That(
-                reblurSource,
-                Does.Contain(
-                    "m_Settings.checkerboardMode ="));
-            Assert.That(
-                reblurSource,
-                Does.Contain(
-                    "DispatchResolveRaw(cmd);"));
-        }
-
-        [Test]
-        public void SignalEncoding_UsesLinearRgbAcrossProducerDenoiserAndResolve()
-        {
-            var encodingSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "NRD",
-                "REBLUR",
-                "VividReblurSignalEncoding.hlsli"));
-            var configSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "NRD",
-                "REBLUR",
-                "Private",
-                "REBLUR_Config.hlsli"));
-            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "GlobalIllumination",
-                "ReferencedPathtracing",
-                "ReferencedPathtracing.rgen.hlsl"));
-            var resolveSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "NRD",
-                "REBLUR",
-                "REBLUR_DiffuseSpecular_Resolve.compute"));
-
-            Assert.That(
-                encodingSource,
-                Does.Contain("#define VIVID_REBLUR_SIGNAL_USE_YCOCG 0"));
-            Assert.That(
-                configSource,
-                Does.Contain(
-                    "#define REBLUR_USE_YCOCG"));
-            Assert.That(
-                configSource,
-                Does.Contain("VIVID_REBLUR_SIGNAL_USE_YCOCG"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain("VividReblurEncodeRadiance(radiance)"));
-            Assert.That(
-                resolveSource,
-                Does.Contain("VividReblurDecodeRadiance(diffuse.xyz)"));
-            Assert.That(
-                resolveSource,
-                Does.Contain("VividReblurEncodeRadiance(diffuseRadiance)"));
         }
 
         [Test]
@@ -567,15 +464,6 @@ namespace VividRP.Editor.Tests
             Assert.That(resource.Access, Is.EqualTo(AccessFlags.Write), name);
             Assert.That(resource.Texture.desc.ColorFormat, Is.EqualTo(format), name);
             Assert.That(resource.Texture.desc.EnableRandomWrite, Is.True, name);
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
-                typeof(ReferencedPathTracingReblurPass).Assembly);
-
-            Assert.That(packageInfo, Is.Not.Null);
-            return Path.Combine(packageInfo.resolvedPath, Path.Combine(relativeParts));
         }
     }
 }

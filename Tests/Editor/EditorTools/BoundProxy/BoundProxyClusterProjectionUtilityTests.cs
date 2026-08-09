@@ -54,8 +54,7 @@ namespace VividRP.Editor.Tests
             {
                 BoundProxyClusterProjectionParameters parameters =
                     BoundProxyClusterProjectionUtility.CreateParameters(camera, 320, 180, 32, 24, 64);
-                BoundProxyWorldData worldData = BoundProxyUtility.CreateWorldData(
-                    null,
+                BoundProxyWorldData worldData = ((Transform)null).CreateWorldData(
                     BoundProxyFeature.Decal,
                     new BoundProxyShape
                     {
@@ -96,8 +95,7 @@ namespace VividRP.Editor.Tests
             {
                 BoundProxyClusterProjectionParameters parameters =
                     BoundProxyClusterProjectionUtility.CreateParameters(camera, 200, 100, 20, 10, 40);
-                BoundProxyWorldData worldData = BoundProxyUtility.CreateWorldData(
-                    null,
+                BoundProxyWorldData worldData = ((Transform)null).CreateWorldData(
                     BoundProxyFeature.LocalVolumetricFog,
                     new BoundProxyShape
                     {
@@ -142,8 +140,7 @@ namespace VividRP.Editor.Tests
             {
                 BoundProxyClusterProjectionParameters parameters =
                     BoundProxyClusterProjectionUtility.CreateParameters(camera, 320, 180, 32, 24, 64);
-                BoundProxyWorldData worldData = BoundProxyUtility.CreateWorldData(
-                    null,
+                BoundProxyWorldData worldData = ((Transform)null).CreateWorldData(
                     BoundProxyFeature.LocalVolumetricFog,
                     new BoundProxyShape
                     {
@@ -194,9 +191,9 @@ namespace VividRP.Editor.Tests
                 BoundProxyClusterProjectionParameters parameters =
                     BoundProxyClusterProjectionUtility.CreateParameters(camera, 200, 100, 20, 10, 40);
                 BoundProxyWorldData firstWorldData =
-                    BoundProxyUtility.CreateWorldData(firstOwner.transform, BoundProxyFeature.Decal, shape);
+                    firstOwner.transform.CreateWorldData(BoundProxyFeature.Decal, shape);
                 BoundProxyWorldData secondWorldData =
-                    BoundProxyUtility.CreateWorldData(secondOwner.transform, BoundProxyFeature.Decal, shape);
+                    secondOwner.transform.CreateWorldData(BoundProxyFeature.Decal, shape);
                 ClusteredProxyScreenBounds firstBounds =
                     BoundProxyClusterProjectionUtility.CreateScreenBounds(firstWorldData, parameters);
                 ClusteredProxyScreenBounds secondBounds =

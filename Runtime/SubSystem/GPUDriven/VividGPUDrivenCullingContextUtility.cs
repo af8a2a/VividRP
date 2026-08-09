@@ -11,7 +11,7 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly Plane[] s_FrustumPlanes = new Plane[6];
 
         public static void Build(
-            Camera camera,
+            this Camera camera,
             VividInstancePassMask passMask,
             out VividGPUCullingContext cullingContext,
             out VividGPULODSelectionContext lodSelectionContext
@@ -118,7 +118,7 @@ namespace VividRP.Runtime.GPUDriven
         }
 
         public static void BuildLODSelectionContext(
-            Camera camera,
+            this Camera camera,
             out VividGPULODSelectionContext lodSelectionContext
         )
         {
@@ -144,7 +144,7 @@ namespace VividRP.Runtime.GPUDriven
             };
         }
 
-        internal static unsafe Vector4 GetFrustumPlane(in VividGPUCullingContext cullingContext, int planeIndex)
+        internal static unsafe Vector4 GetFrustumPlane(this in VividGPUCullingContext cullingContext, int planeIndex)
         {
             if (planeIndex < 0 || planeIndex >= 6)
             {

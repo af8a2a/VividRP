@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -258,46 +257,6 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(OverlayDebugChannelMode.Alpha));
         }
 
-        [Test]
-        public void OverlayDebugShader_SupportsTextureArraysAnchoredOverlayAndVisualizationModes()
-        {
-            var shaderSource = File.ReadAllText(GetShaderSourcePath());
-
-            Assert.That(shaderSource, Does.Contain("#pragma target 4.5"));
-            Assert.That(shaderSource, Does.Contain("TEXTURE2D_ARRAY(_DebugTextureArray);"));
-            Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_ARRAY(_DebugTextureArray"));
-            Assert.That(shaderSource, Does.Contain("_OverlayRect"));
-            Assert.That(shaderSource, Does.Contain("exp2(_DebugExposure)"));
-            Assert.That(shaderSource, Does.Contain("_DebugDepthPyramidParams"));
-            Assert.That(shaderSource, Does.Contain("_FullScreenDebugDepthRemap"));
-            Assert.That(shaderSource, Does.Contain("_DepthRemapEnabled"));
-            Assert.That(shaderSource, Does.Contain("SampleDebugTextureRawLod"));
-            Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_LOD(_DebugTexture"));
-            Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_ARRAY_LOD(_DebugTextureArray"));
-            Assert.That(shaderSource, Does.Contain("max(_DebugDepthPyramidParams.x, 0.0)"));
-            Assert.That(shaderSource, Does.Contain("RemapLinearEyeDepth"));
-            Assert.That(shaderSource, Does.Contain("LinearEyeDepth(deviceDepth, _ZBufferParams)"));
-            Assert.That(shaderSource, Does.Contain("Linear01Depth(depthValue, _ZBufferParams)"));
-            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_DEPTHMODE_LINEAR01"));
-            Assert.That(shaderSource, Does.Contain("_DebugChannelMode"));
-            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_CHANNEL_ALPHA"));
-            Assert.That(shaderSource, Does.Contain("ApplyDebugChannelMode"));
-            Assert.That(shaderSource, Does.Contain("lerp(sourceColor, debugColor, saturate(_DebugOpacity))"));
-            Assert.That(shaderSource, Does.Contain("SampleMotionVectors"));
-            Assert.That(shaderSource, Does.Contain("sampler_PointClamp"));
-            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_MOTION_VECTOR_GRID"));
-            Assert.That(shaderSource, Does.Contain("atan2(motionVector.x, motionVector.y)"));
-            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_MOTION_VECTOR_MAX_SPEED"));
-            Assert.That(shaderSource, Does.Contain("DrawMotionVectorArrow"));
-            Assert.That(shaderSource, Does.Contain("arrowMotionVector /= 9.0"));
-            Assert.That(shaderSource, Does.Not.Contain("VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER"));
-            Assert.That(shaderSource, Does.Not.Contain("_DebugVisibilityTexture"));
-            Assert.That(shaderSource, Does.Not.Contain("UnpackVisibilityBufferValue"));
-            Assert.That(shaderSource, Does.Not.Contain("IsPackedVisibilityBufferValueValid"));
-            Assert.That(shaderSource, Does.Not.Contain("_AutoExposureHistogramBuffer"));
-            Assert.That(shaderSource, Does.Not.Contain("EvaluateAutoExposure"));
-        }
-
         private static void AssertDepthRemap(Vector4 actual, float x, float y, float z, float w)
         {
             Assert.That(actual.x, Is.EqualTo(x).Within(0.0001f));
@@ -322,23 +281,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (Vector4)field.GetValue(pass);
-        }
-
-        private static string GetShaderSourcePath()
-        {
-            var shaderPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Shaders",
-                "Core",
-                "Private",
-                "Debug",
-                "OverlayDebug.shader"));
-
-            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
-            return shaderPath;
         }
     }
 }

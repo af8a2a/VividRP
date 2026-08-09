@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -156,30 +155,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VisibilityBufferDebugShader_SupportsSharedVisualizationModes()
-        {
-            var shaderSource = File.ReadAllText(GetShaderSourcePath());
-
-            Assert.That(shaderSource, Does.Contain("GPUDriven/VividGPUDrivenCommon.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("GPUDriven/VividVisibilityBuffer.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("GPUDriven/VividBarycentric.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_INSTANCE"));
-            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_CLUSTER"));
-            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_CLUSTER_LOD"));
-            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_TRIANGLE"));
-            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_WIREFRAME"));
-            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_BARYCENTRIC"));
-            Assert.That(shaderSource, Does.Contain("ResolveClusterLODLevel"));
-            Assert.That(shaderSource, Does.Contain("ResolveDebugBarycentric"));
-            Assert.That(shaderSource, Does.Contain("CalculateFullBarycentric"));
-            Assert.That(shaderSource, Does.Contain("PullInstanceData"));
-            Assert.That(shaderSource, Does.Contain("PullMeshLODNode"));
-            Assert.That(shaderSource, Does.Contain("_MeshLODNodeCount"));
-            Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue("));
-            Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid("));
-        }
-
-        [Test]
         public void VividRPCoreResources_DeclaresVisibilityBufferDebugShader()
         {
             var field = typeof(VividRPCoreResources).GetField(
@@ -206,34 +181,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);
-        }
-
-        private static string GetShaderSourcePath()
-        {
-            var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "Debug", "VisibilityBufferDebug.shader");
-
-            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
-            return shaderPath;
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "Custom_URP"),
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

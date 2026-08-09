@@ -141,13 +141,13 @@ namespace VividRP.Runtime
             var shouldSubmit = false;
             CameraHistory cameraHistory = null;
             var cameraHistoryFrameActive = false;
-            var projectionState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var projectionState = camera.CaptureProjectionState();
 
             try
             {
                 using (s_RestoreProjectionStateMarker.Auto())
                 {
-                    CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
+                    camera.RestoreProjectionState(projectionState);
                 }
 
                 using (s_HDRStateMarker.Auto())
@@ -327,7 +327,7 @@ namespace VividRP.Runtime
                 {
                     using (s_RestoreProjectionStateMarker.Auto())
                     {
-                        CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
+                        camera.RestoreProjectionState(projectionState);
                     }
                 }
 

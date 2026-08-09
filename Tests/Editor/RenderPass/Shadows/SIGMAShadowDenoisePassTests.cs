@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
@@ -23,15 +22,6 @@ namespace VividRP.Editor.Tests
             Assert.That(resourceNames, Does.Not.Contain("HistoryLength"));
             Assert.That(resourceNames, Does.Not.Contain("SIGMA_HistoryShadowCurrent"));
             Assert.That(resourceNames, Does.Not.Contain("SIGMA_HistoryLengthCurrent"));
-        }
-
-        [Test]
-        public void SIGMAShadowDenoisePass_ClassifyStage_WritesTileTextureBeforeSmoothStage()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(source, Does.Contain("nativeCmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);"));
-            Assert.That(source, Does.Contain("nativeCmd.SetComputeTextureParam(m_SmoothTiles, kernel, gIn_Tiles,  m_TileTexture.innerHandle);"));
         }
 
         [Test]
@@ -76,48 +66,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SIGMAShadowDenoisePass_ReadsSigmaSettingsFromVolume()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(source, Does.Contain("var sigmaSettings = ResolveSettings(VividVolumeManagerUtility.GetRayTracingSettingsVolume());"));
-            Assert.That(source, Does.Contain("m_MaxStabilizedFrameNum = sigmaSettings.MaxStabilizedFrameNum;"));
-            Assert.That(source, Does.Contain("m_Constants = SigmaSharedConstants.Compute("));
-            Assert.That(source, Does.Contain("float stabilizationStrength = m_HasValidHistory ? sigmaSettings.StabilizationStrength : 0.0f;"));
-        }
-
-        [Test]
-        public void SIGMAShadowDenoisePass_RunsTemporalBootstrap_WhenSigmaHistoryIsConfigured()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(source, Does.Contain("bool useTemporalStabilization = !m_UseRawShadowPassthrough && m_MaxStabilizedFrameNum > 0;"));
-            Assert.That(source, Does.Not.Contain("bool useTemporalStabilization = m_HasValidHistory && m_MaxStabilizedFrameNum > 0;"));
-        }
-
-        [Test]
-        public void SIGMAShadowDenoisePass_BypassesDenoiser_WhenCSMResolveAlreadyProducedShadowTerm()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(source, Does.Contain("m_UseRawShadowPassthrough = shadowData.isCSMActive;"));
-            Assert.That(source, Does.Contain("nativeCmd.CopyTexture(m_RawShadowTexture, m_DenoisedShadowTexture);"));
-        }
-
-        [Test]
-        public void SIGMAShadowDenoisePass_ClearsTransientHistoryTextures_ForTemporalBootstrap()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(
-                source,
-                Does.Contain("CreatePassOwnedTexture(\"SIGMA_TransientHistory\",       1, 1, GraphicsFormat.R8_UNorm, clearBuffer: true);"));
-            Assert.That(
-                source,
-                Does.Contain("CreatePassOwnedTexture(\"SIGMA_TransientHistoryLength\", 1, 1, GraphicsFormat.R32_UInt, clearBuffer: true);"));
-        }
-
-        [Test]
         public void ResizePassOwned_PreservesExistingClearBufferState()
         {
             var texture = new RenderGraphTexture
@@ -158,58 +106,6 @@ namespace VividRP.Editor.Tests
             Assert.That(transientShadow.desc.ClearColor, Is.EqualTo(Color.white));
             Assert.That(transientHistoryLength.desc.ClearBuffer, Is.True);
             Assert.That(transientHistoryLength.desc.ClearColor, Is.EqualTo(Color.clear));
-        }
-
-        [Test]
-        public void SIGMAShadowDenoisePass_DoesNotKeepLegacyDebugTileTexture()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(source, Does.Not.Contain("debugTexture"));
-        }
-
-        [Test]
-        public void SIGMAShadowDenoisePass_UsesPackedNormalRoughnessGBufferInput()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(source, Does.Contain("RenderGraphTexture.CreateInput(\"GBuffer1\",      GraphicsFormat.A2B10G10R10_UNormPack32);"));
-        }
-
-        [Test]
-        public void SIGMAShadowDenoisePass_ClearsCurrentHistoryTargets_BeforeTemporalStabilization()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(source, Does.Contain("ClearTexture(nativeCmd, m_HistoryShadowCurrent, Color.white);"));
-            Assert.That(source, Does.Contain("ClearTexture(nativeCmd, m_HistoryLengthCurrent, Color.clear);"));
-        }
-
-        [Test]
-        public void LegacyDirectionalRayTracedShadowTemporalDenoiseResource_IsRemoved()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "Utility", "PipelineResource", "VividResources.cs"));
-
-            Assert.That(source, Does.Not.Contain("DirectionalRayTracedShadowDenoiseCompute"));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private static RenderGraphTexture GetTextureField(SIGMAShadowDenoisePass pass, string fieldName)

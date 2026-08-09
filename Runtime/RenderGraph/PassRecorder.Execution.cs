@@ -877,7 +877,7 @@ namespace VividRP.Runtime
                 return;
 
             texture.desc ??= new RenderGraphTextureDesc();
-            RenderGraphTextureDescUtility.Copy(descriptor, texture.desc);
+            descriptor.Copy(texture.desc);
         }
 
         private static bool TryResolvePassHistoryContext(
@@ -1230,11 +1230,11 @@ namespace VividRP.Runtime
                 if (binding == null || string.IsNullOrEmpty(binding.FieldName))
                     continue;
 
-                var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, binding.FieldName);
+                var field = passType.GetInstanceField(binding.FieldName);
                 if (field == null)
                     continue;
 
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                 {
                     LogSkippedTransientResourceBinding(passType, binding.FieldName);
                     continue;
@@ -1303,11 +1303,11 @@ namespace VividRP.Runtime
                 if (binding == null || binding.SourceKind != RenderGraphPassBindingSourceKind.PassField || string.IsNullOrEmpty(binding.FieldName))
                     continue;
 
-                var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, binding.FieldName);
+                var field = passType.GetInstanceField(binding.FieldName);
                 if (field == null)
                     continue;
 
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                 {
                     LogSkippedTransientResourceBinding(passType, binding.FieldName);
                     continue;
@@ -1316,8 +1316,8 @@ namespace VividRP.Runtime
                 var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < indexedPassTypes.Count
                     ? indexedPassTypes[binding.SourcePassIndex]
                     : null;
-                var sourceField = RenderGraphPassReflectionUtility.GetInstanceField(sourcePassType, binding.SourceFieldName);
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+                var sourceField = sourcePassType.GetInstanceField(binding.SourceFieldName);
+                if (sourceField.IsDeclaredTransientResourceField())
                 {
                     LogSkippedTransientResourceBinding(sourcePassType, binding.SourceFieldName);
                     continue;
@@ -1353,12 +1353,12 @@ namespace VividRP.Runtime
                     continue;
                 }
 
-                var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, binding.FieldName);
+                var field = passType.GetInstanceField(binding.FieldName);
                 var attr = field?.GetCustomAttribute<RenderGraphResource>();
                 if (attr == null)
                     continue;
 
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                     continue;
 
                 var effectiveAccess = ShouldPreserveWriteOnlyColorAttachmentAccess(passType, binding, attr)
@@ -1411,11 +1411,11 @@ namespace VividRP.Runtime
             if (sourcePass == null || sourcePassType == null)
                 return null;
 
-            var sourceField = RenderGraphPassReflectionUtility.GetInstanceField(sourcePassType, fieldName);
+            var sourceField = sourcePassType.GetInstanceField(fieldName);
             if (sourceField == null)
                 return null;
 
-            if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+            if (sourceField.IsDeclaredTransientResourceField())
                 return null;
 
             var sourceValue = sourceField.GetValue(sourcePass);
@@ -2025,7 +2025,7 @@ namespace VividRP.Runtime
                 return;
 
             outputTexture.desc ??= new RenderGraphTextureDesc();
-            RenderGraphTextureDescUtility.Copy(sourceDescriptor, outputTexture.desc);
+            sourceDescriptor.Copy(outputTexture.desc);
         }
 
         private static void CopyBypassBufferDescriptor(IRenderPass pass, PassBypassRule rule)
@@ -2272,7 +2272,7 @@ namespace VividRP.Runtime
             if (hasResources
                 && needsRefresh
                 && pass is IStablePassResourceLayout
-                && PassResourceReferenceRefreshUtility.TryRefresh(pass, resources))
+                && pass.TryRefresh(resources))
             {
                 ApplyResourceAccessOverrides(pass, resources);
 

@@ -693,7 +693,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var desc = m_VBufferHistoryDescriptor;
             if (m_VBufferFeedback?.desc != null)
-                RenderGraphTextureDescUtility.Copy(m_VBufferFeedback.desc, desc);
+                m_VBufferFeedback.desc.Copy(desc);
 
             desc.Name = "VBufferFeedback";
             desc.ColorFormat = GraphicsFormat.R16G16B16A16_SFloat;

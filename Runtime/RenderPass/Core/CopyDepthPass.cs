@@ -61,7 +61,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData.Get<VividCameraData>();
             var sourceDescriptor = m_DepthAttachment?.desc;
-            var hasExplicitSourceSize = RenderGraphTextureDescUtility.HasExplicitSize(sourceDescriptor);
+            var hasExplicitSourceSize = sourceDescriptor.HasExplicitSize();
             var width = hasExplicitSourceSize
                 ? Mathf.Max(1, sourceDescriptor.Width)
                 : CameraDimensionUtility.ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width);

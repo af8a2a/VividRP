@@ -70,7 +70,7 @@ namespace VividRP.Editor
 
         internal static Bounds GetWorldBounds(BoundProxyShape shape, Transform ownerTransform)
         {
-            return BoundProxyUtility.CalculateWorldAabb(ownerTransform, shape);
+            return ownerTransform.CalculateWorldAabb(shape);
         }
 
         internal static void DrawGizmo(Transform ownerTransform, BoundProxyShape shape, bool filled, Color? baseColor = null)

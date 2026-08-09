@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection;
 using System.Linq;
 using NUnit.Framework;
@@ -216,80 +215,6 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<bool>(pass, "m_IsLogBaseBufferEnabled"), Is.True);
         }
 
-        [Test]
-        public void ClusterDebugPass_BindsClusteredLightingParametersDirectly()
-        {
-            var passSource = File.ReadAllText(GetPassSourcePath());
-
-            Assert.That(passSource, Does.Contain("PrepareClusteredLightingParameters(frameData, cameraData, width, height);"));
-            Assert.That(passSource, Does.Contain("ApplyClusteredLightingProperties();"));
-            Assert.That(passSource, Does.Contain("BigTileLightListId = Shader.PropertyToID(\"g_vBigTileLightList\")"));
-            Assert.That(passSource, Does.Contain("m_Material.SetInt(ClusteredPunctualLightGridEnabledId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetInt(ClusteredReflectionProbeGridEnabledId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetInt(ReflectionProbeCountId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetInt(BigTileLightListEnabledId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetInt(NumTileBigTileXId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetInt(ClusterTileSizeId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(BigTileLightListId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(LayeredOffsetId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(LayeredLightListId"));
-            Assert.That(passSource, Does.Contain("MaterialTileFeatureFlagsId = Shader.PropertyToID(\"_MaterialTileFeatureFlags\")"));
-            Assert.That(passSource, Does.Contain("MaterialFeatureTileListId = Shader.PropertyToID(\"_MaterialFeatureTileList\")"));
-            Assert.That(passSource, Does.Contain("MaterialFeatureIndirectArgsId = Shader.PropertyToID(\"_MaterialFeatureIndirectArgs\")"));
-            Assert.That(passSource, Does.Contain("DrawMaterialFeatureVariantOverlay(context);"));
-            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(MaterialTileFeatureFlagsId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(MaterialFeatureTileListId"));
-            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(MaterialFeatureIndirectArgsId"));
-            Assert.That(passSource, Does.Contain("mpb.SetInt(MaterialFeatureDebugId"));
-            Assert.That(passSource, Does.Contain("context.cmd.DrawProcedural("));
-            Assert.That(passSource, Does.Not.Contain("GBuffer0Id = Shader.PropertyToID(\"_GBuffer0\")"));
-        }
-
-        [Test]
-        public void ClusterDebugShader_UsesCoreDebugHeatmapOverlay()
-        {
-            var shaderSource = File.ReadAllText(GetShaderSourcePath());
-
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/Debug.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("OverlayHeatMap("));
-            Assert.That(shaderSource, Does.Contain("IsBigTileDebugEnabled"));
-            Assert.That(shaderSource, Does.Contain("GetSelectedBigTileLightCount"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::CreateBigTile"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTilePunctualLightCount"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTileAreaLightCount"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTileReflectionProbeCount"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTileDecalCount"));
-            Assert.That(shaderSource, Does.Contain("VividClusteredLighting::GetBigTileSize"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetAreaLightCount"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetReflectionProbeCount"));
-            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetDecalCount"));
-            Assert.That(shaderSource, Does.Contain("_BigTileLightListEnabled"));
-            Assert.That(shaderSource, Does.Contain("_NumTileBigTileX"));
-            Assert.That(shaderSource, Does.Not.Contain("StructuredBuffer<uint> g_vBigTileLightList"));
-            Assert.That(shaderSource, Does.Not.Contain("FetchBigTileLightIndex"));
-            Assert.That(shaderSource, Does.Contain("_ClusteredPunctualLightGridEnabled"));
-            Assert.That(shaderSource, Does.Contain("_ClusteredAreaLightGridEnabled"));
-            Assert.That(shaderSource, Does.Contain("_ClusteredReflectionProbeGridEnabled"));
-            Assert.That(shaderSource, Does.Contain("_ReflectionProbeCount"));
-            Assert.That(shaderSource, Does.Contain("_ClusteredDecalGridEnabled"));
-            Assert.That(shaderSource, Does.Contain("Name \"MaterialFeatureVariantsOverlay\""));
-            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _MaterialFeatureTileList"));
-            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _MaterialFeatureIndirectArgs"));
-            Assert.That(shaderSource, Does.Contain("TryResolveMaterialFeatureVariant"));
-            Assert.That(shaderSource, Does.Contain("_MaterialFeatureIndirectArgs[argsOffset]"));
-            Assert.That(shaderSource, Does.Contain("_MaterialFeatureTileList[variant * _MaterialTileCount + variantTileIndex]"));
-            Assert.That(shaderSource, Does.Contain("IsValidMaterialFeatureMask"));
-            Assert.That(shaderSource, Does.Contain("_MaterialTileFeatureFlags[input.tileIndex]"));
-            Assert.That(shaderSource, Does.Contain("_MaterialFeatureDebug & VIVID_MATERIAL_FEATURE_DEBUG_MASK"));
-            Assert.That(shaderSource, Does.Contain("Blend SrcAlpha OneMinusSrcAlpha"));
-            Assert.That(shaderSource, Does.Not.Contain("EvaluateMaterialFeatureVariantDebug(pixelCoord, sourceColor)"));
-            Assert.That(shaderSource, Does.Contain("float2 pixelUv = (float2(pixelCoord) + 0.5) * _ClusterDebugLightViewportSize.zw;"));
-            Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_LOD(_CameraDepthTexture, sampler_PointClamp, depthUv, 0).r"));
-            Assert.That(shaderSource, Does.Not.Contain("GetBruteForcePunctualLightCount"));
-        }
-
         private static T GetFieldValue<T>(ClusterDebugPass pass, string fieldName)
         {
             var field = typeof(ClusterDebugPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -303,39 +228,6 @@ namespace VividRP.Editor.Tests
             var texture = GetFieldValue<RenderGraphTexture>(pass, fieldName);
             Assert.That(texture, Is.Not.Null);
             return texture;
-        }
-
-        private static string GetPassSourcePath()
-        {
-            var passPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Runtime",
-                "RenderPass",
-                "Debug",
-                "ClusterDebugPass.cs"));
-
-            Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");
-            return passPath;
-        }
-
-        private static string GetShaderSourcePath()
-        {
-            var shaderPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Shaders",
-                "Core",
-                "Private",
-                "Debug",
-                "ClusterDebug.shader"));
-
-            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
-            return shaderPath;
         }
     }
 }

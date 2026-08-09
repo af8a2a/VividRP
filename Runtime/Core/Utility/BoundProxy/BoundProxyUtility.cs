@@ -7,7 +7,7 @@ namespace VividRP.Runtime
     {
         private const float IntersectionEpsilon = 1e-5f;
 
-        public static bool TryCreateWorldData(IBoundProxyProvider provider, out BoundProxyWorldData worldData)
+        public static bool TryCreateWorldData(this IBoundProxyProvider provider, out BoundProxyWorldData worldData)
         {
             worldData = default;
             if (provider == null || !provider.IsBoundProxyActive)
@@ -36,7 +36,7 @@ namespace VividRP.Runtime
         }
 
         public static BoundProxyWorldData CreateWorldData(
-            Transform boundTransform,
+            this Transform boundTransform,
             BoundProxyFeature feature,
             BoundProxyShape shape,
             EntityId entityId = default)
@@ -60,7 +60,7 @@ namespace VividRP.Runtime
             };
         }
 
-        public static Bounds CalculateWorldAabb(Transform boundTransform, BoundProxyShape shape)
+        public static Bounds CalculateWorldAabb(this Transform boundTransform, BoundProxyShape shape)
         {
             shape.Sanitize();
             Vector3 worldCenter = CalculateWorldCenter(boundTransform, shape.center);
@@ -73,7 +73,7 @@ namespace VividRP.Runtime
                 shape.GetSanitizedRadius());
         }
 
-        public static Bounds CalculateWorldAabb(in BoundProxyWorldData worldData)
+        public static Bounds CalculateWorldAabb(this in BoundProxyWorldData worldData)
         {
             return CalculateWorldAabb(
                 worldData.worldCenter,
@@ -83,7 +83,7 @@ namespace VividRP.Runtime
                 worldData.sphereRadius);
         }
 
-        public static bool Contains(in BoundProxyWorldData worldData, Vector3 worldPosition)
+        public static bool Contains(this in BoundProxyWorldData worldData, Vector3 worldPosition)
         {
             if (worldData.shape == BoundProxyShapeType.Sphere)
             {
@@ -98,7 +98,7 @@ namespace VividRP.Runtime
                    && Mathf.Abs(localPosition.z) <= halfExtents.z + IntersectionEpsilon;
         }
 
-        public static bool IntersectsAabb(in BoundProxyWorldData worldData, Bounds bounds)
+        public static bool IntersectsAabb(this in BoundProxyWorldData worldData, Bounds bounds)
         {
             if (worldData.shape == BoundProxyShapeType.Sphere)
             {

@@ -192,7 +192,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
                 else
                 {
-                    m_Material.SetTexture(BlurTextureId, TextureResolveUtility.ResolveTexture(m_TempTexture2.innerHandle));
+                    m_Material.SetTexture(BlurTextureId, m_TempTexture2.innerHandle.ResolveTexture());
                     Blit(unsafeCmd, context, m_DiffusionTexture.innerHandle, outputHandle, FilterPassIndex);
                 }
             }
@@ -229,7 +229,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Blitter.BlitTexture(
                 cmd,
                 sourceHandle,
-                TextureScaleBiasUtility.GetScale(sourceHandle),
+                sourceHandle.GetScale(),
                 m_Material,
                 materialPassIndex);
         }

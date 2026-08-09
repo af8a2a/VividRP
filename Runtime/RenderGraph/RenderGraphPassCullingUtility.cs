@@ -7,7 +7,7 @@ namespace VividRP.Runtime
 {
     internal static class RenderGraphPassCullingUtility
     {
-        internal static List<int> GetLivePassIndices(IReadOnlyList<RenderGraphPassDefinition> passDefinitions)
+        internal static List<int> GetLivePassIndices(this IReadOnlyList<RenderGraphPassDefinition> passDefinitions)
         {
             if (passDefinitions == null || passDefinitions.Count == 0)
                 return new List<int>();
@@ -75,13 +75,13 @@ namespace VividRP.Runtime
 
             var hasWritableResource = false;
             var hasTransientWritableResource = false;
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 if (attr == null || !CanWrite(attr.Access))
                     continue;
 
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                 {
                     hasTransientWritableResource = true;
                     continue;
@@ -110,12 +110,12 @@ namespace VividRP.Runtime
                     continue;
                 }
 
-                var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, binding.FieldName);
+                var field = passType.GetInstanceField(binding.FieldName);
                 var attr = field?.GetCustomAttribute<RenderGraphResource>();
                 if (attr == null)
                     continue;
 
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                     continue;
 
                 var effectiveAccess = RenderGraphPassBindingUtility.ResolveEffectiveAccess(binding, attr.Access);
@@ -147,8 +147,8 @@ namespace VividRP.Runtime
                     var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < passTypes.Count
                         ? passTypes[binding.SourcePassIndex]
                         : null;
-                    var sourceField = RenderGraphPassReflectionUtility.GetInstanceField(sourcePassType, binding.SourceFieldName);
-                    if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+                    var sourceField = sourcePassType.GetInstanceField(binding.SourceFieldName);
+                    if (sourceField.IsDeclaredTransientResourceField())
                         continue;
 
                     if (binding.SourcePassIndex >= 0
@@ -209,9 +209,9 @@ namespace VividRP.Runtime
             if (passType == null)
                 return result;
 
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();

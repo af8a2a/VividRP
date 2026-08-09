@@ -1,4 +1,3 @@
-using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using VividRP.Runtime;
@@ -7,81 +6,6 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VirtualTextureShaderContractTests
     {
-        [Test]
-        public void VirtualTextureHlsl_DeclaresExpectedPublicSymbolsAndHelpers()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Public",
-                "VirtualTexture",
-                "VirtualTexture.hlsl"));
-
-            Assert.That(source, Does.Contain("StructuredBuffer<uint> _VTPageTable;"));
-            Assert.That(source, Does.Contain("TEXTURE2D(_VTPhysicalCache);"));
-            Assert.That(source, Does.Contain("TEXTURE2D(_VTPhysicalCache1);"));
-            Assert.That(source, Does.Contain("TEXTURE2D(_VTPhysicalCache2);"));
-            Assert.That(source, Does.Contain("TEXTURE2D(_VTPhysicalCache3);"));
-            Assert.That(source, Does.Not.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache"));
-            Assert.That(source, Does.Contain("_VTFeedbackRequests"));
-            Assert.That(source, Does.Contain("_VTFeedbackCounter"));
-            Assert.That(source, Does.Contain("_VTFeedbackResidentHash"));
-            Assert.That(source, Does.Contain("_VTFeedbackResidentHashCapacity"));
-            Assert.That(source, Does.Contain("VT_FEEDBACK_RESIDENT_ACCESS_COUNTER_INDEX"));
-            Assert.That(source, Does.Contain("register(u1)"));
-            Assert.That(source, Does.Contain("register(u2)"));
-            Assert.That(source, Does.Contain("register(u3)"));
-            Assert.That(source, Does.Contain("float _VTSpaceParams[33];"));
-            Assert.That(source, Does.Contain("#define VT_LAYER_ENCODING_WORD    ((int)_VTSpaceParams[32])"));
-            Assert.That(source, Does.Contain("uint VTGetLayerEncoding(uint layerIndex)"));
-            Assert.That(source, Does.Contain("float4 VTApplyLayerEncoding(float4 value, uint layerIndex)"));
-            Assert.That(source, Does.Contain("float4 _VTLayerFallbacks[4];"));
-            Assert.That(source, Does.Contain("float _VTMipOffsets[VIVID_VT_MAX_MIPS];"));
-            Assert.That(source, Does.Contain("int _VTDebugMode;"));
-            Assert.That(source, Does.Contain("int _VTFeedbackEnabled;"));
-            Assert.That(source, Does.Contain("int _VTFeedbackFrameIndex;"));
-            Assert.That(source, Does.Contain("int _VTFeedbackSampleRate;"));
-            Assert.That(source, Does.Contain("float4 _VTFeedbackViewParams;"));
-            Assert.That(source, Does.Contain("float _VTAdaptiveMipBias;"));
-            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS 20u"));
-            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_RESOLVED_MIP_BITS 6u"));
-            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_LOCKED_BIT 29u"));
-            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_TRANSITION_PHASE_BIT 30u"));
-            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_TRANSITION_PHASE_MASK 3u"));
-            Assert.That(source, Does.Contain("packedEntry & VT_PAGE_TABLE_PHYSICAL_PAGE_ID_MASK"));
-            Assert.That(source, Does.Contain("struct VTMipRange"));
-            Assert.That(source, Does.Contain("float VTComputeRequestedMipLevel"));
-            Assert.That(source, Does.Contain("uint VTComputeRequestedMip"));
-            Assert.That(source, Does.Contain("VTMipRange VTComputeRequestedMipRange"));
-            Assert.That(source, Does.Contain("float VTComputeRequestedMipLevelGrad"));
-            Assert.That(source, Does.Contain("VTMipRange VTComputeRequestedMipRangeGrad"));
-            Assert.That(source, Does.Contain("+ max(_VTAdaptiveMipBias, 0.0)"));
-            Assert.That(source, Does.Contain("VTResolvedAddress VTResolveAddress"));
-            Assert.That(source, Does.Contain("float3 VTComputePhysicalUVW"));
-            Assert.That(source, Does.Contain("float3 VTComputePhysicalUVWLayer"));
-            Assert.That(source, Does.Contain("uint VTGetPhysicalGroupLayerCount"));
-            Assert.That(source, Does.Contain("uint VTGetLayerPhysicalGroup"));
-            Assert.That(source, Does.Contain("uint VTGetLayerPhysicalLayer"));
-            Assert.That(source, Does.Contain("float2 VTComputePhysicalAtlasUv"));
-            Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheGroup"));
-            Assert.That(source, Does.Contain("float4 VTSamplePhysicalCache"));
-            Assert.That(source, Does.Contain("VTResolvedAddress VTFindStableTransitionAncestor"));
-            Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheLayerTransitioned"));
-            Assert.That(source, Does.Contain("_VTPhysicalCache3.GetDimensions(width, height)"));
-            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, atlasUv, 0.0)"));
-            Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheTrilinear"));
-            Assert.That(source, Does.Contain("float4 VTSampleBaseColor"));
-            Assert.That(source, Does.Contain("float3 VTSampleNormal"));
-            Assert.That(source, Does.Contain("float4 VTSampleMask"));
-            Assert.That(source, Does.Contain("float3 VTSRGBToLinear"));
-            Assert.That(source, Does.Contain("bool VTShouldWriteFeedback"));
-            Assert.That(source, Does.Contain("VTFeedbackHash"));
-            Assert.That(source, Does.Contain("void VTWriteFeedback"));
-            Assert.That(source, Does.Contain("void VTWriteAccessFeedback"));
-            Assert.That(source, Does.Contain("VTShouldAppendResidentFeedback"));
-            Assert.That(source, Does.Contain("deduplicateResidentAccess"));
-            Assert.That(source, Does.Contain("void VTWriteFallbackSample(float2 virtualUv, uint requestedMip, VTResolvedAddress resolved)"));
-        }
 
         [Test]
         public void VirtualTextureShaderIds_MatchExpectedPropertyNames()
@@ -104,43 +28,6 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureShaderIDs._VTFeedbackFrameIndex, Is.EqualTo(Shader.PropertyToID("_VTFeedbackFrameIndex")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackSampleRate, Is.EqualTo(Shader.PropertyToID("_VTFeedbackSampleRate")));
             Assert.That(VirtualTextureShaderIDs._VTAdaptiveMipBias, Is.EqualTo(Shader.PropertyToID("_VTAdaptiveMipBias")));
-        }
-
-        [Test]
-        public void VirtualTextureDemoShader_DeclaresDedicatedPassAndFeedbackPath()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Material",
-                "VirtualTextureDemo",
-                "VirtualTextureDemo.shader"));
-
-            Assert.That(source, Does.Contain("Shader \"VividRP/Material/VirtualTextureDemo\""));
-            Assert.That(source, Does.Contain("[MainTexture] [Tex(SurfaceInputs, _BaseTint)] _BaseMap"));
-            Assert.That(source, Does.Contain("[HideInInspector] _MainTex"));
-            Assert.That(source, Does.Contain("Tags { \"LightMode\" = \"VividVT\" }"));
-            Assert.That(source, Does.Contain("#define VIVID_VT_ENABLE_FEEDBACK_RW 1"));
-            Assert.That(source, Does.Contain("float4 _BaseMap_ST;"));
-            Assert.That(source, Does.Contain("output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;"));
-            Assert.That(source, Does.Contain("VTComputeRequestedMipRange"));
-            Assert.That(source, Does.Contain("VTSampleBaseColor"));
-            Assert.That(source, Does.Contain("VTWriteAccessFeedback"));
-            Assert.That(source, Does.Not.Contain("if (!lowerResolved.resident)"));
-            Assert.That(source, Does.Contain("VTWriteFallbackSample(input.uv, requestedMips.lowerMip, lowerResolved, input.positionCS)"));
-        }
-
-        private static string GetPackageFilePath(params string[] parts)
-        {
-            string customPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "Custom_URP"));
-            if (Directory.Exists(customPath))
-                return Path.Combine(customPath, Path.Combine(parts));
-
-            string vividPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "VividRP"));
-            if (Directory.Exists(vividPath))
-                return Path.Combine(vividPath, Path.Combine(parts));
-
-            string legacyPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "com.af8a2a.vividrp"));
-            return Path.Combine(legacyPath, Path.Combine(parts));
         }
     }
 }

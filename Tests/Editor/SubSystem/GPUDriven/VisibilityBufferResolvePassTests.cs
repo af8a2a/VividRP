@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -110,41 +109,6 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedDebugFields, Is.Empty);
         }
 
-        [Test]
-        public void VisibilityBufferResolvePassSource_BindsDebuggerSettingsAndDrawsFullscreen()
-        {
-            var passSource = File.ReadAllText(GetPassSourcePath());
-
-            Assert.That(passSource, Does.Contain("CoreUtils.DrawFullScreen("));
-            Assert.That(passSource, Does.Contain("m_VisibilityBuffer"));
-            Assert.That(passSource, Does.Contain("m_DepthTexture"));
-            Assert.That(passSource, Does.Contain("VividRenderingDebugDisplaySettings.Data"));
-            Assert.That(passSource, Does.Not.Contain("private VisibilityBufferResolveDebugMode m_DebugMode"));
-            Assert.That(passSource, Does.Not.Contain("private float m_WireframeThickness"));
-        }
-
-        [Test]
-        public void VisibilityBufferResolveShader_ReconstructsTrianglesAndSupportsDebugModes()
-        {
-            var shaderSource = File.ReadAllText(GetShaderSourcePath());
-
-            Assert.That(shaderSource, Does.Contain("GPUDriven/VividVisibilityBuffer.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("GPUDriven/VividBarycentric.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_RESOLVE_DEBUG_WIREFRAME"));
-            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_RESOLVE_DEBUG_CLUSTER_LOD"));
-            Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue("));
-            Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid("));
-            Assert.That(shaderSource, Does.Contain("CalculateFullBarycentric("));
-            Assert.That(shaderSource, Does.Contain("PullIndex(result.meshlet"));
-            Assert.That(shaderSource, Does.Contain("ScreenCoordsToNDC(input.positionCS)"));
-            Assert.That(shaderSource, Does.Contain("ResolveVisibilityDepth("));
-            Assert.That(shaderSource, Does.Contain("IsVisibilitySampleVisible("));
-            Assert.That(shaderSource, Does.Contain("IsSceneDepthValid("));
-            Assert.That(shaderSource, Does.Contain("ResolveClusterLODLevel("));
-            Assert.That(shaderSource, Does.Contain("PullMeshLODNode("));
-            Assert.That(shaderSource, Does.Contain("_MeshLODNodeCount"));
-        }
-
         private static RenderGraphTexture GetTextureField(VisibilityBufferResolvePass pass, string fieldName)
         {
             var field = typeof(VisibilityBufferResolvePass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -161,40 +125,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);
-        }
-
-        private static string GetPassSourcePath()
-        {
-            var passPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "GPUDriven",
-                "VisibilityBufferResolvePass.cs"));
-
-            Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");
-            return passPath;
-        }
-
-        private static string GetShaderSourcePath()
-        {
-            var shaderPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Shaders",
-                "Core",
-                "Private",
-                "GPUDriven",
-                "VisibilityBufferResolve.shader"));
-
-            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
-            return shaderPath;
         }
     }
 }

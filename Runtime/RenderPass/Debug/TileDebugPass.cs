@@ -97,12 +97,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(context.cmd, profilingSampler))
             {
-                var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
+                var sourceTexture = m_SourceTexture.innerHandle.ResolveTexture();
                 if (sourceTexture != null)
                 {
                     var copyProperties = context.renderGraphPool.GetTempMaterialPropertyBlock();
                     copyProperties.SetTexture(SourceTextureId, sourceTexture);
-                    copyProperties.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture.innerHandle));
+                    copyProperties.SetVector(SourceTextureScaleBiasId, m_SourceTexture.innerHandle.GetScaleBias());
                     CoreUtils.DrawFullScreen(context.cmd, m_Material, copyProperties, 0);
                 }
 
@@ -144,7 +144,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_OutputTexture.desc.Width = width;
             m_OutputTexture.desc.Height = height;
-            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(sourceDescriptor);
+            m_OutputTexture.desc.ColorFormat = sourceDescriptor.ResolveColorFormat();
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = sourceDescriptor?.FilterMode ?? FilterMode.Bilinear;
@@ -170,7 +170,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(m_SourceTexture?.desc))
+            if ((m_SourceTexture?.desc).HasExplicitSize())
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;

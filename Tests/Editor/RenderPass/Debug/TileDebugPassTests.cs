@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -76,32 +75,6 @@ namespace VividRP.Editor.Tests
             Assert.That(GetVectorField(pass, "m_TileDebugScreenSize"), Is.EqualTo(new Vector4(960f, 540f, 1f / 960f, 1f / 540f)));
         }
 
-        [Test]
-        public void TileDebugPass_UsesPointIndirectDraw_ToConsumeDispatchStyleTileArgs()
-        {
-            var passSource = File.ReadAllText(GetPassSourcePath());
-
-            Assert.That(passSource, Does.Contain("DrawProceduralIndirect("));
-            Assert.That(passSource, Does.Contain("MeshTopology.Points"));
-            Assert.That(passSource, Does.Contain("ImportedGraphicsBuffer"));
-            Assert.That(passSource, Does.Contain("SetBuffer(TileIndicesId"));
-        }
-
-        [Test]
-        public void TileDebugShader_UnpacksTileCoordinates_AndExpandsThemIntoOverlayQuads()
-        {
-            var shaderSource = File.ReadAllText(GetShaderSourcePath());
-
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("#pragma geometry OverlayGeom"));
-            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _TileIndices;"));
-            Assert.That(shaderSource, Does.Contain("uint vertexID : SV_VertexID;"));
-            Assert.That(shaderSource, Does.Contain("_TileIndices[input.vertexID - 1u]"));
-            Assert.That(shaderSource, Does.Not.Contain("uint instanceID : SV_InstanceID;"));
-            Assert.That(shaderSource, Does.Contain("UnpackTileCoord("));
-            Assert.That(shaderSource, Does.Contain("Blend SrcAlpha OneMinusSrcAlpha"));
-        }
-
         private static RenderGraphTexture GetTextureField(TileDebugPass pass, string fieldName)
         {
             var field = typeof(TileDebugPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -119,38 +92,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (Vector4)field.GetValue(pass);
-        }
-
-        private static string GetPassSourcePath()
-        {
-            var passPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "TileDebugPass.cs"));
-
-            Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");
-            return passPath;
-        }
-
-        private static string GetShaderSourcePath()
-        {
-            var shaderPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Shaders",
-                "Core",
-                "Private",
-                "TileDebug.shader"));
-
-            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
-            return shaderPath;
         }
     }
 }

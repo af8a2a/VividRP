@@ -328,11 +328,9 @@ namespace VividRP.Editor.Tests
         [Test]
         public void LegacyDenoisingBindings_ResolveToRadiancePorts()
         {
-            var input = RenderGraphPassReflectionUtility.GetInstanceField(
-                typeof(ReferencedPathTracingDenoisingPass),
+            var input = (typeof(ReferencedPathTracingDenoisingPass)).GetInstanceField(
                 "m_AccumulatedColor");
-            var output = RenderGraphPassReflectionUtility.GetInstanceField(
-                typeof(ReferencedPathTracingDenoisingPass),
+            var output = (typeof(ReferencedPathTracingDenoisingPass)).GetInstanceField(
                 "m_DenoisedColor");
 
             Assert.That(input?.Name, Is.EqualTo("m_Radiance"));

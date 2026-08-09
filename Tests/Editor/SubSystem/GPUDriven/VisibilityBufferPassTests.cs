@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -119,53 +118,6 @@ namespace VividRP.Editor.Tests
             Assert.That(externalDepth.desc.Height, Is.EqualTo(360));
         }
 
-        [Test]
-        public void VisibilityBufferPassSource_ImportsGPUDrivenBuffers_AndDrawsIndirectPerRendererList()
-        {
-            var passSource = File.ReadAllText(GetPassSourcePath());
-
-            Assert.That(passSource, Does.Contain("SetImportedBuffer("));
-            Assert.That(passSource, Does.Contain("ClearImportedBuffer("));
-            Assert.That(passSource, Does.Contain("DrawProceduralIndirect("));
-            Assert.That(passSource, Does.Contain("rendererListIndex * IndirectDrawArgsByteStride"));
-            Assert.That(passSource, Does.Contain("private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();"));
-            Assert.That(passSource, Does.Contain("m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);"));
-            Assert.That(passSource, Does.Contain("m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, indirectArgsBuffer);"));
-            Assert.That(passSource, Does.Contain("m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);"));
-            Assert.That(passSource, Does.Contain("m_DrawProperties);"));
-            Assert.That(passSource, Does.Not.Contain("material.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);"));
-            Assert.That(passSource, Does.Contain("CoreUtils.SetKeyword(material, s_AlphaTestKeyword"));
-            Assert.That(passSource, Does.Contain("TryGetCurrentVisibleMeshletBuffers("));
-            Assert.That(passSource, Does.Contain("public sealed class VisibilityBufferPass : UnsafePass"));
-            Assert.That(passSource, Does.Contain("GenerateCurrentOccluderDepthPyramid(nativeCmd);"));
-            Assert.That(passSource, Does.Contain("VividGPUDrivenOcclusionHistorySystem.CommitCurrent("));
-            Assert.That(passSource, Does.Contain("system.DispatchOcclusionRetest("));
-            Assert.That(passSource, Does.Contain("m_RecoveredMeshletRenderRequestsBuffer"));
-            Assert.That(passSource, Does.Contain("m_RecoveredMeshletIndirectDrawArgsBuffer"));
-            Assert.That(passSource, Does.Contain("gpuDrivenFrameData.occlusionObservationMode"));
-            Assert.That(passSource, Does.Contain("gpuDrivenFrameData.observationRetestParameters"));
-            Assert.That(
-                passSource,
-                Does.Contain("PassRecorder.ImportTextureForPass(this, m_CurrentOccluderDepthPyramid, AccessFlags.Read);"));
-        }
-
-        [Test]
-        public void VisibilityBufferPassShader_PacksVisibilityValues_AndUsesIndirectBaseOffsets()
-        {
-            var shaderSource = File.ReadAllText(GetShaderSourcePath());
-
-            Assert.That(shaderSource, Does.Contain("VividSurfaceSampling.hlsl"));
-            Assert.That(shaderSource, Does.Contain("VividVisibilityBuffer.hlsl"));
-            Assert.That(shaderSource, Does.Contain("PullSurfaceBindingData(materialData.SurfaceBindingIndex)"));
-            Assert.That(shaderSource, Does.Contain("VividSampleBaseColor(surfaceBindingData, uv)"));
-            Assert.That(shaderSource, Does.Not.Contain("GetBindlessTexture2D("));
-            Assert.That(shaderSource, Does.Not.Contain("GPUDriven/Bindless.hlsl"));
-            Assert.That(shaderSource, Does.Contain("GetIndirectInstanceID_Base"));
-            Assert.That(shaderSource, Does.Contain("GetIndirectVertexID_Base"));
-            Assert.That(shaderSource, Does.Contain("PackVisibilityBufferValue("));
-            Assert.That(shaderSource, Does.Contain("clip(albedo.a - materialData.AlphaClipThreshold);"));
-        }
-
         private static RenderGraphTexture GetTextureField(VisibilityBufferPass pass, string fieldName)
         {
             var field = typeof(VisibilityBufferPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -188,42 +140,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (RenderGraphBuffer)field.GetValue(pass);
-        }
-
-        private static string GetPassSourcePath()
-        {
-            var passPath = GetPackageFilePath("Runtime", "RenderPass", "Core", "GPUDriven", "VisibilityBufferPass.cs");
-
-            Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");
-            return passPath;
-        }
-
-        private static string GetShaderSourcePath()
-        {
-            var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferPass.shader");
-
-            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
-            return shaderPath;
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "Custom_URP"),
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

@@ -9,7 +9,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void HasExplicitSize_ReturnsFalse_WhenDescriptorIsNull()
         {
-            Assert.That(RenderGraphTextureDescUtility.HasExplicitSize(null), Is.False);
+            Assert.That(((RenderGraphTextureDesc)null).HasExplicitSize(), Is.False);
         }
 
         [Test]
@@ -21,7 +21,7 @@ namespace VividRP.Editor.Tests
                 Height = 1
             };
 
-            Assert.That(RenderGraphTextureDescUtility.HasExplicitSize(descriptor), Is.False);
+            Assert.That(descriptor.HasExplicitSize(), Is.False);
         }
 
         [Test]
@@ -33,7 +33,7 @@ namespace VividRP.Editor.Tests
                 Height = 64
             };
 
-            Assert.That(RenderGraphTextureDescUtility.HasExplicitSize(descriptor), Is.True);
+            Assert.That(descriptor.HasExplicitSize(), Is.True);
         }
 
         [Test]
@@ -45,7 +45,7 @@ namespace VividRP.Editor.Tests
                 Height = 32
             };
 
-            Assert.That(RenderGraphTextureDescUtility.HasExplicitSize(descriptor), Is.True);
+            Assert.That(descriptor.HasExplicitSize(), Is.True);
         }
 
         [Test]
@@ -160,7 +160,7 @@ namespace VividRP.Editor.Tests
             };
 
             Assert.That(
-                RenderGraphTextureDescUtility.ResolveColorFormat(descriptor),
+                descriptor.ResolveColorFormat(),
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
         }
 
@@ -173,8 +173,7 @@ namespace VividRP.Editor.Tests
             };
 
             Assert.That(
-                RenderGraphTextureDescUtility.ResolveColorFormat(
-                    descriptor,
+                descriptor.ResolveColorFormat(
                     GraphicsFormat.R8G8B8A8_SRGB),
                 Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
         }

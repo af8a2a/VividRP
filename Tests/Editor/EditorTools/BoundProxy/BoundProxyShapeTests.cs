@@ -81,10 +81,10 @@ namespace VividRP.Editor.Tests
             try
             {
                 owner.transform.localScale = new Vector3(1.0f, 1.0f, 1.0f);
-                Bounds unitScaleBounds = BoundProxyUtility.CalculateWorldAabb(owner.transform, shape);
+                Bounds unitScaleBounds = owner.transform.CalculateWorldAabb(shape);
 
                 owner.transform.localScale = new Vector3(7.0f, 8.0f, 9.0f);
-                Bounds scaledBounds = BoundProxyUtility.CalculateWorldAabb(owner.transform, shape);
+                Bounds scaledBounds = owner.transform.CalculateWorldAabb(shape);
 
                 AssertVector3(unitScaleBounds.center, new Vector3(3.0f, 4.0f, 4.0f));
                 AssertVector3(scaledBounds.center, unitScaleBounds.center);
@@ -99,16 +99,14 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ContainsAndIntersectsAabb_ReturnExpectedResults_ForBoxAndSphere()
         {
-            BoundProxyWorldData box = BoundProxyUtility.CreateWorldData(
-                null,
+            BoundProxyWorldData box = ((Transform)null).CreateWorldData(
                 BoundProxyFeature.Decal,
                 new BoundProxyShape
                 {
                     shape = BoundProxyShapeType.Box,
                     size = new Vector3(4.0f, 4.0f, 4.0f),
                 });
-            BoundProxyWorldData sphere = BoundProxyUtility.CreateWorldData(
-                null,
+            BoundProxyWorldData sphere = ((Transform)null).CreateWorldData(
                 BoundProxyFeature.LocalVolumetricFog,
                 new BoundProxyShape
                 {
@@ -117,15 +115,15 @@ namespace VividRP.Editor.Tests
                     radius = 2.0f,
                 });
 
-            Assert.That(BoundProxyUtility.Contains(box, new Vector3(1.5f, 0.0f, 0.0f)), Is.True);
-            Assert.That(BoundProxyUtility.Contains(box, new Vector3(3.0f, 0.0f, 0.0f)), Is.False);
-            Assert.That(BoundProxyUtility.IntersectsAabb(box, new Bounds(new Vector3(1.0f, 0.0f, 0.0f), Vector3.one)), Is.True);
-            Assert.That(BoundProxyUtility.IntersectsAabb(box, new Bounds(new Vector3(5.0f, 0.0f, 0.0f), Vector3.one)), Is.False);
+            Assert.That(box.Contains(new Vector3(1.5f, 0.0f, 0.0f)), Is.True);
+            Assert.That(box.Contains(new Vector3(3.0f, 0.0f, 0.0f)), Is.False);
+            Assert.That(box.IntersectsAabb(new Bounds(new Vector3(1.0f, 0.0f, 0.0f), Vector3.one)), Is.True);
+            Assert.That(box.IntersectsAabb(new Bounds(new Vector3(5.0f, 0.0f, 0.0f), Vector3.one)), Is.False);
 
-            Assert.That(BoundProxyUtility.Contains(sphere, new Vector3(11.0f, 0.0f, 0.0f)), Is.True);
-            Assert.That(BoundProxyUtility.Contains(sphere, new Vector3(13.5f, 0.0f, 0.0f)), Is.False);
-            Assert.That(BoundProxyUtility.IntersectsAabb(sphere, new Bounds(new Vector3(11.0f, 0.0f, 0.0f), Vector3.one)), Is.True);
-            Assert.That(BoundProxyUtility.IntersectsAabb(sphere, new Bounds(new Vector3(14.5f, 0.0f, 0.0f), Vector3.one)), Is.False);
+            Assert.That(sphere.Contains(new Vector3(11.0f, 0.0f, 0.0f)), Is.True);
+            Assert.That(sphere.Contains(new Vector3(13.5f, 0.0f, 0.0f)), Is.False);
+            Assert.That(sphere.IntersectsAabb(new Bounds(new Vector3(11.0f, 0.0f, 0.0f), Vector3.one)), Is.True);
+            Assert.That(sphere.IntersectsAabb(new Bounds(new Vector3(14.5f, 0.0f, 0.0f), Vector3.one)), Is.False);
         }
 
         private static void AssertVector3(Vector3 actual, Vector3 expected, float tolerance = 0.0001f)

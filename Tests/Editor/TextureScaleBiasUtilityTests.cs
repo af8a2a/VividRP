@@ -12,7 +12,7 @@ namespace VividRP.Editor.Tests
         public void GetScaleBias_ReturnsIdentityScaleBias_WhenHandleIsNull()
         {
             Assert.That(
-                TextureScaleBiasUtility.GetScaleBias((RTHandle)null),
+                ((RTHandle)null).GetScaleBias(),
                 Is.EqualTo(new Vector4(1f, 1f, 0f, 0f)));
         }
 
@@ -20,8 +20,7 @@ namespace VividRP.Editor.Tests
         public void GetScaleBias_ReturnsNonFlippedScaleBias_WhenUvOriginsMatch()
         {
             Assert.That(
-                TextureScaleBiasUtility.GetScaleBias(
-                    new Vector2(0.5f, 0.25f),
+                (new Vector2(0.5f, 0.25f)).GetScaleBias(
                     TextureUVOrigin.TopLeft,
                     TextureUVOrigin.TopLeft),
                 Is.EqualTo(new Vector4(0.5f, 0.25f, 0f, 0f)));
@@ -31,8 +30,7 @@ namespace VividRP.Editor.Tests
         public void GetScaleBias_ReturnsFlippedScaleBias_WhenUvOriginsDiffer()
         {
             Assert.That(
-                TextureScaleBiasUtility.GetScaleBias(
-                    new Vector2(0.5f, 0.25f),
+                (new Vector2(0.5f, 0.25f)).GetScaleBias(
                     TextureUVOrigin.TopLeft,
                     TextureUVOrigin.BottomLeft),
                 Is.EqualTo(new Vector4(0.5f, -0.25f, 0f, 0.25f)));
@@ -42,8 +40,7 @@ namespace VividRP.Editor.Tests
         public void GetScaleBias_ReturnsFlippedIdentityScaleBias_WhenHandleIsNullAndUvOriginsDiffer()
         {
             Assert.That(
-                TextureScaleBiasUtility.GetScaleBias(
-                    (RTHandle)null,
+                ((RTHandle)null).GetScaleBias(
                     TextureUVOrigin.TopLeft,
                     TextureUVOrigin.BottomLeft),
                 Is.EqualTo(new Vector4(1f, -1f, 0f, 1f)));

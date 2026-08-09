@@ -51,8 +51,7 @@ namespace VividRP.Runtime.GPUDriven
             VividGPULODSelectionContext lodSelectionContext;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullBuildContextMarker.Auto())
             {
-                VividGPUDrivenCullingContextUtility.Build(
-                    camera,
+                camera.Build(
                     passMask,
                     out cullingContext,
                     out lodSelectionContext

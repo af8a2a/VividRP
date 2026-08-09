@@ -106,16 +106,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var leftTexture = TextureResolveUtility.ResolveTexture(m_LeftTexture.innerHandle);
-            var rightTexture = TextureResolveUtility.ResolveTexture(m_RightTexture.innerHandle);
+            var leftTexture = m_LeftTexture.innerHandle.ResolveTexture();
+            var rightTexture = m_RightTexture.innerHandle.ResolveTexture();
             if (leftTexture == null || rightTexture == null)
                 return;
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(LeftTextureId, leftTexture);
             mpb.SetTexture(RightTextureId, rightTexture);
-            mpb.SetVector(LeftTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_LeftTexture.innerHandle));
-            mpb.SetVector(RightTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_RightTexture.innerHandle));
+            mpb.SetVector(LeftTextureScaleBiasId, m_LeftTexture.innerHandle.GetScaleBias());
+            mpb.SetVector(RightTextureScaleBiasId, m_RightTexture.innerHandle.GetScaleBias());
             mpb.SetFloat(SplitId, m_ResolvedSlider * 0.01f);
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
@@ -139,7 +139,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_OutputTexture.desc.Width = width;
             m_OutputTexture.desc.Height = height;
-            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(sourceDescriptor);
+            m_OutputTexture.desc.ColorFormat = sourceDescriptor.ResolveColorFormat();
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = sourceDescriptor?.FilterMode ?? FilterMode.Bilinear;
@@ -165,10 +165,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(m_LeftTexture?.desc))
+            if ((m_LeftTexture?.desc).HasExplicitSize())
                 return m_LeftTexture.desc;
 
-            if (RenderGraphTextureDescUtility.HasExplicitSize(m_RightTexture?.desc))
+            if ((m_RightTexture?.desc).HasExplicitSize())
                 return m_RightTexture.desc;
 
             return m_LeftTexture?.desc ?? m_RightTexture?.desc;

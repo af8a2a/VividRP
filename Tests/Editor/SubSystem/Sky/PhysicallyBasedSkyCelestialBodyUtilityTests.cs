@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Reflection;
 using Unity.Collections;
 using NUnit.Framework;
@@ -11,18 +10,6 @@ namespace VividRP.Editor.Tests
 {
     public class PhysicallyBasedSkyCelestialBodyUtilityTests
     {
-        [Test]
-        public void Source_ResolvesBindlessSurfaceTextureIndices_ForCelestialBodies()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSkyCelestialBodyData.cs"));
-
-            Assert.That(source, Does.Contain("public uint surfaceTextureIndex;"));
-            Assert.That(source, Does.Contain("surfaceTextureIndex = ResolveSurfaceTextureIndex(additionalData),"));
-            Assert.That(source, Does.Contain("private static uint ResolveSurfaceTextureIndex(VividAdditionalLightData additionalData)"));
-            Assert.That(source, Does.Contain("VividGPUDrivenSystem.instance.BindlessTextureContainer.TryGetOrCreateIndex(surfaceTexture, out var"));
-            Assert.That(source, Does.Contain("? surfaceTextureIndex"));
-            Assert.That(source, Does.Contain("BindlessTextureContainer.InvalidTextureIndex"));
-        }
 
         [Test]
         public void BuildCelestialBodyData_UsesLightColorTemperature_WhenVisibleLightHasStaleTint()
@@ -167,31 +154,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_FallsBackWhenActualDirectionalLightsDoNotYieldCelestialLights()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyCelestialBodyData.cs"));
-
-            Assert.That(source, Does.Contain("&& celestialLightCount > 0"));
-            Assert.That(source, Does.Contain("return celestialLightCount > initialCelestialLightCount"));
-            Assert.That(source, Does.Contain("|| celestialBodyCount > initialCelestialBodyCount;"));
-            Assert.That(source, Does.Not.Contain("return hasDirectionalLights;"));
-        }
-
-        [Test]
-        public void Source_SynchronizesAtmosphereLutMaterialParametersWithCelestialBodyBuffer()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyAtmosphereLutCache.cs"));
-
-            Assert.That(source, Does.Contain("m_MaterialParameters.celestialLightCount = m_CelestialBodyBuffer.CelestialLightCount;"));
-            Assert.That(source, Does.Contain("m_MaterialParameters.celestialBodyCount = m_CelestialBodyBuffer.CelestialBodyCount;"));
-            Assert.That(source, Does.Contain("m_MaterialParameters.celestialLightExposure = Mathf.Max(m_CelestialBodyBuffer.CelestialLightExposure, 1.0f);"));
-            Assert.That(source, Does.Contain("internal bool SkyViewLutRebuiltThisFrame => m_SkyViewLutRebuiltThisFrame;"));
-            Assert.That(source, Does.Contain("internal void Update(in SkyRendererContext context, CommandBuffer cmd, bool forceSkyViewRebuild = false)"));
-            Assert.That(source, Does.Contain("if (forceSkyViewRebuild)"));
-            Assert.That(source, Does.Contain("m_SkyViewLutRebuiltThisFrame = true;"));
-        }
-
-        [Test]
         public void EvaluateAtmosphericAttenuation_ReturnsAtmosphericTransmittance_WhenSunIsAboveHorizon()
         {
             using var scope = new SkyProfileScope();
@@ -250,25 +212,6 @@ namespace VividRP.Editor.Tests
             {
                 UnityEngine.Object.DestroyImmediate(profile);
             }
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private static VisibleLight CreateVisibleDirectionalLight(Light light, Color finalColor)

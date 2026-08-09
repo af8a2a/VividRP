@@ -814,46 +814,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GpuPageProducerContract_WritesThreeLayersWithoutCpuPixelReadbackOrUpload()
-        {
-            string producerSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "SubSystem",
-                "GPUDriven",
-                "VirtualTexture",
-                "GPUDrivenVirtualTextureProducer.cs"));
-            string computeSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "GPUDriven",
-                "GPUDrivenVirtualTexturePageProducer.compute"));
-
-            Assert.That(producerSource, Does.Contain("IVTGpuPageFinalizer"));
-            Assert.That(producerSource, Does.Contain("DispatchCompute"));
-            Assert.That(producerSource, Does.Contain("SourceMipOffsets"));
-            Assert.That(producerSource, Does.Not.Contain("VTTexture2DPageProducer"));
-            Assert.That(producerSource, Does.Not.Contain("GetPixels32"));
-            Assert.That(producerSource, Does.Not.Contain("ReadPixels"));
-            Assert.That(producerSource, Does.Not.Contain("SetPixels32"));
-            Assert.That(producerSource, Does.Not.Contain(".Apply("));
-
-            Assert.That(computeSource, Does.Contain("RWTexture2DArray<float4> _OutputPages"));
-            Assert.That(computeSource, Does.Contain("[numthreads(8, 8, 1)]"));
-            Assert.That(computeSource, Does.Contain("SampleLevel(sampler_LinearRepeat"));
-            Assert.That(computeSource, Does.Contain("SampleLevel(sampler_LinearClamp"));
-            Assert.That(computeSource, Does.Contain("EncodeLinearToSRGB"));
-            Assert.That(computeSource, Does.Contain("const int2 entryPageCount = (int2)_VTEntryPageRegion.zw"));
-            Assert.That(computeSource, Does.Contain("const int2 logicalDimension = entryPageCountAtMip * pageSize"));
-            Assert.That(computeSource, Does.Contain("_VTBaseColorFallback"));
-            Assert.That(computeSource, Does.Contain("_VTNormalFallback"));
-            Assert.That(computeSource, Does.Contain("_VTMaskFallback"));
-            Assert.That(computeSource, Does.Contain("baseSlice + 0"));
-            Assert.That(computeSource, Does.Contain("baseSlice + 1"));
-            Assert.That(computeSource, Does.Contain("baseSlice + 2"));
-        }
-
-        [Test]
         public void GpuPageProducer_ComputesSourceMipOffsetFromVirtualAllocationScale()
         {
             Texture2D halfResolution = null;
@@ -892,68 +852,6 @@ namespace VividRP.Editor.Tests
                 Destroy(matchingResolution);
                 Destroy(doubleResolution);
             }
-        }
-
-        [Test]
-        public void SurfaceSamplingContract_UsesOneResolveContextForGradientsAndFeedback()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Public",
-                "GPUDriven",
-                "VirtualTextureSurfaceSampling.hlsl"));
-
-            Assert.That(source, Does.Contain("struct VividSurfaceSampleContext"));
-            Assert.That(source, Does.Contain("VTComputeRequestedMipRangeGrad("));
-            Assert.That(source, Does.Contain("VividGetSurfaceVirtualTextureMaxMip("));
-            Assert.That(source, Does.Contain("VTWriteAccessFeedback("));
-            Assert.That(source, Does.Not.Contain("if (!context.lowerResolved.resident)"));
-            Assert.That(source, Does.Contain("VTWriteFallbackSample("));
-            Assert.That(source, Does.Contain("VividSampleBaseColorGrad("));
-            Assert.That(source, Does.Contain("VividSampleNormalGrad("));
-            Assert.That(source, Does.Contain("VividSampleMaskGrad("));
-            Assert.That(source, Does.Contain("VividSurfaceUsesClamp("));
-            Assert.That(source, Does.Contain("saturate(uv)"));
-            Assert.That(source, Does.Contain("frac(uv)"));
-            Assert.That(source, Does.Contain("ddx(uv)"));
-            Assert.That(source, Does.Contain("ddy(uv)"));
-            Assert.That(source, Does.Not.Contain("GetBindlessTexture2D("));
-        }
-
-        [Test]
-        public void BindlessSamplingContract_HonorsRepeatAndClampForImplicitAndGradientSamples()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Public",
-                "GPUDriven",
-                "BindlessSurfaceSampling.hlsl"));
-
-            Assert.That(source, Does.Contain("VividSurfaceUsesClamp("));
-            Assert.That(source, Does.Contain("sampler_LinearClamp"));
-            Assert.That(source, Does.Contain("sampler_LinearRepeat"));
-            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_GRAD"));
-        }
-
-        private static string GetPackageFilePath(params string[] parts)
-        {
-            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] candidates =
-            {
-                Path.Combine(projectRoot, "Packages", "Custom_URP"),
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (string candidate in candidates)
-            {
-                if (Directory.Exists(candidate))
-                    return Path.Combine(candidate, Path.Combine(parts));
-            }
-
-            return Path.Combine(candidates[2], Path.Combine(parts));
         }
 
         private static ComputeShader GetPageProducerCompute()

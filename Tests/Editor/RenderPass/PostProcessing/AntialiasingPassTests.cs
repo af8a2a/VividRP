@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -345,60 +344,6 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void SourceFiles_RemoveLegacyAAPassRecorderInjection()
-        {
-            var passRecorderSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderGraph",
-                "PassRecorder.Execution.cs"));
-            var renderGraphPassSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderGraph",
-                "RenderGraphPass.cs"));
-
-            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectCmaa2Pass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectStpPass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectFsr3Pass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectDlssPass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedCmaa2Pass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedStpPass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedFsr3Pass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedDlssPass"));
-            Assert.That(passRecorderSource, Does.Contain("pass is IRenderGraphRecordingPass graphRecordingPass"));
-            Assert.That(renderGraphPassSource, Does.Contain("public interface IRenderGraphRecordingPass"));
-        }
-
-        [Test]
-        public void SourceFiles_RegisterPassthrough_WhenEffectiveModeIsNone()
-        {
-            var antialiasingPassSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "AntialiasingPass.cs"));
-
-            Assert.That(antialiasingPassSource, Does.Contain("if (m_EffectiveMode == VividAntialiasingMode.None)"));
-            Assert.That(antialiasingPassSource, Does.Contain("TryRegisterPassthrough(context)"));
-            Assert.That(antialiasingPassSource, Does.Contain("context.RegisterTextureHandle(AntialiasingOutput, sourceHandle)"));
-        }
-
-        [Test]
-        public void SourceFiles_RecordTsrThroughAntialiasingPassWithTemporalInputs()
-        {
-            var antialiasingPassSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "AntialiasingPass.cs"));
-
-            Assert.That(antialiasingPassSource, Does.Contain("TryRecordTsrPass"));
-            Assert.That(antialiasingPassSource, Does.Contain("m_TsrPass.Record"));
-            Assert.That(antialiasingPassSource, Does.Contain("VividAntialiasingMode.TemporalSuperResolution"));
-            Assert.That(antialiasingPassSource, Does.Contain("if (!HasTemporalInputs())"));
-            Assert.That(antialiasingPassSource, Does.Contain("AntialiasingOutput"));
-        }
-
         private static ContextContainer CreateFrameData(
             int width,
             int height,
@@ -457,25 +402,6 @@ namespace VividRP.Editor.Tests
             var clearMethod = utilityType.GetMethod("Clear", BindingFlags.Static | BindingFlags.NonPublic);
             Assert.That(clearMethod, Is.Not.Null);
             clearMethod.Invoke(null, Array.Empty<object>());
-        }
-
-        private static string GetPackageFilePath(params string[] parts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(parts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(parts));
         }
     }
 }

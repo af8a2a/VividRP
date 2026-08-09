@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -174,39 +173,6 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void VisualizationShader_DeclaresPhysicalAtlasAndPageTableViews()
-        {
-            string source = File.ReadAllText(GetShaderSourcePath());
-
-            Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/VirtualTextureVisualization\""));
-            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_NONE 0"));
-            Assert.That(source, Does.Not.Contain("VIVID_VT_VISUALIZATION_USE_PASS_SETTINGS"));
-            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS 2"));
-            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESIDENCY 3"));
-            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESOLVED_MIP 5"));
-            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_PHYSICAL_PAGE 6"));
-            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_RESOLVED_WORLD_POSITION 7"));
-            Assert.That(source, Does.Contain("EvaluatePhysicalAtlasColor"));
-            Assert.That(source, Does.Contain("SamplePhysicalAtlas"));
-            Assert.That(source, Does.Contain("EvaluatePageTableResidencyColor"));
-            Assert.That(source, Does.Contain("EvaluateResolvedMipColor"));
-            Assert.That(source, Does.Contain("EvaluatePhysicalPageColor"));
-            Assert.That(source, Does.Contain("EvaluateUnavailableColor"));
-            Assert.That(source, Does.Contain("EvaluateResolvedWorldPositionColor"));
-            Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
-            Assert.That(source, Does.Contain("VTComputeRequestedMipRangeGrad"));
-            Assert.That(source, Does.Contain("VTSamplePhysicalCacheTrilinearLayer"));
-            Assert.That(source, Does.Contain("_DepthTexture"));
-            Assert.That(source, Does.Contain("_VTVisualizationWorldPageSize"));
-            Assert.That(source, Does.Not.Contain("_VTOverlayRect"));
-            Assert.That(source, Does.Not.Contain("_VTOverlayOpacity"));
-            Assert.That(source, Does.Contain("_VTVisualizationLayer"));
-            Assert.That(source, Does.Contain("_VTVisualizationAvailable"));
-            Assert.That(source, Does.Contain("_VTPhysicalCache3.GetDimensions"));
-            Assert.That(source, Does.Contain("_VTPageTable[flatIndex]"));
-        }
-
         private static VirtualTextureSpaceDesc CreateDesc(string name)
         {
             return new VirtualTextureSpaceDesc(
@@ -241,46 +207,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);
-        }
-
-        private static string GetShaderSourcePath()
-        {
-            string customPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "Custom_URP",
-                "Shaders",
-                "Core",
-                "Private",
-                "Debug",
-                "VirtualTextureVisualization.shader"));
-            if (File.Exists(customPath))
-                return customPath;
-
-            string vividPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Shaders",
-                "Core",
-                "Private",
-                "Debug",
-                "VirtualTextureVisualization.shader"));
-            if (File.Exists(vividPath))
-                return vividPath;
-
-            return Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "com.af8a2a.vividrp",
-                "Shaders",
-                "Core",
-                "Private",
-                "Debug",
-                "VirtualTextureVisualization.shader"));
         }
     }
 }

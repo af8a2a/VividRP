@@ -124,17 +124,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var visibilityTexture = TextureResolveUtility.ResolveTexture(m_VisibilityBuffer.innerHandle);
+            var visibilityTexture = m_VisibilityBuffer.innerHandle.ResolveTexture();
             if (visibilityTexture == null)
                 return;
 
-            var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
+            var depthTexture = m_DepthTexture.innerHandle.ResolveTexture() ?? Texture2D.whiteTexture;
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(VisibilityBufferId, visibilityTexture);
             mpb.SetTexture(DepthTextureId, depthTexture);
-            mpb.SetVector(VisibilityBufferScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_VisibilityBuffer.innerHandle));
-            mpb.SetVector(DepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
+            mpb.SetVector(VisibilityBufferScaleBiasId, m_VisibilityBuffer.innerHandle.GetScaleBias());
+            mpb.SetVector(DepthTextureScaleBiasId, m_DepthTexture.innerHandle.GetScaleBias());
             mpb.SetInt(ResolveDebugModeId, (int)m_ResolvedDebugMode);
             mpb.SetFloat(ResolveExposureId, m_ResolvedExposure);
             mpb.SetFloat(WireframeThicknessId, m_ResolvedWireframeThickness);

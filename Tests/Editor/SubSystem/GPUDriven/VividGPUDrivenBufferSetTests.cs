@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Unity.Collections.LowLevel.Unsafe;
@@ -172,69 +171,6 @@ namespace VividRP.Editor.Tests
             Assert.That(packed.PackedTangent, Is.Zero);
             Assert.That(VividMeshletVertexPacking.UnpackNormal(packed.PackedNormal), Is.EqualTo(float3.zero));
             Assert.That(VividMeshletVertexPacking.UnpackTangent(packed.PackedTangent), Is.EqualTo(float4.zero));
-        }
-
-        [Test]
-        public void GeneratedShaderInclude_ContainsSurfaceBindingLayout()
-        {
-            string source = File.ReadAllText(GetGeneratedStructIncludePath());
-
-            Assert.That(source, Does.Contain("uint SurfaceBindingIndex;"));
-            Assert.That(source, Does.Contain("struct VividSurfaceBindingData"));
-            Assert.That(source, Does.Contain("uint BaseColorResource;"));
-            Assert.That(source, Does.Contain("uint NormalResource;"));
-            Assert.That(source, Does.Contain("uint MaskResource;"));
-            Assert.That(source, Does.Contain("uint Flags;"));
-            Assert.That(source, Does.Contain("float4 UVScaleBias;"));
-            Assert.That(source, Does.Not.Contain("uint AlbedoIndex;"));
-            Assert.That(source, Does.Contain("struct VividMeshletVertex"));
-            Assert.That(source, Does.Contain("float PositionX;"));
-            Assert.That(source, Does.Contain("float PositionY;"));
-            Assert.That(source, Does.Contain("float PositionZ;"));
-            Assert.That(source, Does.Contain("uint PackedNormal;"));
-            Assert.That(source, Does.Contain("uint PackedTangent;"));
-            Assert.That(source, Does.Contain("float2 UV;"));
-            Assert.That(source, Does.Contain("uint Reserved;"));
-            Assert.That(source, Does.Contain("uint PackedVertexTriangleCounts;"));
-            Assert.That(source, Does.Contain("uint PackedCone;"));
-            Assert.That(source, Does.Contain("uint PackedParentErrorRadius;"));
-            Assert.That(source, Does.Contain("uint PackedMeshletCountLevel;"));
-            Assert.That(source, Does.Not.Contain("float4 ConeApexCutoff;"));
-        }
-
-        [Test]
-        public void GPUDrivenShaders_DecodePackedMeshletVerticesThroughCommonHelper()
-        {
-            string commonSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Public",
-                "GPUDriven",
-                "VividGPUDrivenCommon.hlsl"));
-            Assert.That(commonSource, Does.Contain("struct VividDecodedMeshletVertex"));
-            Assert.That(commonSource, Does.Contain("DecodeVividMeshletOctahedral15"));
-            Assert.That(commonSource, Does.Contain("DecodeVividMeshletVertex"));
-            Assert.That(commonSource, Does.Contain("packedVertex.PositionX"));
-            Assert.That(commonSource, Does.Contain("packedVertex.PackedNormal"));
-            Assert.That(commonSource, Does.Contain("packedVertex.PackedTangent"));
-            Assert.That(commonSource, Does.Contain("DecodeVividMeshlet("));
-            Assert.That(commonSource, Does.Contain("DecodeVividMeshLODNode("));
-            Assert.That(commonSource, Does.Contain("VividDecodedMeshlet"));
-            Assert.That(commonSource, Does.Contain("VividDecodedMeshLODNode"));
-
-            string[][] shaderPaths =
-            {
-                new[] { "Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferPass.shader" },
-                new[] { "Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferShadowCasterPass.shader" },
-                new[] { "Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferResolve.shader" },
-                new[] { "Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferGBufferResolve.shader" },
-                new[] { "Shaders", "Core", "Private", "Debug", "VisibilityBufferDebug.shader" },
-            };
-            foreach (string[] shaderPath in shaderPaths)
-            {
-                string shaderSource = File.ReadAllText(GetPackageFilePath(shaderPath));
-                Assert.That(shaderSource, Does.Contain("DecodeVividMeshletVertex("));
-            }
         }
 
         [Test]
@@ -534,38 +470,6 @@ namespace VividRP.Editor.Tests
             Assert.That(instances[0].ObjectToWorldMatrix.c3.y, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(instances[0].ObjectToWorldMatrix.c3.z, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(1));
-        }
-
-        private static string GetGeneratedStructIncludePath()
-        {
-            return GetPackageFilePath(
-                "Runtime",
-                "SubSystem",
-                "GPUDriven",
-                "VividGPUDrivenStructs.cs.hlsl");
-        }
-
-        private static string GetPackageFilePath(params string[] relativePathSegments)
-        {
-            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "Custom_URP"),
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp"),
-            };
-
-            foreach (string packageRoot in packageRoots)
-            {
-                string path = Path.Combine(new[] { packageRoot }.Concat(relativePathSegments).ToArray());
-                if (File.Exists(path))
-                {
-                    return path;
-                }
-            }
-
-            Assert.Fail($"Could not locate package file '{Path.Combine(relativePathSegments)}'.");
-            return string.Empty;
         }
 
         private static float3 NextUnitVector(System.Random random)

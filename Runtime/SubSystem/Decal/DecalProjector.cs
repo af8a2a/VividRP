@@ -106,8 +106,7 @@ namespace VividRP.Runtime.SubSystem.Decal
                 return false;
             }
 
-            worldData = BoundProxyUtility.CreateWorldData(
-                transform,
+            worldData = transform.CreateWorldData(
                 BoundProxyFeature,
                 BoundProxyShape,
                 transform.GetEntityId());

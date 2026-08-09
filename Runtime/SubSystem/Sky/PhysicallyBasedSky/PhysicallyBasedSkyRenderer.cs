@@ -334,7 +334,7 @@ namespace VividRP.Runtime
                 m_HasRenderedSkyViewLut = true;
             }
 
-            var directionalShadowTexture = TextureResolveUtility.ResolveTexture(m_DirectionalShadowTexture) ?? Shader.GetGlobalTexture(DirectionalShadowTextureId);
+            var directionalShadowTexture = m_DirectionalShadowTexture.ResolveTexture() ?? Shader.GetGlobalTexture(DirectionalShadowTextureId);
             var properties = m_RenderPropertyBlock;
             properties.Clear();
             properties.SetMatrix(PixelCoordToViewDirWSId, m_RenderParameters.pixelCoordToViewDirWS);

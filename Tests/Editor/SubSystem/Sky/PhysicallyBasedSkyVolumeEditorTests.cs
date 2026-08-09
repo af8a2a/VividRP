@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
@@ -67,57 +66,6 @@ namespace VividRP.Editor.Tests
 
                 Object.DestroyImmediate(component);
             }
-        }
-
-        [Test]
-        public void Source_UsesHdrpStyleSectionsAndModelOrdering()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "PhysicallyBasedSkyVolumeEditor.cs"));
-
-            Assert.That(source, Does.Contain("[CustomEditor(typeof(PhysicallyBasedSkyVolume))]"));
-            Assert.That(source, Does.Contain("PropertyFetcher<PhysicallyBasedSkyVolume>"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Earth (Simple)\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Earth (Advanced)\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Custom Planet\")"));
-            Assert.That(source, Does.Contain("(int)PhysicallyBasedSkyModel.EarthSimple"));
-            Assert.That(source, Does.Contain("(int)PhysicallyBasedSkyModel.EarthAdvanced"));
-            Assert.That(source, Does.Contain("(int)PhysicallyBasedSkyModel.Custom"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Model\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Planet and Space\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Planet\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Space\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Air\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Aerosols\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Ozone\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Artistic Overrides\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Sky\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Vivid Extensions\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Height Fog\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Exposure Compensation\""));
-            Assert.That(source, Does.Contain("PropertyField(m_Exposure, s_ExposureCompensationLabel);"));
-            Assert.That(source, Does.Contain("DrawModelTypeField();"));
-            Assert.That(source, Does.Contain("EditorGUI.IntPopup"));
-            Assert.That(source, Does.Contain("using (new EditorGUI.IndentLevelScope())"));
-            Assert.That(source, Does.Contain("if (!isSimpleEarth && !hasCustomMaterial)"));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

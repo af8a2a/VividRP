@@ -6,14 +6,14 @@ namespace VividRP.Runtime
 {
     internal static class VividCameraUtility
     {
-        internal static bool ShouldUseGameCameraAdditionalData(Camera camera)
+        internal static bool ShouldUseGameCameraAdditionalData(this Camera camera)
         {
             return camera != null
                    && camera.cameraType == CameraType.Game
                    && !IsEditorPreviewCamera(camera);
         }
 
-        internal static bool IsEditorPreviewCamera(Camera camera)
+        internal static bool IsEditorPreviewCamera(this Camera camera)
         {
             if (camera == null)
                 return false;

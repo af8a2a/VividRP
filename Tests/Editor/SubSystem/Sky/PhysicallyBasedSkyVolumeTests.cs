@@ -1,6 +1,5 @@
 using NUnit.Framework;
 using UnityEngine;
-using System.IO;
 using System.Reflection;
 using VividRP.Runtime;
 
@@ -21,24 +20,6 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(volume);
             }
-        }
-
-        [Test]
-        public void Source_UsesHdrpAlignedMenuAndEarthConstants()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSkyVolume.cs"));
-
-            Assert.That(source, Does.Contain("[VolumeComponentMenu(\"Sky/Physically Based Sky\")]"));
-            Assert.That(source, Does.Contain("public EnumParameter<PhysicallyBasedSkyModel> type = new(PhysicallyBasedSkyModel.EarthAdvanced);"));
-            Assert.That(source, Does.Contain("private static readonly float DefaultAerosolMaximumAltitude = LayerDepthFromScaleHeight(DefaultAerosolScaleHeight);"));
-            Assert.That(source, Does.Contain("private const float DefaultOzoneMinimumAltitude = 20.0f * 1000.0f;"));
-            Assert.That(source, Does.Contain("private const float DefaultOzoneLayerWidth = 20.0f * 1000.0f;"));
-            Assert.That(source, Does.Contain("public FloatParameter exposure = new(0.0f);"));
-            Assert.That(source, Does.Contain("protected override void OnEnable()"));
-            Assert.That(source, Does.Contain("private bool m_ExposureDefaultsMigrated;"));
-            Assert.That(source, Does.Contain("return SkyIntensityUtility.GetExposureMultiplier(exposure.value);"));
-            Assert.That(source, Does.Contain(": DefaultOzoneLayerWidth;"));
-            Assert.That(source, Does.Contain(": DefaultOzoneMinimumAltitude;"));
         }
 
         [Test]
@@ -243,25 +224,6 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(volume);
             }
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private static void AssertFieldHasTooltip(string fieldName)

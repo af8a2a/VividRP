@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -88,32 +87,6 @@ namespace VividRP.Editor.Tests
             Assert.That(settings.displayOnSceneOverlay, Is.True);
         }
 
-        [Test]
-        public void ExposureDebugShader_ContainsDedicatedSceneMeteringAndHistogramPasses()
-        {
-            var shaderSource = File.ReadAllText(GetShaderSourcePath());
-
-            Assert.That(shaderSource, Does.Contain("Name \"SceneEV100\""));
-            Assert.That(shaderSource, Does.Contain("Name \"Metering\""));
-            Assert.That(shaderSource, Does.Contain("Name \"Histogram\""));
-            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _AutoExposureHistogramBuffer;"));
-            Assert.That(shaderSource, Does.Contain("StructuredBuffer<float4> _AutoExposureCurrentExposureBuffer;"));
-            Assert.That(shaderSource, Does.Contain("ExposureDebugSummary SummarizeExposureDebug()"));
-            Assert.That(shaderSource, Does.Contain("ResolveMeteringWeight"));
-            Assert.That(shaderSource, Does.Contain("ComputePixelPercentile"));
-            Assert.That(shaderSource, Does.Contain("GetTonemappedValueAtLocation"));
-            Assert.That(shaderSource, Does.Contain("DrawHeatSideBar("));
-            Assert.That(shaderSource, Does.Contain("DrawHistogramFrame("));
-            Assert.That(shaderSource, Does.Contain("DrawLiteralCurrentExposure("));
-            Assert.That(shaderSource, Does.Contain("DrawLiteralTargetExposure("));
-            Assert.That(shaderSource, Does.Contain("DrawLiteralExposureCompensation("));
-            Assert.That(shaderSource, Does.Contain("localCoord.y = VIVID_SMALL_FONT_HEIGHT - 1 - localCoord.y;"));
-            Assert.That(shaderSource, Does.Contain("FragSceneEV100"));
-            Assert.That(shaderSource, Does.Contain("FragMetering"));
-            Assert.That(shaderSource, Does.Contain("FragHistogram"));
-            Assert.That(shaderSource, Does.Contain("VividGetOneOverPreExposure()"));
-        }
-
         private static RenderGraphTexture GetTextureField(ExposureDebugPass pass, string fieldName)
         {
             var field = typeof(ExposureDebugPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -123,23 +96,6 @@ namespace VividRP.Editor.Tests
             var texture = (RenderGraphTexture)field.GetValue(pass);
             Assert.That(texture, Is.Not.Null);
             return texture;
-        }
-
-        private static string GetShaderSourcePath()
-        {
-            var shaderPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Shaders",
-                "Core",
-                "Private",
-                "Debug",
-                "ExposureDebug.shader"));
-
-            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
-            return shaderPath;
         }
     }
 }

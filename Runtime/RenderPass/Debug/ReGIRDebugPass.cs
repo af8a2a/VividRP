@@ -142,8 +142,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
-            var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle);
+            var sourceTexture = m_SourceTexture.innerHandle.ResolveTexture();
+            var depthTexture = m_DepthTexture.innerHandle.ResolveTexture();
             var parameterBuffer = m_ReGIRParameterBuffer?.ImportedGraphicsBuffer;
             var reservoirBuffer = m_ReGIRReservoirBuffer?.ImportedGraphicsBuffer;
 
@@ -162,8 +162,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SourceTextureId, sourceTexture);
             mpb.SetTexture(CameraDepthTextureId, depthTexture);
-            mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture.innerHandle));
-            mpb.SetVector(CameraDepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
+            mpb.SetVector(SourceTextureScaleBiasId, m_SourceTexture.innerHandle.GetScaleBias());
+            mpb.SetVector(CameraDepthTextureScaleBiasId, m_DepthTexture.innerHandle.GetScaleBias());
             mpb.SetVector(ReGIRDebugViewportSizeId, m_ReGIRDebugViewportSize);
             mpb.SetInt(ReGIRDebugModeId, (int)m_ResolvedSettings.visualizationMode);
             mpb.SetFloat(ReGIRDebugOpacityId, m_ResolvedSettings.opacity);
@@ -216,7 +216,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_OutputTexture.desc.Width = width;
             m_OutputTexture.desc.Height = height;
-            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(sourceDescriptor);
+            m_OutputTexture.desc.ColorFormat = sourceDescriptor.ResolveColorFormat();
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = sourceDescriptor?.FilterMode ?? FilterMode.Bilinear;
@@ -241,7 +241,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(m_SourceTexture?.desc))
+            if ((m_SourceTexture?.desc).HasExplicitSize())
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;

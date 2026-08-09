@@ -164,7 +164,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureOutputTexture(width, height, GetPreferredSourceDescriptor());
 
-            m_SourceTextureScaleBias = TextureScaleBiasUtility.GetScaleBias(ResolveHandle(m_SourceTexture));
+            m_SourceTextureScaleBias = ResolveHandle(m_SourceTexture).GetScaleBias();
 
             var exposureSettings = m_ExposureData != null
                 ? m_ExposureData.settings
@@ -216,7 +216,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-            var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
+            var sourceTexture = m_SourceTexture.innerHandle.ResolveTexture();
             if (sourceTexture == null)
                 return;
 
@@ -341,7 +341,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_OutputTexture.desc.Width = width;
             m_OutputTexture.desc.Height = height;
-            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(sourceDescriptor);
+            m_OutputTexture.desc.ColorFormat = sourceDescriptor.ResolveColorFormat();
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = sourceDescriptor?.FilterMode ?? FilterMode.Bilinear;
@@ -366,7 +366,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(m_SourceTexture?.desc))
+            if ((m_SourceTexture?.desc).HasExplicitSize())
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;

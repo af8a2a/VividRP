@@ -302,7 +302,7 @@ namespace VividRP.Runtime
                 && passDefinition != null
                 && passDefinition.EnableAsyncCompute
                 && SystemInfo.supportsAsyncCompute
-                && RenderGraphPassExecutionUtility.SupportsAsyncCompute(pass.GetType());
+                && pass.GetType().SupportsAsyncCompute();
         }
 
         private static void SetupImportedHandles(IBaseRenderGraphBuilder builder, IRenderPass pass)

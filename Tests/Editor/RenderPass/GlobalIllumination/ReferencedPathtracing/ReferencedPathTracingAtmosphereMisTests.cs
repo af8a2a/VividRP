@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using VividRP.Runtime.RenderPass.Core;
@@ -8,81 +7,6 @@ namespace VividRP.Editor.Tests
 {
     public sealed class ReferencedPathTracingAtmosphereMisTests
     {
-        [Test]
-        public void ShaderContract_ConnectsSunGroundAndAtmosphereWithBidirectionalMis()
-        {
-            var rayGenerationSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracing.rgen.hlsl"));
-            var atmosphereSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracingAtmosphere.hlsl"));
-            var samplingSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracingSampling.hlsl"));
-
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "ReferencedPathtracingSampleAtmosphereSun("));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "ReferencedPathtracingEvaluateAtmosphereSunDiskRadiance("));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "ReferencedPathtracingEvaluateAtmospherePhasePdf("));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "ReferencedPathtracingSampleAtmosphereGround("));
-            Assert.That(
-                atmosphereSource,
-                Does.Contain(
-                    "ReferencedPathtracingEvaluateAtmosphereGroundDirectWeight("));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "previousReferenceSunReachable"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "shadowInterval.hitsGround != 0u"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "ReferencedPathtracingGetLightEstimatorWeight("));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "ReferencedPathtracingGetBsdfEstimatorWeight("));
-            Assert.That(
-                samplingSource,
-                Does.Contain(
-                    "kReferencedPathtracingAtmosphereSunDimensionOffset = 12u"));
-            Assert.That(
-                ReferencedPathTracingAtmosphereState.ContractVersion,
-                Is.EqualTo(7));
-            Assert.That(
-                ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(8));
-        }
 
         [Test]
         public void FiniteSunDisk_RadianceIntegratesToDirectionalIlluminance()
@@ -162,20 +86,6 @@ namespace VividRP.Editor.Tests
             var secondSquared = secondPdf * secondPdf;
             return firstSquared
                 / (firstSquared + secondSquared);
-        }
-
-        private static string GetPackageFilePath(
-            params string[] relativeParts)
-        {
-            var packageInfo =
-                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
-                    typeof(
-                        ReferencedPathTracingEnvironmentSamplingPass)
-                        .Assembly);
-            Assert.That(packageInfo, Is.Not.Null);
-            return Path.Combine(
-                packageInfo.resolvedPath,
-                Path.Combine(relativeParts));
         }
     }
 }

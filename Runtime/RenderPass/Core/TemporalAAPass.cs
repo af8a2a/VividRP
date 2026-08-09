@@ -234,7 +234,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var desc = m_HistoryColorDescriptor;
             if (m_HistoryColorPrevious?.desc != null)
-                RenderGraphTextureDescUtility.Copy(m_HistoryColorPrevious.desc, desc);
+                m_HistoryColorPrevious.desc.Copy(desc);
 
             desc.Name = "TAAHistoryColorCurrent";
             desc.Width = m_Width;

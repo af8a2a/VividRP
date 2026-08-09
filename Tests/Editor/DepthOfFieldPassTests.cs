@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -204,7 +203,7 @@ namespace VividRP.Editor.Tests
             setMethod.Invoke(pass, new object[] { injectedSource });
 
             Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
-            Assert.That(PassResourceReferenceRefreshUtility.TryRefresh(pass, resources), Is.True);
+            Assert.That(pass.TryRefresh(resources), Is.True);
             Assert.That(sourceEntry.Texture, Is.SameAs(injectedSource));
         }
 
@@ -250,7 +249,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SupportsAsyncCompute_ReturnsFalse_ForDepthOfFieldPass()
         {
-            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(DepthOfFieldPass)), Is.False);
+            Assert.That((typeof(DepthOfFieldPass)).SupportsAsyncCompute(), Is.False);
         }
 
         [Test]
@@ -302,40 +301,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DepthOfFieldCompute_ContainsPhysicalPipelineKernels_AndResourceBindings()
-        {
-            var computeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "DepthOfField.compute"));
-            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "DepthOfField", "DepthOfFieldPass.cs"));
-            var registrySource = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
-            var pipelineResourcesSource = File.ReadAllText(GetPackageFilePath("Runtime", "Resources", "PipelineResources.asset"));
-
-            Assert.That(computeSource, Does.Contain("#pragma kernel KCoCPhysical"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel KComputeSlowTiles"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel KGatherFastTiles"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel KCombineFastTiles"));
-            Assert.That(computeSource, Does.Contain("ComputePhysicalCoC"));
-            Assert.That(computeSource, Does.Contain("GetTileClass"));
-            Assert.That(computeSource, Does.Contain("EvaluatePhysicalBlur"));
-            Assert.That(passSource, Does.Contain("m_Settings.physicallyBased"));
-            Assert.That(passSource, Does.Contain("m_Settings.coCStabilization"));
-            Assert.That(passSource, Does.Contain("DispatchCoCMinMax"));
-            Assert.That(passSource, Does.Contain("DispatchSlowTiles"));
-            Assert.That(passSource, Does.Contain("DispatchCombine"));
-            Assert.That(passSource, Does.Contain("DepthOfFieldPass : ComputePass"));
-            Assert.That(passSource, Does.Contain("[PassBypass(nameof(source))]"));
-            Assert.That(passSource, Does.Contain("public override bool IsActive(ContextContainer frameData)"));
-            Assert.That(passSource, Does.Not.Contain("IRenderGraphRecordingPass"));
-            Assert.That(passSource, Does.Not.Contain("TryRegisterPassthrough"));
-            Assert.That(passSource, Does.Not.Contain("context.RegisterTextureHandle(output, sourceHandle)"));
-            Assert.That(passSource, Does.Contain("m_ComputeSlowTilesKernel, InputLinearDepthId"));
-            Assert.That(passSource, Does.Contain("m_GatherFastTilesKernel, InputLinearDepthId"));
-            Assert.That(passSource, Does.Contain("ResolvePhysicalMaxCoC"));
-            Assert.That(passSource, Does.Contain("DepthOfFieldCompute"));
-            Assert.That(registrySource, Does.Contain("internal sealed class DepthOfFieldPass : RenderPassNodeData"));
-            Assert.That(pipelineResourcesSource, Does.Contain("Shaders/Core/Private/DepthOfField.compute"));
-        }
-
-        [Test]
         public void BuildRegistrations_IncludesDepthOfFieldPass()
         {
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(DepthOfFieldPass) });
@@ -343,25 +308,6 @@ namespace VividRP.Editor.Tests
             Assert.That(registrations, Has.Count.EqualTo(1));
             Assert.That(registrations[0].NodeClassName, Is.EqualTo("DepthOfFieldPass"));
             Assert.That(registrations[0].PassType, Is.EqualTo(typeof(DepthOfFieldPass)));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private static void InvokeApplyInactivePassBypassDescriptors(

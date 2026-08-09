@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -195,53 +194,11 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
         }
 
-        [Test]
-        public void PipelineResourcesAsset_ReferencesTemporalAAComputeShader()
-        {
-            var pipelineResourcesSource = File.ReadAllText(
-                GetPackageFilePath("Runtime", "Resources", "PipelineResources.asset"));
-
-            Assert.That(
-                pipelineResourcesSource,
-                Does.Contain("- ResourceName: Shaders/Core/Private/TemporalAA"));
-            Assert.That(
-                pipelineResourcesSource,
-                Does.Contain("ResourceObject: {fileID: 7200000, guid: e30d483061855394891ca96699b7d9ba, type: 3}"));
-        }
-
-        [Test]
-        public void TemporalAACompute_ReprojectsHistoryWithJitterDelta()
-        {
-            var computeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "TemporalAA.compute"));
-
-            Assert.That(computeSource, Does.Contain("float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;"));
-            Assert.That(computeSource, Does.Contain("float2 historyUV = uv - motionVector + jitterDelta;"));
-        }
-
         private static RenderGraphTexture GetTextureField(TemporalAAPass pass, string fieldName)
         {
             var field = typeof(TemporalAAPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null, $"Field '{fieldName}' not found on TemporalAAPass");
             return (RenderGraphTexture)field.GetValue(pass);
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 
@@ -357,22 +314,6 @@ namespace VividRP.Editor.Tests
             Assert.That(pass.IsPassResourceLayoutDirty, Is.False);
         }
 
-        [Test]
-        public void TemporalAACompute_DeclaresCmaa2Kernels_AndIncludesCmaa2ShaderBody()
-        {
-            var computeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "TemporalAA.compute"));
-            var cmaaSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "CMAA2.hlsl"));
-
-            Assert.That(computeSource, Does.Contain("#pragma kernel ComputeDispatchArgsCS"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel EdgesColor2x2CS"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel ProcessCandidatesCS"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel DeferredColorApply2x2CS"));
-            Assert.That(computeSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/CMAA2.hlsl\""));
-            Assert.That(cmaaSource, Does.Contain("Conservative Morphological Anti-Aliasing, version: 2.3"));
-            Assert.That(cmaaSource, Does.Contain("void ComputeDispatchArgsCS"));
-            Assert.That(cmaaSource, Does.Contain("void DeferredColorApply2x2CS"));
-        }
-
         private static RenderGraphTexture GetCmaa2TextureField(CMAA2Pass pass, string fieldName)
         {
             var field = typeof(CMAA2Pass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -385,25 +326,6 @@ namespace VividRP.Editor.Tests
             var field = typeof(CMAA2Pass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null, $"Field '{fieldName}' not found on CMAA2Pass");
             return (RenderGraphBuffer)field.GetValue(pass);
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

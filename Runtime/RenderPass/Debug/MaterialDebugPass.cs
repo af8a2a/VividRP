@@ -204,13 +204,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
-            var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle);
-            var gBuffer0 = TextureResolveUtility.ResolveTexture(m_GBuffer0.innerHandle);
-            var gBuffer1 = TextureResolveUtility.ResolveTexture(m_GBuffer1.innerHandle);
-            var gBuffer2 = TextureResolveUtility.ResolveTexture(m_GBuffer2.innerHandle);
-            var gBuffer3 = TextureResolveUtility.ResolveTexture(m_GBuffer3.innerHandle);
-            var gBuffer4 = TextureResolveUtility.ResolveTexture(m_GBuffer4.innerHandle);
+            var sourceTexture = m_SourceTexture.innerHandle.ResolveTexture();
+            var depthTexture = m_DepthTexture.innerHandle.ResolveTexture();
+            var gBuffer0 = m_GBuffer0.innerHandle.ResolveTexture();
+            var gBuffer1 = m_GBuffer1.innerHandle.ResolveTexture();
+            var gBuffer2 = m_GBuffer2.innerHandle.ResolveTexture();
+            var gBuffer3 = m_GBuffer3.innerHandle.ResolveTexture();
+            var gBuffer4 = m_GBuffer4.innerHandle.ResolveTexture();
 
             if (sourceTexture == null
                 || depthTexture == null
@@ -242,13 +242,13 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetTexture(GBuffer2Id, gBuffer2);
             mpb.SetTexture(GBuffer3Id, gBuffer3);
             mpb.SetTexture(GBuffer4Id, gBuffer4);
-            mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture.innerHandle));
-            mpb.SetVector(CameraDepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
-            mpb.SetVector(GBuffer0ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer0.innerHandle));
-            mpb.SetVector(GBuffer1ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer1.innerHandle));
-            mpb.SetVector(GBuffer2ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer2.innerHandle));
-            mpb.SetVector(GBuffer3ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer3.innerHandle));
-            mpb.SetVector(GBuffer4ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer4.innerHandle));
+            mpb.SetVector(SourceTextureScaleBiasId, m_SourceTexture.innerHandle.GetScaleBias());
+            mpb.SetVector(CameraDepthTextureScaleBiasId, m_DepthTexture.innerHandle.GetScaleBias());
+            mpb.SetVector(GBuffer0ScaleBiasId, m_GBuffer0.innerHandle.GetScaleBias());
+            mpb.SetVector(GBuffer1ScaleBiasId, m_GBuffer1.innerHandle.GetScaleBias());
+            mpb.SetVector(GBuffer2ScaleBiasId, m_GBuffer2.innerHandle.GetScaleBias());
+            mpb.SetVector(GBuffer3ScaleBiasId, m_GBuffer3.innerHandle.GetScaleBias());
+            mpb.SetVector(GBuffer4ScaleBiasId, m_GBuffer4.innerHandle.GetScaleBias());
             mpb.SetInt(MaterialDebugModeId, resolvedMode);
             mpb.SetFloat(MaterialDebugExposureId, resolvedExposure);
             mpb.SetVector(MaterialFeatureDebugScreenSizeId, m_MaterialFeatureDebugScreenSize);
@@ -312,7 +312,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_OutputTexture.desc.Width = width;
             m_OutputTexture.desc.Height = height;
-            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(sourceDescriptor);
+            m_OutputTexture.desc.ColorFormat = sourceDescriptor.ResolveColorFormat();
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = sourceDescriptor?.FilterMode ?? FilterMode.Bilinear;
@@ -354,7 +354,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(m_SourceTexture?.desc))
+            if ((m_SourceTexture?.desc).HasExplicitSize())
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;

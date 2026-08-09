@@ -145,11 +145,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var visibilityTexture = TextureResolveUtility.ResolveTexture(m_VisibilityBuffer.innerHandle);
+            var visibilityTexture = m_VisibilityBuffer.innerHandle.ResolveTexture();
             if (visibilityTexture == null)
                 return;
 
-            var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
+            var depthTexture = m_DepthTexture.innerHandle.ResolveTexture() ?? Texture2D.whiteTexture;
 
             VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance
                 ? VividGPUDrivenSystem.instance
@@ -179,8 +179,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DrawProperties.Clear();
             m_DrawProperties.SetTexture(VisibilityBufferId, visibilityTexture);
             m_DrawProperties.SetTexture(DepthTextureId, depthTexture);
-            m_DrawProperties.SetVector(VisibilityBufferScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_VisibilityBuffer.innerHandle));
-            m_DrawProperties.SetVector(DepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
+            m_DrawProperties.SetVector(VisibilityBufferScaleBiasId, m_VisibilityBuffer.innerHandle.GetScaleBias());
+            m_DrawProperties.SetVector(DepthTextureScaleBiasId, m_DepthTexture.innerHandle.GetScaleBias());
 
             BindGBufferTargets(nativeCmd);
             CoreUtils.DrawFullScreen(nativeCmd, m_Material, m_DrawProperties, 0);
@@ -243,7 +243,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int screenDimension,
             RenderGraphTextureDesc descriptor)
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
+            if (descriptor.HasExplicitSize())
                 return Mathf.Max(1, descriptor.Width);
 
             return CameraDimensionUtility.ResolveCameraDimension(
@@ -258,7 +258,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int screenDimension,
             RenderGraphTextureDesc descriptor)
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
+            if (descriptor.HasExplicitSize())
                 return Mathf.Max(1, descriptor.Height);
 
             return CameraDimensionUtility.ResolveCameraDimension(

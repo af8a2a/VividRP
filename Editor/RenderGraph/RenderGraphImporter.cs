@@ -181,9 +181,9 @@ namespace VividRP.Editor.RenderGraph
                 passNode.PopulateFloatParameters(passDefinition);
                 passNode.PopulateEnumParameters(passDefinition);
 
-                foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+                foreach (var field in passType.EnumerateRenderGraphResourceFields())
                 {
-                    if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    if (field.IsDeclaredTransientResourceField())
                         continue;
 
                     var attr = field.GetCustomAttribute<RenderGraphResource>();
@@ -390,7 +390,7 @@ namespace VividRP.Editor.RenderGraph
             }
 
             var orderedIndices = RenderGraphPassCompilationUtility.GetOrderedPassIndices(compiledPassDefinitions);
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(compiledPassDefinitions);
+            var livePassIndices = compiledPassDefinitions.GetLivePassIndices();
             var livePassIndexSet = new HashSet<int>(livePassIndices);
             var culledOrderedIndices = orderedIndices.FindAll(index => livePassIndexSet.Contains(index));
 
@@ -424,7 +424,7 @@ namespace VividRP.Editor.RenderGraph
 
         internal static bool ResolveAsyncComputeSetting(Type passType, bool enableAsyncCompute)
         {
-            return enableAsyncCompute && RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType);
+            return enableAsyncCompute && passType.SupportsAsyncCompute();
         }
 
         private static string GetPassDisplayName(RenderPassNodeData passNode, string fallbackName)
@@ -668,9 +668,9 @@ namespace VividRP.Editor.RenderGraph
             if (expectedFieldType == null)
                 return null;
 
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                     continue;
 
                 if (field.FieldType != expectedFieldType)

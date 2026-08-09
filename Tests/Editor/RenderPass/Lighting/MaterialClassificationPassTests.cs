@@ -65,7 +65,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SupportsAsyncCompute_ReturnsTrue_ForClassificationPass()
         {
-            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(MaterialClassificationPass)), Is.True);
+            Assert.That((typeof(MaterialClassificationPass)).SupportsAsyncCompute(), Is.True);
         }
 
         [Test]

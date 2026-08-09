@@ -166,12 +166,12 @@ namespace VividRP.Editor.RenderGraph
 
         internal static string BuildOverrideOptionDisplayName(FieldInfo field, RenderGraphResource attr)
         {
-            return $"Override {RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr)}";
+            return $"Override {field.GetRenderGraphResourceName(attr)}";
         }
 
         internal static string BuildPortDisplayName(FieldInfo field, RenderGraphResource attr, AccessFlags access)
         {
-            var displayName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
+            var displayName = field.GetRenderGraphResourceName(attr);
             var accessLabel = AccessFlagsToShortName(access);
             var attachmentLabel = attr.IsDepthAttachment
                 ? "Depth"

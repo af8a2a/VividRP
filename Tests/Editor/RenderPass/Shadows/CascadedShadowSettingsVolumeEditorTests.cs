@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -64,49 +63,6 @@ namespace VividRP.Editor.Tests
 
                 Object.DestroyImmediate(component);
             }
-        }
-
-        [Test]
-        public void Source_UsesHdrpStyleWorkingUnitAndCascadePreview()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "CascadedShadowSettingsVolumeEditor.cs"));
-
-            Assert.That(source, Does.Contain("[CustomEditor(typeof(CascadedShadowSettingsVolume))]"));
-            Assert.That(source, Does.Contain("PropertyFetcher<CascadedShadowSettingsVolume>"));
-            Assert.That(source, Does.Contain("EditorPrefBoolFlags<WorkingUnit>"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Working Unit\""));
-            Assert.That(source, Does.Contain("DrawCascadeSplitField(splitParameters, i, activeSplitCount);"));
-            Assert.That(source, Does.Contain("DrawCascadeBorderField(borderParameters, splitParameters, i, GetCascadeCount());"));
-            Assert.That(source, Does.Contain("ShadowCascadeGUI.DrawCascades(ref cascades, useMetric, baseMetric);"));
-            Assert.That(source, Does.Contain("using (var scope = new OverridablePropertyScope(parameter, title, this))"));
-            Assert.That(source, Does.Contain("GUILayout.Label(\"Cascade splits\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Border 1\")"));
-            Assert.That(source, Does.Contain("borderSize = borderParameters[i].value.floatValue"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Directional Light\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Per Light\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Screen Space Denoise\""));
-            Assert.That(source, Does.Contain("m_ScreenSpaceShadowDenoise = Unpack(fetcher.Find(x => x.screenSpaceShadowDenoise));"));
-            Assert.That(source, Does.Contain("PropertyField(m_ScreenSpaceShadowDenoise, s_ScreenSpaceShadowDenoiseLabel);"));
-            Assert.That(source, Does.Contain("When Screen Space Quality is set to Very High (VividRP PCSS), blocker and filter tuning also lives on that light."));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

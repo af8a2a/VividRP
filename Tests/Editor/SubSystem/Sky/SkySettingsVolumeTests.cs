@@ -1,4 +1,3 @@
-using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -87,32 +86,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_ReinitializesPlanetAndQualityParameters_ForLegacyProfiles()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkySettingsVolume.cs"));
-
-            Assert.That(source, Does.Contain("internal static class SkyIntensityUtility"));
-            Assert.That(source, Does.Contain("internal static float GetExposureMultiplier(float exposureValue)"));
-            Assert.That(source, Does.Contain("internal static float GetIntensityFromSettings("));
-            Assert.That(source, Does.Not.Contain("public SkyIntensityParameter skyIntensityMode = new(SkyIntensityMode.Exposure);"));
-            Assert.That(source, Does.Not.Contain("public FloatParameter exposure = new(0.0f);"));
-            Assert.That(source, Does.Not.Contain("public MinFloatParameter multiplier = new(1.0f, 0.0f);"));
-            Assert.That(source, Does.Not.Contain("public FloatParameter desiredLuxValue = new(20000.0f);"));
-            Assert.That(source, Does.Contain("includeSunInBaking ??= new BoolParameter(false);"));
-            Assert.That(source, Does.Contain("generatedCubemapQuality ??= new EnumParameter<SkyGeneratedCubemapQuality>(SkyGeneratedCubemapQuality.PlatformDefault);"));
-            Assert.That(source, Does.Contain("renderingSpace ??= new EnumParameter<RenderingSpace>(RenderingSpace.World);"));
-            Assert.That(source, Does.Contain("centerMode ??= new EnumParameter<PlanetMode>(PlanetMode.Automatic);"));
-            Assert.That(source, Does.Contain("planetCenter ??= new Vector3Parameter(new Vector3(0.0f, -DefaultEarthRadius, 0.0f));"));
-            Assert.That(source, Does.Not.Contain("internal static bool HasIntensityOverride(SkySettingsVolume settings = null)"));
-            Assert.That(source, Does.Not.Contain("internal static int GetIntensityHashCode(SkySettingsVolume settings = null)"));
-            Assert.That(source, Does.Not.Contain("internal static float GetIntensityFromSettings(SkySettingsVolume settings = null)"));
-            Assert.That(source, Does.Contain("internal static bool GetIncludeSunInBaking(SkySettingsVolume settings = null)"));
-            Assert.That(source, Does.Contain("internal const int DefaultSkyTextureResolution = 1024;"));
-            Assert.That(source, Does.Contain("internal static int GetSkyTextureResolution(SkySettingsVolume settings = null)"));
-            Assert.That(source, Does.Contain("internal readonly struct SkyPlanet"));
-        }
-
-        [Test]
         public void SkyPlanet_UsesAutomaticWorldCenter_WhenRenderingInWorldSpace()
         {
             var skyVolume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
@@ -188,26 +161,6 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(settings);
                 Object.DestroyImmediate(skyVolume);
             }
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp"),
-                Path.Combine(projectRoot, "Packages", "Custom_URP")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

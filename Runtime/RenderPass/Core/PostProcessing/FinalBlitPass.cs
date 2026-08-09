@@ -334,8 +334,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var sourceTextureUVOrigin = context.GetTextureUVOrigin(source.innerHandle);
-            var scaleBias = TextureScaleBiasUtility.GetScaleBias(
-                sourceHandle,
+            var scaleBias = sourceHandle.GetScaleBias(
                 sourceTextureUVOrigin,
                 m_CameraBackBufferTextureUVOrigin);
 
@@ -349,8 +348,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var camera = context.Get<VividCameraData>()?.camera;
             if (VividAdditionalCameraData.TryGetFinalFrameScreenshotCaptureTarget(camera, out var screenshotTarget))
             {
-                var screenshotScaleBias = TextureScaleBiasUtility.GetScaleBias(
-                    sourceHandle,
+                var screenshotScaleBias = sourceHandle.GetScaleBias(
                     sourceTextureUVOrigin,
                     TextureUVOrigin.BottomLeft);
 

@@ -31,15 +31,15 @@ namespace VividRP.Editor.Tests
             camera.farClipPlane = 250.0f;
             camera.fieldOfView = 60.0f;
 
-            var originalState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            var originalProjection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var originalState = camera.CaptureProjectionState();
+            var originalProjection = camera.GetNonJitteredProjectionMatrix();
             var jitterMatrix = Matrix4x4.Translate(new Vector3(0.015625f, -0.03125f, 0.0f));
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * originalProjection, originalProjection);
+            camera.SetProjectionMatrices(jitterMatrix * originalProjection, originalProjection);
 
             camera.fieldOfView = 45.0f;
-            CameraProjectionMatrixUtility.RestoreProjectionState(camera, originalState);
+            camera.RestoreProjectionState(originalState);
 
-            var restoredProjection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var restoredProjection = camera.GetNonJitteredProjectionMatrix();
             var expectedProjection = Matrix4x4.Perspective(45.0f, camera.aspect, camera.nearClipPlane, camera.farClipPlane);
 
             Assert.That(originalState.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Implicit));
@@ -56,11 +56,11 @@ namespace VividRP.Editor.Tests
             camera.nonJitteredProjectionMatrix = explicitProjection;
             camera.projectionMatrix = explicitProjection;
 
-            var originalState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var originalState = camera.CaptureProjectionState();
             var temporaryProjection = Matrix4x4.Perspective(70.0f, 1.5f, 0.1f, 50.0f);
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, temporaryProjection, temporaryProjection);
+            camera.SetProjectionMatrices(temporaryProjection, temporaryProjection);
 
-            CameraProjectionMatrixUtility.RestoreProjectionState(camera, originalState);
+            camera.RestoreProjectionState(originalState);
 
             Assert.That(originalState.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Explicit));
             Assert.That(MaxAbsDiff(camera.projectionMatrix, explicitProjection), Is.LessThan(0.0001f));
@@ -80,7 +80,7 @@ namespace VividRP.Editor.Tests
             camera.nonJitteredProjectionMatrix = expectedProjection;
             camera.projectionMatrix = expectedProjection;
 
-            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var state = camera.CaptureProjectionState();
 
             Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Implicit));
         }
@@ -99,12 +99,12 @@ namespace VividRP.Editor.Tests
                 camera.aspect,
                 camera.nearClipPlane,
                 camera.farClipPlane);
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, staleProjection, staleProjection);
+            camera.SetProjectionMatrices(staleProjection, staleProjection);
 
             camera.farClipPlane = 1000.0f;
 
-            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            var projection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var state = camera.CaptureProjectionState();
+            var projection = camera.GetNonJitteredProjectionMatrix();
             var expectedProjection = Matrix4x4.Perspective(
                 camera.fieldOfView,
                 camera.aspect,
@@ -130,12 +130,12 @@ namespace VividRP.Editor.Tests
                 camera.aspect,
                 camera.nearClipPlane,
                 camera.farClipPlane);
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, staleProjection, staleProjection);
+            camera.SetProjectionMatrices(staleProjection, staleProjection);
 
             camera.nearClipPlane = 1.0f;
 
-            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            var projection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var state = camera.CaptureProjectionState();
+            var projection = camera.GetNonJitteredProjectionMatrix();
             var expectedProjection = Matrix4x4.Perspective(
                 camera.fieldOfView,
                 camera.aspect,
@@ -163,7 +163,7 @@ namespace VividRP.Editor.Tests
                 camera.aspect,
                 camera.nearClipPlane,
                 camera.farClipPlane);
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, staleProjection, staleProjection);
+            camera.SetProjectionMatrices(staleProjection, staleProjection);
 
             camera.farClipPlane = 1000.0f;
             var antialiasingData = new VividAntialiasingData
@@ -173,8 +173,8 @@ namespace VividRP.Editor.Tests
 
             VividAntialiasingRuntimeUtility.ApplyJitter(camera, additionalData, antialiasingData, 0);
 
-            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            var projection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var state = camera.CaptureProjectionState();
+            var projection = camera.GetNonJitteredProjectionMatrix();
             var expectedProjection = Matrix4x4.Perspective(
                 camera.fieldOfView,
                 camera.aspect,
@@ -205,11 +205,11 @@ namespace VividRP.Editor.Tests
             jitterMatrix.m13 = -0.03125f;
             var jitteredProjection = jitterMatrix * nonJitteredProjection;
 
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitteredProjection, nonJitteredProjection);
+            camera.SetProjectionMatrices(jitteredProjection, nonJitteredProjection);
 
-            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            var projection = CameraProjectionMatrixUtility.GetProjectionMatrix(camera);
-            var nonJittered = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var state = camera.CaptureProjectionState();
+            var projection = camera.GetProjectionMatrix();
+            var nonJittered = camera.GetNonJitteredProjectionMatrix();
 
             Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Explicit));
             Assert.That(MaxAbsDiff(projection, jitteredProjection), Is.LessThan(0.0001f));
@@ -229,10 +229,10 @@ namespace VividRP.Editor.Tests
             camera.nonJitteredProjectionMatrix = sceneAspectProjection;
             camera.projectionMatrix = sceneAspectProjection;
 
-            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            CameraProjectionMatrixUtility.RestoreProjectionState(camera, state);
+            var state = camera.CaptureProjectionState();
+            camera.RestoreProjectionState(state);
 
-            var restoredProjection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var restoredProjection = camera.GetNonJitteredProjectionMatrix();
             var expectedProjection = Matrix4x4.Perspective(50.0f, camera.aspect, camera.nearClipPlane, camera.farClipPlane);
 
             Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Implicit));
@@ -274,10 +274,10 @@ namespace VividRP.Editor.Tests
             camera.nonJitteredProjectionMatrix = sceneAspectProjection;
             camera.projectionMatrix = sceneAspectProjection;
 
-            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            CameraProjectionMatrixUtility.RestoreProjectionState(camera, state);
+            var state = camera.CaptureProjectionState();
+            camera.RestoreProjectionState(state);
 
-            var restoredProjection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var restoredProjection = camera.GetNonJitteredProjectionMatrix();
 
             Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.PhysicalPropertiesBased));
             Assert.That(MaxAbsDiff(restoredProjection, expectedProjection), Is.LessThan(0.0001f));
@@ -305,14 +305,14 @@ namespace VividRP.Editor.Tests
                 camera.farClipPlane,
                 new Camera.GateFitParameters(camera.gateFit, camera.aspect));
 
-            var originalState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var originalState = camera.CaptureProjectionState();
             var temporaryProjection = Matrix4x4.Perspective(70.0f, camera.aspect, 0.1f, 50.0f);
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, temporaryProjection, temporaryProjection);
+            camera.SetProjectionMatrices(temporaryProjection, temporaryProjection);
 
-            CameraProjectionMatrixUtility.RestoreProjectionState(camera, originalState);
+            camera.RestoreProjectionState(originalState);
 
-            var restoredState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            var restoredProjection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var restoredState = camera.CaptureProjectionState();
+            var restoredProjection = camera.GetNonJitteredProjectionMatrix();
 
             Assert.That(originalState.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.PhysicalPropertiesBased));
             Assert.That(camera.usePhysicalProperties, Is.True);
@@ -329,14 +329,14 @@ namespace VividRP.Editor.Tests
             camera.farClipPlane = 250.0f;
             camera.fieldOfView = 60.0f;
 
-            CameraProjectionMatrixUtility.GetProjectionMatrix(camera);
-            CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            camera.GetProjectionMatrix();
+            camera.GetNonJitteredProjectionMatrix();
 
             var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             for (var index = 0; index < 32; index++)
             {
-                CameraProjectionMatrixUtility.GetProjectionMatrix(camera);
-                CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+                camera.GetProjectionMatrix();
+                camera.GetNonJitteredProjectionMatrix();
             }
 
             var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
@@ -353,12 +353,12 @@ namespace VividRP.Editor.Tests
             camera.farClipPlane = 250.0f;
             camera.fieldOfView = 60.0f;
 
-            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
-            CameraProjectionMatrixUtility.RestoreProjectionState(camera, state);
+            var state = camera.CaptureProjectionState();
+            camera.RestoreProjectionState(state);
 
             var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             for (var index = 0; index < 32; index++)
-                CameraProjectionMatrixUtility.RestoreProjectionState(camera, state);
+                camera.RestoreProjectionState(state);
 
             var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 

@@ -172,8 +172,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_OutputTexture.Resize(width, height);
-            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(
-                m_OutputTexture.desc,
+            m_OutputTexture.desc.ColorFormat = m_OutputTexture.desc.ResolveColorFormat(
                 GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;

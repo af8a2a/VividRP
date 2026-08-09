@@ -458,8 +458,8 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var source =
-                TextureResolveUtility.ResolveTexture(
-                    m_RawAccumulation.innerHandle);
+                m_RawAccumulation.innerHandle.ResolveTexture(
+);
             if (source == null)
             {
                 ReferencedPathTracingCapture.SetFailed(

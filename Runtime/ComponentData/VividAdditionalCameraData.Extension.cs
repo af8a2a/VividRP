@@ -90,7 +90,7 @@ namespace VividRP.Runtime
         private Matrix4x4 GetCameraProjectionMatrix()
         {
             var currentCamera = camera;
-            return CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(currentCamera);
+            return currentCamera.GetNonJitteredProjectionMatrix();
         }
 
         private Matrix4x4 GetCameraJitterMatrix()
@@ -99,8 +99,8 @@ namespace VividRP.Runtime
             if (currentCamera == null)
                 return Matrix4x4.identity;
 
-            var nonJitteredProjectionMatrix = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(currentCamera);
-            var projectionMatrix = CameraProjectionMatrixUtility.GetProjectionMatrix(currentCamera);
+            var nonJitteredProjectionMatrix = currentCamera.GetNonJitteredProjectionMatrix();
+            var projectionMatrix = currentCamera.GetProjectionMatrix();
             return projectionMatrix * nonJitteredProjectionMatrix.inverse;
         }
 

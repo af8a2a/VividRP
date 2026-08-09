@@ -144,7 +144,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SupportsAsyncCompute_ReturnsTrue_ForColorGradingPass()
         {
-            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(ColorGradingPass)), Is.True);
+            Assert.That((typeof(ColorGradingPass)).SupportsAsyncCompute(), Is.True);
         }
     }
 }

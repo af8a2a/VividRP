@@ -99,8 +99,8 @@ namespace VividRP.Editor.RenderGraph
                     var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < passTypes.Count
                         ? passTypes[binding.SourcePassIndex]
                         : null;
-                    var sourceField = RenderGraphPassReflectionUtility.GetInstanceField(sourcePassType, binding.SourceFieldName);
-                    if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+                    var sourceField = sourcePassType.GetInstanceField(binding.SourceFieldName);
+                    if (sourceField.IsDeclaredTransientResourceField())
                         continue;
 
                     if (binding.SourcePassIndex >= 0 && binding.SourcePassIndex < passDefinitions.Count && binding.SourcePassIndex != passIndex)
@@ -221,9 +221,9 @@ namespace VividRP.Editor.RenderGraph
             if (passType == null)
                 return result;
 
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();

@@ -109,7 +109,7 @@ namespace VividRP.Editor.Tests
 
                 Bounds localBounds = BoundProxyEditorUtility.GetLocalBounds(shape);
                 Bounds worldBounds = BoundProxyEditorUtility.GetWorldBounds(shape, host.transform);
-                Bounds runtimeWorldBounds = BoundProxyUtility.CalculateWorldAabb(host.transform, shape);
+                Bounds runtimeWorldBounds = host.transform.CalculateWorldAabb(shape);
 
                 Assert.That(localBounds, Is.EqualTo(shape.GetLocalBounds()));
                 AssertVector3(worldBounds.center, runtimeWorldBounds.center);

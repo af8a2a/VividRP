@@ -51,7 +51,7 @@ namespace VividRP.Editor.GPUDriven
         private static readonly int s_ClearCoatMaskId = Shader.PropertyToID("_ClearCoatMask");
         private static readonly int s_SmoothnessTextureChannelId = Shader.PropertyToID("_SmoothnessTextureChannel");
 
-        public static GPUDrivenMaterialProxySyncResult SyncFromSourceMaterial(GPUDrivenMaterialProxy materialProxy)
+        public static GPUDrivenMaterialProxySyncResult SyncFromSourceMaterial(this GPUDrivenMaterialProxy materialProxy)
         {
             if (materialProxy == null)
             {
@@ -62,7 +62,7 @@ namespace VividRP.Editor.GPUDriven
         }
 
         public static GPUDrivenMaterialProxySyncResult SyncFromSourceMaterial(
-            GPUDrivenMaterialProxy materialProxy,
+            this GPUDrivenMaterialProxy materialProxy,
             Material sourceMaterial
         )
         {
@@ -122,7 +122,7 @@ namespace VividRP.Editor.GPUDriven
             );
         }
 
-        public static string[] CollectUnsupportedWarnings(Material sourceMaterial)
+        public static string[] CollectUnsupportedWarnings(this Material sourceMaterial)
         {
             var warnings = new List<string>();
             CollectUnsupportedWarnings(sourceMaterial, warnings);

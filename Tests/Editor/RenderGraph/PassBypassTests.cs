@@ -22,7 +22,7 @@ namespace VividRP.Editor.Tests
         {
             var pass = new TextureBypassPass();
 
-            var resources = PassResourceCollector.Collect(pass);
+            var resources = pass.Collect();
 
             Assert.That(resources.BypassRules, Has.Length.EqualTo(1));
             Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo(TextureBypassPass.SourceFieldName));
@@ -35,7 +35,7 @@ namespace VividRP.Editor.Tests
         {
             var pass = new StopNaNPass();
 
-            var resources = PassResourceCollector.Collect(pass);
+            var resources = pass.Collect();
 
             Assert.That(resources.BypassRules, Has.Length.EqualTo(1));
             Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo("m_Source"));
@@ -90,7 +90,7 @@ namespace VividRP.Editor.Tests
                 passType,
                 outputField,
                 outputAttr,
-                RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(outputField),
+                outputField.IsDeclaredTransientResourceField(),
                 bypassAttr.SourceFieldName,
                 out _,
                 out _,
@@ -109,7 +109,7 @@ namespace VividRP.Editor.Tests
             source.desc.Height = 360;
             SetField(pass, "m_Source", source);
 
-            var resources = PassResourceCollector.Collect(pass);
+            var resources = pass.Collect();
             var output = GetField<RenderGraphTexture>(pass, "m_OutputTexture");
             output.desc.Width = 1;
             output.desc.Height = 1;
@@ -129,7 +129,7 @@ namespace VividRP.Editor.Tests
             var source = RenderGraphTexture.CreateInput("SceneColor", GraphicsFormat.R8G8B8A8_UNorm);
             SetField(pass, "m_Source", source);
 
-            var resources = PassResourceCollector.Collect(pass);
+            var resources = pass.Collect();
             var output = GetField<RenderGraphTexture>(pass, "m_OutputTexture");
 
             try
@@ -153,7 +153,7 @@ namespace VividRP.Editor.Tests
             var source = RenderGraphTexture.CreateInput("SceneColor", GraphicsFormat.R8G8B8A8_UNorm);
             SetField(pass, "m_Source", source);
 
-            var resources = PassResourceCollector.Collect(pass);
+            var resources = pass.Collect();
             var textureCache = new Dictionary<RenderGraphTexture, TextureHandle>(4);
             var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>(1);
 
@@ -216,7 +216,7 @@ namespace VividRP.Editor.Tests
         {
             var renderGraph = new UnityRenderGraph("VividRP PassBypass Buffer Test");
             var pass = new BufferBypassPass();
-            var resources = PassResourceCollector.Collect(pass);
+            var resources = pass.Collect();
             var source = GetField<RenderGraphBuffer>(pass, BufferBypassPass.SourceFieldName);
             var output = GetField<RenderGraphBuffer>(pass, BufferBypassPass.OutputFieldName);
 
@@ -238,7 +238,7 @@ namespace VividRP.Editor.Tests
         {
             var renderGraph = new UnityRenderGraph("VividRP PassBypass ReadWrite Test");
             var pass = new ReadWriteInactivePass();
-            var resources = PassResourceCollector.Collect(pass);
+            var resources = pass.Collect();
             var color = GetField<RenderGraphTexture>(pass, ReadWriteInactivePass.ColorFieldName);
 
             try

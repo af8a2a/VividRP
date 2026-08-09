@@ -13,7 +13,7 @@ namespace VividRP.Editor.Tests
             var field = typeof(DrawObjectPass).GetField("m_ColorTarget", BindingFlags.Instance | BindingFlags.NonPublic);
             var attr = field?.GetCustomAttribute<RenderGraphResource>();
 
-            var resourceName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
+            var resourceName = field.GetRenderGraphResourceName(attr);
 
             Assert.That(resourceName, Is.EqualTo("Color"));
         }
@@ -24,7 +24,7 @@ namespace VividRP.Editor.Tests
             var field = typeof(FullScreenPass).GetField("texture", BindingFlags.Instance | BindingFlags.NonPublic);
             var attr = field?.GetCustomAttribute<RenderGraphResource>();
 
-            var resourceName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
+            var resourceName = field.GetRenderGraphResourceName(attr);
 
             Assert.That(resourceName, Is.EqualTo("texture"));
         }
@@ -32,8 +32,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GetInstanceField_ReturnsRenamedField_WhenFormerSerializedNameMatches()
         {
-            var field = RenderGraphPassReflectionUtility.GetInstanceField(
-                typeof(MotionVectorPass),
+            var field = (typeof(MotionVectorPass)).GetInstanceField(
                 "m_MotionVectorDepthTexture");
 
             Assert.That(field, Is.Not.Null);

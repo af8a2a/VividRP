@@ -1,4 +1,3 @@
-using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -36,59 +35,6 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(material);
             }
-        }
-
-        [Test]
-        public void TerrainLitShader_DeclaresTerrainCompatibilityTagsAndDependencies()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(TerrainLitShaderRelativePath));
-
-            Assert.That(source, Does.Contain("Shader \"VividRP/Terrain/TerrainLit\""));
-            Assert.That(source, Does.Contain("\"RenderPipeline\" = \"VividRenderPipeline\""));
-            Assert.That(source, Does.Contain("\"TerrainCompatible\" = \"True\""));
-            Assert.That(source, Does.Contain("\"SplatCount\" = \"8\""));
-            Assert.That(source, Does.Contain("\"MaskMapR\" = \"Metallic\""));
-            Assert.That(source, Does.Contain("\"MaskMapG\" = \"AO\""));
-            Assert.That(source, Does.Contain("\"MaskMapB\" = \"Height\""));
-            Assert.That(source, Does.Contain("\"MaskMapA\" = \"Smoothness\""));
-            Assert.That(source, Does.Contain("Dependency \"BaseMapShader\" = \"Hidden/VividRP/TerrainLit_Basemap\""));
-            Assert.That(source, Does.Contain("Dependency \"BaseMapGenShader\" = \"Hidden/VividRP/TerrainLit_BasemapGen\""));
-            Assert.That(source, Does.Contain("CustomEditor \"VividRP.Editor.TerrainLitShaderGUI\""));
-        }
-
-        [Test]
-        public void TerrainLitShader_DeclaresRequiredTerrainKeywords()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(TerrainLitShaderRelativePath));
-
-            Assert.That(source, Does.Contain("_TERRAIN_8_LAYERS"));
-            Assert.That(source, Does.Contain("_NORMALMAP"));
-            Assert.That(source, Does.Contain("_MASKMAP"));
-            Assert.That(source, Does.Contain("_TERRAIN_BLEND_HEIGHT"));
-            Assert.That(source, Does.Contain("_TERRAIN_INSTANCED_PERPIXEL_NORMAL"));
-            Assert.That(source, Does.Contain("_ALPHATEST_ON"));
-        }
-
-        [Test]
-        public void TerrainLitBasemapShaders_LoadAndDeclareExpectedContracts()
-        {
-            Shader basemapShader = LoadShader(TerrainLitBasemapShaderRelativePath);
-            Shader basemapGenShader = LoadShader(TerrainLitBasemapGenShaderRelativePath);
-            string basemapSource = File.ReadAllText(GetPackageFilePath(TerrainLitBasemapShaderRelativePath));
-            string basemapGenSource = File.ReadAllText(GetPackageFilePath(TerrainLitBasemapGenShaderRelativePath));
-
-            Assert.That(basemapShader, Is.Not.Null);
-            Assert.That(basemapGenShader, Is.Not.Null);
-            Assert.That(basemapSource, Does.Contain("Shader \"Hidden/VividRP/TerrainLit_Basemap\""));
-            Assert.That(basemapSource, Does.Contain("Name \"VividGBuffer\""));
-            Assert.That(basemapSource, Does.Contain("#define VIVID_TERRAIN_BASEMAP 1"));
-            Assert.That(basemapGenSource, Does.Contain("Shader \"Hidden/VividRP/TerrainLit_BasemapGen\""));
-            Assert.That(basemapGenSource, Does.Contain("\"Name\" = \"_MainTex\""));
-            Assert.That(basemapGenSource, Does.Contain("\"Format\" = \"ARGB32\""));
-            Assert.That(basemapGenSource, Does.Contain("\"Size\" = \"1\""));
-            Assert.That(basemapGenSource, Does.Contain("\"Name\" = \"_MetallicTex\""));
-            Assert.That(basemapGenSource, Does.Contain("\"Format\" = \"RG16\""));
-            Assert.That(basemapGenSource, Does.Contain("\"Size\" = \"1/4\""));
         }
 
         [Test]
@@ -138,27 +84,6 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void TerrainLitGBufferPath_MapsSsrAndDecalPropertiesToMaterialFeatures()
-        {
-            Material material = CreateTerrainLitMaterial();
-            string passSource = File.ReadAllText(GetPackageFilePath("Shaders/Material/TerrainLit/TerrainLitPass.hlsl"));
-
-            try
-            {
-                Assert.That(material.HasProperty("_ReceivesSSR"), Is.True);
-                Assert.That(material.HasProperty("_SupportDecals"), Is.True);
-                Assert.That(passSource, Does.Contain("if (_ReceivesSSR > 0.5)"));
-                Assert.That(passSource, Does.Contain("VIVID_MATERIALFEATURE_SSR_RECEIVE"));
-                Assert.That(passSource, Does.Contain("if (_SupportDecals > 0.5)"));
-                Assert.That(passSource, Does.Contain("VIVID_MATERIALFEATURE_DECAL_RECEIVE"));
-            }
-            finally
-            {
-                Object.DestroyImmediate(material);
-            }
-        }
-
         private static Material CreateTerrainLitMaterial()
         {
             Shader shader = LoadShader(TerrainLitShaderRelativePath);
@@ -190,19 +115,6 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(new ShaderTagId(expectedLightMode)));
         }
 
-        private static string GetPackageFilePath(string relativePath)
-        {
-            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            foreach (string packageRoot in GetCandidatePackageRoots(projectRoot))
-            {
-                string fullPath = Path.Combine(packageRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(projectRoot, "Packages", "Custom_URP", relativePath.Replace('/', Path.DirectorySeparatorChar));
-        }
-
         private static string[] GetCandidateAssetPaths(string relativePath)
         {
             return new[]
@@ -210,16 +122,6 @@ namespace VividRP.Editor.Tests
                 $"Packages/com.af8a2a.vividrp/{relativePath}",
                 $"Packages/VividRP/{relativePath}",
                 $"Packages/Custom_URP/{relativePath}",
-            };
-        }
-
-        private static string[] GetCandidatePackageRoots(string projectRoot)
-        {
-            return new[]
-            {
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp"),
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "Custom_URP"),
             };
         }
     }

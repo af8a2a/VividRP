@@ -105,9 +105,9 @@ namespace VividRP.Editor.RenderGraph
             IRenderGraphValidationReporter reporter,
             ref ValidationSummary summary)
         {
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateInstanceFields(passType))
+            foreach (var field in passType.EnumerateInstanceFields())
             {
-                if (!RenderGraphPassReflectionUtility.HasTransientResourceAttribute(field))
+                if (!field.HasTransientResourceAttribute())
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
@@ -120,7 +120,7 @@ namespace VividRP.Editor.RenderGraph
                     continue;
                 }
 
-                if (!RenderGraphPassReflectionUtility.IsSupportedTransientResourceFieldType(field.FieldType))
+                if (!field.FieldType.IsSupportedTransientResourceFieldType())
                 {
                     reporter.LogError(
                         $"Transient field '{field.Name}' uses unsupported type '{field.FieldType.FullName}'. Only {nameof(RenderGraphTexture)} and {nameof(RenderGraphBuffer)} are supported.",
@@ -147,7 +147,7 @@ namespace VividRP.Editor.RenderGraph
             IRenderGraphValidationReporter reporter,
             ref ValidationSummary summary)
         {
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateInstanceFields(passType))
+            foreach (var field in passType.EnumerateInstanceFields())
             {
                 var bypassAttr = field.GetCustomAttribute<PassBypassAttribute>();
                 if (bypassAttr == null)
@@ -158,7 +158,7 @@ namespace VividRP.Editor.RenderGraph
                         passType,
                         field,
                         attr,
-                        RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field),
+                        field.IsDeclaredTransientResourceField(),
                         bypassAttr.SourceFieldName,
                         out _,
                         out _,
@@ -216,7 +216,7 @@ namespace VividRP.Editor.RenderGraph
             IRenderGraphValidationReporter reporter,
             ref ValidationSummary summary)
         {
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 var hasPairedResourcePorts =
@@ -325,7 +325,7 @@ namespace VividRP.Editor.RenderGraph
             IRenderGraphValidationReporter reporter,
             ref ValidationSummary summary)
         {
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 if (field.FieldType != typeof(RenderGraphTexture))
@@ -527,7 +527,7 @@ namespace VividRP.Editor.RenderGraph
 
         internal static bool IsAsyncComputeConfigurationValid(System.Type passType, bool enableAsyncCompute)
         {
-            return !enableAsyncCompute || RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType);
+            return !enableAsyncCompute || passType.SupportsAsyncCompute();
         }
 
         internal static bool IsCorruptedNode(RenderPassNodeData passNode)

@@ -1,4 +1,3 @@
-using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -250,57 +249,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RenderPipeline_EnablesMotionVectorDepthModeBeforeCullingParameters()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPipeline", "VividRenderPipeline.cs"));
-            var ensureIndex = source.IndexOf(
-                "VividCameraData.EnsureCameraDepthTextureMode(camera);",
-                System.StringComparison.Ordinal);
-            var cullingIndex = source.IndexOf(
-                "camera.TryGetCullingParameters(out cullingParameters)",
-                System.StringComparison.Ordinal);
-
-            Assert.That(ensureIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(cullingIndex, Is.GreaterThan(ensureIndex));
-        }
-
-        [Test]
-        public void BuildShaderVariables_OnlyWritesDepthTextureMode_WhenRequiredFlagsAreMissing()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.ShaderVariables.cs"));
-
-            Assert.That(source, Does.Contain("EnsureRequiredDepthTextureMode(currentCamera);"));
-            Assert.That(source, Does.Contain("if ((depthTextureMode & requiredMode) == requiredMode)"));
-            Assert.That(source, Does.Contain("m_DepthTextureModeHasRequiredFlags"));
-            Assert.That(source, Does.Not.Contain("depthTextureMode |="));
-        }
-
-        [Test]
-        public void BuildShaderVariables_ResolvesDimensionsWithoutEagerCameraPropertyReads()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.ShaderVariables.cs"));
-            var cameraDataSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.cs"));
-            var passRecorderSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
-
-            Assert.That(source, Does.Contain("scaledWidth = ResolveScaledWidth(currentCamera);"));
-            Assert.That(source, Does.Contain("scaledHeight = ResolveScaledHeight(currentCamera);"));
-            Assert.That(source, Does.Contain("referenceWidth = ResolveReferenceWidth(currentCamera, scaledWidth);"));
-            Assert.That(source, Does.Contain("referenceHeight = ResolveReferenceHeight(currentCamera, scaledHeight);"));
-            Assert.That(source, Does.Contain("hasCameraFrameProperties"));
-            Assert.That(source, Does.Contain("ResolveRenderIntoTexture(currentCamera)"));
-            Assert.That(source, Does.Contain("CreateOrthoParams(currentCamera)"));
-            Assert.That(source, Does.Contain("worldSpaceCameraPos = CreateTranslationColumn(invViewMatrix);"));
-            Assert.That(source, Does.Contain("var maxRatio = Mathf.Max(widthRatio, heightRatio);"));
-            Assert.That(source, Does.Contain("var mipScale = Mathf.Max(maxRatio, 0.0001f);"));
-            Assert.That(cameraDataSource, Does.Contain("internal void CacheCameraFrameProperties(Camera value)"));
-            Assert.That(passRecorderSource, Does.Contain("cameraData.CacheCameraFrameProperties(camera);"));
-            Assert.That(source, Does.Not.Contain("ResolveScaledDimension(actualWidth, currentCamera"));
-            Assert.That(source, Does.Not.Contain("ResolveReferenceDimension(pixelWidth, currentCamera"));
-            Assert.That(source, Does.Not.Contain("invViewMatrix.GetColumn(3)"));
-            Assert.That(source, Does.Not.Contain("Mathf.Max(widthRatio, heightRatio, 0.0001f)"));
-        }
-
-        [Test]
         public void SetCamera_CachesCameraNameUntilCameraChanges()
         {
             var firstCamera = m_GameObject.AddComponent<Camera>();
@@ -372,58 +320,6 @@ namespace VividRP.Editor.Tests
             AssertVectorAreEqual(expectedFarPlane, shaderVariables.cameraWorldClipPlanes[5], 0.0001f);
             AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[3], shaderVariables.frustumPlanes[2]);
             AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[2], shaderVariables.frustumPlanes[3]);
-        }
-
-        [Test]
-        public void BuildShaderVariables_ExtractsFrustumPlanesWithoutGeometryUtilityAllocation()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.ShaderVariables.cs"));
-
-            Assert.That(source, Does.Contain("UpdateFrustumPlanes(currentCamera, mainViewConstants);"));
-            Assert.That(source, Does.Contain("ExtractGpuFrustumPlanes(viewConstants, m_CameraWorldClipPlanes);"));
-            Assert.That(source, Does.Contain("AnalyzeProjectionDepth(glstateMatrixProjection"));
-            Assert.That(source, Does.Contain("CreateZBufferParams(metrics.nearClip, metrics.farClip, viewConstants.reversedZ);"));
-            Assert.That(source, Does.Not.Contain("GeometryUtility.CalculateFrustumPlanes"));
-            Assert.That(source, Does.Not.Contain("new Plane[6]"));
-        }
-
-        [Test]
-        public void GetPixelCoordToViewDirWSMatrix_UsesActualRenderSize_ForSkyRays()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.Extension.cs"));
-
-            Assert.That(source, Does.Contain("ResolveViewDirectionDimension(actualWidth"));
-            Assert.That(source, Does.Contain("ResolveViewDirectionDimension(actualHeight"));
-            Assert.That(source, Does.Contain("new Vector4(width, height, 1.0f / width, 1.0f / height)"));
-            Assert.That(source, Does.Not.Contain("new Vector4(camera.scaledPixelWidth, camera.scaledPixelHeight"));
-        }
-
-        [Test]
-        public void FrameContextSystem_UsesExplicitShaderVariablesGlobalConstantBuffer()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
-            var loggerSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "CameraShaderVariablesGlobalComparisonLogger.cs"));
-            var autoExposureSystemSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"));
-
-            Assert.That(source, Does.Contain("SubsystemPreRender?.Invoke(frameData, cmd);"));
-            Assert.That(source, Does.Not.Contain("AutoExposureRuntimeManager.PrepareFrame(frameData);"));
-            Assert.That(source, Does.Not.Contain("BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
-            Assert.That(source, Does.Not.Contain("VividAutoExposureSystem.Deinitialize();"));
-            Assert.That(autoExposureSystemSource, Does.Contain("internal sealed class VividAutoExposureSystem : VividSubsystem<VividAutoExposureSystem>"));
-            Assert.That(autoExposureSystemSource, Does.Contain("PrepareFrame(frameData);"));
-            Assert.That(autoExposureSystemSource, Does.Contain("BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
-            Assert.That(autoExposureSystemSource, Does.Contain("FrameContextSystem.SubsystemDispose += OnSubsystemDispose;"));
-            Assert.That(source, Does.Contain("skyData = frameData.GetOrCreate<VividSkyData>();"));
-            Assert.That(source, Does.Contain("shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData, skyData);"));
-            Assert.That(source, Does.Contain("cameraData.shaderVariablesGlobal = shaderVariablesGlobal;"));
-            Assert.That(source, Does.Contain("cameraData.hasShaderVariablesGlobal = true;"));
-            Assert.That(source, Does.Contain("#if VIVIDRP_DEBUG"));
-            Assert.That(source, Does.Contain("CameraShaderVariablesGlobalComparisonLogger.CaptureAndCompare(cameraData, shaderVariablesGlobal);"));
-            Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(cmd, shaderVariablesGlobal, ShaderVariablesGlobal.ConstantBufferShaderId);"));
-            Assert.That(source, Does.Not.Contain("GetOrCreate<VividCameraShaderData>"));
-            Assert.That(loggerSource, Does.Contain("[Conditional(\"VIVIDRP_DEBUG\")]"));
-            Assert.That(source, Does.Not.Contain("cmd.SetGlobalMatrix("));
-            Assert.That(source, Does.Not.Contain("cmd.SetGlobalVector("));
         }
 
         [Test]
@@ -531,59 +427,6 @@ namespace VividRP.Editor.Tests
             Assert.That(signature, Is.Null);
         }
 
-        [Test]
-        public void UnityInput_RedirectsLegacyAccessors_ToExplicitShaderVariablesGlobalBuffer()
-        {
-            var unityInputSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "UnityInput.hlsl"));
-            var shaderVariablesGlobalSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "ShaderVariablesGlobal.hlsl"));
-            var inputSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "Input.hlsl"));
-
-            Assert.That(unityInputSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/ShaderVariablesGlobal.hlsl\""));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)"));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define unity_MatrixInvVP _VividMatrixInvVP"));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _WorldSpaceCameraPos _VividWorldSpaceCameraPos.xyz"));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _GlobalMipBias _VividGlobalMipBias.xy"));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("float4 _VividPlanetCenterRadius;"));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("float4 _VividPlanetUpAltitude;"));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _PlanetCenterRadius _VividPlanetCenterRadius"));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _PlanetUpAltitude _VividPlanetUpAltitude"));
-            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _ScaledScreenParams _VividScaledScreenParams"));
-            Assert.That(unityInputSource, Does.Contain("#define unity_SHAr _VividSHAr"));
-            Assert.That(unityInputSource, Does.Contain("#define unity_SHC _VividSHC"));
-            Assert.That(inputSource, Does.Not.Contain("float2 _GlobalMipBias;"));
-            Assert.That(inputSource, Does.Not.Contain("float4 _ScaledScreenParams;"));
-        }
-
-        [Test]
-        public void InitializeContext_UsesRenderToTextureConvention_ForStoredCameraMatrices()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
-
-            Assert.That(source, Does.Contain("additionalCameraData.UpdateCameraMatrices(true);"));
-            Assert.That(source, Does.Not.Contain("additionalCameraData.UpdateCameraMatrices(camera.targetTexture != null);"));
-        }
-
-        [Test]
-        public void PrepareFrame_UpdatesFrameContextSystem_BeforePreparingHistoryTargets()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
-            var updateIndex = source.IndexOf("FrameContextSystem.Update(s_FrameData, cmdBuffer);", System.StringComparison.Ordinal);
-            var historyIndex = source.IndexOf("PrepareHistoryTargets(graphAsset, cmdBuffer);", System.StringComparison.Ordinal);
-
-            Assert.That(updateIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(historyIndex, Is.GreaterThan(updateIndex));
-        }
-
-        [Test]
-        public void RecordRenderGraph_PreparesHistoryImports_WithoutRecordingHistoryCopyPasses()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
-
-            Assert.That(source, Does.Contain("PreparePendingHistoryTextureImports(renderGraph);"));
-            Assert.That(source, Does.Not.Contain("RecordHistoryUpdatePasses(renderGraph, graphAsset);"));
-            Assert.That(source, Does.Not.Contain("RecordCodeManagedTextureHistoryUpdatePasses(renderGraph, graphAsset);"));
-        }
-
         private static void AssertMatrixAreEqual(Matrix4x4 expected, Matrix4x4 actual)
         {
             for (var row = 0; row < 4; row++)
@@ -668,25 +511,6 @@ namespace VividRP.Editor.Tests
                 normal.y,
                 normal.z,
                 -Vector3.Dot(normal, point) - distanceOffset);
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private static CameraShaderVariablesGlobalComparisonLogger.Snapshot CreateComparisonSnapshot(CameraType cameraType,

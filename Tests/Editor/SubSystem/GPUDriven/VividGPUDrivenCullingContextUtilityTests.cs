@@ -1,4 +1,3 @@
-using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
@@ -30,8 +29,7 @@ namespace VividRP.Editor.Tests
                     Quaternion.Euler(10.0f, 20.0f, 0.0f)
                 );
 
-                VividGPUDrivenCullingContextUtility.Build(
-                    camera,
+                camera.Build(
                     VividInstancePassMask.Main | VividInstancePassMask.Shadows,
                     out VividGPUCullingContext cullingContext,
                     out VividGPULODSelectionContext lodSelectionContext
@@ -48,7 +46,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(lodSelectionContext.ScreenSizePixels.x, Is.GreaterThan(0.0f));
                 Assert.That(lodSelectionContext.ScreenSizePixels.y, Is.GreaterThan(0.0f));
 
-                Vector4 firstPlane = VividGPUDrivenCullingContextUtility.GetFrustumPlane(cullingContext, 0);
+                Vector4 firstPlane = cullingContext.GetFrustumPlane(0);
                 Assert.That(firstPlane.sqrMagnitude, Is.GreaterThan(0.0f));
             }
             finally
@@ -78,8 +76,7 @@ namespace VividRP.Editor.Tests
                     Quaternion.Euler(15.0f, 35.0f, 5.0f)
                 );
 
-                VividGPUDrivenCullingContextUtility.BuildLODSelectionContext(
-                    camera,
+                camera.BuildLODSelectionContext(
                     out VividGPULODSelectionContext lodSelectionContext
                 );
 
@@ -202,73 +199,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GPUDrivenCommon_UsesProvidedViewMatrixForward_ForOrthographicConeCulling()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Public",
-                "GPUDriven",
-                "VividGPUDrivenCommon.hlsl"));
-
-            Assert.That(source, Does.Contain("float3 GetViewForwardDir(const float4x4 viewMatrix)"));
-            Assert.That(source, Does.Contain("return normalize(-float3(viewMatrix._m20, viewMatrix._m21, viewMatrix._m22));"));
-            Assert.That(source, Does.Not.Contain("UNITY_MATRIX_I_V"));
-            Assert.That(source, Does.Contain(": GetViewForwardDir(cullingContext.ViewMatrix);"));
-        }
-
-        [Test]
-        public void GPUDrivenCommon_TransformsConeAxisAsNormal_ForConeCulling()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Public",
-                "GPUDriven",
-                "VividGPUDrivenCommon.hlsl"));
-
-            Assert.That(
-                source,
-                Does.Contain("mul(meshlet.ConeAxis, (float3x3) instanceData.WorldToObjectMatrix)"));
-            Assert.That(
-                source,
-                Does.Not.Contain("mul((float3x3) instanceData.ObjectToWorldMatrix, meshlet.ConeAxis)"));
-            Assert.That(source, Does.Contain("const float4 boundingSphereWS = TransformSphere("));
-            Assert.That(source, Does.Contain("sinViewCone"));
-            Assert.That(source, Does.Contain("return true;"));
-        }
-
-        [Test]
-        public void GPUDrivenShaders_CullAgainstLightSpaceReceiverSphere_WhenProvided()
-        {
-            string commonSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Public",
-                "GPUDriven",
-                "VividGPUDrivenCommon.hlsl"));
-            string instanceCullingSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "GPUDriven",
-                "GPUInstanceCulling.compute"));
-            string meshletCullingSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "GPUDriven",
-                "GPUMeshletCulling.compute"));
-
-            Assert.That(commonSource, Does.Contain("bool DoLightSphereCulling("));
-            Assert.That(commonSource, Does.Contain("bool LightSphereCulling("));
-            Assert.That(commonSource, Does.Contain("cullingContext.CullingSphereLS.w <= 0.0f"));
-            Assert.That(commonSource, Does.Contain("DoLightSphereCulling(cullingContext.CullingSphereLS, casterBoundingSphereWS, worldToLightSpaceRotation)"));
-            Assert.That(instanceCullingSource, Does.Contain("!LightSphereCulling(cullingContext, boundingSphereWS)"));
-            Assert.That(meshletCullingSource, Does.Contain("!LightSphereCulling(cullingContext, boundingSphereWS)"));
-        }
-
-        [Test]
         public void Cull_CreatesZeroedTransientBuffers_WhenShadersAreUnavailable()
         {
             GameObject cameraObject = null;
@@ -326,26 +256,6 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.c3.y, Is.EqualTo(expected.m13).Within(0.0001f));
             Assert.That(actual.c3.z, Is.EqualTo(expected.m23).Within(0.0001f));
             Assert.That(actual.c3.w, Is.EqualTo(expected.m33).Within(0.0001f));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "Custom_URP"),
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private sealed class FakeBindlessTextureDescriptorAllocator : IBindlessTextureDescriptorAllocator

@@ -281,8 +281,7 @@ namespace VividRP.Runtime
             in TextureHandle destination)
         {
             RTHandle sourceHandle = source;
-            return TextureScaleBiasUtility.GetScaleBias(
-                sourceHandle,
+            return sourceHandle.GetScaleBias(
                 renderGraphContext.GetTextureUVOrigin(in source),
                 renderGraphContext.GetTextureUVOrigin(in destination));
         }

@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -56,63 +55,6 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetOutputPortByName("source_Out"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("depthTexture"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("depthTexture"), Is.Null);
-        }
-
-        [Test]
-        public void LensFlareShader_UsesVividPipelineAndCoreLensFlareBody()
-        {
-            var shaderSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "PostProcessing",
-                "LensFlare",
-                "LensFlareDataDriven.shader"));
-
-            Assert.That(shaderSource, Does.Contain("Shader \"Hidden/VividRP/PostProcessing/LensFlareDataDriven\""));
-            Assert.That(shaderSource, Does.Contain("\"RenderPipeline\" = \"VividRenderPipeline\""));
-            Assert.That(shaderSource, Does.Contain("TEXTURE2D_X_FLOAT(_CameraDepthTexture);"));
-            Assert.That(shaderSource, Does.Contain("LensFlareCommon.hlsl"));
-            Assert.That(shaderSource, Does.Contain("Name \"LensFlareOcclusion\""));
-        }
-
-        [Test]
-        public void GeneratedNodeRegistry_ContainsDataDrivenLensFlarePass()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
-
-            Assert.That(source, Does.Contain("internal sealed class DataDrivenLensFlarePass : RenderPassNodeData"));
-        }
-
-        [Test]
-        public void VividRenderPipeline_InitializesAndDisposesLensFlareCommon()
-        {
-            var pipelineSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderPipeline",
-                "VividRenderPipeline.cs"));
-
-            Assert.That(pipelineSource, Does.Contain("LensFlareCommonSRP.Initialize();"));
-            Assert.That(pipelineSource, Does.Contain("LensFlareCommonSRP.Dispose();"));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

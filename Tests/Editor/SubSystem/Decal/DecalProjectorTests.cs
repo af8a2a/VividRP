@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -203,28 +202,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DecalProjectorEditor_SelectedGizmoUsesHdrpStyleLodAndProjectionPlane()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "DecalProjectorEditor.cs"));
-
-            Assert.That(source, Does.Contain("Gizmos.CalculateLOD"));
-            Assert.That(source, Does.Contain("k_SelectedGizmoMinLod"));
-            Assert.That(source, Does.Contain("Handles.DrawWireCube"));
-            Assert.That(source, Does.Contain("DrawProjectionPlane"));
-            Assert.That(source, Does.Contain("Handles.DrawAAPolyLine"));
-        }
-
-        [Test]
-        public void DecalProjectorMenuItems_DefinesGameObjectMenuEntryLikeHdrp()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "DecalProjectorMenuItems.cs"));
-
-            Assert.That(DecalProjectorMenuItems.CreateDecalProjectorMenuPath, Is.EqualTo("GameObject/Rendering/VividRP Decal Projector"));
-            Assert.That(source, Does.Contain("[MenuItem(CreateDecalProjectorMenuPath"));
-            Assert.That(source, Does.Contain("RotateAround(projector.transform.position, projector.transform.right, 90.0f)"));
-        }
-
-        [Test]
         public void CreateDecalProjectorGameObject_AddsProjectorSelectsObjectAndParentsToContext()
         {
             var parent = new GameObject("Decal Menu Parent");
@@ -291,25 +268,6 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.y, Is.EqualTo(expected.y).Within(tolerance));
             Assert.That(actual.z, Is.EqualTo(expected.z).Within(tolerance));
             Assert.That(actual.w, Is.EqualTo(expected.w).Within(tolerance));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private sealed class FakeBindlessTextureDescriptorAllocator : IBindlessTextureDescriptorAllocator

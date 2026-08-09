@@ -52,7 +52,7 @@ namespace VividRP.Runtime
         private const BindingFlags DeclaredInstanceFieldFlags =
             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly;
 
-        internal static IEnumerable<FieldInfo> EnumerateInstanceFields(Type type)
+        internal static IEnumerable<FieldInfo> EnumerateInstanceFields(this Type type)
         {
             if (type == null)
                 yield break;
@@ -68,7 +68,7 @@ namespace VividRP.Runtime
             }
         }
 
-        internal static IEnumerable<FieldInfo> EnumerateRenderGraphResourceFields(Type type)
+        internal static IEnumerable<FieldInfo> EnumerateRenderGraphResourceFields(this Type type)
         {
             foreach (var field in EnumerateInstanceFields(type))
             {
@@ -77,7 +77,7 @@ namespace VividRP.Runtime
             }
         }
 
-        internal static FieldInfo GetInstanceField(Type type, string fieldName)
+        internal static FieldInfo GetInstanceField(this Type type, string fieldName)
         {
             if (type == null || string.IsNullOrEmpty(fieldName))
                 return null;
@@ -100,7 +100,7 @@ namespace VividRP.Runtime
             return null;
         }
 
-        internal static string GetRenderGraphResourceName(FieldInfo field, RenderGraphResource attr)
+        internal static string GetRenderGraphResourceName(this FieldInfo field, RenderGraphResource attr)
         {
             if (field == null)
                 return attr?.Name;
@@ -119,25 +119,25 @@ namespace VividRP.Runtime
             return $"{baseName}{entryNameSuffix}";
         }
 
-        internal static bool HasTransientResourceAttribute(FieldInfo field)
+        internal static bool HasTransientResourceAttribute(this FieldInfo field)
         {
             return field?.GetCustomAttribute<TransientResourceAttribute>() != null;
         }
 
-        internal static bool IsSupportedTransientResourceFieldType(Type fieldType)
+        internal static bool IsSupportedTransientResourceFieldType(this Type fieldType)
         {
             return fieldType == typeof(RenderGraphTexture)
                 || fieldType == typeof(RenderGraphBuffer);
         }
 
-        internal static bool IsDeclaredTransientResourceField(FieldInfo field)
+        internal static bool IsDeclaredTransientResourceField(this FieldInfo field)
         {
             return field != null
                 && field.GetCustomAttribute<RenderGraphResource>() != null
                 && HasTransientResourceAttribute(field);
         }
 
-        internal static bool IsTransientResourceField(FieldInfo field)
+        internal static bool IsTransientResourceField(this FieldInfo field)
         {
             return IsDeclaredTransientResourceField(field)
                 && IsSupportedTransientResourceFieldType(field.FieldType);
@@ -146,7 +146,7 @@ namespace VividRP.Runtime
 
     internal static class PassResourceCollector
     {
-        public static PassResource Collect(object pass)
+        public static PassResource Collect(this object pass)
         {
             var type = pass.GetType();
 
@@ -156,10 +156,10 @@ namespace VividRP.Runtime
             var accelerationStructures = new List<PassResourceEntry>();
             var bypassRules = new List<PassBypassRule>();
 
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(type))
+            foreach (var field in type.EnumerateRenderGraphResourceFields())
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                var isTransient = RenderGraphPassReflectionUtility.IsTransientResourceField(field);
+                var isTransient = field.IsTransientResourceField();
 
                 var value = field.GetValue(pass);
                 if (value == null)
@@ -170,7 +170,7 @@ namespace VividRP.Runtime
                     case RenderGraphTexture texture:
                         textures.Add(CreateEntry(
                             field,
-                            RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr),
+                            field.GetRenderGraphResourceName(attr),
                             attr.Access,
                             PassResourceType.Texture,
                             texture,
@@ -185,7 +185,7 @@ namespace VividRP.Runtime
                     case RenderGraphBuffer buffer:
                         buffers.Add(CreateEntry(
                             field,
-                            RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr),
+                            field.GetRenderGraphResourceName(attr),
                             attr.Access,
                             PassResourceType.Buffer,
                             buffer,
@@ -197,7 +197,7 @@ namespace VividRP.Runtime
                     case RenderGraphRenderList renderList:
                         renderLists.Add(CreateEntry(
                             field,
-                            RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr),
+                            field.GetRenderGraphResourceName(attr),
                             attr.Access,
                             PassResourceType.RenderList,
                             renderList,
@@ -209,7 +209,7 @@ namespace VividRP.Runtime
                     case RenderGraphAccelerationStructure accelerationStructure:
                         accelerationStructures.Add(CreateEntry(
                             field,
-                            RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr),
+                            field.GetRenderGraphResourceName(attr),
                             attr.Access,
                             PassResourceType.AccelerationStructure,
                             accelerationStructure,
@@ -332,7 +332,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            if (outputIsTransient || RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(outputField))
+            if (outputIsTransient || outputField.IsDeclaredTransientResourceField())
             {
                 error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Transient resources cannot be bypass outputs.";
                 return false;
@@ -356,7 +356,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            sourceField = RenderGraphPassReflectionUtility.GetInstanceField(passType, sourceFieldName);
+            sourceField = passType.GetInstanceField(sourceFieldName);
             if (sourceField == null)
             {
                 error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceFieldName}' was not found.";
@@ -370,7 +370,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+            if (sourceField.IsDeclaredTransientResourceField())
             {
                 error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceField.Name}' cannot be transient.";
                 return false;
@@ -440,7 +440,7 @@ namespace VividRP.Runtime
             RenderGraphResource attr,
             IEnumerable<RenderGraphTexture> textureCollection)
         {
-            var baseName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
+            var baseName = field.GetRenderGraphResourceName(attr);
             var collectionIndex = 0;
 
             foreach (var texture in textureCollection)
@@ -487,7 +487,7 @@ namespace VividRP.Runtime
 
     internal static class PassResourceReferenceRefreshUtility
     {
-        internal static bool TryRefresh(object pass, PassResource resources)
+        internal static bool TryRefresh(this object pass, PassResource resources)
         {
             if (pass == null || resources == null)
                 return false;
@@ -688,7 +688,7 @@ namespace VividRP.Runtime
 
     internal static class RenderGraphPassExecutionUtility
     {
-        internal static bool SupportsAsyncCompute(Type passType)
+        internal static bool SupportsAsyncCompute(this Type passType)
         {
             if (passType == null)
                 return false;
@@ -711,7 +711,7 @@ namespace VividRP.Runtime
         /// </summary>
         PassResource Initialize()
         {
-            return PassResourceCollector.Collect(this);
+            return this.Collect();
         }
 
         /// <summary>

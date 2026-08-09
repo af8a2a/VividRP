@@ -403,8 +403,7 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Height = Mathf.Max(1, height);
             texture.desc.Slices = 1;
             texture.desc.Dimension = TextureDimension.Tex2D;
-            texture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(
-                sourceDescriptor,
+            texture.desc.ColorFormat = sourceDescriptor.ResolveColorFormat(
                 GraphicsFormat.R16G16B16A16_SFloat);
             texture.desc.DepthBufferBits = DepthBits.None;
             texture.desc.MsaaSamples = MSAASamples.None;

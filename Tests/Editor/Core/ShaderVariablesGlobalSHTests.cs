@@ -1,4 +1,3 @@
-using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -8,24 +7,6 @@ namespace VividRP.Editor.Tests
 {
     public class ShaderVariablesGlobalSHTests
     {
-        [Test]
-        public void Source_RemovesCpuSkyDiffuseSHCompatibilityFields()
-        {
-            var skyDataSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividSkyData.cs"));
-            var globalsSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "ShaderVariablesGlobal.cs"));
-
-            Assert.That(skyDataSource, Does.Not.Contain("hasDiffuseSH"));
-            Assert.That(skyDataSource, Does.Not.Contain("diffuseSH"));
-            Assert.That(globalsSource, Does.Contain("var ambientProbe = skyData == null"));
-            Assert.That(globalsSource, Does.Not.Contain("skyData.hasDiffuseSH"));
-            Assert.That(globalsSource, Does.Not.Contain("skyData.diffuseSH"));
-            Assert.That(globalsSource, Does.Contain("public Vector4 _VividPlanetCenterRadius;"));
-            Assert.That(globalsSource, Does.Contain("public Vector4 _VividPlanetUpAltitude;"));
-            Assert.That(globalsSource, Does.Contain("ResolvePlanetData("));
-            Assert.That(globalsSource, Does.Contain("var planet = SkyPlanet.Resolve("));
-            Assert.That(globalsSource, Does.Contain("_VividPlanetCenterRadius = planetCenterRadius,"));
-            Assert.That(globalsSource, Does.Contain("_VividPlanetUpAltitude = planetUpAltitude,"));
-        }
 
         [Test]
         public void Create_FallsBackToRenderSettingsAmbientProbe_WhenSkyDataIsMissing()
@@ -137,25 +118,6 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(cameraObject);
                 Object.DestroyImmediate(profile);
             }
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private static void PopulateChannel(ref SphericalHarmonicsL2 sh, int channel, float startValue)

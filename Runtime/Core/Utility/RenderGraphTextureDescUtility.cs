@@ -5,7 +5,7 @@ namespace VividRP.Runtime
 {
     internal static class RenderGraphTextureDescUtility
     {
-        internal static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
+        internal static bool HasExplicitSize(this RenderGraphTextureDesc descriptor)
         {
             return descriptor != null
                 && descriptor.Width > 0
@@ -42,7 +42,7 @@ namespace VividRP.Runtime
         }
 
         internal static GraphicsFormat ResolveColorFormat(
-            RenderGraphTextureDesc descriptor,
+            this RenderGraphTextureDesc descriptor,
             GraphicsFormat fallbackFormat = GraphicsFormat.R8G8B8A8_UNorm)
         {
             if (descriptor != null && descriptor.ColorFormat != GraphicsFormat.None)
@@ -51,7 +51,7 @@ namespace VividRP.Runtime
             return fallbackFormat;
         }
 
-        internal static void Copy(RenderGraphTextureDesc source, RenderGraphTextureDesc destination)
+        internal static void Copy(this RenderGraphTextureDesc source, RenderGraphTextureDesc destination)
         {
             if (source == null || destination == null)
                 return;

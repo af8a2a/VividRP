@@ -90,7 +90,7 @@ namespace VividRP.Runtime
             if (camera.cameraType == CameraType.Preview || camera.cameraType == CameraType.Reflection)
                 return;
 
-            var nonJitteredProj = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var nonJitteredProj = camera.GetNonJitteredProjectionMatrix();
             var effectiveMode = data != null ? data.effectiveMode : VividAntialiasingMode.None;
 
             if (additionalData != null)
@@ -122,7 +122,7 @@ namespace VividRP.Runtime
                     return;
 #endif
                 default:
-                    CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                    camera.RestoreNoJitterProjection(nonJitteredProj);
                     return;
             }
         }
@@ -288,7 +288,7 @@ namespace VividRP.Runtime
             var taaSettings = TAASettings.FromCamera(additionalData);
             if (!taaSettings.Enabled)
             {
-                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                camera.RestoreNoJitterProjection(nonJitteredProj);
                 return;
             }
 
@@ -296,7 +296,7 @@ namespace VividRP.Runtime
             var pixelHeight = camera.pixelHeight;
             if (pixelWidth <= 0 || pixelHeight <= 0)
             {
-                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                camera.RestoreNoJitterProjection(nonJitteredProj);
                 return;
             }
 
@@ -306,7 +306,7 @@ namespace VividRP.Runtime
             var jitterMatrix = Matrix4x4.identity;
             jitterMatrix.m03 = jitter.x * 2.0f / pixelWidth;
             jitterMatrix.m13 = jitter.y * 2.0f / pixelHeight;
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+            camera.SetProjectionMatrices(jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
         private static void ApplyFsr3Jitter(
@@ -318,7 +318,7 @@ namespace VividRP.Runtime
         {
             if (additionalData == null || data == null)
             {
-                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                camera.RestoreNoJitterProjection(nonJitteredProj);
                 return;
             }
 
@@ -327,7 +327,7 @@ namespace VividRP.Runtime
             if (outputSize.x <= 0 || outputSize.y <= 0 || renderSize.x <= 0 || renderSize.y <= 0)
             {
                 additionalData.ResetFsr3JitterData();
-                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                camera.RestoreNoJitterProjection(nonJitteredProj);
                 return;
             }
 
@@ -338,7 +338,7 @@ namespace VividRP.Runtime
             var jitterMatrix = Matrix4x4.identity;
             jitterMatrix.m03 = jitterOffset.x * 2.0f / renderSize.x;
             jitterMatrix.m13 = -jitterOffset.y * 2.0f / renderSize.y;
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+            camera.SetProjectionMatrices(jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
         private static void ApplyTsrJitter(
@@ -350,7 +350,7 @@ namespace VividRP.Runtime
         {
             if (additionalData == null || data == null)
             {
-                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                camera.RestoreNoJitterProjection(nonJitteredProj);
                 return;
             }
 
@@ -359,7 +359,7 @@ namespace VividRP.Runtime
             if (outputSize.x <= 0 || outputSize.y <= 0 || renderSize.x <= 0 || renderSize.y <= 0)
             {
                 additionalData.ResetTsrJitterData();
-                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                camera.RestoreNoJitterProjection(nonJitteredProj);
                 return;
             }
 
@@ -370,7 +370,7 @@ namespace VividRP.Runtime
             var jitterMatrix = Matrix4x4.identity;
             jitterMatrix.m03 = jitterOffset.x * 2.0f / renderSize.x;
             jitterMatrix.m13 = -jitterOffset.y * 2.0f / renderSize.y;
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+            camera.SetProjectionMatrices(jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
         private static void ApplyStpJitter(Camera camera, Matrix4x4 nonJitteredProj, int frameIndex)
@@ -379,7 +379,7 @@ namespace VividRP.Runtime
             var pixelHeight = camera.pixelHeight;
             if (pixelWidth <= 0 || pixelHeight <= 0)
             {
-                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                camera.RestoreNoJitterProjection(nonJitteredProj);
                 return;
             }
 
@@ -387,7 +387,7 @@ namespace VividRP.Runtime
             var jitterMatrix = Matrix4x4.identity;
             jitterMatrix.m03 = jitter.x * 2.0f / pixelWidth;
             jitterMatrix.m13 = jitter.y * 2.0f / pixelHeight;
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+            camera.SetProjectionMatrices(jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
 #if DLSS_PLUGIN_INTEGRATE
@@ -401,7 +401,7 @@ namespace VividRP.Runtime
             var pixelHeight = camera.pixelHeight;
             if (pixelWidth <= 0 || pixelHeight <= 0)
             {
-                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
+                camera.RestoreNoJitterProjection(nonJitteredProj);
                 return;
             }
 
@@ -416,7 +416,7 @@ namespace VividRP.Runtime
             jitterMatrix.m03 = jitter.x * 2.0f / pixelWidth;
             jitterMatrix.m13 = jitter.y * 2.0f / pixelHeight;
 
-            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+            camera.SetProjectionMatrices(jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 #endif
 

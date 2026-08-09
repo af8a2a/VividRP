@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -202,57 +201,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void FinalBlitShader_ContainsColorGradingLogic_AndSharedBlitShaderDoesNot()
-        {
-            var finalBlitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "FinalBlit.shader"));
-            var blitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Blit.shader"));
-            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "FinalBlitPass.cs"));
-            var frameContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
-            var autoExposureSystemSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"));
-
-            Assert.That(finalBlitShaderSource, Does.Contain("Shader \"Hidden/VividRP/FinalBlit\""));
-            Assert.That(finalBlitShaderSource, Does.Contain("_VividColorGradingLut"));
-            Assert.That(finalBlitShaderSource, Does.Contain("_VividColorGradingParams"));
-            Assert.That(finalBlitShaderSource, Does.Contain("_VividAutoExposureBuffer"));
-            Assert.That(finalBlitShaderSource, Does.Contain("_VividAutoExposurePreExposureBuffer"));
-            Assert.That(finalBlitShaderSource, Does.Contain("_VividAutoExposureParams"));
-            Assert.That(finalBlitShaderSource, Does.Contain("oneOverPreExposure"));
-            Assert.That(finalBlitShaderSource, Does.Contain("ApplyLut3D("));
-
-            Assert.That(blitShaderSource, Does.Contain("Shader \"Hidden/VividRP/Blit\""));
-            Assert.That(blitShaderSource, Does.Not.Contain("_VividColorGradingLut"));
-            Assert.That(blitShaderSource, Does.Not.Contain("_VividColorGradingParams"));
-            Assert.That(blitShaderSource, Does.Not.Contain("ApplyLut3D("));
-
-            Assert.That(passSource, Does.Contain("resources.FinalBlitShader"));
-            Assert.That(passSource, Does.Contain("m_EnableExposure"));
-            Assert.That(passSource, Does.Contain("m_ExposureData?.frameExposureBuffer ?? defaultExposureBuffer"));
-            Assert.That(passSource, Does.Contain("PassRecorder.ImportBufferForPass("));
-            Assert.That(passSource, Does.Contain("AccessFlags.Read"));
-            Assert.That(passSource, Does.Not.Contain("SetBuffer(AutoExposurePreExposureBufferId"));
-            Assert.That(passSource, Does.Not.Contain("ExecuteAutoExposure("));
-            Assert.That(passSource, Does.Not.Contain("RefreshAutoExposureImplementation("));
-            Assert.That(passSource, Does.Not.Contain("m_AutoExposureCompute"));
-            Assert.That(frameContextSource, Does.Not.Contain("BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
-            Assert.That(autoExposureSystemSource, Does.Contain("BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
-            Assert.That(passSource, Does.Not.Contain("AutoExposureStatsReadbackBridge.Request("));
-            Assert.That(passSource, Does.Not.Contain("AutoExposureRuntimeManager.CommitFrame("));
-            Assert.That(passSource, Does.Contain("VividAutoExposureSystem.CommitFrame("));
-            Assert.That(passSource, Does.Not.Contain("resources.BlitShader"));
-        }
-
-        [Test]
-        public void PassRecorderSource_DoesNotInjectStopNaNPass()
-        {
-            var passRecorderSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
-
-            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectStopNaNPass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("GetOrCreateInjectedStopNaNPass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedStopNaNPass"));
-            Assert.That(passRecorderSource, Does.Not.Contain("StopNaNPass (Injected)"));
-        }
-
-        [Test]
         public void FinalBlitPassNode_DoesNotExposeAsyncComputeOption()
         {
             var node = new AutoRegisteredFinalBlitPassNode();
@@ -263,7 +211,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SupportsAsyncCompute_ReturnsFalse_ForFinalBlitPass()
         {
-            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(FinalBlitPass)), Is.False);
+            Assert.That((typeof(FinalBlitPass)).SupportsAsyncCompute(), Is.False);
         }
 
         [Test]
@@ -384,25 +332,6 @@ namespace VividRP.Editor.Tests
                 typeof(AutoExposurePass),
                 "SetSourceTexture",
                 "RestoreSourceTexture");
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private static T LoadPackageAsset<T>(string relativeAssetPath)

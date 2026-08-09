@@ -673,7 +673,7 @@ namespace VividRP.Runtime
             if (sourceDesc == null)
                 return;
 
-            RenderGraphTextureDescUtility.Copy(sourceDesc, output.desc);
+            sourceDesc.Copy(output.desc);
             output.desc.Name = "DepthOfFieldOutput";
             output.desc.ColorFormat = ResolveComputeColorFormat(sourceDesc);
             output.desc.DepthBufferBits = DepthBits.None;
@@ -692,7 +692,7 @@ namespace VividRP.Runtime
         {
             var desc = m_CoCHistoryDescriptor;
             if (m_CoCHistoryPrevious?.desc != null)
-                RenderGraphTextureDescUtility.Copy(m_CoCHistoryPrevious.desc, desc);
+                m_CoCHistoryPrevious.desc.Copy(desc);
 
             desc.Name = "DepthOfFieldCoCHistoryCurrent";
             desc.Width = m_Width;
@@ -726,7 +726,7 @@ namespace VividRP.Runtime
                 return;
 
             if (sourceDescriptor != null)
-                RenderGraphTextureDescUtility.Copy(sourceDescriptor, texture.desc);
+                sourceDescriptor.Copy(texture.desc);
 
             texture.desc.Name = name;
             texture.desc.Width = Mathf.Max(1, width);

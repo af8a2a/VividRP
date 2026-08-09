@@ -111,9 +111,9 @@ namespace VividRP.Editor.RenderGraph
             if (passType == null)
                 return;
 
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
@@ -192,9 +192,9 @@ namespace VividRP.Editor.RenderGraph
 
             if (GetDebugExportEnabled())
             {
-                foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+                foreach (var field in passType.EnumerateRenderGraphResourceFields())
                 {
-                    if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    if (field.IsDeclaredTransientResourceField())
                         continue;
 
                     var attr = field.GetCustomAttribute<RenderGraphResource>();
@@ -207,7 +207,7 @@ namespace VividRP.Editor.RenderGraph
                     if (string.IsNullOrEmpty(debugPortName))
                         continue;
 
-                    var displayName = $"{RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr)} (Debug)";
+                    var displayName = $"{field.GetRenderGraphResourceName(attr)} (Debug)";
 
                     if (field.FieldType == typeof(RenderGraphTexture))
                     {
@@ -386,7 +386,7 @@ namespace VividRP.Editor.RenderGraph
             if (field == null || attr == null)
                 return null;
 
-            if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+            if (field.IsDeclaredTransientResourceField())
                 return null;
 
             return RenderPassPortUtility.GetInputPortName(
@@ -451,7 +451,7 @@ namespace VividRP.Editor.RenderGraph
 
         private bool ShouldDefineAsyncComputeOption(Type passType)
         {
-            return RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType)
+            return passType.SupportsAsyncCompute()
                 || HasAsyncComputeOption();
         }
 
@@ -460,9 +460,9 @@ namespace VividRP.Editor.RenderGraph
             if (context == null || passType == null)
                 return;
 
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
@@ -542,9 +542,9 @@ namespace VividRP.Editor.RenderGraph
                 return;
 
             var hasDebugExportableFields = false;
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            foreach (var field in passType.EnumerateRenderGraphResourceFields())
             {
-                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                if (field.IsDeclaredTransientResourceField())
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();

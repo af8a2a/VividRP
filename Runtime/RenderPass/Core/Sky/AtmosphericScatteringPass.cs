@@ -156,14 +156,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var inputColor = TextureResolveUtility.ResolveTexture(m_ColorInput.innerHandle);
+            var inputColor = m_ColorInput.innerHandle.ResolveTexture();
             if (inputColor == null)
                 return;
 
-            var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
-            var atmosphericScatteringLut = TextureResolveUtility.ResolveTexture(m_AtmosphericScatteringLutHandle);
-            var skyTexture = TextureResolveUtility.ResolveTexture(m_SkyTexture);
-            var vBufferLighting = TextureResolveUtility.ResolveTexture(m_VBufferLighting.innerHandle);
+            var depthTexture = m_DepthTexture.innerHandle.ResolveTexture() ?? Texture2D.whiteTexture;
+            var atmosphericScatteringLut = m_AtmosphericScatteringLutHandle.ResolveTexture();
+            var skyTexture = m_SkyTexture.ResolveTexture();
+            var vBufferLighting = m_VBufferLighting.innerHandle.ResolveTexture();
             var hasValidAtmosphericScatteringLut = HasValidAtmosphericScatteringLut(atmosphericScatteringLut);
             var hasValidSkyTexture = HasValidSkyTexture(skyTexture);
             var hasVBufferLighting = HasValidVBuffer(vBufferLighting);
@@ -363,7 +363,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int screenDimension,
             RenderGraphTextureDesc descriptor)
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
+            if (descriptor.HasExplicitSize())
                 return Mathf.Max(1, descriptor.Width);
 
             return CameraDimensionUtility.ResolveCameraDimension(
@@ -378,7 +378,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int screenDimension,
             RenderGraphTextureDesc descriptor)
         {
-            if (RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
+            if (descriptor.HasExplicitSize())
                 return Mathf.Max(1, descriptor.Height);
 
             return CameraDimensionUtility.ResolveCameraDimension(

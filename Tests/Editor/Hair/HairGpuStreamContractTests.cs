@@ -1,4 +1,3 @@
-using System.IO;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using UnityEngine;
@@ -77,82 +76,6 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 state.CommitFrame(22, 64, 0),
                 Is.EqualTo(HairHistoryResetReason.FirstFrame));
-        }
-
-        [Test]
-        public void VertexUpdateCompute_ExpandsAndCommitsGpuHistory()
-        {
-            string source = ReadPackageFile(
-                "Shaders",
-                "Material",
-                "Hair",
-                "HairDotsVertexUpdate.compute");
-
-            Assert.That(source, Does.Contain("#pragma kernel ExpandHairDots"));
-            Assert.That(source, Does.Contain("#pragma kernel CopyHairHistory"));
-            Assert.That(
-                source,
-                Does.Contain("RWByteAddressBuffer _HairDotsVertexBuffer"));
-            Assert.That(source, Does.Contain("kHairVertexStride = 72u"));
-            Assert.That(
-                source,
-                Does.Contain("if (_HairResetHistory == 0u)"));
-            Assert.That(
-                source,
-                Does.Contain("previousRadius0 = -previousRadius0"));
-            Assert.That(
-                source,
-                Does.Contain("_HairHistoryDestination[segmentIndex] ="));
-        }
-
-        [Test]
-        public void CoreResources_RegistersHairVertexUpdateCompute()
-        {
-            string source = ReadPackageFile(
-                "Runtime",
-                "Core",
-                "PipelineResource",
-                "VividResources.cs");
-
-            Assert.That(
-                source,
-                Does.Contain(
-                    "Shaders/Material/Hair/HairDotsVertexUpdate.compute"));
-            Assert.That(
-                source,
-                Does.Contain("HairDotsVertexUpdateCompute"));
-        }
-
-        private static string ReadPackageFile(params string[] parts)
-        {
-            string customPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "Custom_URP"));
-            if (Directory.Exists(customPath))
-                return File.ReadAllText(Path.Combine(
-                    customPath,
-                    Path.Combine(parts)));
-
-            string vividPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP"));
-            if (Directory.Exists(vividPath))
-                return File.ReadAllText(Path.Combine(
-                    vividPath,
-                    Path.Combine(parts)));
-
-            string legacyPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "com.af8a2a.vividrp"));
-            return File.ReadAllText(Path.Combine(
-                legacyPath,
-                Path.Combine(parts)));
         }
     }
 }

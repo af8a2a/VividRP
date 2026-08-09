@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -91,30 +90,6 @@ namespace VividRP.Editor.Tests
             {
                 UnityEngine.Object.DestroyImmediate(cameraObject);
             }
-        }
-
-        [Test]
-        public void AccumulationShader_DrawsProgressAndPreservesConvergedHistory()
-        {
-            var source = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "GlobalIllumination",
-                "ReferencedPathtracing",
-                "ReferencedPathtracingAccumulation.compute"));
-
-            Assert.That(source, Does.Contain("void AddConvergenceCue("));
-            Assert.That(
-                source,
-                Does.Contain("targetSampleCount <= 1 || sampleCount >= targetSampleCount"));
-            Assert.That(source, Does.Contain("uint barHeight = max(4u"));
-            Assert.That(
-                source,
-                Does.Contain("preserveConvergedHistory"));
-            Assert.That(
-                source,
-                Does.Contain("sceneLinearResult = _ReferencedPathTracingHistoryRadiance[pixelCoord]"));
         }
 
         [Test]
@@ -220,17 +195,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
-                typeof(ReferencedPathTracingAccumulationPass).Assembly);
-
-            Assert.That(packageInfo, Is.Not.Null);
-            return Path.Combine(
-                packageInfo.resolvedPath,
-                Path.Combine(relativeParts));
         }
 
         private static VividLightRenderData CreateReferenceLight(

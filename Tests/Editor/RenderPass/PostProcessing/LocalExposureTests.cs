@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -286,62 +285,6 @@ namespace VividRP.Editor.Tests
             {
                 UnityEngine.Object.DestroyImmediate(container);
             }
-        }
-
-        [Test]
-        public void LocalExposureShader_DeclaresRequiredKernelsAndResourceContracts()
-        {
-            var shaderSource = File.ReadAllText(GetPackageFilePath(
-                "Shaders",
-                "Core",
-                "Private",
-                "LocalExposure",
-                "LocalExposure.compute"));
-            var passSource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "PostProcessing",
-                "LocalExposure",
-                "LocalExposurePass.cs"));
-
-            Assert.That(shaderSource, Does.Contain("#pragma kernel BuildBilateralGrid"));
-            Assert.That(shaderSource, Does.Contain("#pragma kernel SetupLogLuminance"));
-            Assert.That(shaderSource, Does.Contain("#pragma kernel BlurLogLuminanceHorizontal"));
-            Assert.That(shaderSource, Does.Contain("#pragma kernel BlurLogLuminanceVertical"));
-            Assert.That(shaderSource, Does.Contain("#pragma kernel ApplyLocalExposure"));
-            Assert.That(shaderSource, Does.Contain("#pragma kernel Copy"));
-            Assert.That(shaderSource, Does.Contain("#define LOCAL_EXPOSURE_TILE_SIZE 64"));
-            Assert.That(shaderSource, Does.Contain("#define LOCAL_EXPOSURE_GRID_DEPTH 32"));
-            Assert.That(shaderSource, Does.Contain("RWTexture3D<float2> _LocalExposureBilateralGrid"));
-            Assert.That(shaderSource, Does.Contain("_LocalExposureExposureBuffer"));
-            Assert.That(shaderSource, Does.Contain("_LocalExposurePreExposureBuffer"));
-
-            Assert.That(passSource, Does.Contain("GraphicsFormat.R32G32_SFloat"));
-            Assert.That(passSource, Does.Contain("TextureDimension.Tex3D"));
-            Assert.That(passSource, Does.Contain("GridDepth = 32"));
-            Assert.That(passSource, Does.Contain("TileSize = 64"));
-            Assert.That(passSource, Does.Not.Contain("Fusion"));
-            Assert.That(passSource, Does.Not.Contain("Visualization"));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

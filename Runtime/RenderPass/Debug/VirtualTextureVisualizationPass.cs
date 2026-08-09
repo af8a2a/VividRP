@@ -113,16 +113,16 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_Material == null || !m_OutputTexture.innerHandle.IsValid())
                 return;
 
-            Texture sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture?.innerHandle);
+            Texture sourceTexture = (m_SourceTexture?.innerHandle).ResolveTexture();
             bool hasDepth = m_DepthTexture?.innerHandle.IsValid() ?? false;
             Texture depthTexture = hasDepth
-                ? TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle)
+                ? m_DepthTexture.innerHandle.ResolveTexture()
                 : null;
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SourceTextureId, sourceTexture != null ? sourceTexture : Texture2D.blackTexture);
-            mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture?.innerHandle));
+            mpb.SetVector(SourceTextureScaleBiasId, (m_SourceTexture?.innerHandle).GetScaleBias());
             mpb.SetTexture(DepthTextureId, depthTexture != null ? depthTexture : Texture2D.blackTexture);
-            mpb.SetVector(DepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture?.innerHandle));
+            mpb.SetVector(DepthTextureScaleBiasId, (m_DepthTexture?.innerHandle).GetScaleBias());
             mpb.SetInt(VisualizationModeId, (int)m_ResolvedVisualizationMode);
             mpb.SetInt(VisualizationLayerId, (int)m_ResolvedVisualizationLayer);
             mpb.SetFloat(VisualizationWorldPageSizeId, m_ResolvedVisualizationWorldPageSize);
@@ -299,7 +299,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_OutputTexture.desc.Width = width;
             m_OutputTexture.desc.Height = height;
-            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(sourceDescriptor);
+            m_OutputTexture.desc.ColorFormat = sourceDescriptor.ResolveColorFormat();
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = sourceDescriptor?.FilterMode ?? FilterMode.Bilinear;

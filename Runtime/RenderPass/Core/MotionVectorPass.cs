@@ -198,7 +198,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private void ConfigureTargets(VividCameraData cameraData)
         {
             var sourceDescriptor = m_CameraDepthStencilTexture.desc;
-            var hasExplicitSourceSize = RenderGraphTextureDescUtility.HasExplicitSize(sourceDescriptor);
+            var hasExplicitSourceSize = sourceDescriptor.HasExplicitSize();
 
             var width = hasExplicitSourceSize
                 ? Mathf.Max(1, sourceDescriptor.Width)

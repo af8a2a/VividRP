@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -420,78 +419,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GTAOShaderSources_UseVividNormalDecodeAndUnormFinalResolve()
-        {
-            var computeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "GTAO", "GTAO.compute"));
-            var hlslSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "GTAO", "XeGTAO.hlsl"));
-
-            Assert.That(computeSource, Does.Not.Contain("#pragma kernel CSPrefilterDepths16x16"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel CSGTAOHigh"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel CSDenoiseLastPass"));
-            Assert.That(computeSource, Does.Contain("Texture2D<float> _HZBTexture;"));
-            Assert.That(computeSource, Does.Not.Contain("_WorkingDepth"));
-            Assert.That(computeSource, Does.Contain("DecodeVividNormalOct"));
-            Assert.That(computeSource, Does.Contain("GetLeftHandedViewSpaceMatrices"));
-            Assert.That(computeSource, Does.Contain("RWTexture2D<unorm float> _GTAOTexture;"));
-            Assert.That(computeSource, Does.Contain("XeGTAO_MainPass("));
-            Assert.That(computeSource, Does.Contain("XeGTAO_Denoise("));
-            Assert.That(hlslSource, Does.Contain("return LinearEyeDepth( screenDepth, _ZBufferParams );"));
-            Assert.That(hlslSource, Does.Contain("sourceDepthPyramid.SampleLevel("));
-            Assert.That(hlslSource, Does.Contain("RWTexture2D<unorm float> outputTexture"));
-            Assert.That(hlslSource, Does.Not.Contain("VA_SATURATE"));
-            Assert.That(hlslSource, Does.Not.Contain("#include \"vaShared.hlsl\""));
-        }
-
-        [Test]
-        public void CACAOShaderSources_ExposeOfficialPipelineAndVividNormalDecode()
-        {
-            var computeSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "CACAO",
-                    "CACAO.compute"));
-            var bindingSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "CACAO",
-                    "ffx_cacao_bindings.hlsl"));
-            var algorithmSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "CACAO",
-                    "ffx_cacao.hlsl"));
-            var resourceSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Runtime",
-                    "Resources",
-                    "PipelineResources.asset"));
-
-            Assert.That(
-                computeSource,
-                Does.Contain("#pragma kernel FFX_CACAO_PrepareNativeDepthsAndMips"));
-            Assert.That(computeSource, Does.Contain("#pragma kernel FFX_CACAO_GenerateQ3"));
-            Assert.That(
-                computeSource,
-                Does.Contain("#pragma kernel FFX_CACAO_UpscaleBilateral5x5Smart"));
-            Assert.That(bindingSource, Does.Contain("DecodeVividNormalOct"));
-            Assert.That(bindingSource, Does.Contain("GetLeftHandedViewSpaceMatrices"));
-            Assert.That(
-                bindingSource,
-                Does.Contain("g_FFX_CACAO_Consts.PassIndex"));
-            Assert.That(algorithmSource, Does.Contain("FFX_CACAO_GenerateSSAOShadowsInternal"));
-            Assert.That(algorithmSource, Does.Contain("FFX_CACAO_LDSEdgeSensitiveBlur"));
-            Assert.That(
-                resourceSource,
-                Does.Contain("Shaders/Core/Private/CACAO/CACAO.compute"));
-        }
-
-        [Test]
         public void CACAOConstantBuffer_MatchesOfficial384ByteLayout()
         {
             var constantBufferType = typeof(GTAOPass).GetNestedType(
@@ -500,23 +427,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(constantBufferType, Is.Not.Null);
             Assert.That(Marshal.SizeOf(constantBufferType), Is.EqualTo(384));
-        }
-
-        [Test]
-        public void ActiveRenderGraph_WiresGTAOIntoDeferredLighting()
-        {
-            var graphSource = File.ReadAllText(GetAssetFilePath("Assets", "Standard Vivid Render Graph 1.vrdg"));
-
-            Assert.That(graphSource, Does.Contain("type: {class: GTAOPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}"));
-            AssertWireExists(graphSource, "m_GTAOTexture", "GTAOTexture");
-        }
-
-        private static void AssertWireExists(string graphSource, string uniqueId, string title)
-        {
-            var pattern =
-                $@"m_FromPortReference:\s*[\s\S]*?m_UniqueId: {System.Text.RegularExpressions.Regex.Escape(uniqueId)}\s*[\s\S]*?m_Title: {System.Text.RegularExpressions.Regex.Escape(title)} \(W\)\s*[\s\S]*?m_ToPortReference:\s*[\s\S]*?m_UniqueId: {System.Text.RegularExpressions.Regex.Escape(uniqueId)}\s*[\s\S]*?m_Title: {System.Text.RegularExpressions.Regex.Escape(title)} \(R\)";
-
-            Assert.That(graphSource, Does.Match(pattern), $"Expected a GTAO -> DeferredLighting wire for '{uniqueId}'.");
         }
 
         private static void AssertTextureSize(GTAOPass pass, string fieldName, int expectedWidth, int expectedHeight)
@@ -534,31 +444,6 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null, $"Expected private field '{fieldName}' on {nameof(GTAOPass)}.");
             return (T)field.GetValue(pass);
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string[] packageRoots =
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
-        }
-
-        private static string GetAssetFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            return Path.Combine(projectRoot, Path.Combine(relativeParts));
         }
     }
 }

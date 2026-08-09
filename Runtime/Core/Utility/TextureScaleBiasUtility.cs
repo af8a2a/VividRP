@@ -6,7 +6,7 @@ namespace VividRP.Runtime
 {
     internal static class TextureScaleBiasUtility
     {
-        internal static Vector2 GetScale(RTHandle handle)
+        internal static Vector2 GetScale(this RTHandle handle)
         {
             if (handle == null || !handle.useScaling)
                 return Vector2.one;
@@ -16,14 +16,39 @@ namespace VividRP.Runtime
                 handle.rtHandleProperties.rtHandleScale.y);
         }
 
-        internal static Vector4 GetScaleBias(RTHandle handle)
+        internal static Vector2 GetScale(this TextureHandle handle)
         {
-            Vector2 scale = GetScale(handle);
+            RTHandle rtHandle = handle;
+            return rtHandle.GetScale();
+        }
+
+        internal static Vector2 GetScale(this TextureHandle? handle)
+        {
+            return handle.HasValue ? handle.Value.GetScale() : Vector2.one;
+        }
+
+        internal static Vector4 GetScaleBias(this RTHandle handle)
+        {
+            return handle.GetScale().GetScaleBias();
+        }
+
+        internal static Vector4 GetScaleBias(this Vector2 scale)
+        {
             return new Vector4(scale.x, scale.y, 0f, 0f);
         }
 
+        internal static Vector4 GetScaleBias(this TextureHandle handle)
+        {
+            return handle.GetScale().GetScaleBias();
+        }
+
+        internal static Vector4 GetScaleBias(this TextureHandle? handle)
+        {
+            return handle.GetScale().GetScaleBias();
+        }
+
         internal static Vector4 GetScaleBias(
-            Vector2 scale,
+            this Vector2 scale,
             TextureUVOrigin sourceTextureUVOrigin,
             TextureUVOrigin destinationTextureUVOrigin)
         {
@@ -34,11 +59,27 @@ namespace VividRP.Runtime
         }
 
         internal static Vector4 GetScaleBias(
-            RTHandle handle,
+            this RTHandle handle,
             TextureUVOrigin sourceTextureUVOrigin,
             TextureUVOrigin destinationTextureUVOrigin)
         {
             return GetScaleBias(GetScale(handle), sourceTextureUVOrigin, destinationTextureUVOrigin);
+        }
+
+        internal static Vector4 GetScaleBias(
+            this TextureHandle handle,
+            TextureUVOrigin sourceTextureUVOrigin,
+            TextureUVOrigin destinationTextureUVOrigin)
+        {
+            return handle.GetScale().GetScaleBias(sourceTextureUVOrigin, destinationTextureUVOrigin);
+        }
+
+        internal static Vector4 GetScaleBias(
+            this TextureHandle? handle,
+            TextureUVOrigin sourceTextureUVOrigin,
+            TextureUVOrigin destinationTextureUVOrigin)
+        {
+            return handle.GetScale().GetScaleBias(sourceTextureUVOrigin, destinationTextureUVOrigin);
         }
     }
 }

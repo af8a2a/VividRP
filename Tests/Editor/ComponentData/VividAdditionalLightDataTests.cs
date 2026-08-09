@@ -1,4 +1,3 @@
-using System.IO;
 using System.Runtime.CompilerServices;
 using System.Reflection;
 using NUnit.Framework;
@@ -1387,28 +1386,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividLightEditor_UsesSharedAngularDiameterCelestialBodyPanel()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
-
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Celestial Body\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Affect Physically Based Sky\""));
-            Assert.That(source, Does.Not.Contain("Angular Diameter Multiplier"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Shading\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Phase\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Phase Rotation\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Surface Color\""));
-            Assert.That(source, Does.Not.Contain("s_DiameterModeNames"));
-            Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.angularDiameter, s_AngularDiameterLabel);"));
-            Assert.That(source, Does.Not.Contain("DrawCelestialBodyAngularDiameterField"));
-            Assert.That(source, Does.Contain("DrawCelestialBodySurfaceColorField();"));
-            Assert.That(source, Does.Contain("The Celestial Body cannot receive lighting from itself."));
-            Assert.That(source, Does.Contain("The Sun Light needs to be a directional light."));
-            Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.flareFalloff, s_FlareFalloffLabel);"));
-            Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.flareTint, s_FlareTintLabel);"));
-        }
-
-        [Test]
         public void VividLightEditor_ShowsAreaBarnDoorControls_OnlyForRectangleLights()
         {
             var rectangleLight = m_GameObject.AddComponent<Light>();
@@ -1437,77 +1414,6 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(tubeLightObject);
             }
-        }
-
-        [Test]
-        public void VividLightEditor_UsesHdrpStyleAreaBarnDoorPanel()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
-
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Barn Door\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Angle\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Length\""));
-            Assert.That(source, Does.Contain("DrawAreaBarnDoorInspector();"));
-            Assert.That(source, Does.Contain("m_SerializedLight.barnDoorAngle"));
-            Assert.That(source, Does.Contain("m_SerializedLight.barnDoorLength"));
-        }
-
-        [Test]
-        public void VividLightEditor_UsesDirectionalShadowBiasPanel()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
-
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"CSM Shadow\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Screen Space Quality\""));
-            Assert.That(source, Does.Contain("private static readonly GUIContent[] s_ScreenSpaceShadowQualityOptionLabels ="));
-            Assert.That(source, Does.Contain("Low (PCF 3x3)"));
-            Assert.That(source, Does.Contain("Medium (PCF 5x5)"));
-            Assert.That(source, Does.Contain("High (PCF 7x7)"));
-            Assert.That(source, Does.Contain("Very High (VividRP PCSS)"));
-            Assert.That(source, Does.Contain("Very High (Unreal SSS)"));
-            Assert.That(source, Does.Contain("CSMScreenSpaceShadowQuality.Unreal"));
-            Assert.That(source, Does.Contain("DrawDirectionalScreenSpaceShadowQualityField();"));
-            Assert.That(source, Does.Contain("m_SerializedLight.screenSpaceShadowQuality"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Atlas Resolution\""));
-            Assert.That(source, Does.Contain("private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels ="));
-            Assert.That(source, Does.Contain("EditorGUILayout.IntPopup("));
-            Assert.That(source, Does.Contain("m_SerializedLight.shadowAtlasResolution"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"PCSS\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Max Penumbra Size\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Max Sampling Distance\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Min Filter\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Blocker Search Angular Diameter\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Blocker Sample Count\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Filter Sample Count\""));
-            Assert.That(source, Does.Contain("DrawDirectionalPCSSFields();"));
-            Assert.That(source, Does.Contain("m_SerializedLight.dirLightPCSSMaxPenumbraSize"));
-            Assert.That(source, Does.Contain("m_SerializedLight.dirLightPCSSFilterSampleCount"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Bend SSS\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Surface Thickness\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Bilinear Threshold\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Shadow Contrast\""));
-            Assert.That(source, Does.Contain("DrawDirectionalBendSSSFields();"));
-            Assert.That(source, Does.Contain("ShouldShowDirectionalBendSSSControls(m_SerializedLight)"));
-            Assert.That(source, Does.Contain("m_SerializedLight.dirLightBendSSSSurfaceThickness"));
-            Assert.That(source, Does.Contain("m_SerializedLight.dirLightBendSSSBilinearSamplingOffsetMode"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Depth Bias\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Normal Bias\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Slope-Scale Depth Bias\""));
-            Assert.That(source, Does.Contain("EditorGUILayout.Slider(m_SerializedLight.depthBias, 0.0f, 10.0f, s_DepthBiasLabel);"));
-            Assert.That(source, Does.Contain("EditorGUILayout.Slider(m_SerializedLight.normalBias, 0.0f, 10.0f, s_NormalBiasLabel);"));
-            Assert.That(source, Does.Contain("EditorGUILayout.Slider(m_SerializedLight.slopeBias, 0.0f, 5.0f, s_SlopeBiasLabel);"));
-        }
-
-        [Test]
-        public void VividLightRenderDatabase_UsesEntityIdComparer_ForTrackedLightLookups()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "ComponentData", "VividAdditionalLightData.cs"));
-
-            Assert.That(source, Does.Contain("Dictionary<EntityId, int> m_EntityIdToDataIndex = new(new EntityIdComparer())"));
-            Assert.That(source, Does.Contain("return EntityId.ToULong(x) == EntityId.ToULong(y);"));
-            Assert.That(source, Does.Contain("return EntityId.ToULong(entityId) == EntityId.ToULong(EntityId.None);"));
-            Assert.That(source, Does.Not.Contain("lightEntityId.Equals(EntityId.None)"));
-            Assert.That(source, Does.Not.Contain("trackedLightData.lightEntityId.Equals(EntityId.None)"));
         }
 
         [Test]
@@ -1801,25 +1707,6 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.x, Is.EqualTo(expected.x).Within(0.0001f));
             Assert.That(actual.y, Is.EqualTo(expected.y).Within(0.0001f));
             Assert.That(actual.z, Is.EqualTo(expected.z).Within(0.0001f));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
-            {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
-
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

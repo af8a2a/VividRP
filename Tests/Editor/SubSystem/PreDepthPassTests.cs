@@ -86,7 +86,7 @@ namespace VividRP.Editor.Tests
         {
             var pass = new PreDepthPass();
 
-            var resources = PassResourceCollector.Collect(pass);
+            var resources = pass.Collect();
 
             Assert.That(resources.Textures, Has.Length.EqualTo(1));
             Assert.That(resources.Textures[0].Name, Is.EqualTo("Depth"));

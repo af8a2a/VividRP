@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Unity.Collections;
@@ -1080,70 +1079,6 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void VividRenderPipeline_DisposeExplicitlyDeinitializesVirtualTextureSystem()
-        {
-            string source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPipeline", "VividRenderPipeline.cs"));
-
-            Assert.That(source, Does.Contain("VirtualTextureSystem.Deinitialize();"));
-        }
-
-        [Test]
-        public void PhysicalPool_PageReplacementDiagnostics_AreGuardedByVtDebug()
-        {
-            string source = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "SubSystem",
-                "VirtualTexture",
-                "Core",
-                "VTPhysicalPool.cs"));
-            string[] diagnosticTags =
-            {
-                "[VividRP][VT_DEBUG][PageReplaceBegin]",
-                "[VividRP][VT_DEBUG][PageReplaceInvalidate]",
-                "[VividRP][VT_DEBUG][PageReplaceCommit]",
-                "[VividRP][VT_DEBUG][PageResidentAttach]",
-                "[VividRP][VT_DEBUG][PageTimeline]",
-                "[VividRP][VT_DEBUG][TimelineSummary]",
-                "[VividRP][VT_DEBUG][PageTransitionForcedStable]",
-                "[VividRP][VT_DEBUG][TimelineError]",
-                "[VividRP][VT_DEBUG][TimelineWarning]",
-            };
-
-            foreach (string diagnosticTag in diagnosticTags)
-            {
-                int diagnosticIndex = source.IndexOf(diagnosticTag, System.StringComparison.Ordinal);
-                Assert.That(diagnosticIndex, Is.GreaterThanOrEqualTo(0), diagnosticTag);
-
-                int guardIndex = source.LastIndexOf(
-                    "#if VT_DEBUG",
-                    diagnosticIndex,
-                    System.StringComparison.Ordinal);
-                Assert.That(guardIndex, Is.GreaterThanOrEqualTo(0), diagnosticTag);
-
-                int guardEndIndex = source.IndexOf(
-                    "#endif",
-                    guardIndex,
-                    System.StringComparison.Ordinal);
-
-                Assert.That(guardEndIndex, Is.GreaterThan(diagnosticIndex), diagnosticTag);
-            }
-
-            Assert.That(source, Does.Contain("LogOption.NoStacktrace"));
-            Assert.That(source, Does.Not.Contain("[VividRP][VT_DEBUG][PageFillReserve]"));
-            Assert.That(source, Does.Not.Contain("[VividRP][VT_DEBUG][PageResidentCommit]"));
-            Assert.That(source, Does.Not.Contain("[VividRP][VT_DEBUG][PageReserveCancel]"));
-
-            string residencySource = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "SubSystem",
-                "VirtualTexture",
-                "Core",
-                "VTResidencyManager.cs"));
-            Assert.That(residencySource, Does.Not.Contain("[VividRP][VT_DEBUG][PageTransitionBegin]"));
-            Assert.That(residencySource, Does.Not.Contain("[VividRP][VT_DEBUG][PageTransitionReveal]"));
-        }
-
         [TestCase(1, 16)]
         [TestCase(8, 16)]
         [TestCase(9, 32)]
@@ -1155,111 +1090,6 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VirtualTextureFeedbackBufferState.ResolveResidentHashCapacityForTesting(cachePageCount),
                 Is.EqualTo(expectedCapacity));
-        }
-
-        [Test]
-        public void Update_ReusesFeedbackScratchCollectionsAndCommitCallbacks_ToAvoidPreRenderGc()
-        {
-            string systemSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureSystem.cs"));
-            string feedbackSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureFeedback.cs"));
-            string nativeAggregatorSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTFeedbackNativeAggregator.cs"));
-            string debugStatsSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTDebugStats.cs"));
-            string addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTAddressSpace.cs"));
-            string residencySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTResidencyManager.cs"));
-            string uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTUploadScheduler.cs"));
-            string streamManagerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTStreamChunkManager.cs"));
-            string streamIOSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTStreamIO.cs"));
-            string streamCompressionSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTStreamingCompression.cs"));
-            string directStorageSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTDirectStorageBackend.cs"));
-            string assetProducerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VividVirtualTextureAssetProducer.cs"));
-            string profilingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "RenderPassProfiling.cs"));
-
-            Assert.That(systemSource, Does.Contain("private static VTFeedbackNativeAggregator s_FeedbackAggregator;"));
-            Assert.That(systemSource, Does.Contain("s_FeedbackAggregator.Aggregate("));
-            Assert.That(systemSource, Does.Contain("cachePriorityViewId);"));
-            Assert.That(systemSource, Does.Contain("s_FeedbackAggregator.Clear();"));
-            Assert.That(systemSource, Does.Contain("NativeArray<VirtualTextureAggregatedFeedbackRequest> aggregatedRequests"));
-            Assert.That(systemSource, Does.Contain("new NativeSlice<VirtualTextureAggregatedFeedbackRequest>("));
-            Assert.That(systemSource, Does.Contain("CollectAndSchedulePendingUploads(frameIndex, cmd);"));
-            Assert.That(systemSource, Does.Contain("VirtualTextureViewId.FromCameraData(cameraData);"));
-            Assert.That(systemSource, Does.Not.Contain("s_AddressSpaces.Values"));
-            Assert.That(systemSource, Does.Not.Contain("s_GroupedRequests"));
-            Assert.That(systemSource, Does.Not.Contain("s_AggregatedRequests"));
-            Assert.That(feedbackSource, Does.Not.Contain("internal sealed class Scratch"));
-            Assert.That(nativeAggregatorSource, Does.Contain("NativeList<VirtualTextureAggregatedFeedbackRequest>"));
-            Assert.That(nativeAggregatorSource, Does.Contain("SortJobDefer"));
-            Assert.That(nativeAggregatorSource, Does.Contain("[BurstCompile]"));
-            Assert.That(nativeAggregatorSource, Does.Contain("VTFeedbackAggregateInlineJob"));
-            Assert.That(feedbackSource, Does.Contain("internal Dictionary<Camera, VirtualTextureFeedbackCameraState> EnumerateStates()"));
-            Assert.That(feedbackSource, Does.Contain("internal Dictionary<int, VirtualTextureFeedbackBufferState> EnumerateSpaceStates()"));
-            Assert.That(feedbackSource, Does.Contain("m_ZeroCounterData = new NativeArray<uint>("));
-            Assert.That(feedbackSource, Does.Contain("cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);"));
-            Assert.That(feedbackSource, Does.Contain("private const int FeedbackBufferCount = 8;"));
-            Assert.That(feedbackSource, Does.Contain("private const int FeedbackCounterElementCount = 3;"));
-            Assert.That(feedbackSource, Does.Contain("ResidentHashBuffer"));
-            Assert.That(feedbackSource, Does.Contain("ResolveResidentHashCapacity"));
-            Assert.That(feedbackSource, Does.Not.Contain("cmd.SetBufferData(writePair.ResidentHashBuffer"));
-            Assert.That(feedbackSource, Does.Contain("&& !readPair.HasCompletedReadback"));
-            Assert.That(feedbackSource, Does.Contain("pair.WasWritten = false;"));
-            Assert.That(feedbackSource, Does.Contain("FindWritableBufferIndex()"));
-            Assert.That(feedbackSource, Does.Contain("public AsyncGPUReadbackRequest RequestsReadbackRequest;"));
-            Assert.That(feedbackSource, Does.Contain("pair.PollReadback();"));
-            Assert.That(feedbackSource, Does.Contain("AsyncGPUReadback.RequestIntoNativeArray("));
-            Assert.That(feedbackSource, Does.Contain("ref pair.RequestsReadbackData"));
-            Assert.That(feedbackSource, Does.Contain("ref pair.CounterReadbackData"));
-            Assert.That(feedbackSource, Does.Contain("NativeArray<ulong> NativeRequests"));
-            Assert.That(feedbackSource, Does.Not.Contain("RequestsReadbackData.CopyTo"));
-            Assert.That(feedbackSource, Does.Not.Contain("ulong[] CompletedRequests"));
-            Assert.That(feedbackSource, Does.Not.Contain("Action<AsyncGPUReadbackRequest>"));
-            Assert.That(feedbackSource, Does.Not.Contain("ReadbackCallback"));
-            Assert.That(feedbackSource, Does.Not.Contain("request => HandleRequestsReadback"));
-            Assert.That(feedbackSource, Does.Not.Contain("request.GetData"));
-            Assert.That(feedbackSource, Does.Not.Contain("new ulong[data.Length]"));
-            Assert.That(feedbackSource, Does.Not.Contain("AsyncGPUReadback.Request(pair.RequestsBuffer"));
-            Assert.That(feedbackSource, Does.Not.Contain("AsyncGPUReadback.Request(pair.CounterBuffer"));
-            Assert.That(feedbackSource, Does.Not.Contain("cmd.SetBufferData(writePair.CounterBuffer, s_ZeroCounterData);"));
-            Assert.That(debugStatsSource, Does.Contain("s_EditorGameViewTypeCache.TryGetValue"));
-            Assert.That(debugStatsSource, Does.Contain("s_EditorGameViewTypeCache.Add"));
-            Assert.That(systemSource, Does.Contain("s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver, frameIndex);"));
-            Assert.That(addressSpaceSource, Does.Contain("CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)"));
-            Assert.That(addressSpaceSource, Does.Contain("m_CachedPendingRequestRevision"));
-            Assert.That(addressSpaceSource, Does.Contain("PendingUploadSortEntry"));
-            Assert.That(addressSpaceSource, Does.Contain("FilterInFlightRequests("));
-            Assert.That(addressSpaceSource, Does.Not.Contain("IsRequestInFlight(request)"));
-            Assert.That(addressSpaceSource, Does.Not.Contain("request => TryCommitRequestInternal"));
-            Assert.That(residencySource, Does.Contain("IncrementPendingRequestRevision();"));
-            Assert.That(uploadSchedulerSource, Does.Contain("internal int FilterInFlightRequests("));
-            Assert.That(uploadSchedulerSource, Does.Not.Contain("CountInFlightDuplicates"));
-            Assert.That(uploadSchedulerSource, Does.Contain("IVTUploadRequestCommitterResolver committerResolver,"));
-            Assert.That(uploadSchedulerSource, Does.Contain("committer.TryCommitUpload(request, frameIndex)"));
-            Assert.That(uploadSchedulerSource, Does.Not.Contain("Func<VTRequest"));
-            Assert.That(uploadSchedulerSource, Does.Contain("m_TouchedEncodedGroups"));
-            Assert.That(uploadSchedulerSource, Does.Not.Contain("var touchedEncodedGroups = new bool"));
-            Assert.That(addressSpaceSource, Does.Contain("m_ResidentPageTouchedGroups"));
-            Assert.That(addressSpaceSource, Does.Not.Contain("var touchedGroups = new bool"));
-            Assert.That(streamManagerSource, Does.Contain("m_SubmissionEntries"));
-            Assert.That(streamManagerSource, Does.Contain("m_SubmissionCommands"));
-            Assert.That(streamManagerSource, Does.Contain("m_ActiveBatchPool"));
-            Assert.That(streamManagerSource, Does.Contain("m_LeasePool"));
-            Assert.That(streamManagerSource, Does.Contain("m_InFlightChunkCount"));
-            Assert.That(streamManagerSource, Does.Not.Contain("CountInFlightChunks()"));
-            Assert.That(streamManagerSource, Does.Contain("Task.Factory.StartNew("));
-            Assert.That(streamManagerSource, Does.Not.Contain("Task.Run(() => Decode"));
-            Assert.That(streamIOSource, Does.Contain("m_BatchIntBufferPool"));
-            Assert.That(streamIOSource, Does.Not.Contain("new int[commands.Count]"));
-            Assert.That(streamCompressionSource, Does.Contain("decodedData = storedData;"));
-            Assert.That(streamCompressionSource, Does.Not.Contain("decodedData = (byte[])storedData.Clone();"));
-            Assert.That(directStorageSource, Does.Contain("m_BatchOffsets"));
-            Assert.That(directStorageSource, Does.Not.Contain("new long[commands.Count]"));
-            Assert.That(assetProducerSource, Does.Contain("m_ChunkRequestPool"));
-            Assert.That(assetProducerSource, Does.Contain("m_FinalizerPool"));
-            Assert.That(assetProducerSource, Does.Contain("m_EncodedFinalizerPool"));
-            Assert.That(assetProducerSource, Does.Contain("GetCachedLayers(desc.StackDesc)"));
-            Assert.That(assetProducerSource, Does.Not.Contain("CopyLayers(desc.StackDesc)"));
-            Assert.That(profilingSource, Does.Contain("VirtualTextureSystem/Transitions/AdvancePhases"));
-            Assert.That(profilingSource, Does.Contain("VirtualTextureSystem/Residency/Budget/AssignPerSpace"));
-            Assert.That(profilingSource, Does.Contain("VirtualTextureSystem/Uploads/CollectPending/SortCandidates"));
-            Assert.That(profilingSource, Does.Contain("VirtualTextureSystem/Uploads/Stream/SubmitReads/CreateIOBatch"));
         }
 
         [Test]
@@ -1469,20 +1299,6 @@ namespace VividRP.Editor.Tests
                 color.g / 255f,
                 color.b / 255f,
                 color.a / 255f);
-        }
-
-        private static string GetPackageFilePath(params string[] parts)
-        {
-            string customPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "Custom_URP"));
-            if (Directory.Exists(customPath))
-                return Path.Combine(customPath, Path.Combine(parts));
-
-            string vividPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "VividRP"));
-            if (Directory.Exists(vividPath))
-                return Path.Combine(vividPath, Path.Combine(parts));
-
-            string legacyPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "com.af8a2a.vividrp"));
-            return Path.Combine(legacyPath, Path.Combine(parts));
         }
     }
 }

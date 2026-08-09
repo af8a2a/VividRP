@@ -155,8 +155,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 // LOD selection must match the main camera so meshlets do not pop between frames as
                 // cascade orientation changes. Frustum culling still uses the cascade view-projection.
-                VividGPUDrivenCullingContextUtility.BuildLODSelectionContext(
-                    m_LODCamera,
+                m_LODCamera.BuildLODSelectionContext(
                     out var lodContext);
 
                 // Phase A: cull every cascade with no render target bound. Each cascade owns its own

@@ -646,7 +646,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (sourceDescriptor != null)
             {
-                RenderGraphTextureDescUtility.Copy(sourceDescriptor, descriptor);
+                sourceDescriptor.Copy(descriptor);
             }
             else
             {

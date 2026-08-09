@@ -197,8 +197,8 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var nonJitteredProjectionMatrix = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(currentCamera);
-            var projectionMatrix = CameraProjectionMatrixUtility.GetProjectionMatrix(currentCamera);
+            var nonJitteredProjectionMatrix = currentCamera.GetNonJitteredProjectionMatrix();
+            var projectionMatrix = currentCamera.GetProjectionMatrix();
             var jitterMatrix = projectionMatrix * nonJitteredProjectionMatrix.inverse;
             var jitter = new Vector2(jitterMatrix.m03, jitterMatrix.m13);
             SetViewProjectionAndJitterMatrix(

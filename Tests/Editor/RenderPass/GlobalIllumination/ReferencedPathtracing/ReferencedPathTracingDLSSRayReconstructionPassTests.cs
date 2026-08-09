@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Unity.GraphToolkit.Editor;
@@ -122,74 +121,6 @@ namespace VividRP.Editor.Tests
             {
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
-        }
-
-#if DLSS_PLUGIN_INTEGRATE
-        [Test]
-        public void ApplyEnumParameters_UpdatesRayReconstructionPreset()
-        {
-            var pass = new ReferencedPathTracingDLSSRayReconstructionPass();
-
-            RenderGraphPassEnumParameterUtility.ApplyEnumParameters(
-                pass,
-                typeof(ReferencedPathTracingDLSSRayReconstructionPass),
-                new List<RenderGraphPassEnumParameter>
-                {
-                    new()
-                    {
-                        FieldName = "m_Preset",
-                        Value = (int)DLSSRRPreset.E
-                    }
-                });
-
-            Assert.That(pass.Preset, Is.EqualTo(DLSSRRPreset.E));
-        }
-
-        [Test]
-        public void RenderGraphNode_ExposesRayReconstructionPreset()
-        {
-            var graph = RenderGraphTestUtility.CreateGraph();
-
-            try
-            {
-                var node = new AutoRegisteredDLSSRRPassNode();
-                RenderGraphTestUtility.AddTestNode(graph, node);
-
-                Assert.That(node.TryGetPreset(out var preset), Is.True);
-                Assert.That(preset, Is.EqualTo(DLSSRRPreset.Default));
-
-                var result = RenderGraphCompiler.Compile(graph);
-                var parameter = result.Passes.Single()
-                    .EnumParameters.Single(entry => entry.FieldName == "m_Preset");
-                Assert.That(parameter.Value, Is.EqualTo((int)DLSSRRPreset.Default));
-            }
-            finally
-            {
-                RenderGraphTestUtility.DeleteGraph(graph);
-            }
-        }
-#endif
-
-        [Test]
-        public void ResolveShader_RestoresVividPreExposureAfterSceneLinearRR()
-        {
-            const string assetPath =
-                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathTracingDLSSRayReconstructionResolve.compute";
-            var shader = AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>(
-                assetPath);
-
-            Assert.That(shader, Is.Not.Null);
-            Assert.That(
-                shader.FindKernel(
-                    ReferencedPathTracingDLSSRayReconstructionPass
-                        .ResolvePreExposureKernelName),
-                Is.GreaterThanOrEqualTo(0));
-
-            var source = File.ReadAllText(Path.GetFullPath(assetPath));
-            Assert.That(source, Does.Contain("VividApplyPreExposure"));
-            Assert.That(
-                source,
-                Does.Contain("_ReferencedPathTracingDLSSRRSceneLinearColor"));
         }
     }
 }

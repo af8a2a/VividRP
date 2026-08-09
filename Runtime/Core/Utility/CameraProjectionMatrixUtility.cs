@@ -36,7 +36,7 @@ namespace VividRP.Runtime
             internal Matrix4x4 NonJitteredProjectionMatrix { get; }
         }
 
-        public static Matrix4x4 GetProjectionMatrix(Camera camera)
+        public static Matrix4x4 GetProjectionMatrix(this Camera camera)
         {
             if (camera == null)
             {
@@ -70,7 +70,7 @@ namespace VividRP.Runtime
             return BuildProjectionMatrix(camera);
         }
 
-        public static Matrix4x4 GetNonJitteredProjectionMatrix(Camera camera)
+        public static Matrix4x4 GetNonJitteredProjectionMatrix(this Camera camera)
         {
             if (camera == null)
             {
@@ -117,12 +117,12 @@ namespace VividRP.Runtime
             return camera != null && camera.cameraType == CameraType.SceneView;
         }
 
-        public static bool IsProjectionMatrixUsable(Matrix4x4 matrix)
+        public static bool IsProjectionMatrixUsable(this Matrix4x4 matrix)
         {
             return MaxAbsElement(matrix) > MatrixTolerance && MaxAbsDiff(matrix, Matrix4x4.identity) > MatrixTolerance;
         }
 
-        public static void SetProjectionMatrices(Camera camera, Matrix4x4 projectionMatrix, Matrix4x4 nonJitteredProjectionMatrix)
+        public static void SetProjectionMatrices(this Camera camera, Matrix4x4 projectionMatrix, Matrix4x4 nonJitteredProjectionMatrix)
         {
             if (camera == null)
             {
@@ -133,7 +133,7 @@ namespace VividRP.Runtime
             camera.projectionMatrix = projectionMatrix;
         }
 
-        internal static void RestoreNoJitterProjection(Camera camera, Matrix4x4 nonJitteredProjectionMatrix)
+        internal static void RestoreNoJitterProjection(this Camera camera, Matrix4x4 nonJitteredProjectionMatrix)
         {
             if (camera == null)
                 return;
@@ -147,7 +147,7 @@ namespace VividRP.Runtime
             SetProjectionMatrices(camera, nonJitteredProjectionMatrix, nonJitteredProjectionMatrix);
         }
 
-        internal static CameraProjectionState CaptureProjectionState(Camera camera)
+        internal static CameraProjectionState CaptureProjectionState(this Camera camera)
         {
             if (camera == null)
                 return default;
@@ -158,7 +158,7 @@ namespace VividRP.Runtime
                 camera.nonJitteredProjectionMatrix);
         }
 
-        internal static void RestoreProjectionState(Camera camera, in CameraProjectionState state)
+        internal static void RestoreProjectionState(this Camera camera, in CameraProjectionState state)
         {
             if (camera == null)
                 return;

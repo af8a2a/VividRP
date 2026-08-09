@@ -125,7 +125,7 @@ namespace VividRP.Editor.GPUDriven
                 EditorUtility.SetDirty(meshletRenderer);
             }
 
-            GPUDrivenMaterialProxySyncResult syncResult = GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy, sourceMaterial);
+            GPUDrivenMaterialProxySyncResult syncResult = materialProxy.SyncFromSourceMaterial(sourceMaterial);
             if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
             {
                 warnings.Add(syncResult.ErrorMessage);
@@ -223,7 +223,7 @@ namespace VividRP.Editor.GPUDriven
 
                 if (wasCreated)
                 {
-                    GPUDrivenMaterialProxySyncResult syncResult = GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy, sourceMaterial);
+                    GPUDrivenMaterialProxySyncResult syncResult = materialProxy.SyncFromSourceMaterial(sourceMaterial);
                     if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
                     {
                         warnings.Add(syncResult.ErrorMessage);
@@ -307,7 +307,7 @@ namespace VividRP.Editor.GPUDriven
                 );
             }
 
-            GPUDrivenMaterialProxySyncResult syncResult = GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy, sourceMaterial);
+            GPUDrivenMaterialProxySyncResult syncResult = materialProxy.SyncFromSourceMaterial(sourceMaterial);
             var warnings = new List<string>(syncResult.Warnings);
             uint revisionAfterSync = materialProxy.Revision;
             if (syncResult.Success
@@ -367,7 +367,7 @@ namespace VividRP.Editor.GPUDriven
                     continue;
                 }
 
-                GPUDrivenMaterialProxySyncResult syncResult = GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy, sourceMaterial);
+                GPUDrivenMaterialProxySyncResult syncResult = materialProxy.SyncFromSourceMaterial(sourceMaterial);
                 if (!syncResult.Success)
                 {
                     return new GPUDrivenMaterialProxySyncResult(false, changed, syncResult.ErrorMessage, warnings.ToArray());

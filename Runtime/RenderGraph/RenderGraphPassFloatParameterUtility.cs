@@ -14,7 +14,7 @@ namespace VividRP.Runtime
             if (passType == null)
                 yield break;
 
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateInstanceFields(passType))
+            foreach (var field in passType.EnumerateInstanceFields())
             {
                 if (!IsSerializableFloatField(field))
                     continue;
@@ -62,7 +62,7 @@ namespace VividRP.Runtime
                 if (parameter == null || string.IsNullOrEmpty(parameter.FieldName))
                     continue;
 
-                var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, parameter.FieldName);
+                var field = passType.GetInstanceField(parameter.FieldName);
                 if (!IsSerializableFloatField(field))
                     continue;
 

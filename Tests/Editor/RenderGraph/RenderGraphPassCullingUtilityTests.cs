@@ -30,7 +30,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+            var livePassIndices = passDefinitions.GetLivePassIndices();
 
             Assert.That(livePassIndices, Is.Empty);
         }
@@ -72,7 +72,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+            var livePassIndices = passDefinitions.GetLivePassIndices();
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0, 1 }));
         }
@@ -88,7 +88,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+            var livePassIndices = passDefinitions.GetLivePassIndices();
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
         }
@@ -104,7 +104,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+            var livePassIndices = passDefinitions.GetLivePassIndices();
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
         }
@@ -120,7 +120,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+            var livePassIndices = passDefinitions.GetLivePassIndices();
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
         }
@@ -147,7 +147,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+            var livePassIndices = passDefinitions.GetLivePassIndices();
 
             Assert.That(livePassIndices, Is.Empty);
         }
@@ -197,7 +197,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+            var livePassIndices = passDefinitions.GetLivePassIndices();
 
             Assert.That(livePassIndices, Is.Empty);
         }
@@ -225,7 +225,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+            var livePassIndices = passDefinitions.GetLivePassIndices();
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
         }

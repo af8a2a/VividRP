@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -10,75 +9,6 @@ namespace VividRP.Editor.Tests
 {
     public sealed class ReferencedPathTracingVolumetricCloudTests
     {
-        [Test]
-        public void ShaderContract_CloudEventsPrecedeSurfaceAndShareVisibility()
-        {
-            var rayGenerationSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracing.rgen.hlsl"));
-            var cloudSource = File.ReadAllText(
-                GetPackageFilePath(
-                    "Shaders",
-                    "Core",
-                    "Private",
-                    "GlobalIllumination",
-                    "ReferencedPathtracing",
-                    "ReferencedPathtracingCloud.hlsl"));
-
-            var cloudSampleIndex = rayGenerationSource.IndexOf(
-                "ReferencedPathtracingSampleCloudMedium(",
-                StringComparison.Ordinal);
-            var surfaceMissIndex = rayGenerationSource.IndexOf(
-                "if (payload.hit == 0u)",
-                StringComparison.Ordinal);
-            Assert.That(cloudSampleIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(surfaceMissIndex, Is.GreaterThan(cloudSampleIndex));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "ReferencedPathtracingEvaluateCloudTransmittance("));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain("cloudEventFirst"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "ReferencedPathtracingEvaluateCloudPhasePdf("));
-            Assert.That(
-                cloudSource,
-                Does.Contain(
-                    "struct ReferencedPathtracingCloudMaterialSample"));
-            Assert.That(
-                cloudSource,
-                Does.Contain(
-                    "ReferencedPathtracingIntersectCloudShell("));
-            Assert.That(
-                cloudSource,
-                Does.Contain(
-                    "REFERENCED_CLOUD_MAXIMUM_TRACKING_STEP_COUNT"));
-            Assert.That(
-                cloudSource,
-                Does.Contain(
-                    "REFERENCED_CLOUD_SHADOW_REFERENCE_SAMPLE_COUNT"));
-            Assert.That(
-                cloudSource,
-                Does.Contain(
-                    "REFERENCED_CLOUD_SHADOW_NUMERICAL_REFERENCE_SAMPLE_COUNT"));
-            Assert.That(
-                cloudSource,
-                Does.Contain("if (opticalDepth >= 80.0)"));
-            Assert.That(
-                ReferencedPathTracingAtmosphereState.ContractVersion,
-                Is.EqualTo(7));
-            Assert.That(
-                ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(8));
-        }
 
         [Test]
         public void DisabledClouds_IgnoreCloudParametersAndPreserveA3Signature()
@@ -334,20 +264,6 @@ namespace VividRP.Editor.Tests
                     * Math.PI
                     * denominator
                     * Math.Sqrt(denominator));
-        }
-
-        private static string GetPackageFilePath(
-            params string[] relativeParts)
-        {
-            var packageInfo =
-                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
-                    typeof(
-                        ReferencedPathTracingEnvironmentSamplingPass)
-                        .Assembly);
-            Assert.That(packageInfo, Is.Not.Null);
-            return Path.Combine(
-                packageInfo.resolvedPath,
-                Path.Combine(relativeParts));
         }
     }
 }

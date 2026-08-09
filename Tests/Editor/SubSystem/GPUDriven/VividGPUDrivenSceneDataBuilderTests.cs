@@ -528,6 +528,7 @@ namespace VividRP.Editor.Tests
             Mesh mesh = null;
             Material material = null;
             VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
 
             try
             {
@@ -542,9 +543,12 @@ namespace VividRP.Editor.Tests
                     new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
                     new byte[] { 0, 1, 2 }
                 );
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
 
                 gameObject = CreateMeshletRendererObject("Renderer_TrackedAsset", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
                 meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
                 VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
 
                 var sceneData = new VividGPUDrivenSceneData();
@@ -577,7 +581,76 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
-                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection);
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy);
+            }
+        }
+
+        [Test]
+        public void Build_SkipsSceneRebuild_WhenUntrackedMeshletAssetChanges()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset trackedMeshletCollection = null;
+            VividMeshletCollectionAsset untrackedMeshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("UntrackedAssetChangeMesh");
+                material = CreateTestMaterial();
+                trackedMeshletCollection = CreateMeshletCollectionAsset(
+                    "TrackedCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
+
+                gameObject = CreateMeshletRendererObject("Renderer_UntrackedAssetChange", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { trackedMeshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
+
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
+                VividInstanceData retainedInstanceData = sceneData.MutableInstances[0];
+                retainedInstanceData.Padding0 = 123u;
+                sceneData.MutableInstances[0] = retainedInstanceData;
+
+                untrackedMeshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                untrackedMeshletCollection.MarkChanged();
+
+                bool staticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    bindlessTextureContainer,
+                    out bool materialDataChanged,
+                    out bool instanceDataChanged
+                );
+
+                Assert.That(staticDataChanged, Is.False);
+                Assert.That(materialDataChanged, Is.False);
+                Assert.That(instanceDataChanged, Is.False);
+                Assert.That(sceneData.Instances[0].Padding0, Is.EqualTo(123u));
+            }
+            finally
+            {
+                DestroyTestObjects(
+                    gameObject,
+                    null,
+                    material,
+                    mesh,
+                    trackedMeshletCollection,
+                    untrackedMeshletCollection,
+                    materialProxy);
             }
         }
 

@@ -43,6 +43,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<GPUDrivenMaterialProxy> m_TrackedMaterialProxies = new();
         private readonly List<VividTerrainData> m_CurrentReferencedTerrainData = new();
         private readonly List<VividTerrainData> m_TrackedTerrainData = new();
+        private readonly List<bool> m_RendererRenderability = new();
         private readonly List<VividInstanceData> m_PreviousInstanceData = new();
         private static readonly Dictionary<Shader, bool> s_SimpleForwardShaderMatchCache = new();
         private static Shader s_SimpleForwardShader;
@@ -53,6 +54,7 @@ namespace VividRP.Runtime.GPUDriven
         private uint m_PreviousDatabaseStructureRevision;
         private uint m_PreviousDatabaseResourceRevision;
         private uint m_PreviousDatabaseInstanceRevision;
+        private uint m_PreviousMeshletAssetGlobalContentRevision;
 
         public bool Build(
             VividGPUDrivenSceneData sceneData,
@@ -106,6 +108,7 @@ namespace VividRP.Runtime.GPUDriven
             bool staticDataChanged = !m_HasBuiltStaticData;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCollectReferencesMarker.Auto())
             {
+                UpdateRendererRenderability(database);
                 CollectReferencedMeshletAssetIds(database);
                 CollectReferencedMaterialProxyIds(database);
                 CollectReferencedTerrainDataIds(database);
@@ -185,6 +188,11 @@ namespace VividRP.Runtime.GPUDriven
 
                     for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
                     {
+                        if (!m_RendererRenderability[rendererIndex])
+                        {
+                            continue;
+                        }
+
                         AppendRendererSceneData(
                             sceneData,
                             rendererData[rendererIndex],
@@ -220,6 +228,7 @@ namespace VividRP.Runtime.GPUDriven
             m_PreviousDatabaseStructureRevision = database.StructureRevision;
             m_PreviousDatabaseResourceRevision = database.ResourceRevision;
             m_PreviousDatabaseInstanceRevision = database.InstanceRevision;
+            m_PreviousMeshletAssetGlobalContentRevision = VividMeshletCollectionAsset.GlobalContentRevision;
             return staticDataChanged;
         }
 
@@ -244,6 +253,12 @@ namespace VividRP.Runtime.GPUDriven
 
         private bool HaveTrackedMeshletAssetsChanged()
         {
+            uint globalContentRevision = VividMeshletCollectionAsset.GlobalContentRevision;
+            if (m_PreviousMeshletAssetGlobalContentRevision == globalContentRevision)
+            {
+                return false;
+            }
+
             for (int assetIndex = 0; assetIndex < m_TrackedMeshletAssets.Count; assetIndex++)
             {
                 VividMeshletCollectionAsset asset = m_TrackedMeshletAssets[assetIndex];
@@ -255,6 +270,7 @@ namespace VividRP.Runtime.GPUDriven
                 }
             }
 
+            m_PreviousMeshletAssetGlobalContentRevision = globalContentRevision;
             return false;
         }
 
@@ -385,13 +401,12 @@ namespace VividRP.Runtime.GPUDriven
             m_CurrentReferencedMeshletAssetIds.Clear();
             m_CurrentReferencedMeshletAssets.Clear();
 
-            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
-            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            int rendererCount = m_RendererRenderability.Count;
 
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
-                if (!IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                if (!m_RendererRenderability[rendererIndex])
                 {
                     continue;
                 }
@@ -417,18 +432,18 @@ namespace VividRP.Runtime.GPUDriven
             m_CurrentReferencedMaterialProxies.Clear();
             m_UsesFallbackMaterials = false;
 
-            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
-            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            int rendererCount = m_RendererRenderability.Count;
 
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
-                if (!IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                VividMeshletRendererResources resources = rendererResources[rendererIndex];
+                if (resources.IsTerrain || !m_RendererRenderability[rendererIndex])
                 {
                     continue;
                 }
 
-                VividMeshletCollectionAsset[] meshletCollections = rendererResources[rendererIndex].MeshletCollections;
+                VividMeshletCollectionAsset[] meshletCollections = resources.MeshletCollections;
                 for (int subMeshIndex = 0; subMeshIndex < meshletCollections.Length; subMeshIndex++)
                 {
                     if (meshletCollections[subMeshIndex] == null)
@@ -436,15 +451,11 @@ namespace VividRP.Runtime.GPUDriven
                         continue;
                     }
 
-                    GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(rendererResources[rendererIndex].MaterialProxies, subMeshIndex);
+                    GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(resources.MaterialProxies, subMeshIndex);
                     if (materialProxy != null)
                     {
                         if (m_CurrentReferencedMaterialProxyIds.Add(materialProxy.GetEntityId()))
                             m_CurrentReferencedMaterialProxies.Add(materialProxy);
-                    }
-                    else if (rendererResources[rendererIndex].IsTerrain)
-                    {
-                        continue;
                     }
                     else
                     {
@@ -477,13 +488,12 @@ namespace VividRP.Runtime.GPUDriven
             m_CurrentReferencedTerrainDataIds.Clear();
             m_CurrentReferencedTerrainData.Clear();
 
-            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
-            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            int rendererCount = m_RendererRenderability.Count;
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
                 VividMeshletRendererResources resources = rendererResources[rendererIndex];
-                if (!resources.IsTerrain || !IsRenderable(rendererData[rendererIndex], resources))
+                if (!resources.IsTerrain || !m_RendererRenderability[rendererIndex])
                 {
                     continue;
                 }
@@ -522,13 +532,12 @@ namespace VividRP.Runtime.GPUDriven
 
         private bool HasTrackedMeshletAssetVersionChanges(VividMeshletRendererDatabase database)
         {
-            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
-            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            int rendererCount = m_RendererRenderability.Count;
 
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
-                if (!IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                if (!m_RendererRenderability[rendererIndex])
                 {
                     continue;
                 }
@@ -556,18 +565,18 @@ namespace VividRP.Runtime.GPUDriven
 
         private bool HasTrackedMaterialProxyVersionChanges(VividMeshletRendererDatabase database)
         {
-            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
-            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            int rendererCount = m_RendererRenderability.Count;
 
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
-                if (!IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                VividMeshletRendererResources resources = rendererResources[rendererIndex];
+                if (resources.IsTerrain || !m_RendererRenderability[rendererIndex])
                 {
                     continue;
                 }
 
-                VividMeshletCollectionAsset[] meshletCollections = rendererResources[rendererIndex].MeshletCollections;
+                VividMeshletCollectionAsset[] meshletCollections = resources.MeshletCollections;
                 for (int subMeshIndex = 0; subMeshIndex < meshletCollections.Length; subMeshIndex++)
                 {
                     if (meshletCollections[subMeshIndex] == null)
@@ -575,7 +584,7 @@ namespace VividRP.Runtime.GPUDriven
                         continue;
                     }
 
-                    GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(rendererResources[rendererIndex].MaterialProxies, subMeshIndex);
+                    GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(resources.MaterialProxies, subMeshIndex);
                     if (materialProxy == null)
                     {
                         continue;
@@ -595,14 +604,13 @@ namespace VividRP.Runtime.GPUDriven
 
         private bool HasTrackedTerrainMaterialVersionChanges(VividMeshletRendererDatabase database)
         {
-            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
-            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            int rendererCount = m_RendererRenderability.Count;
 
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
                 VividMeshletRendererResources resources = rendererResources[rendererIndex];
-                if (!resources.IsTerrain || !IsRenderable(rendererData[rendererIndex], resources))
+                if (!resources.IsTerrain || !m_RendererRenderability[rendererIndex])
                 {
                     continue;
                 }
@@ -632,11 +640,6 @@ namespace VividRP.Runtime.GPUDriven
             IGPUDrivenTextureBackend textureBackend
         )
         {
-            if (!IsRenderable(trackedData, trackedResources))
-            {
-                return;
-            }
-
             int subMeshCount = trackedResources.MeshletCollections.Length;
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
             {
@@ -671,6 +674,19 @@ namespace VividRP.Runtime.GPUDriven
                         meshMetadata,
                         localBounds),
                     meshMetadata.MaxVisibleMeshletRenderRequestCount);
+            }
+        }
+
+        private void UpdateRendererRenderability(VividMeshletRendererDatabase database)
+        {
+            m_RendererRenderability.Clear();
+
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+            IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                m_RendererRenderability.Add(IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]));
             }
         }
 

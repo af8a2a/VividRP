@@ -1,11 +1,15 @@
 using System;
 using UnityEngine;
 using UnityEngine.Serialization;
+using Unity.Scripting.LifecycleManagement;
 
 namespace VividRP.Runtime.GPUDriven.Meshlets
 {
     public class VividMeshletCollectionAsset : ScriptableObject, ISerializationCallbackReceiver
     {
+        [NoAutoStaticsCleanup]
+        private static uint s_GlobalContentRevision = 1u;
+
         [SerializeField, HideInInspector] private uint m_ContentVersion = 1u;
         [SerializeField, HideInInspector] private uint m_MeshDataSerializationVersion = VividMeshletCollectionBinarySerializer.CurrentVersion;
         [SerializeField, HideInInspector] private byte[] m_MeshDataBlob = Array.Empty<byte>();
@@ -100,6 +104,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         public uint ContentVersion => m_ContentVersion;
 
+        internal static uint GlobalContentRevision => s_GlobalContentRevision;
+
         public void SetMeshData(
             int[] meshLODLevelNodeCounts,
             VividMeshLODNode[] meshLODNodes,
@@ -117,10 +123,13 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         public void MarkChanged()
         {
-            unchecked
-            {
-                m_ContentVersion = m_ContentVersion == uint.MaxValue ? 1u : m_ContentVersion + 1u;
-            }
+            m_ContentVersion = IncrementRevision(m_ContentVersion);
+            s_GlobalContentRevision = IncrementRevision(s_GlobalContentRevision);
+        }
+
+        private static uint IncrementRevision(uint revision)
+        {
+            return revision == uint.MaxValue ? 1u : revision + 1u;
         }
 
         void ISerializationCallbackReceiver.OnBeforeSerialize()
@@ -235,5 +244,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             MarkChanged();
         }
 #endif
+
+        private void OnDestroy()
+        {
+            s_GlobalContentRevision = IncrementRevision(s_GlobalContentRevision);
+        }
     }
 }

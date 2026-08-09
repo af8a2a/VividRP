@@ -224,7 +224,9 @@ namespace VividRP.Runtime.GPUDriven
             if (cullingSphereWS.w <= 0.0f)
                 return float4.zero;
 
-            Vector3 centerLS = viewMatrix.MultiplyPoint3x4(cullingSphereWS);
+            // LightSphereCulling transforms caster centers with the view rotation only.
+            // Keep the receiver center in the same translation-free space.
+            Vector3 centerLS = viewMatrix.MultiplyVector(cullingSphereWS);
             return new float4(centerLS.x, centerLS.y, centerLS.z, cullingSphereWS.w);
         }
 

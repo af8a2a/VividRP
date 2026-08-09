@@ -16,7 +16,7 @@ Shader "VividRP/Material/StandardLit"
         [SubEnum(SurfaceInputs, Specular, 0, Metallic, 1)] _WorkflowMode("Workflow Mode", Float) = 1.0
         [MainTexture] [Tex(SurfaceInputs, _BaseColor)] _BaseMap("Albedo", 2D) = "white" {}
         [HideInInspector] [MainColor] _BaseColor("Color", Color) = (1, 1, 1, 1)
-        [Sub(SurfaceInputs)] _OpacityMap("Opacity Map", 2D) = "white" {}
+        [Sub(SurfaceInputs)][Tex] _OpacityMap("Opacity Map", 2D) = "white" {}
         [Sub(SurfaceInputs)] _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.5
         [SubEnum(SurfaceInputs, Metallic Alpha, 0, Albedo Alpha, 1)] _SmoothnessTextureChannel("Smoothness Source", Float) = 0.0

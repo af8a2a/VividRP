@@ -168,7 +168,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Build_TransformsCullingSphereIntoViewSpace_WhenProvided()
+        public void Build_TransformsCullingSphereWithViewRotationOnly_WhenProvided()
         {
             var viewMatrix = Matrix4x4.TRS(
                 new Vector3(2.0f, 3.0f, 4.0f),
@@ -191,7 +191,7 @@ namespace VividRP.Editor.Tests
                 out VividGPUCullingContext cullingContext,
                 out _);
 
-            Vector3 expectedCenterLS = viewMatrix.MultiplyPoint3x4(cullingSphereWS);
+            Vector3 expectedCenterLS = viewMatrix.MultiplyVector(cullingSphereWS);
             Assert.That(cullingContext.CullingSphereLS.x, Is.EqualTo(expectedCenterLS.x).Within(0.0001f));
             Assert.That(cullingContext.CullingSphereLS.y, Is.EqualTo(expectedCenterLS.y).Within(0.0001f));
             Assert.That(cullingContext.CullingSphereLS.z, Is.EqualTo(expectedCenterLS.z).Within(0.0001f));

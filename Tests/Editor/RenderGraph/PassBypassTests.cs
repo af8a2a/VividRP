@@ -284,31 +284,6 @@ namespace VividRP.Editor.Tests
         }
     }
 
-    public sealed class PassBypassValidatorTests
-    {
-        [Test]
-        public void Validator_DetectsBypassOutputBoundToHistoryCurrent()
-        {
-            var graph = new RenderGraphEditorGraph();
-            var passNode = new HistoryCurrentBypassPassNode();
-            var historyNode = new HistoryResourceNodeData();
-            graph.AddNode(passNode);
-            graph.AddNode(historyNode);
-            graph.Connect(
-                historyNode.GetOutputPortByName(HistoryResourceNodeData.CurrentOutputPortName),
-                passNode.GetInputPortByName($"{HistoryCurrentBypassPass.OutputFieldName}_In"));
-
-            var field = typeof(HistoryCurrentBypassPass).GetField(
-                HistoryCurrentBypassPass.OutputFieldName,
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            var attr = field.GetCustomAttribute<RenderGraphResource>();
-
-            Assert.That(
-                RenderGraphEditorValidator.IsBypassFieldBoundToHistoryCurrent(passNode, field, attr),
-                Is.True);
-        }
-    }
-
     public sealed class TextureBypassPass : ComputePass
     {
         internal const string SourceFieldName = "m_Source";
@@ -408,33 +383,6 @@ namespace VividRP.Editor.Tests
         private RenderGraphRenderList m_Output = new();
 
         internal const string OutputFieldName = "m_Output";
-    }
-
-    public sealed class HistoryCurrentBypassPass : ComputePass
-    {
-        internal const string OutputFieldName = "m_Output";
-
-        [RenderGraphResource(Access = AccessFlags.Read)]
-        private RenderGraphTexture m_Source = RenderGraphTexture.CreateInput(
-            "Source",
-            GraphicsFormat.R8G8B8A8_UNorm);
-
-        [RenderGraphResource(Access = AccessFlags.ReadWrite)]
-        [PassBypass(nameof(m_Source))]
-        private RenderGraphTexture m_Output = RenderGraphTexture.CreateOutput(
-            "Output",
-            GraphicsFormat.R8G8B8A8_UNorm);
-
-        public override void Create() { }
-        public override void Prepare(ContextContainer frameData) { }
-        public override void Record(ComputePassContext context) { }
-        public override void Dispose() { }
-    }
-
-    [Serializable]
-    internal sealed class HistoryCurrentBypassPassNode : RenderPassNodeData
-    {
-        internal override Type GetRegisteredPassType() => typeof(HistoryCurrentBypassPass);
     }
 
     internal static class PassBypassTestUtility

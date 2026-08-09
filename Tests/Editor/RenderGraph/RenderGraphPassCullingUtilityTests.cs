@@ -202,34 +202,6 @@ namespace VividRP.Editor.Tests
             Assert.That(livePassIndices, Is.Empty);
         }
 
-        [Test]
-        public void GetLivePassIndices_PreservesHistoryCurrentWriter_WhenNoSameFrameConsumerExists()
-        {
-            var passDefinitions = new List<RenderGraphPassDefinition>
-            {
-                new()
-                {
-                    PassType = GetPassTypeName<TemporalAAPass>(),
-                    ResourceBindings =
-                    {
-                        new RenderGraphPassResourceBinding
-                        {
-                            FieldName = "m_HistoryColorCurrent",
-                            ResourceKind = RenderGraphResourceKind.Texture,
-                            ResourceIndex = 0,
-                            ResourceBindingVariant = RenderGraphResourceBindingVariant.HistoryCurrent,
-                            SourceKind = RenderGraphPassBindingSourceKind.Resource,
-                            ConnectionKind = RenderGraphPassBindingConnectionKind.Output,
-                        }
-                    }
-                }
-            };
-
-            var livePassIndices = passDefinitions.GetLivePassIndices();
-
-            Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
-        }
-
         private static string GetPassTypeName<T>()
         {
             var type = typeof(T);

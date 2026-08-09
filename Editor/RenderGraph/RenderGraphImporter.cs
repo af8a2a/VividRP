@@ -63,7 +63,6 @@ namespace VividRP.Editor.RenderGraph
     internal sealed class RenderGraphCompilationResult
     {
         internal List<RenderGraphTextureDesc> TextureDescriptors { get; } = new List<RenderGraphTextureDesc>();
-        internal List<RenderGraphTextureDesc> HistoryTextureDescriptors { get; } = new List<RenderGraphTextureDesc>();
         internal List<RenderGraphBufferDesc> BufferDescriptors { get; } = new List<RenderGraphBufferDesc>();
         internal List<RenderGraphRenderListDesc> RenderListDescriptors { get; } = new List<RenderGraphRenderListDesc>();
         internal List<RenderGraphAccelerationStructureDesc> AccelerationStructureDescriptors { get; } = new List<RenderGraphAccelerationStructureDesc>();
@@ -76,14 +75,12 @@ namespace VividRP.Editor.RenderGraph
                 return;
 
             runtimeAsset.TextureDescriptors.Clear();
-            runtimeAsset.HistoryTextureDescriptors.Clear();
             runtimeAsset.BufferDescriptors.Clear();
             runtimeAsset.RenderListDescriptors.Clear();
             runtimeAsset.AccelerationStructureDescriptors.Clear();
             runtimeAsset.Passes.Clear();
 
             runtimeAsset.TextureDescriptors.AddRange(TextureDescriptors);
-            runtimeAsset.HistoryTextureDescriptors.AddRange(HistoryTextureDescriptors);
             runtimeAsset.BufferDescriptors.AddRange(BufferDescriptors);
             runtimeAsset.RenderListDescriptors.AddRange(RenderListDescriptors);
             runtimeAsset.AccelerationStructureDescriptors.AddRange(AccelerationStructureDescriptors);
@@ -101,7 +98,6 @@ namespace VividRP.Editor.RenderGraph
 
             var flattenedGraph = RenderGraphSubSystemCompilationUtility.Flatten(graph);
             var textureNodeToIndex = new Dictionary<TextureResourceNodeData, int>();
-            var historyNodeToIndex = new Dictionary<HistoryResourceNodeData, int>();
             var bufferNodeToIndex = new Dictionary<BufferResourceNodeData, int>();
             var renderListNodeToIndex = new Dictionary<RenderListResourceNodeData, int>();
             var accelerationStructureNodeToIndex = new Dictionary<AccelerationStructureResourceNodeData, int>();
@@ -127,13 +123,6 @@ namespace VividRP.Editor.RenderGraph
                 textureNodeToIndex.Add(textureNode, index);
                 result.TextureDescriptors.Add(textureNode.GetDescriptor());
                 AddPortBindingIndex(texturePortToIndex, textureNode.GetOutputPortByName(TextureResourceNodeData.OutputPortName), index);
-            }
-
-            foreach (var historyNode in flattenedGraph.HistoryNodes)
-            {
-                var index = result.HistoryTextureDescriptors.Count;
-                historyNodeToIndex.Add(historyNode, index);
-                result.HistoryTextureDescriptors.Add(historyNode.GetDescriptor());
             }
 
             foreach (var bufferNode in flattenedGraph.BufferNodes)
@@ -200,19 +189,6 @@ namespace VividRP.Editor.RenderGraph
                     var connectionKind = GetConnectionKind(inputConnectedPort, outputConnectedPort);
                     var inputResourceNode = GetBindableResourceNode(field.FieldType, inputConnectedPort);
                     var outputResourceNode = GetBindableResourceNode(field.FieldType, outputConnectedPort);
-
-                    if (field.FieldType == typeof(RenderGraphTexture)
-                        && TryAddHistoryTextureBinding(
-                            passDefinition,
-                            field.Name,
-                            attr.Access,
-                            inputConnectedPort,
-                            outputConnectedPort,
-                            connectionKind,
-                            historyNodeToIndex))
-                    {
-                        continue;
-                    }
 
                     if (inputResourceNode != null && outputResourceNode != null && inputResourceNode != outputResourceNode)
                     {
@@ -430,103 +406,6 @@ namespace VividRP.Editor.RenderGraph
         private static string GetPassDisplayName(RenderPassNodeData passNode, string fallbackName)
         {
             return passNode?.GetAuthoredPassName(fallbackName) ?? fallbackName;
-        }
-
-        private static bool TryAddHistoryTextureBinding(
-            RenderGraphPassDefinition passDef,
-            string targetFieldName,
-            AccessFlags access,
-            IPort inputConnectedPort,
-            IPort outputConnectedPort,
-            RenderGraphPassBindingConnectionKind connectionKind,
-            IReadOnlyDictionary<HistoryResourceNodeData, int> historyNodeToIndex)
-        {
-            var hasInputHistory = TryGetHistoryBindingReference(
-                inputConnectedPort,
-                historyNodeToIndex,
-                out var inputHistoryIndex,
-                out var inputVariant);
-            var hasOutputHistory = TryGetHistoryBindingReference(
-                outputConnectedPort,
-                historyNodeToIndex,
-                out var outputHistoryIndex,
-                out var outputVariant);
-
-            if (!hasInputHistory && !hasOutputHistory)
-                return false;
-
-            var canRead = RenderPassPortUtility.CanRead(access);
-            var canWrite = RenderPassPortUtility.CanWrite(access);
-
-            if (canRead && canWrite)
-            {
-                if (hasInputHistory
-                    && outputConnectedPort == null
-                    && inputVariant == RenderGraphResourceBindingVariant.HistoryCurrent)
-                {
-                    passDef.ResourceBindings.Add(new RenderGraphPassResourceBinding
-                    {
-                        FieldName = targetFieldName,
-                        ResourceKind = RenderGraphResourceKind.Texture,
-                        ResourceIndex = inputHistoryIndex,
-                        ResourceBindingVariant = RenderGraphResourceBindingVariant.HistoryCurrent,
-                        SourceKind = RenderGraphPassBindingSourceKind.Resource,
-                        ConnectionKind = connectionKind,
-                    });
-                }
-
-                return true;
-            }
-
-            if (canRead && hasInputHistory)
-            {
-                passDef.ResourceBindings.Add(new RenderGraphPassResourceBinding
-                {
-                    FieldName = targetFieldName,
-                    ResourceKind = RenderGraphResourceKind.Texture,
-                    ResourceIndex = inputHistoryIndex,
-                    ResourceBindingVariant = inputVariant,
-                    SourceKind = RenderGraphPassBindingSourceKind.Resource,
-                    ConnectionKind = connectionKind,
-                });
-                return true;
-            }
-
-            if (canWrite && (hasInputHistory || hasOutputHistory))
-                return true;
-
-            return true;
-        }
-
-        private static bool TryGetHistoryBindingReference(
-            IPort connectedPort,
-            IReadOnlyDictionary<HistoryResourceNodeData, int> historyNodeToIndex,
-            out int historyIndex,
-            out RenderGraphResourceBindingVariant variant)
-        {
-            historyIndex = -1;
-            variant = RenderGraphResourceBindingVariant.Default;
-
-            if (connectedPort?.GetNode() is not HistoryResourceNodeData historyNode)
-                return false;
-
-            if (!historyNodeToIndex.TryGetValue(historyNode, out historyIndex))
-                return false;
-
-            if (historyNode.IsPreviousOutputPort(connectedPort))
-            {
-                variant = RenderGraphResourceBindingVariant.HistoryPrevious;
-                return true;
-            }
-
-            if (historyNode.IsCurrentOutputPort(connectedPort))
-            {
-                variant = RenderGraphResourceBindingVariant.HistoryCurrent;
-                return true;
-            }
-
-            historyIndex = -1;
-            return false;
         }
 
         private static bool TryAddStandaloneResourceBinding(

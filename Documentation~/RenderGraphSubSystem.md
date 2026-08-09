@@ -60,7 +60,6 @@
 - `BufferResourceNodeData`
 - `RenderListResourceNodeData`
 - `AccelerationStructureResourceNodeData`
-- `HistoryResourceNodeData`
 
 ### 3. 定义显式输入/输出
 
@@ -121,12 +120,6 @@ Main Pass A
         -> OutputColor
     -> Main Pass B
 ```
-
-## History 资源说明
-
-- `HistoryResourceNodeData` 可以作为 `SubSystem` 内部私有实现存在
-- 跨 `SubSystem` 边界时，不提供专门的 `Prev / Curr` 端口语义
-- 如果把 history 相关结果暴露到外部，它只按普通 `RenderGraphTexture` 处理
 
 ## 导入与运行时行为
 

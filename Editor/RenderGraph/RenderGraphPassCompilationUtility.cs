@@ -115,9 +115,6 @@ namespace VividRP.Editor.RenderGraph
                 if (!RenderGraphPassBindingUtility.ConsumesExistingState(binding, access))
                     continue;
 
-                if (binding.ResourceBindingVariant == RenderGraphResourceBindingVariant.HistoryPrevious)
-                    continue;
-
                 for (var otherPassIndex = 0; otherPassIndex < passDefinitions.Count; otherPassIndex++)
                 {
                     if (otherPassIndex == passIndex)
@@ -133,8 +130,7 @@ namespace VividRP.Editor.RenderGraph
                             continue;
 
                         if (otherBinding.ResourceKind != binding.ResourceKind
-                            || otherBinding.ResourceIndex != binding.ResourceIndex
-                            || otherBinding.ResourceBindingVariant != binding.ResourceBindingVariant)
+                            || otherBinding.ResourceIndex != binding.ResourceIndex)
                         {
                             continue;
                         }
@@ -338,7 +334,6 @@ namespace VividRP.Editor.RenderGraph
                     FieldName = binding.FieldName,
                     ResourceKind = binding.ResourceKind,
                     ResourceIndex = binding.ResourceIndex,
-                    ResourceBindingVariant = binding.ResourceBindingVariant,
                     SourceKind = binding.SourceKind,
                     ConnectionKind = binding.ConnectionKind,
                     SourcePassIndex = binding.SourcePassIndex,

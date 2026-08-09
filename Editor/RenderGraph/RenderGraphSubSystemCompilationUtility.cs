@@ -167,7 +167,6 @@ namespace VividRP.Editor.RenderGraph
         internal RenderGraphCompilationScope RootScope { get; }
         internal List<RenderPassNodeData> PassNodes { get; } = new();
         internal List<TextureResourceNodeData> TextureNodes { get; } = new();
-        internal List<HistoryResourceNodeData> HistoryNodes { get; } = new();
         internal List<BufferResourceNodeData> BufferNodes { get; } = new();
         internal List<RenderListResourceNodeData> RenderListNodes { get; } = new();
         internal List<AccelerationStructureResourceNodeData> AccelerationStructureNodes { get; } = new();
@@ -214,10 +213,6 @@ namespace VividRP.Editor.RenderGraph
                     case TextureResourceNodeData textureNode:
                         flattenedGraph.TextureNodes.Add(textureNode);
                         flattenedGraph.m_NodeScopes[textureNode] = scope;
-                        break;
-                    case HistoryResourceNodeData historyNode:
-                        flattenedGraph.HistoryNodes.Add(historyNode);
-                        flattenedGraph.m_NodeScopes[historyNode] = scope;
                         break;
                     case BufferResourceNodeData bufferNode:
                         flattenedGraph.BufferNodes.Add(bufferNode);

@@ -30,7 +30,7 @@ namespace VividRP.Runtime
             var stack = new Stack<int>();
             for (var i = 0; i < passDefinitions.Count; i++)
             {
-                if (!IsLiveRoot(passDefinitions[i], passTypes[i]))
+                if (!IsLiveRoot(passTypes[i]))
                     continue;
 
                 live[i] = true;
@@ -60,9 +60,7 @@ namespace VividRP.Runtime
             return liveIndices;
         }
 
-        private static bool IsLiveRoot(
-            RenderGraphPassDefinition passDefinition,
-            Type passType)
+        private static bool IsLiveRoot(Type passType)
         {
             if (passType == null)
                 return true;
@@ -92,36 +90,6 @@ namespace VividRP.Runtime
 
             if (!hasWritableResource)
                 return !hasTransientWritableResource;
-
-            return HasHistoryCurrentWrite(passDefinition, passType);
-        }
-
-        private static bool HasHistoryCurrentWrite(RenderGraphPassDefinition passDefinition, Type passType)
-        {
-            if (passDefinition?.ResourceBindings == null || passType == null)
-                return false;
-
-            foreach (var binding in passDefinition.ResourceBindings)
-            {
-                if (binding == null
-                    || binding.ResourceBindingVariant != RenderGraphResourceBindingVariant.HistoryCurrent
-                    || string.IsNullOrEmpty(binding.FieldName))
-                {
-                    continue;
-                }
-
-                var field = passType.GetInstanceField(binding.FieldName);
-                var attr = field?.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null)
-                    continue;
-
-                if (field.IsDeclaredTransientResourceField())
-                    continue;
-
-                var effectiveAccess = RenderGraphPassBindingUtility.ResolveEffectiveAccess(binding, attr.Access);
-                if (CanWrite(effectiveAccess))
-                    return true;
-            }
 
             return false;
         }
@@ -167,9 +135,6 @@ namespace VividRP.Runtime
                 if (!RenderGraphPassBindingUtility.ConsumesExistingState(binding, access))
                     continue;
 
-                if (binding.ResourceBindingVariant == RenderGraphResourceBindingVariant.HistoryPrevious)
-                    continue;
-
                 for (var otherPassIndex = 0; otherPassIndex < passDefinitions.Count; otherPassIndex++)
                 {
                     if (otherPassIndex == passIndex)
@@ -185,8 +150,7 @@ namespace VividRP.Runtime
                             continue;
 
                         if (otherBinding.ResourceKind != binding.ResourceKind
-                            || otherBinding.ResourceIndex != binding.ResourceIndex
-                            || otherBinding.ResourceBindingVariant != binding.ResourceBindingVariant)
+                            || otherBinding.ResourceIndex != binding.ResourceIndex)
                         {
                             continue;
                         }

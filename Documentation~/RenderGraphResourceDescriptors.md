@@ -80,10 +80,9 @@ All resource and pass nodes have been updated to use the new descriptor system:
 - Descriptor is initialized with `CreateStructured(1, 4)`
 - Port stores reference to the descriptor
 
-**HistoryTextureNodeData**
-- Uses `RenderGraphTextureDesc` with `TextureSizeMode` support
-- Both Current and History ports reference the same descriptor
-- Resolves size based on camera or explicit dimensions
+**CameraHistoryTexture**
+- Persistent texture history is managed per camera at runtime instead of through a graph resource node
+- `CameraHistoryRenderGraphBridge` converts `RenderGraphTextureDesc` values and imports the requested history frame
 
 **HistoryBufferNodeData**
 - Uses `RenderGraphBufferDesc`

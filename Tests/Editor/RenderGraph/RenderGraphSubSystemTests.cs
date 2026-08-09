@@ -182,14 +182,12 @@ namespace VividRP.Editor.Tests
                 var bufferNode = new BufferResourceNodeData();
                 var renderListNode = new RenderListResourceNodeData();
                 var accelerationStructureNode = new AccelerationStructureResourceNodeData();
-                var historyNode = new HistoryResourceNodeData();
                 var consumerNode = new PrivateResourcesConsumerPassNode();
 
                 subSystemGraph.AddNode(textureNode);
                 subSystemGraph.AddNode(bufferNode);
                 subSystemGraph.AddNode(renderListNode);
                 subSystemGraph.AddNode(accelerationStructureNode);
-                subSystemGraph.AddNode(historyNode);
                 RenderGraphTestUtility.AddTestNode(subSystemGraph, consumerNode);
 
                 Assert.That(subSystemGraph.Connect(
@@ -208,16 +206,10 @@ namespace VividRP.Editor.Tests
                     accelerationStructureNode.GetOutputPortByName(AccelerationStructureResourceNodeData.OutputPortName),
                     consumerNode.GetInputPortByName(PrivateResourcesConsumerPass.AccelerationStructureFieldName)),
                     Is.True);
-                Assert.That(subSystemGraph.Connect(
-                    historyNode.GetOutputPortByName(HistoryResourceNodeData.PreviousOutputPortName),
-                    consumerNode.GetInputPortByName(PrivateResourcesConsumerPass.HistoryFieldName)),
-                    Is.True);
-
                 var result = RenderGraphCompiler.Compile(graph);
 
                 Assert.That(result.Passes, Has.Count.EqualTo(1));
                 Assert.That(result.TextureDescriptors, Has.Count.EqualTo(1));
-                Assert.That(result.HistoryTextureDescriptors, Has.Count.EqualTo(1));
                 Assert.That(result.BufferDescriptors, Has.Count.EqualTo(1));
                 Assert.That(result.RenderListDescriptors, Has.Count.EqualTo(1));
                 Assert.That(result.AccelerationStructureDescriptors, Has.Count.EqualTo(1));
@@ -440,7 +432,6 @@ namespace VividRP.Editor.Tests
         internal const string BufferFieldName = "m_Buffer";
         internal const string RenderListFieldName = "m_RenderList";
         internal const string AccelerationStructureFieldName = "m_AccelerationStructure";
-        internal const string HistoryFieldName = "m_HistoryTexture";
 
         [RenderGraphResource(Name = "Texture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Texture = new RenderGraphTexture();
@@ -453,9 +444,6 @@ namespace VividRP.Editor.Tests
 
         [RenderGraphResource(Name = "AccelerationStructure", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_AccelerationStructure = new RenderGraphAccelerationStructure();
-
-        [RenderGraphResource(Name = "History", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_HistoryTexture = new RenderGraphTexture();
 
         public override void Create()
         {

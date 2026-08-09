@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Unity.GraphToolkit.Editor;
-using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
@@ -88,10 +87,8 @@ namespace VividRP.Editor.RenderGraph
                 ValidateTransientResourceFields(passNode, passType, reporter, ref summary);
                 ValidatePassBypassFields(passNode, passType, reporter, ref summary);
                 ValidateReadWriteBindings(passNode, passType, reporter, ref summary);
-                ValidateHistoryBindings(passNode, passType, reporter, ref summary);
             }
 
-            ValidateHistoryResourceNodes(graph, reporter, ref summary);
             ValidateSubSystemInterfaceVariables(graph, reporter, ref summary);
 
             ValidateSubgraphNodes(graph, reporter, summarizeChildSubgraphs, ref summary);
@@ -169,45 +166,7 @@ namespace VividRP.Editor.RenderGraph
                     continue;
                 }
 
-                if (IsBypassFieldBoundToHistoryCurrent(passNode, field, attr))
-                {
-                    reporter.LogError(
-                        $"Field '{field.Name}' cannot use {nameof(PassBypassAttribute)} while bound to CurrOut on a history node.",
-                        passNode);
-                    summary.ErrorCount++;
-                }
             }
-        }
-
-        internal static bool IsBypassFieldBoundToHistoryCurrent(
-            RenderPassNodeData passNode,
-            FieldInfo field,
-            RenderGraphResource attr)
-        {
-            if (passNode == null || field == null || attr == null || field.FieldType != typeof(RenderGraphTexture))
-                return false;
-
-            var inputPortName = passNode.GetInputPortName(field, attr);
-            var outputPortName = RenderPassPortUtility.GetOutputPortName(
-                field.Name,
-                attr.Access,
-                attr.BindingMode,
-                attr.AllowWriteOnlyInput);
-            var inputConnectedPort = string.IsNullOrEmpty(inputPortName)
-                ? null
-                : passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort;
-            var outputConnectedPort = string.IsNullOrEmpty(outputPortName)
-                ? null
-                : passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort;
-
-            return IsHistoryCurrentOutput(inputConnectedPort)
-                   || IsHistoryCurrentOutput(outputConnectedPort);
-        }
-
-        private static bool IsHistoryCurrentOutput(IPort connectedPort)
-        {
-            return connectedPort?.GetNode() is HistoryResourceNodeData historyNode
-                   && historyNode.IsCurrentOutputPort(connectedPort);
         }
 
         private static void ValidateReadWriteBindings(
@@ -317,72 +276,6 @@ namespace VividRP.Editor.RenderGraph
                 $"Async Compute can only be enabled on {nameof(ComputePass)} or {nameof(UnsafePass)} types that implement {nameof(IAsyncComputeSupportedPass)}. Disable Async Compute or reselect a supported pass.",
                 passNode);
             summary.ErrorCount++;
-        }
-
-        private static void ValidateHistoryBindings(
-            RenderPassNodeData passNode,
-            System.Type passType,
-            IRenderGraphValidationReporter reporter,
-            ref ValidationSummary summary)
-        {
-            foreach (var field in passType.EnumerateRenderGraphResourceFields())
-            {
-                var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (field.FieldType != typeof(RenderGraphTexture))
-                    continue;
-
-                var inputPortName = passNode.GetInputPortName(field, attr);
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(
-                    field.Name,
-                    attr.Access,
-                    attr.BindingMode,
-                    attr.AllowWriteOnlyInput);
-                var inputConnectedPort = string.IsNullOrEmpty(inputPortName)
-                    ? null
-                    : passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort;
-                var outputConnectedPort = string.IsNullOrEmpty(outputPortName)
-                    ? null
-                    : passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort;
-                var inputHistoryNode = inputConnectedPort?.GetNode() as HistoryResourceNodeData;
-                var outputHistoryNode = outputConnectedPort?.GetNode() as HistoryResourceNodeData;
-
-                if (inputHistoryNode == null && outputHistoryNode == null)
-                    continue;
-
-                var canRead = RenderPassPortUtility.CanRead(attr.Access);
-                var canWrite = RenderPassPortUtility.CanWrite(attr.Access);
-
-                if (canRead && canWrite)
-                {
-                    var isValidCurrentHistoryBinding = inputHistoryNode != null
-                        && outputConnectedPort == null
-                        && inputHistoryNode.IsCurrentOutputPort(inputConnectedPort);
-
-                    if (!isValidCurrentHistoryBinding)
-                    {
-                        reporter.LogError(
-                            $"Read/write field '{field.Name}' must connect only its input port to CurrOut on a history node and leave the output port unconnected.",
-                            passNode);
-                        summary.ErrorCount++;
-                    }
-
-                    continue;
-                }
-
-                if (canRead && inputHistoryNode != null && !inputHistoryNode.IsPreviousOutputPort(inputConnectedPort) && !inputHistoryNode.IsCurrentOutputPort(inputConnectedPort))
-                {
-                    reporter.LogError($"Read field '{field.Name}' must connect to PrevOut or CurrOut on a history node.", passNode);
-                    summary.ErrorCount++;
-                }
-
-                if (canWrite && (inputHistoryNode != null || outputHistoryNode != null))
-                {
-                    reporter.LogError(
-                        $"Write-only field '{field.Name}' cannot bind directly to a history node. Use a ReadWrite field and connect its input port to CurrOut instead.",
-                        passNode);
-                    summary.ErrorCount++;
-                }
-            }
         }
 
         private static void ValidateSubSystemInterfaceVariables(
@@ -509,22 +402,6 @@ namespace VividRP.Editor.RenderGraph
                    || node is AccelerationStructureResourceNodeData;
         }
 
-        private static void ValidateHistoryResourceNodes(
-            RenderGraphEditorGraph graph,
-            IRenderGraphValidationReporter reporter,
-            ref ValidationSummary summary)
-        {
-            foreach (var historyNode in graph.GetNodes().OfType<HistoryResourceNodeData>())
-            {
-                var desc = historyNode.GetDescriptor();
-                if (desc == null || desc.ColorFormat == GraphicsFormat.None)
-                {
-                    reporter.LogError("History resource requires a valid color format.", historyNode);
-                    summary.ErrorCount++;
-                }
-            }
-        }
-
         internal static bool IsAsyncComputeConfigurationValid(System.Type passType, bool enableAsyncCompute)
         {
             return !enableAsyncCompute || passType.SupportsAsyncCompute();
@@ -617,9 +494,6 @@ namespace VividRP.Editor.RenderGraph
                     break;
                 case RenderListResourceNodeData:
                     portNames = new[] { RenderListResourceNodeData.InputPortName, RenderListResourceNodeData.OutputPortName };
-                    break;
-                case HistoryResourceNodeData:
-                    portNames = new[] { HistoryResourceNodeData.PreviousOutputPortName, HistoryResourceNodeData.CurrentOutputPortName };
                     break;
                 case AccelerationStructureResourceNodeData:
                     portNames = new[] { AccelerationStructureResourceNodeData.InputPortName, AccelerationStructureResourceNodeData.OutputPortName };

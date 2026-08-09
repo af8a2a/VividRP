@@ -57,6 +57,75 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Revisions_TrackStructureResourceAndInstanceChanges()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+            VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+
+            try
+            {
+                uint structureBeforeRegistration = database.StructureRevision;
+                uint resourceBeforeRegistration = database.ResourceRevision;
+                uint instanceBeforeRegistration = database.InstanceRevision;
+
+                gameObject = CreateMeshRendererObject("MeshletRenderer_Revisions", out mesh, out material);
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+
+                Assert.That(database.StructureRevision, Is.Not.EqualTo(structureBeforeRegistration));
+                Assert.That(database.ResourceRevision, Is.Not.EqualTo(resourceBeforeRegistration));
+                Assert.That(database.InstanceRevision, Is.Not.EqualTo(instanceBeforeRegistration));
+
+                meshletRenderer.CaptureSourceFromRenderer(gameObject.GetComponent<MeshRenderer>());
+                meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                meshletCollection.SourceSubmeshIndex = 0;
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+
+                uint structureBeforeResourceUpdate = database.StructureRevision;
+                uint resourceBeforeResourceUpdate = database.ResourceRevision;
+                uint instanceBeforeResourceUpdate = database.InstanceRevision;
+                database.UpdateRendererData(meshletRenderer);
+
+                Assert.That(database.StructureRevision, Is.EqualTo(structureBeforeResourceUpdate));
+                Assert.That(database.ResourceRevision, Is.Not.EqualTo(resourceBeforeResourceUpdate));
+                Assert.That(database.InstanceRevision, Is.Not.EqualTo(instanceBeforeResourceUpdate));
+
+                uint structureBeforeTransformUpdate = database.StructureRevision;
+                uint resourceBeforeTransformUpdate = database.ResourceRevision;
+                uint instanceBeforeTransformUpdate = database.InstanceRevision;
+                gameObject.transform.position = Vector3.one;
+                database.UpdateRendererTransformData(meshletRenderer);
+
+                Assert.That(database.StructureRevision, Is.EqualTo(structureBeforeTransformUpdate));
+                Assert.That(database.ResourceRevision, Is.EqualTo(resourceBeforeTransformUpdate));
+                Assert.That(database.InstanceRevision, Is.Not.EqualTo(instanceBeforeTransformUpdate));
+
+                uint structureBeforeRemoval = database.StructureRevision;
+                uint resourceBeforeRemoval = database.ResourceRevision;
+                uint instanceBeforeRemoval = database.InstanceRevision;
+                database.UnregisterRenderer(meshletRenderer);
+
+                Assert.That(database.StructureRevision, Is.Not.EqualTo(structureBeforeRemoval));
+                Assert.That(database.ResourceRevision, Is.Not.EqualTo(resourceBeforeRemoval));
+                Assert.That(database.InstanceRevision, Is.Not.EqualTo(instanceBeforeRemoval));
+            }
+            finally
+            {
+                if (materialProxy != null)
+                    Object.DestroyImmediate(materialProxy);
+                if (meshletCollection != null)
+                    Object.DestroyImmediate(meshletCollection);
+
+                DestroyTestObjects(gameObject, material, mesh);
+            }
+        }
+
+        [Test]
         public void UpdateRendererData_CapturesResources_WhenSourceWasExplicitlyCaptured()
         {
             Material material = null;

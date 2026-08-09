@@ -306,6 +306,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MaxMeshletListBuildJobCount, Is.EqualTo(1));
                 Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(1));
 
+                VividInstanceData retainedInstanceData = sceneData.MutableInstances[0];
+                retainedInstanceData.Padding0 = 123u;
+                sceneData.MutableInstances[0] = retainedInstanceData;
+
                 bool staticDataChanged = builder.Build(
                     sceneData,
                     VividMeshletRendererDatabase.instance,
@@ -319,6 +323,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(instanceDataChanged, Is.False);
                 Assert.That(sceneData.MaxMeshletListBuildJobCount, Is.EqualTo(1));
                 Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(1));
+                Assert.That(sceneData.Instances[0].Padding0, Is.EqualTo(123u));
             }
             finally
             {

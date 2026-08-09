@@ -106,6 +106,9 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMeshletRendererRenderData> m_RendererData = new();
         private readonly List<VividMeshletRendererResources> m_RendererResources = new();
         private readonly Dictionary<EntityId, int> m_EntityIdToDataIndex = new();
+        private uint m_StructureRevision;
+        private uint m_ResourceRevision;
+        private uint m_InstanceRevision;
 
         private static readonly VividMeshletRendererDatabase s_Instance = new();
 
@@ -116,6 +119,12 @@ namespace VividRP.Runtime.GPUDriven
         public IReadOnlyList<VividMeshletRendererRenderData> rendererData => m_RendererData;
 
         public IReadOnlyList<VividMeshletRendererResources> rendererResources => m_RendererResources;
+
+        internal uint StructureRevision => m_StructureRevision;
+
+        internal uint ResourceRevision => m_ResourceRevision;
+
+        internal uint InstanceRevision => m_InstanceRevision;
 
         internal VividMeshletRendererRenderData RegisterRenderer(MeshletRenderer meshletRenderer)
         {
@@ -131,7 +140,11 @@ namespace VividRP.Runtime.GPUDriven
 
             VividMeshletRendererRenderData trackedData = CreateRendererData(meshletRenderer);
             VividMeshletRendererResources trackedResources = CreateRendererResources(meshletRenderer);
-            StoreRendererData(trackedData, trackedResources);
+            bool added = StoreRendererData(trackedData, trackedResources);
+            if (added)
+                MarkStructureChanged();
+            else
+                MarkResourcesChanged();
             meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: true);
             return trackedData;
         }
@@ -151,6 +164,7 @@ namespace VividRP.Runtime.GPUDriven
 
             VividMeshletRendererRenderData trackedData = CreateRendererData(meshletRenderer);
             StoreRendererData(trackedData, trackedResources);
+            MarkInstancesChanged();
             meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: false);
             return trackedData;
         }
@@ -172,6 +186,7 @@ namespace VividRP.Runtime.GPUDriven
             VividMeshletRendererRenderData updatedTrackedData =
                 CreateTransformOnlyRendererData(meshletRenderer, trackedData);
             StoreRendererData(updatedTrackedData, trackedResources);
+            MarkInstancesChanged();
             meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: false);
             return updatedTrackedData;
         }
@@ -185,7 +200,11 @@ namespace VividRP.Runtime.GPUDriven
 
             VividMeshletRendererRenderData trackedData = CreateTerrainData(terrain);
             VividMeshletRendererResources trackedResources = CreateTerrainResources(terrain);
-            StoreRendererData(trackedData, trackedResources);
+            bool added = StoreRendererData(trackedData, trackedResources);
+            if (added)
+                MarkStructureChanged();
+            else
+                MarkResourcesChanged();
             terrain.NotifyTerrainDataSynchronized();
             return trackedData;
         }
@@ -207,6 +226,7 @@ namespace VividRP.Runtime.GPUDriven
             VividMeshletRendererRenderData updatedTrackedData =
                 CreateTerrainTransformOnlyData(terrain, trackedData);
             StoreRendererData(updatedTrackedData, trackedResources);
+            MarkInstancesChanged();
             terrain.NotifyTerrainDataSynchronized();
             return updatedTrackedData;
         }
@@ -309,9 +329,14 @@ namespace VividRP.Runtime.GPUDriven
 
         internal void Clear()
         {
+            bool hadRenderers = m_RendererData.Count > 0
+                || m_RendererResources.Count > 0
+                || m_EntityIdToDataIndex.Count > 0;
             m_RendererData.Clear();
             m_RendererResources.Clear();
             m_EntityIdToDataIndex.Clear();
+            if (hadRenderers)
+                MarkStructureChanged();
         }
 
         private bool TryGetRendererData(int dataIndex, out VividMeshletRendererRenderData trackedData)
@@ -340,27 +365,28 @@ namespace VividRP.Runtime.GPUDriven
             return true;
         }
 
-        private void StoreRendererData(
+        private bool StoreRendererData(
             in VividMeshletRendererRenderData trackedData,
             in VividMeshletRendererResources trackedResources
         )
         {
             if (trackedData.meshletRendererEntityId.Equals(EntityId.None))
             {
-                return;
+                return false;
             }
 
             if (m_EntityIdToDataIndex.TryGetValue(trackedData.meshletRendererEntityId, out int dataIndex))
             {
                 m_RendererData[dataIndex] = trackedData;
                 m_RendererResources[dataIndex] = trackedResources;
-                return;
+                return false;
             }
 
             dataIndex = m_RendererData.Count;
             m_RendererData.Add(trackedData);
             m_RendererResources.Add(trackedResources);
             m_EntityIdToDataIndex.Add(trackedData.meshletRendererEntityId, dataIndex);
+            return true;
         }
 
         private void RemoveRendererAt(int removedIndex)
@@ -381,6 +407,30 @@ namespace VividRP.Runtime.GPUDriven
 
             m_RendererData.RemoveAt(lastIndex);
             m_RendererResources.RemoveAt(lastIndex);
+            MarkStructureChanged();
+        }
+
+        private void MarkStructureChanged()
+        {
+            m_StructureRevision = IncrementRevision(m_StructureRevision);
+            m_ResourceRevision = IncrementRevision(m_ResourceRevision);
+            m_InstanceRevision = IncrementRevision(m_InstanceRevision);
+        }
+
+        private void MarkResourcesChanged()
+        {
+            m_ResourceRevision = IncrementRevision(m_ResourceRevision);
+            m_InstanceRevision = IncrementRevision(m_InstanceRevision);
+        }
+
+        private void MarkInstancesChanged()
+        {
+            m_InstanceRevision = IncrementRevision(m_InstanceRevision);
+        }
+
+        private static uint IncrementRevision(uint revision)
+        {
+            return revision == uint.MaxValue ? 1u : revision + 1u;
         }
 
         private static VividMeshletRendererRenderData CreateRendererData(MeshletRenderer meshletRenderer)

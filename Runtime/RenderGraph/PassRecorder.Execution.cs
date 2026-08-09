@@ -38,6 +38,7 @@ namespace VividRP.Runtime
         private static long s_CurrentImportVersion;
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
+        private static bool s_HasCascadedShadowCasterPass;
         private static int s_EditModeFrameIndex;
 
 #if UNITY_EDITOR
@@ -170,6 +171,14 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.InitializeContextShadowDataUpdateMarker.Auto())
             {
                 shadowData.Update(cullingResults, lightData);
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextShadowCasterCullingMarker.Auto())
+            {
+                // Unity schedules renderer shadow-culling jobs here. Start them before subsystem
+                // and pass preparation, but skip Meshlet-only graphs that never consume the results.
+                if (s_HasCascadedShadowCasterPass)
+                    shadowData.ScheduleShadowCasterCulling(context, cullingResults);
             }
         }
 
@@ -366,6 +375,7 @@ namespace VividRP.Runtime
             s_RuntimePassDefinitions.Clear();
             s_CurrentImportVersion = 0;
             s_IsCompiled = false;
+            s_HasCascadedShadowCasterPass = false;
             RenderPassProfilingUtility.Clear();
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -576,6 +586,13 @@ namespace VividRP.Runtime
         {
             EnsureCompiled(graphAsset);
             return HasAntialiasingPass(s_RenderPasses);
+        }
+
+        internal static bool HasCascadedShadowCasterPass => s_HasCascadedShadowCasterPass;
+
+        internal static void RegisterCascadedShadowCasterPass()
+        {
+            s_HasCascadedShadowCasterPass = true;
         }
 
         internal static bool HasRenderGizmoPrePostProcessBoundary(IReadOnlyList<IRenderPass> renderPasses)

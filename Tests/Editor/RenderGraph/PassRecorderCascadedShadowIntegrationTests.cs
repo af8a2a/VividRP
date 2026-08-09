@@ -98,6 +98,33 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Compile_CachesCascadedShadowCasterPassPresence_UntilRecorderIsDisposed()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<CSMShadowPass>(),
+            });
+
+            try
+            {
+                Assert.That(PassRecorder.HasCascadedShadowCasterPass, Is.False);
+
+                Compile(graphAsset);
+
+                Assert.That(PassRecorder.HasCascadedShadowCasterPass, Is.True);
+
+                PassRecorder.Dispose();
+
+                Assert.That(PassRecorder.HasCascadedShadowCasterPass, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
         private static void Compile(RenderGraphData graphAsset)
         {
             var method = typeof(PassRecorder).GetMethod("Compile", BindingFlags.NonPublic | BindingFlags.Static);

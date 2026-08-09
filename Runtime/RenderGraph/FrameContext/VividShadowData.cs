@@ -1,4 +1,5 @@
 using UnityEngine;
+using Unity.Collections;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
@@ -129,6 +130,53 @@ namespace VividRP.Runtime
 
             ComputeAtlasLayout();
             isCSMActive = true;
+        }
+
+        internal void ScheduleShadowCasterCulling(
+            ScriptableRenderContext context,
+            CullingResults cullingResults)
+        {
+            if (!isCSMActive
+                || mainLightVisibleIndex < 0
+                || mainLightVisibleIndex >= cullingResults.visibleLights.Length
+                || cascadeCount <= 0)
+            {
+                return;
+            }
+
+            var perLightInfos = new NativeArray<LightShadowCasterCullingInfo>(
+                cullingResults.visibleLights.Length,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            var splitBuffer = new NativeArray<ShadowSplitData>(
+                cascadeCount,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+
+            try
+            {
+                for (int cascadeIndex = 0; cascadeIndex < cascadeCount; cascadeIndex++)
+                    splitBuffer[cascadeIndex] = splitData[cascadeIndex];
+
+                perLightInfos[mainLightVisibleIndex] = new LightShadowCasterCullingInfo
+                {
+                    splitRange = new RangeInt(0, cascadeCount),
+                    projectionType = BatchCullingProjectionType.Orthographic,
+                };
+
+                context.CullShadowCasters(
+                    cullingResults,
+                    new ShadowCastersCullingInfos
+                    {
+                        perLightInfos = perLightInfos,
+                        splitBuffer = splitBuffer,
+                    });
+            }
+            finally
+            {
+                splitBuffer.Dispose();
+                perLightInfos.Dispose();
+            }
         }
 
         /// <summary>

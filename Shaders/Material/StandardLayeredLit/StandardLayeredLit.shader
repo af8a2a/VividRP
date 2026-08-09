@@ -14,20 +14,21 @@ Shader "VividRP/Material/StandardLayeredLit"
 
         [Main(SurfaceInputs, _, on, off)] _SurfaceInputs("Surface Inputs", Float) = 1
         [SubEnum(SurfaceInputs, Specular, 0, Metallic, 1)] _WorkflowMode("Workflow Mode", Float) = 1.0
-        [MainTexture] [Tex(SurfaceInputs, _BaseColor)] _BaseMap("Albedo", 2D) = "white" {}
-        [HideInInspector] [MainColor] _BaseColor("Color", Color) = (1, 1, 1, 1)
-        [Sub(SurfaceInputs)] _OpacityMap("Opacity Map", 2D) = "white" {}
-        [Sub(SurfaceInputs)] _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
+        [AdvancedHeaderProperty] [MainTexture] [Tex(SurfaceInputs, _BaseColor)] _BaseMap("Albedo", 2D) = "white" {}
+        [Advanced] [HideInInspector] [MainColor] _BaseColor("Color", Color) = (1, 1, 1, 1)
+        [Advanced] [TilingOffset(SurfaceInputs)] _BaseMap_ST("UV Tiling and Offset", Vector) = (1, 1, 0, 0)
+        [Tex(SurfaceInputs)] _OpacityMap("Opacity Map", 2D) = "white" {}
+        [Tex(SurfaceInputs, _Metallic)] _MetallicGlossMap("Metallic Map", 2D) = "white" {}
+        [HideInInspector] _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.5
         [SubEnum(SurfaceInputs, Metallic Alpha, 0, Albedo Alpha, 1)] _SmoothnessTextureChannel("Smoothness Source", Float) = 0.0
-        [Sub(SurfaceInputs)] _MetallicGlossMap("Metallic Map", 2D) = "white" {}
-        [Sub(SurfaceInputs)] _RoughnessMap("Roughness Map", 2D) = "white" {}
-        [Sub(SurfaceInputs)] _BumpScale("Normal Scale", Float) = 1.0
-        [Sub(SurfaceInputs)] [Normal] _BumpMap("Normal Map", 2D) = "bump" {}
-        [Sub(SurfaceInputs)] _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
-        [Sub(SurfaceInputs)] _OcclusionMap("Occlusion Map", 2D) = "white" {}
-        [Sub(SurfaceInputs)] [HDR] _EmissionColor("Emission Color", Color) = (0, 0, 0, 0)
-        [Sub(SurfaceInputs)] _EmissionMap("Emission Map", 2D) = "black" {}
+        [Tex(SurfaceInputs)] _RoughnessMap("Roughness Map", 2D) = "white" {}
+        [Tex(SurfaceInputs, _BumpScale)] [Normal] _BumpMap("Normal Map", 2D) = "bump" {}
+        [HideInInspector] _BumpScale("Normal Scale", Float) = 1.0
+        [Tex(SurfaceInputs, _OcclusionStrength)] _OcclusionMap("Occlusion Map", 2D) = "white" {}
+        [HideInInspector] _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
+        [Tex(SurfaceInputs, _EmissionColor)] _EmissionMap("Emission Map", 2D) = "black" {}
+        [HideInInspector] [HDR] _EmissionColor("Emission Color", Color) = (0, 0, 0, 0)
         [Sub(SurfaceInputs)] _ClearCoatMask("Clear Coat Mask", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _ClearCoatSmoothness("Clear Coat Smoothness", Range(0.0, 1.0)) = 1.0
 

@@ -13,6 +13,7 @@ namespace LWGUI
 	{
 		public LWGUIMetaDatas metaDatas;
 		public bool hasChange;
+		protected virtual bool ShowLogo => true;
 
 		public static LWGUICustomGUIEvent onDrawCustomHeader;
 		public static LWGUICustomGUIEvent onDrawCustomFooter;
@@ -143,8 +144,11 @@ namespace LWGUI
 				onDrawCustomFooter(this);
 
 			// LOGO
-			EditorGUILayout.Space();
-			Helper.DrawLogo();
+			if (ShowLogo)
+			{
+				EditorGUILayout.Space();
+				Helper.DrawLogo();
+			}
 		}
 
 		private void DrawAdvancedHeader(PropertyStaticData propStaticData, MaterialProperty prop)

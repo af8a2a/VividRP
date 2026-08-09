@@ -7,6 +7,8 @@ namespace VividRP.Editor
 {
     public sealed class StandardLitShaderGUI : LWGUI.LWGUI
     {
+        protected override bool ShowLogo => false;
+
         public override void AssignNewShaderToMaterial(Material material, Shader oldShader, Shader newShader)
         {
             base.AssignNewShaderToMaterial(material, oldShader, newShader);

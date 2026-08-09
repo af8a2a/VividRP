@@ -38,7 +38,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly IGPUDrivenTextureBackend m_TextureBackend;
         private readonly BindlessGPUDrivenTextureBackend m_LegacyBindlessBackend;
         private readonly GPUDrivenTextureBackendMode m_TextureBackendMode;
-        private VividGPUDrivenCullingDispatcher[] m_ShadowCullingDispatchers;
+        private VividGPUDrivenCullingDispatcher m_ShadowCullingDispatcher;
+        private int m_ShadowCullingContextCount;
         private bool m_IsDisposed;
 
         public VividGPUDrivenSystem()
@@ -208,26 +209,26 @@ namespace VividRP.Runtime.GPUDriven
 
         public GraphicsBuffer GetShadowVisibleMeshletRenderRequestsBuffer(int cascadeIndex)
         {
-            if (m_ShadowCullingDispatchers == null
+            if (m_ShadowCullingDispatcher == null
                 || cascadeIndex < 0
-                || cascadeIndex >= m_ShadowCullingDispatchers.Length)
+                || cascadeIndex >= m_ShadowCullingContextCount)
             {
                 return null;
             }
 
-            return m_ShadowCullingDispatchers[cascadeIndex]?.BufferSet.VisibleMeshletRenderRequestsBuffer;
+            return m_ShadowCullingDispatcher.BufferSet.VisibleMeshletRenderRequestsBuffer;
         }
 
         public GraphicsBuffer GetShadowVisibleMeshletIndirectDrawArgsBuffer(int cascadeIndex)
         {
-            if (m_ShadowCullingDispatchers == null
+            if (m_ShadowCullingDispatcher == null
                 || cascadeIndex < 0
-                || cascadeIndex >= m_ShadowCullingDispatchers.Length)
+                || cascadeIndex >= m_ShadowCullingContextCount)
             {
                 return null;
             }
 
-            return m_ShadowCullingDispatchers[cascadeIndex]?.BufferSet.VisibleMeshletIndirectDrawArgsBuffer;
+            return m_ShadowCullingDispatcher.BufferSet.VisibleMeshletIndirectDrawArgsBuffer;
         }
 
         public static bool TryGetCurrentVisibleMeshletBuffers(
@@ -422,10 +423,10 @@ namespace VividRP.Runtime.GPUDriven
                 mipCount);
         }
 
-        public void CullShadowCascade(
-            int cascadeIndex,
+        public void CullShadowCascades(
             CommandBuffer cmd,
-            in VividGPUCullingContext cullingContext,
+            VividGPUCullingContext[] cullingContexts,
+            int cullingContextCount,
             in VividGPULODSelectionContext lodSelectionContext,
             ComputeShader gpuInstanceCullingCompute,
             ComputeShader meshletListBuildCompute,
@@ -435,17 +436,21 @@ namespace VividRP.Runtime.GPUDriven
         {
             ThrowIfDisposed();
 
-            if (cascadeIndex < 0)
+            if (cullingContexts == null)
             {
-                throw new ArgumentOutOfRangeException(nameof(cascadeIndex));
+                throw new ArgumentNullException(nameof(cullingContexts));
             }
 
-            EnsureShadowDispatcherCapacity(cascadeIndex + 1);
+            if (cullingContextCount <= 0 || cullingContextCount > cullingContexts.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cullingContextCount));
+            }
 
-            var dispatcher = m_ShadowCullingDispatchers[cascadeIndex];
-            dispatcher.Dispatch(
+            m_ShadowCullingDispatcher ??= new VividGPUDrivenCullingDispatcher(supportsOcclusion: false);
+            m_ShadowCullingDispatcher.DispatchBatch(
                 cmd,
-                cullingContext,
+                cullingContexts,
+                cullingContextCount,
                 lodSelectionContext,
                 SceneData,
                 m_BufferSet,
@@ -456,21 +461,7 @@ namespace VividRP.Runtime.GPUDriven
                 ForcedMeshLODNodeDepth,
                 MeshLODErrorThreshold
             );
-        }
-
-        private void EnsureShadowDispatcherCapacity(int requiredCount)
-        {
-            if (m_ShadowCullingDispatchers != null && m_ShadowCullingDispatchers.Length >= requiredCount)
-            {
-                return;
-            }
-
-            int previousCount = m_ShadowCullingDispatchers?.Length ?? 0;
-            Array.Resize(ref m_ShadowCullingDispatchers, requiredCount);
-            for (int i = previousCount; i < requiredCount; i++)
-            {
-                m_ShadowCullingDispatchers[i] = new VividGPUDrivenCullingDispatcher(supportsOcclusion: false);
-            }
+            m_ShadowCullingContextCount = cullingContextCount;
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -498,15 +489,9 @@ namespace VividRP.Runtime.GPUDriven
             SceneData.Clear();
             m_BufferSet.Dispose();
             m_CullingDispatcher.Dispose();
-            if (m_ShadowCullingDispatchers != null)
-            {
-                for (int i = 0; i < m_ShadowCullingDispatchers.Length; i++)
-                {
-                    m_ShadowCullingDispatchers[i]?.Dispose();
-                    m_ShadowCullingDispatchers[i] = null;
-                }
-                m_ShadowCullingDispatchers = null;
-            }
+            m_ShadowCullingDispatcher?.Dispose();
+            m_ShadowCullingDispatcher = null;
+            m_ShadowCullingContextCount = 0;
             m_TextureBackend.Dispose();
             if (m_LegacyBindlessBackend != null && !ReferenceEquals(m_LegacyBindlessBackend, m_TextureBackend))
                 m_LegacyBindlessBackend.Dispose();

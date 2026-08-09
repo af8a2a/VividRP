@@ -11,7 +11,6 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string ShadowCasterShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass";
 
         private const int AtlasGridSize = 2;
-        private const int IndirectDrawArgsByteStride = sizeof(uint) * 4;
         private const int RendererListCount = (int)VividRendererListID.Count;
 
         private static readonly int s_CullId = Shader.PropertyToID("_Cull");
@@ -26,6 +25,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private readonly Material[] m_Materials = new Material[RendererListCount];
         private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
+        private readonly VividGPUCullingContext[] m_ShadowCullingContexts =
+            new VividGPUCullingContext[VividShadowData.MaxCascadeCount];
         private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
         private readonly Vector4[] m_VirtualTextureLayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
@@ -158,21 +159,27 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_LODCamera.BuildLODSelectionContext(
                     out var lodContext);
 
-                // Phase A: cull every cascade with no render target bound. Each cascade owns its own
-                // dispatcher so output buffers do not collide and do not overwrite the main-view buffers.
+                // Phase A: build all cascade contexts, then cull them as one two-dimensional workload.
                 for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)
                 {
-                    BuildShadowCullingContext(cascadeIndex, out var cullingContext);
-                    system.CullShadowCascade(
+                    BuildShadowCullingContext(
                         cascadeIndex,
-                        nativeCmd,
-                        cullingContext,
-                        lodContext,
-                        resources.GPUInstanceCullingCompute,
-                        resources.MeshletListBuildCompute,
-                        resources.GPUMeshletCullingCompute,
-                        resources.FixupVisibleMeshletIndirectDrawArgsCompute);
+                        out m_ShadowCullingContexts[cascadeIndex]);
                 }
+                system.CullShadowCascades(
+                    nativeCmd,
+                    m_ShadowCullingContexts,
+                    m_CascadeCount,
+                    lodContext,
+                    resources.GPUInstanceCullingCompute,
+                    resources.MeshletListBuildCompute,
+                    resources.GPUMeshletCullingCompute,
+                    resources.FixupVisibleMeshletIndirectDrawArgsCompute);
+
+                var requestsBuffer = system.GetShadowVisibleMeshletRenderRequestsBuffer(0);
+                var argsBuffer = system.GetShadowVisibleMeshletIndirectDrawArgsBuffer(0);
+                if (requestsBuffer == null || argsBuffer == null)
+                    return;
 
                 // Phase B: bind atlas (preserve traditional caster depth) and issue indirect draws per cascade.
                 nativeCmd.SetRenderTarget(
@@ -183,11 +190,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)
                 {
-                    var requestsBuffer = system.GetShadowVisibleMeshletRenderRequestsBuffer(cascadeIndex);
-                    var argsBuffer = system.GetShadowVisibleMeshletIndirectDrawArgsBuffer(cascadeIndex);
-                    if (requestsBuffer == null || argsBuffer == null)
-                        continue;
-
                     int offsetX = (cascadeIndex % AtlasGridSize) * m_CascadeResolution;
                     int offsetY = (cascadeIndex / AtlasGridSize) * m_CascadeResolution;
                     var viewMatrix = m_ShadowData.viewMatrices[cascadeIndex];
@@ -219,14 +221,19 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_DrawProperties.Clear();
                         m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, requestsBuffer);
                         m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, argsBuffer);
-                        m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);
+                        int commandIndex = VividGPUDrivenCullingBuffers.GetIndirectDrawArgsCommandIndex(
+                            cascadeIndex,
+                            rendererListIndex);
+                        m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, commandIndex);
                         nativeCmd.DrawProceduralIndirect(
                             Matrix4x4.identity,
                             material,
                             0,
                             MeshTopology.Triangles,
                             argsBuffer,
-                            rendererListIndex * IndirectDrawArgsByteStride,
+                            VividGPUDrivenCullingBuffers.GetIndirectDrawArgsByteOffset(
+                                cascadeIndex,
+                                rendererListIndex),
                             m_DrawProperties);
                     }
                 }

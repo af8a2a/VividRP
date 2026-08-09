@@ -8,6 +8,7 @@
 
 uint _ForcedMeshLODNodeDepth;
 float _MeshLODErrorThreshold;
+uint _CullingContextCount;
 
 StructuredBuffer<VividGPUCullingContext> _CullingContexts;
 StructuredBuffer<VividGPULODSelectionContext> _LODSelectionContexts;
@@ -22,12 +23,14 @@ RWStructuredBuffer<uint> _VisibleRendererListMeshletCounts;
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_GroupID)
 {
-    if (groupID.x >= _MeshletListBuildJobCounter[0])
+    const uint cullingContextIndex = groupID.y;
+    if (cullingContextIndex >= max(_CullingContextCount, 1u) ||
+        groupID.x >= _MeshletListBuildJobCounter[cullingContextIndex])
     {
         return;
     }
 
-    const VividGPUCullingContext cullingContext = _CullingContexts[0];
+    const VividGPUCullingContext cullingContext = _CullingContexts[cullingContextIndex];
     const VividGPULODSelectionContext lodSelectionContext = _LODSelectionContexts[0];
     const VividMeshletListBuildJob job = _MeshletListBuildJobs[cullingContext.MeshletListBuildJobsOffset + groupID.x];
     const VividInstanceData instanceData = PullInstanceData(job.InstanceID);
@@ -65,14 +68,16 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
         for (uint meshletIndex = 0u; meshletIndex < meshLODNode.MeshletCount; ++meshletIndex)
         {
             uint requestIndex;
-            InterlockedAdd(_VisibleMeshletRenderRequestCounter[0], 1u, requestIndex);
+            InterlockedAdd(_VisibleMeshletRenderRequestCounter[cullingContextIndex], 1u, requestIndex);
 
             VividMeshletRenderRequestPacked request;
             request.InstanceID_LOD = job.InstanceID;
             request.MeshletID = meshLODNode.MeshletStartIndex + meshletIndex;
-            _CandidateMeshletRenderRequests[requestIndex] = request;
+            _CandidateMeshletRenderRequests[cullingContext.MeshletRenderRequestsOffset + requestIndex] = request;
 
-            InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListIndex], 1u);
+            const uint rendererListCountIndex =
+                cullingContextIndex * VIVIDRENDERERLISTID_COUNT + rendererListIndex;
+            InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListCountIndex], 1u);
         }
     }
 }

@@ -8,6 +8,7 @@
 #define MAX_LODNODES_PER_THREAD_GROUP 32u
 
 StructuredBuffer<VividGPUCullingContext> _CullingContexts;
+uint _CullingContextCount;
 
 RWStructuredBuffer<VividMeshletListBuildJob> _MeshletListBuildJobs;
 RWStructuredBuffer<uint> _MeshletListBuildJobCounter;
@@ -16,6 +17,19 @@ RWStructuredBuffer<uint> _MeshletListBuildIndirectArgs;
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
+    const uint cullingContextCount = max(_CullingContextCount, 1u);
+    const uint cullingContextIndex = dispatchThreadID.y;
+    if (cullingContextIndex >= cullingContextCount)
+    {
+        return;
+    }
+
+    if (dispatchThreadID.x == 0u && cullingContextIndex == 0u)
+    {
+        _MeshletListBuildIndirectArgs[1] = cullingContextCount;
+        _MeshletListBuildIndirectArgs[2] = 1u;
+    }
+
     const uint instanceID = dispatchThreadID.x;
     if (instanceID >= _InstanceDataCount)
     {
@@ -23,7 +37,7 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
     const VividInstanceData instanceData = PullInstanceData(instanceID);
-    const VividGPUCullingContext cullingContext = _CullingContexts[0];
+    const VividGPUCullingContext cullingContext = _CullingContexts[cullingContextIndex];
 
     if ((instanceData.Flags & VIVIDINSTANCEFLAGS_DISABLED) != 0u ||
         (instanceData.PassMask & (uint) cullingContext.PassMask) == 0u)
@@ -47,8 +61,8 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
     const uint jobCount = (totalMeshLODCount + MAX_LODNODES_PER_THREAD_GROUP - 1u) / MAX_LODNODES_PER_THREAD_GROUP;
 
     uint jobWriteOffset;
-    InterlockedAdd(_MeshletListBuildJobCounter[0], jobCount, jobWriteOffset);
-    InterlockedAdd(_MeshletListBuildIndirectArgs[0], jobCount);
+    InterlockedAdd(_MeshletListBuildJobCounter[cullingContextIndex], jobCount, jobWriteOffset);
+    InterlockedMax(_MeshletListBuildIndirectArgs[0], jobWriteOffset + jobCount);
 
     [loop]
     for (uint jobIndex = 0u; jobIndex < jobCount; ++jobIndex)
@@ -61,6 +75,6 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
         job.MeshLODNodeOffset = offset;
         job.MeshLODNodeCount = min(remainingNodeCount, MAX_LODNODES_PER_THREAD_GROUP);
         job.Padding0 = 0u;
-        _MeshletListBuildJobs[jobWriteOffset + jobIndex] = job;
+        _MeshletListBuildJobs[cullingContext.MeshletListBuildJobsOffset + jobWriteOffset + jobIndex] = job;
     }
 }

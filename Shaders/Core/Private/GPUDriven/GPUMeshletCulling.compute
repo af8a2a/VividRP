@@ -22,6 +22,7 @@
 #define THREAD_GROUP_SIZE 32
 
 StructuredBuffer<VividGPUCullingContext> _CullingContexts;
+uint _CullingContextCount;
 StructuredBuffer<uint> _VisibleMeshletRenderRequestCounter;
 StructuredBuffer<VividMeshletRenderRequestPacked> _CandidateMeshletRenderRequests;
 
@@ -334,9 +335,12 @@ bool IsMeshletVisibleAfterOcclusion(const float4 boundingSphereWS)
 
 void AppendVisibleMeshlet(
     const VividMeshletRenderRequestPacked renderRequest,
-    const uint rendererListIndex)
+    const uint rendererListIndex,
+    const uint cullingContextIndex)
 {
-    const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListIndex);
+    const uint rendererListCountIndex =
+        cullingContextIndex * VIVIDRENDERERLISTID_COUNT + rendererListIndex;
+    const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListCountIndex);
 
     uint localWriteOffset;
     _VisibleMeshletIndirectDrawArgs.InterlockedAdd(
@@ -348,16 +352,17 @@ void AppendVisibleMeshlet(
         drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
     const uint writeIndex = startInstance + localWriteOffset;
     _VisibleMeshletRenderRequests[writeIndex] = renderRequest;
-    InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListIndex], 1u);
+    InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListCountIndex], 1u);
 }
 
 bool TryResolveCulledMeshlet(
     const uint candidateIndex,
+    const uint cullingContextIndex,
     out VividMeshletRenderRequestPacked renderRequest,
     out uint rendererListIndex,
     out float4 boundingSphereWS)
 {
-    if (candidateIndex >= _VisibleMeshletRenderRequestCounter[0])
+    if (candidateIndex >= _VisibleMeshletRenderRequestCounter[cullingContextIndex])
     {
         renderRequest.InstanceID_LOD = 0u;
         renderRequest.MeshletID = 0u;
@@ -366,8 +371,8 @@ bool TryResolveCulledMeshlet(
         return false;
     }
 
-    const VividGPUCullingContext cullingContext = _CullingContexts[0];
-    renderRequest = _CandidateMeshletRenderRequests[candidateIndex];
+    const VividGPUCullingContext cullingContext = _CullingContexts[cullingContextIndex];
+    renderRequest = _CandidateMeshletRenderRequests[cullingContext.MeshletRenderRequestsOffset + candidateIndex];
 
     if (renderRequest.MeshletID >= _MeshletCount)
     {
@@ -400,11 +405,18 @@ bool TryResolveCulledMeshlet(
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
+    const uint cullingContextIndex = dispatchThreadID.y;
+    if (cullingContextIndex >= max(_CullingContextCount, 1u))
+    {
+        return;
+    }
+
     VividMeshletRenderRequestPacked renderRequest;
     uint rendererListIndex;
     float4 boundingSphereWS;
     if (!TryResolveCulledMeshlet(
             dispatchThreadID.x,
+            cullingContextIndex,
             renderRequest,
             rendererListIndex,
             boundingSphereWS))
@@ -412,17 +424,24 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
-    AppendVisibleMeshlet(renderRequest, rendererListIndex);
+    AppendVisibleMeshlet(renderRequest, rendererListIndex, cullingContextIndex);
 }
 
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSOcclusionTestAll(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
+    const uint cullingContextIndex = dispatchThreadID.y;
+    if (cullingContextIndex >= max(_CullingContextCount, 1u))
+    {
+        return;
+    }
+
     VividMeshletRenderRequestPacked renderRequest;
     uint rendererListIndex;
     float4 boundingSphereWS;
     if (!TryResolveCulledMeshlet(
             dispatchThreadID.x,
+            cullingContextIndex,
             renderRequest,
             rendererListIndex,
             boundingSphereWS))
@@ -441,7 +460,7 @@ void CSOcclusionTestAll(const uint3 dispatchThreadID : SV_DispatchThreadID)
         }
     }
 
-    AppendVisibleMeshlet(renderRequest, rendererListIndex);
+    AppendVisibleMeshlet(renderRequest, rendererListIndex, cullingContextIndex);
 }
 
 [numthreads(1, 1, 1)]

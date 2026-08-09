@@ -27,6 +27,7 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _SharedIndexCount = Shader.PropertyToID(nameof(_SharedIndexCount));
 
         public static readonly int _CullingContexts = Shader.PropertyToID(nameof(_CullingContexts));
+        public static readonly int _CullingContextCount = Shader.PropertyToID(nameof(_CullingContextCount));
         public static readonly int _LODSelectionContexts = Shader.PropertyToID(nameof(_LODSelectionContexts));
         public static readonly int _MeshletListBuildJobs = Shader.PropertyToID(nameof(_MeshletListBuildJobs));
         public static readonly int _MeshletListBuildJobCounter = Shader.PropertyToID(nameof(_MeshletListBuildJobCounter));

@@ -4,31 +4,43 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
 
+StructuredBuffer<VividGPUCullingContext> _CullingContexts;
 StructuredBuffer<uint> _VisibleMeshletRenderRequestCounter;
 RWStructuredBuffer<uint> _VisibleRendererListMeshletCounts;
 RWStructuredBuffer<uint> _GPUMeshletCullingIndirectDispatchArgs;
 RWByteAddressBuffer _VisibleMeshletIndirectDrawArgs;
+uint _CullingContextCount;
 
 [numthreads(1, 1, 1)]
 void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    if (dispatchThreadID.x != 0u)
+    const uint cullingContextCount = max(_CullingContextCount, 1u);
+    const uint cullingContextIndex = dispatchThreadID.x;
+    if (cullingContextIndex >= cullingContextCount)
     {
         return;
     }
 
-    const uint visibleMeshletRequestCount = _VisibleMeshletRenderRequestCounter[0];
-    _GPUMeshletCullingIndirectDispatchArgs[0] = (visibleMeshletRequestCount + 31u) / 32u;
-    _GPUMeshletCullingIndirectDispatchArgs[1] = 1u;
-    _GPUMeshletCullingIndirectDispatchArgs[2] = 1u;
+    if (cullingContextIndex == 0u)
+    {
+        _GPUMeshletCullingIndirectDispatchArgs[1] = cullingContextCount;
+        _GPUMeshletCullingIndirectDispatchArgs[2] = 1u;
+    }
 
-    uint startInstance = 0u;
+    const uint visibleMeshletRequestCount = _VisibleMeshletRenderRequestCounter[cullingContextIndex];
+    const uint threadGroupCount = (visibleMeshletRequestCount + 31u) / 32u;
+    InterlockedMax(_GPUMeshletCullingIndirectDispatchArgs[0], threadGroupCount);
+
+    const VividGPUCullingContext cullingContext = _CullingContexts[cullingContextIndex];
+    const uint rendererListBaseIndex = cullingContextIndex * VIVIDRENDERERLISTID_COUNT;
+    uint startInstance = cullingContext.BaseStartInstance;
 
     [unroll]
     for (uint rendererListIndex = 0u; rendererListIndex < VIVIDRENDERERLISTID_COUNT; ++rendererListIndex)
     {
-        const uint maxInstanceCount = _VisibleRendererListMeshletCounts[rendererListIndex];
-        const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListIndex);
+        const uint rendererListCountIndex = rendererListBaseIndex + rendererListIndex;
+        const uint maxInstanceCount = _VisibleRendererListMeshletCounts[rendererListCountIndex];
+        const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListCountIndex);
         _VisibleMeshletIndirectDrawArgs.Store4(
             drawArgsAddress,
             uint4(
@@ -38,7 +50,7 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
                 startInstance
             )
         );
-        _VisibleRendererListMeshletCounts[rendererListIndex] = 0u;
+        _VisibleRendererListMeshletCounts[rendererListCountIndex] = 0u;
 
         startInstance += maxInstanceCount;
     }

@@ -8,6 +8,11 @@ namespace VividRP.Runtime.GPUDriven
 {
     internal sealed class VividGPUDrivenCullingBuffers : IDisposable
     {
+        internal const int IndirectDrawArgsWordCount = 4;
+        internal const int IndirectDrawArgsByteStride = sizeof(uint) * IndirectDrawArgsWordCount;
+
+        private const int RendererListCount = (int)VividRendererListID.Count;
+
         private NativeArray<VividGPUCullingContext> m_CullingContextUpload;
         private NativeArray<VividGPULODSelectionContext> m_LodSelectionContextUpload;
         private NativeArray<IndirectDispatchArgs> m_InitialIndirectDispatchArgsUpload;
@@ -48,13 +53,14 @@ namespace VividRP.Runtime.GPUDriven
             };
             m_ZeroUintUpload = new NativeArray<uint>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             m_ZeroRendererListCountsUpload = new NativeArray<uint>(
-                Mathf.Max(1, (int)VividRendererListID.Count),
+                Mathf.Max(1, RendererListCount),
                 Allocator.Persistent,
                 NativeArrayOptions.ClearMemory);
             m_ZeroIndirectDrawArgsWordsUpload = new NativeArray<uint>(
-                Mathf.Max(4, (int)VividRendererListID.Count * 4),
+                Mathf.Max(IndirectDrawArgsWordCount, RendererListCount * IndirectDrawArgsWordCount),
                 Allocator.Persistent,
                 NativeArrayOptions.ClearMemory);
+            CullingContextCount = 1;
         }
 
         public GraphicsBuffer CullingContextBuffer => m_CullingContextBuffer;
@@ -97,7 +103,14 @@ namespace VividRP.Runtime.GPUDriven
 
         public int MaxVisibleMeshletRenderRequestCount { get; private set; }
 
+        public int CullingContextCount { get; private set; }
+
         public void EnsureCapacity(VividGPUDrivenSceneData sceneData)
+        {
+            EnsureCapacity(sceneData, 1);
+        }
+
+        public void EnsureCapacity(VividGPUDrivenSceneData sceneData, int cullingContextCount)
         {
             ThrowIfDisposed();
 
@@ -106,12 +119,36 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(sceneData));
             }
 
+            if (cullingContextCount <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cullingContextCount));
+            }
+
+            if (SupportsOcclusion && cullingContextCount != 1)
+            {
+                throw new ArgumentException(
+                    "Batched culling contexts do not support occlusion buffers.",
+                    nameof(cullingContextCount));
+            }
+
             MaxMeshletListBuildJobCount = VividGPUDrivenCullingCapacityUtility.GetMaxMeshletListBuildJobCount(sceneData);
             MaxVisibleMeshletRenderRequestCount = VividGPUDrivenCullingCapacityUtility.GetMaxVisibleMeshletRenderRequestCount(sceneData);
+            CullingContextCount = cullingContextCount;
+
+            int totalMeshletListBuildJobCount = MultiplyCapacity(
+                MaxMeshletListBuildJobCount,
+                cullingContextCount);
+            int totalVisibleMeshletRenderRequestCount = MultiplyCapacity(
+                MaxVisibleMeshletRenderRequestCount,
+                cullingContextCount);
+            int totalRendererListCount = MultiplyCapacity(RendererListCount, cullingContextCount);
+
+            EnsureUploadCapacity(cullingContextCount, totalRendererListCount);
+            UpdateInitialIndirectDispatchArgs(cullingContextCount);
 
             EnsureStructuredBuffer(
                 ref m_CullingContextBuffer,
-                1,
+                cullingContextCount,
                 UnsafeUtility.SizeOf<VividGPUCullingContext>(),
                 "VividGPUDriven_CullingContext"
             );
@@ -123,13 +160,13 @@ namespace VividRP.Runtime.GPUDriven
             );
             EnsureStructuredBuffer(
                 ref m_MeshletListBuildJobsBuffer,
-                MaxMeshletListBuildJobCount,
+                totalMeshletListBuildJobCount,
                 UnsafeUtility.SizeOf<Meshlets.VividMeshletListBuildJob>(),
                 "VividGPUDriven_MeshletListBuildJobs"
             );
             EnsureStructuredBuffer(
                 ref m_MeshletListBuildJobCounterBuffer,
-                1,
+                cullingContextCount,
                 sizeof(uint),
                 "VividGPUDriven_MeshletListBuildJobCounter"
             );
@@ -139,7 +176,7 @@ namespace VividRP.Runtime.GPUDriven
             );
             EnsureStructuredBuffer(
                 ref m_CandidateMeshletRenderRequestsBuffer,
-                MaxVisibleMeshletRenderRequestCount,
+                totalVisibleMeshletRenderRequestCount,
                 UnsafeUtility.SizeOf<VividMeshletRenderRequestPacked>(),
                 "VividGPUDriven_CandidateMeshletRenderRequests"
             );
@@ -149,25 +186,25 @@ namespace VividRP.Runtime.GPUDriven
             );
             EnsureStructuredBuffer(
                 ref m_VisibleMeshletRenderRequestsBuffer,
-                MaxVisibleMeshletRenderRequestCount,
+                totalVisibleMeshletRenderRequestCount,
                 UnsafeUtility.SizeOf<VividMeshletRenderRequestPacked>(),
                 "VividGPUDriven_VisibleMeshletRenderRequests"
             );
             EnsureStructuredBuffer(
                 ref m_VisibleMeshletRenderRequestCounterBuffer,
-                1,
+                cullingContextCount,
                 sizeof(uint),
                 "VividGPUDriven_VisibleMeshletRenderRequestCounter"
             );
             EnsureStructuredBuffer(
                 ref m_VisibleRendererListMeshletCountsBuffer,
-                Mathf.Max(1, (int) VividRendererListID.Count),
+                totalRendererListCount,
                 sizeof(uint),
                 "VividGPUDriven_VisibleRendererListMeshletCounts"
             );
             EnsureIndirectDrawArgsBuffer(
                 ref m_VisibleMeshletIndirectDrawArgsBuffer,
-                Mathf.Max(1, (int) VividRendererListID.Count),
+                totalRendererListCount,
                 "VividGPUDriven_VisibleMeshletIndirectDrawArgs"
             );
             if (SupportsOcclusion)
@@ -221,11 +258,91 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(cmd));
             }
 
-            m_CullingContextUpload[0] = cullingContext;
+            VividGPUCullingContext uploadContext = cullingContext;
+            SetContextOffsets(ref uploadContext, 0);
+            m_CullingContextUpload[0] = uploadContext;
             m_LodSelectionContextUpload[0] = lodSelectionContext;
 
             cmd.SetBufferData(CullingContextBuffer, m_CullingContextUpload);
             cmd.SetBufferData(LodSelectionContextBuffer, m_LodSelectionContextUpload);
+        }
+
+        public void UploadContexts(
+            CommandBuffer cmd,
+            VividGPUCullingContext[] cullingContexts,
+            int cullingContextCount,
+            in VividGPULODSelectionContext lodSelectionContext
+        )
+        {
+            ThrowIfDisposed();
+
+            if (cmd == null)
+            {
+                throw new ArgumentNullException(nameof(cmd));
+            }
+
+            if (cullingContexts == null)
+            {
+                throw new ArgumentNullException(nameof(cullingContexts));
+            }
+
+            if (cullingContextCount <= 0 || cullingContextCount > cullingContexts.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cullingContextCount));
+            }
+
+            if (cullingContextCount != CullingContextCount)
+            {
+                throw new InvalidOperationException(
+                    "EnsureCapacity must be called with the same culling context count before uploading contexts.");
+            }
+
+            for (int contextIndex = 0; contextIndex < cullingContextCount; contextIndex++)
+            {
+                VividGPUCullingContext uploadContext = cullingContexts[contextIndex];
+                SetContextOffsets(ref uploadContext, contextIndex);
+                m_CullingContextUpload[contextIndex] = uploadContext;
+            }
+
+            m_LodSelectionContextUpload[0] = lodSelectionContext;
+            cmd.SetBufferData(CullingContextBuffer, m_CullingContextUpload);
+            cmd.SetBufferData(LodSelectionContextBuffer, m_LodSelectionContextUpload);
+        }
+
+        internal static int GetContextOffset(int contextIndex, int perContextCapacity)
+        {
+            if (contextIndex < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(contextIndex));
+            }
+
+            if (perContextCapacity < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(perContextCapacity));
+            }
+
+            return MultiplyCapacity(perContextCapacity, contextIndex);
+        }
+
+        internal static int GetIndirectDrawArgsCommandIndex(int contextIndex, int rendererListIndex)
+        {
+            if (contextIndex < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(contextIndex));
+            }
+
+            if (rendererListIndex < 0 || rendererListIndex >= RendererListCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(rendererListIndex));
+            }
+
+            return checked(contextIndex * RendererListCount + rendererListIndex);
+        }
+
+        internal static int GetIndirectDrawArgsByteOffset(int contextIndex, int rendererListIndex)
+        {
+            return checked(GetIndirectDrawArgsCommandIndex(contextIndex, rendererListIndex)
+                           * IndirectDrawArgsByteStride);
         }
 
         public void Reset(CommandBuffer cmd)
@@ -331,7 +448,52 @@ namespace VividRP.Runtime.GPUDriven
             m_RecoveredMeshletIndirectDrawArgsBuffer = null;
             MaxMeshletListBuildJobCount = 0;
             MaxVisibleMeshletRenderRequestCount = 0;
+            CullingContextCount = 0;
             m_IsDisposed = true;
+        }
+
+        private void SetContextOffsets(ref VividGPUCullingContext cullingContext, int contextIndex)
+        {
+            int meshletListBuildJobsOffset = GetContextOffset(
+                contextIndex,
+                MaxMeshletListBuildJobCount);
+            int meshletRenderRequestsOffset = GetContextOffset(
+                contextIndex,
+                MaxVisibleMeshletRenderRequestCount);
+
+            cullingContext.BaseStartInstance = (uint)meshletRenderRequestsOffset;
+            cullingContext.MeshletListBuildJobsOffset = (uint)meshletListBuildJobsOffset;
+            cullingContext.MeshletRenderRequestsOffset = (uint)meshletRenderRequestsOffset;
+        }
+
+        private void EnsureUploadCapacity(int cullingContextCount, int totalRendererListCount)
+        {
+            ResizeNativeArray(
+                ref m_CullingContextUpload,
+                cullingContextCount,
+                NativeArrayOptions.UninitializedMemory);
+            ResizeNativeArray(
+                ref m_ZeroUintUpload,
+                cullingContextCount,
+                NativeArrayOptions.ClearMemory);
+            ResizeNativeArray(
+                ref m_ZeroRendererListCountsUpload,
+                totalRendererListCount,
+                NativeArrayOptions.ClearMemory);
+            ResizeNativeArray(
+                ref m_ZeroIndirectDrawArgsWordsUpload,
+                MultiplyCapacity(totalRendererListCount, IndirectDrawArgsWordCount),
+                NativeArrayOptions.ClearMemory);
+        }
+
+        private void UpdateInitialIndirectDispatchArgs(int cullingContextCount)
+        {
+            m_InitialIndirectDispatchArgsUpload[0] = new IndirectDispatchArgs
+            {
+                ThreadGroupsX = 0,
+                ThreadGroupsY = (uint)cullingContextCount,
+                ThreadGroupsZ = 1,
+            };
         }
 
         private static void EnsureStructuredBuffer(
@@ -387,7 +549,9 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void EnsureIndirectDrawArgsBuffer(ref GraphicsBuffer buffer, int commandCount, string bufferName)
         {
-            int elementCount = Mathf.Max(4, commandCount * 4);
+            int elementCount = Mathf.Max(
+                IndirectDrawArgsWordCount,
+                MultiplyCapacity(commandCount, IndirectDrawArgsWordCount));
             const int stride = sizeof(uint);
             GraphicsBuffer.Target target = GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments;
 
@@ -411,6 +575,17 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
+        private static int MultiplyCapacity(int count, int multiplier)
+        {
+            long result = (long)count * multiplier;
+            if (result < 0 || result > int.MaxValue)
+            {
+                throw new InvalidOperationException("GPU-driven culling buffer capacity exceeds the supported range.");
+            }
+
+            return (int)result;
+        }
+
         private static void DisposeNativeArray<T>(ref NativeArray<T> array)
             where T : struct
         {
@@ -421,6 +596,21 @@ namespace VividRP.Runtime.GPUDriven
 
             array.Dispose();
             array = default;
+        }
+
+        private static void ResizeNativeArray<T>(
+            ref NativeArray<T> array,
+            int length,
+            NativeArrayOptions options)
+            where T : struct
+        {
+            if (array.IsCreated && array.Length == length)
+            {
+                return;
+            }
+
+            DisposeNativeArray(ref array);
+            array = new NativeArray<T>(length, Allocator.Persistent, options);
         }
     }
 }

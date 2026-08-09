@@ -750,12 +750,6 @@ namespace VividRP.Runtime
         /// <returns>TextureHandle that can be used in Record()</returns>
         TextureHandle Import(RTHandle rtHandle);
 
-        /// <summary>
-        /// Allocates or reuses a pass-scoped history buffer pair during Prepare().
-        /// previous receives the last valid frame, current is registered as this frame's output.
-        /// </summary>
-        bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc);
-
         bool IsActive(ContextContainer frameData)
         {
             return true;
@@ -788,10 +782,6 @@ namespace VividRP.Runtime
             return PassRecorder.ImportTextureForPass(this, rtHandle);
         }
 
-        public bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc)
-        {
-            return PassRecorder.AllocHistoryBufferForPass(this, key, previous, current, desc);
-        }
     }
 
     public abstract class RasterPass : IRenderPass
@@ -820,10 +810,6 @@ namespace VividRP.Runtime
             return PassRecorder.ImportTextureForPass(this, rtHandle);
         }
 
-        public bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc)
-        {
-            return PassRecorder.AllocHistoryBufferForPass(this, key, previous, current, desc);
-        }
     }
 
     public abstract class UnsafePass : IRenderPass
@@ -860,9 +846,5 @@ namespace VividRP.Runtime
             return PassRecorder.ImportTextureForPass(this, rtHandle);
         }
 
-        public bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc)
-        {
-            return PassRecorder.AllocHistoryBufferForPass(this, key, previous, current, desc);
-        }
     }
 }

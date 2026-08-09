@@ -13,54 +13,18 @@ namespace VividRP.Runtime
 {
     public static partial class PassRecorder
     {
-        private readonly struct PassHistoryKeyCacheKey
-        {
-            public PassHistoryKeyCacheKey(IRenderPass pass, string key)
-            {
-                Pass = pass;
-                Key = key;
-            }
-
-            public IRenderPass Pass { get; }
-            public string Key { get; }
-        }
-
-        private sealed class PassHistoryKeyCacheKeyComparer : IEqualityComparer<PassHistoryKeyCacheKey>
-        {
-            public bool Equals(PassHistoryKeyCacheKey x, PassHistoryKeyCacheKey y)
-            {
-                return ReferenceEquals(x.Pass, y.Pass)
-                    && string.Equals(x.Key, y.Key, StringComparison.Ordinal);
-            }
-
-            public int GetHashCode(PassHistoryKeyCacheKey obj)
-            {
-                var passHash = obj.Pass != null ? RuntimeHelpers.GetHashCode(obj.Pass) : 0;
-                return HashCode.Combine(passHash, StringComparer.Ordinal.GetHashCode(obj.Key ?? string.Empty));
-            }
-        }
-
-        private sealed class CodeManagedBufferHistoryRequest
-        {
-            public string Key;
-            public RenderGraphBuffer CurrentBuffer;
-        }
-
         private static readonly List<IRenderPass> s_RenderPasses = new();
         private static readonly ContextContainer s_FrameData = new();
         private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
         private static readonly Dictionary<IRenderPass, int> s_PassIndices = new();
         private static readonly Dictionary<IRenderPass, Vector2Int> s_PassRenderSizes = new();
         private static readonly Dictionary<IRenderPass, Dictionary<string, AccessFlags>> s_PassResourceAccessOverrides = new();
-        private static readonly Dictionary<PassHistoryKeyCacheKey, string> s_PassHistoryKeys = new(32, new PassHistoryKeyCacheKeyComparer());
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
         private static readonly Dictionary<IRenderPass, List<ImportedPassHandle>> s_PassImportedHandles = new();
-        private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
-        private static readonly HashSet<RenderGraphTexture> s_HistoryImportedTextures = new();
-        private static readonly HashSet<RenderGraphBuffer> s_HistoryImportedBuffers = new();
-        private static readonly HashSet<RenderGraphBuffer> s_CodeManagedHistoryImportedBuffers = new();
-        private static readonly Dictionary<RTHandle, TextureHandle> s_HistoryTextureImportCache = new(16);
-        private static readonly Dictionary<GraphicsBuffer, BufferHandle> s_HistoryBufferImportCache = new(16);
+        private static readonly HashSet<RenderGraphTexture> s_FrameImportedTextures = new();
+        private static readonly HashSet<RenderGraphBuffer> s_FrameImportedBuffers = new();
+        private static readonly Dictionary<RTHandle, TextureHandle> s_TextureImportCache = new(16);
+        private static readonly Dictionary<GraphicsBuffer, BufferHandle> s_BufferImportCache = new(16);
         private static readonly Dictionary<RenderGraphTexture, TextureHandle> s_RecordGraphTextureCache = new(64);
         private static readonly Dictionary<RenderGraphBuffer, BufferHandle> s_RecordGraphBufferCache = new(16);
         private static readonly Dictionary<RenderGraphRenderList, RendererListHandle> s_RecordGraphRenderListCache = new(16);
@@ -380,14 +344,11 @@ namespace VividRP.Runtime
             s_PassIndices.Clear();
             s_PassRenderSizes.Clear();
             s_PassResourceAccessOverrides.Clear();
-            s_PassHistoryKeys.Clear();
             s_PassActiveStates = Array.Empty<bool>();
-            ClearHistoryImportedHandles();
-            ClearCodeManagedHistoryFrameState();
+            ClearFrameImportedHandles();
             ClearImportedTextures();
             s_PassImportedHandles.Clear();
             ClearRecordGraphResourceCaches();
-            RenderGraphBufferHistoryRegistry.Clear();
             VividAntialiasingRuntimeUtility.Clear();
             if (s_FrameData.Contains<VividLightData>())
                 s_FrameData.Get<VividLightData>().ReleaseLightGridNativeResources();
@@ -409,14 +370,9 @@ namespace VividRP.Runtime
                 EnsureCompiled(graphAsset);
             }
 
-            using (RenderPassProfilingUtility.PrepareFrameClearHistoryImportsMarker.Auto())
+            using (RenderPassProfilingUtility.PrepareFrameClearImportedHandlesMarker.Auto())
             {
-                ClearHistoryImportedHandles();
-            }
-
-            using (RenderPassProfilingUtility.PrepareFrameClearCodeManagedHistoryMarker.Auto())
-            {
-                ClearCodeManagedHistoryFrameState();
+                ClearFrameImportedHandles();
             }
 
             s_RenderedPreImageEffectGizmosInGraph = false;
@@ -437,8 +393,7 @@ namespace VividRP.Runtime
         {
             VirtualTextureSystem.AbortPageTableUpdates();
             ClearImportedTextures();
-            ClearHistoryImportedHandles();
-            ClearCodeManagedHistoryFrameState();
+            ClearFrameImportedHandles();
             s_RenderedPreImageEffectGizmosInGraph = false;
         }
 
@@ -469,10 +424,10 @@ namespace VividRP.Runtime
                 return default;
             }
 
-            if (!s_HistoryTextureImportCache.TryGetValue(rtHandle, out var handle))
+            if (!s_TextureImportCache.TryGetValue(rtHandle, out var handle))
             {
                 handle = s_CurrentRenderGraph.ImportTexture(rtHandle);
-                s_HistoryTextureImportCache.Add(rtHandle, handle);
+                s_TextureImportCache.Add(rtHandle, handle);
             }
 
             return handle;
@@ -484,7 +439,7 @@ namespace VividRP.Runtime
                 return;
 
             texture.SetImportedHandle(handle);
-            s_HistoryImportedTextures.Add(texture);
+            s_FrameImportedTextures.Add(texture);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -513,10 +468,10 @@ namespace VividRP.Runtime
                 return default;
             }
 
-            if (!s_HistoryBufferImportCache.TryGetValue(graphicsBuffer, out var handle))
+            if (!s_BufferImportCache.TryGetValue(graphicsBuffer, out var handle))
             {
                 handle = s_CurrentRenderGraph.ImportBuffer(graphicsBuffer);
-                s_HistoryBufferImportCache.Add(graphicsBuffer, handle);
+                s_BufferImportCache.Add(graphicsBuffer, handle);
             }
 
             return handle;
@@ -528,7 +483,7 @@ namespace VividRP.Runtime
                 return;
 
             buffer.SetImportedHandle(handle);
-            s_HistoryImportedBuffers.Add(buffer);
+            s_FrameImportedBuffers.Add(buffer);
         }
 
         internal static bool IsPassTextureImportActive => s_CurrentRenderGraph != null;
@@ -594,23 +549,13 @@ namespace VividRP.Runtime
             s_ImportedRTHandles[texture] = rtHandle;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static void CommitFrame(RenderGraphData graphAsset)
+        internal static void CommitFrame()
         {
             using var commitFrameScope = RenderPassProfilingUtility.CommitFrameMarker.Auto();
             VirtualTextureSystem.CommitPageTableUpdates();
-            using (RenderPassProfilingUtility.CommitFrameBufferHistoriesMarker.Auto())
+            using (RenderPassProfilingUtility.CommitFrameClearImportedHandlesMarker.Auto())
             {
-                FinalizeCodeManagedBufferHistories(graphAsset);
-            }
-
-            using (RenderPassProfilingUtility.CommitFrameClearHistoryImportsMarker.Auto())
-            {
-                ClearHistoryImportedHandles();
-            }
-
-            using (RenderPassProfilingUtility.CommitFrameClearCodeManagedHistoryMarker.Auto())
-            {
-                ClearCodeManagedHistoryFrameState();
+                ClearFrameImportedHandles();
             }
         }
 
@@ -670,113 +615,6 @@ namespace VividRP.Runtime
             return !hasRenderGizmoPrePostProcessBoundary || !renderedPreImageEffectGizmosInGraph;
         }
 
-        internal static bool AllocHistoryBufferForPass(
-            IRenderPass pass,
-            string key,
-            RenderGraphBuffer previous,
-            RenderGraphBuffer current,
-            RenderGraphBufferDesc desc)
-        {
-            using var historyAllocScope = RenderPassProfilingUtility.AllocHistoryBufferForPassMarker.Auto();
-
-            if (!TryResolvePassHistoryContext(pass, key, out var historyKey, out var camera, out var graphAsset))
-                return false;
-
-            var descriptor = CloneBufferDescriptor(desc ?? current?.desc ?? previous?.desc);
-            if (descriptor == null)
-            {
-                Debug.LogWarning("[VividRP] Cannot allocate history buffer without a descriptor.");
-                return false;
-            }
-
-            if (!RenderGraphBufferHistoryRegistry.PrepareHistoryBuffers(
-                    camera,
-                    graphAsset,
-                    historyKey,
-                    descriptor,
-                    out var previousBuffer,
-                    out var currentBuffer,
-                    out var hasValidHistory))
-            {
-                return false;
-            }
-
-            if (previous != null)
-            {
-                previous.desc = CloneBufferDescriptor(descriptor);
-                previous.SetImportedBuffer(previousBuffer);
-                s_CodeManagedHistoryImportedBuffers.Add(previous);
-            }
-
-            if (current != null)
-            {
-                current.desc = CloneBufferDescriptor(descriptor);
-                current.SetImportedBuffer(currentBuffer);
-                s_CodeManagedHistoryImportedBuffers.Add(current);
-                s_CodeManagedBufferHistoryRequests[historyKey] = new CodeManagedBufferHistoryRequest
-                {
-                    Key = historyKey,
-                    CurrentBuffer = current,
-                };
-            }
-
-            return hasValidHistory;
-        }
-
-        internal static string BuildPassHistoryKey(IRenderPass pass, string key)
-        {
-            if (pass == null || string.IsNullOrWhiteSpace(key))
-                return null;
-
-            if (!s_PassIndices.TryGetValue(pass, out var passIndex))
-            {
-                passIndex = s_RenderPasses.IndexOf(pass);
-                if (passIndex < 0)
-                    return null;
-
-                s_PassIndices[pass] = passIndex;
-            }
-
-            var cacheKey = new PassHistoryKeyCacheKey(pass, key);
-            if (s_PassHistoryKeys.TryGetValue(cacheKey, out var historyKey))
-                return historyKey;
-
-            historyKey = $"{passIndex}:{key}";
-            s_PassHistoryKeys[cacheKey] = historyKey;
-            return historyKey;
-        }
-
-        private static bool TryResolvePassHistoryContext(
-            IRenderPass pass,
-            string key,
-            out string historyKey,
-            out Camera camera,
-            out RenderGraphData graphAsset)
-        {
-            historyKey = BuildPassHistoryKey(pass, key);
-            camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
-            graphAsset = s_CurrentGraphAsset;
-
-            if (string.IsNullOrEmpty(historyKey) || camera == null || graphAsset == null)
-            {
-                if (string.IsNullOrWhiteSpace(key))
-                    Debug.LogWarning("[VividRP] Cannot allocate history resource with an empty key.");
-                else if (camera == null || graphAsset == null)
-                    Debug.LogWarning("[VividRP] Cannot allocate history resource before PassRecorder has an active camera and graph asset.");
-                else
-                    Debug.LogWarning("[VividRP] Cannot resolve the pass history scope for the requested resource.");
-
-                return false;
-            }
-
-            return true;
-        }
-
-        private static RenderGraphBufferDesc CloneBufferDescriptor(RenderGraphBufferDesc descriptor)
-        {
-            return descriptor?.Clone();
-        }
-
         /// <summary>
         /// Clears all imported textures at the start of each frame.
         /// </summary>
@@ -790,35 +628,24 @@ namespace VividRP.Runtime
             s_ImportedRTHandles.Clear();
             foreach (var handles in s_PassImportedHandles.Values)
                 handles?.Clear();
-            s_HistoryTextureImportCache.Clear();
-            s_HistoryBufferImportCache.Clear();
+            s_TextureImportCache.Clear();
+            s_BufferImportCache.Clear();
             s_CurrentRenderGraph = null;
         }
 
-        private static void ClearHistoryImportedHandles()
+        private static void ClearFrameImportedHandles()
         {
-            foreach (var texture in s_HistoryImportedTextures)
+            foreach (var texture in s_FrameImportedTextures)
             {
                 texture?.ClearImportedHandle();
             }
-            foreach (var buffer in s_HistoryImportedBuffers)
+            foreach (var buffer in s_FrameImportedBuffers)
             {
                 buffer?.ClearImportedHandle();
             }
 
-            s_HistoryImportedTextures.Clear();
-            s_HistoryImportedBuffers.Clear();
-        }
-
-        private static void ClearCodeManagedHistoryFrameState()
-        {
-            foreach (var buffer in s_CodeManagedHistoryImportedBuffers)
-            {
-                buffer?.ClearImportedBuffer();
-            }
-
-            s_CodeManagedHistoryImportedBuffers.Clear();
-            s_CodeManagedBufferHistoryRequests.Clear();
+            s_FrameImportedTextures.Clear();
+            s_FrameImportedBuffers.Clear();
         }
 
         private static void EnsureCompiled(RenderGraphData graphAsset)
@@ -1263,41 +1090,6 @@ namespace VividRP.Runtime
             Debug.LogWarning(
                 $"[VividRP] Skipping legacy RenderGraph binding for transient field '{fieldName}' on '{passType?.FullName ?? "<Unknown Pass>"}'.");
         }
-        private static bool ShouldPersistHistoryBuffer(RenderGraphBuffer buffer)
-        {
-            foreach (var resources in s_PassResources.Values)
-            {
-                if (resources?.Buffers == null)
-                    continue;
-
-                foreach (var entry in resources.Buffers)
-                {
-                    if (ReferenceEquals(entry?.Buffer, buffer) && (entry.Access & AccessFlags.Write) != 0)
-                        return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static void FinalizeCodeManagedBufferHistories(RenderGraphData graphAsset)
-        {
-            if (graphAsset == null || s_CodeManagedBufferHistoryRequests.Count == 0)
-                return;
-
-            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
-            if (camera == null)
-                return;
-
-            foreach (var request in s_CodeManagedBufferHistoryRequests.Values)
-            {
-                if (request?.CurrentBuffer == null || !ShouldPersistHistoryBuffer(request.CurrentBuffer))
-                    continue;
-
-                RenderGraphBufferHistoryRegistry.FinalizeFrame(camera, graphAsset, request.Key);
-            }
-        }
-
 #if UNITY_EDITOR
         private static void RecordRenderGizmosPass(
             RenderGraph renderGraph,
@@ -1422,8 +1214,8 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.RecordRenderGraphSetCurrentGraphMarker.Auto())
             {
-                s_HistoryTextureImportCache.Clear();
-                s_HistoryBufferImportCache.Clear();
+                s_TextureImportCache.Clear();
+                s_BufferImportCache.Clear();
                 s_CurrentRenderGraph = renderGraph;
             }
 
@@ -1627,7 +1419,8 @@ namespace VividRP.Runtime
 
         private static void ClearRecordGraphResourceCaches()
         {
-            s_HistoryTextureImportCache.Clear();
+            s_TextureImportCache.Clear();
+            s_BufferImportCache.Clear();
             s_RecordGraphTextureCache.Clear();
             s_RecordGraphBufferCache.Clear();
             s_RecordGraphRenderListCache.Clear();

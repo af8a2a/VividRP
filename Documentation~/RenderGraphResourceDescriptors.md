@@ -84,10 +84,6 @@ All resource and pass nodes have been updated to use the new descriptor system:
 - Persistent texture history is managed per camera at runtime instead of through a graph resource node
 - `CameraHistoryRenderGraphBridge` converts `RenderGraphTextureDesc` values and imports the requested history frame
 
-**HistoryBufferNodeData**
-- Uses `RenderGraphBufferDesc`
-- Both Current and History ports reference the same descriptor
-
 ### Pass Nodes
 
 **FullScreenPassNodeData**

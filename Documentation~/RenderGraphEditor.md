@@ -40,7 +40,7 @@
 - 该标记不会生成输入/输出/debug 端口，也不会显示 override 选项
 - 标记后的资源在录制 Pass 时通过 CoreRP builder 的 `CreateTransientTexture` / `CreateTransientBuffer` 创建，不能跨 Pass 或跨帧传递
 - 跨 Pass 资源继续使用普通 `[RenderGraphResource]` 字段或资源节点；跨帧资源继续使用 history 流程
-- `IRenderPass` 提供 `AllocHistoryBuffer(...)`，可以在 `Prepare()` 中直接申请 pass-scoped history buffer；纹理历史由 `CameraHistoryTexture` 管理
+- 持久化纹理与 buffer 历史分别由 `CameraHistoryTexture` 和 `CameraHistoryBuffer` 管理，并通过 `CameraHistoryRenderGraphBridge` 导入 RenderGraph
 - 纹理 history 运行时由 `BufferedRTHandleSystem` 做双缓冲物理存储，但对 Pass 暴露的仍是 `RenderGraphTexture`
 - `PassRecorder` 会在录制阶段自动把 history 逻辑资源导入 RenderGraph，并在图执行成功后提交 history；不再依赖图尾的显式 copy 更新
 

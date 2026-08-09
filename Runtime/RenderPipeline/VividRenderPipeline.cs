@@ -264,7 +264,7 @@ namespace VividRP.Runtime
 
                 using (s_CommitFrameMarker.Auto())
                 {
-                    PassRecorder.CommitFrame(graphAsset);
+                    PassRecorder.CommitFrame();
                 }
 
                 using (s_SetupCameraPropertiesMarker.Auto())

@@ -1,4 +1,3 @@
-using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -27,19 +26,13 @@ namespace VividRP.Runtime.RenderPass.Core
         {
         }
 
+        public override void Resize(int width, int height)
+        {
+            m_DepthAttachment.Resize(width, height);
+        }
+
         public override void Prepare(ContextContainer frameData)
         {
-            var cameraData = frameData.Get<VividCameraData>();
-            var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
-            var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
-
-            if (width <= 0)
-                width = Mathf.Max(1, Screen.width);
-
-            if (height <= 0)
-                height = Mathf.Max(1, Screen.height);
-
-            m_DepthAttachment.Resize(width, height);
         }
 
         public override void Record(RasterPassContext context)

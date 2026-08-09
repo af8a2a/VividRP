@@ -29,6 +29,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetMarkers_UsesProfilingSampler_ForGpuRecordTiming()
+        {
+            var pass = new ProfilingTestPass();
+
+            var markers = RenderPassProfilingUtility.GetMarkers(pass, "ProfilingTestPass", 3);
+
+            Assert.That(markers.Record, Is.TypeOf<ProfilingSampler>());
+            Assert.That(markers.Record.name, Is.EqualTo("VividRP.RenderPass.Record/3:ProfilingTestPass"));
+        }
+
+        [Test]
         public void GetMarkers_StoresGraphName_ForRenderGraphPassNameReuse()
         {
             var pass = new ProfilingTestPass();
@@ -136,6 +147,31 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void PrepareRenderPass_CallsResizeBeforePrepare_OnlyWhenRenderSizeChanges()
+        {
+            var pass = new ResizeTrackingPass();
+            var cameraData = PassRecorder.GetFrameData().GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 640;
+            cameraData.actualHeight = 360;
+
+            Prepare(pass);
+            Prepare(pass);
+
+            cameraData.actualWidth = 1280;
+            cameraData.actualHeight = 720;
+            Prepare(pass);
+
+            Assert.That(pass.Events, Is.EqualTo(new[]
+            {
+                "Resize:640x360",
+                "Prepare",
+                "Prepare",
+                "Resize:1280x720",
+                "Prepare",
+            }));
+        }
+
         private static void Compile(RenderGraphData graphAsset)
         {
             var method = typeof(PassRecorder).GetMethod("Compile", BindingFlags.NonPublic | BindingFlags.Static);
@@ -157,6 +193,13 @@ namespace VividRP.Editor.Tests
             return (RenderPassProfilerMarkers)method.Invoke(null, new object[] { pass, displayName });
         }
 
+        private static void Prepare(IRenderPass pass)
+        {
+            var method = typeof(PassRecorder).GetMethod("PrepareRenderPass", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(method, Is.Not.Null);
+            method.Invoke(null, new object[] { pass, null });
+        }
+
         private static string GetPassTypeName<T>()
         {
             var type = typeof(T);
@@ -171,6 +214,33 @@ namespace VividRP.Editor.Tests
 
             public override void Prepare(ContextContainer frameData)
             {
+            }
+
+            public override void Record(RasterPassContext context)
+            {
+            }
+
+            public override void Dispose()
+            {
+            }
+        }
+
+        private sealed class ResizeTrackingPass : RasterPass
+        {
+            public readonly List<string> Events = new();
+
+            public override void Create()
+            {
+            }
+
+            public override void Resize(int width, int height)
+            {
+                Events.Add($"Resize:{width}x{height}");
+            }
+
+            public override void Prepare(ContextContainer frameData)
+            {
+                Events.Add("Prepare");
             }
 
             public override void Record(RasterPassContext context)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Unity.Profiling;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
@@ -20,6 +21,7 @@ namespace VividRP.Runtime
 
             Create = new ProfilerMarker($"{MarkerRoot}.Create/{displayName}");
             Initialize = new ProfilerMarker($"{MarkerRoot}.Initialize/{displayName}");
+            Resize = new ProfilerMarker($"{MarkerRoot}.Resize/{displayName}");
             Prepare = new ProfilerMarker($"{MarkerRoot}.Prepare/{displayName}");
             RecordGraph = new ProfilerMarker($"{MarkerRoot}.RecordGraph/{displayName}");
             RecordGraphPrepareRenderGraph = new ProfilerMarker($"{MarkerRoot}.RecordGraph.PrepareRenderGraph/{displayName}");
@@ -30,7 +32,7 @@ namespace VividRP.Runtime
             RecordGraphSetupImportedHandles = new ProfilerMarker($"{MarkerRoot}.RecordGraph.SetupImportedHandles/{displayName}");
             RecordGraphConfigureBuilder = new ProfilerMarker($"{MarkerRoot}.RecordGraph.ConfigureBuilder/{displayName}");
             RecordGraphSetRenderFunc = new ProfilerMarker($"{MarkerRoot}.RecordGraph.SetRenderFunc/{displayName}");
-            Record = new ProfilerMarker($"{MarkerRoot}.Record/{displayName}");
+            Record = new ProfilingSampler($"{MarkerRoot}.Record/{displayName}");
             Dispose = new ProfilerMarker($"{MarkerRoot}.Dispose/{displayName}");
             DisplayName = displayName;
             GraphName = graphName;
@@ -38,6 +40,7 @@ namespace VividRP.Runtime
 
         public ProfilerMarker Create { get; }
         public ProfilerMarker Initialize { get; }
+        public ProfilerMarker Resize { get; }
         public ProfilerMarker Prepare { get; }
         public ProfilerMarker RecordGraph { get; }
         public ProfilerMarker RecordGraphPrepareRenderGraph { get; }
@@ -48,10 +51,15 @@ namespace VividRP.Runtime
         public ProfilerMarker RecordGraphSetupImportedHandles { get; }
         public ProfilerMarker RecordGraphConfigureBuilder { get; }
         public ProfilerMarker RecordGraphSetRenderFunc { get; }
-        public ProfilerMarker Record { get; }
+        public ProfilingSampler Record { get; }
         public ProfilerMarker Dispose { get; }
         public string DisplayName { get; }
         public string GraphName { get; }
+
+        internal void Release()
+        {
+            Record?.Dispose();
+        }
     }
 
     internal static class RenderPassProfilingUtility
@@ -337,6 +345,9 @@ namespace VividRP.Runtime
 
         public static void Clear()
         {
+            foreach (var markers in s_Markers.Values)
+                markers.Release();
+
             s_Markers.Clear();
         }
 

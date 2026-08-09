@@ -38,17 +38,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_ConfiguresMippedRandomWriteTexture()
+        public void Resize_ConfiguresMippedRandomWriteTexture()
         {
             var pass = new HZBGeneratePass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 1920;
-            cameraData.actualHeight = 1080;
 
             try
             {
-                pass.Prepare(frameData);
+                pass.Resize(1920, 1080);
 
                 var hzbTexture = GetTextureField(pass, "m_HzbTexture");
                 Assert.That(hzbTexture.desc.Width, Is.EqualTo(1920));
@@ -67,17 +63,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_ClampsMipCountToShaderLimit()
+        public void Resize_ClampsMipCountToShaderLimit()
         {
             var pass = new HZBGeneratePass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 8192;
-            cameraData.actualHeight = 8192;
 
             try
             {
-                pass.Prepare(frameData);
+                pass.Resize(8192, 8192);
 
                 var hzbTexture = GetTextureField(pass, "m_HzbTexture");
                 Assert.That(hzbTexture.desc.MipCount, Is.EqualTo(13));

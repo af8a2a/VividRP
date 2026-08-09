@@ -275,20 +275,20 @@ namespace VividRP.Runtime
 
         private static void ExecuteComputePass(ComputePassData data, ComputeGraphContext ctx)
         {
-            using var recordScope = data.Markers.Record.Auto();
+            using var recordScope = new ProfilingScope(ctx.cmd, data.Markers.Record);
             data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
         }
 
         private static void ExecuteRasterPass(RasterPassData data, RasterGraphContext ctx)
         {
-            using var recordScope = data.Markers.Record.Auto();
+            using var recordScope = new ProfilingScope(ctx.cmd, data.Markers.Record);
             data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
         }
 
         private static void ExecuteUnsafePass(UnsafePassData data, UnsafeGraphContext ctx)
         {
             var passContext = new UnsafePassContext(ctx, s_FrameData);
-            using var recordScope = data.Markers.Record.Auto();
+            using var recordScope = new ProfilingScope(ctx.cmd, data.Markers.Record);
             data.Pass.Record(passContext);
         }
 

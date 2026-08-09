@@ -101,17 +101,10 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        public override void Prepare(ContextContainer frameData)
+        public override void Resize(int width, int height)
         {
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            m_Width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
-            m_Height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
-
-            if (m_Width <= 0)
-                m_Width = Mathf.Max(1, Screen.width);
-
-            if (m_Height <= 0)
-                m_Height = Mathf.Max(1, Screen.height);
+            m_Width = width;
+            m_Height = height;
 
             m_MipCount = CalculateMipCount(m_Width, m_Height);
             m_DispatchGroupCountX = Mathf.Max(1, (m_Width + 63) >> 6);
@@ -120,6 +113,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_DepthTexture.Resize(m_Width, m_Height);
             ConfigureHzbTexture(m_HzbTexture, m_Width, m_Height, m_MipCount);
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
             EnsureAtomicCounterBuffer();
             ZeroAtomicCounterBuffer();
         }

@@ -12,15 +12,11 @@ namespace VividRP.Editor.Tests
     public class PreDepthPassTests
     {
         [Test]
-        public void Prepare_KeepsDefaultDepthAttachmentDepthOnly()
+        public void Resize_KeepsDefaultDepthAttachmentDepthOnly()
         {
             var pass = new PreDepthPass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 1280;
-            cameraData.actualHeight = 720;
 
-            pass.Prepare(frameData);
+            pass.Resize(1280, 720);
 
             var depthTexture = GetDepthTexture(pass);
 
@@ -31,13 +27,9 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_PreservesBoundDepthFormatWithoutInjectingStencilFormat()
+        public void Resize_PreservesBoundDepthFormatWithoutInjectingStencilFormat()
         {
             var pass = new PreDepthPass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 1920;
-            cameraData.actualHeight = 1080;
 
             var sharedDepth = new RenderGraphTexture
             {
@@ -58,7 +50,7 @@ namespace VividRP.Editor.Tests
 
             SetDepthTexture(pass, sharedDepth);
 
-            pass.Prepare(frameData);
+            pass.Resize(1920, 1080);
 
             Assert.That(sharedDepth.desc.Width, Is.EqualTo(1920));
             Assert.That(sharedDepth.desc.Height, Is.EqualTo(1080));

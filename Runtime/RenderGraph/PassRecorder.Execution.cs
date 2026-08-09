@@ -78,6 +78,7 @@ namespace VividRP.Runtime
         private static readonly ContextContainer s_FrameData = new();
         private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
         private static readonly Dictionary<IRenderPass, int> s_PassIndices = new();
+        private static readonly Dictionary<IRenderPass, Vector2Int> s_PassRenderSizes = new();
         private static readonly Dictionary<IRenderPass, Dictionary<string, AccessFlags>> s_PassResourceAccessOverrides = new();
         private static readonly Dictionary<PassHistoryKeyCacheKey, string> s_PassHistoryKeys = new(32, new PassHistoryKeyCacheKeyComparer());
         private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
@@ -345,6 +346,28 @@ namespace VividRP.Runtime
                 return;
 
             var markers = GetPassMarkers(pass, displayName);
+            var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
+            var renderSize = new Vector2Int(
+                CameraDimensionUtility.ResolveCameraDimension(
+                    cameraData.actualWidth,
+                    cameraData.pixelWidth,
+                    Screen.width),
+                CameraDimensionUtility.ResolveCameraDimension(
+                    cameraData.actualHeight,
+                    cameraData.pixelHeight,
+                    Screen.height));
+
+            if (!s_PassRenderSizes.TryGetValue(pass, out var previousRenderSize)
+                || previousRenderSize != renderSize)
+            {
+                using (markers.Resize.Auto())
+                {
+                    pass.Resize(renderSize.x, renderSize.y);
+                }
+
+                s_PassRenderSizes[pass] = renderSize;
+            }
+
             using (markers.Prepare.Auto())
             {
                 pass.Prepare(s_FrameData);
@@ -387,6 +410,7 @@ namespace VividRP.Runtime
             s_RenderPasses.Clear();
             s_PassResources.Clear();
             s_PassIndices.Clear();
+            s_PassRenderSizes.Clear();
             s_PassResourceAccessOverrides.Clear();
             s_PassHistoryKeys.Clear();
             s_PassActiveStates = Array.Empty<bool>();

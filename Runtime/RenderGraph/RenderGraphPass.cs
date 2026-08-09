@@ -715,6 +715,15 @@ namespace VividRP.Runtime
         }
 
         /// <summary>
+        /// Updates resolution-dependent resources.
+        /// Called before Prepare() the first time an active pass is prepared and whenever the
+        /// actual render resolution changes. Width and height are always at least one.
+        /// </summary>
+        void Resize(int width, int height)
+        {
+        }
+
+        /// <summary>
         /// Prepare runtime resources (e.g. dynamic count buffer).
         /// Called each frame before the RenderGraph pass is recorded.
         /// After Prepare, the RenderGraph will automatically use the resource info
@@ -764,6 +773,7 @@ namespace VividRP.Runtime
         protected  ProfilingSampler profilingSampler;
 
         public abstract void Create();
+        public virtual void Resize(int width, int height) { }
         public abstract void Prepare(ContextContainer frameData);
         public virtual bool IsActive(ContextContainer frameData) => true;
 
@@ -800,6 +810,7 @@ namespace VividRP.Runtime
         protected ProfilingSampler profilingSampler;
 
         public abstract void Create();
+        public virtual void Resize(int width, int height) { }
         public abstract void Prepare(ContextContainer frameData);
         public virtual bool IsActive(ContextContainer frameData) => true;
 
@@ -836,6 +847,8 @@ namespace VividRP.Runtime
 
        protected ProfilingSampler profilingSampler;
         public abstract void Create();
+
+        public virtual void Resize(int width, int height) { }
 
         /// <summary>
         /// Prepare runtime resources (e.g. dynamic count buffer).

@@ -30,6 +30,70 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AddInstance_ClassifiesActiveMainViewRendererBatchKeys()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            sceneData.MutableMaterials.Add(new VividMaterialData
+            {
+                RendererListID = VividRendererListID.Default,
+            });
+            sceneData.MutableMaterials.Add(new VividMaterialData
+            {
+                RendererListID = VividRendererListID.CullOff | VividRendererListID.AlphaTest,
+            });
+            sceneData.MutableMaterials.Add(new VividMaterialData
+            {
+                RendererListID = VividRendererListID.AlphaTest,
+            });
+
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    MaterialIndex = 0,
+                    PassMask = VividInstancePassMask.Main,
+                    Flags = VividInstanceFlags.FlipWindingOrder,
+                },
+                maxVisibleMeshletRenderRequestCount: 1);
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    MaterialIndex = 1,
+                    PassMask = VividInstancePassMask.Main,
+                    Flags = VividInstanceFlags.FlipWindingOrder,
+                },
+                maxVisibleMeshletRenderRequestCount: 1);
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    MaterialIndex = 2,
+                    PassMask = VividInstancePassMask.Shadows,
+                },
+                maxVisibleMeshletRenderRequestCount: 1);
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    MaterialIndex = 2,
+                    PassMask = VividInstancePassMask.Main,
+                    Flags = VividInstanceFlags.Disabled,
+                },
+                maxVisibleMeshletRenderRequestCount: 1);
+
+            Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.CullFront), Is.True);
+            Assert.That(
+                sceneData.IsMainViewRendererBatchActive(VividRendererListID.CullOff | VividRendererListID.AlphaTest),
+                Is.True);
+            Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.Default), Is.False);
+            Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.AlphaTest), Is.False);
+
+            sceneData.ClearInstances();
+
+            Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.CullFront), Is.False);
+            Assert.That(
+                sceneData.IsMainViewRendererBatchActive(VividRendererListID.CullOff | VividRendererListID.AlphaTest),
+                Is.False);
+        }
+
+        [Test]
         public void Build_DeduplicatesSharedMaterialAndMeshletData_WhenTwoRenderersReferenceSameAssets()
         {
             GameObject first = null;
@@ -76,6 +140,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(2));
                 Assert.That(sceneData.Instances[0].MaterialIndex, Is.EqualTo(sceneData.Instances[1].MaterialIndex));
                 Assert.That(sceneData.Instances[0].TopMeshLODStartIndex, Is.EqualTo(sceneData.Instances[1].TopMeshLODStartIndex));
+                Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.Default), Is.True);
             }
             finally
             {

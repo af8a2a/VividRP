@@ -75,7 +75,8 @@ namespace VividRP.Runtime.GPUDriven
 
     internal static class VividGPUDrivenOcclusionHistorySystem
     {
-        internal const int MaxMipCount = 16;
+        // FidelityFX SPD generates at most 12 mips from mip 0 in one dispatch.
+        internal const int MaxMipCount = 13;
         internal const float ConservativeDepthBias = 0.0005f;
 
         private static readonly CameraRelativeSystem<VividGPUDrivenOcclusionHistoryState> s_States = new();

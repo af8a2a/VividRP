@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -13,12 +14,47 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string VisibilityBufferShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferPass";
 
         private const int IndirectDrawArgsByteStride = sizeof(uint) * 4;
+        private const int SpdTileSize = 64;
+        private const int SpdMipTextureCount = VividGPUDrivenOcclusionHistorySystem.MaxMipCount;
+        private const int SpdAtomicCounterCount = 6;
 
         private static readonly int s_CullId = Shader.PropertyToID("_Cull");
         private static readonly int s_UnityIndirectDrawArgsId = Shader.PropertyToID("unity_IndirectDrawArgs");
         private static readonly int s_UnityBaseCommandIdId = Shader.PropertyToID("unity_BaseCommandID");
         private static readonly int s_VisibleMeshletRenderRequestsId = Shader.PropertyToID("_VisibleMeshletRenderRequests");
+        private static readonly int s_SpdMipsId = Shader.PropertyToID("mips");
+        private static readonly int s_SpdNumWorkGroupsId = Shader.PropertyToID("numWorkGroups");
+        private static readonly int s_SpdWorkGroupOffsetId = Shader.PropertyToID("workGroupOffset");
+        private static readonly int s_SpdGlobalAtomicId = Shader.PropertyToID("spdGlobalAtomic");
+        private static readonly int[] s_SpdMipTextureIds =
+        {
+            Shader.PropertyToID("rw_spd_mip0"),
+            Shader.PropertyToID("rw_spd_mip1"),
+            Shader.PropertyToID("rw_spd_mip2"),
+            Shader.PropertyToID("rw_spd_mip3"),
+            Shader.PropertyToID("rw_spd_mip4"),
+            Shader.PropertyToID("rw_spd_mip5"),
+            Shader.PropertyToID("rw_spd_mip6"),
+            Shader.PropertyToID("rw_spd_mip7"),
+            Shader.PropertyToID("rw_spd_mip8"),
+            Shader.PropertyToID("rw_spd_mip9"),
+            Shader.PropertyToID("rw_spd_mip10"),
+            Shader.PropertyToID("rw_spd_mip11"),
+            Shader.PropertyToID("rw_spd_mip12"),
+        };
+        private static readonly SpdGlobalAtomicBufferData[] s_ZeroSpdAtomicCounterData = { default };
         private static readonly string s_AlphaTestKeyword = "_ALPHATEST_ON";
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SpdGlobalAtomicBufferData
+        {
+            public uint Counter0;
+            public uint Counter1;
+            public uint Counter2;
+            public uint Counter3;
+            public uint Counter4;
+            public uint Counter5;
+        }
 
         [RenderGraphResource(Name = "VisibleMeshletRenderRequests", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_VisibleMeshletRenderRequests;
@@ -58,6 +94,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private GraphicsBuffer m_RecoveredMeshletRenderRequestsBuffer;
         private GraphicsBuffer m_RecoveredRendererListMeshletCountsBuffer;
         private GraphicsBuffer m_RecoveredMeshletIndirectDrawArgsBuffer;
+        private GraphicsBuffer m_SpdGlobalAtomicBuffer;
         private int m_CopyOccluderDepthKernel = -1;
         private int m_DownsampleOccluderDepthKernel = -1;
         private int m_OccluderWidth;
@@ -105,7 +142,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
             };
             m_Depth.desc.Name = "Depth";
-
+            m_Depth.desc.ClearBuffer = false;
             m_DefaultVisibilityBuffer = m_VisibilityBuffer;
             m_DefaultDepth = m_Depth;
         }
@@ -278,6 +315,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MeshletCullingCompute = null;
             m_CopyOccluderDepthKernel = -1;
             m_DownsampleOccluderDepthKernel = -1;
+            ReleaseSpdGlobalAtomicBuffer();
             ResetOcclusionFrameState();
             m_FrameIndex = 0;
             for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
@@ -375,6 +413,8 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             PassRecorder.ImportTextureForPass(this, m_CurrentOccluderDepthPyramid, AccessFlags.ReadWrite);
+            EnsureSpdGlobalAtomicBuffer();
+            PassRecorder.ImportBufferForPass(this, m_SpdGlobalAtomicBuffer, AccessFlags.ReadWrite);
             ImportOcclusionBuffers();
             m_OcclusionCullingEnabled = true;
             m_OcclusionHistoryValid = gpuDrivenFrameData.occlusionHistoryValid;
@@ -398,6 +438,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_MeshletCullingCompute != null
                 && m_CopyOccluderDepthKernel >= 0
                 && m_DownsampleOccluderDepthKernel >= 0
+                && m_SpdGlobalAtomicBuffer != null
                 && m_CurrentOccluderDepthPyramid != null
                 && m_Depth?.innerHandle.IsValid() == true;
         }
@@ -473,41 +514,77 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.DivRoundUp(m_OccluderTextureHeight, 8),
                 1);
 
-            cmd.SetComputeTextureParam(
+            if (m_OccluderMipCount <= 1)
+                return;
+
+            int dispatchGroupCountX = CoreUtils.DivRoundUp(m_OccluderTextureWidth, SpdTileSize);
+            int dispatchGroupCountY = CoreUtils.DivRoundUp(m_OccluderTextureHeight, SpdTileSize);
+            cmd.SetComputeIntParam(m_MeshletCullingCompute, s_SpdMipsId, m_OccluderMipCount - 1);
+            cmd.SetComputeIntParam(
+                m_MeshletCullingCompute,
+                s_SpdNumWorkGroupsId,
+                dispatchGroupCountX * dispatchGroupCountY);
+            cmd.SetComputeVectorParam(m_MeshletCullingCompute, s_SpdWorkGroupOffsetId, Vector4.zero);
+            cmd.SetComputeBufferParam(
                 m_MeshletCullingCompute,
                 m_DownsampleOccluderDepthKernel,
-                VividGPUDrivenShaderIDs._OccluderDepthPyramid,
-                m_CurrentOccluderDepthPyramid);
-            for (int mipLevel = 1; mipLevel < m_OccluderMipCount; mipLevel++)
+                s_SpdGlobalAtomicId,
+                m_SpdGlobalAtomicBuffer);
+            BindSpdMipTextureViews(
+                cmd,
+                m_MeshletCullingCompute,
+                m_DownsampleOccluderDepthKernel,
+                m_CurrentOccluderDepthPyramid,
+                m_OccluderMipCount);
+            cmd.DispatchCompute(
+                m_MeshletCullingCompute,
+                m_DownsampleOccluderDepthKernel,
+                dispatchGroupCountX,
+                dispatchGroupCountY,
+                1);
+        }
+
+        private void EnsureSpdGlobalAtomicBuffer()
+        {
+            const int stride = sizeof(uint) * SpdAtomicCounterCount;
+            if (m_SpdGlobalAtomicBuffer != null
+                && m_SpdGlobalAtomicBuffer.count == 1
+                && m_SpdGlobalAtomicBuffer.stride == stride)
             {
-                int sourceWidth = Mathf.Max(1, m_OccluderTextureWidth >> (mipLevel - 1));
-                int sourceHeight = Mathf.Max(1, m_OccluderTextureHeight >> (mipLevel - 1));
-                int destinationWidth = Mathf.Max(1, m_OccluderTextureWidth >> mipLevel);
-                int destinationHeight = Mathf.Max(1, m_OccluderTextureHeight >> mipLevel);
-                cmd.SetComputeIntParam(
-                    m_MeshletCullingCompute,
-                    VividGPUDrivenShaderIDs._OccluderSourceMip,
-                    mipLevel - 1);
-                cmd.SetComputeVectorParam(
-                    m_MeshletCullingCompute,
-                    VividGPUDrivenShaderIDs._OccluderSourceSize,
-                    new Vector4(sourceWidth, sourceHeight, 0.0f, 0.0f));
-                cmd.SetComputeVectorParam(
-                    m_MeshletCullingCompute,
-                    VividGPUDrivenShaderIDs._OccluderDestinationSize,
-                    new Vector4(destinationWidth, destinationHeight, 0.0f, 0.0f));
+                return;
+            }
+
+            m_SpdGlobalAtomicBuffer?.Dispose();
+            m_SpdGlobalAtomicBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, stride);
+            m_SpdGlobalAtomicBuffer.SetData(s_ZeroSpdAtomicCounterData);
+        }
+
+        private void ReleaseSpdGlobalAtomicBuffer()
+        {
+            m_SpdGlobalAtomicBuffer?.Dispose();
+            m_SpdGlobalAtomicBuffer = null;
+        }
+
+        private static void BindSpdMipTextureViews(
+            CommandBuffer cmd,
+            ComputeShader computeShader,
+            int kernelIndex,
+            RTHandle depthPyramid,
+            int mipCount)
+        {
+            if (cmd == null || computeShader == null || depthPyramid == null)
+                return;
+
+            int boundMipCount = Mathf.Clamp(mipCount, 1, SpdMipTextureCount);
+            for (int shaderMipIndex = 0; shaderMipIndex < s_SpdMipTextureIds.Length; shaderMipIndex++)
+            {
+                int boundMipIndex = Mathf.Clamp(shaderMipIndex, 0, boundMipCount - 1);
                 cmd.SetComputeTextureParam(
-                    m_MeshletCullingCompute,
-                    m_DownsampleOccluderDepthKernel,
-                    VividGPUDrivenShaderIDs._OccluderDepthPyramidDestination,
-                    m_CurrentOccluderDepthPyramid,
-                    mipLevel);
-                cmd.DispatchCompute(
-                    m_MeshletCullingCompute,
-                    m_DownsampleOccluderDepthKernel,
-                    CoreUtils.DivRoundUp(destinationWidth, 8),
-                    CoreUtils.DivRoundUp(destinationHeight, 8),
-                    1);
+                    computeShader,
+                    kernelIndex,
+                    s_SpdMipTextureIds[shaderMipIndex],
+                    depthPyramid,
+                    boundMipIndex);
             }
         }
 
@@ -524,11 +601,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
             for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
             {
+                VividRendererListID batchKey = (VividRendererListID) rendererListIndex;
+                if (system != null && !system.IsMainViewRendererBatchActive(batchKey))
+                    continue;
+
                 Material material = m_Materials[rendererListIndex];
                 if (material == null)
                     continue;
                 if (!virtualTextureReady
-                    && (((VividRendererListID) rendererListIndex & VividRendererListID.AlphaTest) != 0))
+                    && ((batchKey & VividRendererListID.AlphaTest) != 0))
                 {
                     continue;
                 }

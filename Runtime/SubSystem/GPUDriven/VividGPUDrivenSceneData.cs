@@ -16,6 +16,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<byte> m_Indices = new();
         private int m_MaxMeshletListBuildJobCount;
         private int m_MaxVisibleMeshletRenderRequestCount;
+        private uint m_MainViewRendererBatchMask;
 
         public IReadOnlyList<VividInstanceData> Instances => m_Instances;
 
@@ -57,6 +58,13 @@ namespace VividRP.Runtime.GPUDriven
 
         internal int MaxVisibleMeshletRenderRequestCount => Mathf.Max(1, m_MaxVisibleMeshletRenderRequestCount);
 
+        internal bool IsMainViewRendererBatchActive(VividRendererListID batchKey)
+        {
+            int batchIndex = (int) batchKey;
+            return (uint) batchIndex < (uint) VividRendererListID.Count
+                && (m_MainViewRendererBatchMask & (1u << batchIndex)) != 0;
+        }
+
         internal List<VividInstanceData> MutableInstances => m_Instances;
 
         internal List<VividMaterialData> MutableMaterials => m_Materials;
@@ -80,6 +88,7 @@ namespace VividRP.Runtime.GPUDriven
             int maxVisibleMeshletRenderRequestCount)
         {
             m_Instances.Add(instanceData);
+            RegisterMainViewRendererBatch(instanceData);
 
             uint maxNodesPerJob = global::VividRP.Runtime.GPUDriven.Meshlets.VividMeshletListBuildJob.MaxLODNodesPerThreadGroup;
             if (maxNodesPerJob == 0)
@@ -99,6 +108,7 @@ namespace VividRP.Runtime.GPUDriven
             m_Instances.Clear();
             m_MaxMeshletListBuildJobCount = 0;
             m_MaxVisibleMeshletRenderRequestCount = 0;
+            m_MainViewRendererBatchMask = 0;
         }
 
         internal void ClearMaterials()
@@ -132,6 +142,27 @@ namespace VividRP.Runtime.GPUDriven
             m_Meshlets.Clear();
             m_Vertices.Clear();
             m_Indices.Clear();
+        }
+
+        private void RegisterMainViewRendererBatch(in VividInstanceData instanceData)
+        {
+            if ((instanceData.PassMask & VividInstancePassMask.Main) == 0
+                || (instanceData.Flags & VividInstanceFlags.Disabled) != 0
+                || instanceData.MaterialIndex >= (uint) m_Materials.Count)
+            {
+                return;
+            }
+
+            VividRendererListID batchKey = m_Materials[(int) instanceData.MaterialIndex].RendererListID;
+            if ((instanceData.Flags & VividInstanceFlags.FlipWindingOrder) != 0
+                && (batchKey & VividRendererListID.CullOff) == 0)
+            {
+                batchKey ^= VividRendererListID.CullFront;
+            }
+
+            int batchIndex = (int) batchKey;
+            if ((uint) batchIndex < (uint) VividRendererListID.Count)
+                m_MainViewRendererBatchMask |= 1u << batchIndex;
         }
 
         private static int SaturatingAdd(int current, int increment)

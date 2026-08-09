@@ -30,6 +30,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CalculateMipCount_CapsAtSpdMipLimit()
+        {
+            Assert.That(
+                VividGPUDrivenOcclusionHistorySystem.CalculateMipCount(8192, 8192),
+                Is.EqualTo(13));
+        }
+
+        [Test]
         public void GPUDrivenFrameData_ResetClearsOcclusionObservationState()
         {
             var frameData = new VividGPUDrivenFrameData

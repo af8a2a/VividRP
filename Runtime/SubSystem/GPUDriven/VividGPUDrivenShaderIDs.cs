@@ -51,7 +51,6 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _OccluderDepthPyramidSize = Shader.PropertyToID(nameof(_OccluderDepthPyramidSize));
         public static readonly int _OccluderDepthPyramidTextureSize = Shader.PropertyToID(nameof(_OccluderDepthPyramidTextureSize));
         public static readonly int _OccluderDepthPyramidMipCount = Shader.PropertyToID(nameof(_OccluderDepthPyramidMipCount));
-        public static readonly int _OccluderSourceMip = Shader.PropertyToID(nameof(_OccluderSourceMip));
         public static readonly int _OccluderSourceSize = Shader.PropertyToID(nameof(_OccluderSourceSize));
         public static readonly int _OccluderDestinationSize = Shader.PropertyToID(nameof(_OccluderDestinationSize));
         public static readonly int _OcclusionTestMode = Shader.PropertyToID(nameof(_OcclusionTestMode));

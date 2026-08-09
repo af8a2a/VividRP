@@ -10,8 +10,14 @@
 #pragma kernel CSDownsampleOccluderDepth
 
 #pragma use_dxc
+#pragma require Native16Bit
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+
+#define FFX_WAVE 1
+#define A_GPU 1
+#define A_HLSL 1
+#include "Packages/com.unity.render-pipelines.core/Runtime/PostProcessing/Shaders/ffx/ffx_a.hlsl"
 
 #define THREAD_GROUP_SIZE 32
 
@@ -32,12 +38,38 @@ RWByteAddressBuffer _RecoveredMeshletIndirectDrawArgs;
 Texture2D<float> _InputDepth;
 Texture2D<float> _OccluderDepthPyramid;
 RWTexture2D<float> _OccluderDepthPyramidDestination;
+RWTexture2D<float> rw_spd_mip0;
+RWTexture2D<float> rw_spd_mip1;
+RWTexture2D<float> rw_spd_mip2;
+RWTexture2D<float> rw_spd_mip3;
+RWTexture2D<float> rw_spd_mip4;
+RWTexture2D<float> rw_spd_mip5;
+globallycoherent RWTexture2D<float> rw_spd_mip6;
+RWTexture2D<float> rw_spd_mip7;
+RWTexture2D<float> rw_spd_mip8;
+RWTexture2D<float> rw_spd_mip9;
+RWTexture2D<float> rw_spd_mip10;
+RWTexture2D<float> rw_spd_mip11;
+RWTexture2D<float> rw_spd_mip12;
+
+struct SpdGlobalAtomicBuffer
+{
+    uint counter[6];
+};
+
+globallycoherent RWStructuredBuffer<SpdGlobalAtomicBuffer> spdGlobalAtomic;
+
+cbuffer spdConstants
+{
+    uint mips;
+    uint numWorkGroups;
+    uint2 workGroupOffset;
+}
 
 float4x4 _OccluderViewProjectionMatrix;
 float4 _OccluderDepthPyramidSize;
 float4 _OccluderDepthPyramidTextureSize;
 uint _OccluderDepthPyramidMipCount;
-uint _OccluderSourceMip;
 float4 _OccluderSourceSize;
 float4 _OccluderDestinationSize;
 uint _OcclusionTestMode;
@@ -64,6 +96,101 @@ float FarthestDepth4(const float4 depths)
         FarthestDepth(depths.x, depths.y),
         FarthestDepth(depths.z, depths.w));
 }
+
+groupshared uint spdCounter;
+groupshared float spdIntermediateR[16][16];
+groupshared float spdIntermediateG[16][16];
+groupshared float spdIntermediateB[16][16];
+groupshared float spdIntermediateA[16][16];
+
+float SpdReductionIdentity()
+{
+#if UNITY_REVERSED_Z
+    return 1.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+float4 SpdLoadSourceImage(const int2 pixelCoord)
+{
+    const uint2 sourceSize = max(uint2(_OccluderDestinationSize.xy), 1u);
+    if (any(uint2(pixelCoord) >= sourceSize))
+        return SpdReductionIdentity().xxxx;
+
+    return rw_spd_mip0[pixelCoord].xxxx;
+}
+
+float4 SpdLoad(const int2 pixelCoord)
+{
+    const uint2 sourceMipSize = max(uint2(_OccluderDestinationSize.xy) >> 6u, 1u);
+    if (any(uint2(pixelCoord) >= sourceMipSize))
+        return SpdReductionIdentity().xxxx;
+
+    return rw_spd_mip6[pixelCoord].xxxx;
+}
+
+void SpdStore(const int2 pixelCoord, const float4 value, const uint mipLevel)
+{
+    switch (mipLevel)
+    {
+        case 0: rw_spd_mip1[pixelCoord] = value.x; break;
+        case 1: rw_spd_mip2[pixelCoord] = value.x; break;
+        case 2: rw_spd_mip3[pixelCoord] = value.x; break;
+        case 3: rw_spd_mip4[pixelCoord] = value.x; break;
+        case 4: rw_spd_mip5[pixelCoord] = value.x; break;
+        case 5: rw_spd_mip6[pixelCoord] = value.x; break;
+        case 6: rw_spd_mip7[pixelCoord] = value.x; break;
+        case 7: rw_spd_mip8[pixelCoord] = value.x; break;
+        case 8: rw_spd_mip9[pixelCoord] = value.x; break;
+        case 9: rw_spd_mip10[pixelCoord] = value.x; break;
+        case 10: rw_spd_mip11[pixelCoord] = value.x; break;
+        case 11: rw_spd_mip12[pixelCoord] = value.x; break;
+    }
+}
+
+void SpdIncreaseAtomicCounter(const uint slice)
+{
+    InterlockedAdd(spdGlobalAtomic[0].counter[slice], 1u, spdCounter);
+}
+
+uint SpdGetAtomicCounter()
+{
+    return spdCounter;
+}
+
+void SpdResetAtomicCounter(const uint slice)
+{
+    spdGlobalAtomic[0].counter[slice] = 0u;
+}
+
+float4 SpdLoadIntermediate(const uint x, const uint y)
+{
+    return float4(
+        spdIntermediateR[x][y],
+        spdIntermediateG[x][y],
+        spdIntermediateB[x][y],
+        spdIntermediateA[x][y]);
+}
+
+void SpdStoreIntermediate(const uint x, const uint y, const float4 value)
+{
+    spdIntermediateR[x][y] = value.x;
+    spdIntermediateG[x][y] = value.y;
+    spdIntermediateB[x][y] = value.z;
+    spdIntermediateA[x][y] = value.w;
+}
+
+float4 SpdReduce4(const float4 v0, const float4 v1, const float4 v2, const float4 v3)
+{
+#if UNITY_REVERSED_Z
+    return min(min(v0, v1), min(v2, v3));
+#else
+    return max(max(v0, v1), max(v2, v3));
+#endif
+}
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/FidelityFX/ffx_spd.hlsl"
 
 bool IsVisibleAgainstOccluderDepth(const float occluderDepth, const float queryClosestDepth)
 {
@@ -414,24 +541,16 @@ void CSCopyOccluderDepth(const uint3 dispatchThreadID : SV_DispatchThreadID)
 #endif
 }
 
-[numthreads(8, 8, 1)]
-void CSDownsampleOccluderDepth(const uint3 dispatchThreadID : SV_DispatchThreadID)
+[numthreads(256, 1, 1)]
+void CSDownsampleOccluderDepth(
+    const uint3 workGroupID : SV_GroupID,
+    const uint localThreadIndex : SV_GroupIndex)
 {
-    const uint2 destinationCoord = dispatchThreadID.xy;
-    const uint2 destinationSize = uint2(_OccluderDestinationSize.xy);
-    if (any(destinationCoord >= destinationSize))
-        return;
-
-    const uint2 sourceBase = destinationCoord * 2u;
-    const uint2 sourceMax = max(uint2(_OccluderSourceSize.xy), 1u) - 1u;
-    const uint2 sourceCoord00 = min(sourceBase, sourceMax);
-    const uint2 sourceCoord10 = min(sourceBase + uint2(1u, 0u), sourceMax);
-    const uint2 sourceCoord01 = min(sourceBase + uint2(0u, 1u), sourceMax);
-    const uint2 sourceCoord11 = min(sourceBase + uint2(1u, 1u), sourceMax);
-    const float4 sourceDepths = float4(
-        _OccluderDepthPyramid.Load(int3(sourceCoord00, _OccluderSourceMip)),
-        _OccluderDepthPyramid.Load(int3(sourceCoord10, _OccluderSourceMip)),
-        _OccluderDepthPyramid.Load(int3(sourceCoord01, _OccluderSourceMip)),
-        _OccluderDepthPyramid.Load(int3(sourceCoord11, _OccluderSourceMip)));
-    _OccluderDepthPyramidDestination[destinationCoord] = FarthestDepth4(sourceDepths);
+    SpdDownsample(
+        uint2(workGroupID.xy),
+        localThreadIndex,
+        mips,
+        numWorkGroups,
+        workGroupID.z,
+        workGroupOffset);
 }

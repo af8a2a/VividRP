@@ -189,6 +189,11 @@ namespace VividRP.Runtime.GPUDriven
 
         public bool UsesVirtualTexture => m_TextureBackend is IGPUDrivenVirtualTextureBackend;
 
+        internal bool IsMainViewRendererBatchActive(VividRendererListID batchKey)
+        {
+            return SceneData.IsMainViewRendererBatchActive(batchKey);
+        }
+
         internal VividGPUDrivenBufferSet BufferSet => m_BufferSet;
 
         internal VividGPUDrivenCullingBuffers CullingBufferSet => m_CullingDispatcher.BufferSet;

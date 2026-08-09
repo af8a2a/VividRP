@@ -75,6 +75,7 @@ namespace VividRP.Runtime
             VividGPUDrivenFrameData gpuDrivenFrameData;
             VividGPUDrivenDecalData gpuDrivenDecalData;
             VividLightData lightData;
+            VividShadowData shadowData;
             using (RenderPassProfilingUtility.InitializeContextResolveFrameDataMarker.Auto())
             {
                 renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
@@ -83,6 +84,7 @@ namespace VividRP.Runtime
                 gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
                 gpuDrivenDecalData = s_FrameData.GetOrCreate<VividGPUDrivenDecalData>();
                 lightData = s_FrameData.GetOrCreate<VividLightData>();
+                shadowData = s_FrameData.GetOrCreate<VividShadowData>();
             }
 
             int frameIndex;
@@ -163,6 +165,11 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.InitializeContextLightDataUpdateMarker.Auto())
             {
                 lightData.Update(cullingResults, cameraData.viewMatrix);
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextShadowDataUpdateMarker.Auto())
+            {
+                shadowData.Update(cullingResults, lightData);
             }
         }
 

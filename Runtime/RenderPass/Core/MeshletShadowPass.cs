@@ -94,20 +94,13 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!system.IsAvailable || system.SceneData == null || system.SceneData.InstanceCount == 0)
                 return;
 
-            var lightData = frameData.GetOrCreate<VividLightData>();
-            if (!CSMShadowPass.TryResolveVisibleMainDirectionalLight(lightData, out _, out var additionalLightData)
-                || additionalLightData == null)
-            {
-                return;
-            }
-
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             if (cameraData.camera == null)
                 return;
 
             m_CameraShaderGlobals = CSMShadowPass.ResolveCameraShaderGlobals(frameData, cameraData);
-            m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
-            m_ShadowCasterState = CSMShadowPass.BuildShadowCasterState(lightData.mainVisibleLight);
+            m_SlopeScaleDepthBias = shadowData.slopeScaleDepthBias;
+            m_ShadowCasterState = shadowData.shadowCasterState;
             m_CascadeCount = Mathf.Min(shadowData.cascadeCount, VividShadowData.MaxCascadeCount);
             m_CascadeResolution = shadowData.cascadeResolution;
             m_ShadowData = shadowData;

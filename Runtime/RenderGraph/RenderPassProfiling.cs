@@ -113,6 +113,7 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker InitializeContextPopulateCameraDataMarker = new("VividRP.RenderPass.InitializeContext/PopulateCameraData");
         public static readonly ProfilerMarker InitializeContextPopulateRenderingDataMarker = new("VividRP.RenderPass.InitializeContext/PopulateRenderingData");
         public static readonly ProfilerMarker InitializeContextLightDataUpdateMarker = new("VividRP.RenderPass.InitializeContext/LightData.Update");
+        public static readonly ProfilerMarker InitializeContextShadowDataUpdateMarker = new("VividRP.RenderPass.InitializeContext/ShadowData.Update");
         public static readonly ProfilerMarker InitializeContextLightDataDrainMarker = new("VividRP.RenderPass.InitializeContext/LightData.Update/Drain");
         public static readonly ProfilerMarker InitializeContextLightDataInputsMarker = new("VividRP.RenderPass.InitializeContext/LightData.Update/Inputs");
         public static readonly ProfilerMarker InitializeContextLightDataVisibleLightsMarker = new("VividRP.RenderPass.InitializeContext/LightData.Update/VisibleLights");

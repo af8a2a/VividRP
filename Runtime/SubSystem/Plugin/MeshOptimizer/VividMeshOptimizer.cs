@@ -63,8 +63,8 @@ namespace VividRP.Runtime
             Assert.IsTrue(maxMeshlets > 0);
 
             var meshlets = new NativeArray<meshopt_Meshlet>((int) maxMeshlets, allocator);
-            var meshletVertices = new NativeArray<uint>((int) (maxMeshlets * meshletGenerationParams.MaxVertices), allocator);
-            var meshletIndices = new NativeArray<byte>((int) (maxMeshlets * meshletGenerationParams.MaxTriangles * 3), allocator);
+            var meshletVertices = new NativeArray<uint>(indices.Length, allocator);
+            var meshletIndices = new NativeArray<byte>(indices.Length, allocator);
 
             uint floatsInVertex = vertexPositionStride / sizeof(float);
             nuint meshletCount = meshopt_buildMeshlets(
@@ -81,13 +81,24 @@ namespace VividRP.Runtime
                 meshletGenerationParams.ConeWeight
             );
 
+            for (int meshletIndex = 0; meshletIndex < (int) meshletCount; meshletIndex++)
+            {
+                ref readonly meshopt_Meshlet meshlet = ref meshlets.ElementAtRefReadonly(meshletIndex);
+                meshopt_optimizeMeshlet(
+                    meshletVertices.ElementPtr((int) meshlet.VertexOffset),
+                    meshletIndices.ElementPtr((int) meshlet.TriangleOffset),
+                    meshlet.TriangleCount,
+                    meshlet.VertexCount
+                );
+            }
+
             int usedVertexCount = 0;
             int usedIndexCount = 0;
             if (meshletCount > 0)
             {
                 ref readonly meshopt_Meshlet lastMeshlet = ref meshlets.ElementAtRefReadonly((int) meshletCount - 1);
                 usedVertexCount = (int) (lastMeshlet.VertexOffset + lastMeshlet.VertexCount);
-                usedIndexCount = (int) (lastMeshlet.TriangleOffset + ((lastMeshlet.TriangleCount * 3 + 3) & ~3u));
+                usedIndexCount = (int) (lastMeshlet.TriangleOffset + lastMeshlet.TriangleCount * 3);
             }
 
             return new MeshletBuildResults
@@ -179,6 +190,7 @@ namespace VividRP.Runtime
                     pVertexPositions,
                     vertexCount,
                     vertexPositionsStride,
+                    null,
                     (nuint) targetIndexCount,
                     targetError,
                     &resultErrorValue

@@ -1,6 +1,48 @@
 This package contains third-party software components governed by the license(s) indicated below:
 ---------
 
+Component Name: METIS
+
+Source: https://github.com/KarypisLab/METIS
+
+Version / Revision: v5.2.1, commit f5ae915a84d3bbf1508b529af90292dd7085b9ec
+
+License Type: Apache-2.0
+
+The unmodified upstream source and license are redistributed under
+`PluginSource~/METIS~/Source`. VividRP's Windows x86_64 DLL is built from this
+source.
+
+---------
+
+Component Name: GKlib
+
+Source: https://github.com/KarypisLab/GKlib
+
+Version / Revision: commit 3b7d61b9f885063c89901f3901fb4426f9cfb58f
+
+License Types: Apache-2.0 AND LGPL-2.1-or-later AND BSD-3-Clause
+
+GKlib is statically linked into VividRP's METIS DLL. The unmodified upstream
+source, license inventory, and full license texts are redistributed under
+`PluginSource~/METIS~/GKlib`.
+
+---------
+
+Component Name: MeshOptimizer
+
+Source: https://github.com/zeux/meshoptimizer
+
+Version / Revision: v1.1, commit dc9d09ed83e1004aef47a1c3c597e0ec64848a37
+
+License Type: MIT
+
+The unmodified upstream source and license are redistributed under
+`PluginSource~/MeshOptimizer~/Source`. VividRP's Windows x86_64 DLL is built
+from this source.
+
+---------
+
 Component Name: FidelityFX CACAO
 
 Source: https://github.com/GPUOpen-Effects/FidelityFX-CACAO

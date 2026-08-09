@@ -209,11 +209,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
                     for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
                     {
+                        VividRendererListID batchKey = (VividRendererListID) rendererListIndex;
+                        if (!system.IsShadowRendererBatchActive(batchKey))
+                            continue;
+
                         Material material = m_Materials[rendererListIndex];
                         if (material == null)
                             continue;
                         if (!virtualTextureReady
-                            && (((VividRendererListID) rendererListIndex & VividRendererListID.AlphaTest) != 0))
+                            && ((batchKey & VividRendererListID.AlphaTest) != 0))
                         {
                             continue;
                         }

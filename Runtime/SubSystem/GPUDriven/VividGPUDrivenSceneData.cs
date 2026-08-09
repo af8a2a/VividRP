@@ -17,6 +17,7 @@ namespace VividRP.Runtime.GPUDriven
         private int m_MaxMeshletListBuildJobCount;
         private int m_MaxVisibleMeshletRenderRequestCount;
         private uint m_MainViewRendererBatchMask;
+        private uint m_ShadowRendererBatchMask;
 
         public IReadOnlyList<VividInstanceData> Instances => m_Instances;
 
@@ -65,6 +66,13 @@ namespace VividRP.Runtime.GPUDriven
                 && (m_MainViewRendererBatchMask & (1u << batchIndex)) != 0;
         }
 
+        internal bool IsShadowRendererBatchActive(VividRendererListID batchKey)
+        {
+            int batchIndex = (int) batchKey;
+            return (uint) batchIndex < (uint) VividRendererListID.Count
+                && (m_ShadowRendererBatchMask & (1u << batchIndex)) != 0;
+        }
+
         internal List<VividInstanceData> MutableInstances => m_Instances;
 
         internal List<VividMaterialData> MutableMaterials => m_Materials;
@@ -88,7 +96,7 @@ namespace VividRP.Runtime.GPUDriven
             int maxVisibleMeshletRenderRequestCount)
         {
             m_Instances.Add(instanceData);
-            RegisterMainViewRendererBatch(instanceData);
+            RegisterRendererBatch(instanceData);
 
             uint maxNodesPerJob = global::VividRP.Runtime.GPUDriven.Meshlets.VividMeshletListBuildJob.MaxLODNodesPerThreadGroup;
             if (maxNodesPerJob == 0)
@@ -109,6 +117,7 @@ namespace VividRP.Runtime.GPUDriven
             m_MaxMeshletListBuildJobCount = 0;
             m_MaxVisibleMeshletRenderRequestCount = 0;
             m_MainViewRendererBatchMask = 0;
+            m_ShadowRendererBatchMask = 0;
         }
 
         internal void ClearMaterials()
@@ -144,10 +153,9 @@ namespace VividRP.Runtime.GPUDriven
             m_Indices.Clear();
         }
 
-        private void RegisterMainViewRendererBatch(in VividInstanceData instanceData)
+        private void RegisterRendererBatch(in VividInstanceData instanceData)
         {
-            if ((instanceData.PassMask & VividInstancePassMask.Main) == 0
-                || (instanceData.Flags & VividInstanceFlags.Disabled) != 0
+            if ((instanceData.Flags & VividInstanceFlags.Disabled) != 0
                 || instanceData.MaterialIndex >= (uint) m_Materials.Count)
             {
                 return;
@@ -161,8 +169,14 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             int batchIndex = (int) batchKey;
-            if ((uint) batchIndex < (uint) VividRendererListID.Count)
-                m_MainViewRendererBatchMask |= 1u << batchIndex;
+            if ((uint) batchIndex >= (uint) VividRendererListID.Count)
+                return;
+
+            uint batchBit = 1u << batchIndex;
+            if ((instanceData.PassMask & VividInstancePassMask.Main) != 0)
+                m_MainViewRendererBatchMask |= batchBit;
+            if ((instanceData.PassMask & VividInstancePassMask.Shadows) != 0)
+                m_ShadowRendererBatchMask |= batchBit;
         }
 
         private static int SaturatingAdd(int current, int increment)

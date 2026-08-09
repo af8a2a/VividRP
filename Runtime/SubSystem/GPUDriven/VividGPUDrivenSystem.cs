@@ -195,6 +195,11 @@ namespace VividRP.Runtime.GPUDriven
             return SceneData.IsMainViewRendererBatchActive(batchKey);
         }
 
+        internal bool IsShadowRendererBatchActive(VividRendererListID batchKey)
+        {
+            return SceneData.IsShadowRendererBatchActive(batchKey);
+        }
+
         internal VividGPUDrivenBufferSet BufferSet => m_BufferSet;
 
         internal VividGPUDrivenCullingBuffers CullingBufferSet => m_CullingDispatcher.BufferSet;

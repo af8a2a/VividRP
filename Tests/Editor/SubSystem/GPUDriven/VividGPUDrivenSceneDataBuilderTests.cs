@@ -30,7 +30,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AddInstance_ClassifiesActiveMainViewRendererBatchKeys()
+        public void AddInstance_ClassifiesActiveRendererBatchKeysByPass()
         {
             var sceneData = new VividGPUDrivenSceneData();
             sceneData.MutableMaterials.Add(new VividMaterialData
@@ -44,6 +44,10 @@ namespace VividRP.Editor.Tests
             sceneData.MutableMaterials.Add(new VividMaterialData
             {
                 RendererListID = VividRendererListID.AlphaTest,
+            });
+            sceneData.MutableMaterials.Add(new VividMaterialData
+            {
+                RendererListID = VividRendererListID.CullOff,
             });
 
             sceneData.AddInstance(
@@ -65,8 +69,16 @@ namespace VividRP.Editor.Tests
             sceneData.AddInstance(
                 new VividInstanceData
                 {
+                    MaterialIndex = 3,
+                    PassMask = VividInstancePassMask.Main | VividInstancePassMask.Shadows,
+                },
+                maxVisibleMeshletRenderRequestCount: 1);
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
                     MaterialIndex = 2,
                     PassMask = VividInstancePassMask.Shadows,
+                    Flags = VividInstanceFlags.FlipWindingOrder,
                 },
                 maxVisibleMeshletRenderRequestCount: 1);
             sceneData.AddInstance(
@@ -82,14 +94,26 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 sceneData.IsMainViewRendererBatchActive(VividRendererListID.CullOff | VividRendererListID.AlphaTest),
                 Is.True);
+            Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.CullOff), Is.True);
             Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.Default), Is.False);
             Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.AlphaTest), Is.False);
+            Assert.That(
+                sceneData.IsShadowRendererBatchActive(VividRendererListID.CullFront | VividRendererListID.AlphaTest),
+                Is.True);
+            Assert.That(sceneData.IsShadowRendererBatchActive(VividRendererListID.CullOff), Is.True);
+            Assert.That(sceneData.IsShadowRendererBatchActive(VividRendererListID.CullFront), Is.False);
+            Assert.That(
+                sceneData.IsShadowRendererBatchActive(VividRendererListID.CullOff | VividRendererListID.AlphaTest),
+                Is.False);
 
             sceneData.ClearInstances();
 
             Assert.That(sceneData.IsMainViewRendererBatchActive(VividRendererListID.CullFront), Is.False);
             Assert.That(
                 sceneData.IsMainViewRendererBatchActive(VividRendererListID.CullOff | VividRendererListID.AlphaTest),
+                Is.False);
+            Assert.That(
+                sceneData.IsShadowRendererBatchActive(VividRendererListID.CullFront | VividRendererListID.AlphaTest),
                 Is.False);
         }
 

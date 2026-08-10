@@ -106,8 +106,7 @@ float SampleDirectionalShadow(uint2 pixelCoord)
 
 float SampleGTAO(uint2 pixelCoord)
 {
-    float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
-    return _GTAOTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
+    return LOAD_TEXTURE2D(_GTAOTexture,pixelCoord).x;
 }
 
 float4 LoadScreenSpaceReflection(uint2 pixelCoord, VividGBufferSurfaceData surfaceData)

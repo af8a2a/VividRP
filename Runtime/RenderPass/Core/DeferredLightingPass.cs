@@ -35,8 +35,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ScreenSpaceReflectionEnabledId = Shader.PropertyToID("_ScreenSpaceReflectionEnabled");
         private static readonly int LightingTextureId = Shader.PropertyToID("_LightingTexture");
         private static readonly int LightingDebugTextureId = Shader.PropertyToID("_LightingDebugTexture");
-        private static readonly int LightingWidthId = Shader.PropertyToID("_LightingWidth");
-        private static readonly int LightingHeightId = Shader.PropertyToID("_LightingHeight");
         private static readonly int MaterialTileFeatureFlagsId = Shader.PropertyToID("_MaterialTileFeatureFlags");
         private static readonly int MaterialFeatureTileListId = Shader.PropertyToID("_MaterialFeatureTileList");
         private static readonly int MaterialTileCountXId = Shader.PropertyToID("_MaterialTileCountX");
@@ -507,8 +505,6 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingDebugTextureId, m_DebugTexture.innerHandle);
-            cmd.SetComputeIntParam(m_DeferredLitCompute, LightingWidthId, m_LightingWidth);
-            cmd.SetComputeIntParam(m_DeferredLitCompute, LightingHeightId, m_LightingHeight);
         }
 
         private void BindIndirectLightingParameters(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)

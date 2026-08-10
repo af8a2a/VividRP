@@ -34,8 +34,6 @@ StructuredBuffer<uint> _MaterialFeatureTileList;
 RWTexture2D<float4> _LightingTexture;
 RWTexture2D<float4> _LightingDebugTexture;
 
-uint _LightingWidth;
-uint _LightingHeight;
 uint _ScreenSpaceReflectionEnabled;
 uint _MaterialTileCountX;
 uint _MaterialFeatureTileListOffset;
@@ -102,13 +100,13 @@ uint GetDeferredTileFeatureFlags(uint deferredVariant, uint tileIndex)
 
 float SampleDirectionalShadow(uint2 pixelCoord)
 {
-    float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
+    float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     return _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
 }
 
 float SampleGTAO(uint2 pixelCoord)
 {
-    float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
+    float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     return _GTAOTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
 }
 
@@ -298,7 +296,7 @@ VividLightLoopOutput EvaluateDeferredLitLighting(
 [numthreads(8, 8, 1)]
 void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (dispatchThreadId.x >= _LightingWidth || dispatchThreadId.y >= _LightingHeight)
+    if (dispatchThreadId.x >= (uint)_ScreenSize.x || dispatchThreadId.y >= (uint)_ScreenSize.y)
         return;
 
     uint2 pixelCoord = dispatchThreadId.xy;
@@ -324,7 +322,7 @@ void DeferredLitVariant(
         return;
 
     uint2 pixelCoord = tileCoord * CLASSIFY_TILE_SIZE + groupThreadId.xy;
-    if (pixelCoord.x >= _LightingWidth || pixelCoord.y >= _LightingHeight)
+    if (pixelCoord.x >= (uint)_ScreenSize.x || pixelCoord.y >= (uint)_ScreenSize.y)
         return;
 
     float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));

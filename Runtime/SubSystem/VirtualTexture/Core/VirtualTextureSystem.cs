@@ -732,6 +732,10 @@ namespace VividRP.Runtime
                         fallbackSampleCount,
                         physicalPoolStats.FreePageCount,
                         evictionCount));
+                float adaptiveMipBiasOverride =
+                    VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride;
+                if (adaptiveMipBiasOverride >= 0f)
+                    adaptiveMipBias = adaptiveMipBiasOverride;
             }
             if (virtualTextureFrameData != null)
                 virtualTextureFrameData.AdaptiveMipBias = adaptiveMipBias;

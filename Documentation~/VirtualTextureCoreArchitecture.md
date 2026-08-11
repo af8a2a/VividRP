@@ -332,8 +332,19 @@ next frames
 
 - `GBufferPass`：在 VT render list 绘制前绑定 VT globals 和 feedback UAV。
 - `VirtualTextureFeedbackPass`：专门的 VT feedback/GBuffer 路径。
-- `VirtualTextureDemoPass`：demo path。
+- `VisibilityBufferPass`：写入 GPUDriven visibility；alpha test 可采样 VT，但不写 feedback。
+- `VisibilityBufferGBufferResolvePass`：按 GPUDriven private allocation 绑定资源，在重建 UV 导数后采样并写 feedback。
 - `VirtualTextureVisualizationPass`：debug visualization path。
+
+`VirtualTextureDemoController` 现在只验证 `MeshletRenderer`、`GPUDrivenMaterialProxy` 和兼容的
+`GPUDrivenSurface` VT asset，实际渲染复用上述 VisibilityBuffer 流程。`VirtualTextureDemoPass`
+仅作为旧 RenderGraph 资产的序列化兼容节点保留，不再注册 page-table 依赖、绑定 feedback UAV
+或执行绘制；旧 `VirtualTextureDemo.shader` 同样不再写 feedback。
+
+旧 Demo 场景迁移时：先通过 `MeshletRenderer` Inspector 的 takeover 流程捕获并移除源
+`MeshRenderer`，再通过 GPUDriven Material Proxy Editor 构建并绑定 `GPUDrivenSurface` VT asset，
+最后将这些已配置资源赋给 `VirtualTextureDemoController` 做一致性校验。RenderGraph 中旧
+`VirtualTextureDemoPass` 节点可在图编辑器中删除；删除前它是可裁剪的空兼容节点。
 
 通用绑定入口是：
 

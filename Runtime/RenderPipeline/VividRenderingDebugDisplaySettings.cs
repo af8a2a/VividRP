@@ -76,6 +76,7 @@ namespace VividRP.Runtime
         internal const float DefaultReGIRDebugOpacity = 0.45f;
         internal const float DefaultVisibilityBufferWireframeThickness = 10f;
         internal const float DefaultVirtualTextureVisualizationWorldPageSize = 1f;
+        internal const float DefaultVirtualTextureAdaptiveMipBiasOverride = -1f;
         internal const ReferencedPathTracingTransportDebugMode
             DefaultReferencedPathTracingTransportDebugMode =
                 ReferencedPathTracingTransportDebugMode.Combined;
@@ -215,6 +216,10 @@ namespace VividRP.Runtime
         [SerializeField]
         private float m_VirtualTextureVisualizationWorldPageSize =
             DefaultVirtualTextureVisualizationWorldPageSize;
+
+        [SerializeField]
+        private float m_VirtualTextureAdaptiveMipBiasOverride =
+            DefaultVirtualTextureAdaptiveMipBiasOverride;
 
         [SerializeField]
         private float m_VirtualTextureVisualizationOverlayAmount;
@@ -486,6 +491,18 @@ namespace VividRP.Runtime
             set => m_VirtualTextureVisualizationWorldPageSize = Mathf.Max(value, 0.001f);
         }
 
+        internal float virtualTextureAdaptiveMipBiasOverride
+        {
+            get => Mathf.Clamp(
+                m_VirtualTextureAdaptiveMipBiasOverride,
+                DefaultVirtualTextureAdaptiveMipBiasOverride,
+                VTAdaptiveMipBiasController.MaxMipBias);
+            set => m_VirtualTextureAdaptiveMipBiasOverride = Mathf.Clamp(
+                value,
+                DefaultVirtualTextureAdaptiveMipBiasOverride,
+                VTAdaptiveMipBiasController.MaxMipBias);
+        }
+
         [Obsolete("VT visualization now emits a dedicated full-screen debug output.")]
         internal float virtualTextureVisualizationOverlayAmount
         {
@@ -556,6 +573,7 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
             || virtualTextureVisualizationMode != VirtualTextureVisualizationMode.None
+            || virtualTextureAdaptiveMipBiasOverride >= 0f
             || m_VirtualTextureStatsViewMode != VirtualTextureStatsViewMode.Auto
             || m_VirtualTextureStatsCamera != null;
 
@@ -612,6 +630,8 @@ namespace VividRP.Runtime
             m_VirtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
             m_VirtualTextureVisualizationWorldPageSize =
                 DefaultVirtualTextureVisualizationWorldPageSize;
+            m_VirtualTextureAdaptiveMipBiasOverride =
+                DefaultVirtualTextureAdaptiveMipBiasOverride;
             m_VirtualTextureVisualizationOverlayAmount = 0f;
             m_VirtualTextureVisualizationOpacity = 1f;
             m_VirtualTextureStatsViewMode = VirtualTextureStatsViewMode.Auto;
@@ -990,6 +1010,12 @@ namespace VividRP.Runtime
             {
                 name = "World Units Per Page",
                 tooltip = "Set the XZ-world projection scale used by Resolved Page Content. One projected virtual page spans this many world units."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureAdaptiveMipBiasOverride = new()
+            {
+                name = "Adaptive Mip Bias Override",
+                tooltip = "Use -1 for adaptive control, or 0 through 4 to force a fixed mip bias for A/B validation."
             };
 
             public static readonly NameAndTooltip VirtualTextureResetState = new()
@@ -1456,6 +1482,14 @@ namespace VividRP.Runtime
                     isHiddenCallback = () =>
                         data.virtualTextureVisualizationMode
                             != VirtualTextureVisualizationMode.ResolvedWorldPosition,
+                });
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.VirtualTextureAdaptiveMipBiasOverride,
+                    getter = () => data.virtualTextureAdaptiveMipBiasOverride,
+                    setter = value => data.virtualTextureAdaptiveMipBiasOverride = value,
+                    min = () => VividRenderingDebugSettingsData.DefaultVirtualTextureAdaptiveMipBiasOverride,
+                    max = () => VTAdaptiveMipBiasController.MaxMipBias,
                 });
                 foldout.children.Add(new DebugUI.Button
                 {

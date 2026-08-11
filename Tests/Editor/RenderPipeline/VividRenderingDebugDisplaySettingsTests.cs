@@ -83,6 +83,7 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Target"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Layer"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> World Units Per Page"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Mip Bias Override"), Is.Not.Null);
             var resetVirtualTextureState = DebugManager.instance.GetItem(
                 "Rendering -> VividRP Debug -> Virtual Texture -> Reset VT State") as DebugUI.Button;
             Assert.That(resetVirtualTextureState, Is.Not.Null);
@@ -124,6 +125,7 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.FirstPublic;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.Mask;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize = 16f;
+            VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride = 2f;
             VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode = VirtualTextureStatsViewMode.SelectedCamera;
 
             VividRenderingDebugDisplaySettings.Data.Reset();
@@ -141,6 +143,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize,
                 Is.EqualTo(VividRenderingDebugSettingsData.DefaultVirtualTextureVisualizationWorldPageSize));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultVirtualTextureAdaptiveMipBiasOverride));
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode,
                 Is.EqualTo(VirtualTextureStatsViewMode.Auto));

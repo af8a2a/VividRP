@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using NUnit.Framework;
+using UnityEngine.Rendering;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
@@ -66,6 +67,25 @@ namespace VividRP.Editor.Tests
             {
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
+        }
+
+        [Test]
+        public void Prepare_DoesNotCreateStandaloneVirtualTextureFrameData()
+        {
+            var pass = new VirtualTextureDemoPass();
+            var frameData = new ContextContainer();
+
+            pass.Prepare(frameData);
+
+            Assert.That(frameData.Contains<VividVirtualTextureFrameData>(), Is.False);
+        }
+
+        [Test]
+        public void CompatibilityPass_DoesNotForceGlobalStateExecution()
+        {
+            Assert.That(
+                typeof(IAllowGlobalStateModificationPass).IsAssignableFrom(typeof(VirtualTextureDemoPass)),
+                Is.False);
         }
     }
 }

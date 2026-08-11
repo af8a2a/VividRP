@@ -616,6 +616,59 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return ((uint) maxMip << ResourceLayerBitCount) | (uint) layerIndex;
         }
 
+        internal static bool IsCompatibleStreamedAsset(
+            VividVirtualTextureAsset asset,
+            out string validationMessage)
+        {
+            return IsCompatibleStreamedAsset(
+                asset,
+                CreateSpaceDesc().StackDesc,
+                out validationMessage);
+        }
+
+        private static bool IsCompatibleStreamedAsset(
+            VividVirtualTextureAsset asset,
+            VTStackDesc expectedStackDesc,
+            out string validationMessage)
+        {
+            if (asset == null)
+            {
+                validationMessage = "Assign a streamed virtual texture asset.";
+                return false;
+            }
+
+            VividVirtualTextureBuiltData builtData = asset.BuiltData;
+            if (builtData == null)
+            {
+                validationMessage = $"Streamed VT asset '{asset.name}' has no built data.";
+                return false;
+            }
+
+            bool valid = builtData.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
+                         && builtData.PageSize == PageSize
+                         && builtData.BorderSize == BorderSize
+                         && builtData.VirtualPageCountX > 0
+                         && builtData.VirtualPageCountY > 0
+                         && builtData.VirtualPageCountX <= MaxAllocationPageCount
+                         && builtData.VirtualPageCountY <= MaxAllocationPageCount
+                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountX)
+                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountY)
+                         && builtData.MipCount == ComputeMaxMip(
+                             builtData.VirtualPageCountX,
+                             builtData.VirtualPageCountY) + 1
+                         && builtData.MatchesStack(expectedStackDesc)
+                         && (builtData.HasInlineRawData || builtData.HasStreamData);
+            if (valid)
+            {
+                validationMessage = string.Empty;
+                return true;
+            }
+
+            validationMessage =
+                $"Streamed VT asset '{asset.name}' is not a compatible GPUDrivenSurface build (128 texel pages, 4 texel borders, power-of-two dimensions, and the GPUDriven BCn stack are required).";
+            return false;
+        }
+
         private static VirtualTextureSpaceDesc CreateSpaceDesc()
         {
             var layers = new[]
@@ -777,23 +830,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 m_PermanentlyFailedStreamedAssets.Remove(assetId);
             }
 
-            VividVirtualTextureBuiltData builtData = asset.BuiltData;
-            bool valid = builtData != null
-                         && builtData.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
-                         && builtData.PageSize == PageSize
-                         && builtData.BorderSize == BorderSize
-                         && builtData.VirtualPageCountX > 0
-                         && builtData.VirtualPageCountY > 0
-                         && builtData.VirtualPageCountX <= MaxAllocationPageCount
-                         && builtData.VirtualPageCountY <= MaxAllocationPageCount
-                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountX)
-                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountY)
-                         && builtData.MipCount == ComputeMaxMip(
-                             builtData.VirtualPageCountX,
-                             builtData.VirtualPageCountY) + 1
-                         && builtData.MatchesStack(VirtualTextureSpaceDesc.StackDesc)
-                         && (builtData.HasInlineRawData || builtData.HasStreamData);
-            if (valid)
+            if (IsCompatibleStreamedAsset(asset, VirtualTextureSpaceDesc.StackDesc, out _))
                 return asset;
 
             if (m_InvalidStreamedAssetWarningIds.Add(assetId))

@@ -1,6 +1,7 @@
+using System;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering;
-using UnityEngine.Rendering;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 
 namespace VividRP.Runtime
 {
@@ -8,84 +9,34 @@ namespace VividRP.Runtime
     [ExecuteAlways]
     public sealed class VirtualTextureDemoController : MonoBehaviour
     {
-        private const string DemoSurfaceName = "VT Demo Surface";
-        private const string DemoShaderName = "VividRP/Material/VirtualTextureDemo";
-        private const string DefaultSourceTextureAssetPath = "Assets/vt/UVTest.jpg";
-        private static readonly int s_BaseMapId = Shader.PropertyToID("_BaseMap");
-        private static readonly int s_MainTexId = Shader.PropertyToID("_MainTex");
-
-        private enum DemoProducerMode
-        {
-            CheckerSource = 0,
-            ProceduralPageDebug = 1,
-            SourceTexture = 2,
-            VirtualTextureAsset = 3,
-        }
+        [SerializeField]
+        private MeshletRenderer m_MeshletRenderer;
 
         [SerializeField]
-        private string m_SpaceName = "VT Demo Space";
-
-        [SerializeField, Min(16)]
-        private int m_PageSize = 128;
-
-        [SerializeField, Min(0)]
-        private int m_BorderSize = 4;
-
-        [SerializeField, Min(1)]
-        private int m_VirtualPageCountX = 16;
-
-        [SerializeField, Min(1)]
-        private int m_VirtualPageCountY = 16;
-
-        [SerializeField, Min(1)]
-        private int m_MipCount = 5;
-
-        [SerializeField, Min(2)]
-        private int m_CachePageCount = 24;
-
-        [SerializeField, Min(1)]
-        private int m_MaxUploadsPerFrame = 4;
-
-        [SerializeField, Min(16)]
-        private int m_FeedbackCapacity = 512;
-
-        [SerializeField, Range(0, 4)]
-        private int m_NeighborPrefetchCount = 2;
-
-        [SerializeField]
-        private DemoProducerMode m_ProducerMode = DemoProducerMode.SourceTexture;
-
-        [SerializeField]
-        private Texture2D m_SourceTexture;
+        private GPUDrivenMaterialProxy m_MaterialProxy;
 
         [SerializeField]
         private VividVirtualTextureAsset m_VirtualTextureAsset;
 
-        [SerializeField]
-        private string m_SourceTextureAssetPath = DefaultSourceTextureAssetPath;
+        [SerializeField, Min(0)]
+        private int m_SubMeshIndex;
 
-        [SerializeField]
-        private bool m_AutoSizeFromSourceTexture = true;
+        [NonSerialized]
+        private string m_LastValidationMessage;
 
-        [SerializeField]
-        private bool m_CreateDemoSurface = true;
+        // Kept for source compatibility with the former standalone-space demo.
+        [Obsolete("VirtualTextureDemo no longer owns an address space. Use the GPUDriven VT allocation instead.")]
+        public int SpaceId => 0;
 
-        [SerializeField]
-        private Vector2 m_SurfaceSize = new(10f, 10f);
-
-        [SerializeField]
-        private MeshRenderer m_DemoRenderer;
-
-        private Material m_RuntimeMaterial;
-        private VTTexture2DPageProducer m_TextureProducer;
-        private int m_SpaceId;
-
-        public int SpaceId => m_SpaceId;
+        private void Reset()
+        {
+            m_MeshletRenderer = GetComponent<MeshletRenderer>();
+            ResolveExistingBindings();
+        }
 
         private void OnEnable()
         {
-            EnsureRegisteredSpace();
-            EnsureDemoSurface();
+            ValidateConfiguration();
         }
 
         private void OnValidate()
@@ -93,216 +44,143 @@ namespace VividRP.Runtime
             if (!isActiveAndEnabled)
                 return;
 
-            EnsureRegisteredSpace();
-            EnsureDemoSurface();
+            ValidateConfiguration();
         }
 
-        private void OnDisable()
+        public bool TryValidateVisibilityBufferDemo(out string validationMessage)
         {
-            if (m_SpaceId > 0)
+            if (m_MeshletRenderer == null)
+                m_MeshletRenderer = GetComponent<MeshletRenderer>();
+            if (m_MeshletRenderer == null)
             {
-                VirtualTextureSystem.UnregisterAddressSpace(m_SpaceId);
-                m_SpaceId = 0;
+                validationMessage =
+                    "Assign a MeshletRenderer. VirtualTextureDemo now uses the GPUDriven VisibilityBuffer path and no longer creates a MeshRenderer surface.";
+                return false;
             }
 
-            m_TextureProducer = null;
-
-            if (m_RuntimeMaterial != null)
+            if (!m_MeshletRenderer.takeOverSourceRenderer)
             {
-                CoreUtils.Destroy(m_RuntimeMaterial);
-                m_RuntimeMaterial = null;
+                validationMessage =
+                    "The MeshletRenderer must use the Take Over Source Renderer workflow before it can serve as the VT demo.";
+                return false;
             }
+
+            if (m_MeshletRenderer.TryGetComponent(out Renderer sourceRenderer) && sourceRenderer.enabled)
+            {
+                validationMessage =
+                    $"Disable or remove the source {sourceRenderer.GetType().Name}. The VT demo must render only through the GPUDriven VisibilityBuffer path.";
+                return false;
+            }
+
+            int subMeshCount = m_MeshletRenderer.subMeshCount;
+            if (subMeshCount <= 0)
+            {
+                validationMessage = "The assigned MeshletRenderer has no captured source mesh.";
+                return false;
+            }
+
+            if (m_SubMeshIndex < 0 || m_SubMeshIndex >= subMeshCount)
+            {
+                validationMessage =
+                    $"Submesh index {m_SubMeshIndex} is outside the MeshletRenderer range [0, {subMeshCount - 1}].";
+                return false;
+            }
+
+            GPUDrivenMaterialProxy boundMaterialProxy = m_MeshletRenderer.GetMaterialProxy(m_SubMeshIndex);
+            if (m_MaterialProxy == null)
+                m_MaterialProxy = boundMaterialProxy;
+            if (m_MaterialProxy == null)
+            {
+                validationMessage =
+                    "Assign a GPUDrivenMaterialProxy. The VisibilityBuffer path consumes material proxies instead of the legacy VirtualTextureDemo material.";
+                return false;
+            }
+
+            if (boundMaterialProxy != m_MaterialProxy)
+            {
+                validationMessage =
+                    $"Bind the assigned GPUDrivenMaterialProxy to MeshletRenderer submesh {m_SubMeshIndex}.";
+                return false;
+            }
+
+            if (m_VirtualTextureAsset == null)
+                m_VirtualTextureAsset = m_MaterialProxy.StreamedVirtualTexture;
+            if (m_MaterialProxy.StreamedVirtualTexture != m_VirtualTextureAsset)
+            {
+                validationMessage =
+                    "Build and bind the assigned streamed VT asset through the GPUDriven Material Proxy editor.";
+                return false;
+            }
+
+            if (!VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(
+                    m_VirtualTextureAsset,
+                    out validationMessage))
+            {
+                return false;
+            }
+
+            if (!m_MeshletRenderer.TryValidate(out string rendererValidationMessage))
+            {
+                validationMessage = $"MeshletRenderer is not ready for VisibilityBuffer rendering: {rendererValidationMessage}";
+                return false;
+            }
+
+            validationMessage = string.Empty;
+            return true;
         }
 
-        private void EnsureRegisteredSpace()
+        private void ValidateConfiguration()
         {
-            try
+            if (TryValidateVisibilityBufferDemo(out string validationMessage)
+                && TryValidateActivePipeline(out validationMessage))
             {
-                m_SpaceId = VirtualTextureSystem.RegisterOrReconfigureAddressSpace(
-                    CreateDescriptor(),
-                    ResolveProducer());
+                m_LastValidationMessage = string.Empty;
+                return;
             }
-            catch (System.Exception exception)
-            {
-                Debug.LogWarning($"[VividRP] Failed to register VT demo space '{m_SpaceName}': {exception.Message}", this);
-            }
-        }
 
-        private void EnsureDemoSurface()
-        {
-            if (!m_CreateDemoSurface)
+            if (string.Equals(m_LastValidationMessage, validationMessage, StringComparison.Ordinal))
                 return;
 
-            if (m_DemoRenderer == null)
+            m_LastValidationMessage = validationMessage;
+            Debug.LogWarning($"[VividRP] VirtualTextureDemo configuration is incomplete: {validationMessage}", this);
+        }
+
+        private static bool TryValidateActivePipeline(out string validationMessage)
+        {
+            VividRenderPipelineAsset pipelineAsset = VividRenderPipelineAsset.GetActiveAsset();
+            if (pipelineAsset == null)
             {
-                Transform existingSurface = transform.Find(DemoSurfaceName);
-                GameObject surfaceObject = existingSurface != null
-                    ? existingSurface.gameObject
-                    : GameObject.CreatePrimitive(PrimitiveType.Quad);
-                surfaceObject.name = DemoSurfaceName;
-                surfaceObject.transform.SetParent(transform, false);
-                surfaceObject.transform.localPosition = Vector3.zero;
-                surfaceObject.transform.localRotation = Quaternion.identity;
-
-                if (surfaceObject.TryGetComponent(out Collider collider))
-                {
-                    if (Application.isPlaying)
-                        Destroy(collider);
-                    else
-                        DestroyImmediate(collider);
-                }
-
-                if (!surfaceObject.TryGetComponent(out MeshRenderer renderer))
-                    renderer = surfaceObject.AddComponent<MeshRenderer>();
-
-                if (!surfaceObject.TryGetComponent(out MeshFilter _))
-                    surfaceObject.AddComponent<MeshFilter>();
-
-                m_DemoRenderer = renderer;
+                validationMessage = string.Empty;
+                return true;
             }
 
-            Transform surfaceTransform = m_DemoRenderer.transform;
-            surfaceTransform.localScale = new Vector3(m_SurfaceSize.x, m_SurfaceSize.y, 1f);
+            if (!pipelineAsset.EnableGPUDriven)
+            {
+                validationMessage = "Enable GPUDriven rendering on the active Vivid render pipeline asset.";
+                return false;
+            }
 
-            Shader shader = Shader.Find(DemoShaderName);
-            if (shader == null)
+            if (pipelineAsset.GPUDrivenTextureBackend != GPUDrivenTextureBackendMode.VirtualTexture)
+            {
+                validationMessage =
+                    "Select the VirtualTexture GPUDriven texture backend on the active Vivid render pipeline asset.";
+                return false;
+            }
+
+            validationMessage = string.Empty;
+            return true;
+        }
+
+        private void ResolveExistingBindings()
+        {
+            if (m_MeshletRenderer == null || m_MeshletRenderer.subMeshCount <= 0)
                 return;
 
-            if (m_RuntimeMaterial == null || m_RuntimeMaterial.shader != shader)
-            {
-                if (m_RuntimeMaterial != null)
-                    CoreUtils.Destroy(m_RuntimeMaterial);
-
-                m_RuntimeMaterial = CoreUtils.CreateEngineMaterial(shader);
-                m_RuntimeMaterial.name = $"{nameof(VirtualTextureDemoController)}_Material";
-            }
-
-            if (m_DemoRenderer.sharedMaterial != m_RuntimeMaterial)
-                m_DemoRenderer.sharedMaterial = m_RuntimeMaterial;
-
-            SyncSourceTextureToMaterial();
-        }
-
-        private VirtualTextureSpaceDesc CreateDescriptor()
-        {
-            int pageSize = Mathf.Max(16, m_PageSize);
-            int borderSize = Mathf.Max(0, m_BorderSize);
-            int virtualPageCountX = Mathf.Max(1, m_VirtualPageCountX);
-            int virtualPageCountY = Mathf.Max(1, m_VirtualPageCountY);
-            int mipCount = Mathf.Max(1, m_MipCount);
-            Texture2D sourceTexture = ResolveSourceTexture();
-            VividVirtualTextureBuiltData builtData = ResolveBuiltData();
-            bool useBuiltData = m_ProducerMode == DemoProducerMode.VirtualTextureAsset && builtData != null;
-
-            if (useBuiltData && m_AutoSizeFromSourceTexture)
-            {
-                pageSize = builtData.PageSize;
-                borderSize = builtData.BorderSize;
-                virtualPageCountX = builtData.VirtualPageCountX;
-                virtualPageCountY = builtData.VirtualPageCountY;
-                mipCount = builtData.MipCount;
-            }
-            else if (m_ProducerMode == DemoProducerMode.SourceTexture
-                && m_AutoSizeFromSourceTexture
-                && sourceTexture != null)
-            {
-                virtualPageCountX = Mathf.Max(1, Mathf.CeilToInt(sourceTexture.width / (float)pageSize));
-                virtualPageCountY = Mathf.Max(1, Mathf.CeilToInt(sourceTexture.height / (float)pageSize));
-                mipCount = ComputeMipCount(virtualPageCountX, virtualPageCountY);
-            }
-
-            if (useBuiltData)
-            {
-                return builtData.CreateSpaceDesc(
-                    string.IsNullOrWhiteSpace(m_SpaceName) ? "VT Demo Space" : m_SpaceName,
-                    cachePageCount: Mathf.Max(2, m_CachePageCount),
-                    maxUploadsPerFrame: Mathf.Max(1, m_MaxUploadsPerFrame),
-                    feedbackCapacity: Mathf.Max(16, m_FeedbackCapacity),
-                    neighborPrefetchCount: Mathf.Clamp(m_NeighborPrefetchCount, 0, 4));
-            }
-
-            return new VirtualTextureSpaceDesc(
-                string.IsNullOrWhiteSpace(m_SpaceName) ? "VT Demo Space" : m_SpaceName,
-                pageSize: pageSize,
-                borderSize: borderSize,
-                virtualPageCountX: virtualPageCountX,
-                virtualPageCountY: virtualPageCountY,
-                mipCount: mipCount,
-                cachePageCount: Mathf.Max(2, m_CachePageCount),
-                graphicsFormat: useBuiltData ? builtData.GraphicsFormat : GraphicsFormat.R8G8B8A8_UNorm,
-                maxUploadsPerFrame: Mathf.Max(1, m_MaxUploadsPerFrame),
-                feedbackCapacity: Mathf.Max(16, m_FeedbackCapacity),
-                neighborPrefetchCount: Mathf.Clamp(m_NeighborPrefetchCount, 0, 4));
-        }
-
-        private VTProducer ResolveProducer()
-        {
-            if (m_ProducerMode == DemoProducerMode.ProceduralPageDebug)
-                return VTProceduralPageProducer.Instance;
-
-            if (m_ProducerMode == DemoProducerMode.CheckerSource)
-                return VTCheckerSourcePageProducer.Instance;
-
-            if (m_ProducerMode == DemoProducerMode.VirtualTextureAsset)
-            {
-                if (m_VirtualTextureAsset?.BuiltData == null)
-                    return VTCheckerSourcePageProducer.Instance;
-
-                return m_VirtualTextureAsset;
-            }
-
-            Texture2D sourceTexture = ResolveSourceTexture();
-            if (sourceTexture == null)
-                return VTCheckerSourcePageProducer.Instance;
-
-            if (m_TextureProducer == null || !ReferenceEquals(m_TextureProducer.SourceTexture, sourceTexture))
-                m_TextureProducer = new VTTexture2DPageProducer(sourceTexture);
-
-            return m_TextureProducer;
-        }
-
-        private VividVirtualTextureBuiltData ResolveBuiltData()
-        {
-            return m_VirtualTextureAsset != null ? m_VirtualTextureAsset.BuiltData : null;
-        }
-
-        private Texture2D ResolveSourceTexture()
-        {
-            if (m_SourceTexture != null)
-                return m_SourceTexture;
-
-#if UNITY_EDITOR
-            if (!string.IsNullOrWhiteSpace(m_SourceTextureAssetPath))
-                return UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(m_SourceTextureAssetPath);
-#endif
-
-            return null;
-        }
-
-        private void SyncSourceTextureToMaterial()
-        {
-            if (m_RuntimeMaterial == null)
-                return;
-
-            Texture2D sourceTexture = m_ProducerMode == DemoProducerMode.SourceTexture
-                ? ResolveSourceTexture()
-                : null;
-
-            if (m_RuntimeMaterial.HasProperty(s_BaseMapId))
-                m_RuntimeMaterial.SetTexture(s_BaseMapId, sourceTexture);
-
-            if (m_RuntimeMaterial.HasProperty(s_MainTexId))
-                m_RuntimeMaterial.SetTexture(s_MainTexId, sourceTexture);
-        }
-
-        private static int ComputeMipCount(int virtualPageCountX, int virtualPageCountY)
-        {
-            int maxPageCount = Mathf.Max(1, Mathf.Max(virtualPageCountX, virtualPageCountY));
-            int mipCount = 1;
-            while ((maxPageCount >>= 1) > 0 && mipCount < VirtualTextureFeedbackProcessor.MaxMipCount)
-                mipCount += 1;
-
-            return mipCount;
+            int subMeshIndex = Mathf.Clamp(m_SubMeshIndex, 0, m_MeshletRenderer.subMeshCount - 1);
+            if (m_MaterialProxy == null)
+                m_MaterialProxy = m_MeshletRenderer.GetMaterialProxy(subMeshIndex);
+            if (m_VirtualTextureAsset == null && m_MaterialProxy != null)
+                m_VirtualTextureAsset = m_MaterialProxy.StreamedVirtualTexture;
         }
     }
 }

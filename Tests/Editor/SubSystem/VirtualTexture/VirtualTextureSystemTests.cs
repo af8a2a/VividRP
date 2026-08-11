@@ -625,6 +625,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_AppliesDebugMipBiasOverride_WithoutFreezingAdaptiveController()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "FixedAdaptiveMipBias",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0));
+            var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
+
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride = 2f;
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    1,
+                    0,
+                    requestKey);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                Assert.That(VirtualTextureStatsRegistry.LastStats.AdaptiveMipBias, Is.EqualTo(2f));
+                Assert.That(
+                    frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias,
+                    Is.EqualTo(2f));
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.EqualTo(0.5f));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureAdaptiveMipBiasOverride;
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
         public void Update_SchedulesNeighborPrefetchWithinUploadBudget_WhenEnabled()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(

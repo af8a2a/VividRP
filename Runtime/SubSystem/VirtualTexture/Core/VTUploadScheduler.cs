@@ -1091,6 +1091,11 @@ namespace VividRP.Runtime
             ResetLastScheduleStats();
             m_ReservedUploadCountThisFrame = 0;
             m_ReservedUploadBytesThisFrame = 0;
+            DiscardQueuedUploads();
+        }
+
+        internal void DiscardQueuedUploads()
+        {
             if (m_QueuedUploads.Count > 0)
                 DisposeQueuedUploads();
 
@@ -1344,6 +1349,7 @@ namespace VividRP.Runtime
             }
 
             m_QueuedUploads.Clear();
+            m_QueuedCountsByKey.Clear();
             return scheduledAny;
         }
 
@@ -1401,6 +1407,7 @@ namespace VividRP.Runtime
         {
             DisposePayloads(m_QueuedUploads, 0, m_QueuedUploads.Count);
             m_QueuedUploads.Clear();
+            m_QueuedCountsByKey.Clear();
         }
 
         private static int ComputeUploadByteSize(in VirtualTextureSpaceDesc desc)

@@ -483,6 +483,170 @@ namespace VividRP.Editor.Tests
             Assert.That(residentEntry.PendingUpload, Is.False);
         }
 
+        [TestCase(false, TestName = "Uploads_ShareGlobalPageBudgetAcrossCameraUpdatesInSameFrame")]
+        [TestCase(true, TestName = "Uploads_ShareGlobalByteBudgetAcrossCameraUpdatesInSameFrame")]
+        public void Uploads_ShareGlobalBudgetAcrossCameraUpdatesInSameFrame(bool useByteBudget)
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                useByteBudget ? "MultiCameraByteBudget" : "MultiCameraPageBudget",
+                maxUploadsPerFrame: 2,
+                cachePageCount: 4);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            RunWithTwoCameras("VTBudgetCamera", (firstCamera, secondCamera, commandBuffer) =>
+            {
+                int uploadByteSize = desc.PhysicalPageSize * desc.PhysicalPageSize * 4;
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(useByteBudget ? 2 : 1);
+                VirtualTextureSystem.SetUploadMemoryBudgetForTesting(
+                    useByteBudget ? uploadByteSize : int.MaxValue);
+
+                var firstCoord = new VirtualTexturePageCoord(0, 0, 0);
+                var secondCoord = new VirtualTexturePageCoord(3, 3, 0);
+                IssueFeedback(firstCamera, 73, commandBuffer, spaceId, firstCoord);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+
+                IssueFeedback(secondCamera, 73, commandBuffer, spaceId, secondCoord);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId),
+                    Is.EqualTo(useByteBudget ? 2 : 1));
+
+                m_FenceFactory.Handles[0].IsPassed = true;
+                IssueFeedback(secondCamera, 74, commandBuffer, spaceId, secondCoord);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(2));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(2));
+            });
+        }
+
+        [Test]
+        public void Uploads_SharePerSpacePageBudgetAcrossCameraUpdatesInSameFrame()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "MultiCameraSpaceBudget",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            RunWithTwoCameras("VTSpaceBudgetCamera", (firstCamera, secondCamera, commandBuffer) =>
+            {
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(2);
+                VirtualTextureSystem.SetUploadMemoryBudgetForTesting(int.MaxValue);
+
+                IssueFeedback(
+                    firstCamera,
+                    73,
+                    commandBuffer,
+                    spaceId,
+                    new VirtualTexturePageCoord(0, 0, 0));
+                IssueFeedback(
+                    secondCamera,
+                    73,
+                    commandBuffer,
+                    spaceId,
+                    new VirtualTexturePageCoord(3, 3, 0));
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId),
+                    Is.EqualTo(1));
+            });
+        }
+
+        [Test]
+        public void Uploads_UseRemainingGlobalBudgetAcrossCameraUpdatesInSameFrame()
+        {
+            VirtualTextureSpaceDesc firstDesc = CreateDesc(
+                "MultiCameraRemainingBudgetA",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4);
+            VirtualTextureSpaceDesc secondDesc = CreateDesc(
+                "MultiCameraRemainingBudgetB",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4);
+            var firstProducer = new StatusPageProducer(firstDesc, VTPageRequestStatus.Available);
+            var secondProducer = new StatusPageProducer(secondDesc, VTPageRequestStatus.Available);
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(firstDesc, firstProducer);
+            int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(secondDesc, secondProducer);
+            firstProducer.ResetCounters();
+            secondProducer.ResetCounters();
+
+            RunWithTwoCameras("VTRemainingBudgetCamera", (firstCamera, secondCamera, commandBuffer) =>
+            {
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(2);
+                VirtualTextureSystem.SetUploadMemoryBudgetForTesting(int.MaxValue);
+
+                IssueFeedback(
+                    firstCamera,
+                    73,
+                    commandBuffer,
+                    firstSpaceId,
+                    new VirtualTexturePageCoord(0, 0, 0));
+                IssueFeedback(
+                    secondCamera,
+                    73,
+                    commandBuffer,
+                    secondSpaceId,
+                    new VirtualTexturePageCoord(0, 0, 0));
+
+                Assert.That(firstProducer.ProduceCount, Is.EqualTo(1));
+                Assert.That(secondProducer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(2));
+            });
+        }
+
+        [Test]
+        public void Uploads_SharePerSpaceScheduleBudgetAcrossCameraUpdatesInSameFrame()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "MultiCameraSpaceScheduleBudget",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            VirtualTextureSystem.SetUploadMemoryBudgetForTesting(1);
+            IssueFeedback(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            IssueFeedback(spaceId, new VirtualTexturePageCoord(3, 3, 0));
+
+            Assert.That(producer.ProduceCount, Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId),
+                Is.EqualTo(2));
+
+            RunWithTwoCameras("VTSpaceScheduleBudgetCamera", (firstCamera, secondCamera, commandBuffer) =>
+            {
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(2);
+                VirtualTextureSystem.SetUploadMemoryBudgetForTesting(int.MaxValue);
+
+                IssueFeedback(firstCamera, 73, commandBuffer, spaceId);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+
+                IssueFeedback(secondCamera, 73, commandBuffer, spaceId);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+
+                m_FenceFactory.Handles[0].IsPassed = true;
+                IssueFeedback(secondCamera, 74, commandBuffer, spaceId);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(2));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(2));
+            });
+        }
+
         [Test]
         public void Uploads_AccountForEachPhysicalGroupStorageFormat()
         {
@@ -1010,6 +1174,61 @@ namespace VividRP.Editor.Tests
             {
                 commandBuffer.Dispose();
             }
+        }
+
+        private static void RunWithTwoCameras(
+            string namePrefix,
+            System.Action<Camera, Camera, CommandBuffer> action)
+        {
+            var firstCameraObject = new GameObject($"{namePrefix}A");
+            var secondCameraObject = new GameObject($"{namePrefix}B");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                action(
+                    firstCameraObject.AddComponent<Camera>(),
+                    secondCameraObject.AddComponent<Camera>(),
+                    commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
+            }
+        }
+
+        private static void IssueFeedback(
+            Camera camera,
+            int frameIndex,
+            CommandBuffer commandBuffer,
+            int spaceId,
+            params VirtualTexturePageCoord[] coords)
+        {
+            commandBuffer.Clear();
+            foreach (VirtualTexturePageCoord coord in coords)
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    camera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, coord));
+            }
+
+            VirtualTextureSystem.Update(CreateFrameData(camera, frameIndex), commandBuffer);
+        }
+
+        private static ContextContainer CreateFrameData(Camera camera, int frameIndex)
+        {
+            var frameData = new ContextContainer();
+            VividCameraData cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.SetCamera(camera);
+            cameraData.actualWidth = 512;
+            cameraData.actualHeight = 512;
+            cameraData.pixelWidth = 512;
+            cameraData.pixelHeight = 512;
+            cameraData.pixelRect = new Rect(0f, 0f, 512f, 512f);
+            cameraData.frameIndex = frameIndex;
+            return frameData;
         }
 
         private static void UpdateOnce()

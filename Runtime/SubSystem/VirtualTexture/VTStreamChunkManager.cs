@@ -294,6 +294,11 @@ namespace VividRP.Runtime
             m_LastIOSaturationCount = 0;
             m_LastDecodeSaturationCount = 0;
             m_LastCacheAllocationFailureCount = 0;
+            PollProgress();
+        }
+
+        internal void PollProgress()
+        {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamPollReadBatchesMarker.Auto())
                 PollReadBatches();
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamReplaceBackendMarker.Auto())

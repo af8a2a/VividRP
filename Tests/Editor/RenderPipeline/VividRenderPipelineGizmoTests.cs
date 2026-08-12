@@ -8,6 +8,38 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VividRenderPipelineGizmoTests
     {
+        [Test]
+        public void ResolvePipelineFrameIndex_ReusesPlayModeFrameIndex()
+        {
+            int editModeFrameIndex = 7;
+
+            int frameIndex = VividRenderPipeline.ResolvePipelineFrameIndex(
+                isPlaying: true,
+                playModeFrameIndex: 42,
+                editModeFrameIndex: ref editModeFrameIndex);
+
+            Assert.That(frameIndex, Is.EqualTo(42));
+            Assert.That(editModeFrameIndex, Is.EqualTo(7));
+        }
+
+        [Test]
+        public void ResolvePipelineFrameIndex_AdvancesOncePerEditModeRender()
+        {
+            int editModeFrameIndex = 0;
+
+            int firstFrameIndex = VividRenderPipeline.ResolvePipelineFrameIndex(
+                isPlaying: false,
+                playModeFrameIndex: 42,
+                editModeFrameIndex: ref editModeFrameIndex);
+            int secondFrameIndex = VividRenderPipeline.ResolvePipelineFrameIndex(
+                isPlaying: false,
+                playModeFrameIndex: 42,
+                editModeFrameIndex: ref editModeFrameIndex);
+
+            Assert.That(firstFrameIndex, Is.EqualTo(1));
+            Assert.That(secondFrameIndex, Is.EqualTo(2));
+        }
+
         [TestCase(CameraType.SceneView, false)]
         [TestCase(CameraType.Game, false)]
         [TestCase(CameraType.Preview, false)]

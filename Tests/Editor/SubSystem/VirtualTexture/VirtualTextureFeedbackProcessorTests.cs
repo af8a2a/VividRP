@@ -58,6 +58,122 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FeedbackBatch_PreservesOverflowAndFallbackBreakdown()
+        {
+            var batch = new VirtualTextureFeedbackBatch(
+                CameraType.Game,
+                new ulong[4],
+                requestCount: 4,
+                frameIndex: 7,
+                feedbackOverflowCount: 6,
+                fallbackSampleCount: 10,
+                residentAccessCount: 2,
+                faultOverflowCount: 2,
+                residentOverflowCount: 4,
+                residentFallbackSampleCount: 7,
+                weightedResolvedSampleCount: 20);
+
+            Assert.That(batch.FaultOverflowCount, Is.EqualTo(2));
+            Assert.That(batch.ResidentOverflowCount, Is.EqualTo(4));
+            Assert.That(
+                batch.FaultOverflowCount + batch.ResidentOverflowCount,
+                Is.EqualTo(batch.FeedbackOverflowCount));
+            Assert.That(batch.ResidentFallbackSampleCount, Is.EqualTo(7));
+            Assert.That(batch.NonResidentFallbackSampleCount, Is.EqualTo(3));
+            Assert.That(batch.WeightedResolvedSampleCount, Is.EqualTo(20));
+            Assert.That(batch.RequestsReadbackValid, Is.True);
+            Assert.That(batch.CounterReadbackValid, Is.True);
+        }
+
+        [Test]
+        public void FeedbackBatch_DerivesUnspecifiedOverflowSideFromTotal()
+        {
+            var faultSpecified = new VirtualTextureFeedbackBatch(
+                CameraType.Game,
+                System.Array.Empty<ulong>(),
+                requestCount: 0,
+                frameIndex: 1,
+                feedbackOverflowCount: 6,
+                faultOverflowCount: 2);
+            var residentSpecified = new VirtualTextureFeedbackBatch(
+                CameraType.Game,
+                System.Array.Empty<ulong>(),
+                requestCount: 0,
+                frameIndex: 1,
+                feedbackOverflowCount: 6,
+                residentOverflowCount: 4);
+
+            Assert.That(faultSpecified.FaultOverflowCount, Is.EqualTo(2));
+            Assert.That(faultSpecified.ResidentOverflowCount, Is.EqualTo(4));
+            Assert.That(residentSpecified.FaultOverflowCount, Is.EqualTo(2));
+            Assert.That(residentSpecified.ResidentOverflowCount, Is.EqualTo(4));
+        }
+
+        [Test]
+        public void FeedbackBatch_PreservesCounterDerivedAcceptedFaultRequestCount_WhenRequestsAreInvalid()
+        {
+            var batch = new VirtualTextureFeedbackBatch(
+                CameraType.Game,
+                System.Array.Empty<ulong>(),
+                requestCount: 0,
+                frameIndex: 1,
+                faultOverflowCount: 3,
+                requestsReadbackValid: false,
+                counterReadbackValid: true,
+                acceptedFaultRequestCount: 12);
+
+            Assert.That(batch.RequestCount, Is.Zero);
+            Assert.That(batch.ResidentAccessCount, Is.Zero);
+            Assert.That(batch.AcceptedFaultRequestCount, Is.EqualTo(12));
+        }
+
+        [TestCase(false, 4, 7, 2, 0)]
+        [TestCase(true, 4, 7, 2, 2)]
+        [TestCase(true, 4, 2, 3, 0)]
+        public void CompletedReadbackCounts_DeriveAcceptedFaultsFromCounters(
+            bool counterReadbackValid,
+            int requestCapacity,
+            int completedRequestCount,
+            int completedResidentAccessCount,
+            int expectedAcceptedFaultRequestCount)
+        {
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ResolveCompletedAcceptedFaultRequestCount(
+                    counterReadbackValid,
+                    requestCapacity,
+                    completedRequestCount,
+                    completedResidentAccessCount),
+                Is.EqualTo(expectedAcceptedFaultRequestCount));
+        }
+
+        [TestCase(true, true, 4, 7, 4, 3)]
+        [TestCase(false, true, 4, 7, 0, 3)]
+        [TestCase(true, false, 4, 7, 0, 0)]
+        [TestCase(false, false, 4, 7, 0, 0)]
+        public void CompletedReadbackCounts_KeepCapacityIndependentFromRequestValidity(
+            bool requestsReadbackValid,
+            bool counterReadbackValid,
+            int requestCapacity,
+            int completedRequestCount,
+            int expectedRequestCount,
+            int expectedOverflowCount)
+        {
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ResolveCompletedRequestCount(
+                    requestsReadbackValid,
+                    counterReadbackValid,
+                    requestCapacity,
+                    completedRequestCount),
+                Is.EqualTo(expectedRequestCount));
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ResolveCompletedOverflowCount(
+                    counterReadbackValid,
+                    requestCapacity,
+                    completedRequestCount),
+                Is.EqualTo(expectedOverflowCount));
+        }
+
+        [Test]
         public void Aggregate_PrioritizesGameCameraBeforeSceneView_AcrossMipAndHitCount()
         {
             ulong sceneFine = VirtualTextureFeedbackProcessor.EncodeKey(1, new VirtualTexturePageCoord(0, 0, 0));

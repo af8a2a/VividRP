@@ -84,6 +84,26 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Layer"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> World Units Per Page"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Mip Bias Override"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Feedback Overflow Count Override"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Fallback Sample Count Override"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Fresh Feedback (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Measured Overflow (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Overflow Input (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Overflow Pressure (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Measured Fallback (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Fallback Input (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Fallback Coverage (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Total Pressure (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Target Mip Bias (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Feedback Fault Overflow (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Feedback Resident Overflow (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Feedback Request Readback Errors (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Feedback Counter Readback Errors (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Fallback Nonresident Samples (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Fallback Resident Samples (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Resolved VT Samples (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Last Fresh Frame (Global)"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Adaptive Last Fresh Resolved VT Samples (Global)"), Is.Not.Null);
             var resetVirtualTextureState = DebugManager.instance.GetItem(
                 "Rendering -> VividRP Debug -> Virtual Texture -> Reset VT State") as DebugUI.Button;
             Assert.That(resetVirtualTextureState, Is.Not.Null);
@@ -126,6 +146,8 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.Mask;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize = 16f;
             VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride = 2f;
+            VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride = 3;
+            VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride = 11;
             VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode = VirtualTextureStatsViewMode.SelectedCamera;
 
             VividRenderingDebugDisplaySettings.Data.Reset();
@@ -147,8 +169,42 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride,
                 Is.EqualTo(VividRenderingDebugSettingsData.DefaultVirtualTextureAdaptiveMipBiasOverride));
             Assert.That(
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultVirtualTextureFeedbackOverflowCountOverride));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultVirtualTextureFallbackSampleCountOverride));
+            Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode,
                 Is.EqualTo(VirtualTextureStatsViewMode.Auto));
+        }
+
+        [Test]
+        public void VirtualTextureFeedbackPressureOverrideWidgets_UseMeasuredCountSentinel()
+        {
+            var overflowWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Virtual Texture -> Feedback Overflow Count Override")
+                as DebugUI.IntField;
+            var fallbackWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Virtual Texture -> Fallback Sample Count Override")
+                as DebugUI.IntField;
+
+            Assert.That(overflowWidget, Is.Not.Null);
+            Assert.That(fallbackWidget, Is.Not.Null);
+            Assert.That(overflowWidget.min(), Is.EqualTo(-1));
+            Assert.That(fallbackWidget.min(), Is.EqualTo(-1));
+
+            overflowWidget.setter(3);
+            fallbackWidget.setter(11);
+
+            Assert.That(overflowWidget.getter(), Is.EqualTo(3));
+            Assert.That(fallbackWidget.getter(), Is.EqualTo(11));
+
+            overflowWidget.setter(-2);
+            fallbackWidget.setter(-2);
+
+            Assert.That(overflowWidget.getter(), Is.EqualTo(-1));
+            Assert.That(fallbackWidget.getter(), Is.EqualTo(-1));
         }
 
         [Test]
@@ -590,6 +646,21 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode =
                 VirtualTextureVisualizationMode.PageTableResidency;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksVirtualTextureFeedbackPressureOverrides()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride = 0;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride = 0;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

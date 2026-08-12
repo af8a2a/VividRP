@@ -40,6 +40,20 @@ namespace VividRP.Runtime
         private static int s_NextAllocationId = 1;
         private static int s_FallbackFrameIndex = -1;
         private static bool s_RuntimeStateResetRequested;
+        private static int s_FeedbackRequestReadbackErrorCount;
+        private static int s_FeedbackCounterReadbackErrorCount;
+        private static int s_FeedbackLastReadbackErrorFrameIndex = -1;
+        private static int s_PendingAdaptiveFeedbackOverflowCount;
+        private static int s_PendingAdaptiveFallbackSampleCount;
+        private static int s_PendingAdaptiveFaultOverflowCount;
+        private static int s_PendingAdaptiveResidentOverflowCount;
+        private static int s_PendingAdaptiveNonResidentFallbackSampleCount;
+        private static int s_PendingAdaptiveResidentFallbackSampleCount;
+        private static int s_PendingAdaptiveWeightedResolvedSampleCount;
+        private static int s_PendingAdaptiveAcceptedFaultRequestCount;
+        private static int s_PendingAdaptiveAcceptedResidentRequestCount;
+        private static int s_PendingAdaptiveFeedbackMeasurementFrameIndex = -1;
+        private static bool s_HasPendingAdaptiveFeedbackMeasurement;
 
         private sealed class PendingUploadCandidateComparer : IComparer<VTPendingUploadCandidate>
         {
@@ -183,6 +197,10 @@ namespace VividRP.Runtime
             s_NextAllocationId = 1;
             s_FallbackFrameIndex = -1;
             s_RuntimeStateResetRequested = false;
+            s_FeedbackRequestReadbackErrorCount = 0;
+            s_FeedbackCounterReadbackErrorCount = 0;
+            s_FeedbackLastReadbackErrorFrameIndex = -1;
+            ResetPendingAdaptiveFeedbackMeasurement();
             s_DemandEvictionBudgetFrameIndex = int.MinValue;
             s_RemainingDemandEvictionBudget = 0;
             s_AdaptiveMipBiasController.Reset();
@@ -369,6 +387,10 @@ namespace VividRP.Runtime
             s_DemandEvictionBudgetFrameIndex = int.MinValue;
             s_RemainingDemandEvictionBudget = 0;
             s_AdaptiveMipBiasController.Reset();
+            s_FeedbackRequestReadbackErrorCount = 0;
+            s_FeedbackCounterReadbackErrorCount = 0;
+            s_FeedbackLastReadbackErrorFrameIndex = -1;
+            ResetPendingAdaptiveFeedbackMeasurement();
             VirtualTextureStatsRegistry.Clear();
 
             Debug.Log(
@@ -383,6 +405,71 @@ namespace VividRP.Runtime
             {
                 UpdateCore(frameData, cmd);
             }
+        }
+
+        private static void AccumulatePendingAdaptiveFeedbackMeasurement(
+            int feedbackOverflowCount,
+            int fallbackSampleCount,
+            int faultOverflowCount,
+            int residentOverflowCount,
+            int nonResidentFallbackSampleCount,
+            int residentFallbackSampleCount,
+            int weightedResolvedSampleCount,
+            int acceptedFaultRequestCount,
+            int acceptedResidentRequestCount,
+            int feedbackMeasurementFrameIndex)
+        {
+            s_PendingAdaptiveFeedbackOverflowCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveFeedbackOverflowCount,
+                feedbackOverflowCount);
+            s_PendingAdaptiveFallbackSampleCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveFallbackSampleCount,
+                fallbackSampleCount);
+            s_PendingAdaptiveFaultOverflowCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveFaultOverflowCount,
+                faultOverflowCount);
+            s_PendingAdaptiveResidentOverflowCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveResidentOverflowCount,
+                residentOverflowCount);
+            s_PendingAdaptiveNonResidentFallbackSampleCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveNonResidentFallbackSampleCount,
+                nonResidentFallbackSampleCount);
+            s_PendingAdaptiveResidentFallbackSampleCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveResidentFallbackSampleCount,
+                residentFallbackSampleCount);
+            s_PendingAdaptiveWeightedResolvedSampleCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveWeightedResolvedSampleCount,
+                weightedResolvedSampleCount);
+            s_PendingAdaptiveAcceptedFaultRequestCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveAcceptedFaultRequestCount,
+                acceptedFaultRequestCount);
+            s_PendingAdaptiveAcceptedResidentRequestCount = SaturatingAddFeedbackCount(
+                s_PendingAdaptiveAcceptedResidentRequestCount,
+                acceptedResidentRequestCount);
+            s_PendingAdaptiveFeedbackMeasurementFrameIndex = Mathf.Max(
+                s_PendingAdaptiveFeedbackMeasurementFrameIndex,
+                feedbackMeasurementFrameIndex);
+            s_HasPendingAdaptiveFeedbackMeasurement = true;
+        }
+
+        private static void ResetPendingAdaptiveFeedbackMeasurement()
+        {
+            s_PendingAdaptiveFeedbackOverflowCount = 0;
+            s_PendingAdaptiveFallbackSampleCount = 0;
+            s_PendingAdaptiveFaultOverflowCount = 0;
+            s_PendingAdaptiveResidentOverflowCount = 0;
+            s_PendingAdaptiveNonResidentFallbackSampleCount = 0;
+            s_PendingAdaptiveResidentFallbackSampleCount = 0;
+            s_PendingAdaptiveWeightedResolvedSampleCount = 0;
+            s_PendingAdaptiveAcceptedFaultRequestCount = 0;
+            s_PendingAdaptiveAcceptedResidentRequestCount = 0;
+            s_PendingAdaptiveFeedbackMeasurementFrameIndex = -1;
+            s_HasPendingAdaptiveFeedbackMeasurement = false;
+        }
+
+        private static int SaturatingAddFeedbackCount(int left, int right)
+        {
+            return (int)Math.Min(int.MaxValue, (long)Mathf.Max(0, left) + Mathf.Max(0, right));
         }
 
         protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
@@ -416,7 +503,6 @@ namespace VividRP.Runtime
                             .ResolveTransitionStartBudget(frameIndex));
                 }
             }
-
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureTransitionsStartMarker.Auto())
             {
                 for (int round = 0;
@@ -494,6 +580,17 @@ namespace VividRP.Runtime
             int faultCount = 0;
             int feedbackOverflowCount = 0;
             int fallbackSampleCount = 0;
+            int faultOverflowCount = 0;
+            int residentOverflowCount = 0;
+            int nonResidentFallbackSampleCount = 0;
+            int residentFallbackSampleCount = 0;
+            int weightedResolvedSampleCount = 0;
+            int measuredAcceptedFaultRequestCount = 0;
+            int measuredAcceptedResidentRequestCount = 0;
+            int requestReadbackErrorCount = 0;
+            int counterReadbackErrorCount = 0;
+            int feedbackMeasurementFrameIndex = -1;
+            bool hasFreshFeedbackMeasurement = false;
             int activeViewFaultCount = 0;
             int activeViewFeedbackOverflowCount = 0;
             int activeViewFallbackSampleCount = 0;
@@ -503,9 +600,48 @@ namespace VividRP.Runtime
                 for (int batchIndex = 0; batchIndex < s_CompletedReadbacks.Count; batchIndex++)
                 {
                     VirtualTextureFeedbackBatch batch = s_CompletedReadbacks[batchIndex];
-                    faultCount += Mathf.Max(0, batch.RequestCount - batch.ResidentAccessCount);
-                    feedbackOverflowCount += batch.FeedbackOverflowCount;
-                    fallbackSampleCount += batch.FallbackSampleCount;
+                    faultCount = SaturatingAddFeedbackCount(
+                        faultCount,
+                        Mathf.Max(0, batch.RequestCount - batch.ResidentAccessCount));
+                    feedbackOverflowCount = SaturatingAddFeedbackCount(
+                        feedbackOverflowCount,
+                        batch.FeedbackOverflowCount);
+                    fallbackSampleCount = SaturatingAddFeedbackCount(
+                        fallbackSampleCount,
+                        batch.FallbackSampleCount);
+                    faultOverflowCount = SaturatingAddFeedbackCount(
+                        faultOverflowCount,
+                        batch.FaultOverflowCount);
+                    residentOverflowCount = SaturatingAddFeedbackCount(
+                        residentOverflowCount,
+                        batch.ResidentOverflowCount);
+                    nonResidentFallbackSampleCount = SaturatingAddFeedbackCount(
+                        nonResidentFallbackSampleCount,
+                        batch.NonResidentFallbackSampleCount);
+                    residentFallbackSampleCount = SaturatingAddFeedbackCount(
+                        residentFallbackSampleCount,
+                        batch.ResidentFallbackSampleCount);
+                    weightedResolvedSampleCount = SaturatingAddFeedbackCount(
+                        weightedResolvedSampleCount,
+                        batch.WeightedResolvedSampleCount);
+                    requestReadbackErrorCount += batch.RequestsReadbackValid ? 0 : 1;
+                    counterReadbackErrorCount += batch.CounterReadbackValid ? 0 : 1;
+                    hasFreshFeedbackMeasurement |= batch.CounterReadbackValid;
+                    if (batch.CounterReadbackValid)
+                    {
+                        // Only fault traffic drives adaptive overflow pressure. Resident
+                        // accesses use the same physical buffer, so subtract the accepted
+                        // resident entries before normalizing rejected fault attempts.
+                        measuredAcceptedFaultRequestCount = SaturatingAddFeedbackCount(
+                            measuredAcceptedFaultRequestCount,
+                            batch.AcceptedFaultRequestCount);
+                        measuredAcceptedResidentRequestCount = SaturatingAddFeedbackCount(
+                            measuredAcceptedResidentRequestCount,
+                            batch.AcceptedResidentRequestCount);
+                        feedbackMeasurementFrameIndex = Mathf.Max(
+                            feedbackMeasurementFrameIndex,
+                            batch.FrameIndex);
+                    }
 
                     if (IsBatchFromView(batch, activeViewId, activeCameraType))
                     {
@@ -518,6 +654,15 @@ namespace VividRP.Runtime
                     }
                 }
             }
+
+            s_FeedbackRequestReadbackErrorCount = (int)Math.Min(
+                int.MaxValue,
+                (long)s_FeedbackRequestReadbackErrorCount + requestReadbackErrorCount);
+            s_FeedbackCounterReadbackErrorCount = (int)Math.Min(
+                int.MaxValue,
+                (long)s_FeedbackCounterReadbackErrorCount + counterReadbackErrorCount);
+            if (requestReadbackErrorCount > 0 || counterReadbackErrorCount > 0)
+                s_FeedbackLastReadbackErrorFrameIndex = frameIndex;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateMarker.Auto())
             {
@@ -721,19 +866,102 @@ namespace VividRP.Runtime
             float adaptiveMipBias;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsAdaptiveMipBiasMarker.Auto())
             {
-                adaptiveMipBias = s_AdaptiveMipBiasController.Update(
-                    frameIndex,
-                    new VTAdaptiveMipBiasInputs(
-                        globalResidencyRequestBudget,
-                        pendingUploadCount,
-                        blockedUploadCount,
-                        streamSaturatedRequestCount,
+                VividRenderingDebugSettingsData debugSettings =
+                    VividRenderingDebugDisplaySettings.Data;
+                if (s_AdaptiveMipBiasController.HasUpdatedFrame(frameIndex))
+                {
+                    // Feedback can complete while a later camera is rendering the same frame.
+                    // Carry it forward because the global controller intentionally updates once.
+                    if (hasFreshFeedbackMeasurement)
+                    {
+                        AccumulatePendingAdaptiveFeedbackMeasurement(
+                            feedbackOverflowCount,
+                            fallbackSampleCount,
+                            faultOverflowCount,
+                            residentOverflowCount,
+                            nonResidentFallbackSampleCount,
+                            residentFallbackSampleCount,
+                            weightedResolvedSampleCount,
+                            measuredAcceptedFaultRequestCount,
+                            measuredAcceptedResidentRequestCount,
+                            feedbackMeasurementFrameIndex);
+                    }
+
+                    adaptiveMipBias = s_AdaptiveMipBiasController.CurrentMipBias;
+                }
+                else
+                {
+                    int measuredFeedbackOverflowCount = SaturatingAddFeedbackCount(
                         feedbackOverflowCount,
+                        s_PendingAdaptiveFeedbackOverflowCount);
+                    int measuredFallbackSampleCount = SaturatingAddFeedbackCount(
                         fallbackSampleCount,
-                        physicalPoolStats.FreePageCount,
-                        evictionCount));
-                float adaptiveMipBiasOverride =
-                    VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride;
+                        s_PendingAdaptiveFallbackSampleCount);
+                    int measuredFaultOverflowCount = SaturatingAddFeedbackCount(
+                        faultOverflowCount,
+                        s_PendingAdaptiveFaultOverflowCount);
+                    int measuredResidentOverflowCount = SaturatingAddFeedbackCount(
+                        residentOverflowCount,
+                        s_PendingAdaptiveResidentOverflowCount);
+                    int measuredNonResidentFallbackSampleCount = SaturatingAddFeedbackCount(
+                        nonResidentFallbackSampleCount,
+                        s_PendingAdaptiveNonResidentFallbackSampleCount);
+                    int measuredResidentFallbackSampleCount = SaturatingAddFeedbackCount(
+                        residentFallbackSampleCount,
+                        s_PendingAdaptiveResidentFallbackSampleCount);
+                    int measuredWeightedResolvedSampleCount = SaturatingAddFeedbackCount(
+                        weightedResolvedSampleCount,
+                        s_PendingAdaptiveWeightedResolvedSampleCount);
+                    int adaptiveAcceptedFaultRequestCount = SaturatingAddFeedbackCount(
+                        measuredAcceptedFaultRequestCount,
+                        s_PendingAdaptiveAcceptedFaultRequestCount);
+                    int adaptiveAcceptedResidentRequestCount = SaturatingAddFeedbackCount(
+                        measuredAcceptedResidentRequestCount,
+                        s_PendingAdaptiveAcceptedResidentRequestCount);
+                    int measuredFeedbackFrameIndex = Mathf.Max(
+                        feedbackMeasurementFrameIndex,
+                        s_PendingAdaptiveFeedbackMeasurementFrameIndex);
+                    bool hasMeasuredFeedback = hasFreshFeedbackMeasurement
+                                               || s_HasPendingAdaptiveFeedbackMeasurement;
+                    ResetPendingAdaptiveFeedbackMeasurement();
+
+                    int adaptiveFeedbackOverflowCount =
+                        debugSettings.virtualTextureFeedbackOverflowCountOverride >= 0
+                            ? debugSettings.virtualTextureFeedbackOverflowCountOverride
+                            : measuredFaultOverflowCount;
+                    int adaptiveFallbackSampleCount =
+                        debugSettings.virtualTextureFallbackSampleCountOverride >= 0
+                            ? debugSettings.virtualTextureFallbackSampleCountOverride
+                            : measuredNonResidentFallbackSampleCount;
+                    adaptiveMipBias = s_AdaptiveMipBiasController.Update(
+                        frameIndex,
+                        new VTAdaptiveMipBiasInputs(
+                            globalResidencyRequestBudget,
+                            pendingUploadCount,
+                            blockedUploadCount,
+                            streamSaturatedRequestCount,
+                            adaptiveFeedbackOverflowCount,
+                            adaptiveFallbackSampleCount,
+                            physicalPoolStats.FreePageCount,
+                            evictionCount,
+                            hasFreshFeedbackMeasurement: hasMeasuredFeedback,
+                            measuredFeedbackOverflowCount: measuredFeedbackOverflowCount,
+                            measuredFallbackSampleCount: measuredFallbackSampleCount,
+                            measuredFaultOverflowCount: measuredFaultOverflowCount,
+                            measuredResidentOverflowCount: measuredResidentOverflowCount,
+                            measuredNonResidentFallbackSampleCount: measuredNonResidentFallbackSampleCount,
+                            measuredResidentFallbackSampleCount: measuredResidentFallbackSampleCount,
+                            feedbackMeasurementFrameIndex: measuredFeedbackFrameIndex,
+                            weightedAccessSampleCount: measuredWeightedResolvedSampleCount,
+                            measuredWeightedAccessSampleCount: measuredWeightedResolvedSampleCount,
+                            acceptedFaultRequestCount: adaptiveAcceptedFaultRequestCount,
+                            acceptedResidentRequestCount: adaptiveAcceptedResidentRequestCount,
+                            feedbackOverflowOverrideActive:
+                                debugSettings.virtualTextureFeedbackOverflowCountOverride >= 0,
+                            fallbackSampleOverrideActive:
+                                debugSettings.virtualTextureFallbackSampleCountOverride >= 0));
+                }
+                float adaptiveMipBiasOverride = debugSettings.virtualTextureAdaptiveMipBiasOverride;
                 if (adaptiveMipBiasOverride >= 0f)
                     adaptiveMipBias = adaptiveMipBiasOverride;
             }
@@ -1138,6 +1366,7 @@ namespace VividRP.Runtime
                 cameraType,
                 feedbackOverflowCount,
                 fallbackSampleCount,
+                fallbackSampleCount,
                 requestKeys);
         }
 
@@ -1152,6 +1381,7 @@ namespace VividRP.Runtime
                 camera != null ? camera.cameraType : CameraType.Game,
                 feedbackOverflowCount,
                 fallbackSampleCount,
+                fallbackSampleCount,
                 requestKeys);
         }
 
@@ -1160,6 +1390,7 @@ namespace VividRP.Runtime
             CameraType cameraType,
             int feedbackOverflowCount,
             int fallbackSampleCount,
+            int weightedResolvedSampleCount,
             params ulong[] requestKeys)
         {
             if (requestKeys == null || requestKeys.Length == 0)
@@ -1177,7 +1408,8 @@ namespace VividRP.Runtime
                 requestKeys.Length,
                 Time.frameCount,
                 feedbackOverflowCount,
-                fallbackSampleCount));
+                fallbackSampleCount,
+                weightedResolvedSampleCount: weightedResolvedSampleCount));
         }
 
         internal static bool TryGetPageTableEntryForTesting(
@@ -1477,6 +1709,96 @@ namespace VividRP.Runtime
         {
             return s_AdaptiveMipBiasController.CurrentMipBias;
         }
+
+        internal static int AdaptiveFeedbackOverflowInputCount =>
+            s_AdaptiveMipBiasController.LastFeedbackOverflowCount;
+
+        internal static int AdaptiveFallbackSampleInputCount =>
+            s_AdaptiveMipBiasController.LastFallbackSampleCount;
+
+        internal static int AdaptiveMeasuredFeedbackOverflowCount =>
+            s_AdaptiveMipBiasController.LastMeasuredFeedbackOverflowCount;
+
+        internal static int AdaptiveMeasuredFallbackSampleCount =>
+            s_AdaptiveMipBiasController.LastMeasuredFallbackSampleCount;
+
+        internal static int AdaptiveMeasuredFaultOverflowCount =>
+            s_AdaptiveMipBiasController.LastMeasuredFaultOverflowCount;
+
+        internal static int AdaptiveMeasuredResidentOverflowCount =>
+            s_AdaptiveMipBiasController.LastMeasuredResidentOverflowCount;
+
+        internal static int AdaptiveMeasuredNonResidentFallbackSampleCount =>
+            s_AdaptiveMipBiasController.LastMeasuredNonResidentFallbackSampleCount;
+
+        internal static int AdaptiveMeasuredResidentFallbackSampleCount =>
+            s_AdaptiveMipBiasController.LastMeasuredResidentFallbackSampleCount;
+
+        internal static int AdaptiveMeasuredWeightedResolvedSampleCount =>
+            s_AdaptiveMipBiasController.LastMeasuredWeightedAccessSampleCount;
+
+        internal static int AdaptiveMeasuredAcceptedFaultRequestCount =>
+            s_AdaptiveMipBiasController.LastMeasuredAcceptedFaultRequestCount;
+
+        internal static int AdaptiveMeasuredAcceptedResidentRequestCount =>
+            s_AdaptiveMipBiasController.LastMeasuredAcceptedResidentRequestCount;
+
+        internal static float AdaptiveFeedbackOverflowPressure =>
+            s_AdaptiveMipBiasController.LastFeedbackOverflowPressure;
+
+        internal static float AdaptiveFallbackPressure =>
+            s_AdaptiveMipBiasController.LastFallbackPressure;
+
+        internal static float AdaptiveFallbackCoverage =>
+            s_AdaptiveMipBiasController.LastFallbackCoverage;
+
+        internal static float AdaptiveTotalPressure =>
+            s_AdaptiveMipBiasController.LastPressure;
+
+        internal static float AdaptiveTargetMipBias =>
+            s_AdaptiveMipBiasController.LastTargetMipBias;
+
+        internal static int AdaptiveLastFreshFeedbackFrameIndex =>
+            s_AdaptiveMipBiasController.LastFreshFeedbackFrameIndex;
+
+        internal static int AdaptiveLastFreshFeedbackOverflowCount =>
+            s_AdaptiveMipBiasController.LastFreshMeasuredFeedbackOverflowCount;
+
+        internal static int AdaptiveLastFreshFallbackSampleCount =>
+            s_AdaptiveMipBiasController.LastFreshMeasuredFallbackSampleCount;
+
+        internal static int AdaptiveLastFreshFaultOverflowCount =>
+            s_AdaptiveMipBiasController.LastFreshMeasuredFaultOverflowCount;
+
+        internal static int AdaptiveLastFreshResidentOverflowCount =>
+            s_AdaptiveMipBiasController.LastFreshMeasuredResidentOverflowCount;
+
+        internal static int AdaptiveLastFreshNonResidentFallbackSampleCount =>
+            s_AdaptiveMipBiasController.LastFreshMeasuredNonResidentFallbackSampleCount;
+
+        internal static int AdaptiveLastFreshResidentFallbackSampleCount =>
+            s_AdaptiveMipBiasController.LastFreshMeasuredResidentFallbackSampleCount;
+
+        internal static int AdaptiveLastFreshWeightedResolvedSampleCount =>
+            s_AdaptiveMipBiasController.LastFreshMeasuredWeightedAccessSampleCount;
+
+        internal static float AdaptiveLastFreshFeedbackOverflowPressure =>
+            s_AdaptiveMipBiasController.LastFreshFeedbackOverflowPressure;
+
+        internal static float AdaptiveLastFreshFallbackPressure =>
+            s_AdaptiveMipBiasController.LastFreshFallbackPressure;
+
+        internal static int FeedbackRequestReadbackErrorCount =>
+            s_FeedbackRequestReadbackErrorCount;
+
+        internal static int FeedbackCounterReadbackErrorCount =>
+            s_FeedbackCounterReadbackErrorCount;
+
+        internal static int FeedbackLastReadbackErrorFrameIndex =>
+            s_FeedbackLastReadbackErrorFrameIndex;
+
+        internal static bool AdaptiveFeedbackMeasurementWasFresh =>
+            s_AdaptiveMipBiasController.LastUpdateHadFreshFeedbackMeasurement;
 
         internal static int GetGpuUploadStagingTextureCountForTesting()
         {
@@ -1847,8 +2169,15 @@ namespace VividRP.Runtime
                     keptRequests,
                     keptCount,
                     batch.FrameIndex,
-                    batch.FeedbackOverflowCount,
-                    batch.FallbackSampleCount);
+                    feedbackOverflowCount: batch.FeedbackOverflowCount,
+                    fallbackSampleCount: batch.FallbackSampleCount,
+                    faultOverflowCount: batch.FaultOverflowCount,
+                    residentOverflowCount: batch.ResidentOverflowCount,
+                    residentFallbackSampleCount: batch.ResidentFallbackSampleCount,
+                    weightedResolvedSampleCount: batch.WeightedResolvedSampleCount,
+                    requestsReadbackValid: batch.RequestsReadbackValid,
+                    counterReadbackValid: batch.CounterReadbackValid,
+                    acceptedFaultRequestCount: batch.AcceptedFaultRequestCount);
             }
         }
 

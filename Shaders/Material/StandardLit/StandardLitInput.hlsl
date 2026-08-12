@@ -104,9 +104,9 @@ float4 SampleVirtualTextureBase(float2 uv, float4 positionSS)
     if (requestedMips.upperMip != requestedMips.lowerMip)
         VTWriteAccessFeedback(uv, requestedMips.upperMip, upperResolved, positionSS);
 
-    VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved, positionSS);
+    VTWriteResolvedSampleStatus(uv, requestedMips.lowerMip, lowerResolved, positionSS);
     if (!VTResolvedAddressMatches(lowerResolved, upperResolved))
-        VTWriteFallbackSample(uv, requestedMips.upperMip, upperResolved, positionSS);
+        VTWriteResolvedSampleStatus(uv, requestedMips.upperMip, upperResolved, positionSS);
 
     return VTSampleBaseColor(uv, lowerResolved, upperResolved, requestedMips.blend);
 }

@@ -54,7 +54,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.PhysicalCache, Is.Not.Null);
                 AssertPhysicalAtlas(binding.PhysicalCache, desc, groupLayerCount: 1);
                 Assert.That(binding.HasFeedback, Is.True);
-                Assert.That(binding.FeedbackCounter.count, Is.EqualTo(2));
+                Assert.That(binding.FeedbackCounter.count, Is.EqualTo(7));
                 Assert.That(binding.ShaderParams.SpaceId, Is.EqualTo(spaceId));
                 Assert.That(binding.ShaderParams.PageSize, Is.EqualTo(desc.PageSize));
                 Assert.That(binding.MipOffsets, Is.EqualTo(VirtualTextureSpaceUtility.BuildMipOffsets(
@@ -659,6 +659,156 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride =
                     VividRenderingDebugSettingsData.DefaultVirtualTextureAdaptiveMipBiasOverride;
                 commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_ZeroDebugFeedbackPressureOverrides_SuppressMeasuredPressureWithoutReplacingStats()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "FeedbackPressureOverrides",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
+
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride = 0;
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride = 0;
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    3,
+                    11);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+                Assert.That(stats.FeedbackOverflowCount, Is.EqualTo(3));
+                Assert.That(stats.FallbackSampleCount, Is.EqualTo(11));
+                Assert.That(stats.AdaptiveMipBias, Is.Zero);
+                Assert.That(frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias, Is.Zero);
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackOverflowInputCount, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFallbackSampleInputCount, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFeedbackOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFallbackSampleCount, Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFaultOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredResidentOverflowCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.AdaptiveMeasuredNonResidentFallbackSampleCount,
+                    Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredResidentFallbackSampleCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.AdaptiveMeasuredWeightedResolvedSampleCount,
+                    Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackOverflowPressure, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFallbackPressure, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveTotalPressure, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveTargetMipBias, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackMeasurementWasFresh, Is.True);
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshFeedbackOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshFallbackSampleCount, Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshFaultOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshResidentOverflowCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.AdaptiveLastFreshNonResidentFallbackSampleCount,
+                    Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshResidentFallbackSampleCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.AdaptiveLastFreshWeightedResolvedSampleCount,
+                    Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.FeedbackRequestReadbackErrorCount, Is.Zero);
+                Assert.That(VirtualTextureSystem.FeedbackCounterReadbackErrorCount, Is.Zero);
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureFeedbackOverflowCountOverride;
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureFallbackSampleCountOverride;
+                commandBuffer.Dispose();
+            }
+        }
+
+        [TestCase(1, -1)]
+        [TestCase(-1, int.MaxValue)]
+        public void Update_PositiveDebugFeedbackPressureOverrides_DriveAdaptiveBiasWithoutReplacingStats(
+            int feedbackOverflowCountOverride,
+            int fallbackSampleCountOverride)
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "InjectedFeedbackPressure",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
+
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride =
+                    feedbackOverflowCountOverride;
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride =
+                    fallbackSampleCountOverride;
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+                Assert.That(stats.FeedbackOverflowCount, Is.Zero);
+                Assert.That(stats.FallbackSampleCount, Is.Zero);
+                Assert.That(stats.AdaptiveMipBias, Is.EqualTo(0.5f));
+                Assert.That(
+                    frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias,
+                    Is.EqualTo(0.5f));
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.EqualTo(0.5f));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureFeedbackOverflowCountOverride;
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureFallbackSampleCountOverride;
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_CarriesFeedbackConsumedByLaterCameraUpdateIntoNextControllerFrame()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "DeferredAdaptiveFeedback",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            var cameraGameObject = new GameObject("DeferredAdaptiveFeedbackCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera camera = cameraGameObject.AddComponent<Camera>();
+                ContextContainer firstFrameData = CreateFrameData(camera, frameIndex: 17);
+
+                VirtualTextureSystem.Update(firstFrameData, commandBuffer);
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    feedbackOverflowCount: 3,
+                    fallbackSampleCount: 11);
+                VirtualTextureSystem.Update(firstFrameData, commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackMeasurementWasFresh, Is.False);
+
+                ContextContainer nextFrameData = CreateFrameData(camera, frameIndex: 18);
+                VirtualTextureSystem.Update(nextFrameData, commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.EqualTo(0.5f));
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackMeasurementWasFresh, Is.True);
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFeedbackOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFallbackSampleCount, Is.EqualTo(11));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(cameraGameObject);
             }
         }
 

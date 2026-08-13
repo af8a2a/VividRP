@@ -233,6 +233,82 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_WithWorkspace_ReusesBuffersAndTracksLogicalCounts()
+        {
+            var directional = CreateLight(
+                1,
+                LightType.Directional,
+                Vector3.one);
+            var point = CreateLight(2, LightType.Point, Vector3.one);
+            var workspace =
+                new ReferencedPathTracingLightListBuilder.BuildWorkspace();
+
+            var expected = ReferencedPathTracingLightListBuilder.Build(
+                new[] { directional, point });
+            var reusable = ReferencedPathTracingLightListBuilder.Build(
+                new[] { directional, point },
+                workspace);
+
+            Assert.That(
+                reusable.recordCount,
+                Is.EqualTo(expected.records.Length));
+            Assert.That(
+                reusable.spatialIndex.wordCount,
+                Is.EqualTo(expected.spatialIndex.words.Length));
+            Assert.That(
+                reusable.storageBlockCount,
+                Is.EqualTo(expected.storageBlocks.Length));
+            CollectionAssert.AreEqual(
+                expected.records,
+                reusable.records.Take(reusable.recordCount));
+            CollectionAssert.AreEqual(
+                expected.spatialIndex.words,
+                reusable.spatialIndex.words.Take(
+                    reusable.spatialIndex.wordCount));
+            CollectionAssert.AreEqual(
+                expected.storageBlocks,
+                reusable.storageBlocks.Take(
+                    reusable.storageBlockCount));
+
+            var recordBuffer = reusable.records;
+            var spatialWordBuffer = reusable.spatialIndex.words;
+            var storageBlockBuffer = reusable.storageBlocks;
+            expected = ReferencedPathTracingLightListBuilder.Build(
+                new[] { directional });
+            reusable = ReferencedPathTracingLightListBuilder.Build(
+                new[] { directional },
+                workspace);
+
+            Assert.That(reusable.records, Is.SameAs(recordBuffer));
+            Assert.That(
+                reusable.spatialIndex.words,
+                Is.SameAs(spatialWordBuffer));
+            Assert.That(
+                reusable.storageBlocks,
+                Is.SameAs(storageBlockBuffer));
+            Assert.That(
+                reusable.recordCount,
+                Is.EqualTo(expected.records.Length));
+            Assert.That(
+                reusable.spatialIndex.wordCount,
+                Is.EqualTo(expected.spatialIndex.words.Length));
+            Assert.That(
+                reusable.storageBlockCount,
+                Is.EqualTo(expected.storageBlocks.Length));
+            CollectionAssert.AreEqual(
+                expected.records,
+                reusable.records.Take(reusable.recordCount));
+            CollectionAssert.AreEqual(
+                expected.spatialIndex.words,
+                reusable.spatialIndex.words.Take(
+                    reusable.spatialIndex.wordCount));
+            CollectionAssert.AreEqual(
+                expected.storageBlocks,
+                reusable.storageBlocks.Take(
+                    reusable.storageBlockCount));
+        }
+
+        [Test]
         public void Build_MarksSpatialCellOverflowForCompleteScanFallback()
         {
             var lights = Enumerable.Range(

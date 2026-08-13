@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 13966, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name: CornellBox_PathTracing
+  m_EditorClassIdentifier: UnityEditor.dll::UnityEditor.SceneTemplate.SceneTemplateAsset
+  templateScene: {fileID: 102900000, guid: e3d6ae3b350620144a5f671c39c9de6c, type: 3}
+  templateName: Cornell Box Tier 1 - Opaque + Emission (VividRP)
+  description: 'Tier 1 VividRP path-tracing reference: StandardLit opaque geometry, HDRI importance sampling, emissive mesh lighting, automatic exposure, and no Unity Light components.'
+  preview: {fileID: 0}
+  dependencies:
+  - dependency: {fileID: 2100000, guid: eae5c81e455cfa341a4d177b911e606f, type: 2}
+    instantiationMode: 0
+  - dependency: {fileID: 2100000, guid: d80642e48e3daf1408ae04ec98079be1, type: 2}
+    instantiationMode: 0
+  - dependency: {fileID: 2100000, guid: 5e6514992f13b0b40a0f8885d64a7c67, type: 2}
+    instantiationMode: 0
+  - dependency: {fileID: 2100000, guid: e2c437f5ae7c8b549b3ffd7ab20f76af, type: 2}
+    instantiationMode: 0
+  - dependency: {fileID: 2800000, guid: 5d907025744cf3043b99354fababcd92, type: 2}
+    instantiationMode: 0
+  - dependency: {fileID: 8900000, guid: 6ef3a4217fa94c6ab3c3ebef707ef3f1, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 11400000, guid: c147d38830c012f469909ed759bbecd2, type: 2}
+    instantiationMode: 0
+  templatePipeline: {fileID: 11500000, guid: 3e16798181882d74b87f8b88be8bdbe7, type: 3}
+  badge: {fileID: 0}
+  addToDefaults: 0

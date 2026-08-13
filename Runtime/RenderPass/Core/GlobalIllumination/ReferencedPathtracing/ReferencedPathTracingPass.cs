@@ -330,6 +330,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private RayTracingShader m_RayTracingShader;
         private GraphicsBuffer m_NvidiaShaderExtensionBuffer;
         private GraphicsBuffer m_LocalFogBuffer;
+        private readonly ReferencedPathTracingLightListBuilder.BuildWorkspace
+            m_LightListBuildWorkspace = new();
+        private readonly ReferencedPathTracingLocalFogState.BuildWorkspace
+            m_LocalFogBuildWorkspace = new();
         private LocalKeyword m_ShaderExecutionReorderingKeyword;
         private bool m_ShaderExecutionReorderingKeywordAvailable;
         private LocalKeyword m_IndexedBndKeyword;
@@ -504,7 +508,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalFogState =
                 ReferencedPathTracingLocalFogState.Resolve(
                     camera,
-                    m_GlobalFogState.enabled);
+                    m_GlobalFogState.enabled,
+                    m_LocalFogBuildWorkspace);
             PrepareLocalFogBuffer();
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
             RefreshIndexedBndKeyword();
@@ -1385,7 +1390,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 var maskTexture =
                     maskTextures != null
-                        && index < maskTextures.Length
+                        && index < m_LocalFogState.maskTextureCount
                         ? maskTextures[index]
                         : fallbackMask;
                 cmd.SetRayTracingTextureParam(
@@ -1484,7 +1489,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 VividLocalVolumetricFogEngineData.Stride;
             if (m_LocalFogBuffer == null
                 || !m_LocalFogBuffer.IsValid()
-                || m_LocalFogBuffer.count != requiredCount
+                || m_LocalFogBuffer.count < requiredCount
                 || m_LocalFogBuffer.stride != requiredStride)
             {
                 m_LocalFogBuffer?.Dispose();
@@ -1497,10 +1502,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 };
             }
 
-            m_LocalFogBuffer.SetData(
-                m_LocalFogState.count > 0
-                    ? m_LocalFogState.records
-                    : s_EmptyLocalFogStorage);
+            if (m_LocalFogState.count > 0)
+            {
+                m_LocalFogBuffer.SetData(
+                    m_LocalFogState.records,
+                    0,
+                    0,
+                    m_LocalFogState.count);
+            }
+            else
+            {
+                m_LocalFogBuffer.SetData(s_EmptyLocalFogStorage);
+            }
         }
 
         private void BindAtmosphereContract(CommandBuffer cmd)
@@ -1760,9 +1773,10 @@ namespace VividRP.Runtime.RenderPass.Core
             var lightDatabase = VividLightRenderDatabase.instance;
             lightDatabase.CompleteSceneLightPrepare();
             var buildResult = ReferencedPathTracingLightListBuilder.Build(
-                lightDatabase.sceneLightData);
+                lightDatabase.sceneLightData,
+                m_LightListBuildWorkspace);
             for (var lightIndex = 0;
-                 lightIndex < buildResult.records.Length;
+                 lightIndex < buildResult.recordCount;
                  lightIndex++)
             {
                 var light = buildResult.records[lightIndex];

@@ -412,6 +412,8 @@ namespace VividRP.Runtime.RenderPass.Core
     internal static class ReferencedPathTracingLightSignatureUtility
     {
         private const float MainLightDeltaSinSquaredThreshold = 1e-12f;
+        private static readonly ReferencedPathTracingLightListBuilder
+            .BuildWorkspace s_LightListBuildWorkspace = new();
 
         internal static bool HasFiniteMainLightSolidAngle(
             float angularDiameter)
@@ -463,7 +465,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var lightDatabase = VividLightRenderDatabase.instance;
             lightDatabase.CompleteSceneLightPrepare();
             var buildResult = ReferencedPathTracingLightListBuilder.Build(
-                lightDatabase.sceneLightData);
+                lightDatabase.sceneLightData,
+                s_LightListBuildWorkspace);
             localLightSignature =
                 ((ulong)buildResult.parameters.signatureHigh << 32)
                 | buildResult.parameters.signatureLow;

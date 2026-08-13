@@ -69,6 +69,7 @@ namespace VividRP.Runtime
         private bool m_initialized = false;
         private bool m_createFailed = false;
         private bool m_disposed = false;
+        private readonly DLSSRayReconstructionTexturePtrCache m_texturePtrCache = new();
 
         // Create params tracking for recreation
         private uint m_inputWidth;
@@ -298,6 +299,7 @@ namespace VividRP.Runtime
             if (Extension.EvaluateRayReconstructionFeature(
                     cmd,
                     m_dlssHandle,
+                    m_texturePtrCache,
                     colorInput,
                     colorOutput,
                     depth,
@@ -519,10 +521,12 @@ namespace VividRP.Runtime
 
             m_initialized = false;
             m_createFailed = true;
+            m_texturePtrCache.Clear();
         }
 
         private bool DisposeResources(CommandBuffer cmd)
         {
+            m_texturePtrCache.Clear();
             var ext = Extension;
             if (ext == null)
             {

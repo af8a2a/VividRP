@@ -444,6 +444,7 @@ namespace VividRP.Runtime
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
             ComputeBuffer feedbackResidentHash,
+            int feedbackRequestCapacity,
             int feedbackResidentHashCapacity,
             VirtualTextureFeedbackBufferState feedbackState)
         {
@@ -459,6 +460,7 @@ namespace VividRP.Runtime
                 feedbackRequests,
                 feedbackCounter,
                 feedbackResidentHash,
+                feedbackRequestCapacity,
                 feedbackResidentHashCapacity,
                 feedbackState,
                 m_ShaderParams,

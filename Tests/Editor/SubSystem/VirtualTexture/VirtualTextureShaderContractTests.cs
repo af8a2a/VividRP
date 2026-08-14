@@ -18,6 +18,7 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureShaderIDs._VTFeedbackRequests, Is.EqualTo(Shader.PropertyToID("_VTFeedbackRequests")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackCounter, Is.EqualTo(Shader.PropertyToID("_VTFeedbackCounter")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackResidentHash, Is.EqualTo(Shader.PropertyToID("_VTFeedbackResidentHash")));
+            Assert.That(VirtualTextureShaderIDs._VTFeedbackRequestCapacity, Is.EqualTo(Shader.PropertyToID("_VTFeedbackRequestCapacity")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackResidentHashCapacity, Is.EqualTo(Shader.PropertyToID("_VTFeedbackResidentHashCapacity")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackEnabled, Is.EqualTo(Shader.PropertyToID("_VTFeedbackEnabled")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackViewParams, Is.EqualTo(Shader.PropertyToID("_VTFeedbackViewParams")));
@@ -28,6 +29,14 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureShaderIDs._VTFeedbackFrameIndex, Is.EqualTo(Shader.PropertyToID("_VTFeedbackFrameIndex")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackSampleRate, Is.EqualTo(Shader.PropertyToID("_VTFeedbackSampleRate")));
             Assert.That(VirtualTextureShaderIDs._VTAdaptiveMipBias, Is.EqualTo(Shader.PropertyToID("_VTAdaptiveMipBias")));
+        }
+
+        [Test]
+        public void FeedbackUavSlots_FollowFiveGBufferRenderTargets()
+        {
+            Assert.That(VirtualTextureFeedbackBindingUtility.RequestsUavSlot, Is.EqualTo(5));
+            Assert.That(VirtualTextureFeedbackBindingUtility.CounterUavSlot, Is.EqualTo(6));
+            Assert.That(VirtualTextureFeedbackBindingUtility.HashUavSlot, Is.EqualTo(7));
         }
     }
 }

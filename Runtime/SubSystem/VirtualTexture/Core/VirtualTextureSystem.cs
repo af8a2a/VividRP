@@ -356,10 +356,9 @@ namespace VividRP.Runtime
             s_PageTableScatterUploader.Reset();
 
             foreach (int spaceId in s_PageTableSpaces.Keys)
-            {
                 s_UploadScheduler.CancelUploadsForSpace(spaceId);
-                RemoveFeedbackStateForSpace(spaceId);
-            }
+
+            s_FeedbackCameraSystem.ResetStreamStates();
 
 #if VT_DEBUG
             // A user-requested reset intentionally cancels every pending page. Keep it
@@ -614,7 +613,7 @@ namespace VividRP.Runtime
                     VirtualTextureFeedbackBatch batch = s_CompletedReadbacks[batchIndex];
                     faultCount = SaturatingAddFeedbackCount(
                         faultCount,
-                        Mathf.Max(0, batch.RequestCount - batch.ResidentAccessCount));
+                        batch.AcceptedFaultRequestCount);
                     feedbackOverflowCount = SaturatingAddFeedbackCount(
                         feedbackOverflowCount,
                         batch.FeedbackOverflowCount);
@@ -659,7 +658,7 @@ namespace VividRP.Runtime
                     {
                         activeViewFaultCount += Mathf.Max(
                             0,
-                            batch.RequestCount - batch.ResidentAccessCount);
+                            batch.AcceptedFaultRequestCount);
                         activeViewFeedbackOverflowCount += batch.FeedbackOverflowCount;
                         activeViewFallbackSampleCount += batch.FallbackSampleCount;
                         activeViewLastReadbackFrame = Mathf.Max(activeViewLastReadbackFrame, batch.FrameIndex);
@@ -1045,50 +1044,67 @@ namespace VividRP.Runtime
             int residentPageCount = 0;
             int freePageCount = 0;
             int feedbackCapacity = 0;
+            int feedbackPageCapacity = 0;
             long pageTableByteCount = 0;
             string statusMessage = s_PageTableSpaces.Count == 0 ? "[VividRP] VT has no registered spaces." : string.Empty;
+
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+            {
+                feedbackCapacity = checked(
+                    feedbackCapacity + addressSpace.StackDesc.FeedbackCapacity);
+                feedbackPageCapacity = checked(
+                    feedbackPageCapacity + addressSpace.StackDesc.CachePageCount);
+            }
+
+            ComputeBuffer sharedFeedbackRequests = null;
+            ComputeBuffer sharedFeedbackCounter = null;
+            ComputeBuffer sharedFeedbackHash = null;
+            int sharedFeedbackHashCapacity = 0;
+            VirtualTextureFeedbackBufferState feedbackBufferState = null;
+            if (supportsFeedback && cameraFeedbackState != null && feedbackCapacity > 0)
+            {
+                bool forceImmediateReadback = false;
+                foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                {
+                    if (addressSpace.PendingRequestCount > 0
+                        || s_UploadScheduler.HasInFlightUploadForSpace(addressSpace.SpaceId))
+                    {
+                        forceImmediateReadback = true;
+                        break;
+                    }
+                }
+
+                feedbackBufferState = cameraFeedbackState.GetOrCreateStreamState();
+                if (!feedbackBufferState.TryPrepareForFrame(
+                        cmd,
+                        ResolveCameraName(cameraData, camera),
+                        camera,
+                        activeViewId,
+                        activeViewSignature,
+                        feedbackCapacity,
+                        feedbackPageCapacity,
+                        frameIndex,
+                        forceImmediateReadback,
+                        out sharedFeedbackRequests,
+                        out sharedFeedbackCounter,
+                        out sharedFeedbackHash,
+                        out sharedFeedbackHashCapacity,
+                        out string feedbackStatus)
+                    && string.IsNullOrEmpty(statusMessage)
+                    && !string.IsNullOrEmpty(feedbackStatus))
+                {
+                    statusMessage = feedbackStatus;
+                }
+            }
 
             foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
             {
                 VTPageTableSpace addressSpace = pair.Value;
-                ComputeBuffer feedbackRequests = null;
-                ComputeBuffer feedbackCounter = null;
-                ComputeBuffer feedbackResidentHash = null;
-                int feedbackResidentHashCapacity = 0;
-                VirtualTextureFeedbackBufferState feedbackBufferState = null;
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsMarker.Auto())
                 {
-                    feedbackCapacity += addressSpace.StackDesc.FeedbackCapacity;
                     pageTableByteCount = checked(
                         pageTableByteCount
                         + (long)addressSpace.TotalPageCount * sizeof(uint));
-
-                    if (supportsFeedback && cameraFeedbackState != null)
-                    {
-                        feedbackBufferState = cameraFeedbackState.GetOrCreateSpaceState(
-                            addressSpace.SpaceId);
-                        if (!feedbackBufferState.TryPrepareForFrame(
-                                cmd,
-                                addressSpace.Descriptor.SpaceName,
-                                camera,
-                                activeViewId,
-                                activeViewSignature,
-                                addressSpace.StackDesc.FeedbackCapacity,
-                                addressSpace.StackDesc.CachePageCount,
-                                frameIndex,
-                                addressSpace.PendingRequestCount > 0
-                                || s_UploadScheduler.HasInFlightUploadForSpace(addressSpace.SpaceId),
-                                out feedbackRequests,
-                                out feedbackCounter,
-                                out feedbackResidentHash,
-                                out feedbackResidentHashCapacity,
-                                out string feedbackStatus)
-                            && string.IsNullOrEmpty(statusMessage)
-                            && !string.IsNullOrEmpty(feedbackStatus))
-                        {
-                            statusMessage = feedbackStatus;
-                        }
-                    }
                 }
 
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureBindingsMarker.Auto())
@@ -1104,10 +1120,11 @@ namespace VividRP.Runtime
                     virtualTextureFrameData?.AddBinding(addressSpace.CreateBinding(
                         allocationId,
                         privateSpace,
-                        feedbackRequests,
-                        feedbackCounter,
-                        feedbackResidentHash,
-                        feedbackResidentHashCapacity,
+                        sharedFeedbackRequests,
+                        sharedFeedbackCounter,
+                        sharedFeedbackHash,
+                        feedbackCapacity,
+                        sharedFeedbackHashCapacity,
                         feedbackBufferState));
                 }
             }
@@ -1915,6 +1932,12 @@ namespace VividRP.Runtime
 
         private static VTAllocatedVirtualTexture CreateAllocation(in VTAllocationDesc desc)
         {
+            if ((uint)s_NextSpaceId > ushort.MaxValue)
+            {
+                throw new InvalidOperationException(
+                    "[VividRP] VT feedback keys support at most 65535 address spaces per runtime epoch.");
+            }
+
             int allocationId = s_NextAllocationId++;
             int spaceId = s_NextSpaceId++;
             VTPageTableSpace addressSpace = CreatePageTableSpace(
@@ -2040,9 +2063,12 @@ namespace VividRP.Runtime
 
         private static void RemoveFeedbackStateForSpace(int spaceId)
         {
-            s_FeedbackCameraSystem.RemoveSpaceState(spaceId);
-            RemoveQueuedFeedbackForSpace(s_CompletedReadbacks, spaceId);
-            RemoveQueuedFeedbackForSpace(s_InjectedReadbacks, spaceId);
+            // A camera owns one compact stream shared by every space. Stream-level counters
+            // cannot be split when the topology changes, so conservatively discard the batch.
+            s_FeedbackCameraSystem.ResetStreamStates();
+            s_CompletedReadbacks.Clear();
+            s_InjectedReadbacks.Clear();
+            ResetPendingAdaptiveFeedbackMeasurement();
             RemoveFeedbackMotionStateForSpace(spaceId);
         }
 
@@ -2082,8 +2108,8 @@ namespace VividRP.Runtime
             if (cameraState == null)
                 return;
 
-            foreach (KeyValuePair<int, VirtualTextureFeedbackBufferState> spacePair in cameraState.EnumerateSpaceStates())
-                spacePair.Value.CollectCompletedReadbacks(s_CompletedReadbacks, ref lastReadbackFrame);
+            if (cameraState.TryGetStreamState(out VirtualTextureFeedbackBufferState streamState))
+                streamState.CollectCompletedReadbacks(s_CompletedReadbacks, ref lastReadbackFrame);
         }
 
         private static int CollectPendingUploadCount()
@@ -2217,58 +2243,6 @@ namespace VividRP.Runtime
             if (right == null)
                 return -1;
             return left.SpaceId.CompareTo(right.SpaceId);
-        }
-
-        private static void RemoveQueuedFeedbackForSpace(List<VirtualTextureFeedbackBatch> batches, int spaceId)
-        {
-            for (int batchIndex = batches.Count - 1; batchIndex >= 0; batchIndex--)
-            {
-                VirtualTextureFeedbackBatch batch = batches[batchIndex];
-                int requestCount = Mathf.Min(batch.RequestCount, batch.RequestCapacity);
-                int keptCount = 0;
-                ulong[] keptRequests = null;
-
-                for (int requestIndex = 0; requestIndex < requestCount; requestIndex++)
-                {
-                    ulong key = batch.GetRequest(requestIndex);
-                    VirtualTextureFeedbackProcessor.DecodeKey(
-                        key,
-                        out int requestSpaceId,
-                        out _);
-                    if (requestSpaceId == spaceId)
-                        continue;
-
-                    keptRequests ??= new ulong[requestCount];
-                    keptRequests[keptCount] = key;
-                    keptCount += 1;
-                }
-
-                if (keptCount == requestCount)
-                    continue;
-
-                if (keptCount == 0)
-                {
-                    batches.RemoveAt(batchIndex);
-                    continue;
-                }
-
-                Array.Resize(ref keptRequests, keptCount);
-                batches[batchIndex] = new VirtualTextureFeedbackBatch(
-                    batch.ViewId,
-                    batch.CameraType,
-                    keptRequests,
-                    keptCount,
-                    batch.FrameIndex,
-                    feedbackOverflowCount: batch.FeedbackOverflowCount,
-                    fallbackSampleCount: batch.FallbackSampleCount,
-                    faultOverflowCount: batch.FaultOverflowCount,
-                    residentOverflowCount: batch.ResidentOverflowCount,
-                    residentFallbackSampleCount: batch.ResidentFallbackSampleCount,
-                    weightedResolvedSampleCount: batch.WeightedResolvedSampleCount,
-                    requestsReadbackValid: batch.RequestsReadbackValid,
-                    counterReadbackValid: batch.CounterReadbackValid,
-                    acceptedFaultRequestCount: batch.AcceptedFaultRequestCount);
-            }
         }
 
         private static void ResolvePrefetchBiasBySpace(VirtualTextureViewId viewId)
@@ -2410,7 +2384,23 @@ namespace VividRP.Runtime
             if (camera == null)
                 return false;
 
-            return camera.cameraType == CameraType.Game || camera.cameraType == CameraType.SceneView;
+            bool supportedCamera = camera.cameraType == CameraType.Game
+                                   || camera.cameraType == CameraType.SceneView;
+            return supportedCamera && IsFeedbackPlatformSupported(
+                SystemInfo.graphicsShaderLevel,
+                SystemInfo.supportsAsyncGPUReadback,
+                SystemInfo.supportedRandomWriteTargetCount);
+        }
+
+        internal static bool IsFeedbackPlatformSupported(
+            int graphicsShaderLevel,
+            bool supportsAsyncGpuReadback,
+            int supportedRandomWriteTargetCount)
+        {
+            return graphicsShaderLevel >= 50
+                   && supportsAsyncGpuReadback
+                   && supportedRandomWriteTargetCount
+                   > VirtualTextureFeedbackBindingUtility.HashUavSlot;
         }
     }
 }

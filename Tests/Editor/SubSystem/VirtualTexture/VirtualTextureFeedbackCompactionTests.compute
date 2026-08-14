@@ -1,0 +1,33 @@
+#pragma kernel WriteFaultFeedback
+#pragma kernel WriteResidentFeedback
+#pragma use_dxc
+#pragma target 5.0
+
+#define VIVID_VT_ENABLE_FEEDBACK_RW 1
+#define TEXTURE2D(name) Texture2D name
+#define SAMPLER(name) SamplerState name
+#define SAMPLE_TEXTURE2D_LOD(textureName, samplerName, coord, lod) \
+    textureName.SampleLevel(samplerName, coord, lod)
+
+#include "../../../../Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
+
+StructuredBuffer<uint2> _FeedbackTestKeys;
+uint _FeedbackTestCount;
+
+[numthreads(64, 1, 1)]
+void WriteFaultFeedback(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= _FeedbackTestCount)
+        return;
+
+    VTWriteCompactedFeedback(_FeedbackTestKeys[dispatchThreadId.x], false);
+}
+
+[numthreads(64, 1, 1)]
+void WriteResidentFeedback(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= _FeedbackTestCount)
+        return;
+
+    VTWriteCompactedFeedback(_FeedbackTestKeys[dispatchThreadId.x], true);
+}

@@ -20,7 +20,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma editor_sync_compilation
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
-            #pragma use_dxc 
+            #pragma target 5.0
+            #pragma require randomwrite
+            #pragma use_dxc
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"

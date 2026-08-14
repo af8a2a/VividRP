@@ -54,7 +54,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.PhysicalCache, Is.Not.Null);
                 AssertPhysicalAtlas(binding.PhysicalCache, desc, groupLayerCount: 1);
                 Assert.That(binding.HasFeedback, Is.True);
-                Assert.That(binding.FeedbackCounter.count, Is.EqualTo(7));
+                Assert.That(binding.FeedbackCounter.count, Is.EqualTo(8));
+                Assert.That(binding.FeedbackRequests.stride, Is.EqualTo(VirtualTextureCompactedFeedbackRequest.Stride));
+                Assert.That(binding.FeedbackRequestCapacity, Is.EqualTo(desc.FeedbackCapacity));
                 Assert.That(binding.ShaderParams.SpaceId, Is.EqualTo(spaceId));
                 Assert.That(binding.ShaderParams.PageSize, Is.EqualTo(desc.PageSize));
                 Assert.That(binding.MipOffsets, Is.EqualTo(VirtualTextureSpaceUtility.BuildMipOffsets(
@@ -259,6 +261,111 @@ namespace VividRP.Editor.Tests
             finally
             {
                 commandBuffer.Dispose();
+            }
+        }
+
+        [TestCase(50, true, 8, true)]
+        [TestCase(49, true, 8, false)]
+        [TestCase(50, false, 8, false)]
+        [TestCase(50, true, 7, false)]
+        public void FeedbackPlatformSupport_RequiresSm5ReadbackAndAllEightOutputSlots(
+            int graphicsShaderLevel,
+            bool supportsAsyncGpuReadback,
+            int supportedRandomWriteTargetCount,
+            bool expected)
+        {
+            Assert.That(
+                VirtualTextureSystem.IsFeedbackPlatformSupported(
+                    graphicsShaderLevel,
+                    supportsAsyncGpuReadback,
+                    supportedRandomWriteTargetCount),
+                Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void Update_SharesOneCompactedFeedbackStreamAcrossSpacesForCamera()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "SharedFeedbackA",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32));
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "SharedFeedbackB",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 64));
+            var cameraGameObject = new GameObject("VTSharedFeedbackCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera camera = cameraGameObject.AddComponent<Camera>();
+                ContextContainer frameData = CreateFrameData(camera, frameIndex: 21);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VividVirtualTextureFrameData virtualTextureFrameData =
+                    frameData.Get<VividVirtualTextureFrameData>();
+                Assert.That(virtualTextureFrameData.BindingCount, Is.EqualTo(2));
+                VirtualTextureSpaceBinding first = virtualTextureFrameData.Bindings[0];
+                VirtualTextureSpaceBinding second = virtualTextureFrameData.Bindings[1];
+                Assert.That(second.FeedbackRequests, Is.SameAs(first.FeedbackRequests));
+                Assert.That(second.FeedbackCounter, Is.SameAs(first.FeedbackCounter));
+                Assert.That(second.FeedbackResidentHash, Is.SameAs(first.FeedbackResidentHash));
+                Assert.That(first.FeedbackRequestCapacity, Is.EqualTo(96));
+                Assert.That(second.FeedbackRequestCapacity, Is.EqualTo(96));
+                Assert.That(first.FeedbackRequests.count, Is.EqualTo(96));
+                Assert.That(
+                    first.FeedbackResidentHashCapacity,
+                    Is.EqualTo(VirtualTextureFeedbackBufferState.ResolveFeedbackHashCapacityForTesting(
+                        feedbackCapacity: 96,
+                        pageCapacity: 12)));
+                Assert.That(second.FeedbackResidentHashCapacity, Is.EqualTo(first.FeedbackResidentHashCapacity));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(cameraGameObject);
+            }
+        }
+
+        [Test]
+        public void Update_KeepsCompactedFeedbackStreamsSeparateAcrossCameras()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "PerCameraFeedback",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32));
+            var firstCameraObject = new GameObject("VTFeedbackCameraA");
+            var secondCameraObject = new GameObject("VTFeedbackCameraB");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera firstCamera = firstCameraObject.AddComponent<Camera>();
+                Camera secondCamera = secondCameraObject.AddComponent<Camera>();
+                ContextContainer firstFrameData = CreateFrameData(firstCamera, frameIndex: 31);
+                ContextContainer secondFrameData = CreateFrameData(secondCamera, frameIndex: 31);
+
+                VirtualTextureSystem.Update(firstFrameData, commandBuffer);
+                commandBuffer.Clear();
+                VirtualTextureSystem.Update(secondFrameData, commandBuffer);
+
+                VirtualTextureSpaceBinding firstBinding =
+                    firstFrameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
+                VirtualTextureSpaceBinding secondBinding =
+                    secondFrameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
+                Assert.That(secondBinding.FeedbackRequests, Is.Not.SameAs(firstBinding.FeedbackRequests));
+                Assert.That(secondBinding.FeedbackCounter, Is.Not.SameAs(firstBinding.FeedbackCounter));
+                Assert.That(secondBinding.FeedbackResidentHash, Is.Not.SameAs(firstBinding.FeedbackResidentHash));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
             }
         }
 
@@ -1176,7 +1283,8 @@ namespace VividRP.Editor.Tests
                 AssertPhysicalAtlas(updatedBinding.PhysicalCache, updatedDesc, groupLayerCount: 1);
                 Assert.That(updatedBinding.ShaderParams.PageSize, Is.EqualTo(updatedDesc.PageSize));
                 Assert.That(updatedBinding.ShaderParams.FeedbackCapacity, Is.EqualTo(updatedDesc.FeedbackCapacity));
-                Assert.That(updatedBinding.FeedbackResidentHashCapacity, Is.EqualTo(16));
+                Assert.That(updatedBinding.FeedbackRequestCapacity, Is.EqualTo(64));
+                Assert.That(updatedBinding.FeedbackResidentHashCapacity, Is.EqualTo(128));
                 Assert.That(updatedBinding.HasFeedback, Is.True);
             }
             finally

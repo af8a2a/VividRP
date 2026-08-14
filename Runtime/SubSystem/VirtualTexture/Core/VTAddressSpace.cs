@@ -157,6 +157,21 @@ namespace VividRP.Runtime
         internal bool LastResidencyClassificationUsedParallelJob =>
             m_ResidencyManager.LastClassificationUsedParallelJob;
 
+        internal int PrefetchCandidateCount => m_ResidencyManager.PrefetchCandidateCount;
+
+        internal VTPrefetchCandidate GetPrefetchCandidate(int index)
+        {
+            return m_ResidencyManager.GetPrefetchCandidate(index);
+        }
+
+#if UNITY_INCLUDE_TESTS
+        internal int ResidencyProcessRequestsCallCount =>
+            m_ResidencyManager.ProcessRequestsCallCount;
+
+        internal int PrefetchCandidateProcessCallCount =>
+            m_ResidencyManager.ProcessPrefetchCandidateCallCount;
+#endif
+
         internal int[] MipOffsets => m_MipOffsets;
 
         internal VTResidencyRequestClassification GetExactResidencyClassification(
@@ -181,10 +196,8 @@ namespace VividRP.Runtime
         internal VTResidencyProcessResult ProcessRequests(
             NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
-            Vector2Int prefetchBias,
             int frameIndex,
             int maxNewRequests = int.MaxValue,
-            bool allowNeighborPrefetch = true,
             bool rebuildPageTable = true)
         {
             VTResidencyProcessResult result = m_ResidencyManager.ProcessRequests(
@@ -193,10 +206,8 @@ namespace VividRP.Runtime
                 SpaceId,
                 requests,
                 activeViewId,
-                prefetchBias,
                 frameIndex,
-                maxNewRequests,
-                allowNeighborPrefetch);
+                maxNewRequests);
 
             if (!rebuildPageTable)
                 return result;
@@ -214,6 +225,26 @@ namespace VividRP.Runtime
             }
 
             return result;
+        }
+
+        internal VTResidencyProcessResult ProcessPrefetchCandidate(
+            in VTPrefetchCandidate candidate,
+            VirtualTextureViewId activeViewId,
+            Vector2Int prefetchBias,
+            int frameIndex,
+            int maxResidencyRequests,
+            int maxPrefetchRequests)
+        {
+            return m_ResidencyManager.ProcessPrefetchCandidate(
+                Descriptor,
+                m_MipOffsets,
+                SpaceId,
+                candidate,
+                activeViewId,
+                prefetchBias,
+                frameIndex,
+                maxResidencyRequests,
+                maxPrefetchRequests);
         }
 
         internal void CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)

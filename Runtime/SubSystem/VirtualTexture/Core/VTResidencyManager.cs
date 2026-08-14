@@ -209,6 +209,74 @@ namespace VividRP.Runtime
         internal int AllocatedRequestCount { get; }
     }
 
+    internal readonly struct VTPrefetchCandidate
+    {
+        internal VTPrefetchCandidate(
+            in VirtualTextureAggregatedFeedbackRequest request
+#if VT_DEBUG
+            , in VirtualTexturePageCoord sourceCoord,
+            int mipGap,
+            VTPageRequestKind requestKind
+#endif
+        )
+        {
+            Request = request;
+#if VT_DEBUG
+            SourceCoord = sourceCoord;
+            MipGap = mipGap;
+            RequestKind = requestKind;
+#endif
+        }
+
+        internal VirtualTextureAggregatedFeedbackRequest Request { get; }
+
+#if VT_DEBUG
+        internal VirtualTexturePageCoord SourceCoord { get; }
+
+        internal int MipGap { get; }
+
+        internal VTPageRequestKind RequestKind { get; }
+
+        internal VTPageRequestDebugInfo CreateDebugInfo()
+        {
+            return new VTPageRequestDebugInfo(
+                RequestKind,
+                SourceCoord,
+                Request.PageCoord,
+                MipGap,
+                VTRequestPriorityUtility.ComputeMipWeightedScore(
+                    Request.HitCount,
+                    Request.PageCoord.Mip));
+        }
+
+        internal VTPageRequestDebugInfo CreateNeighborDebugInfo(
+            in VirtualTexturePageCoord neighborCoord)
+        {
+            return new VTPageRequestDebugInfo(
+                VTPageRequestKind.Neighbor,
+                SourceCoord,
+                neighborCoord,
+                MipGap,
+                VTRequestPriorityUtility.ComputeMipWeightedScore(
+                    Request.HitCount,
+                    Request.PageCoord.Mip));
+        }
+#endif
+
+        internal VTPrefetchCandidate WithRequest(
+            in VirtualTextureAggregatedFeedbackRequest request)
+        {
+            return new VTPrefetchCandidate(
+                request
+#if VT_DEBUG
+                , SourceCoord,
+                MipGap,
+                RequestKind
+#endif
+            );
+        }
+    }
+
     internal sealed class VTResidencyManager : IDisposable, IVTPhysicalPoolOwner
     {
         private const int k_InlineClassificationThreshold = 64;
@@ -245,74 +313,6 @@ namespace VividRP.Runtime
             public byte TransitionFrameCount;
         }
 
-        private readonly struct VTRefinementRequest
-        {
-            internal VTRefinementRequest(
-                in VirtualTextureAggregatedFeedbackRequest request
-#if VT_DEBUG
-                , in VirtualTexturePageCoord sourceCoord,
-                int mipGap,
-                VTPageRequestKind requestKind
-#endif
-            )
-            {
-                Request = request;
-#if VT_DEBUG
-                SourceCoord = sourceCoord;
-                MipGap = mipGap;
-                RequestKind = requestKind;
-#endif
-            }
-
-            internal VirtualTextureAggregatedFeedbackRequest Request { get; }
-
-#if VT_DEBUG
-            internal VirtualTexturePageCoord SourceCoord { get; }
-
-            internal int MipGap { get; }
-
-            internal VTPageRequestKind RequestKind { get; }
-
-            internal VTPageRequestDebugInfo CreateDebugInfo()
-            {
-                return new VTPageRequestDebugInfo(
-                    RequestKind,
-                    SourceCoord,
-                    Request.PageCoord,
-                    MipGap,
-                    VTRequestPriorityUtility.ComputeMipWeightedScore(
-                        Request.HitCount,
-                        Request.PageCoord.Mip));
-            }
-
-            internal VTPageRequestDebugInfo CreateNeighborDebugInfo(
-                in VirtualTexturePageCoord neighborCoord)
-            {
-                return new VTPageRequestDebugInfo(
-                    VTPageRequestKind.Neighbor,
-                    SourceCoord,
-                    neighborCoord,
-                    MipGap,
-                    VTRequestPriorityUtility.ComputeMipWeightedScore(
-                        Request.HitCount,
-                        Request.PageCoord.Mip));
-            }
-#endif
-
-            internal VTRefinementRequest WithRequest(
-                in VirtualTextureAggregatedFeedbackRequest request)
-            {
-                return new VTRefinementRequest(
-                    request
-#if VT_DEBUG
-                    , SourceCoord,
-                    MipGap,
-                    RequestKind
-#endif
-                );
-            }
-        }
-
         private readonly int m_SpaceId;
         private readonly VTProducerHandle m_ProducerHandle;
         private readonly string m_ProducerName;
@@ -324,7 +324,7 @@ namespace VividRP.Runtime
         private readonly int[] m_PageMips;
         private readonly VTPhysicalPool m_PhysicalPool;
         private readonly List<VTRequest> m_PendingRequests = new();
-        private readonly List<VTRefinementRequest> m_RefinementRequests = new();
+        private readonly List<VTPrefetchCandidate> m_RefinementRequests = new();
         private readonly Dictionary<VirtualTexturePageCoord, int> m_RefinementRequestIndices = new();
         private readonly int[] m_PendingRequestIndices;
         private readonly List<int> m_DirtyPageTableUpdates = new();
@@ -340,6 +340,10 @@ namespace VividRP.Runtime
         private bool m_LastClassificationUsedParallelJob;
         private bool m_ColdStartActivated;
         private int m_ColdStartFrameIndex = int.MinValue;
+#if UNITY_INCLUDE_TESTS
+        private int m_ProcessRequestsCallCount;
+        private int m_ProcessPrefetchCandidateCallCount;
+#endif
 
         internal VTResidencyManager(
             int spaceId,
@@ -399,6 +403,19 @@ namespace VividRP.Runtime
             : 0;
 
         internal bool LastClassificationUsedParallelJob => m_LastClassificationUsedParallelJob;
+
+        internal int PrefetchCandidateCount => m_RefinementRequests.Count;
+
+        internal VTPrefetchCandidate GetPrefetchCandidate(int index)
+        {
+            return m_RefinementRequests[index];
+        }
+
+#if UNITY_INCLUDE_TESTS
+        internal int ProcessRequestsCallCount => m_ProcessRequestsCallCount;
+
+        internal int ProcessPrefetchCandidateCallCount => m_ProcessPrefetchCandidateCallCount;
+#endif
 
         internal bool IsColdStartActive(int frameIndex)
         {
@@ -646,11 +663,12 @@ namespace VividRP.Runtime
             int spaceId,
             NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
-            Vector2Int prefetchBias,
             int frameIndex,
-            int maxNewRequests,
-            bool allowNeighborPrefetch)
+            int maxNewRequests)
         {
+#if UNITY_INCLUDE_TESTS
+            m_ProcessRequestsCallCount += 1;
+#endif
             int evictionCount = 0;
             int allocatedThisFrame = 0;
             int allocationLimit = Mathf.Min(
@@ -659,7 +677,6 @@ namespace VividRP.Runtime
             int pendingMipGapSum = 0;
             int pendingMipGapMax = 0;
             int pendingMipGapSampleCount = 0;
-            int prefetchRequestCount = 0;
             bool pageTableChanged = false;
 
             if (requests.Length == 0)
@@ -698,7 +715,7 @@ namespace VividRP.Runtime
 
                     for (int requestIndex = 0; requestIndex < m_RefinementRequests.Count; requestIndex++)
                     {
-                        VTRefinementRequest refinementRequest = m_RefinementRequests[requestIndex];
+                        VTPrefetchCandidate refinementRequest = m_RefinementRequests[requestIndex];
 #if VT_DEBUG
                         VTPageRequestDebugInfo requestDebugInfo = refinementRequest.CreateDebugInfo();
 #endif
@@ -721,45 +738,111 @@ namespace VividRP.Runtime
                 }
             }
 
-            if (allowNeighborPrefetch
-                && desc.NeighborPrefetchCount > 0
-                && allocatedThisFrame < allocationLimit)
-            {
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyPrefetchMarker.Auto())
-                {
-                    for (int requestIndex = 0; requestIndex < m_RefinementRequests.Count; requestIndex++)
-                    {
-                        VTRefinementRequest request = m_RefinementRequests[requestIndex];
-                        if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.Request.PageCoord))
-                            continue;
-
-                        prefetchRequestCount += ProcessNeighborPrefetchRequests(
-                            desc,
-                            mipOffsets,
-                            spaceId,
-                            request,
-                            activeViewId,
-                            prefetchBias,
-                            frameIndex,
-                            allocationLimit,
-                            ref allocatedThisFrame,
-                            ref evictionCount,
-                            ref pageTableChanged);
-
-                        if (allocatedThisFrame >= allocationLimit)
-                            break;
-                    }
-                }
-            }
-
             return new VTResidencyProcessResult(
                 evictionCount,
                 pageTableChanged,
                 pendingMipGapSum,
                 pendingMipGapMax,
                 pendingMipGapSampleCount,
-                prefetchRequestCount,
-                allocatedThisFrame);
+                prefetchRequestCount: 0,
+                allocatedRequestCount: allocatedThisFrame);
+        }
+
+        internal VTResidencyProcessResult ProcessPrefetchCandidate(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            int spaceId,
+            in VTPrefetchCandidate candidate,
+            VirtualTextureViewId activeViewId,
+            Vector2Int prefetchBias,
+            int frameIndex,
+            int maxResidencyRequests,
+            int maxPrefetchRequests)
+        {
+#if UNITY_INCLUDE_TESTS
+            m_ProcessPrefetchCandidateCallCount += 1;
+#endif
+            int residencyAllocationLimit = Mathf.Min(
+                desc.MaxResidencyAllocationsPerFrame,
+                Mathf.Max(0, maxResidencyRequests));
+            if (residencyAllocationLimit <= 0
+                || desc.NeighborPrefetchCount <= 0
+                || !VirtualTextureSpaceUtility.IsCoordValid(desc, candidate.Request.PageCoord))
+            {
+                return default;
+            }
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
+                desc,
+                mipOffsets,
+                candidate.Request.PageCoord);
+            VTResidencyRequestClassification classification = ClassifyPageState(
+                m_PageStates[pageIndex]);
+            if (classification == VTResidencyRequestClassification.Invalid
+                || classification == VTResidencyRequestClassification.Resident)
+            {
+                return default;
+            }
+
+            int allocatedThisFrame = 0;
+            int evictionCount = 0;
+            bool pageTableChanged = false;
+#if VT_DEBUG
+            VTPageRequestDebugInfo requestDebugInfo = candidate.CreateDebugInfo();
+#endif
+            // Demand may have returned unused allocation budget after a shared attach.
+            // Reprocess the scalar seed so Missing can consume that budget and Pending
+            // retains its priority-promotion semantics, without rebuilding the batch.
+            TryProcessClassifiedRequest(
+                desc,
+                spaceId,
+                candidate.Request,
+                activeViewId,
+                frameIndex,
+                false,
+                false,
+#if VT_DEBUG
+                requestDebugInfo,
+#endif
+                residencyAllocationLimit,
+                pageIndex,
+                classification,
+                ref allocatedThisFrame,
+                ref evictionCount,
+                ref pageTableChanged);
+
+            int prefetchRequestCount = 0;
+            int remainingResidencyAllocationBudget = Mathf.Max(
+                0,
+                residencyAllocationLimit - allocatedThisFrame);
+            int neighborAllocationBudget = Mathf.Min(
+                remainingResidencyAllocationBudget,
+                Mathf.Max(0, maxPrefetchRequests));
+            if (neighborAllocationBudget > 0)
+            {
+                int neighborAllocationLimit = allocatedThisFrame + neighborAllocationBudget;
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyPrefetchNeighborsMarker.Auto())
+                {
+                    prefetchRequestCount = ProcessNeighborPrefetchRequests(
+                        desc,
+                        mipOffsets,
+                        spaceId,
+                        candidate,
+                        activeViewId,
+                        prefetchBias,
+                        frameIndex,
+                        neighborAllocationLimit,
+                        ref allocatedThisFrame,
+                        ref evictionCount,
+                        ref pageTableChanged);
+                }
+            }
+
+            return new VTResidencyProcessResult(
+                evictionCount,
+                pageTableChanged,
+                prefetchRequestCount: prefetchRequestCount,
+                allocatedRequestCount: allocatedThisFrame);
         }
 
         private void BuildRefinementRequests(
@@ -804,7 +887,7 @@ namespace VividRP.Runtime
 #endif
                 }
 
-                AddOrMergeRefinementRequest(new VTRefinementRequest(
+                AddOrMergeRefinementRequest(new VTPrefetchCandidate(
                     request
 #if VT_DEBUG
                     , sourceCoord,
@@ -819,7 +902,7 @@ namespace VividRP.Runtime
         }
 
         private void AddOrMergeRefinementRequest(
-            in VTRefinementRequest refinementRequest)
+            in VTPrefetchCandidate refinementRequest)
         {
             VirtualTextureAggregatedFeedbackRequest request = refinementRequest.Request;
             if (!m_RefinementRequestIndices.TryGetValue(request.PageCoord, out int existingIndex))
@@ -829,7 +912,7 @@ namespace VividRP.Runtime
                 return;
             }
 
-            VTRefinementRequest existingRefinementRequest = m_RefinementRequests[existingIndex];
+            VTPrefetchCandidate existingRefinementRequest = m_RefinementRequests[existingIndex];
             VirtualTextureAggregatedFeedbackRequest existing = existingRefinementRequest.Request;
             int combinedHitCount = existing.HitCount > int.MaxValue - request.HitCount
                 ? int.MaxValue
@@ -854,7 +937,7 @@ namespace VividRP.Runtime
             m_RefinementRequests[existingIndex] = existingRefinementRequest.WithRequest(mergedRequest);
         }
 
-        private sealed class RefinementRequestComparer : IComparer<VTRefinementRequest>
+        private sealed class RefinementRequestComparer : IComparer<VTPrefetchCandidate>
         {
             internal static readonly RefinementRequestComparer Instance = new();
 
@@ -863,8 +946,8 @@ namespace VividRP.Runtime
             }
 
             public int Compare(
-                VTRefinementRequest left,
-                VTRefinementRequest right)
+                VTPrefetchCandidate left,
+                VTPrefetchCandidate right)
             {
                 return new VTFeedbackPriorityComparer().Compare(left.Request, right.Request);
             }
@@ -1375,6 +1458,7 @@ namespace VividRP.Runtime
                 activeViewId,
                 frameIndex,
                 isPrefetch,
+                !isPrefetch,
 #if VT_DEBUG
                 requestDebugInfo,
 #endif
@@ -1393,6 +1477,7 @@ namespace VividRP.Runtime
             VirtualTextureViewId activeViewId,
             int frameIndex,
             bool isPrefetch,
+            bool allowEviction,
 #if VT_DEBUG
             in VTPageRequestDebugInfo requestDebugInfo,
 #endif
@@ -1483,10 +1568,9 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            // Prefetch is speculative and must never displace a visible resident page.
-            // Once the shared pool is full, demand requests alone decide which LRU page
-            // is worth replacing.
-            if (isPrefetch && m_PhysicalPool.FreePageCount <= 0)
+            // Speculative work may attach an existing shared page, but it must never
+            // displace a visible resident page once the pool is full.
+            if (!allowEviction && m_PhysicalPool.FreePageCount <= 0)
                 return false;
 
             VirtualTextureViewId evictionViewId = isPrefetch
@@ -1556,7 +1640,7 @@ namespace VividRP.Runtime
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
             int spaceId,
-            in VTRefinementRequest refinementRequest,
+            in VTPrefetchCandidate refinementRequest,
             VirtualTextureViewId activeViewId,
             Vector2Int prefetchBias,
             int frameIndex,
@@ -1642,7 +1726,7 @@ namespace VividRP.Runtime
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
             int spaceId,
-            in VTRefinementRequest refinementRequest,
+            in VTPrefetchCandidate refinementRequest,
             VirtualTextureViewId activeViewId,
             int frameIndex,
             int allocationLimit,

@@ -1045,9 +1045,21 @@ namespace VividRP.Editor.Tests
             VirtualTextureSpaceDesc desc = CreateDesc("DebugPoolA");
             VirtualTextureSystem.RegisterAddressSpace(desc, new NamedProducer("DebugProducerA"));
             VirtualTextureSystem.RegisterAddressSpace(CreateDesc("DebugPoolB"), new NamedProducer("DebugProducerB"));
+            int freePageCollectionCountBeforeUpdate =
+                VirtualTextureSystem.GetPhysicalPoolFreePageCollectionCountForTesting();
+            int fullStatsCollectionCountBeforeUpdate =
+                VirtualTextureSystem.GetPhysicalPoolStatsCollectionCountForTesting();
 
             UpdateOnce();
 
+            Assert.That(
+                VirtualTextureSystem.GetPhysicalPoolFreePageCollectionCountForTesting()
+                - freePageCollectionCountBeforeUpdate,
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPhysicalPoolStatsCollectionCountForTesting()
+                - fullStatsCollectionCountBeforeUpdate,
+                Is.EqualTo(1));
             VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
             Assert.That(stats.ActiveSpaceCount, Is.EqualTo(2));
             Assert.That(stats.PhysicalPoolCount, Is.EqualTo(1));

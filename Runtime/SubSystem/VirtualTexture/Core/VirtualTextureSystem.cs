@@ -47,6 +47,10 @@ namespace VividRP.Runtime
         private static int s_RemainingDemandEvictionBudget;
         private static int s_LastResidencyCandidateCount;
         private static int s_LastPrefetchProcessRequestsCallCount;
+#if UNITY_INCLUDE_TESTS
+        private static int s_PhysicalPoolFreePageCollectionCount;
+        private static int s_PhysicalPoolStatsCollectionCount;
+#endif
 
         private static int s_NextSpaceId = 1;
         private static int s_NextAllocationId = 1;
@@ -150,7 +154,7 @@ namespace VividRP.Runtime
             }
         }
 
-        private static bool RequiresResidencyProcessing(
+        private static bool IsResidencyCandidateEligible(
             VTResidencyRequestClassification classification)
         {
             // Pending seeds still drive priority promotion and neighbor prefetch.
@@ -253,6 +257,10 @@ namespace VividRP.Runtime
             s_AllocatedPrefetchRequestCount = 0;
             s_LastResidencyCandidateCount = 0;
             s_LastPrefetchProcessRequestsCallCount = 0;
+#if UNITY_INCLUDE_TESTS
+            s_PhysicalPoolFreePageCollectionCount = 0;
+            s_PhysicalPoolStatsCollectionCount = 0;
+#endif
             s_RuntimeStateResetRequested = false;
             s_FeedbackRequestReadbackErrorCount = 0;
             s_FeedbackCounterReadbackErrorCount = 0;
@@ -451,6 +459,10 @@ namespace VividRP.Runtime
             s_AllocatedPrefetchRequestCount = 0;
             s_LastResidencyCandidateCount = 0;
             s_LastPrefetchProcessRequestsCallCount = 0;
+#if UNITY_INCLUDE_TESTS
+            s_PhysicalPoolFreePageCollectionCount = 0;
+            s_PhysicalPoolStatsCollectionCount = 0;
+#endif
             s_AdaptiveMipBiasController.Reset();
             s_FeedbackRequestReadbackErrorCount = 0;
             s_FeedbackCounterReadbackErrorCount = 0;
@@ -795,7 +807,7 @@ namespace VividRP.Runtime
             {
                 int freePhysicalPageCountBeforeResidency;
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyBudgetPoolStatsMarker.Auto())
-                    freePhysicalPageCountBeforeResidency = CollectPhysicalPoolStats().FreePageCount;
+                    freePhysicalPageCountBeforeResidency = CollectFreePhysicalPageCount();
                 if (s_DemandEvictionBudgetFrameIndex != frameIndex)
                 {
                     s_DemandEvictionBudgetFrameIndex = frameIndex;
@@ -821,7 +833,7 @@ namespace VividRP.Runtime
                     {
                         VirtualTextureAggregatedFeedbackRequest request = aggregatedRequests[requestIndex];
                         if (!s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace)
-                            || !RequiresResidencyProcessing(
+                            || !IsResidencyCandidateEligible(
                                 addressSpace.GetExactResidencyClassification(request.PageCoord)))
                         {
                             continue;
@@ -855,6 +867,8 @@ namespace VividRP.Runtime
                             0,
                             addressSpace.Descriptor.MaxResidencyAllocationsPerFrame
                             - allocatedSpaceRequestCount);
+                        // Pending stays eligible for Prefetch but does not reserve another
+                        // demand allocation from the physical-page budget.
                         if (assignedSpaceBudget >= remainingSpaceRequestBudget
                             || !addressSpace.RequiresNewPhysicalPage(request.PageCoord))
                         {
@@ -940,7 +954,7 @@ namespace VividRP.Runtime
                     // the candidate snapshot was built.
                     if (!s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace)
                         || addressSpace.Descriptor.NeighborPrefetchCount <= 0
-                        || !RequiresResidencyProcessing(
+                        || !IsResidencyCandidateEligible(
                             addressSpace.GetExactResidencyClassification(request.PageCoord)))
                     {
                         continue;
@@ -1826,6 +1840,18 @@ namespace VividRP.Runtime
             return CollectPhysicalPoolStats();
         }
 
+#if UNITY_INCLUDE_TESTS
+        internal static int GetPhysicalPoolFreePageCollectionCountForTesting()
+        {
+            return s_PhysicalPoolFreePageCollectionCount;
+        }
+
+        internal static int GetPhysicalPoolStatsCollectionCountForTesting()
+        {
+            return s_PhysicalPoolStatsCollectionCount;
+        }
+#endif
+
         internal static bool TryGetPhysicalCacheForTesting(int spaceId, out Texture2D physicalCache)
         {
             return TryGetPhysicalCacheForTesting(spaceId, 0, out physicalCache);
@@ -2115,8 +2141,29 @@ namespace VividRP.Runtime
             pool.Dispose();
         }
 
+        private static int CollectFreePhysicalPageCount()
+        {
+#if UNITY_INCLUDE_TESTS
+            s_PhysicalPoolFreePageCollectionCount += 1;
+#endif
+            int freePageCount = 0;
+            foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
+            {
+                int poolFreePageCount = pool.FreePageCount;
+                if (freePageCount > int.MaxValue - poolFreePageCount)
+                    return int.MaxValue;
+
+                freePageCount += poolFreePageCount;
+            }
+
+            return freePageCount;
+        }
+
         private static VTPhysicalPoolStats CollectPhysicalPoolStats()
         {
+#if UNITY_INCLUDE_TESTS
+            s_PhysicalPoolStatsCollectionCount += 1;
+#endif
             int residentPageCount = 0;
             int freePageCount = 0;
             int lockedPageCount = 0;

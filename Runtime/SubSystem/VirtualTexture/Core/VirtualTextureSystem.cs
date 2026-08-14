@@ -50,6 +50,7 @@ namespace VividRP.Runtime
 #if UNITY_INCLUDE_TESTS
         private static int s_PhysicalPoolFreePageCollectionCount;
         private static int s_PhysicalPoolStatsCollectionCount;
+        private static int s_UploadSpaceSortCount;
 #endif
 
         private static int s_NextSpaceId = 1;
@@ -260,6 +261,7 @@ namespace VividRP.Runtime
 #if UNITY_INCLUDE_TESTS
             s_PhysicalPoolFreePageCollectionCount = 0;
             s_PhysicalPoolStatsCollectionCount = 0;
+            s_UploadSpaceSortCount = 0;
 #endif
             s_RuntimeStateResetRequested = false;
             s_FeedbackRequestReadbackErrorCount = 0;
@@ -462,6 +464,7 @@ namespace VividRP.Runtime
 #if UNITY_INCLUDE_TESTS
             s_PhysicalPoolFreePageCollectionCount = 0;
             s_PhysicalPoolStatsCollectionCount = 0;
+            s_UploadSpaceSortCount = 0;
 #endif
             s_AdaptiveMipBiasController.Reset();
             s_FeedbackRequestReadbackErrorCount = 0;
@@ -1850,6 +1853,11 @@ namespace VividRP.Runtime
         {
             return s_PhysicalPoolStatsCollectionCount;
         }
+
+        internal static int GetUploadSpaceSortCountForTesting()
+        {
+            return s_UploadSpaceSortCount;
+        }
 #endif
 
         internal static bool TryGetPhysicalCacheForTesting(int spaceId, out Texture2D physicalCache)
@@ -2394,11 +2402,28 @@ namespace VividRP.Runtime
 
         private static void CollectAndSchedulePendingUploadsCore(int frameIndex, CommandBuffer cmd)
         {
+            bool hasPendingUploadWork = false;
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+            {
+                addressSpace.RetireProducerRequestsIfChanged();
+                hasPendingUploadWork |= addressSpace.HasPendingUploadWork;
+            }
+
+            if (!hasPendingUploadWork)
+            {
+                s_PendingUploadCandidates.Clear();
+                s_UploadSpaceOrder.Clear();
+                return;
+            }
+
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingBuildSpaceOrderMarker.Auto())
             {
                 s_UploadSpaceOrder.Clear();
                 foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
                     s_UploadSpaceOrder.Add(addressSpace);
+#if UNITY_INCLUDE_TESTS
+                s_UploadSpaceSortCount += 1;
+#endif
                 s_UploadSpaceOrder.Sort(CompareAddressSpacesById);
             }
 

@@ -51,9 +51,13 @@ namespace VividRP.Runtime
         private readonly List<VTRequest> m_ResidentRefreshRequests = new();
         private readonly List<VTRequest> m_LiveProducerRequests = new();
         private uint m_CachedPendingRequestRevision;
+        private uint m_ResidentRefreshRequestRevision;
+        private uint m_LastRetiredPendingRequestRevision;
+        private uint m_LastRetiredResidentRefreshRequestRevision;
         private int m_PendingOrderCacheBuildCount;
         private int m_PendingOrderCacheHitCount;
         private bool m_HasPendingOrderCache;
+        private bool m_HasRetiredProducerRequests;
         private Texture2DArray m_ResidentPageStagingTexture;
         private readonly Texture2D[] m_ResidentPageConvertedStagingTextures =
             new Texture2D[VTStackDesc.MaxLayerCount];
@@ -118,6 +122,9 @@ namespace VividRP.Runtime
         internal int PendingRequestCount => m_ResidencyManager.PendingRequestCount;
 
         internal uint PendingRequestRevision => m_ResidencyManager.PendingRequestRevision;
+
+        internal bool HasPendingUploadWork =>
+            PendingRequestCount > 0 || m_ResidentRefreshRequests.Count > 0;
 
         internal int PendingOrderCacheBuildCount => m_PendingOrderCacheBuildCount;
 
@@ -425,7 +432,11 @@ namespace VividRP.Runtime
             m_PendingUploadSortEntries.Clear();
             m_SortedPendingRequests.Clear();
             m_EligiblePendingRequests.Clear();
-            m_ResidentRefreshRequests.Clear();
+            if (m_ResidentRefreshRequests.Count > 0)
+            {
+                m_ResidentRefreshRequests.Clear();
+                IncrementResidentRefreshRequestRevision();
+            }
             m_LiveProducerRequests.Clear();
             m_CachedPendingRequestRevision = 0;
             m_HasPendingOrderCache = false;
@@ -445,6 +456,9 @@ namespace VividRP.Runtime
             }
 
             m_ResidencyManager.ResetPageTransitionsForRuntimeReset();
+            m_LastRetiredPendingRequestRevision = m_ResidencyManager.PendingRequestRevision;
+            m_LastRetiredResidentRefreshRequestRevision = m_ResidentRefreshRequestRevision;
+            m_HasRetiredProducerRequests = m_PageProducer is IVTPageRequestRetirement;
 
             return flushedCount;
         }
@@ -538,7 +552,10 @@ namespace VividRP.Runtime
                     // Keep the locked fallback resident, then overwrite the same physical page once its
                     // encoded payload becomes available through the normal global upload scheduler.
                     if (usedFallback && m_PageProducer is VividVirtualTextureAssetProducer)
+                    {
                         m_ResidentRefreshRequests.Add(request);
+                        IncrementResidentRefreshRequestRevision();
+                    }
                 }
             }
         }
@@ -741,26 +758,14 @@ namespace VividRP.Runtime
 
             IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
             int pendingRequestCount = pendingRequests?.Count ?? 0;
+            RetireProducerRequestsIfChanged();
             if (pendingRequestCount == 0 && m_ResidentRefreshRequests.Count == 0)
-            {
-                RetireProducerRequests(Array.Empty<VTRequest>());
                 return;
-            }
 
             if (uploadScheduler == null || m_PageProducer == null || !uploadScheduler.IsEnabled)
             {
                 uploadScheduler?.AddSkippedUploadCount(pendingRequestCount + m_ResidentRefreshRequests.Count);
                 return;
-            }
-
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRetireMarker.Auto())
-            {
-                m_LiveProducerRequests.Clear();
-                for (int refreshIndex = 0; refreshIndex < m_ResidentRefreshRequests.Count; refreshIndex++)
-                    m_LiveProducerRequests.Add(m_ResidentRefreshRequests[refreshIndex]);
-                for (int requestIndex = 0; requestIndex < pendingRequestCount; requestIndex++)
-                    m_LiveProducerRequests.Add(pendingRequests[requestIndex]);
-                RetireProducerRequests(m_LiveProducerRequests);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingGatherTasksMarker.Auto())
@@ -987,6 +992,37 @@ namespace VividRP.Runtime
                 retirement.RetireRequests(liveRequests);
         }
 
+        internal void RetireProducerRequestsIfChanged()
+        {
+            if (m_PageProducer is not IVTPageRequestRetirement retirement)
+                return;
+
+            uint pendingRequestRevision = m_ResidencyManager.PendingRequestRevision;
+            if (m_HasRetiredProducerRequests
+                && m_LastRetiredPendingRequestRevision == pendingRequestRevision
+                && m_LastRetiredResidentRefreshRequestRevision == m_ResidentRefreshRequestRevision)
+            {
+                return;
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRetireMarker.Auto())
+            {
+                m_LiveProducerRequests.Clear();
+                for (int refreshIndex = 0; refreshIndex < m_ResidentRefreshRequests.Count; refreshIndex++)
+                    m_LiveProducerRequests.Add(m_ResidentRefreshRequests[refreshIndex]);
+
+                IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
+                for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+                    m_LiveProducerRequests.Add(pendingRequests[requestIndex]);
+
+                retirement.RetireRequests(m_LiveProducerRequests);
+            }
+
+            m_LastRetiredPendingRequestRevision = pendingRequestRevision;
+            m_LastRetiredResidentRefreshRequestRevision = m_ResidentRefreshRequestRevision;
+            m_HasRetiredProducerRequests = true;
+        }
+
         private IReadOnlyList<VTRequest> GetOrderedPendingRequests(IReadOnlyList<VTRequest> pendingRequests)
         {
             if (pendingRequests == null || pendingRequests.Count == 0)
@@ -1120,10 +1156,19 @@ namespace VividRP.Runtime
                 }
 
                 m_ResidentRefreshRequests.RemoveAt(requestIndex);
+                IncrementResidentRefreshRequestRevision();
                 return true;
             }
 
             return false;
+        }
+
+        private void IncrementResidentRefreshRequestRevision()
+        {
+            unchecked
+            {
+                m_ResidentRefreshRequestRevision += 1u;
+            }
         }
 
         bool IVTUploadRequestCommitter.TryCommitUpload(in VTRequest request, int frameIndex)

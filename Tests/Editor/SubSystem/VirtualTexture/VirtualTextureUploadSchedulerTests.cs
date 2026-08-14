@@ -27,7 +27,10 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        private sealed class StatusPageProducer : IVTPageProducer, IVTPrioritizedPageProducer
+        private sealed class StatusPageProducer :
+            IVTPageProducer,
+            IVTPrioritizedPageProducer,
+            IVTPageRequestRetirement
         {
             internal StatusPageProducer(
                 in VirtualTextureSpaceDesc desc,
@@ -65,6 +68,10 @@ namespace VividRP.Editor.Tests
             internal int GatherTaskCount { get; private set; }
 
             internal int CancelCount { get; private set; }
+
+            internal int RetirementCount { get; private set; }
+
+            internal int LastRetiredRequestCount { get; private set; } = -1;
 
             internal List<VirtualTexturePageCoord> RequestedCoords { get; } = new();
 
@@ -106,12 +113,20 @@ namespace VividRP.Editor.Tests
                 CancelCount += 1;
             }
 
+            public void RetireRequests(IReadOnlyList<VTRequest> liveRequests)
+            {
+                RetirementCount += 1;
+                LastRetiredRequestCount = liveRequests?.Count ?? 0;
+            }
+
             internal void ResetCounters()
             {
                 RequestCount = 0;
                 ProduceCount = 0;
                 GatherTaskCount = 0;
                 CancelCount = 0;
+                RetirementCount = 0;
+                LastRetiredRequestCount = -1;
                 RequestedCoords.Clear();
                 RequestedPriorityKeys.Clear();
             }
@@ -450,6 +465,85 @@ namespace VividRP.Editor.Tests
 
             Assert.That(VirtualTextureSystem.GetPendingRequestRevisionForTesting(spaceId), Is.GreaterThan(initialRevision));
             Assert.That(VirtualTextureSystem.GetPendingOrderCacheBuildCountForTesting(spaceId), Is.EqualTo(initialBuildCount + 1));
+        }
+
+        [Test]
+        public void UploadSpaceOrder_SkipsSortUntilPendingWorkExists()
+        {
+            VirtualTextureSpaceDesc firstDesc = CreateDesc("IdleUploadSpaceA");
+            VirtualTextureSpaceDesc secondDesc = CreateDesc("IdleUploadSpaceB");
+            var firstProducer = new StatusPageProducer(firstDesc, VTPageRequestStatus.Pending);
+            var secondProducer = new StatusPageProducer(secondDesc, VTPageRequestStatus.Pending);
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(firstDesc, firstProducer);
+            VirtualTextureSystem.RegisterAddressSpace(secondDesc, secondProducer);
+            int initialSortCount = VirtualTextureSystem.GetUploadSpaceSortCountForTesting();
+
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetUploadSpaceSortCountForTesting(), Is.EqualTo(initialSortCount));
+
+            IssueFeedback(firstSpaceId, new VirtualTexturePageCoord(0, 0, 0));
+
+            Assert.That(VirtualTextureSystem.GetUploadSpaceSortCountForTesting(), Is.EqualTo(initialSortCount + 1));
+        }
+
+        [Test]
+        public void ProducerRetirement_RunsOnlyWhenLiveRequestRevisionChanges()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("RevisionGatedRetirement");
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Pending);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            var coord = new VirtualTexturePageCoord(0, 0, 0);
+            producer.ResetCounters();
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(1));
+            Assert.That(producer.LastRetiredRequestCount, Is.Zero);
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(1));
+
+            IssueFeedback(spaceId, coord);
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(2));
+            Assert.That(producer.LastRetiredRequestCount, Is.EqualTo(1));
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(2));
+
+            IssueFeedback(spaceId, coord, coord);
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(3));
+            Assert.That(producer.LastRetiredRequestCount, Is.EqualTo(1));
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(3));
+
+            producer.Status = VTPageRequestStatus.Invalid;
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.Zero);
+            Assert.That(producer.RetirementCount, Is.EqualTo(3));
+            int sortCountAfterPendingRemoval = VirtualTextureSystem.GetUploadSpaceSortCountForTesting();
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(4));
+            Assert.That(producer.LastRetiredRequestCount, Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetUploadSpaceSortCountForTesting(),
+                Is.EqualTo(sortCountAfterPendingRemoval));
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(4));
+            Assert.That(
+                VirtualTextureSystem.GetUploadSpaceSortCountForTesting(),
+                Is.EqualTo(sortCountAfterPendingRemoval));
         }
 
         [Test]

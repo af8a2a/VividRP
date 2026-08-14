@@ -1039,6 +1039,11 @@ namespace VividRP.Runtime
                 pageState.TransitionPhase);
         }
 
+        internal VTResidencyRequestClassification GetPageClassification(int pageIndex)
+        {
+            return ClassifyPageState(m_PageStates[pageIndex]);
+        }
+
         internal bool AdvancePageTransitions(
             int frameIndex,
             int maxPhaseAdvancesThisCall = int.MaxValue,

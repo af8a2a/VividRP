@@ -152,17 +152,23 @@ namespace VividRP.Runtime
 
         internal int[] MipOffsets => m_MipOffsets;
 
-        internal bool RequiresNewPhysicalPage(in VirtualTexturePageCoord coord)
+        internal VTResidencyRequestClassification GetExactResidencyClassification(
+            in VirtualTexturePageCoord coord)
         {
             if (!VirtualTextureSpaceUtility.IsCoordValid(Descriptor, coord))
-                return false;
+                return VTResidencyRequestClassification.Invalid;
 
             int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
                 Descriptor,
                 m_MipOffsets,
                 coord);
-            VTPageResidencyState pageState = m_ResidencyManager.GetPageState(pageIndex);
-            return !pageState.Resident && !pageState.PendingUpload;
+            return m_ResidencyManager.GetPageClassification(pageIndex);
+        }
+
+        internal bool RequiresNewPhysicalPage(in VirtualTexturePageCoord coord)
+        {
+            return GetExactResidencyClassification(coord)
+                   == VTResidencyRequestClassification.Missing;
         }
 
         internal VTResidencyProcessResult ProcessRequests(

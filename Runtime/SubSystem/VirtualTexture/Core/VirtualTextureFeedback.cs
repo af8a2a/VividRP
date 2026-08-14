@@ -997,7 +997,16 @@ namespace VividRP.Runtime
 
             BufferPairState writePair = m_BufferPairs[writeBufferIndex];
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsResetCounterMarker.Auto())
+            {
                 cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);
+                if (RequiresFeedbackHashClear(writePair.ScheduledFrameIndex, frameIndex))
+                {
+                    // The frame index is the hash epoch. A camera rendered more than one
+                    // ring-length in the same pipeline frame may reacquire this pair, so its
+                    // old epoch must not point at the freshly reset compact output.
+                    cmd.SetBufferData(writePair.ResidentHashBuffer, m_ZeroFeedbackHashData);
+                }
+            }
             writePair.WasWritten = true;
             writePair.LastViewId = viewId;
             writePair.LastCameraType = camera.cameraType;
@@ -1297,6 +1306,13 @@ namespace VividRP.Runtime
             return counterReadbackValid
                 ? Mathf.Max(0, completedAcceptedFaultRequestCount)
                 : 0;
+        }
+
+        internal static bool RequiresFeedbackHashClear(
+            int previousFrameIndex,
+            int frameIndex)
+        {
+            return frameIndex >= 0 && previousFrameIndex == frameIndex;
         }
 
         private static int ResolveFeedbackHashCapacity(int feedbackCapacity, int pageCapacity)

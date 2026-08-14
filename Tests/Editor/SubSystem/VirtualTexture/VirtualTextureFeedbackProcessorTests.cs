@@ -145,6 +145,21 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(expectedAcceptedFaultRequestCount));
         }
 
+        [TestCase(-1, 0, false)]
+        [TestCase(4, 5, false)]
+        [TestCase(5, 5, true)]
+        public void FeedbackHashClear_IsRequiredOnlyWhenPairReusesSameFrameEpoch(
+            int previousFrameIndex,
+            int frameIndex,
+            bool expected)
+        {
+            Assert.That(
+                VirtualTextureFeedbackBufferState.RequiresFeedbackHashClear(
+                    previousFrameIndex,
+                    frameIndex),
+                Is.EqualTo(expected));
+        }
+
         [Test]
         public void NativeAggregator_PreservesGpuCompactedHitCountsAcrossSpaces()
         {
@@ -659,6 +674,7 @@ namespace VividRP.Editor.Tests
         private const int CounterCount = 8;
         private const int ResidentAccessCounterIndex = 2;
         private const int FaultOverflowCounterIndex = 3;
+        private const int ResidentOverflowCounterIndex = 4;
         private const int AcceptedFaultCounterIndex = 7;
 
         [Test]
@@ -726,6 +742,94 @@ namespace VividRP.Editor.Tests
             Assert.That(result.Records.Length, Is.EqualTo(4));
             Assert.That(result.Counters[AcceptedFaultCounterIndex], Is.EqualTo(4));
             Assert.That(result.Counters[FaultOverflowCounterIndex], Is.EqualTo(12));
+        }
+
+        [Test]
+        public void Compaction_ReportsResidentHitsForFaultOverflowSentinels()
+        {
+            if (!SystemInfo.supportsComputeShaders)
+                Assert.Ignore("The active graphics device does not support compute shaders.");
+
+            ComputeShader compute = LoadCompute();
+            const int outputCapacity = 1;
+            const int hashCapacity = 16;
+            ulong acceptedKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(0, 0, 0));
+            ulong overflowKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                2,
+                new VirtualTexturePageCoord(1, 0, 0));
+            using var acceptedKeyBuffer = new ComputeBuffer(
+                1,
+                sizeof(ulong),
+                ComputeBufferType.Structured);
+            using var overflowKeyBuffer = new ComputeBuffer(
+                1,
+                sizeof(ulong),
+                ComputeBufferType.Structured);
+            using var outputBuffer = new ComputeBuffer(
+                outputCapacity,
+                VirtualTextureCompactedFeedbackRequest.Stride,
+                ComputeBufferType.Structured);
+            using var counterBuffer = new ComputeBuffer(
+                CounterCount,
+                sizeof(uint),
+                ComputeBufferType.Structured);
+            using var hashBuffer = new ComputeBuffer(
+                hashCapacity,
+                sizeof(uint) * 4,
+                ComputeBufferType.Structured);
+            counterBuffer.SetData(new uint[CounterCount]);
+            hashBuffer.SetData(new Vector4[hashCapacity]);
+
+            int faultKernel = compute.FindKernel("WriteFaultFeedback");
+            int residentKernel = compute.FindKernel("WriteResidentFeedback");
+            acceptedKeyBuffer.SetData(new[] { acceptedKey });
+            overflowKeyBuffer.SetData(new[] { overflowKey });
+            Bind(
+                compute,
+                faultKernel,
+                acceptedKeyBuffer,
+                outputBuffer,
+                counterBuffer,
+                hashBuffer,
+                keyCount: 1,
+                outputCapacity,
+                hashCapacity,
+                frameIndex: 0);
+            compute.Dispatch(faultKernel, 1, 1, 1);
+
+            Bind(
+                compute,
+                faultKernel,
+                overflowKeyBuffer,
+                outputBuffer,
+                counterBuffer,
+                hashBuffer,
+                keyCount: 1,
+                outputCapacity,
+                hashCapacity,
+                frameIndex: 0);
+            compute.Dispatch(faultKernel, 1, 1, 1);
+            Bind(
+                compute,
+                residentKernel,
+                overflowKeyBuffer,
+                outputBuffer,
+                counterBuffer,
+                hashBuffer,
+                keyCount: 1,
+                outputCapacity,
+                hashCapacity,
+                frameIndex: 0);
+            compute.Dispatch(residentKernel, 1, 1, 1);
+
+            var counters = new uint[CounterCount];
+            counterBuffer.GetData(counters);
+            Assert.That(counters[AcceptedFaultCounterIndex], Is.EqualTo(1));
+            Assert.That(counters[FaultOverflowCounterIndex], Is.EqualTo(1));
+            Assert.That(counters[ResidentAccessCounterIndex], Is.Zero);
+            Assert.That(counters[ResidentOverflowCounterIndex], Is.EqualTo(1));
         }
 
         [Test]

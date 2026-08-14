@@ -26,7 +26,11 @@ namespace VividRP.Editor.Tests
                 | CopyTextureSupport.RTToTexture
                 | CopyTextureSupport.DifferentTypes;
 
+            internal int MaximumTextureSize { get; set; } = 16384;
+
             public bool SupportsComputeShaders => SupportsCompute;
+
+            public int MaxTextureSize => MaximumTextureSize;
 
             public CopyTextureSupport CopyTextureSupport => CopySupport;
 
@@ -110,6 +114,98 @@ namespace VividRP.Editor.Tests
             Assert.That(physicalAtlas.dimension, Is.EqualTo(TextureDimension.Tex2D));
             Assert.That(physicalAtlas.width, Is.EqualTo(3128));
             Assert.That(physicalAtlas.height, Is.EqualTo(3128));
+        }
+
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Low, 256)]
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium, 512)]
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.High, 1024)]
+        public void DescriptorProfile_MapsPhysicalPoolQualityWithoutChangingStreamingBudgets(
+            GPUDrivenVirtualTexturePhysicalPoolQuality quality,
+            int expectedCachePageCount)
+        {
+            GPUDrivenVirtualTextureDescriptorProfile profile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(quality);
+
+            Assert.That(profile.CachePageCount, Is.EqualTo(expectedCachePageCount));
+        }
+
+        [Test]
+        public void DescriptorProfile_InvalidQualityFallsBackToMedium()
+        {
+            GPUDrivenVirtualTextureDescriptorProfile profile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    (GPUDrivenVirtualTexturePhysicalPoolQuality)99);
+
+            Assert.That(profile.CachePageCount, Is.EqualTo(512));
+        }
+
+        [TestCase(3000, 256)]
+        [TestCase(4096, 512)]
+        [TestCase(8192, 1024)]
+        public void SupportedDescriptorProfile_DowngradesHighToLargestTierThatFits(
+            int maxTextureSize,
+            int expectedCachePageCount)
+        {
+            GPUDrivenVirtualTextureDescriptorProfile requestedProfile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.High);
+
+            GPUDrivenVirtualTextureDescriptorProfile supportedProfile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveSupportedDescriptorProfile(
+                    requestedProfile,
+                    maxTextureSize);
+
+            Assert.That(supportedProfile.CachePageCount, Is.EqualTo(expectedCachePageCount));
+        }
+
+        [Test]
+        public void Constructor_DowngradesUnsupportedHighProfileBeforeCreatingSpace()
+        {
+            const string missingShaderReason =
+                "GPUDriven VT page producer compute shader resource is missing.";
+            LogAssert.Expect(
+                LogType.Warning,
+                "[VividRP] GPUDriven virtual texture physical pool was reduced from 1024 to 512 pages "
+                + "because the active device supports at most 4096x4096 2D textures.");
+            LogAssert.Expect(
+                LogType.Warning,
+                $"[VividRP] GPUDriven virtual texture backend is unavailable: {missingShaderReason}");
+            GPUDrivenVirtualTextureDescriptorProfile highProfile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.High);
+            var capabilities = new TestCapabilities { MaximumTextureSize = 4096 };
+
+            using var backend = new VirtualTextureGPUDrivenTextureBackend(
+                null,
+                capabilities,
+                highProfile);
+
+            Assert.That(backend.DescriptorProfile.CachePageCount, Is.EqualTo(512));
+            Assert.That(backend.VirtualTextureSpaceDesc.CachePageCount, Is.EqualTo(512));
+        }
+
+        [Test]
+        public void Constructor_AppliesRestrictedDescriptorProfileOverride()
+        {
+            const string reason = "GPUDriven VT page producer compute shader resource is missing.";
+            LogAssert.Expect(
+                LogType.Warning,
+                $"[VividRP] GPUDriven virtual texture backend is unavailable: {reason}");
+            var profile = new GPUDrivenVirtualTextureDescriptorProfile(cachePageCount: 7);
+
+            using var backend = new VirtualTextureGPUDrivenTextureBackend(
+                null,
+                new TestCapabilities(),
+                profile);
+
+            Assert.That(backend.VirtualTextureSpaceDesc.CachePageCount, Is.EqualTo(7));
+            Assert.That(backend.VirtualTextureSpaceDesc.MaxUploadsPerFrame, Is.EqualTo(16));
+            Assert.That(backend.VirtualTextureSpaceDesc.FeedbackCapacity, Is.EqualTo(65536));
+            Assert.That(backend.VirtualTextureSpaceDesc.NeighborPrefetchCount, Is.EqualTo(1));
+            Assert.That(backend.VirtualTextureSpaceDesc.PageSize, Is.EqualTo(128));
+            Assert.That(backend.VirtualTextureSpaceDesc.BorderSize, Is.EqualTo(4));
+            Assert.That(backend.VirtualTextureSpaceDesc.VirtualPageCountX, Is.EqualTo(256));
+            Assert.That(backend.VirtualTextureSpaceDesc.VirtualPageCountY, Is.EqualTo(256));
         }
 
         [Test]

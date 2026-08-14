@@ -7,9 +7,50 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime.GPUDriven.VirtualTexture
 {
+    public enum GPUDrivenVirtualTexturePhysicalPoolQuality
+    {
+        Low = 0,
+        Medium = 1,
+        High = 2,
+    }
+
+    internal readonly struct GPUDrivenVirtualTextureDescriptorProfile :
+        IEquatable<GPUDrivenVirtualTextureDescriptorProfile>
+    {
+        internal GPUDrivenVirtualTextureDescriptorProfile(int cachePageCount)
+        {
+            if (cachePageCount <= 0
+                || cachePageCount > VirtualTexturePageTableEntry.MaxPhysicalPageCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cachePageCount));
+            }
+
+            CachePageCount = cachePageCount;
+        }
+
+        internal int CachePageCount { get; }
+
+        public bool Equals(GPUDrivenVirtualTextureDescriptorProfile other)
+        {
+            return CachePageCount == other.CachePageCount;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is GPUDrivenVirtualTextureDescriptorProfile other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return CachePageCount;
+        }
+    }
+
     internal interface IGPUDrivenVirtualTextureRuntimeCapabilities
     {
         bool SupportsComputeShaders { get; }
+
+        int MaxTextureSize { get; }
 
         bool IsFormatSupported(GraphicsFormat format, GraphicsFormatUsage usage);
 
@@ -25,6 +66,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         }
 
         public bool SupportsComputeShaders => SystemInfo.supportsComputeShaders;
+
+        public int MaxTextureSize => SystemInfo.maxTextureSize;
 
         public CopyTextureSupport CopyTextureSupport => SystemInfo.copyTextureSupport;
 
@@ -46,9 +89,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal const int VirtualPageCapacity = AtlasPageCount * AtlasPageCount;
         internal const string SpaceName = "VividGPUDriven.StaticMesh";
 
-        private const int CachePageCount = 512;
+        private const int LowCachePageCount = 256;
+        private const int MediumCachePageCount = 512;
+        private const int HighCachePageCount = 1024;
         private const int MaxUploadsPerFrame = 16;
         private const int FeedbackCapacity = 65536;
+        private const int NeighborPrefetchCount = 1;
         private const int ResourceLayerBitCount = 8;
 
         private readonly struct TextureSetKey : IEquatable<TextureSetKey>
@@ -163,15 +209,48 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal VirtualTextureGPUDrivenTextureBackend()
             : this(
                 PipelineResourceManager.Get<VividRPCoreResources>()?.GPUDrivenVirtualTexturePageProducerCompute,
-                GPUDrivenVirtualTextureRuntimeCapabilities.Instance)
+                GPUDrivenVirtualTextureRuntimeCapabilities.Instance,
+                ResolveDescriptorProfile(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium))
+        {
+        }
+
+        internal VirtualTextureGPUDrivenTextureBackend(
+            GPUDrivenVirtualTextureDescriptorProfile descriptorProfile)
+            : this(
+                PipelineResourceManager.Get<VividRPCoreResources>()?.GPUDrivenVirtualTexturePageProducerCompute,
+                GPUDrivenVirtualTextureRuntimeCapabilities.Instance,
+                descriptorProfile)
         {
         }
 
         internal VirtualTextureGPUDrivenTextureBackend(
             ComputeShader pageProducerCompute,
             IGPUDrivenVirtualTextureRuntimeCapabilities capabilities)
+            : this(
+                pageProducerCompute,
+                capabilities,
+                ResolveDescriptorProfile(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium))
         {
-            VirtualTextureSpaceDesc = CreateSpaceDesc();
+        }
+
+        internal VirtualTextureGPUDrivenTextureBackend(
+            ComputeShader pageProducerCompute,
+            IGPUDrivenVirtualTextureRuntimeCapabilities capabilities,
+            GPUDrivenVirtualTextureDescriptorProfile descriptorProfile)
+        {
+            DescriptorProfile = ResolveSupportedDescriptorProfile(
+                descriptorProfile,
+                capabilities?.MaxTextureSize ?? 0);
+            VirtualTextureSpaceDesc = CreateSpaceDesc(DescriptorProfile);
+
+            if (!DescriptorProfile.Equals(descriptorProfile))
+            {
+                Debug.LogWarning(
+                    $"[VividRP] GPUDriven virtual texture physical pool was reduced from "
+                    + $"{descriptorProfile.CachePageCount} to {DescriptorProfile.CachePageCount} pages "
+                    + $"because the active device supports at most {capabilities.MaxTextureSize}x"
+                    + $"{capabilities.MaxTextureSize} 2D textures.");
+            }
 
             if (!TryValidateGpuPageProducer(pageProducerCompute, capabilities, out string unavailableReason))
             {
@@ -226,6 +305,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         public int VirtualTextureSpaceId { get; }
 
         public int VirtualTextureAllocationId { get; }
+
+        internal GPUDrivenVirtualTextureDescriptorProfile DescriptorProfile { get; }
 
         internal VirtualTextureSpaceDesc VirtualTextureSpaceDesc { get; }
 
@@ -622,7 +703,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         {
             return IsCompatibleStreamedAsset(
                 asset,
-                CreateSpaceDesc().StackDesc,
+                CreateSpaceDesc(
+                    ResolveDescriptorProfile(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium)).StackDesc,
                 out validationMessage);
         }
 
@@ -669,7 +751,50 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return false;
         }
 
-        private static VirtualTextureSpaceDesc CreateSpaceDesc()
+        internal static GPUDrivenVirtualTextureDescriptorProfile ResolveDescriptorProfile(
+            GPUDrivenVirtualTexturePhysicalPoolQuality quality)
+        {
+            int cachePageCount = quality switch
+            {
+                GPUDrivenVirtualTexturePhysicalPoolQuality.Low => LowCachePageCount,
+                GPUDrivenVirtualTexturePhysicalPoolQuality.High => HighCachePageCount,
+                _ => MediumCachePageCount,
+            };
+            return new GPUDrivenVirtualTextureDescriptorProfile(cachePageCount);
+        }
+
+        internal static GPUDrivenVirtualTextureDescriptorProfile ResolveSupportedDescriptorProfile(
+            in GPUDrivenVirtualTextureDescriptorProfile requestedProfile,
+            int maxTextureSize)
+        {
+            if (maxTextureSize <= 0)
+                return requestedProfile;
+
+            int physicalPageSize = PageSize + BorderSize * 2;
+            int maxTilesPerDimension = maxTextureSize / physicalPageSize;
+            long maxPageCount = (long)maxTilesPerDimension * maxTilesPerDimension;
+            if (requestedProfile.CachePageCount <= maxPageCount)
+                return requestedProfile;
+
+            if (MediumCachePageCount <= maxPageCount)
+            {
+                return ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.Medium);
+            }
+
+            if (LowCachePageCount <= maxPageCount)
+            {
+                return ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.Low);
+            }
+
+            // There is no supported quality below Low. Keep the requested descriptor so
+            // normal backend construction reports the precise atlas capability failure.
+            return requestedProfile;
+        }
+
+        private static VirtualTextureSpaceDesc CreateSpaceDesc(
+            in GPUDrivenVirtualTextureDescriptorProfile descriptorProfile)
         {
             var layers = new[]
             {
@@ -705,11 +830,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             var stackDesc = new VTStackDesc(
                 PageSize,
                 BorderSize,
-                CachePageCount,
+                descriptorProfile.CachePageCount,
                 layers,
                 MaxUploadsPerFrame,
                 FeedbackCapacity,
-                neighborPrefetchCount: 1);
+                NeighborPrefetchCount);
             int mipCount = Mathf.RoundToInt(Mathf.Log(AtlasPageCount, 2.0f)) + 1;
             return new VirtualTextureSpaceDesc(
                 SpaceName,

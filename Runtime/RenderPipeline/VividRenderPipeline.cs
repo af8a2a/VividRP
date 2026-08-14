@@ -145,11 +145,26 @@ namespace VividRP.Runtime
             if (asset == null)
                 return;
 
+            VirtualTextureSystem.ConfigureBudgets(
+                asset.VirtualTextureMaxResidencyAllocationsPerFrame,
+                asset.VirtualTextureMaxPrefetchAllocationsPerFrame,
+                asset.VirtualTextureMaxPageUploadsPerFrame,
+                ResolveVirtualTextureUploadByteBudget(
+                    asset.VirtualTextureMaxUploadBytesPerFrameMiB));
             VTStreamChunkManager.Shared.Configure(
                 asset.VirtualTextureIOBackend,
                 asset.VirtualTextureMaxInFlightChunks,
                 asset.VirtualTextureDecodeConcurrency,
                 asset.VirtualTextureDecodedCacheBudgetMiB);
+        }
+
+        internal static int ResolveVirtualTextureUploadByteBudget(int budgetMiB)
+        {
+            if (budgetMiB <= 0)
+                return 0;
+
+            long budgetBytes = (long)budgetMiB * 1024L * 1024L;
+            return budgetBytes >= int.MaxValue ? int.MaxValue : (int)budgetBytes;
         }
 
         private void RenderCamera(ScriptableRenderContext context, Camera camera, int frameIndex)

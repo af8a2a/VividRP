@@ -222,11 +222,15 @@ namespace VividRP.Runtime
             internal QueuedUpload(
                 UploadPoolKey key,
                 VTPhysicalPool physicalPool,
-                in VTPageUploadPayload payload)
+                in VTPageUploadPayload payload,
+                in VTRequestPriorityKey priorityKey,
+                long enqueueSequence)
             {
                 Key = key;
                 PhysicalPool = physicalPool;
                 Payload = payload;
+                PriorityKey = priorityKey;
+                EnqueueSequence = enqueueSequence;
             }
 
             internal UploadPoolKey Key { get; }
@@ -234,6 +238,10 @@ namespace VividRP.Runtime
             internal VTPhysicalPool PhysicalPool { get; }
 
             internal VTPageUploadPayload Payload { get; }
+
+            internal VTRequestPriorityKey PriorityKey { get; }
+
+            internal long EnqueueSequence { get; }
         }
 
         private sealed class GraphicsFenceHandle : IVTUploadFenceHandle
@@ -1013,6 +1021,7 @@ namespace VividRP.Runtime
         private int m_LastCpuProducedPageCount;
         private int m_LastGpuProducedPageCount;
         private int m_LastGpuDispatchCount;
+        private long m_NextQueuedUploadSequence;
 
         internal bool IsEnabled => true;
 
@@ -1284,11 +1293,17 @@ namespace VividRP.Runtime
             string spaceName,
             in VirtualTextureSpaceDesc desc,
             VTPhysicalPool physicalPool,
-            in VTPageUploadPayload payload)
+            in VTPageUploadPayload payload,
+            in VTRequestPriorityKey priorityKey)
         {
             UploadPoolKey key = new(desc);
             GetOrCreatePool(spaceName, key, desc.MaxUploadsPerFrame);
-            m_QueuedUploads.Add(new QueuedUpload(key, physicalPool, payload));
+            m_QueuedUploads.Add(new QueuedUpload(
+                key,
+                physicalPool,
+                payload,
+                priorityKey,
+                m_NextQueuedUploadSequence++));
         }
 
         internal bool FinalizeUploads(CommandBuffer cmd)
@@ -1475,7 +1490,12 @@ namespace VividRP.Runtime
                 if (layoutCompare != 0)
                     return layoutCompare;
 
-                return left.Payload.Request.SpaceId.CompareTo(right.Payload.Request.SpaceId);
+                int priorityCompare = VTRequestPriorityUtility.Compare(
+                    left.PriorityKey,
+                    right.PriorityKey);
+                return priorityCompare != 0
+                    ? priorityCompare
+                    : left.EnqueueSequence.CompareTo(right.EnqueueSequence);
             }
         }
     }

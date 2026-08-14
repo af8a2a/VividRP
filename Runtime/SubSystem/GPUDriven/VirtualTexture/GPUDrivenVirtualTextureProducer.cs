@@ -7,6 +7,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 {
     internal sealed class GPUDrivenVirtualTextureProducer :
         IVTPageProducer,
+        IVTPrioritizedPageProducer,
         IVTPageRequestRetirement,
         IDisposable
     {
@@ -283,6 +284,18 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {
+            VTRequestPriorityKey priorityKey = VTRequestPriorityKey.FromRequest(
+                request,
+                locked: false,
+                producerPriority: ProducerDesc.ProducerPriority);
+            return RequestPageData(desc, request, priorityKey);
+        }
+
+        public VTPageRequestStatus RequestPageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request,
+            in VTRequestPriorityKey priorityKey)
+        {
             if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
                 return VTPageRequestStatus.Invalid;
 
@@ -294,7 +307,17 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return VTPageRequestStatus.Available;
 
             VTRequest localRequest = TranslateRequest(entry, request);
-            return entry.StreamedProducer.RequestPageData(entry.LocalDesc, localRequest);
+            VTRequestPriorityKey localPriorityKey = VTRequestPriorityKey.FromRequest(
+                localRequest,
+                priorityKey.Locked,
+                entry.StreamedProducer.ProducerDesc.ProducerPriority);
+            localPriorityKey = VTRequestPriorityUtility.SelectHigher(
+                priorityKey,
+                localPriorityKey);
+            return entry.StreamedProducer.RequestPageData(
+                entry.LocalDesc,
+                localRequest,
+                localPriorityKey);
         }
 
         public IVTPageUploadFinalizer ProducePageData(

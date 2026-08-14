@@ -112,6 +112,8 @@ namespace VividRP.Editor.RenderPipeline
             };
             root.Add(gpuDrivenTextureBackendField);
 
+            AddVirtualTextureFoldout(root);
+
             var gpuDrivenDecalField = new PropertyField(
                 serializedObject.FindProperty("m_EnableGPUDrivenDecal"),
                 s_GpuDrivenDecalLabel.text)
@@ -248,6 +250,77 @@ namespace VividRP.Editor.RenderPipeline
                 "m_ReflectionProbeAtlasDecreaseResToFit",
                 s_ReflectionProbeAtlasDecreaseResToFitLabel,
                 "vivid-rp-asset-reflection-probe-atlas-decrease-res-to-fit-field");
+
+            root.Add(foldout);
+        }
+
+        private void AddVirtualTextureFoldout(VisualElement root)
+        {
+            var foldout = new Foldout
+            {
+                text = "Virtual Texture",
+                value = true,
+                name = "vivid-rp-asset-virtual-texture-foldout",
+            };
+
+            AddAssetProperty(
+                foldout,
+                "m_GPUDrivenVirtualTexturePhysicalPoolQuality",
+                EditorGUIUtility.TrTextContent(
+                    "GPUDriven Physical Pool Quality",
+                    "Selects 256, 512, or 1024 physical cache pages for the GPUDriven virtual texture backend. "
+                    + "The setting is applied when the backend is next initialized; unsupported sizes fall back to the highest tier that fits the device."),
+                "vivid-rp-asset-gpu-driven-vt-physical-pool-quality-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureIOBackend",
+                EditorGUIUtility.TrTextContent("I/O Backend"),
+                "vivid-rp-asset-vt-io-backend-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxResidencyAllocationsPerFrame",
+                EditorGUIUtility.TrTextContent(
+                    "Max Demand Residency Allocations / Frame",
+                    "Global feedback-driven demand allocation budget. Locked bootstrap and mip-tail reservations are excluded. Set to 0 for unlimited."),
+                "vivid-rp-asset-vt-max-residency-allocations-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxPrefetchAllocationsPerFrame",
+                EditorGUIUtility.TrTextContent(
+                    "Max Prefetch Allocations / Frame",
+                    "Global neighbor-prefetch allocation budget. Set to 0 to use the remaining residency budget."),
+                "vivid-rp-asset-vt-max-prefetch-allocations-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxPageUploadsPerFrame",
+                EditorGUIUtility.TrTextContent(
+                    "Max Page Uploads / Frame",
+                    "Global page-upload budget. Set to 0 for unlimited."),
+                "vivid-rp-asset-vt-max-page-uploads-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxUploadBytesPerFrameMiB",
+                EditorGUIUtility.TrTextContent(
+                    "Max Upload MiB / Frame",
+                    "Global upload byte budget. Set to 0 for unlimited."),
+                "vivid-rp-asset-vt-max-upload-mib-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxInFlightChunks",
+                EditorGUIUtility.TrTextContent("Max In-Flight Chunks"),
+                "vivid-rp-asset-vt-max-in-flight-chunks-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureDecodeConcurrency",
+                EditorGUIUtility.TrTextContent(
+                    "Decode Concurrency",
+                    "Maximum concurrent chunk decodes. Set to 0 to derive it from the processor count."),
+                "vivid-rp-asset-vt-decode-concurrency-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureDecodedCacheBudgetMiB",
+                EditorGUIUtility.TrTextContent("Decoded Cache Budget MiB"),
+                "vivid-rp-asset-vt-decoded-cache-budget-field");
 
             root.Add(foldout);
         }

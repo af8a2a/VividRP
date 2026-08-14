@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
@@ -24,6 +25,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.EnableGPUDriven, Is.False);
                 Assert.That(asset.EnableGPUDrivenOcclusionCulling, Is.True);
                 Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
+                Assert.That(
+                    asset.GPUDrivenVirtualTexturePhysicalPoolQuality,
+                    Is.EqualTo(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium));
+                Assert.That(asset.VirtualTextureMaxResidencyAllocationsPerFrame, Is.EqualTo(64));
+                Assert.That(asset.VirtualTextureMaxPrefetchAllocationsPerFrame, Is.Zero);
+                Assert.That(asset.VirtualTextureMaxPageUploadsPerFrame, Is.EqualTo(64));
+                Assert.That(asset.VirtualTextureMaxUploadBytesPerFrameMiB, Is.Zero);
             }
             finally
             {
@@ -44,18 +52,39 @@ namespace VividRP.Editor.Tests
                 var property = serializedObject.FindProperty("m_EnableGPUDriven");
                 var occlusionProperty = serializedObject.FindProperty("m_EnableGPUDrivenOcclusionCulling");
                 var textureBackendProperty = serializedObject.FindProperty("m_GPUDrivenTextureBackend");
+                var virtualTexturePhysicalPoolQualityProperty = serializedObject.FindProperty(
+                    "m_GPUDrivenVirtualTexturePhysicalPoolQuality");
+                var maxResidencyProperty = serializedObject.FindProperty(
+                    "m_VirtualTextureMaxResidencyAllocationsPerFrame");
+                var maxPrefetchProperty = serializedObject.FindProperty(
+                    "m_VirtualTextureMaxPrefetchAllocationsPerFrame");
+                var maxPageUploadsProperty = serializedObject.FindProperty(
+                    "m_VirtualTextureMaxPageUploadsPerFrame");
+                var maxUploadMiBProperty = serializedObject.FindProperty(
+                    "m_VirtualTextureMaxUploadBytesPerFrameMiB");
 
                 Assert.That(colorGradingSpaceProperty, Is.Not.Null);
                 Assert.That(implementationProperty, Is.Not.Null);
                 Assert.That(property, Is.Not.Null);
                 Assert.That(occlusionProperty, Is.Not.Null);
                 Assert.That(textureBackendProperty, Is.Not.Null);
+                Assert.That(virtualTexturePhysicalPoolQualityProperty, Is.Not.Null);
+                Assert.That(maxResidencyProperty, Is.Not.Null);
+                Assert.That(maxPrefetchProperty, Is.Not.Null);
+                Assert.That(maxPageUploadsProperty, Is.Not.Null);
+                Assert.That(maxUploadMiBProperty, Is.Not.Null);
 
                 colorGradingSpaceProperty.enumValueIndex = (int)ColorGradingSpace.AcesCg;
                 implementationProperty.enumValueIndex = (int)AutoExposureImplementationPath.HDRP;
                 property.boolValue = true;
                 occlusionProperty.boolValue = false;
                 textureBackendProperty.enumValueIndex = (int) GPUDrivenTextureBackendMode.Bindless;
+                virtualTexturePhysicalPoolQualityProperty.enumValueIndex =
+                    (int)GPUDrivenVirtualTexturePhysicalPoolQuality.High;
+                maxResidencyProperty.intValue = 41;
+                maxPrefetchProperty.intValue = 7;
+                maxPageUploadsProperty.intValue = 13;
+                maxUploadMiBProperty.intValue = 23;
                 serializedObject.ApplyModifiedPropertiesWithoutUndo();
 
                 Assert.That(asset.ColorGradingSpace, Is.EqualTo(ColorGradingSpace.AcesCg));
@@ -63,6 +92,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.EnableGPUDriven, Is.True);
                 Assert.That(asset.EnableGPUDrivenOcclusionCulling, Is.False);
                 Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
+                Assert.That(
+                    asset.GPUDrivenVirtualTexturePhysicalPoolQuality,
+                    Is.EqualTo(GPUDrivenVirtualTexturePhysicalPoolQuality.High));
+                Assert.That(asset.VirtualTextureMaxResidencyAllocationsPerFrame, Is.EqualTo(41));
+                Assert.That(asset.VirtualTextureMaxPrefetchAllocationsPerFrame, Is.EqualTo(7));
+                Assert.That(asset.VirtualTextureMaxPageUploadsPerFrame, Is.EqualTo(13));
+                Assert.That(asset.VirtualTextureMaxUploadBytesPerFrameMiB, Is.EqualTo(23));
             }
             finally
             {
@@ -163,6 +199,64 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     VividGPUDrivenSystem.ResolveConfiguredTextureBackendMode(asset),
                     Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void ResolveConfiguredVirtualTextureDescriptorProfile_UsesMediumByDefaultAndAssetQuality()
+        {
+            GPUDrivenVirtualTextureDescriptorProfile defaultProfile =
+                VividGPUDrivenSystem.ResolveConfiguredVirtualTextureDescriptorProfile(null);
+            Assert.That(defaultProfile.CachePageCount, Is.EqualTo(512));
+
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                asset.GPUDrivenVirtualTexturePhysicalPoolQuality =
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.High;
+
+                GPUDrivenVirtualTextureDescriptorProfile highProfile =
+                    VividGPUDrivenSystem.ResolveConfiguredVirtualTextureDescriptorProfile(asset);
+
+                Assert.That(highProfile.CachePageCount, Is.EqualTo(1024));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void RequiresTextureBackendRecreation_TracksBackendModeOnly()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        asset),
+                    Is.False);
+
+                asset.GPUDrivenVirtualTexturePhysicalPoolQuality =
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.High;
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        asset),
+                    Is.False,
+                    "Physical-pool quality takes effect on the next backend initialization.");
+
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.Bindless;
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        asset),
+                    Is.True);
             }
             finally
             {

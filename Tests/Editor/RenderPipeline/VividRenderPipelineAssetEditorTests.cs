@@ -90,6 +90,18 @@ namespace VividRP.Tests
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-async-compute-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-occlusion-culling-field"), Is.Not.Null);
+                Assert.That(root.Q<Foldout>("vivid-rp-asset-virtual-texture-foldout"), Is.Not.Null);
+                Assert.That(
+                    root.Q<PropertyField>("vivid-rp-asset-gpu-driven-vt-physical-pool-quality-field"),
+                    Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-io-backend-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-max-residency-allocations-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-max-prefetch-allocations-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-max-page-uploads-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-max-upload-mib-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-max-in-flight-chunks-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-decode-concurrency-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-decoded-cache-budget-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-decal-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-debug-overlay-field"), Is.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-srp-batcher-field"), Is.Not.Null);

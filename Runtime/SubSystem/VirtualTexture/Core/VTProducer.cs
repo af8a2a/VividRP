@@ -234,6 +234,14 @@ namespace VividRP.Runtime
             in VTRequest request);
     }
 
+    internal interface IVTPrioritizedPageProducer
+    {
+        VTPageRequestStatus RequestPageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request,
+            in VTRequestPriorityKey priorityKey);
+    }
+
     internal interface IVTRuntimePageProducer : VTProducer
     {
         void WritePage(

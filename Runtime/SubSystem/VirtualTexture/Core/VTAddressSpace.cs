@@ -18,6 +18,10 @@ namespace VividRP.Runtime
             Request = request;
             Locked = locked;
             FairnessRank = fairnessRank;
+            PriorityKey = VTRequestPriorityKey.FromRequest(
+                request,
+                locked,
+                addressSpace?.ProducerPriority ?? 0);
         }
 
         internal VTPageTableSpace AddressSpace { get; }
@@ -27,6 +31,8 @@ namespace VividRP.Runtime
         internal bool Locked { get; }
 
         internal int FairnessRank { get; }
+
+        internal VTRequestPriorityKey PriorityKey { get; }
     }
 
     internal sealed class VTPageTableSpace : IDisposable, IVTUploadRequestCommitter
@@ -100,6 +106,8 @@ namespace VividRP.Runtime
         internal VTPhysicalPool PhysicalPool { get; }
 
         internal VTStackDesc StackDesc => Descriptor.StackDesc;
+
+        internal int ProducerPriority => m_PageProducer?.ProducerDesc.ProducerPriority ?? 0;
 
         internal int TotalPageCount { get; }
 
@@ -203,8 +211,13 @@ namespace VividRP.Runtime
             int skippedUploadCount = 0;
             for (int candidateIndex = 0; candidateIndex < m_LocalUploadCandidates.Count; candidateIndex++)
             {
-                if (!TrySchedulePendingUpload(uploadScheduler, cmd, m_LocalUploadCandidates[candidateIndex].Request))
+                if (!TrySchedulePendingUpload(
+                        uploadScheduler,
+                        cmd,
+                        m_LocalUploadCandidates[candidateIndex]))
+                {
                     skippedUploadCount += 1;
+                }
             }
 
             uploadScheduler?.AddSkippedUploadCount(skippedUploadCount);
@@ -789,14 +802,22 @@ namespace VividRP.Runtime
         internal bool TrySchedulePendingUpload(
             VTUploadScheduler uploadScheduler,
             CommandBuffer cmd,
-            in VTRequest request)
+            in VTPendingUploadCandidate candidate)
         {
             if (uploadScheduler == null || m_PageProducer == null || cmd == null || !uploadScheduler.IsEnabled)
                 return false;
 
+            VTRequest request = candidate.Request;
             VTPageRequestStatus status;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRequestPageMarker.Auto())
-                status = m_PageProducer.RequestPageData(Descriptor, request);
+            {
+                status = m_PageProducer is IVTPrioritizedPageProducer prioritizedProducer
+                    ? prioritizedProducer.RequestPageData(
+                        Descriptor,
+                        request,
+                        candidate.PriorityKey)
+                    : m_PageProducer.RequestPageData(Descriptor, request);
+            }
             if (status != VTPageRequestStatus.Available)
             {
                 if (status == VTPageRequestStatus.Invalid)
@@ -827,7 +848,8 @@ namespace VividRP.Runtime
                     Descriptor.SpaceName,
                     Descriptor,
                     m_ResidencyManager.PhysicalPool,
-                    new VTPageUploadPayload(request, finalizer));
+                    new VTPageUploadPayload(request, finalizer),
+                    candidate.PriorityKey);
             }
 
             return true;
@@ -984,7 +1006,10 @@ namespace VividRP.Runtime
                     Descriptor,
                     m_MipOffsets,
                     request.PageCoord);
-                m_PendingUploadSortEntries.Add(new PendingUploadSortEntry(request, locked));
+                m_PendingUploadSortEntries.Add(new PendingUploadSortEntry(
+                    request,
+                    locked,
+                    ProducerPriority));
             }
 
             if (m_PendingUploadSortEntries.Count > 1)
@@ -1001,37 +1026,23 @@ namespace VividRP.Runtime
 
         private readonly struct PendingUploadSortEntry
         {
-            internal PendingUploadSortEntry(in VTRequest request, bool locked)
+            internal PendingUploadSortEntry(
+                in VTRequest request,
+                bool locked,
+                int producerPriority)
             {
                 Request = request;
-                Locked = locked;
-                IsActiveView = request.IsActiveView;
-                CameraPriority = request.CameraPriority;
-                Priority = request.Priority;
-                MipWeightedPriority = VTRequestPriorityUtility.ComputeMipWeightedScore(
-                    request.Priority,
-                    request.PageCoord.Mip);
-                RequestFrame = request.RequestFrame;
-                Mip = request.PageCoord.Mip;
+                PriorityKey = VTRequestPriorityKey.FromRequest(
+                    request,
+                    locked,
+                    producerPriority);
                 Y = request.PageCoord.Y;
                 X = request.PageCoord.X;
             }
 
             internal VTRequest Request { get; }
 
-            internal bool Locked { get; }
-
-            internal bool IsActiveView { get; }
-
-            internal int CameraPriority { get; }
-
-            internal int Priority { get; }
-
-            internal long MipWeightedPriority { get; }
-
-            internal int RequestFrame { get; }
-
-            internal int Mip { get; }
+            internal VTRequestPriorityKey PriorityKey { get; }
 
             internal int Y { get; }
 
@@ -1048,31 +1059,11 @@ namespace VividRP.Runtime
 
             public int Compare(PendingUploadSortEntry left, PendingUploadSortEntry right)
             {
-                if (left.Locked != right.Locked)
-                    return left.Locked ? -1 : 1;
-
-                if (left.IsActiveView != right.IsActiveView)
-                    return left.IsActiveView ? -1 : 1;
-
-                int cameraCompare = left.CameraPriority.CompareTo(right.CameraPriority);
-                if (cameraCompare != 0)
-                    return cameraCompare;
-
-                int scoreCompare = right.MipWeightedPriority.CompareTo(left.MipWeightedPriority);
-                if (scoreCompare != 0)
-                    return scoreCompare;
-
-                int mipCompare = right.Mip.CompareTo(left.Mip);
-                if (mipCompare != 0)
-                    return mipCompare;
-
-                int priorityCompare = right.Priority.CompareTo(left.Priority);
+                int priorityCompare = VTRequestPriorityUtility.Compare(
+                    left.PriorityKey,
+                    right.PriorityKey);
                 if (priorityCompare != 0)
                     return priorityCompare;
-
-                int frameCompare = left.RequestFrame.CompareTo(right.RequestFrame);
-                if (frameCompare != 0)
-                    return frameCompare;
 
                 int yCompare = left.Y.CompareTo(right.Y);
                 if (yCompare != 0)

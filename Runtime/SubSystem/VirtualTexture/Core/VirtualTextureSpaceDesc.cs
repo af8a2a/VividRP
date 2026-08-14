@@ -16,7 +16,9 @@ namespace VividRP.Runtime
             GraphicsFormat graphicsFormat,
             int maxUploadsPerFrame,
             int feedbackCapacity,
-            int neighborPrefetchCount = 0)
+            int neighborPrefetchCount = 0,
+            int maxResidencyAllocationsPerFrame = 0,
+            int maxPrefetchAllocationsPerFrame = 0)
             : this(
                 spaceName,
                 virtualPageCountX,
@@ -29,7 +31,9 @@ namespace VividRP.Runtime
                     graphicsFormat,
                     maxUploadsPerFrame,
                     feedbackCapacity,
-                    neighborPrefetchCount))
+                    neighborPrefetchCount,
+                    maxResidencyAllocationsPerFrame,
+                    maxPrefetchAllocationsPerFrame))
         {
         }
 
@@ -85,6 +89,10 @@ namespace VividRP.Runtime
         public GraphicsFormat GraphicsFormat => StackDesc.GraphicsFormat;
 
         public int MaxUploadsPerFrame => StackDesc.MaxUploadsPerFrame;
+
+        public int MaxResidencyAllocationsPerFrame => StackDesc.MaxResidencyAllocationsPerFrame;
+
+        public int MaxPrefetchAllocationsPerFrame => StackDesc.MaxPrefetchAllocationsPerFrame;
 
         public int FeedbackCapacity => StackDesc.FeedbackCapacity;
 

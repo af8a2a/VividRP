@@ -89,7 +89,9 @@ namespace VividRP.Runtime
         internal VTProducerHandle Register(in VirtualTextureSpaceDesc spaceDesc, VTProducer producer)
         {
             VTProducer resolvedProducer = ResolveStoredProducer(producer);
-            VTProducerDesc producerDesc = VTProducerDesc.FromSpaceDesc(resolvedProducer.Name, spaceDesc);
+            VTProducerDesc producerDesc = resolvedProducer is IVTPageProducer describedPageProducer
+                ? describedPageProducer.ProducerDesc
+                : VTProducerDesc.FromSpaceDesc(resolvedProducer.Name, spaceDesc);
 
             foreach (KeyValuePair<VTProducerHandle, Entry> pair in m_Entries)
             {
@@ -133,8 +135,15 @@ namespace VividRP.Runtime
 
         internal bool IsSameProducer(VTProducerHandle handle, VTProducer producer)
         {
-            return m_Entries.TryGetValue(handle, out Entry entry)
-                   && IsSameProducer(entry.Producer, ResolveStoredProducer(producer));
+            if (!m_Entries.TryGetValue(handle, out Entry entry))
+                return false;
+
+            VTProducer resolvedProducer = ResolveStoredProducer(producer);
+            if (!IsSameProducer(entry.Producer, resolvedProducer))
+                return false;
+
+            return resolvedProducer is not IVTPageProducer pageProducer
+                   || entry.Desc.Equals(pageProducer.ProducerDesc);
         }
 
         internal bool TryGetProducerName(VTProducerHandle handle, out string producerName)
@@ -183,13 +192,7 @@ namespace VividRP.Runtime
 
         private static bool IsSameProducer(VTProducer left, VTProducer right)
         {
-            if (ReferenceEquals(left, right))
-                return true;
-
-            if (left == null || right == null)
-                return false;
-
-            return string.Equals(left.Name, right.Name, StringComparison.Ordinal);
+            return ReferenceEquals(left, right);
         }
     }
 }

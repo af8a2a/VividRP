@@ -73,7 +73,24 @@ namespace VividRP.Runtime
             GPUDriven.GPUDrivenTextureBackendMode.VirtualTexture;
 
         [SerializeField]
+        private GPUDriven.VirtualTexture.GPUDrivenVirtualTexturePhysicalPoolQuality
+            m_GPUDrivenVirtualTexturePhysicalPoolQuality =
+                GPUDriven.VirtualTexture.GPUDrivenVirtualTexturePhysicalPoolQuality.Medium;
+
+        [SerializeField]
         private VividVirtualTextureIOBackendMode m_VirtualTextureIOBackend = VividVirtualTextureIOBackendMode.Auto;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureMaxResidencyAllocationsPerFrame = 64;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureMaxPrefetchAllocationsPerFrame;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureMaxPageUploadsPerFrame = 64;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureMaxUploadBytesPerFrameMiB;
 
         [SerializeField, Min(1)]
         private int m_VirtualTextureMaxInFlightChunks = 64;
@@ -193,10 +210,41 @@ namespace VividRP.Runtime
             set => m_GPUDrivenTextureBackend = value;
         }
 
+        public GPUDriven.VirtualTexture.GPUDrivenVirtualTexturePhysicalPoolQuality
+            GPUDrivenVirtualTexturePhysicalPoolQuality
+        {
+            get => m_GPUDrivenVirtualTexturePhysicalPoolQuality;
+            set => m_GPUDrivenVirtualTexturePhysicalPoolQuality = value;
+        }
+
         public VividVirtualTextureIOBackendMode VirtualTextureIOBackend
         {
             get => m_VirtualTextureIOBackend;
             set => m_VirtualTextureIOBackend = value;
+        }
+
+        public int VirtualTextureMaxResidencyAllocationsPerFrame
+        {
+            get => Mathf.Max(0, m_VirtualTextureMaxResidencyAllocationsPerFrame);
+            set => m_VirtualTextureMaxResidencyAllocationsPerFrame = Mathf.Max(0, value);
+        }
+
+        public int VirtualTextureMaxPrefetchAllocationsPerFrame
+        {
+            get => Mathf.Max(0, m_VirtualTextureMaxPrefetchAllocationsPerFrame);
+            set => m_VirtualTextureMaxPrefetchAllocationsPerFrame = Mathf.Max(0, value);
+        }
+
+        public int VirtualTextureMaxPageUploadsPerFrame
+        {
+            get => Mathf.Max(0, m_VirtualTextureMaxPageUploadsPerFrame);
+            set => m_VirtualTextureMaxPageUploadsPerFrame = Mathf.Max(0, value);
+        }
+
+        public int VirtualTextureMaxUploadBytesPerFrameMiB
+        {
+            get => Mathf.Max(0, m_VirtualTextureMaxUploadBytesPerFrameMiB);
+            set => m_VirtualTextureMaxUploadBytesPerFrameMiB = Mathf.Max(0, value);
         }
 
         public int VirtualTextureMaxInFlightChunks

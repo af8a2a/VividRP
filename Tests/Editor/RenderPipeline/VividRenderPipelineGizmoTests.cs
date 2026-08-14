@@ -40,6 +40,18 @@ namespace VividRP.Editor.Tests
             Assert.That(secondFrameIndex, Is.EqualTo(2));
         }
 
+        [TestCase(0, 0)]
+        [TestCase(1, 1024 * 1024)]
+        [TestCase(2048, int.MaxValue)]
+        public void ResolveVirtualTextureUploadByteBudget_ClampsMiBToSchedulerRange(
+            int budgetMiB,
+            int expectedBytes)
+        {
+            Assert.That(
+                VividRenderPipeline.ResolveVirtualTextureUploadByteBudget(budgetMiB),
+                Is.EqualTo(expectedBytes));
+        }
+
         [TestCase(CameraType.SceneView, false)]
         [TestCase(CameraType.Game, false)]
         [TestCase(CameraType.Preview, false)]

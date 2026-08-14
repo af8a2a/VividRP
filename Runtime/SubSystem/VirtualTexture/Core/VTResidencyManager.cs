@@ -654,7 +654,7 @@ namespace VividRP.Runtime
             int evictionCount = 0;
             int allocatedThisFrame = 0;
             int allocationLimit = Mathf.Min(
-                desc.MaxUploadsPerFrame,
+                desc.MaxResidencyAllocationsPerFrame,
                 Mathf.Max(0, maxNewRequests));
             int pendingMipGapSum = 0;
             int pendingMipGapMax = 0;

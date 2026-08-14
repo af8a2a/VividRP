@@ -24,6 +24,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SpaceDesc_ResolvesIndependentAllocationBudgetDefaultsAndIdentity()
+        {
+            VTStackDesc legacyStack = CreateDesc(
+                "BudgetDefaults",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3).StackDesc;
+            VTStackDesc explicitStack = CreateDesc(
+                "BudgetIdentity",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3,
+                maxResidencyAllocationsPerFrame: 5,
+                maxPrefetchAllocationsPerFrame: 1).StackDesc;
+            VTStackDesc differentResidency = CreateDesc(
+                "BudgetIdentity",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3,
+                maxResidencyAllocationsPerFrame: 4,
+                maxPrefetchAllocationsPerFrame: 1).StackDesc;
+            VTStackDesc differentPrefetch = CreateDesc(
+                "BudgetIdentity",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3,
+                maxResidencyAllocationsPerFrame: 5,
+                maxPrefetchAllocationsPerFrame: 2).StackDesc;
+
+            Assert.That(legacyStack.MaxResidencyAllocationsPerFrame, Is.EqualTo(3));
+            Assert.That(legacyStack.MaxPrefetchAllocationsPerFrame, Is.EqualTo(int.MaxValue));
+            Assert.That(explicitStack.MaxResidencyAllocationsPerFrame, Is.EqualTo(5));
+            Assert.That(explicitStack.MaxPrefetchAllocationsPerFrame, Is.EqualTo(1));
+            Assert.That(explicitStack, Is.Not.EqualTo(differentResidency));
+            Assert.That(explicitStack, Is.Not.EqualTo(differentPrefetch));
+        }
+
+        [Test]
         public void Update_PopulatesFrameBindingAndCreatesFeedbackState_ForGameCamera()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("GameCamera", cachePageCount: 2, maxUploadsPerFrame: 1);
@@ -956,6 +990,145 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_RespectsPerSpacePrefetchAllocationBudget()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "SpacePrefetchBudget",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 4,
+                neighborPrefetchCount: 2,
+                maxResidencyAllocationsPerFrame: 4,
+                maxPrefetchAllocationsPerFrame: 1));
+            var requestedCoord = new VirtualTexturePageCoord(1, 1, 0);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 4,
+                    maxPrefetchAllocationsPerFrame: 0,
+                    maxPageUploadsPerFrame: 4,
+                    maxUploadBytesPerFrame: int.MaxValue);
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, requestedCoord));
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(requests, Has.Count.EqualTo(2));
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Update_SharesGlobalPrefetchAllocationBudgetAcrossCamerasInSameFrame()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "GlobalPrefetchBudget",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 6,
+                neighborPrefetchCount: 2,
+                maxResidencyAllocationsPerFrame: 6));
+            var firstCameraObject = new GameObject("VTGlobalPrefetchCameraA");
+            var secondCameraObject = new GameObject("VTGlobalPrefetchCameraB");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera firstCamera = firstCameraObject.AddComponent<Camera>();
+                Camera secondCamera = secondCameraObject.AddComponent<Camera>();
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 6,
+                    maxPrefetchAllocationsPerFrame: 1,
+                    maxPageUploadsPerFrame: 6,
+                    maxUploadBytesPerFrame: int.MaxValue);
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    firstCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(
+                        spaceId,
+                        new VirtualTexturePageCoord(1, 1, 0)));
+                VirtualTextureSystem.Update(CreateFrameData(firstCamera, frameIndex: 73), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(2));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.EqualTo(1));
+
+                commandBuffer.Clear();
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    secondCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(
+                        spaceId,
+                        new VirtualTexturePageCoord(3, 3, 0)));
+                VirtualTextureSystem.Update(CreateFrameData(secondCamera, frameIndex: 73), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(3));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.Zero);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
+            }
+        }
+
+        [Test]
+        public void Update_SharesGlobalResidencyBudgetAcrossCamerasAndRestoresItNextFrame()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "GlobalResidencyBudget",
+                cachePageCount: 6,
+                maxUploadsPerFrame: 6,
+                maxResidencyAllocationsPerFrame: 6));
+            var firstCameraObject = new GameObject("VTGlobalResidencyCameraA");
+            var secondCameraObject = new GameObject("VTGlobalResidencyCameraB");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera firstCamera = firstCameraObject.AddComponent<Camera>();
+                Camera secondCamera = secondCameraObject.AddComponent<Camera>();
+                var firstCoord = new VirtualTexturePageCoord(0, 0, 0);
+                var secondCoord = new VirtualTexturePageCoord(3, 3, 0);
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 1,
+                    maxPrefetchAllocationsPerFrame: 0,
+                    maxPageUploadsPerFrame: 6,
+                    maxUploadBytesPerFrame: int.MaxValue);
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    firstCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, firstCoord));
+                VirtualTextureSystem.Update(CreateFrameData(firstCamera, frameIndex: 73), commandBuffer);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+                commandBuffer.Clear();
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    secondCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, secondCoord));
+                VirtualTextureSystem.Update(CreateFrameData(secondCamera, frameIndex: 73), commandBuffer);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+                commandBuffer.Clear();
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    secondCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, secondCoord));
+                VirtualTextureSystem.Update(CreateFrameData(secondCamera, frameIndex: 74), commandBuffer);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(2));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
+            }
+        }
+
+        [Test]
         public void Update_ColdStartPrefetchesNeighborsAtRequestedMip()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
@@ -1546,7 +1719,9 @@ namespace VividRP.Editor.Tests
             int virtualPageCountX = 4,
             int virtualPageCountY = 4,
             int mipCount = 3,
-            int feedbackCapacity = 32)
+            int feedbackCapacity = 32,
+            int maxResidencyAllocationsPerFrame = 0,
+            int maxPrefetchAllocationsPerFrame = 0)
         {
             return new VirtualTextureSpaceDesc(
                 name,
@@ -1559,7 +1734,9 @@ namespace VividRP.Editor.Tests
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: maxUploadsPerFrame,
                 feedbackCapacity: feedbackCapacity,
-                neighborPrefetchCount: neighborPrefetchCount);
+                neighborPrefetchCount: neighborPrefetchCount,
+                maxResidencyAllocationsPerFrame: maxResidencyAllocationsPerFrame,
+                maxPrefetchAllocationsPerFrame: maxPrefetchAllocationsPerFrame);
         }
 
         private static void AssertClassification(

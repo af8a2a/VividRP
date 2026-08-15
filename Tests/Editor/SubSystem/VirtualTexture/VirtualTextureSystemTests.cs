@@ -2091,6 +2091,66 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RequestPreparationConsumeJob_MergesAndSortsCandidates()
+        {
+            var results = new NativeArray<VTRequestPreparationResult>(3, Allocator.TempJob);
+            var candidates = new NativeList<VTPrefetchCandidate>(3, Allocator.TempJob);
+            var candidateIndices =
+                new NativeParallelHashMap<VTRequestPreparationCandidateKey, int>(
+                    3,
+                    Allocator.TempJob);
+            VirtualTextureViewId activeViewId =
+                VirtualTextureViewId.FromCameraType(CameraType.Game);
+            var mergedCoord = new VirtualTexturePageCoord(1, 1, 0);
+            var backgroundCoord = new VirtualTexturePageCoord(2, 2, 0);
+
+            try
+            {
+                results[0] = CreatePreparedCandidate(CreateAggregatedRequest(
+                    mergedCoord,
+                    hitCount: 2,
+                    cameraPriority: 5,
+                    VirtualTextureViewId.Invalid,
+                    isActiveView: false));
+                results[1] = CreatePreparedCandidate(CreateAggregatedRequest(
+                    mergedCoord,
+                    hitCount: 3,
+                    cameraPriority: 3,
+                    activeViewId,
+                    isActiveView: true));
+                results[2] = CreatePreparedCandidate(CreateAggregatedRequest(
+                    backgroundCoord,
+                    hitCount: 10,
+                    cameraPriority: 0,
+                    VirtualTextureViewId.Invalid,
+                    isActiveView: false));
+
+                new VTRequestPreparationConsumeJob
+                {
+                    PreparationResults = results,
+                    Candidates = candidates,
+                    CandidateIndices = candidateIndices,
+                    RequestCount = results.Length,
+                }.Run();
+
+                Assert.That(candidates.Length, Is.EqualTo(2));
+                VirtualTextureAggregatedFeedbackRequest merged = candidates[0].Request;
+                Assert.That(merged.PageCoord, Is.EqualTo(mergedCoord));
+                Assert.That(merged.HitCount, Is.EqualTo(5));
+                Assert.That(merged.CameraPriority, Is.EqualTo(3));
+                Assert.That(merged.IsActiveView, Is.True);
+                Assert.That(merged.ViewId, Is.EqualTo(activeViewId));
+                Assert.That(candidates[1].Request.PageCoord, Is.EqualTo(backgroundCoord));
+            }
+            finally
+            {
+                candidateIndices.Dispose();
+                candidates.Dispose();
+                results.Dispose();
+            }
+        }
+
+        [Test]
         public void Update_ReusesRequestPreparationBuffers_AndSelectsParallelPathForLargeBatches()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
@@ -2189,7 +2249,7 @@ namespace VividRP.Editor.Tests
                     Is.True);
                 Assert.That(
                     VirtualTextureSystem.GetLastRequestPreparationScheduledJobCountForTesting(),
-                    Is.EqualTo(2));
+                    Is.EqualTo(4));
                 Assert.That(
                     VirtualTextureSystem.GetLastRequestPreparationWaitCountForTesting(),
                     Is.EqualTo(1));
@@ -2262,11 +2322,45 @@ namespace VividRP.Editor.Tests
         private static VirtualTextureAggregatedFeedbackRequest CreateAggregatedRequest(
             in VirtualTexturePageCoord pageCoord)
         {
+            return CreateAggregatedRequest(
+                pageCoord,
+                hitCount: 1,
+                cameraPriority: 0,
+                VirtualTextureViewId.Invalid,
+                isActiveView: false);
+        }
+
+        private static VirtualTextureAggregatedFeedbackRequest CreateAggregatedRequest(
+            in VirtualTexturePageCoord pageCoord,
+            int hitCount,
+            int cameraPriority,
+            VirtualTextureViewId viewId,
+            bool isActiveView)
+        {
             return new VirtualTextureAggregatedFeedbackRequest(
                 spaceId: 1,
                 pageCoord,
-                hitCount: 1,
-                cameraPriority: 0);
+                hitCount,
+                cameraPriority,
+                viewId,
+                isActiveView);
+        }
+
+        private static VTRequestPreparationResult CreatePreparedCandidate(
+            in VirtualTextureAggregatedFeedbackRequest request)
+        {
+            var candidate = new VTPrefetchCandidate(
+                request
+#if VT_DEBUG
+                , request.PageCoord,
+                mipGap: 0,
+                requestKind: VTPageRequestKind.Demand
+#endif
+            );
+            return new VTRequestPreparationResult(
+                default,
+                candidate,
+                hasCandidate: true);
         }
 
         private static void AssertPhysicalAtlas(

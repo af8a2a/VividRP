@@ -214,7 +214,7 @@ namespace VividRP.Runtime
             return FinalizeResidencyProcessResult(result, rebuildPageTable);
         }
 
-        internal bool ScheduleRequestPreparation(
+        internal int ScheduleRequestPreparation(
             NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             int frameIndex,
             out JobHandle preparationHandle)

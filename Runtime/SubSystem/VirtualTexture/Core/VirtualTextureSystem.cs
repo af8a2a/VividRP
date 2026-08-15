@@ -994,7 +994,7 @@ namespace VividRP.Runtime
                             continue;
                         }
 
-                        bool scheduledParallelJob = addressSpace.ScheduleRequestPreparation(
+                        int scheduledJobCount = addressSpace.ScheduleRequestPreparation(
                             spaceRequests,
                             frameIndex,
                             out JobHandle preparationHandle);
@@ -1003,14 +1003,14 @@ namespace VividRP.Runtime
                             spaceRequests,
                             assignedSpaceBudget,
                             remainingSpaceRequestBudget));
-                        if (scheduledParallelJob)
+                        if (scheduledJobCount > 0)
                         {
                             hasScheduledPreparationJobs = true;
                             combinedPreparationHandle = JobHandle.CombineDependencies(
                                 combinedPreparationHandle,
                                 preparationHandle);
 #if UNITY_INCLUDE_TESTS
-                            s_LastRequestPreparationScheduledJobCount += 1;
+                            s_LastRequestPreparationScheduledJobCount += scheduledJobCount;
 #endif
                         }
                     }
@@ -1072,8 +1072,8 @@ namespace VividRP.Runtime
 
                             if (addressSpace.Descriptor.NeighborPrefetchCount > 0)
                             {
-                                // Copy the Demand-produced, refinement-merged seeds. The
-                                // manager rebuilds its list on the next Demand invocation.
+                                // Copy the refinement-merged seeds produced by the completed
+                                // preparation chain. Its Consume job rebuilds them next time.
                                 for (int candidateIndex = 0;
                                      candidateIndex < addressSpace.PrefetchCandidateCount;
                                      candidateIndex++)

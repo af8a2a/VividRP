@@ -12,16 +12,11 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string VisibilityBufferGBufferResolveShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve";
 
         private static readonly int VisibilityBufferId = Shader.PropertyToID("_VisibilityBuffer");
-        private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int VisibilityBufferScaleBiasId = Shader.PropertyToID("_VisibilityBufferScaleBias");
-        private static readonly int DepthTextureScaleBiasId = Shader.PropertyToID("_DepthTextureScaleBias");
 
         [RenderGraphResource(Name = "VisibilityBuffer", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VisibilityBuffer;
-
-        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_DepthTexture;
-
+        
         [RenderGraphResource(
             Name = "GBuffer0",
             Access = AccessFlags.ReadWrite,
@@ -77,8 +72,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VisibilityBuffer = RenderGraphTexture.CreateInput("VisibilityBuffer", GraphicsFormat.R32G32_UInt);
             m_VisibilityBuffer.desc.FilterMode = FilterMode.Point;
 
-            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_DepthTexture.desc.FilterMode = FilterMode.Point;
 
             m_GBuffer0 = RenderGraphTexture.CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer1 = RenderGraphTexture.CreateColorTarget("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
@@ -149,8 +142,6 @@ namespace VividRP.Runtime.RenderPass.Core
             if (visibilityTexture == null)
                 return;
 
-            var depthTexture = m_DepthTexture.innerHandle.ResolveTexture() ?? Texture2D.whiteTexture;
-
             VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance
                 ? VividGPUDrivenSystem.instance
                 : null;
@@ -178,9 +169,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_DrawProperties.Clear();
             m_DrawProperties.SetTexture(VisibilityBufferId, visibilityTexture);
-            m_DrawProperties.SetTexture(DepthTextureId, depthTexture);
             m_DrawProperties.SetVector(VisibilityBufferScaleBiasId, m_VisibilityBuffer.innerHandle.GetScaleBias());
-            m_DrawProperties.SetVector(DepthTextureScaleBiasId, m_DepthTexture.innerHandle.GetScaleBias());
 
             BindGBufferTargets(nativeCmd);
             CoreUtils.DrawFullScreen(nativeCmd, m_Material, m_DrawProperties, 0);

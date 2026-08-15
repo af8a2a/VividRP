@@ -13,7 +13,7 @@ namespace VividRP.Editor.Tests
     public sealed class VisibilityBufferGBufferResolvePassTests
     {
         [Test]
-        public void Initialize_RegistersVisibilityDepthInputsAndGBufferOutputs()
+        public void Initialize_RegistersVisibilityAndSchedulingDepthInputsAndGBufferOutputs()
         {
             IRenderPass renderPass = new VisibilityBufferGBufferResolvePass();
 

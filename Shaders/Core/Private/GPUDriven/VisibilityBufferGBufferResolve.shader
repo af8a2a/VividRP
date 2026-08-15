@@ -37,14 +37,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
 
             TYPED_TEXTURE2D(float2, _VisibilityBuffer);
-            TEXTURE2D(_DepthTexture);
-            SAMPLER(sampler_DepthTexture);
 
             StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
             ByteAddressBuffer _SharedIndexBuffer;
 
             float4 _VisibilityBufferScaleBias;
-            float4 _DepthTextureScaleBias;
 
             struct Attributes
             {
@@ -83,15 +80,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             float2 ApplyScaleBias(float2 uv, float4 scaleBias)
             {
                 return uv * scaleBias.xy + scaleBias.zw;
-            }
-
-            bool IsSceneDepthValid(float sceneDepth)
-            {
-                #if UNITY_REVERSED_Z
-                return sceneDepth > 1e-6f;
-                #else
-                return sceneDepth < 0.999999f;
-                #endif
             }
 
             Varyings Vert(Attributes input)
@@ -238,21 +226,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             bool TryLoadVisibilityValue(
                 Varyings input,
-                out VividVisibilityBufferValue visibilityBufferValue,
-                out float sceneDepth)
+                out VividVisibilityBufferValue visibilityBufferValue)
             {
-                sceneDepth = 1.0f;
                 float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
                 uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
                 if (!IsPackedVisibilityBufferValueValid(packedValue))
-                {
-                    visibilityBufferValue = (VividVisibilityBufferValue) 0;
-                    return false;
-                }
-
-                float2 depthUv = ApplyScaleBias(input.uv, _DepthTextureScaleBias);
-                sceneDepth = SAMPLE_TEXTURE2D_LOD(_DepthTexture, sampler_PointClamp, depthUv, 0).r;
-                if (!IsSceneDepthValid(sceneDepth))
                 {
                     visibilityBufferValue = (VividVisibilityBufferValue) 0;
                     return false;
@@ -288,25 +266,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 result.clipPosition1 = TransformWorldToHClip(result.positionWS1);
                 result.clipPosition2 = TransformWorldToHClip(result.positionWS2);
                 return result;
-            }
-
-            float ResolveVisibilityDepth(
-                const TriangleData triangleData,
-                const VividBarycentricDerivatives barycentric)
-            {
-                float4 clipPosition = InterpolateWithBarycentricNoDerivatives(
-                    barycentric,
-                    triangleData.clipPosition0,
-                    triangleData.clipPosition1,
-                    triangleData.clipPosition2);
-
-                return saturate(clipPosition.z / max(abs(clipPosition.w), 1e-6f));
-            }
-
-            bool IsVisibilitySampleVisible(float visibilityDepth, float sceneDepth)
-            {
-                float depthTolerance = max(1e-4f, fwidth(visibilityDepth) * 2.0f);
-                return abs(visibilityDepth - sceneDepth) <= depthTolerance;
             }
 
             #define VIVID_MAX_TERRAIN_LAYERS 8u
@@ -615,9 +574,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             VividGBufferFragmentOutput Frag(Varyings input)
             {
-                float sceneDepth;
                 VividVisibilityBufferValue visibilityBufferValue;
-                if (!TryLoadVisibilityValue(input, visibilityBufferValue, sceneDepth))
+                if (!TryLoadVisibilityValue(input, visibilityBufferValue))
                 {
                     discard;
                     return (VividGBufferFragmentOutput) 0;
@@ -633,13 +591,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     pixelNdc,
                     _ScreenSize.zw
                 );
-
-                float visibilityDepth = ResolveVisibilityDepth(triangleData, barycentric);
-                if (!IsVisibilitySampleVisible(visibilityDepth, sceneDepth))
-                {
-                    discard;
-                    return (VividGBufferFragmentOutput) 0;
-                }
 
                 VividGBufferSurfaceData surfaceData = ResolveSurfaceData(triangleData, barycentric, input.positionCS);
                 return PackVividGBufferSurfaceData(surfaceData);

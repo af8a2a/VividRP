@@ -7,6 +7,11 @@ struct TerrainRuntimeVirtualTextureRecordGPUData
     uint LevelCount;
     uint Revision;
     uint Padding0;
+    float4 WorldToTerrainUvX;
+    float4 WorldToTerrainUvY;
+    float4 WorldToTerrainLocalY;
+    float2 LocalHeightRange;
+    float2 Padding1;
 };
 
 struct TerrainRuntimeVirtualTextureLevelGPUData

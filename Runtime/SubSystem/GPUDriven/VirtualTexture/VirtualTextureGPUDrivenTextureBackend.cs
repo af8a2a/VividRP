@@ -1310,12 +1310,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     continue;
 
                 int levelStartIndex = recordIndex * TerrainRuntimeVirtualTextureClipmap.LevelCount;
-                records[recordIndex] = new TerrainRuntimeVirtualTextureRecordGPUData
-                {
-                    LevelStartIndex = (uint)levelStartIndex,
-                    LevelCount = TerrainRuntimeVirtualTextureClipmap.LevelCount,
-                    Revision = clipmap.Revision,
-                };
+                records[recordIndex] = clipmap.CreateGPUData((uint)levelStartIndex);
                 for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
                     levels[levelStartIndex + levelIndex] = clipmap.Levels[levelIndex].CreateGPUData();
             }

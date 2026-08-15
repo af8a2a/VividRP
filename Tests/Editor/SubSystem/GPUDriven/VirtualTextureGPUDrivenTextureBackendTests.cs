@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
@@ -114,6 +115,12 @@ namespace VividRP.Editor.Tests
             Assert.That(physicalAtlas.dimension, Is.EqualTo(TextureDimension.Tex2D));
             Assert.That(physicalAtlas.width, Is.EqualTo(3128));
             Assert.That(physicalAtlas.height, Is.EqualTo(3128));
+        }
+
+        [Test]
+        public void TerrainRVTRecordGPUData_MatchesExpandedShaderLayout()
+        {
+            Assert.That(Marshal.SizeOf<TerrainRuntimeVirtualTextureRecordGPUData>(), Is.EqualTo(80));
         }
 
         [Test]

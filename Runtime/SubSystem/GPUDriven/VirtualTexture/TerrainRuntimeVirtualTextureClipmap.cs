@@ -14,6 +14,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal uint LevelCount;
         internal uint Revision;
         internal uint Padding0;
+        internal float4 WorldToTerrainUvX;
+        internal float4 WorldToTerrainUvY;
+        internal float4 WorldToTerrainLocalY;
+        internal float2 LocalHeightRange;
+        internal float2 Padding1;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -489,6 +494,41 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal uint CreatedUpdate { get; set; }
 
         internal Level[] Levels { get; }
+
+        internal TerrainRuntimeVirtualTextureRecordGPUData CreateGPUData(uint levelStartIndex)
+        {
+            Matrix4x4 worldToLocal = m_Terrain.transform.worldToLocalMatrix;
+            Vector3 terrainSize = m_TerrainData.Size;
+            float inverseSizeX = Mathf.Abs(terrainSize.x) > Mathf.Epsilon
+                ? 1.0f / terrainSize.x
+                : 0.0f;
+            float inverseSizeZ = Mathf.Abs(terrainSize.z) > Mathf.Epsilon
+                ? 1.0f / terrainSize.z
+                : 0.0f;
+            Bounds localBounds = m_TerrainData.LocalBounds;
+            return new TerrainRuntimeVirtualTextureRecordGPUData
+            {
+                LevelStartIndex = levelStartIndex,
+                LevelCount = TerrainRuntimeVirtualTextureClipmap.LevelCount,
+                Revision = Revision,
+                WorldToTerrainUvX = new float4(
+                    worldToLocal.m00 * inverseSizeX,
+                    worldToLocal.m01 * inverseSizeX,
+                    worldToLocal.m02 * inverseSizeX,
+                    worldToLocal.m03 * inverseSizeX),
+                WorldToTerrainUvY = new float4(
+                    worldToLocal.m20 * inverseSizeZ,
+                    worldToLocal.m21 * inverseSizeZ,
+                    worldToLocal.m22 * inverseSizeZ,
+                    worldToLocal.m23 * inverseSizeZ),
+                WorldToTerrainLocalY = new float4(
+                    worldToLocal.m10,
+                    worldToLocal.m11,
+                    worldToLocal.m12,
+                    worldToLocal.m13),
+                LocalHeightRange = new float2(localBounds.min.y, localBounds.max.y),
+            };
+        }
 
         internal void UpdateCamera(Vector3 cameraPosition, List<VTPageRegion> flushRegions)
         {

@@ -16,6 +16,15 @@ namespace VividRP.Runtime
         PhysicalPageId = 3,
     }
 
+    public enum TerrainRuntimeVirtualTextureDebugMode
+    {
+        None = 0,
+        [InspectorName("Clipmap Level")]
+        ClipmapLevel = 1,
+        [InspectorName("Page Residency")]
+        PageResidency = 2,
+    }
+
     public enum VirtualTextureVisualizationMode
     {
         None = 0,
@@ -205,6 +214,10 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private VirtualTextureDebugMode m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
+
+        [SerializeField]
+        private TerrainRuntimeVirtualTextureDebugMode m_TerrainRuntimeVirtualTextureDebugMode =
+            TerrainRuntimeVirtualTextureDebugMode.None;
 
         [SerializeField]
         private VirtualTextureVisualizationMode m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.None;
@@ -477,6 +490,13 @@ namespace VividRP.Runtime
             set => m_VirtualTextureDebugMode = value;
         }
 
+        internal TerrainRuntimeVirtualTextureDebugMode terrainRuntimeVirtualTextureDebugMode
+        {
+            get => NormalizeTerrainRuntimeVirtualTextureDebugMode(m_TerrainRuntimeVirtualTextureDebugMode);
+            set => m_TerrainRuntimeVirtualTextureDebugMode =
+                NormalizeTerrainRuntimeVirtualTextureDebugMode(value);
+        }
+
         internal VirtualTextureVisualizationMode virtualTextureVisualizationMode
         {
             get => NormalizeVirtualTextureVisualizationMode(m_VirtualTextureVisualizationMode);
@@ -602,6 +622,7 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_ReflectionProbeAtlasExposure, 0f)
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
+            || terrainRuntimeVirtualTextureDebugMode != TerrainRuntimeVirtualTextureDebugMode.None
             || virtualTextureVisualizationMode != VirtualTextureVisualizationMode.None
             || virtualTextureAdaptiveMipBiasOverride >= 0f
             || virtualTextureFeedbackOverflowCountOverride >= 0
@@ -657,6 +678,7 @@ namespace VividRP.Runtime
             m_ReflectionProbeAtlasExposure = 0f;
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
+            m_TerrainRuntimeVirtualTextureDebugMode = TerrainRuntimeVirtualTextureDebugMode.None;
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.None;
             m_VirtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
             m_VirtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
@@ -682,6 +704,16 @@ namespace VividRP.Runtime
                     and <= VirtualTextureVisualizationMode.ResolvedWorldPosition
                     ? value
                     : VirtualTextureVisualizationMode.None;
+        }
+
+        private static TerrainRuntimeVirtualTextureDebugMode
+            NormalizeTerrainRuntimeVirtualTextureDebugMode(
+                TerrainRuntimeVirtualTextureDebugMode value)
+        {
+            return value is >= TerrainRuntimeVirtualTextureDebugMode.None
+                and <= TerrainRuntimeVirtualTextureDebugMode.PageResidency
+                    ? value
+                    : TerrainRuntimeVirtualTextureDebugMode.None;
         }
 
         private static VisibilityBufferDebugVisualizationMode NormalizeVisibilityBufferDebugMode(
@@ -1022,6 +1054,12 @@ namespace VividRP.Runtime
             {
                 name = "Mode",
                 tooltip = "Select the virtual texture debug visualization mode."
+            };
+
+            public static readonly NameAndTooltip TerrainRuntimeVirtualTextureDebugMode = new()
+            {
+                name = "Terrain RVT Visualization",
+                tooltip = "Clipmap Level uses red/green/blue for levels 0/1/2 and gray for Composite. Page Residency uses green for an exact hit, yellow for a coarser RVT fallback, red for a missing eligible page, and gray for intentional Composite fallback."
             };
 
             public static readonly NameAndTooltip VirtualTextureVisualizationMode = new()
@@ -1499,6 +1537,10 @@ namespace VividRP.Runtime
                     Strings.VirtualTextureDebugMode,
                     () => data.virtualTextureDebugMode,
                     value => data.virtualTextureDebugMode = value));
+                foldout.children.Add(CreateEnumField(
+                    Strings.TerrainRuntimeVirtualTextureDebugMode,
+                    () => data.terrainRuntimeVirtualTextureDebugMode,
+                    value => data.terrainRuntimeVirtualTextureDebugMode = value));
                 foldout.children.Add(CreateEnumField(
                     Strings.VirtualTextureVisualizationMode,
                     () => data.virtualTextureVisualizationMode,

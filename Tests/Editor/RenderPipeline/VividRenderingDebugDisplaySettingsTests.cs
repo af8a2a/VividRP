@@ -79,6 +79,7 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Slider"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Terrain RVT Visualization"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Target"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Layer"), Is.Not.Null);
@@ -141,6 +142,8 @@ namespace VividRP.Editor.Tests
         public void Reset_RestoresVirtualTextureDebugDefaults()
         {
             VividRenderingDebugDisplaySettings.Data.virtualTextureDebugMode = VirtualTextureDebugMode.PhysicalPageId;
+            VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode =
+                TerrainRuntimeVirtualTextureDebugMode.PageResidency;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode = VirtualTextureVisualizationMode.PageTableResidency;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.FirstPublic;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.Mask;
@@ -153,6 +156,9 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.Reset();
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.virtualTextureDebugMode, Is.EqualTo(VirtualTextureDebugMode.None));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode,
+                Is.EqualTo(TerrainRuntimeVirtualTextureDebugMode.None));
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode,
                 Is.EqualTo(VirtualTextureVisualizationMode.None));
@@ -177,6 +183,34 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode,
                 Is.EqualTo(VirtualTextureStatsViewMode.Auto));
+        }
+
+        [Test]
+        public void TerrainRuntimeVirtualTextureVisualizationWidget_ControlsAndNormalizesMode()
+        {
+            var widget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Virtual Texture -> Terrain RVT Visualization")
+                as DebugUI.EnumField;
+
+            Assert.That(widget, Is.Not.Null);
+            int residencyIndex = Array.IndexOf(
+                widget.enumValues,
+                (int)TerrainRuntimeVirtualTextureDebugMode.PageResidency);
+            Assert.That(residencyIndex, Is.GreaterThanOrEqualTo(0));
+
+            widget.setIndex(residencyIndex);
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode,
+                Is.EqualTo(TerrainRuntimeVirtualTextureDebugMode.PageResidency));
+            Assert.That(widget.getter(), Is.EqualTo((int)TerrainRuntimeVirtualTextureDebugMode.PageResidency));
+
+            VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode =
+                (TerrainRuntimeVirtualTextureDebugMode)99;
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode,
+                Is.EqualTo(TerrainRuntimeVirtualTextureDebugMode.None));
         }
 
         [Test]
@@ -646,6 +680,17 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode =
                 VirtualTextureVisualizationMode.PageTableResidency;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksTerrainRuntimeVirtualTextureVisualization()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode =
+                TerrainRuntimeVirtualTextureDebugMode.ClipmapLevel;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

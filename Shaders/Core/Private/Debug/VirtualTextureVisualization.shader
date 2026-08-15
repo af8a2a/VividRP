@@ -18,6 +18,7 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
 
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/TerrainRuntimeVirtualTextureSampling.hlsl"
 
             #define VIVID_VT_VISUALIZATION_NONE 0
             #define VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS 2
@@ -31,6 +32,10 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             #define VIVID_VT_VISUALIZATION_LAYER_NORMAL 1
             #define VIVID_VT_VISUALIZATION_LAYER_MASK 2
 
+            #define VIVID_TERRAIN_RVT_VISUALIZATION_NONE 0
+            #define VIVID_TERRAIN_RVT_VISUALIZATION_CLIPMAP_LEVEL 1
+            #define VIVID_TERRAIN_RVT_VISUALIZATION_PAGE_RESIDENCY 2
+
             TEXTURE2D(_SourceTexture);
             SAMPLER(sampler_SourceTexture);
             TEXTURE2D(_DepthTexture);
@@ -42,6 +47,7 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             int _VTVisualizationAvailable;
             int _VTVisualizationSpaceId;
             float _VTVisualizationWorldPageSize;
+            int _TerrainRVTVisualizationMode;
 
             struct Attributes
             {
@@ -101,6 +107,206 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                 float3 dark = float3(0.12, 0.015, 0.03);
                 float3 bright = float3(0.65, 0.04, 0.18);
                 return float4(lerp(dark, bright, saturate(checker * 0.55 + diagonal * 0.35)), 1.0);
+            }
+
+            bool TryResolveTerrainRVTRecord(
+                float3 worldPosition,
+                out uint recordIndex,
+                out float2 terrainUv)
+            {
+                float4 homogeneousWorldPosition = float4(worldPosition, 1.0);
+                [loop]
+                for (uint candidateIndex = 0u;
+                     candidateIndex < _VividTerrainRVTRecordCount;
+                     candidateIndex++)
+                {
+                    TerrainRuntimeVirtualTextureRecordGPUData recordData =
+                        _VividTerrainRVTRecords[candidateIndex];
+                    if (recordData.LevelCount == 0u)
+                        continue;
+
+                    float2 candidateUv = float2(
+                        dot(recordData.WorldToTerrainUvX, homogeneousWorldPosition),
+                        dot(recordData.WorldToTerrainUvY, homogeneousWorldPosition));
+                    float localY = dot(
+                        recordData.WorldToTerrainLocalY,
+                        homogeneousWorldPosition);
+                    float heightPadding = max(
+                        (recordData.LocalHeightRange.y - recordData.LocalHeightRange.x) * 0.002,
+                        0.05);
+                    bool insideUv = all(candidateUv >= 0.0) && all(candidateUv <= 1.0);
+                    bool insideHeight = localY >= recordData.LocalHeightRange.x - heightPadding
+                        && localY <= recordData.LocalHeightRange.y + heightPadding;
+                    if (!insideUv || !insideHeight)
+                        continue;
+
+                    recordIndex = candidateIndex;
+                    terrainUv = candidateUv;
+                    return true;
+                }
+
+                recordIndex = 0u;
+                terrainUv = 0.0.xx;
+                return false;
+            }
+
+            void EvaluateTerrainRVTLevelState(
+                TerrainRuntimeVirtualTextureLevelGPUData levelData,
+                float2 terrainUv,
+                float2 terrainUvDdx,
+                float2 terrainUvDdy,
+                out bool eligible,
+                out bool resident,
+                out float blendWeight,
+                out float pageGridWeight)
+            {
+                eligible = false;
+                resident = false;
+                blendWeight = 0.0;
+                pageGridWeight = 0.0;
+
+                float2 totalPageCount = max((float2)levelData.TotalPageCount, 1.0.xx);
+                float2 scaledPage = saturate(terrainUv) * totalPageCount;
+                scaledPage = min(scaledPage, totalPageCount - 1e-5);
+                int2 logicalPage = (int2)floor(scaledPage);
+                int2 localPage = logicalPage - levelData.WindowPageOrigin;
+                if (any(localPage < 0) || any(localPage >= 8))
+                    return;
+
+                float2 totalTexelCount = totalPageCount * VT_PAGE_SIZE;
+                float texelFootprint = max(
+                    length(terrainUvDdx * totalTexelCount),
+                    length(terrainUvDdy * totalTexelCount));
+                float detailWeight = saturate(2.0 - texelFootprint);
+                float2 windowPosition = scaledPage - (float2)levelData.WindowPageOrigin;
+                float edgeDistance = min(
+                    min(windowPosition.x, windowPosition.y),
+                    min(8.0 - windowPosition.x, 8.0 - windowPosition.y));
+                blendWeight = min(detailWeight, saturate(edgeDistance));
+                if (blendWeight <= 0.0)
+                    return;
+
+                eligible = true;
+                if (_TerrainRVTVisualizationMode
+                    == VIVID_TERRAIN_RVT_VISUALIZATION_CLIPMAP_LEVEL)
+                {
+                    float2 pageUv = frac(scaledPage);
+                    float pageEdge = min(
+                        min(pageUv.x, pageUv.y),
+                        min(1.0 - pageUv.x, 1.0 - pageUv.y));
+                    pageGridWeight = 1.0 - saturate(pageEdge * VT_PAGE_SIZE * 0.5);
+                }
+
+                uint2 ringPage = (uint2)logicalPage & 7u;
+                uint2 atlasPage = levelData.AtlasPageOrigin + ringPage;
+                float2 virtualUv =
+                    (float2(atlasPage) + frac(scaledPage))
+                    / float2(VT_VIRTUAL_PAGE_COUNT_X, VT_VIRTUAL_PAGE_COUNT_Y);
+                VTResolvedAddress resolved = VTResolveAddress(virtualUv, 0u);
+                resident = resolved.resident && resolved.valid && resolved.resolvedMip == 0u;
+            }
+
+            float3 TerrainRVTClipmapLevelColor(uint levelIndex, float pageGridWeight)
+            {
+                float3 levelColor = levelIndex == 0u
+                    ? float3(1.0, 0.12, 0.04)
+                    : levelIndex == 1u
+                        ? float3(0.08, 1.0, 0.15)
+                        : float3(0.05, 0.35, 1.0);
+                return levelColor * lerp(1.0, 0.15, pageGridWeight);
+            }
+
+            float3 EvaluateTerrainRVTColor(uint recordIndex, float2 terrainUv)
+            {
+                TerrainRuntimeVirtualTextureRecordGPUData recordData =
+                    _VividTerrainRVTRecords[recordIndex];
+                float2 terrainUvDdx = ddx(terrainUv);
+                float2 terrainUvDdy = ddy(terrainUv);
+                int finestEligibleLevel = -1;
+                int finestResidentLevel = -1;
+                float3 clipmapLevelColor = 0.15.xxx;
+
+                [unroll]
+                for (int reverseLevelIndex = 2; reverseLevelIndex >= 0; reverseLevelIndex--)
+                {
+                    if ((uint)reverseLevelIndex >= recordData.LevelCount)
+                        continue;
+
+                    TerrainRuntimeVirtualTextureLevelGPUData levelData =
+                        _VividTerrainRVTLevels[
+                            recordData.LevelStartIndex + (uint)reverseLevelIndex];
+                    bool eligible;
+                    bool resident;
+                    float blendWeight;
+                    float pageGridWeight;
+                    EvaluateTerrainRVTLevelState(
+                        levelData,
+                        terrainUv,
+                        terrainUvDdx,
+                        terrainUvDdy,
+                        eligible,
+                        resident,
+                        blendWeight,
+                        pageGridWeight);
+                    if (eligible)
+                        finestEligibleLevel = reverseLevelIndex;
+                    if (!resident)
+                        continue;
+
+                    finestResidentLevel = reverseLevelIndex;
+                    if (_TerrainRVTVisualizationMode
+                        == VIVID_TERRAIN_RVT_VISUALIZATION_CLIPMAP_LEVEL)
+                    {
+                        clipmapLevelColor = lerp(
+                            clipmapLevelColor,
+                            TerrainRVTClipmapLevelColor(
+                                (uint)reverseLevelIndex,
+                                pageGridWeight),
+                            blendWeight);
+                    }
+                }
+
+                if (_TerrainRVTVisualizationMode
+                    == VIVID_TERRAIN_RVT_VISUALIZATION_CLIPMAP_LEVEL)
+                {
+                    return clipmapLevelColor;
+                }
+
+                return finestEligibleLevel < 0
+                    ? 0.15.xxx
+                    : finestResidentLevel < 0
+                        ? float3(1.0, 0.04, 0.02)
+                        : finestResidentLevel == finestEligibleLevel
+                            ? float3(0.05, 1.0, 0.12)
+                            : float3(1.0, 0.72, 0.04);
+            }
+
+            float4 EvaluateTerrainRVTVisualization(float2 pixelUv, float4 sourceColor)
+            {
+                float2 depthUv = ApplyScaleBias(pixelUv, _DepthTextureScaleBias);
+                float deviceDepth = SAMPLE_TEXTURE2D_LOD(
+                    _DepthTexture,
+                    sampler_PointClamp,
+                    depthUv,
+                    0.0).r;
+                if (IsSkyDepth(deviceDepth))
+                    return sourceColor;
+
+                float3 worldPosition = ComputeWorldSpacePosition(
+                    pixelUv,
+                    deviceDepth,
+                    UNITY_MATRIX_I_VP);
+                uint recordIndex;
+                float2 terrainUv;
+                if (!TryResolveTerrainRVTRecord(
+                        worldPosition,
+                        recordIndex,
+                        terrainUv))
+                {
+                    return sourceColor;
+                }
+
+                return float4(EvaluateTerrainRVTColor(recordIndex, terrainUv), 1.0);
             }
 
             float4 SamplePhysicalAtlas(uint physicalGroup, float2 atlasUv, out uint2 dimensions)
@@ -370,6 +576,18 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             {
                 float2 sourceUv = ApplyScaleBias(input.uv, _SourceTextureScaleBias);
                 float4 sourceColor = SAMPLE_TEXTURE2D(_SourceTexture, sampler_SourceTexture, sourceUv);
+
+                if (_TerrainRVTVisualizationMode != VIVID_TERRAIN_RVT_VISUALIZATION_NONE)
+                {
+                    if (_VTVisualizationAvailable == 0
+                        || _VividTerrainRVTEnabled == 0u
+                        || _VividTerrainRVTRecordCount == 0u)
+                    {
+                        return EvaluateUnavailableColor(input.uv);
+                    }
+
+                    return EvaluateTerrainRVTVisualization(input.uv, sourceColor);
+                }
 
                 if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_NONE)
                     return sourceColor;

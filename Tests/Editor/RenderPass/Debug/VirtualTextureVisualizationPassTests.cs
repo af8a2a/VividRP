@@ -91,6 +91,38 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveTerrainRVTVisualizationMode_UsesRenderingDebuggerValueAndDefault()
+        {
+            Assert.That(
+                VirtualTextureVisualizationPass.ResolveTerrainRVTVisualizationMode(null),
+                Is.EqualTo(TerrainRuntimeVirtualTextureDebugMode.None));
+
+            var resolved = VirtualTextureVisualizationPass.ResolveTerrainRVTVisualizationMode(
+                new VividRenderingDebugSettingsData
+                {
+                    terrainRuntimeVirtualTextureDebugMode =
+                        TerrainRuntimeVirtualTextureDebugMode.PageResidency,
+                });
+
+            Assert.That(resolved, Is.EqualTo(TerrainRuntimeVirtualTextureDebugMode.PageResidency));
+        }
+
+        [Test]
+        public void ResolveVisualizationTarget_TerrainRVTForcesGPUDrivenSpace()
+        {
+            Assert.That(
+                VirtualTextureVisualizationPass.ResolveVisualizationTarget(
+                    VirtualTextureVisualizationTarget.FirstPublic,
+                    TerrainRuntimeVirtualTextureDebugMode.ClipmapLevel),
+                Is.EqualTo(VirtualTextureVisualizationTarget.GPUDriven));
+            Assert.That(
+                VirtualTextureVisualizationPass.ResolveVisualizationTarget(
+                    VirtualTextureVisualizationTarget.FirstPublic,
+                    TerrainRuntimeVirtualTextureDebugMode.None),
+                Is.EqualTo(VirtualTextureVisualizationTarget.FirstPublic));
+        }
+
+        [Test]
         public void Prepare_UsesRenderingDebuggerForAllVisualizationSettings()
         {
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode =
@@ -100,6 +132,8 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer =
                 VirtualTextureVisualizationLayer.Mask;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationWorldPageSize = 24f;
+            VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode =
+                TerrainRuntimeVirtualTextureDebugMode.ClipmapLevel;
             var pass = new VirtualTextureVisualizationPass();
 
             pass.Prepare(new ContextContainer());
@@ -116,6 +150,11 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 GetField<float>(pass, "m_ResolvedVisualizationWorldPageSize"),
                 Is.EqualTo(24f));
+            Assert.That(
+                GetField<TerrainRuntimeVirtualTextureDebugMode>(
+                    pass,
+                    "m_ResolvedTerrainRVTVisualizationMode"),
+                Is.EqualTo(TerrainRuntimeVirtualTextureDebugMode.ClipmapLevel));
         }
 
         [Test]

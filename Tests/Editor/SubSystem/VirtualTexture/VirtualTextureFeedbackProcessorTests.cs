@@ -486,6 +486,39 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void NativeAggregator_ScheduleDefersParallelCompletionUntilComplete()
+        {
+            var requests = new ulong[65];
+            for (int requestIndex = 0; requestIndex < requests.Length; requestIndex++)
+            {
+                requests[requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    1,
+                    new VirtualTexturePageCoord(requestIndex, 0, 0));
+            }
+
+            var batches = new List<VirtualTextureFeedbackBatch>
+            {
+                new(CameraType.Game, requests, requests.Length, 12),
+            };
+            using var aggregator = new VTFeedbackNativeAggregator();
+
+            aggregator.Schedule(
+                batches,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                default);
+
+            Assert.That(aggregator.LastUsedParallelJobs, Is.True);
+            Assert.That(aggregator.HasOutstandingJobs, Is.True);
+
+            aggregator.Complete();
+
+            Assert.That(aggregator.HasOutstandingJobs, Is.False);
+            Assert.That(aggregator.AggregatedRequests.Length, Is.EqualTo(requests.Length));
+            Assert.That(aggregator.SpaceRanges.Length, Is.EqualTo(1));
+        }
+
+        [Test]
         public void ShouldScheduleReadback_SkipsStableEmptyStaticView_UntilHeartbeatInterval()
         {
             var signature = new VirtualTextureFeedbackViewSignature(

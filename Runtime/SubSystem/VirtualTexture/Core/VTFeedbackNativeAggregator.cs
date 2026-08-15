@@ -478,7 +478,19 @@ namespace VividRP.Runtime
 
         internal bool LastUsedParallelJobs => m_LastUsedParallelJobs;
 
+        internal bool HasOutstandingJobs => m_HasOutstandingJobs;
+
         internal void Aggregate(
+            IReadOnlyList<VirtualTextureFeedbackBatch> batches,
+            VirtualTextureViewId priorityViewId,
+            VirtualTextureViewId activeViewId,
+            CameraType activeCameraType)
+        {
+            Schedule(batches, priorityViewId, activeViewId, activeCameraType);
+            Complete();
+        }
+
+        internal void Schedule(
             IReadOnlyList<VirtualTextureFeedbackBatch> batches,
             VirtualTextureViewId priorityViewId,
             VirtualTextureViewId activeViewId,
@@ -617,8 +629,6 @@ namespace VividRP.Runtime
                     GroupedRequests = m_GroupedRequests.AsDeferredJobArray(),
                     SpaceRanges = m_SpaceRanges,
                 }.Schedule(groupedSortHandle));
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackGroupBySpaceMarker.Auto())
-                    CompleteOutstandingJobs();
             }
             catch
             {
@@ -633,6 +643,13 @@ namespace VividRP.Runtime
 
                 throw;
             }
+        }
+
+        internal void Complete()
+        {
+            ThrowIfDisposed();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackGroupBySpaceMarker.Auto())
+                CompleteOutstandingJobs();
         }
 
         internal bool TryGetRequestsForSpace(

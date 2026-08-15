@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -152,10 +153,11 @@ namespace VividRP.Runtime
 
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
-        internal int ResidencyClassificationCapacity => m_ResidencyManager.ClassificationCapacity;
+        internal int RequestPreparationCapacity =>
+            m_ResidencyManager.RequestPreparationCapacity;
 
-        internal bool LastResidencyClassificationUsedParallelJob =>
-            m_ResidencyManager.LastClassificationUsedParallelJob;
+        internal bool LastRequestPreparationUsedParallelJob =>
+            m_ResidencyManager.LastRequestPreparationUsedParallelJob;
 
         internal int PrefetchCandidateCount => m_ResidencyManager.PrefetchCandidateCount;
 
@@ -209,6 +211,55 @@ namespace VividRP.Runtime
                 frameIndex,
                 maxNewRequests);
 
+            return FinalizeResidencyProcessResult(result, rebuildPageTable);
+        }
+
+        internal bool ScheduleRequestPreparation(
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
+            int frameIndex,
+            out JobHandle preparationHandle)
+        {
+            return m_ResidencyManager.ScheduleRequestPreparation(
+                requests,
+                frameIndex,
+                out preparationHandle);
+        }
+
+        internal void CompleteRequestPreparation()
+        {
+            m_ResidencyManager.CompleteRequestPreparation();
+        }
+
+        internal void TouchPreparedResidentRequests(
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
+            int frameIndex)
+        {
+            m_ResidencyManager.TouchPreparedResidentRequests(requests, frameIndex);
+        }
+
+        internal VTResidencyProcessResult ProcessPreparedRequests(
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
+            VirtualTextureViewId activeViewId,
+            int frameIndex,
+            int maxNewRequests = int.MaxValue,
+            bool rebuildPageTable = true)
+        {
+            VTResidencyProcessResult result = m_ResidencyManager.ProcessPreparedRequests(
+                Descriptor,
+                m_MipOffsets,
+                SpaceId,
+                requests,
+                activeViewId,
+                frameIndex,
+                maxNewRequests);
+
+            return FinalizeResidencyProcessResult(result, rebuildPageTable);
+        }
+
+        private VTResidencyProcessResult FinalizeResidencyProcessResult(
+            in VTResidencyProcessResult result,
+            bool rebuildPageTable)
+        {
             if (!rebuildPageTable)
                 return result;
 
@@ -457,6 +508,7 @@ namespace VividRP.Runtime
 
         internal int ClearRuntimeState()
         {
+            m_ResidencyManager.DiscardRequestPreparation();
             RetireProducerRequests(Array.Empty<VTRequest>());
             m_LocalUploadCandidates.Clear();
             m_ProducerTasks.Clear();

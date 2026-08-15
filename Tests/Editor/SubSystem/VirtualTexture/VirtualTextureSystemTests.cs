@@ -2019,68 +2019,79 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResidencyClassificationJob_ClassifiesStateAndResolvesResidentMipGap()
+        public void RequestPreparationJob_ClassifiesAndBuildsRefinementSeeds()
         {
-            var inputs = new NativeArray<VTResidencyClassificationInput>(4, Allocator.TempJob);
+            var requests = new NativeArray<VirtualTextureAggregatedFeedbackRequest>(4, Allocator.TempJob);
             var pageStateFlags = new NativeArray<byte>(21, Allocator.TempJob);
             var mipOffsets = new NativeArray<int>(new[] { 0, 16, 20 }, Allocator.TempJob);
-            var results = new NativeArray<VTResidencyClassificationResult>(4, Allocator.TempJob);
+            var results = new NativeArray<VTRequestPreparationResult>(4, Allocator.TempJob);
 
             try
             {
-                inputs[0] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(0, 0, 0));
-                inputs[1] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(1, 0, 0));
-                inputs[2] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(3, 3, 0));
-                inputs[3] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(4, 0, 0));
-                pageStateFlags[0] = VTResidencyClassificationJob.ResidentFlag;
-                pageStateFlags[1] = VTResidencyClassificationJob.PendingFlag;
-                pageStateFlags[16] = VTResidencyClassificationJob.ResidentFlag;
-                pageStateFlags[20] = VTResidencyClassificationJob.ResidentFlag;
+                requests[0] = CreateAggregatedRequest(new VirtualTexturePageCoord(0, 0, 0));
+                requests[1] = CreateAggregatedRequest(new VirtualTexturePageCoord(1, 0, 0));
+                requests[2] = CreateAggregatedRequest(new VirtualTexturePageCoord(3, 3, 0));
+                requests[3] = CreateAggregatedRequest(new VirtualTexturePageCoord(4, 0, 0));
+                pageStateFlags[0] = VTRequestPreparationJob.ResidentFlag;
+                pageStateFlags[1] = VTRequestPreparationJob.PendingFlag;
+                pageStateFlags[16] = VTRequestPreparationJob.ResidentFlag;
+                pageStateFlags[20] = VTRequestPreparationJob.ResidentFlag;
 
-                var job = new VTResidencyClassificationJob
+                var job = new VTRequestPreparationJob
                 {
-                    Inputs = inputs,
+                    Requests = new NativeSlice<VirtualTextureAggregatedFeedbackRequest>(requests),
                     PageStateFlags = pageStateFlags,
                     MipOffsets = mipOffsets,
                     Results = results,
                     VirtualPageCountX = 4,
                     VirtualPageCountY = 4,
                     MipCount = 3,
+                    MaxRefinementMipStep = 1,
                 };
-                job.Run(inputs.Length);
+                job.Run(requests.Length);
 
                 AssertClassification(
-                    results[0],
+                    results[0].Classification,
                     pageIndex: 0,
                     mipGap: 0,
                     VTResidencyRequestClassification.Resident);
                 AssertClassification(
-                    results[1],
+                    results[1].Classification,
                     pageIndex: 1,
                     mipGap: 1,
                     VTResidencyRequestClassification.Pending);
                 AssertClassification(
-                    results[2],
+                    results[2].Classification,
                     pageIndex: 15,
                     mipGap: 2,
                     VTResidencyRequestClassification.Missing);
                 AssertClassification(
-                    results[3],
+                    results[3].Classification,
                     pageIndex: -1,
                     mipGap: -1,
                     VTResidencyRequestClassification.Invalid);
+                Assert.That(results[0].HasCandidate, Is.False);
+                Assert.That(results[1].HasCandidate, Is.True);
+                Assert.That(
+                    results[1].Candidate.Request.PageCoord,
+                    Is.EqualTo(new VirtualTexturePageCoord(1, 0, 0)));
+                Assert.That(results[2].HasCandidate, Is.True);
+                Assert.That(
+                    results[2].Candidate.Request.PageCoord,
+                    Is.EqualTo(new VirtualTexturePageCoord(1, 1, 1)));
+                Assert.That(results[3].HasCandidate, Is.False);
             }
             finally
             {
                 results.Dispose();
                 mipOffsets.Dispose();
                 pageStateFlags.Dispose();
-                inputs.Dispose();
+                requests.Dispose();
             }
         }
 
         [Test]
-        public void Update_ReusesClassificationBuffers_AndSelectsParallelPathForLargeBatches()
+        public void Update_ReusesRequestPreparationBuffers_AndSelectsParallelPathForLargeBatches()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
                 "BurstClassification",
@@ -2105,10 +2116,10 @@ namespace VividRP.Editor.Tests
                 VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
 
                 Assert.That(
-                    VirtualTextureSystem.WasLastResidencyClassificationParallelForTesting(spaceId),
+                    VirtualTextureSystem.WasLastRequestPreparationParallelForTesting(spaceId),
                     Is.True);
                 Assert.That(
-                    VirtualTextureSystem.GetResidencyClassificationCapacityForTesting(spaceId),
+                    VirtualTextureSystem.GetRequestPreparationCapacityForTesting(spaceId),
                     Is.EqualTo(128));
 
                 commandBuffer.Clear();
@@ -2116,11 +2127,78 @@ namespace VividRP.Editor.Tests
                 VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
 
                 Assert.That(
-                    VirtualTextureSystem.WasLastResidencyClassificationParallelForTesting(spaceId),
+                    VirtualTextureSystem.WasLastRequestPreparationParallelForTesting(spaceId),
                     Is.False);
                 Assert.That(
-                    VirtualTextureSystem.GetResidencyClassificationCapacityForTesting(spaceId),
+                    VirtualTextureSystem.GetRequestPreparationCapacityForTesting(spaceId),
                     Is.EqualTo(128));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_SchedulesAllSpaceRequestPreparationsBeforeSingleWait()
+        {
+            int firstSpaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "ParallelClassificationA",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                virtualPageCountX: 16,
+                virtualPageCountY: 16,
+                mipCount: 5,
+                feedbackCapacity: 128));
+            int secondSpaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "ParallelClassificationB",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                virtualPageCountX: 16,
+                virtualPageCountY: 16,
+                mipCount: 5,
+                feedbackCapacity: 128));
+            var requestKeys = new ulong[130];
+            for (int requestIndex = 0; requestIndex < 65; requestIndex++)
+            {
+                var coord = new VirtualTexturePageCoord(
+                    requestIndex % 16,
+                    requestIndex / 16,
+                    0);
+                requestKeys[requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    firstSpaceId,
+                    coord);
+                requestKeys[65 + requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    secondSpaceId,
+                    coord);
+            }
+
+            var commandBuffer = new CommandBuffer();
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    requestKeys);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(
+                    VirtualTextureSystem.WasLastRequestPreparationParallelForTesting(firstSpaceId),
+                    Is.True);
+                Assert.That(
+                    VirtualTextureSystem.WasLastRequestPreparationParallelForTesting(secondSpaceId),
+                    Is.True);
+                Assert.That(
+                    VirtualTextureSystem.GetLastRequestPreparationScheduledJobCountForTesting(),
+                    Is.EqualTo(2));
+                Assert.That(
+                    VirtualTextureSystem.GetLastRequestPreparationWaitCountForTesting(),
+                    Is.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(firstSpaceId),
+                    Is.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(secondSpaceId),
+                    Is.EqualTo(1));
             }
             finally
             {
@@ -2179,6 +2257,16 @@ namespace VividRP.Editor.Tests
             Assert.That(result.PageIndex, Is.EqualTo(pageIndex));
             Assert.That(result.MipGap, Is.EqualTo(mipGap));
             Assert.That(result.Classification, Is.EqualTo(classification));
+        }
+
+        private static VirtualTextureAggregatedFeedbackRequest CreateAggregatedRequest(
+            in VirtualTexturePageCoord pageCoord)
+        {
+            return new VirtualTextureAggregatedFeedbackRequest(
+                spaceId: 1,
+                pageCoord,
+                hitCount: 1,
+                cameraPriority: 0);
         }
 
         private static void AssertPhysicalAtlas(

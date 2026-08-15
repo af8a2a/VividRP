@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -1198,6 +1199,8 @@ namespace VividRP.Editor.Tests
         {
             GameObject gameObject = null;
             VividTerrainData terrainData = null;
+            VividVirtualTextureAsset compositeVirtualTexture = null;
+            VividVirtualTextureBuiltData compositeBuiltData = null;
             VividMeshletCollectionAsset meshletCollection = null;
             var textures = new List<Texture2D>();
 
@@ -1274,6 +1277,12 @@ namespace VividRP.Editor.Tests
                     },
                     new[] { controlMap }
                 );
+                compositeVirtualTexture = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+                compositeVirtualTexture.name = "Terrain Composite Surface";
+                compositeBuiltData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+                InitializeCompositeBuiltData(compositeBuiltData, contentVersion: 1u);
+                compositeVirtualTexture.Initialize(compositeBuiltData);
+                terrainData.SetCompositeVirtualTexture(compositeVirtualTexture);
 
                 gameObject = new GameObject("Terrain Control Blend Scene Builder");
                 VividTerrain terrain = gameObject.AddComponent<VividTerrain>();
@@ -1319,6 +1328,43 @@ namespace VividRP.Editor.Tests
                 Assert.That(controlBinding.NormalResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
                 Assert.That(controlBinding.MaskResource, Is.Not.EqualTo(VividSurfaceBindingData.InvalidResource));
                 Assert.That(controlBinding.UVScaleBias.x, Is.LessThan(0.0f));
+
+                var compositeSceneData = new VividGPUDrivenSceneData();
+                var compositeBuilder = new VividGPUDrivenSceneDataBuilder();
+                using var compositeBackend = new CompositeCapableTextureBackend(compositeVirtualTexture);
+                compositeBuilder.Build(
+                    compositeSceneData,
+                    VividMeshletRendererDatabase.instance,
+                    compositeBackend);
+
+                Assert.That(compositeSceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(compositeSceneData.SurfaceBindingCount, Is.EqualTo(1));
+                Assert.That(compositeSceneData.TerrainMaterialCount, Is.EqualTo(0));
+                Assert.That(compositeSceneData.TerrainLayerCount, Is.EqualTo(0));
+                VividMaterialData compositeMaterial = compositeSceneData.Materials[0];
+                Assert.That(
+                    compositeMaterial.MaterialFlags & VividMaterialFlags.Terrain,
+                    Is.EqualTo(VividMaterialFlags.None));
+                Assert.That(compositeMaterial.TextureTilingOffset, Is.EqualTo(new float4(1.0f, 1.0f, 0.0f, 0.0f)));
+                Assert.That(compositeMaterial.NormalsStrength, Is.EqualTo(1.0f));
+                Assert.That(
+                    compositeMaterial.Padding0,
+                    Is.EqualTo((uint) GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness));
+
+                compositeBuilder.Build(
+                    compositeSceneData,
+                    VividMeshletRendererDatabase.instance,
+                    compositeBackend,
+                    out bool unchangedMaterialData);
+                Assert.That(unchangedMaterialData, Is.False);
+
+                InitializeCompositeBuiltData(compositeBuiltData, contentVersion: 2u);
+                compositeBuilder.Build(
+                    compositeSceneData,
+                    VividMeshletRendererDatabase.instance,
+                    compositeBackend,
+                    out bool changedMaterialData);
+                Assert.That(changedMaterialData, Is.True);
             }
             finally
             {
@@ -1326,6 +1372,10 @@ namespace VividRP.Editor.Tests
                     Object.DestroyImmediate(gameObject);
                 if (terrainData != null)
                     Object.DestroyImmediate(terrainData);
+                if (compositeVirtualTexture != null)
+                    Object.DestroyImmediate(compositeVirtualTexture);
+                if (compositeBuiltData != null)
+                    Object.DestroyImmediate(compositeBuiltData);
                 if (meshletCollection != null)
                     Object.DestroyImmediate(meshletCollection);
                 for (int textureIndex = 0; textureIndex < textures.Count; textureIndex++)
@@ -1333,6 +1383,86 @@ namespace VividRP.Editor.Tests
                     if (textures[textureIndex] != null)
                         Object.DestroyImmediate(textures[textureIndex]);
                 }
+            }
+        }
+
+        private static void InitializeCompositeBuiltData(
+            VividVirtualTextureBuiltData builtData,
+            uint contentVersion)
+        {
+            builtData.Initialize(
+                string.Empty,
+                string.Empty,
+                pageSize: 128,
+                borderSize: 4,
+                virtualPageCountX: 1,
+                virtualPageCountY: 1,
+                mipCount: 1,
+                Array.Empty<VividVirtualTextureLayerDescriptor>(),
+                Array.Empty<VividVirtualTextureChunkDescriptor>(),
+                Array.Empty<VividVirtualTextureTileDescriptor>(),
+                new[] { 0 },
+                new byte[] { 0 },
+                buildProfile: VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                contentLayerMask: 7,
+                contentVersion: contentVersion,
+                addressMode: VividVirtualTextureAddressMode.Clamp);
+        }
+
+        private sealed class CompositeCapableTextureBackend : IGPUDrivenTextureBackend
+        {
+            private readonly VividVirtualTextureAsset m_CompositeAsset;
+
+            internal CompositeCapableTextureBackend(VividVirtualTextureAsset compositeAsset)
+            {
+                m_CompositeAsset = compositeAsset;
+            }
+
+            public string DisplayName => "Composite Test";
+
+            public bool IsAvailable => true;
+
+            public string UnavailableReason => string.Empty;
+
+            public uint BindingRevision => 0u;
+
+            public void PrepareFrame()
+            {
+            }
+
+            public void ResetPerFrameStats()
+            {
+            }
+
+            public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
+            {
+                return asset == m_CompositeAsset;
+            }
+
+            public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
+            {
+                bool composite = textures.StreamedVirtualTexture == m_CompositeAsset;
+                return new VividSurfaceBindingData
+                {
+                    BaseColorResource = composite ? 1u : VividSurfaceBindingData.InvalidResource,
+                    NormalResource = composite ? 2u : VividSurfaceBindingData.InvalidResource,
+                    MaskResource = composite ? 3u : VividSurfaceBindingData.InvalidResource,
+                    Flags = composite
+                        ? VividSurfaceBindingFlags.BaseColor
+                          | VividSurfaceBindingFlags.Normal
+                          | VividSurfaceBindingFlags.Mask
+                        : VividSurfaceBindingFlags.None,
+                    UVScaleBias = new float4(-1.0f, -1.0f, 0.0f, 0.0f),
+                };
+            }
+
+            public GPUDrivenTextureBackendStats GetStats()
+            {
+                return default;
+            }
+
+            public void Dispose()
+            {
             }
         }
 

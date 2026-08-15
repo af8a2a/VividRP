@@ -47,6 +47,11 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             TextureContainer.ResetPerFrameStats();
         }
 
+        public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
+        {
+            return false;
+        }
+
         public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
         {
             ThrowIfDisposed();

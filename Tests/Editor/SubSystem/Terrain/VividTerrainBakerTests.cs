@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -64,6 +65,283 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(data);
             }
+        }
+
+        [Test]
+        public void CompositeBuilder_ResolvesAspectRatioToPowerOfTwoVirtualPages()
+        {
+            var source = new VividTerrainCompositeSource(
+                string.Empty,
+                new Vector3(1024.0f, 128.0f, 512.0f),
+                VividTerrainCompositeSource.DefaultMaxResolution,
+                new VividTerrainCompositeLayerSource[2],
+                Array.Empty<Texture2D>());
+
+            VividTerrainCompositeVirtualTextureBuilder.ResolveDimensions(
+                source,
+                out int width,
+                out int height,
+                out int mipCount);
+
+            Assert.That(width, Is.EqualTo(4096));
+            Assert.That(height, Is.EqualTo(2048));
+            Assert.That(mipCount, Is.EqualTo(6));
+        }
+
+        [Test]
+        public void CompositeBuilder_BlendsCurrentTerrainSurfaceSemantics()
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Terrain composite GPU baking is unavailable on this editor device.");
+
+            Texture2D red = CreateSolidTexture(new Color32(255, 0, 0, 255), linear: false);
+            Texture2D blue = CreateSolidTexture(new Color32(0, 0, 255, 255), linear: false);
+            Texture2D tiltedNormal = CreateSolidTexture(new Color32(0, 128, 0, 255), linear: true);
+            Texture2D firstMask = CreateSolidTexture(new Color32(51, 102, 0, 153), linear: true);
+            Texture2D control = CreateSolidTexture(new Color32(64, 191, 0, 0), linear: true);
+            try
+            {
+                var firstLayer = new VividTerrainLayerData(
+                    red,
+                    null,
+                    firstMask,
+                    Vector2.one,
+                    Vector2.zero,
+                    Color.white,
+                    0.1f,
+                    0.9f,
+                    1.0f);
+                var secondLayer = new VividTerrainLayerData(
+                    blue,
+                    tiltedNormal,
+                    null,
+                    Vector2.one,
+                    Vector2.zero,
+                    Color.white,
+                    0.8f,
+                    0.2f,
+                    0.5f);
+                var source = new VividTerrainCompositeSource(
+                    string.Empty,
+                    Vector3.one,
+                    256,
+                    new[]
+                    {
+                        new VividTerrainCompositeLayerSource(firstLayer, Vector3.one),
+                        new VividTerrainCompositeLayerSource(secondLayer, Vector3.one),
+                    },
+                    new[] { control });
+
+                using VividTerrainCompositeTextureSet composite =
+                    VividTerrainCompositeVirtualTextureBuilder.Generate(source);
+                int pixelIndex = 128 * 256 + 128;
+                Color32 baseColor = composite.BaseColor.GetPixels32(0)[pixelIndex];
+                Color32 normal = composite.Normal.GetPixels32(0)[pixelIndex];
+                Color32 mask = composite.Mask.GetPixels32(0)[pixelIndex];
+
+                float firstWeight = 64.0f / (64.0f + 191.0f);
+                float secondWeight = 1.0f - firstWeight;
+                Assert.That(
+                    baseColor.r,
+                    Is.EqualTo(Mathf.RoundToInt(Mathf.LinearToGammaSpace(firstWeight) * 255.0f)).Within(2));
+                Assert.That(baseColor.g, Is.EqualTo(0).Within(1));
+                Assert.That(
+                    baseColor.b,
+                    Is.EqualTo(Mathf.RoundToInt(Mathf.LinearToGammaSpace(secondWeight) * 255.0f)).Within(2));
+
+                Vector3 blendedNormal = new Vector3(
+                    secondWeight * 0.5f,
+                    0.0f,
+                    firstWeight + secondWeight * Mathf.Sqrt(0.75f)).normalized;
+                Assert.That(normal.a, Is.EqualTo(Mathf.RoundToInt((blendedNormal.x * 0.5f + 0.5f) * 255.0f)).Within(2));
+                Assert.That(normal.g, Is.EqualTo(128).Within(2));
+
+                float expectedMetallic = firstWeight * (51.0f / 255.0f) + secondWeight * 0.8f;
+                float expectedOcclusion = firstWeight * (102.0f / 255.0f) + secondWeight;
+                float expectedSmoothness = firstWeight * (153.0f / 255.0f) + secondWeight * 0.2f;
+                Assert.That(mask.r, Is.EqualTo(Mathf.RoundToInt(expectedMetallic * 255.0f)).Within(2));
+                Assert.That(mask.g, Is.EqualTo(Mathf.RoundToInt(expectedOcclusion * 255.0f)).Within(2));
+                Assert.That(mask.a, Is.EqualTo(Mathf.RoundToInt(expectedSmoothness * 255.0f)).Within(2));
+
+                Color32 mipBaseColor = composite.BaseColor.GetPixels32(1)[64 * 128 + 64];
+                Assert.That(mipBaseColor.r, Is.EqualTo(baseColor.r).Within(1));
+                Assert.That(mipBaseColor.b, Is.EqualTo(baseColor.b).Within(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(red);
+                Object.DestroyImmediate(blue);
+                Object.DestroyImmediate(tiltedNormal);
+                Object.DestroyImmediate(firstMask);
+                Object.DestroyImmediate(control);
+            }
+        }
+
+        [Test]
+        public void CompositeBuilder_ZeroWeightsFallBackToFirstLayerDefaults()
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Terrain composite GPU baking is unavailable on this editor device.");
+
+            Texture2D red = CreateSolidTexture(new Color32(255, 0, 0, 255), linear: false);
+            Texture2D zeroControl = CreateSolidTexture(new Color32(0, 0, 0, 0), linear: true);
+            try
+            {
+                var firstLayer = new VividTerrainLayerData(
+                    null,
+                    null,
+                    null,
+                    Vector2.one,
+                    Vector2.zero,
+                    Color.white,
+                    0.25f,
+                    0.75f,
+                    2.0f);
+                var secondLayer = new VividTerrainLayerData(
+                    red,
+                    null,
+                    null,
+                    Vector2.one,
+                    Vector2.zero,
+                    Color.white,
+                    1.0f,
+                    0.0f,
+                    1.0f);
+                var source = new VividTerrainCompositeSource(
+                    string.Empty,
+                    Vector3.one,
+                    128,
+                    new[]
+                    {
+                        new VividTerrainCompositeLayerSource(firstLayer, Vector3.one),
+                        new VividTerrainCompositeLayerSource(secondLayer, Vector3.one),
+                    },
+                    new[] { zeroControl });
+
+                using VividTerrainCompositeTextureSet composite =
+                    VividTerrainCompositeVirtualTextureBuilder.Generate(source);
+                Color32 baseColor = composite.BaseColor.GetPixels32(0)[0];
+                Color32 normal = composite.Normal.GetPixels32(0)[0];
+                Color32 mask = composite.Mask.GetPixels32(0)[0];
+
+                Assert.That(baseColor, Is.EqualTo(new Color32(255, 255, 255, 255)));
+                Assert.That(normal.a, Is.EqualTo(128).Within(1));
+                Assert.That(normal.g, Is.EqualTo(128).Within(1));
+                Assert.That(mask.r, Is.EqualTo(64).Within(1));
+                Assert.That(mask.g, Is.EqualTo(255));
+                Assert.That(mask.a, Is.EqualTo(191).Within(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(red);
+                Object.DestroyImmediate(zeroControl);
+            }
+        }
+
+        [Test]
+        public void CompositeUpgrade_AddsMissingAssetAndSkipsCompatibleTerrain()
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Terrain composite GPU baking is unavailable on this editor device.");
+
+            Texture2D controlMap = CreateSolidTexture(new Color32(128, 127, 0, 0), linear: true);
+            string controlMapPath = TempFolder + "/LegacyCompositeControl.asset";
+            string terrainDataPath = TempFolder + "/LegacyCompositeTerrain.asset";
+            AssetDatabase.CreateAsset(controlMap, controlMapPath);
+
+            var terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
+            terrainData.Initialize(
+                string.Empty,
+                "LegacyCompositeTerrain",
+                sourceHeightmapResolution: 2,
+                new Vector3(128.0f, 1.0f, 128.0f),
+                new Bounds(new Vector3(64.0f, 0.5f, 64.0f), new Vector3(128.0f, 1.0f, 128.0f)),
+                Vector2Int.zero,
+                VividTerrainBakeSettings.Default,
+                null,
+                new[]
+                {
+                    new VividTerrainLayerData(
+                        null,
+                        null,
+                        null,
+                        Vector2.one,
+                        Vector2.zero,
+                        Color.white,
+                        0.0f,
+                        0.5f,
+                        1.0f),
+                    new VividTerrainLayerData(
+                        null,
+                        null,
+                        null,
+                        Vector2.one,
+                        Vector2.zero,
+                        Color.white,
+                        1.0f,
+                        0.25f,
+                        1.0f),
+                },
+                Array.Empty<VividTerrainChunkData>(),
+                new[] { controlMap });
+            AssetDatabase.CreateAsset(terrainData, terrainDataPath);
+            AssetDatabase.SaveAssets();
+
+            bool success = VividTerrainCompositeUpgradeUtility.TryUpgrade(
+                terrainData,
+                maxResolution: 128,
+                progressHandler: null,
+                out bool upgraded,
+                out string errorMessage);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(upgraded, Is.True);
+            Assert.That(terrainData.CompositeVirtualTexture, Is.Not.Null);
+            Assert.That(
+                AssetDatabase.GetAssetPath(terrainData.CompositeVirtualTexture),
+                Does.EndWith("LegacyCompositeTerrain_CompositeSurface.vividvt"));
+            Assert.That(
+                VividTerrainCompositeUpgradeUtility.IsCompatibleComposite(
+                    terrainData.CompositeVirtualTexture),
+                Is.True);
+            Assert.That(File.Exists(terrainData.CompositeVirtualTexture.BuiltData.StreamDataPath), Is.True);
+
+            VividTerrainData reloaded = AssetDatabase.LoadAssetAtPath<VividTerrainData>(terrainDataPath);
+            Assert.That(reloaded.CompositeVirtualTexture, Is.SameAs(terrainData.CompositeVirtualTexture));
+
+            VividVirtualTextureAsset firstComposite = terrainData.CompositeVirtualTexture;
+            success = VividTerrainCompositeUpgradeUtility.TryUpgrade(
+                terrainData,
+                maxResolution: 128,
+                progressHandler: null,
+                out upgraded,
+                out errorMessage);
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(upgraded, Is.False);
+            Assert.That(terrainData.CompositeVirtualTexture, Is.SameAs(firstComposite));
+        }
+
+        [Test]
+        public void CompositeUpgrade_RejectsTerrainWithMissingControlMaps()
+        {
+            var terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
+            terrainData.Initialize(
+                string.Empty,
+                "MissingControls",
+                sourceHeightmapResolution: 2,
+                Vector3.one,
+                new Bounds(Vector3.one * 0.5f, Vector3.one),
+                Vector2Int.zero,
+                VividTerrainBakeSettings.Default,
+                null,
+                new[] { default(VividTerrainLayerData), default(VividTerrainLayerData) },
+                Array.Empty<VividTerrainChunkData>());
+            AssetDatabase.CreateAsset(terrainData, TempFolder + "/MissingControls.asset");
+
+            Assert.That(
+                VividTerrainCompositeUpgradeUtility.CanUpgrade(terrainData, out string reason),
+                Is.False);
+            Assert.That(reason, Does.Contain("persistent control maps"));
         }
 
         [Test]
@@ -177,6 +455,7 @@ namespace VividRP.Editor.Tests
                     SourceTerrainData = source,
                     SourceTerrainDataGUID = AssetDatabase.AssetPathToGUID(sourcePath),
                     Settings = new VividTerrainBakeSettings(1, 32, optimizeVertexCache: false),
+                    CompositeMaxResolution = 128,
                     LogErrorHandler = Assert.Fail,
                 });
 
@@ -188,12 +467,45 @@ namespace VividRP.Editor.Tests
             Assert.That(controlMap, Is.Not.SameAs(source.alphamapTextures[0]));
             Assert.That(baked.ControlVirtualTextures, Has.Count.EqualTo(1));
             Assert.That(baked.ControlVirtualTextures[0], Is.Not.Null);
+            Assert.That(baked.CompositeVirtualTexture, Is.Not.Null);
+            Assert.That(
+                baked.CompositeVirtualTexture.BuildProfile,
+                Is.EqualTo(VividVirtualTextureBuildProfile.GPUDrivenSurface));
+            Assert.That(
+                baked.CompositeVirtualTexture.AddressMode,
+                Is.EqualTo(VividVirtualTextureAddressMode.Clamp));
+            Assert.That(baked.CompositeVirtualTexture.VirtualPageCountX, Is.EqualTo(1));
+            Assert.That(baked.CompositeVirtualTexture.VirtualPageCountY, Is.EqualTo(1));
+            Assert.That(baked.CompositeVirtualTexture.ContentLayerMask, Is.EqualTo(7));
+            Assert.That(
+                baked.CompositeVirtualTexture.StorageProfile,
+                Is.EqualTo(VividVirtualTextureStorageProfile.DesktopBCn));
+            Assert.That(
+                baked.CompositeVirtualTexture.BuiltData.Layers.Select(layer => layer.Semantic),
+                Is.EqualTo(new[]
+                {
+                    VTLayerSemantic.BaseColor,
+                    VTLayerSemantic.Normal,
+                    VTLayerSemantic.Mask,
+                    VTLayerSemantic.Height,
+                }));
+            Assert.That(File.Exists(baked.CompositeVirtualTexture.BuiltData.StreamDataPath), Is.True);
+
+            string compositePath = AssetDatabase.GetAssetPath(baked.CompositeVirtualTexture);
+            var compositeImporter = (VividVirtualTextureAssetImporter) AssetImporter.GetAtPath(compositePath);
+            var serializedImporter = new SerializedObject(compositeImporter);
+            Vector2Int capturedResolution = serializedImporter
+                .FindProperty("m_TerrainCompositeSource")
+                .FindPropertyRelative("m_OutputResolution")
+                .vector2IntValue;
+            Assert.That(capturedResolution, Is.EqualTo(new Vector2Int(128, 128)));
 
             VividTerrainData reloaded = AssetDatabase.LoadAssetAtPath<VividTerrainData>(bakedPath);
             Assert.That(reloaded.ControlMaps, Has.Count.EqualTo(1));
             Assert.That(reloaded.ControlMaps[0], Is.Not.Null);
             Assert.That(reloaded.ControlVirtualTextures, Has.Count.EqualTo(1));
             Assert.That(reloaded.ControlVirtualTextures[0], Is.Not.Null);
+            Assert.That(reloaded.CompositeVirtualTexture, Is.Not.Null);
         }
 
         [Test]
@@ -498,6 +810,17 @@ namespace VividRP.Editor.Tests
             terrainData.SetHeights(0, 0, heights);
             expectedMaximumHeight = 5.0f;
             return terrainData;
+        }
+
+        private static Texture2D CreateSolidTexture(Color32 color, bool linear)
+        {
+            var texture = new Texture2D(4, 4, TextureFormat.RGBA32, mipChain: true, linear: linear);
+            var pixels = new Color32[16];
+            for (int pixelIndex = 0; pixelIndex < pixels.Length; pixelIndex++)
+                pixels[pixelIndex] = color;
+            texture.SetPixels32(pixels);
+            texture.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+            return texture;
         }
 
         private static void AssertChunkBordersArePreservedAcrossLODs(

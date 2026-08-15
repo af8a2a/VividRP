@@ -1,0 +1,200 @@
+#pragma kernel CSAccumulate
+#pragma kernel CSFinalize
+
+#pragma use_dxc
+#pragma target 5.0
+
+Texture2D<float4> _BaseColor;
+Texture2D<float4> _Normal;
+Texture2D<float4> _Mask;
+Texture2D<float4> _Control0;
+Texture2D<float4> _Control1;
+
+SamplerState sampler_LinearRepeat;
+SamplerState sampler_LinearClamp;
+
+RWTexture2D<float4> _AccumulatedBaseColor;
+RWTexture2D<float4> _AccumulatedNormal;
+RWTexture2D<float4> _AccumulatedMask;
+RWTexture2D<float4> _OutputBaseColor;
+RWTexture2D<float4> _OutputNormal;
+RWTexture2D<float4> _OutputMask;
+
+float4 _LayerTilingOffset;
+float4 _LayerMaterialParams;
+float4 _OutputDimensions;
+int _LayerPresence;
+int _LayerCount;
+int _LayerIndex;
+int _ControlCount;
+
+float ResolveMip(uint width, uint height, float2 uvScale)
+{
+    const float2 sourceFootprint = float2(width, height) * abs(uvScale) * _OutputDimensions.zw;
+    return max(0.0, log2(max(max(sourceFootprint.x, sourceFootprint.y), 1e-6)));
+}
+
+float4 SampleBaseColor(float2 uv, float2 uvScale)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _BaseColor.GetDimensions(0, width, height, mipCount);
+    return _BaseColor.SampleLevel(sampler_LinearRepeat, uv, ResolveMip(width, height, uvScale));
+}
+
+float4 SampleNormal(float2 uv, float2 uvScale)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _Normal.GetDimensions(0, width, height, mipCount);
+    return _Normal.SampleLevel(sampler_LinearRepeat, uv, ResolveMip(width, height, uvScale));
+}
+
+float4 SampleMask(float2 uv, float2 uvScale)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _Mask.GetDimensions(0, width, height, mipCount);
+    return _Mask.SampleLevel(sampler_LinearRepeat, uv, ResolveMip(width, height, uvScale));
+}
+
+float4 SampleControl0(float2 uv)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _Control0.GetDimensions(0, width, height, mipCount);
+    return _Control0.SampleLevel(sampler_LinearClamp, uv, ResolveMip(width, height, 1.0.xx));
+}
+
+float4 SampleControl1(float2 uv)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _Control1.GetDimensions(0, width, height, mipCount);
+    return _Control1.SampleLevel(sampler_LinearClamp, uv, ResolveMip(width, height, 1.0.xx));
+}
+
+float ResolveLayerWeight(float2 terrainUv)
+{
+    const float4 control0 = _ControlCount > 0 ? SampleControl0(terrainUv) : 0.0.xxxx;
+    const float4 control1 = _ControlCount > 1 ? SampleControl1(terrainUv) : 0.0.xxxx;
+    float weights[8] =
+    {
+        control0.r,
+        control0.g,
+        control0.b,
+        control0.a,
+        control1.r,
+        control1.g,
+        control1.b,
+        control1.a,
+    };
+
+    const uint layerCount = min((uint)max(_LayerCount, 0), 8u);
+    float weightSum = 0.0;
+    [unroll]
+    for (uint layerIndex = 0u; layerIndex < 8u; ++layerIndex)
+    {
+        weights[layerIndex] = layerIndex < layerCount ? max(weights[layerIndex], 0.0) : 0.0;
+        weightSum += weights[layerIndex];
+    }
+
+    const uint selectedLayerIndex = (uint)max(_LayerIndex, 0);
+    if (layerCount == 1u)
+        return selectedLayerIndex == 0u ? 1.0 : 0.0;
+    if (weightSum > 1e-5)
+        return selectedLayerIndex < layerCount ? weights[selectedLayerIndex] / weightSum : 0.0;
+    return selectedLayerIndex == 0u && layerCount > 0u ? 1.0 : 0.0;
+}
+
+float3 EncodeLinearToSRGB(float3 value)
+{
+    value = max(value, 0.0);
+    const float3 threshold = 0.0031308.xxx;
+    const float3 useLowSegment = 1.0 - step(threshold, value);
+    const float3 lowSegment = value * 12.92;
+    const float3 highSegment = 1.055 * pow(value, 1.0 / 2.4) - 0.055;
+    return saturate(lerp(highSegment, lowSegment, useLowSegment));
+}
+
+float3 DecodeNormal(float4 packedNormal, float scale)
+{
+    float2 normalXY = packedNormal.wy * 2.0 - 1.0;
+    normalXY *= scale;
+    const float normalZ = sqrt(saturate(1.0 - dot(normalXY, normalXY)));
+    return float3(normalXY, normalZ);
+}
+
+[numthreads(8, 8, 1)]
+void CSAccumulate(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint2 outputSize = (uint2)_OutputDimensions.xy;
+    if (dispatchThreadID.x >= outputSize.x || dispatchThreadID.y >= outputSize.y)
+        return;
+
+    const float2 terrainUv = ((float2)dispatchThreadID.xy + 0.5) * _OutputDimensions.zw;
+    const float weight = ResolveLayerWeight(terrainUv);
+    const float2 layerUv = terrainUv * _LayerTilingOffset.xy + _LayerTilingOffset.zw;
+
+    const float3 layerBaseColor = (_LayerPresence & 1) != 0
+        ? SampleBaseColor(layerUv, _LayerTilingOffset.xy).rgb
+        : 1.0.xxx;
+    const float3 layerNormal = (_LayerPresence & 2) != 0
+        ? DecodeNormal(SampleNormal(layerUv, _LayerTilingOffset.xy), _LayerMaterialParams.x)
+        : float3(0.0, 0.0, 1.0);
+
+    float layerMetallic = _LayerMaterialParams.y;
+    float layerAmbientOcclusion = 1.0;
+    float layerSmoothness = _LayerMaterialParams.z;
+    if ((_LayerPresence & 4) != 0)
+    {
+        const float4 mask = SampleMask(layerUv, _LayerTilingOffset.xy);
+        layerMetallic = mask.r;
+        layerAmbientOcclusion = mask.g;
+        layerSmoothness = mask.a;
+    }
+
+    const uint2 outputPixel = dispatchThreadID.xy;
+    const bool clear = _LayerIndex == 0;
+    const float4 accumulatedBaseColor = clear ? 0.0.xxxx : _AccumulatedBaseColor[outputPixel];
+    const float4 accumulatedNormal = clear ? 0.0.xxxx : _AccumulatedNormal[outputPixel];
+    const float4 accumulatedMask = clear ? 0.0.xxxx : _AccumulatedMask[outputPixel];
+    _AccumulatedBaseColor[outputPixel] = accumulatedBaseColor + float4(layerBaseColor * weight, 0.0);
+    _AccumulatedNormal[outputPixel] = accumulatedNormal + float4(layerNormal * weight, 0.0);
+    _AccumulatedMask[outputPixel] = accumulatedMask + float4(
+        layerMetallic * weight,
+        layerAmbientOcclusion * weight,
+        0.0,
+        layerSmoothness * weight);
+}
+
+[numthreads(8, 8, 1)]
+void CSFinalize(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint2 outputSize = (uint2)_OutputDimensions.xy;
+    if (dispatchThreadID.x >= outputSize.x || dispatchThreadID.y >= outputSize.y)
+        return;
+
+    const uint2 outputPixel = dispatchThreadID.xy;
+    const float3 baseColor = _AccumulatedBaseColor[outputPixel].rgb;
+    float3 normalTS = _AccumulatedNormal[outputPixel].rgb;
+    const float4 mask = _AccumulatedMask[outputPixel];
+    const float normalLengthSquared = dot(normalTS, normalTS);
+    normalTS = normalLengthSquared > 1e-8
+        ? normalTS * rsqrt(normalLengthSquared)
+        : float3(0.0, 0.0, 1.0);
+
+    const float2 encodedNormal = normalTS.xy * 0.5 + 0.5;
+    _OutputBaseColor[outputPixel] = float4(EncodeLinearToSRGB(baseColor), 1.0);
+    _OutputNormal[outputPixel] = float4(0.0, encodedNormal.y, 0.0, encodedNormal.x);
+    _OutputMask[outputPixel] = float4(
+        saturate(mask.r),
+        saturate(mask.g),
+        1.0,
+        saturate(mask.a));
+}

@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEditor.AssetImporters;
 using UnityEditor.Build;
 using UnityEngine;
+using VividRP.Editor.TerrainTools;
 using VividRP.Runtime;
 using Debug = UnityEngine.Debug;
 using Object = UnityEngine.Object;
@@ -45,6 +46,12 @@ namespace VividRP.Editor
         [SerializeField, HideInInspector]
         private bool m_StorageSettingsInitialized;
 
+        [SerializeField, HideInInspector]
+        private VividVirtualTextureImportSourceKind m_SourceKind;
+
+        [SerializeField, HideInInspector]
+        private VividTerrainCompositeSource m_TerrainCompositeSource;
+
         [Min(1)]
         public int PageSize = 128;
 
@@ -67,26 +74,21 @@ namespace VividRP.Editor
             ctx.AddObjectToAsset(nameof(VividVirtualTextureAsset), asset);
             ctx.SetMainObject(asset);
 
-            if ((BuildProfile == VividVirtualTextureBuildProfile.Generic && SourceTexture == null)
-                || (SourceTexture == null && NormalTexture == null && MaskTexture == null))
-                return;
-
-            Texture2D primaryTexture = SourceTexture != null ? SourceTexture : NormalTexture != null ? NormalTexture : MaskTexture;
-            string sourceTexturePath = AssetDatabase.GetAssetPath(primaryTexture);
-            if (!string.IsNullOrEmpty(sourceTexturePath))
-                ctx.DependsOnSourceAsset(sourceTexturePath);
-            if (NormalTexture != null)
+            bool terrainComposite = m_SourceKind == VividVirtualTextureImportSourceKind.TerrainComposite;
+            if (terrainComposite)
             {
-                string normalTexturePath = AssetDatabase.GetAssetPath(NormalTexture);
-                if (!string.IsNullOrEmpty(normalTexturePath))
-                    ctx.DependsOnSourceAsset(normalTexturePath);
+                if (!m_TerrainCompositeSource.IsValid)
+                    return;
+                RegisterTerrainCompositeDependencies(ctx, m_TerrainCompositeSource);
             }
-
-            if (MaskTexture != null)
+            else
             {
-                string maskTexturePath = AssetDatabase.GetAssetPath(MaskTexture);
-                if (!string.IsNullOrEmpty(maskTexturePath))
-                    ctx.DependsOnSourceAsset(maskTexturePath);
+                if ((BuildProfile == VividVirtualTextureBuildProfile.Generic && SourceTexture == null)
+                    || (SourceTexture == null && NormalTexture == null && MaskTexture == null))
+                    return;
+                RegisterTextureDependency(ctx, SourceTexture);
+                RegisterTextureDependency(ctx, NormalTexture);
+                RegisterTextureDependency(ctx, MaskTexture);
             }
 
             var builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
@@ -96,39 +98,130 @@ namespace VividRP.Editor
             var timer = Stopwatch.StartNew();
             string virtualTextureGUID = AssetDatabase.AssetPathToGUID(ctx.assetPath);
             bool useVersion3Defaults = m_StorageSettingsInitialized || HasVersion3Marker(ctx.assetPath);
-            VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+            VividTerrainCompositeTextureSet generatedTextures = null;
+            try
             {
-                SourceTexture = SourceTexture,
-                NormalTexture = NormalTexture,
-                MaskTexture = MaskTexture,
-                SourceTextureGUID = AssetDatabase.AssetPathToGUID(sourceTexturePath),
-                SourceTexturePath = sourceTexturePath,
-                PageSize = PageSize,
-                BorderSize = BorderSize,
-                MipCount = MipCount,
-                FallbackColor = (Color32)FallbackColor,
-                NormalFallbackColor = (Color32)NormalFallbackColor,
-                MaskFallbackColor = (Color32)MaskFallbackColor,
-                StreamDataPath = ctx.assetPath + ".stream",
-                LogErrorHandler = message => ctx.LogImportError(message),
-                BuildProfile = BuildProfile,
-                AddressMode = AddressMode,
-                RuntimeStreamDataPath = GetRuntimeStreamDataPath(virtualTextureGUID),
-                StorageProfile = useVersion3Defaults
-                    ? StorageProfile
-                    : VividVirtualTextureStorageProfile.LegacyRGBA32,
-                StreamCompression = useVersion3Defaults
-                    ? StreamCompression
-                    : VividVirtualTextureStreamCompression.None,
-                MaskStorage = MaskStorage,
-                BCQuality = useVersion3Defaults ? BCQuality : VividVirtualTextureBCQuality.Normal,
-                ZstdLevel = Mathf.Clamp(ZstdLevel, 1, 3),
-                ChunkTargetKiB = Mathf.Clamp(ChunkTargetKiB, 128, 256),
-                LogWarningHandler = message => ctx.LogImportWarning(message),
-            });
+                Texture2D baseColor = SourceTexture;
+                Texture2D normal = NormalTexture;
+                Texture2D mask = MaskTexture;
+                string sourceTextureGUID;
+                string sourceTexturePath;
+                if (terrainComposite)
+                {
+                    generatedTextures = VividTerrainCompositeVirtualTextureBuilder.Generate(
+                        m_TerrainCompositeSource);
+                    baseColor = generatedTextures.BaseColor;
+                    normal = generatedTextures.Normal;
+                    mask = generatedTextures.Mask;
+                    sourceTextureGUID = m_TerrainCompositeSource.SourceTerrainDataGUID;
+                    sourceTexturePath = AssetDatabase.GUIDToAssetPath(sourceTextureGUID);
+                }
+                else
+                {
+                    Texture2D primaryTexture = baseColor != null ? baseColor : normal != null ? normal : mask;
+                    sourceTexturePath = AssetDatabase.GetAssetPath(primaryTexture);
+                    sourceTextureGUID = AssetDatabase.AssetPathToGUID(sourceTexturePath);
+                }
+
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = baseColor,
+                    NormalTexture = normal,
+                    MaskTexture = mask,
+                    SourceTextureGUID = sourceTextureGUID,
+                    SourceTexturePath = sourceTexturePath,
+                    PageSize = PageSize,
+                    BorderSize = BorderSize,
+                    MipCount = MipCount,
+                    FallbackColor = (Color32)FallbackColor,
+                    NormalFallbackColor = (Color32)NormalFallbackColor,
+                    MaskFallbackColor = (Color32)MaskFallbackColor,
+                    StreamDataPath = ctx.assetPath + ".stream",
+                    LogErrorHandler = message => ctx.LogImportError(message),
+                    BuildProfile = BuildProfile,
+                    AddressMode = AddressMode,
+                    RuntimeStreamDataPath = GetRuntimeStreamDataPath(virtualTextureGUID),
+                    StorageProfile = useVersion3Defaults
+                        ? StorageProfile
+                        : VividVirtualTextureStorageProfile.LegacyRGBA32,
+                    StreamCompression = useVersion3Defaults
+                        ? StreamCompression
+                        : VividVirtualTextureStreamCompression.None,
+                    MaskStorage = MaskStorage,
+                    BCQuality = useVersion3Defaults ? BCQuality : VividVirtualTextureBCQuality.Normal,
+                    ZstdLevel = Mathf.Clamp(ZstdLevel, 1, 3),
+                    ChunkTargetKiB = Mathf.Clamp(ChunkTargetKiB, 128, 256),
+                    LogWarningHandler = message => ctx.LogImportWarning(message),
+                });
+            }
+            finally
+            {
+                generatedTextures?.Dispose();
+            }
 
             timer.Stop();
             Debug.Log($"Building virtual texture for {ctx.assetPath} took {timer.Elapsed.TotalMilliseconds:F3} ms.", asset);
+        }
+
+        internal void ConfigureTerrainCompositeSource(in VividTerrainCompositeSource source)
+        {
+            m_SourceKind = VividVirtualTextureImportSourceKind.TerrainComposite;
+            m_TerrainCompositeSource = source;
+            SourceTexture = null;
+            NormalTexture = null;
+            MaskTexture = null;
+            BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface;
+            AddressMode = VividVirtualTextureAddressMode.Clamp;
+            StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
+            StreamCompression = VividVirtualTextureStreamCompression.Zstd;
+            MaskStorage = VividVirtualTextureMaskStorage.PackedRGBA;
+            BCQuality = VividVirtualTextureBCQuality.Normal;
+            ZstdLevel = 3;
+            ChunkTargetKiB = 256;
+            PageSize = 128;
+            BorderSize = 4;
+            MipCount = 0;
+            FallbackColor = Color.white;
+            NormalFallbackColor = new Color(0.5f, 0.5f, 1.0f, 0.5f);
+            MaskFallbackColor = Color.white;
+            m_StorageSettingsInitialized = true;
+        }
+
+        private static void RegisterTerrainCompositeDependencies(
+            AssetImportContext ctx,
+            in VividTerrainCompositeSource source)
+        {
+            string[] computePaths = VividPackagePathUtility.GetCandidateAssetPaths(
+                VividTerrainCompositeVirtualTextureBuilder.ComputeRelativePath);
+            for (int pathIndex = 0; pathIndex < computePaths.Length; pathIndex++)
+            {
+                if (AssetDatabase.LoadAssetAtPath<ComputeShader>(computePaths[pathIndex]) == null)
+                    continue;
+
+                ctx.DependsOnSourceAsset(computePaths[pathIndex]);
+                break;
+            }
+
+            VividTerrainCompositeLayerSource[] layers = source.Layers;
+            for (int layerIndex = 0; layerIndex < layers.Length; layerIndex++)
+            {
+                RegisterTextureDependency(ctx, layers[layerIndex].BaseColor);
+                RegisterTextureDependency(ctx, layers[layerIndex].Normal);
+                RegisterTextureDependency(ctx, layers[layerIndex].Mask);
+            }
+
+            Texture2D[] controlMaps = source.ControlMaps;
+            for (int controlIndex = 0; controlIndex < controlMaps.Length; controlIndex++)
+                RegisterTextureDependency(ctx, controlMaps[controlIndex]);
+        }
+
+        private static void RegisterTextureDependency(AssetImportContext ctx, Texture texture)
+        {
+            if (texture == null)
+                return;
+            string texturePath = AssetDatabase.GetAssetPath(texture);
+            if (!string.IsNullOrEmpty(texturePath))
+                ctx.DependsOnSourceAsset(texturePath);
         }
 
         [MenuItem("Assets/Create/VividRP/Virtual Texture Asset")]

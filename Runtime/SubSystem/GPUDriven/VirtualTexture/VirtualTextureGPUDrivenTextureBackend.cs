@@ -708,6 +708,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 out validationMessage);
         }
 
+        public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
+        {
+            return IsCompatibleStreamedAsset(asset, out _);
+        }
+
         private static bool IsCompatibleStreamedAsset(
             VividVirtualTextureAsset asset,
             VTStackDesc expectedStackDesc,

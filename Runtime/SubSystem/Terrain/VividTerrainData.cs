@@ -5,6 +5,21 @@ using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Runtime
 {
+    internal static class VividTerrainSurfaceUtility
+    {
+        internal static Vector4 GetLayerTilingOffset(
+            Vector3 terrainSize,
+            Vector2 tileSize,
+            Vector2 tileOffset)
+        {
+            float tileScaleX = Mathf.Abs(tileSize.x) > Mathf.Epsilon ? terrainSize.x / tileSize.x : 1.0f;
+            float tileScaleY = Mathf.Abs(tileSize.y) > Mathf.Epsilon ? terrainSize.z / tileSize.y : 1.0f;
+            float tileOffsetX = Mathf.Abs(tileSize.x) > Mathf.Epsilon ? -tileOffset.x / tileSize.x : 0.0f;
+            float tileOffsetY = Mathf.Abs(tileSize.y) > Mathf.Epsilon ? -tileOffset.y / tileSize.y : 0.0f;
+            return new Vector4(tileScaleX, tileScaleY, tileOffsetX, tileOffsetY);
+        }
+    }
+
     [Serializable]
     public struct VividTerrainBakeSettings
     {
@@ -253,6 +268,9 @@ namespace VividRP.Runtime
         private VividVirtualTextureAsset[] m_ControlVirtualTextures = Array.Empty<VividVirtualTextureAsset>();
 
         [SerializeField]
+        private VividVirtualTextureAsset m_CompositeVirtualTexture;
+
+        [SerializeField]
         private VividTerrainChunkData[] m_Chunks = Array.Empty<VividTerrainChunkData>();
 
         public uint BakeVersion => m_BakeVersion;
@@ -279,6 +297,8 @@ namespace VividRP.Runtime
 
         public IReadOnlyList<VividVirtualTextureAsset> ControlVirtualTextures =>
             m_ControlVirtualTextures ?? Array.Empty<VividVirtualTextureAsset>();
+
+        public VividVirtualTextureAsset CompositeVirtualTexture => m_CompositeVirtualTexture;
 
         public int SupportedSurfaceLayerCount => Mathf.Min(Layers.Count, MaximumSurfaceLayerCount);
 
@@ -452,6 +472,7 @@ namespace VividRP.Runtime
             m_Layers = layers ?? Array.Empty<VividTerrainLayerData>();
             m_ControlMaps = controlMaps ?? Array.Empty<Texture2D>();
             m_ControlVirtualTextures = Array.Empty<VividVirtualTextureAsset>();
+            m_CompositeVirtualTexture = null;
             m_Chunks = chunks ?? Array.Empty<VividTerrainChunkData>();
         }
 
@@ -478,6 +499,11 @@ namespace VividRP.Runtime
         internal void SetControlMaps(Texture2D[] controlMaps)
         {
             m_ControlMaps = controlMaps ?? Array.Empty<Texture2D>();
+        }
+
+        internal void SetCompositeVirtualTexture(VividVirtualTextureAsset compositeVirtualTexture)
+        {
+            m_CompositeVirtualTexture = compositeVirtualTexture;
         }
     }
 }

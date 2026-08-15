@@ -22,6 +22,7 @@ namespace VividRP.Editor.TerrainTools
             public string SourceTerrainDataGUID;
             public long SourceTerrainDataLocalFileID;
             public VividTerrainBakeSettings Settings;
+            public int CompositeMaxResolution;
             public Action<float, string> ProgressHandler;
             public Action<string> LogErrorHandler;
         }
@@ -46,11 +47,19 @@ namespace VividRP.Editor.TerrainTools
 
             try
             {
-                Generate(data, parameters);
+                Parameters generateParameters = parameters;
+                Action<float, string> progressHandler = parameters.ProgressHandler;
+                generateParameters.ProgressHandler = (progress, message) =>
+                    progressHandler?.Invoke(progress * 0.6f, message);
+                Generate(data, generateParameters);
+                progressHandler?.Invoke(0.6f, "Building terrain streamed virtual textures");
                 BuildStreamedVirtualTextures(
                     data,
                     parameters.SourceTerrainData,
+                    parameters.SourceTerrainDataGUID,
                     assetPath,
+                    parameters.CompositeMaxResolution,
+                    progressHandler,
                     createdVirtualTexturePaths);
                 AssetDatabase.CreateAsset(data, assetPath);
                 mainAssetCreated = true;
@@ -518,13 +527,19 @@ namespace VividRP.Editor.TerrainTools
         private static void BuildStreamedVirtualTextures(
             VividTerrainData terrainData,
             TerrainData sourceTerrainData,
+            string sourceTerrainDataGUID,
             string terrainAssetPath,
+            int compositeMaxResolution,
+            Action<float, string> progressHandler,
             List<string> createdAssetPaths)
         {
             var layerVirtualTextures = new VividVirtualTextureAsset[terrainData.Layers.Count];
             int supportedLayerCount = terrainData.SupportedSurfaceLayerCount;
             for (int layerIndex = 0; layerIndex < supportedLayerCount; layerIndex++)
             {
+                progressHandler?.Invoke(
+                    Mathf.Lerp(0.6f, 0.7f, layerIndex / (float)Mathf.Max(1, supportedLayerCount)),
+                    $"Building terrain layer VT {layerIndex + 1}/{supportedLayerCount}");
                 VividTerrainLayerData layer = terrainData.Layers[layerIndex];
                 if (layer.DiffuseTexture == null
                     && layer.NormalMapTexture == null
@@ -564,6 +579,9 @@ namespace VividRP.Editor.TerrainTools
             var controlVirtualTextures = new VividVirtualTextureAsset[controlMapCount];
             for (int controlMapIndex = 0; controlMapIndex < controlMapCount; controlMapIndex++)
             {
+                progressHandler?.Invoke(
+                    Mathf.Lerp(0.7f, 0.8f, controlMapIndex / (float)Mathf.Max(1, controlMapCount)),
+                    $"Building terrain control VT {controlMapIndex + 1}/{controlMapCount}");
                 string controlMapPath = CreateSiblingAssetPath(
                     terrainAssetPath,
                     $"Control{controlMapIndex}_Source",
@@ -601,6 +619,56 @@ namespace VividRP.Editor.TerrainTools
 
             terrainData.SetControlMaps(persistentControlMaps);
             terrainData.SetStreamedVirtualTextures(layerVirtualTextures, controlVirtualTextures);
+
+            if (supportedLayerCount <= 1)
+            {
+                terrainData.SetCompositeVirtualTexture(null);
+                progressHandler?.Invoke(1.0f, "Terrain streamed virtual textures complete");
+                return;
+            }
+
+            var compositeLayers = new VividTerrainCompositeLayerSource[supportedLayerCount];
+            for (int layerIndex = 0; layerIndex < supportedLayerCount; layerIndex++)
+            {
+                compositeLayers[layerIndex] = new VividTerrainCompositeLayerSource(
+                    terrainData.Layers[layerIndex],
+                    terrainData.Size);
+            }
+
+            string resolvedSourceGUID = sourceTerrainDataGUID;
+            if (string.IsNullOrWhiteSpace(resolvedSourceGUID))
+            {
+                string sourcePath = AssetDatabase.GetAssetPath(sourceTerrainData);
+                resolvedSourceGUID = AssetDatabase.AssetPathToGUID(sourcePath);
+            }
+
+            var compositeSource = new VividTerrainCompositeSource(
+                resolvedSourceGUID,
+                terrainData.Size,
+                compositeMaxResolution,
+                compositeLayers,
+                persistentControlMaps);
+            string compositeVirtualTexturePath = CreateVirtualTextureAssetPath(
+                terrainAssetPath,
+                "CompositeSurface");
+            bool compositeSuccess = VividTerrainCompositeVirtualTextureAssetUtility.BuildOrRefresh(
+                compositeVirtualTexturePath,
+                compositeSource,
+                (progress, message) => progressHandler?.Invoke(
+                    Mathf.Lerp(0.8f, 1.0f, progress),
+                    message),
+                out VividVirtualTextureAsset compositeVirtualTexture,
+                out bool compositeWasCreated,
+                out string compositeErrorMessage);
+            if (compositeWasCreated)
+                createdAssetPaths.Add(compositeVirtualTexturePath);
+            if (!compositeSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to build terrain composite streamed VT: {compositeErrorMessage}");
+            }
+
+            terrainData.SetCompositeVirtualTexture(compositeVirtualTexture);
         }
 
         private static string CreateVirtualTextureAssetPath(string terrainAssetPath, string suffix)

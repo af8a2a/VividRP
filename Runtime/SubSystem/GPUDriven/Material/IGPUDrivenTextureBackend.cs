@@ -134,6 +134,8 @@ namespace VividRP.Runtime.GPUDriven
 
         void ResetPerFrameStats();
 
+        bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset);
+
         VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures);
 
         GPUDrivenTextureBackendStats GetStats();

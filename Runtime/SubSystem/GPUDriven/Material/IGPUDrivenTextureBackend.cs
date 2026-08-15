@@ -167,7 +167,7 @@ namespace VividRP.Runtime.GPUDriven
             uint revision,
             out uint recordIndex);
 
-        void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera);
+        void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera, int frameIndex);
 
         void BindTerrainRuntimeVirtualTextureGlobals(UnityEngine.Rendering.CommandBuffer cmd);
     }

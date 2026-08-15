@@ -621,7 +621,11 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             if (gpuDrivenSystem.m_TextureBackend is IGPUDrivenTerrainRuntimeVirtualTextureBackend terrainRVTBackend)
-                terrainRVTBackend.UpdateTerrainRuntimeVirtualTextures(camera);
+            {
+                terrainRVTBackend.UpdateTerrainRuntimeVirtualTextures(
+                    camera,
+                    cameraData.frameIndex);
+            }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenApplySettingsMarker.Auto())
             {

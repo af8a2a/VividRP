@@ -124,6 +124,64 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TerrainRVT_PerGameCameraResolverDoesNotCollapseToMainCamera()
+        {
+            var mainCameraObject = new GameObject("Terrain RVT Main Camera");
+            var secondaryCameraObject = new GameObject("Terrain RVT Secondary Camera");
+            try
+            {
+                mainCameraObject.tag = "MainCamera";
+                Camera mainCamera = mainCameraObject.AddComponent<Camera>();
+                Camera secondaryCamera = secondaryCameraObject.AddComponent<Camera>();
+
+                Assert.That(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveTerrainRVTCamera(mainCamera),
+                    Is.SameAs(mainCamera));
+                Assert.That(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveTerrainRVTCamera(secondaryCamera),
+                    Is.SameAs(secondaryCamera));
+                Assert.That(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveTerrainRVTCamera(null),
+                    Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(secondaryCameraObject);
+                Object.DestroyImmediate(mainCameraObject);
+            }
+        }
+
+        [TestCase(CameraType.Game, true)]
+        [TestCase(CameraType.SceneView, true)]
+        [TestCase(CameraType.Preview, false)]
+        [TestCase(CameraType.Reflection, false)]
+        public void TerrainRVT_CameraTypeEligibilityMatchesSupportedViews(
+            CameraType cameraType,
+            bool expected)
+        {
+            Assert.That(
+                VirtualTextureGPUDrivenTextureBackend.IsTerrainRVTCameraType(cameraType),
+                Is.EqualTo(expected));
+        }
+
+        [TestCase(CameraType.Game, true, true)]
+        [TestCase(CameraType.Game, false, false)]
+        [TestCase(CameraType.SceneView, true, true)]
+        [TestCase(CameraType.SceneView, false, true)]
+        [TestCase(CameraType.Preview, true, false)]
+        public void TerrainRVT_CameraStateLifetimeMatchesCameraType(
+            CameraType cameraType,
+            bool isActiveAndEnabled,
+            bool expected)
+        {
+            Assert.That(
+                VirtualTextureGPUDrivenTextureBackend.ShouldKeepTerrainRVTCameraState(
+                    cameraType,
+                    isActiveAndEnabled),
+                Is.EqualTo(expected));
+        }
+
+        [Test]
         public void TerrainRVTClipmap_SinglePageMove_InvalidatesOnlyEnteringColumn()
         {
             TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();

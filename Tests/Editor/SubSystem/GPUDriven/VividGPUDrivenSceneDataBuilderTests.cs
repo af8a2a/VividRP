@@ -1480,7 +1480,7 @@ namespace VividRP.Editor.Tests
                 return TerrainRuntimeVirtualTextureEnabled;
             }
 
-            public void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera)
+            public void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera, int frameIndex)
             {
             }
 

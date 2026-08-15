@@ -186,6 +186,25 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             internal bool MipTailResident;
         }
 
+        private sealed class TerrainRVTRegistration
+        {
+            internal VividTerrain Terrain;
+            internal VividTerrainData TerrainData;
+            internal EntityId EntityId;
+            internal uint Revision;
+            internal uint RecordIndex;
+            internal uint LastTouchedUpdate;
+            internal uint CreatedUpdate;
+        }
+
+        private sealed class TerrainRVTCameraState
+        {
+            internal Camera Camera;
+            internal EntityId CameraId;
+            internal readonly Dictionary<EntityId, TerrainRuntimeVirtualTextureClipmap> Clipmaps = new();
+            internal int LastScheduledFrame = -1;
+        }
+
         private readonly Dictionary<TextureSetKey, BindingEntry> m_Bindings = new();
         private readonly HashSet<EntityId> m_RegisteredTextureIds = new();
         private readonly HashSet<EntityId> m_UnsupportedTextureWarningIds = new();
@@ -196,11 +215,14 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private readonly List<BindingEntry> m_ReleaseEntries = new();
         private readonly List<VTPageRegion> m_ReleaseRegions = new();
         private readonly List<BindingEntry> m_ReleaseAllocationEntries = new();
-        private readonly Dictionary<EntityId, TerrainRuntimeVirtualTextureClipmap> m_TerrainRVTByInstanceId = new();
+        private readonly Dictionary<EntityId, TerrainRVTRegistration> m_TerrainRVTRegistrations = new();
+        private readonly List<TerrainRVTRegistration> m_TerrainRVTRecords = new();
+        private readonly Dictionary<EntityId, TerrainRVTCameraState> m_TerrainRVTCameraStates = new();
         private readonly Dictionary<TerrainRuntimeVirtualTextureClipmap, GPUDrivenVirtualTextureAtlasAllocator.Allocation[]>
             m_TerrainRVTAllocations = new();
-        private readonly List<TerrainRuntimeVirtualTextureClipmap> m_TerrainRVTRecords = new();
-        private readonly List<TerrainRuntimeVirtualTextureClipmap> m_TerrainRVTReleaseEntries = new();
+        private readonly List<TerrainRVTRegistration> m_TerrainRVTReleaseEntries = new();
+        private readonly List<TerrainRVTCameraState> m_TerrainRVTCameraReleaseEntries = new();
+        private readonly List<TerrainRuntimeVirtualTextureClipmap> m_TerrainRVTClipmapReleaseEntries = new();
         private readonly List<TerrainRuntimeVirtualTextureClipmap.PageCandidate> m_TerrainRVTCandidates = new();
         private readonly List<VTPageRegion> m_TerrainRVTFlushRegions = new();
         private readonly ComputeShader m_TerrainRVTPageProducerCompute;
@@ -220,14 +242,14 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private string m_LastAtlasAllocationFailureReason = string.Empty;
         private bool m_SurfaceBindingUpdateActive;
         private bool m_RetrySurfaceBindingUpdate;
-        private bool m_TerrainRVTRecordsDirty;
-        private bool m_CurrentCameraUsesTerrainRVT;
         private readonly bool m_TerrainRVTRequested;
-        private int m_TerrainRVTScheduledFrame = -1;
-        private int m_FallbackDriverCameraFrame = -1;
-        private Camera m_FallbackDriverCamera;
+        private TerrainRVTCameraState m_CurrentTerrainRVTCameraState;
         private GraphicsBuffer m_TerrainRVTRecordBuffer;
         private GraphicsBuffer m_TerrainRVTLevelBuffer;
+        private TerrainRuntimeVirtualTextureRecordGPUData[] m_TerrainRVTRecordUpload =
+            Array.Empty<TerrainRuntimeVirtualTextureRecordGPUData>();
+        private TerrainRuntimeVirtualTextureLevelGPUData[] m_TerrainRVTLevelUpload =
+            Array.Empty<TerrainRuntimeVirtualTextureLevelGPUData>();
         private bool m_IsDisposed;
 
         internal VirtualTextureGPUDrivenTextureBackend()
@@ -393,13 +415,15 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         internal int QueuedMipTailPageCount => m_QueuedMipTailPageCount;
 
-        internal int TerrainRuntimeVirtualTextureRecordCount => m_TerrainRVTByInstanceId.Count;
+        internal int TerrainRuntimeVirtualTextureRecordCount => m_TerrainRVTRegistrations.Count;
 
         public void PrepareFrame()
         {
             ThrowIfDisposed();
             if (!IsAvailable)
                 return;
+
+            PurgeInactiveTerrainRVTCameras();
 
             if (m_RetrySurfaceBindingUpdate)
             {
@@ -480,24 +504,49 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return false;
 
             EntityId terrainId = terrain.GetEntityId();
-            if (m_TerrainRVTByInstanceId.TryGetValue(
+            if (m_TerrainRVTRegistrations.TryGetValue(
                     terrainId,
-                    out TerrainRuntimeVirtualTextureClipmap existingClipmap))
+                    out TerrainRVTRegistration existingRegistration))
             {
-                if (existingClipmap.Revision == revision)
+                if (existingRegistration.Revision == revision)
                 {
-                    TouchTerrainRVT(existingClipmap);
-                    recordIndex = existingClipmap.RecordIndex;
+                    TouchTerrainRVT(existingRegistration);
+                    recordIndex = existingRegistration.RecordIndex;
                     return true;
                 }
 
-                ReleaseTerrainRVT(existingClipmap);
+                ReleaseTerrainRVT(existingRegistration);
             }
+
+            int recordSlot = FindTerrainRVTRecordSlot();
+            var registration = new TerrainRVTRegistration
+            {
+                Terrain = terrain,
+                TerrainData = terrainData,
+                EntityId = terrainId,
+                Revision = revision,
+                RecordIndex = (uint)recordSlot,
+            };
+            TouchNewTerrainRVT(registration);
+            m_TerrainRVTRecords[recordSlot] = registration;
+            m_TerrainRVTRegistrations.Add(terrainId, registration);
+            IncrementBindingRevision();
+            recordIndex = registration.RecordIndex;
+            return true;
+        }
+
+        private bool TryCreateTerrainRVTClipmap(
+            TerrainRVTCameraState cameraState,
+            TerrainRVTRegistration registration)
+        {
+            if (cameraState.Clipmaps.ContainsKey(registration.EntityId))
+                return true;
 
             var allocations = new GPUDrivenVirtualTextureAtlasAllocator.Allocation[
                 TerrainRuntimeVirtualTextureClipmap.LevelCount];
             var pageRegions = new RectInt[TerrainRuntimeVirtualTextureClipmap.LevelCount];
             int allocatedLevelCount = 0;
+            TerrainRuntimeVirtualTextureClipmap clipmap = null;
             try
             {
                 for (int levelIndex = 0;
@@ -516,12 +565,15 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     allocatedLevelCount += 1;
                 }
 
-                var clipmap = new TerrainRuntimeVirtualTextureClipmap(
-                    terrain,
-                    terrainData,
+                clipmap = new TerrainRuntimeVirtualTextureClipmap(
+                    registration.Terrain,
+                    registration.TerrainData,
                     m_TerrainRVTPageProducerCompute,
                     pageRegions,
-                    revision);
+                    registration.Revision)
+                {
+                    RecordIndex = registration.RecordIndex,
+                };
                 int registeredLevelCount = 0;
                 try
                 {
@@ -539,20 +591,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     throw;
                 }
 
-                int recordSlot = FindTerrainRVTRecordSlot();
-                clipmap.RecordIndex = (uint)recordSlot;
-                TouchNewTerrainRVT(clipmap);
-                m_TerrainRVTRecords[recordSlot] = clipmap;
-                m_TerrainRVTByInstanceId.Add(terrainId, clipmap);
+                cameraState.Clipmaps.Add(registration.EntityId, clipmap);
                 m_TerrainRVTAllocations.Add(clipmap, allocations);
-                m_TerrainRVTRecordsDirty = true;
-                IncrementBindingRevision();
-                recordIndex = clipmap.RecordIndex;
                 return true;
             }
             finally
             {
-                if (recordIndex == VividSurfaceBindingData.InvalidResource)
+                if (clipmap == null || !cameraState.Clipmaps.ContainsKey(registration.EntityId))
                 {
                     for (int levelIndex = 0; levelIndex < allocatedLevelCount; levelIndex++)
                         m_AtlasAllocator.Release(allocations[levelIndex]);
@@ -560,46 +605,38 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
         }
 
-        public void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera)
+        public void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera, int frameIndex)
         {
-            m_CurrentCameraUsesTerrainRVT = false;
+            m_CurrentTerrainRVTCameraState = null;
             if (!TerrainRuntimeVirtualTextureEnabled
-                || renderingCamera == null
-                || renderingCamera.cameraType != CameraType.Game
-                || m_TerrainRVTByInstanceId.Count == 0)
+                || ResolveTerrainRVTCamera(renderingCamera) == null
+                || m_TerrainRVTRegistrations.Count == 0)
             {
                 return;
             }
 
-            Camera driverCamera = Camera.main;
-            int frameIndex = Time.frameCount;
-            if (driverCamera == null)
-            {
-                if (m_FallbackDriverCameraFrame != frameIndex)
-                {
-                    m_FallbackDriverCameraFrame = frameIndex;
-                    m_FallbackDriverCamera = renderingCamera;
-                }
-                driverCamera = m_FallbackDriverCamera;
-            }
+            TerrainRVTCameraState cameraState = GetOrCreateTerrainRVTCameraState(renderingCamera);
+            m_CurrentTerrainRVTCameraState = cameraState;
+            foreach (TerrainRVTRegistration registration in m_TerrainRVTRegistrations.Values)
+                TryCreateTerrainRVTClipmap(cameraState, registration);
 
-            m_CurrentCameraUsesTerrainRVT = ReferenceEquals(renderingCamera, driverCamera);
-            if (!m_CurrentCameraUsesTerrainRVT || m_TerrainRVTScheduledFrame == frameIndex)
+            int resolvedFrameIndex = frameIndex >= 0 ? frameIndex : Time.frameCount;
+            if (cameraState.LastScheduledFrame == resolvedFrameIndex)
                 return;
 
-            m_TerrainRVTScheduledFrame = frameIndex;
+            cameraState.LastScheduledFrame = resolvedFrameIndex;
             m_TerrainRVTFlushRegions.Clear();
-            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in m_TerrainRVTByInstanceId.Values)
+            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in cameraState.Clipmaps.Values)
             {
                 for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
                     clipmap.Levels[levelIndex].RetireResidentPages(VirtualTextureSpaceId);
-                clipmap.UpdateCamera(driverCamera.transform.position, m_TerrainRVTFlushRegions);
+                clipmap.UpdateCamera(renderingCamera.transform.position, m_TerrainRVTFlushRegions);
             }
             if (m_TerrainRVTFlushRegions.Count > 0)
                 VirtualTextureSystem.FlushRegions(VirtualTextureSpaceId, m_TerrainRVTFlushRegions);
 
             m_TerrainRVTCandidates.Clear();
-            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in m_TerrainRVTByInstanceId.Values)
+            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in cameraState.Clipmaps.Values)
             {
                 for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
                     clipmap.Levels[levelIndex].GatherCandidates(m_TerrainRVTCandidates);
@@ -615,14 +652,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     m_TerrainRVTCandidates[candidateIndex];
                 if (candidate.Level.TryApproveAndQueue(
                         VirtualTextureSpaceId,
-                        frameIndex,
+                        resolvedFrameIndex,
                         candidate.CellIndex))
                 {
                     scheduledPageCount += 1;
                 }
             }
-
-            m_TerrainRVTRecordsDirty = true;
         }
 
         public void BindTerrainRuntimeVirtualTextureGlobals(CommandBuffer cmd)
@@ -630,16 +665,21 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (cmd == null)
                 throw new ArgumentNullException(nameof(cmd));
 
-            int recordCount = m_TerrainRVTRecords.Count;
-            if (m_TerrainRVTRecordsDirty && recordCount > 0)
-                UploadTerrainRVTBuffers();
+            TerrainRVTCameraState cameraState = m_CurrentTerrainRVTCameraState;
+            int recordCount = cameraState != null && cameraState.Clipmaps.Count > 0
+                ? m_TerrainRVTRecords.Count
+                : 0;
+            if (recordCount > 0)
+            {
+                // Record slots stay terrain-stable while their contents are selected per camera.
+                // Queue the upload with this camera's rendering commands to preserve submission order.
+                UploadTerrainRVTBuffers(cmd, cameraState);
+            }
             cmd.SetGlobalInt(s_TerrainRVTRecordCountId, recordCount);
-            cmd.SetGlobalInt(
-                s_TerrainRVTEnabledId,
-                m_CurrentCameraUsesTerrainRVT && recordCount > 0 ? 1 : 0);
-            if (m_TerrainRVTRecordBuffer != null)
+            cmd.SetGlobalInt(s_TerrainRVTEnabledId, recordCount > 0 ? 1 : 0);
+            if (recordCount > 0 && m_TerrainRVTRecordBuffer != null)
                 cmd.SetGlobalBuffer(s_TerrainRVTRecordsId, m_TerrainRVTRecordBuffer);
-            if (m_TerrainRVTLevelBuffer != null)
+            if (recordCount > 0 && m_TerrainRVTLevelBuffer != null)
                 cmd.SetGlobalBuffer(s_TerrainRVTLevelsId, m_TerrainRVTLevelBuffer);
         }
 
@@ -677,13 +717,17 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_ReleaseEntries.Clear();
 
             m_TerrainRVTReleaseEntries.Clear();
-            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in m_TerrainRVTByInstanceId.Values)
+            foreach (TerrainRVTRegistration registration in m_TerrainRVTRegistrations.Values)
             {
-                if (clipmap.LastTouchedUpdate != m_SurfaceBindingUpdate)
-                    m_TerrainRVTReleaseEntries.Add(clipmap);
+                if (registration.LastTouchedUpdate != m_SurfaceBindingUpdate)
+                    m_TerrainRVTReleaseEntries.Add(registration);
             }
-            for (int clipmapIndex = 0; clipmapIndex < m_TerrainRVTReleaseEntries.Count; clipmapIndex++)
-                ReleaseTerrainRVT(m_TerrainRVTReleaseEntries[clipmapIndex]);
+            for (int registrationIndex = 0;
+                 registrationIndex < m_TerrainRVTReleaseEntries.Count;
+                 registrationIndex++)
+            {
+                ReleaseTerrainRVT(m_TerrainRVTReleaseEntries[registrationIndex]);
+            }
             m_TerrainRVTReleaseEntries.Clear();
         }
 
@@ -704,13 +748,17 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_ReleaseEntries.Clear();
 
             m_TerrainRVTReleaseEntries.Clear();
-            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in m_TerrainRVTByInstanceId.Values)
+            foreach (TerrainRVTRegistration registration in m_TerrainRVTRegistrations.Values)
             {
-                if (clipmap.CreatedUpdate == m_SurfaceBindingUpdate)
-                    m_TerrainRVTReleaseEntries.Add(clipmap);
+                if (registration.CreatedUpdate == m_SurfaceBindingUpdate)
+                    m_TerrainRVTReleaseEntries.Add(registration);
             }
-            for (int clipmapIndex = 0; clipmapIndex < m_TerrainRVTReleaseEntries.Count; clipmapIndex++)
-                ReleaseTerrainRVT(m_TerrainRVTReleaseEntries[clipmapIndex]);
+            for (int registrationIndex = 0;
+                 registrationIndex < m_TerrainRVTReleaseEntries.Count;
+                 registrationIndex++)
+            {
+                ReleaseTerrainRVT(m_TerrainRVTReleaseEntries[registrationIndex]);
+            }
             m_TerrainRVTReleaseEntries.Clear();
         }
 
@@ -938,18 +986,28 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (VirtualTextureSpaceId > 0 && VirtualTextureSystem.IsInitialized)
                 VirtualTextureSystem.UnregisterAddressSpace(VirtualTextureSpaceId);
 
-            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in m_TerrainRVTByInstanceId.Values)
-                clipmap.Dispose();
-            m_TerrainRVTByInstanceId.Clear();
+            foreach (TerrainRVTCameraState cameraState in m_TerrainRVTCameraStates.Values)
+            {
+                foreach (TerrainRuntimeVirtualTextureClipmap clipmap in cameraState.Clipmaps.Values)
+                    clipmap.Dispose();
+                cameraState.Clipmaps.Clear();
+            }
+            m_TerrainRVTCameraStates.Clear();
+            m_TerrainRVTRegistrations.Clear();
             m_TerrainRVTAllocations.Clear();
             m_TerrainRVTRecords.Clear();
             m_TerrainRVTReleaseEntries.Clear();
+            m_TerrainRVTCameraReleaseEntries.Clear();
+            m_TerrainRVTClipmapReleaseEntries.Clear();
             m_TerrainRVTCandidates.Clear();
             m_TerrainRVTFlushRegions.Clear();
             m_TerrainRVTRecordBuffer?.Dispose();
             m_TerrainRVTRecordBuffer = null;
             m_TerrainRVTLevelBuffer?.Dispose();
             m_TerrainRVTLevelBuffer = null;
+            m_TerrainRVTRecordUpload = Array.Empty<TerrainRuntimeVirtualTextureRecordGPUData>();
+            m_TerrainRVTLevelUpload = Array.Empty<TerrainRuntimeVirtualTextureLevelGPUData>();
+            m_CurrentTerrainRVTCameraState = null;
             m_Bindings.Clear();
             m_RegisteredTextureIds.Clear();
             m_UnsupportedTextureWarningIds.Clear();
@@ -1237,24 +1295,134 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return m_TerrainRVTRecords.Count - 1;
         }
 
-        private void TouchTerrainRVT(TerrainRuntimeVirtualTextureClipmap clipmap)
+        internal static Camera ResolveTerrainRVTCamera(Camera renderingCamera)
         {
-            if (m_SurfaceBindingUpdateActive)
-                clipmap.LastTouchedUpdate = m_SurfaceBindingUpdate;
+            return renderingCamera != null && IsTerrainRVTCameraType(renderingCamera.cameraType)
+                ? renderingCamera
+                : null;
         }
 
-        private void TouchNewTerrainRVT(TerrainRuntimeVirtualTextureClipmap clipmap)
+        internal static bool IsTerrainRVTCameraType(CameraType cameraType)
+        {
+            return cameraType == CameraType.Game || cameraType == CameraType.SceneView;
+        }
+
+        internal static bool ShouldKeepTerrainRVTCameraState(
+            CameraType cameraType,
+            bool isActiveAndEnabled)
+        {
+            return IsTerrainRVTCameraType(cameraType)
+                   && (cameraType != CameraType.Game || isActiveAndEnabled);
+        }
+
+        private TerrainRVTCameraState GetOrCreateTerrainRVTCameraState(Camera camera)
+        {
+            EntityId cameraId = camera.GetEntityId();
+            if (m_TerrainRVTCameraStates.TryGetValue(cameraId, out TerrainRVTCameraState cameraState))
+            {
+                if (ReferenceEquals(cameraState.Camera, camera))
+                    return cameraState;
+                ReleaseTerrainRVTCameraState(cameraState);
+            }
+
+            cameraState = new TerrainRVTCameraState
+            {
+                Camera = camera,
+                CameraId = cameraId,
+            };
+            m_TerrainRVTCameraStates.Add(cameraId, cameraState);
+            return cameraState;
+        }
+
+        private void PurgeInactiveTerrainRVTCameras()
+        {
+            m_TerrainRVTCameraReleaseEntries.Clear();
+            foreach (TerrainRVTCameraState cameraState in m_TerrainRVTCameraStates.Values)
+            {
+                if (cameraState.Camera == null
+                    // Unity renders hidden SceneView cameras while their Camera component is disabled.
+                    || !ShouldKeepTerrainRVTCameraState(
+                        cameraState.Camera.cameraType,
+                        cameraState.Camera.isActiveAndEnabled))
+                {
+                    m_TerrainRVTCameraReleaseEntries.Add(cameraState);
+                }
+            }
+            for (int cameraIndex = 0;
+                 cameraIndex < m_TerrainRVTCameraReleaseEntries.Count;
+                 cameraIndex++)
+            {
+                ReleaseTerrainRVTCameraState(m_TerrainRVTCameraReleaseEntries[cameraIndex]);
+            }
+            m_TerrainRVTCameraReleaseEntries.Clear();
+        }
+
+        private void ReleaseTerrainRVTCameraState(TerrainRVTCameraState cameraState)
+        {
+            if (cameraState == null || !m_TerrainRVTCameraStates.Remove(cameraState.CameraId))
+                return;
+
+            if (ReferenceEquals(m_CurrentTerrainRVTCameraState, cameraState))
+                m_CurrentTerrainRVTCameraState = null;
+
+            m_TerrainRVTClipmapReleaseEntries.Clear();
+            m_TerrainRVTClipmapReleaseEntries.AddRange(cameraState.Clipmaps.Values);
+            for (int clipmapIndex = 0;
+                 clipmapIndex < m_TerrainRVTClipmapReleaseEntries.Count;
+                 clipmapIndex++)
+            {
+                ReleaseTerrainRVTClipmap(
+                    cameraState,
+                    m_TerrainRVTClipmapReleaseEntries[clipmapIndex]);
+            }
+            m_TerrainRVTClipmapReleaseEntries.Clear();
+        }
+
+        private void TouchTerrainRVT(TerrainRVTRegistration registration)
+        {
+            if (m_SurfaceBindingUpdateActive)
+                registration.LastTouchedUpdate = m_SurfaceBindingUpdate;
+        }
+
+        private void TouchNewTerrainRVT(TerrainRVTRegistration registration)
         {
             if (!m_SurfaceBindingUpdateActive)
                 return;
 
-            clipmap.LastTouchedUpdate = m_SurfaceBindingUpdate;
-            clipmap.CreatedUpdate = m_SurfaceBindingUpdate;
+            registration.LastTouchedUpdate = m_SurfaceBindingUpdate;
+            registration.CreatedUpdate = m_SurfaceBindingUpdate;
         }
 
-        private void ReleaseTerrainRVT(TerrainRuntimeVirtualTextureClipmap clipmap)
+        private void ReleaseTerrainRVT(TerrainRVTRegistration registration)
         {
-            if (clipmap == null || !m_TerrainRVTByInstanceId.Remove(clipmap.EntityId))
+            if (registration == null || !m_TerrainRVTRegistrations.Remove(registration.EntityId))
+                return;
+
+            foreach (TerrainRVTCameraState cameraState in m_TerrainRVTCameraStates.Values)
+            {
+                if (cameraState.Clipmaps.TryGetValue(
+                        registration.EntityId,
+                        out TerrainRuntimeVirtualTextureClipmap clipmap))
+                {
+                    ReleaseTerrainRVTClipmap(cameraState, clipmap);
+                }
+            }
+
+            int recordIndex = (int)registration.RecordIndex;
+            if (recordIndex >= 0
+                && recordIndex < m_TerrainRVTRecords.Count
+                && ReferenceEquals(m_TerrainRVTRecords[recordIndex], registration))
+            {
+                m_TerrainRVTRecords[recordIndex] = null;
+            }
+            IncrementBindingRevision();
+        }
+
+        private void ReleaseTerrainRVTClipmap(
+            TerrainRVTCameraState cameraState,
+            TerrainRuntimeVirtualTextureClipmap clipmap)
+        {
+            if (clipmap == null || !cameraState.Clipmaps.Remove(clipmap.EntityId))
                 return;
 
             m_TerrainRVTFlushRegions.Clear();
@@ -1274,19 +1442,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     m_AtlasAllocator.Release(allocations[allocationIndex]);
             }
 
-            int recordIndex = (int)clipmap.RecordIndex;
-            if (recordIndex >= 0
-                && recordIndex < m_TerrainRVTRecords.Count
-                && ReferenceEquals(m_TerrainRVTRecords[recordIndex], clipmap))
-            {
-                m_TerrainRVTRecords[recordIndex] = null;
-            }
             clipmap.Dispose();
-            m_TerrainRVTRecordsDirty = true;
-            IncrementBindingRevision();
         }
 
-        private void UploadTerrainRVTBuffers()
+        private void UploadTerrainRVTBuffers(CommandBuffer cmd, TerrainRVTCameraState cameraState)
         {
             int recordCount = Mathf.Max(1, m_TerrainRVTRecords.Count);
             int levelCount = recordCount * TerrainRuntimeVirtualTextureClipmap.LevelCount;
@@ -1301,23 +1460,34 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 Marshal.SizeOf<TerrainRuntimeVirtualTextureLevelGPUData>(),
                 "VividTerrainRVTLevels");
 
-            var records = new TerrainRuntimeVirtualTextureRecordGPUData[recordCount];
-            var levels = new TerrainRuntimeVirtualTextureLevelGPUData[levelCount];
+            if (m_TerrainRVTRecordUpload.Length < recordCount)
+                m_TerrainRVTRecordUpload = new TerrainRuntimeVirtualTextureRecordGPUData[recordCount];
+            if (m_TerrainRVTLevelUpload.Length < levelCount)
+                m_TerrainRVTLevelUpload = new TerrainRuntimeVirtualTextureLevelGPUData[levelCount];
+            Array.Clear(m_TerrainRVTRecordUpload, 0, recordCount);
+            Array.Clear(m_TerrainRVTLevelUpload, 0, levelCount);
             for (int recordIndex = 0; recordIndex < m_TerrainRVTRecords.Count; recordIndex++)
             {
-                TerrainRuntimeVirtualTextureClipmap clipmap = m_TerrainRVTRecords[recordIndex];
-                if (clipmap == null)
+                TerrainRVTRegistration registration = m_TerrainRVTRecords[recordIndex];
+                if (registration == null
+                    || !cameraState.Clipmaps.TryGetValue(
+                        registration.EntityId,
+                        out TerrainRuntimeVirtualTextureClipmap clipmap))
+                {
                     continue;
+                }
 
                 int levelStartIndex = recordIndex * TerrainRuntimeVirtualTextureClipmap.LevelCount;
-                records[recordIndex] = clipmap.CreateGPUData((uint)levelStartIndex);
+                m_TerrainRVTRecordUpload[recordIndex] = clipmap.CreateGPUData((uint)levelStartIndex);
                 for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
-                    levels[levelStartIndex + levelIndex] = clipmap.Levels[levelIndex].CreateGPUData();
+                {
+                    m_TerrainRVTLevelUpload[levelStartIndex + levelIndex] =
+                        clipmap.Levels[levelIndex].CreateGPUData();
+                }
             }
 
-            m_TerrainRVTRecordBuffer.SetData(records);
-            m_TerrainRVTLevelBuffer.SetData(levels);
-            m_TerrainRVTRecordsDirty = false;
+            cmd.SetBufferData(m_TerrainRVTRecordBuffer, m_TerrainRVTRecordUpload, 0, 0, recordCount);
+            cmd.SetBufferData(m_TerrainRVTLevelBuffer, m_TerrainRVTLevelUpload, 0, 0, levelCount);
         }
 
         private static void EnsureTerrainRVTBuffer(

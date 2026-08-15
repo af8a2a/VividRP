@@ -191,19 +191,27 @@ namespace VividRP.Editor.Tests
             var widget = DebugManager.instance.GetItem(
                     "Rendering -> VividRP Debug -> Virtual Texture -> Terrain RVT Visualization")
                 as DebugUI.EnumField;
+            var layerWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Virtual Texture -> Visualization Layer")
+                as DebugUI.EnumField;
 
             Assert.That(widget, Is.Not.Null);
-            int residencyIndex = Array.IndexOf(
+            Assert.That(layerWidget, Is.Not.Null);
+            int resolvedSurfaceIndex = Array.IndexOf(
                 widget.enumValues,
-                (int)TerrainRuntimeVirtualTextureDebugMode.PageResidency);
-            Assert.That(residencyIndex, Is.GreaterThanOrEqualTo(0));
+                (int)TerrainRuntimeVirtualTextureDebugMode.ResolvedSurface);
+            Assert.That(resolvedSurfaceIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(layerWidget.isHiddenCallback(), Is.True);
 
-            widget.setIndex(residencyIndex);
+            widget.setIndex(resolvedSurfaceIndex);
 
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode,
-                Is.EqualTo(TerrainRuntimeVirtualTextureDebugMode.PageResidency));
-            Assert.That(widget.getter(), Is.EqualTo((int)TerrainRuntimeVirtualTextureDebugMode.PageResidency));
+                Is.EqualTo(TerrainRuntimeVirtualTextureDebugMode.ResolvedSurface));
+            Assert.That(
+                widget.getter(),
+                Is.EqualTo((int)TerrainRuntimeVirtualTextureDebugMode.ResolvedSurface));
+            Assert.That(layerWidget.isHiddenCallback(), Is.False);
 
             VividRenderingDebugDisplaySettings.Data.terrainRuntimeVirtualTextureDebugMode =
                 (TerrainRuntimeVirtualTextureDebugMode)99;

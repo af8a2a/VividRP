@@ -35,6 +35,7 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             #define VIVID_TERRAIN_RVT_VISUALIZATION_NONE 0
             #define VIVID_TERRAIN_RVT_VISUALIZATION_CLIPMAP_LEVEL 1
             #define VIVID_TERRAIN_RVT_VISUALIZATION_PAGE_RESIDENCY 2
+            #define VIVID_TERRAIN_RVT_VISUALIZATION_RESOLVED_SURFACE 3
 
             TEXTURE2D(_SourceTexture);
             SAMPLER(sampler_SourceTexture);
@@ -281,7 +282,44 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                             : float3(1.0, 0.72, 0.04);
             }
 
-            float4 EvaluateTerrainRVTVisualization(float2 pixelUv, float4 sourceColor)
+            float4 EvaluateTerrainRVTResolvedSurface(
+                uint recordIndex,
+                float2 terrainUv,
+                float4 positionCS)
+            {
+                float3 baseColor = 0.0.xxx;
+                float3 normalTS = float3(0.0, 0.0, 1.0);
+                float4 mask = 1.0.xxxx;
+                bool resolved = VividResolveTerrainRVT(
+                    recordIndex,
+                    terrainUv,
+                    ddx(terrainUv),
+                    ddy(terrainUv),
+                    positionCS,
+                    baseColor,
+                    normalTS,
+                    mask);
+                if (!resolved)
+                {
+                    float missingChecker = fmod(
+                        floor(terrainUv.x * 64.0) + floor(terrainUv.y * 64.0),
+                        2.0);
+                    return float4(
+                        lerp(float3(0.025, 0.0, 0.025), float3(0.6, 0.0, 0.6), missingChecker),
+                        1.0);
+                }
+
+                if (_VTVisualizationLayer == VIVID_VT_VISUALIZATION_LAYER_NORMAL)
+                    return float4(normalTS * 0.5 + 0.5, 1.0);
+                if (_VTVisualizationLayer == VIVID_VT_VISUALIZATION_LAYER_MASK)
+                    return float4(mask.r, mask.g, mask.a, 1.0);
+                return float4(baseColor, 1.0);
+            }
+
+            float4 EvaluateTerrainRVTVisualization(
+                float2 pixelUv,
+                float4 positionCS,
+                float4 sourceColor)
             {
                 float2 depthUv = ApplyScaleBias(pixelUv, _DepthTextureScaleBias);
                 float deviceDepth = SAMPLE_TEXTURE2D_LOD(
@@ -304,6 +342,15 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                         terrainUv))
                 {
                     return sourceColor;
+                }
+
+                if (_TerrainRVTVisualizationMode
+                    == VIVID_TERRAIN_RVT_VISUALIZATION_RESOLVED_SURFACE)
+                {
+                    return EvaluateTerrainRVTResolvedSurface(
+                        recordIndex,
+                        terrainUv,
+                        positionCS);
                 }
 
                 return float4(EvaluateTerrainRVTColor(recordIndex, terrainUv), 1.0);
@@ -586,7 +633,10 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                         return EvaluateUnavailableColor(input.uv);
                     }
 
-                    return EvaluateTerrainRVTVisualization(input.uv, sourceColor);
+                    return EvaluateTerrainRVTVisualization(
+                        input.uv,
+                        input.positionCS,
+                        sourceColor);
                 }
 
                 if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_NONE)

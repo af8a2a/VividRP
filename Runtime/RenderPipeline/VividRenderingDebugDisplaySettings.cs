@@ -23,6 +23,8 @@ namespace VividRP.Runtime
         ClipmapLevel = 1,
         [InspectorName("Page Residency")]
         PageResidency = 2,
+        [InspectorName("Resolved Surface")]
+        ResolvedSurface = 3,
     }
 
     public enum VirtualTextureVisualizationMode
@@ -711,7 +713,7 @@ namespace VividRP.Runtime
                 TerrainRuntimeVirtualTextureDebugMode value)
         {
             return value is >= TerrainRuntimeVirtualTextureDebugMode.None
-                and <= TerrainRuntimeVirtualTextureDebugMode.PageResidency
+                and <= TerrainRuntimeVirtualTextureDebugMode.ResolvedSurface
                     ? value
                     : TerrainRuntimeVirtualTextureDebugMode.None;
         }
@@ -1059,7 +1061,7 @@ namespace VividRP.Runtime
             public static readonly NameAndTooltip TerrainRuntimeVirtualTextureDebugMode = new()
             {
                 name = "Terrain RVT Visualization",
-                tooltip = "Clipmap Level uses red/green/blue for levels 0/1/2 and gray for Composite. Page Residency uses green for an exact hit, yellow for a coarser RVT fallback, red for a missing eligible page, and gray for intentional Composite fallback."
+                tooltip = "Clipmap Level uses red/green/blue for levels 0/1/2 and gray for Composite. Page Residency uses green for an exact hit, yellow for a coarser RVT fallback, red for a missing eligible page, and gray for intentional Composite fallback. Resolved Surface writes the selected resident RVT layer directly to the visualization output."
             };
 
             public static readonly NameAndTooltip VirtualTextureVisualizationMode = new()
@@ -1077,7 +1079,7 @@ namespace VividRP.Runtime
             public static readonly NameAndTooltip VirtualTextureVisualizationLayer = new()
             {
                 name = "Visualization Layer",
-                tooltip = "Select the Base Color, Normal, or Mask layer displayed by atlas and resolved-page views."
+                tooltip = "Select the Base Color, Normal, or Mask layer displayed by atlas and resolved-page views. RVT Resolved Surface displays Mask as Metallic/AO/Smoothness in RGB."
             };
 
             public static readonly NameAndTooltip VirtualTextureVisualizationWorldPageSize = new()
@@ -1557,7 +1559,9 @@ namespace VividRP.Runtime
                     () => data.virtualTextureVisualizationLayer,
                     value => data.virtualTextureVisualizationLayer = value);
                 layerField.isHiddenCallback = () =>
-                    data.virtualTextureVisualizationMode != VirtualTextureVisualizationMode.PhysicalAtlas
+                    data.terrainRuntimeVirtualTextureDebugMode
+                        != TerrainRuntimeVirtualTextureDebugMode.ResolvedSurface
+                    && data.virtualTextureVisualizationMode != VirtualTextureVisualizationMode.PhysicalAtlas
                     && data.virtualTextureVisualizationMode
                         != VirtualTextureVisualizationMode.PhysicalAtlasAndPageTableResidency
                     && data.virtualTextureVisualizationMode

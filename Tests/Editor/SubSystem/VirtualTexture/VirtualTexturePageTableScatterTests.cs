@@ -65,5 +65,28 @@ namespace VividRP.Editor.Tests
             Assert.That(shader, Is.Not.Null);
             Assert.That(shader.HasKernel("ScatterPageTableUpdates"), Is.True);
         }
+
+        [Test]
+        public void PipelineResources_ResolveRuntimeBlockCompressorKernels()
+        {
+            Assume.That(
+                SystemInfo.graphicsDeviceType,
+                Is.EqualTo(UnityEngine.Rendering.GraphicsDeviceType.Direct3D12));
+            ComputeShader shader = PipelineResourceManager.Get<VividRPCoreResources>()
+                ?.VirtualTextureBlockCompressCompute;
+
+            Assert.That(shader, Is.Not.Null);
+            Assert.That(shader.HasKernel("EncodeBC7"), Is.True);
+            Assert.That(shader.HasKernel("EncodeBC5"), Is.True);
+            Assert.That(shader.HasKernel("EncodeBC4"), Is.True);
+
+            foreach (UnityEditor.ShaderMessage message in UnityEditor.ShaderUtil.GetComputeShaderMessages(shader))
+            {
+                Assert.That(
+                    message.severity.ToString(),
+                    Is.Not.EqualTo("Error"),
+                    $"{message.file}:{message.line}: {message.message}");
+            }
+        }
     }
 }

@@ -1,7 +1,8 @@
 #pragma kernel EncodeBC7
 #pragma kernel EncodeBC5
 #pragma kernel EncodeBC4
-#pragma only_renderers d3d12
+// Unity imports Direct3D compute kernels through the d3d11 renderer token on DX12.
+#pragma only_renderers d3d11
 
 #pragma use_dxc
 #pragma target 5.0
@@ -29,30 +30,48 @@ float4 LoadSourceTexel(uint2 blockCoord, uint texelIndex)
 
 void WriteBits64(inout uint2 block, inout uint bitPosition, uint value, uint bitCount)
 {
-    [loop]
-    for (uint bitIndex = 0u; bitIndex < bitCount; ++bitIndex, ++bitPosition)
-    {
-        if (((value >> bitIndex) & 1u) == 0u)
-            continue;
+    const uint wordIndex = bitPosition >> 5u;
+    const uint wordBit = bitPosition & 31u;
+    const uint maskedValue = value & ((1u << bitCount) - 1u);
+    if (wordIndex == 0u)
+        block.x |= maskedValue << wordBit;
+    else
+        block.y |= maskedValue << wordBit;
 
-        const uint wordIndex = bitPosition >> 5u;
-        const uint wordBit = bitPosition & 31u;
-        block[wordIndex] |= 1u << wordBit;
+    if (wordBit + bitCount > 32u)
+    {
+        const uint overflowValue = maskedValue >> (32u - wordBit);
+        if (wordIndex == 0u)
+            block.y |= overflowValue;
     }
+    bitPosition += bitCount;
 }
 
 void WriteBits128(inout uint4 block, inout uint bitPosition, uint value, uint bitCount)
 {
-    [loop]
-    for (uint bitIndex = 0u; bitIndex < bitCount; ++bitIndex, ++bitPosition)
-    {
-        if (((value >> bitIndex) & 1u) == 0u)
-            continue;
+    const uint wordIndex = bitPosition >> 5u;
+    const uint wordBit = bitPosition & 31u;
+    const uint maskedValue = value & ((1u << bitCount) - 1u);
+    if (wordIndex == 0u)
+        block.x |= maskedValue << wordBit;
+    else if (wordIndex == 1u)
+        block.y |= maskedValue << wordBit;
+    else if (wordIndex == 2u)
+        block.z |= maskedValue << wordBit;
+    else
+        block.w |= maskedValue << wordBit;
 
-        const uint wordIndex = bitPosition >> 5u;
-        const uint wordBit = bitPosition & 31u;
-        block[wordIndex] |= 1u << wordBit;
+    if (wordBit + bitCount > 32u)
+    {
+        const uint overflowValue = maskedValue >> (32u - wordBit);
+        if (wordIndex == 0u)
+            block.y |= overflowValue;
+        else if (wordIndex == 1u)
+            block.z |= overflowValue;
+        else if (wordIndex == 2u)
+            block.w |= overflowValue;
     }
+    bitPosition += bitCount;
 }
 
 void BuildBC4Palette(uint endpoint0, uint endpoint1, out float palette[8])
@@ -170,8 +189,8 @@ uint2 EncodeBC4Block(float values[16])
     WriteBits64(block, bitPosition, bestEndpoint0, 8u);
     WriteBits64(block, bitPosition, bestEndpoint1, 8u);
     [unroll]
-    for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
-        WriteBits64(block, bitPosition, bestIndices[texelIndex], 3u);
+    for (uint packedTexelIndex = 0u; packedTexelIndex < 16u; ++packedTexelIndex)
+        WriteBits64(block, bitPosition, bestIndices[packedTexelIndex], 3u);
     return block;
 }
 
@@ -360,8 +379,8 @@ uint4 EncodeBC7Block(float4 colors[16])
     WriteBits128(block, bitPosition, bestPBit1, 1u);
     WriteBits128(block, bitPosition, bestIndices[0], 3u);
     [unroll]
-    for (uint texelIndex = 1u; texelIndex < 16u; ++texelIndex)
-        WriteBits128(block, bitPosition, bestIndices[texelIndex], 4u);
+    for (uint packedTexelIndex = 1u; packedTexelIndex < 16u; ++packedTexelIndex)
+        WriteBits128(block, bitPosition, bestIndices[packedTexelIndex], 4u);
     return block;
 }
 

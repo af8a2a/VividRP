@@ -454,6 +454,15 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 bool isTerrainRVT =
                     (triangleData.materialData.MaterialFlags
                         & VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE) != 0u;
+#if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                uint terrainRVTRecordFlags = 0u;
+                if (isTerrainRVT
+                    && triangleData.materialData.Padding1 < _VividTerrainRVTRecordCount)
+                {
+                    terrainRVTRecordFlags =
+                        _VividTerrainRVTRecords[triangleData.materialData.Padding1].Padding0;
+                }
+#endif
 
                 UNITY_BRANCH
                 if (isTerrain)
@@ -583,6 +592,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.customData = 0.0f;
                 surfaceData.customData1 = 0.0f;
                 surfaceData.materialFeatures = VIVID_MATERIALFEATURE_DEFAULT;
+#if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                if (isTerrainRVT
+                    && (terrainRVTRecordFlags & VIVID_TERRAIN_RVT_RECEIVE_DECALS) == 0u)
+                {
+                    surfaceData.materialFeatures &= ~VIVID_MATERIALFEATURE_DECAL_RECEIVE;
+                }
+#endif
                 surfaceData.emissive = max(triangleData.materialData.Emission.rgb, 0.0f);
                 surfaceData.builtinData = CreateVividBuiltinData(
                     SampleVividProbeVolume(

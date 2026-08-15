@@ -51,6 +51,12 @@ namespace VividRP.Runtime
         HDRP,
     }
 
+    public enum VividDecalTechnique
+    {
+        ClusteredBindless = 0,
+        TerrainRuntimeVirtualTexture = 1,
+    }
+
     [CreateAssetMenu(menuName = "VividRP/Vivid Render Pipeline")]
     public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>, IProbeVolumeEnabledRenderPipeline, ISTPEnabledRenderPipeline
     {
@@ -106,6 +112,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private bool m_EnableGPUDrivenDecal;
+
+        [SerializeField]
+        private VividDecalTechnique m_DecalTechnique = VividDecalTechnique.ClusteredBindless;
 
         [SerializeField]
         private bool m_EnableSRPBatcher = true;
@@ -280,6 +289,44 @@ namespace VividRP.Runtime
         {
             get => m_EnableGPUDrivenDecal;
             set => m_EnableGPUDrivenDecal = value;
+        }
+
+        public VividDecalTechnique DecalTechnique
+        {
+            get => m_DecalTechnique;
+            set => m_DecalTechnique = value;
+        }
+
+        internal bool TryValidateTerrainRuntimeVirtualTextureDecals(out string reason)
+        {
+            if (!m_EnableGPUDriven)
+            {
+                reason = "Terrain Runtime Virtual Texture decals require GPU Driven rendering.";
+                return false;
+            }
+            if (m_GPUDrivenTextureBackend != GPUDriven.GPUDrivenTextureBackendMode.VirtualTexture)
+            {
+                reason = "Terrain Runtime Virtual Texture decals require the Virtual Texture GPUDriven texture backend.";
+                return false;
+            }
+            if (!m_EnableTerrainRuntimeVirtualTexture)
+            {
+                reason = "Terrain Runtime Virtual Texture decals require Terrain Runtime Virtual Texture.";
+                return false;
+            }
+            if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Direct3D12)
+            {
+                reason = "Terrain Runtime Virtual Texture decals currently require Direct3D 12.";
+                return false;
+            }
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                reason = "Terrain Runtime Virtual Texture decals require compute shader support.";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
         }
 
         public AutoExposureImplementationPath AutoExposureImplementation

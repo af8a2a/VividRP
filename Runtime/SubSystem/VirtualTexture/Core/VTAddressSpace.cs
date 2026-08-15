@@ -50,6 +50,8 @@ namespace VividRP.Runtime
         private readonly List<VTRequest> m_SortedPendingRequests = new();
         private readonly List<VTRequest> m_EligiblePendingRequests = new();
         private readonly List<VTRequest> m_ResidentRefreshRequests = new();
+        private readonly List<AtomicResidentRefresh> m_AtomicResidentRefreshes = new();
+        private readonly List<DeferredAtomicRefreshRelease> m_DeferredAtomicRefreshReleases = new();
         private readonly List<VTRequest> m_LiveProducerRequests = new();
         private uint m_CachedPendingRequestRevision;
         private uint m_ResidentRefreshRequestRevision;
@@ -67,6 +69,47 @@ namespace VividRP.Runtime
         private readonly bool[] m_ResidentPageTouchedGroups = new bool[VTStackDesc.MaxLayerCount];
         private Color32[] m_ResidentPageScratchPixels;
         private IVTPageProducer m_FallbackResidentPageProducer;
+
+        private readonly struct AtomicResidentRefresh
+        {
+            internal AtomicResidentRefresh(
+                in VTRequest request,
+                int oldPhysicalPageId,
+                int oldGeneration,
+                bool oldLocked)
+            {
+                Request = request;
+                OldPhysicalPageId = oldPhysicalPageId;
+                OldGeneration = oldGeneration;
+                OldLocked = oldLocked;
+            }
+
+            internal VTRequest Request { get; }
+            internal int OldPhysicalPageId { get; }
+            internal int OldGeneration { get; }
+            internal bool OldLocked { get; }
+        }
+
+        private struct DeferredAtomicRefreshRelease
+        {
+            internal DeferredAtomicRefreshRelease(
+                in VirtualTexturePageCoord coord,
+                int oldPhysicalPageId,
+                int oldGeneration)
+            {
+                Coord = coord;
+                OldPhysicalPageId = oldPhysicalPageId;
+                OldGeneration = oldGeneration;
+                CapturedPendingVersion = 0;
+                CapturedForUpload = false;
+            }
+
+            internal VirtualTexturePageCoord Coord;
+            internal int OldPhysicalPageId;
+            internal int OldGeneration;
+            internal int CapturedPendingVersion;
+            internal bool CapturedForUpload;
+        }
 
         internal VTPageTableSpace(
             int spaceId,
@@ -353,6 +396,51 @@ namespace VividRP.Runtime
             return true;
         }
 
+        internal bool TryQueuePageRefresh(
+            in VirtualTexturePageCoord coord,
+            int frameIndex)
+        {
+            for (int refreshIndex = 0; refreshIndex < m_AtomicResidentRefreshes.Count; refreshIndex++)
+            {
+                if (m_AtomicResidentRefreshes[refreshIndex].Request.PageCoord.Equals(coord))
+                    return true;
+            }
+
+            if (!m_ResidencyManager.TryAllocatePageRefresh(
+                    Descriptor,
+                    m_MipOffsets,
+                    SpaceId,
+                    coord,
+                    frameIndex,
+                    out VTRequest request,
+                    out int oldPhysicalPageId,
+                    out int oldGeneration,
+                    out bool oldLocked))
+            {
+                return false;
+            }
+
+            m_ResidentRefreshRequests.Add(request);
+            m_AtomicResidentRefreshes.Add(new AtomicResidentRefresh(
+                request,
+                oldPhysicalPageId,
+                oldGeneration,
+                oldLocked));
+            IncrementResidentRefreshRequestRevision();
+            return true;
+        }
+
+        internal bool IsPageRefreshPending(in VirtualTexturePageCoord coord)
+        {
+            for (int refreshIndex = 0; refreshIndex < m_AtomicResidentRefreshes.Count; refreshIndex++)
+            {
+                if (m_AtomicResidentRefreshes[refreshIndex].Request.PageCoord.Equals(coord))
+                    return true;
+            }
+
+            return false;
+        }
+
         internal bool TryMakePageResident(
             in VirtualTexturePageCoord coord,
             bool locked,
@@ -411,22 +499,51 @@ namespace VividRP.Runtime
             return m_PageTableUpdater.TryGetEntry(Descriptor, m_MipOffsets, coord, out entry);
         }
 
+        internal bool IsPageTableEntryPendingUpload(in VirtualTexturePageCoord coord)
+        {
+            RebuildPageTableIfDirty();
+            return m_PageTableUpdater.IsEntryPendingUpload(Descriptor, m_MipOffsets, coord);
+        }
+
         internal int CopyPendingPageTableUpdates(
             VTPageTableScatterUpdate[] destination,
             int destinationStartIndex,
             out int pendingVersion,
             out bool fullUpload)
         {
-            return m_PageTableUpdater.CopyPendingUpdates(
+            int copiedCount = m_PageTableUpdater.CopyPendingUpdates(
                 destination,
                 destinationStartIndex,
                 out pendingVersion,
                 out fullUpload);
+            if (copiedCount > 0)
+                CaptureDeferredAtomicRefreshReleases(pendingVersion);
+            return copiedCount;
         }
 
         internal void RefreshPageTableBufferImmediately()
         {
+            int pendingVersion = m_PageTableUpdater.PendingUploadVersion;
+            CaptureDeferredAtomicRefreshReleases(pendingVersion);
             m_PageTableUpdater.RefreshBufferImmediate();
+            RetireDeferredAtomicRefreshReleases(pendingVersion);
+        }
+
+        internal bool CommitPendingPageTableUpload(
+            int pendingVersion,
+            bool fullUpload,
+            int uploadedEntryCount)
+        {
+            if (!m_PageTableUpdater.CommitPendingUpload(
+                    pendingVersion,
+                    fullUpload,
+                    uploadedEntryCount))
+            {
+                return false;
+            }
+
+            RetireDeferredAtomicRefreshReleases(pendingVersion);
+            return true;
         }
 
         internal void AdvancePageTransitions(int frameIndex)
@@ -477,6 +594,7 @@ namespace VividRP.Runtime
 
         internal int FlushRegion(int mip, RectInt pageRegion)
         {
+            CancelAtomicRefreshes(mip, pageRegion);
             int flushedCount = m_ResidencyManager.FlushRegion(mip, pageRegion);
             if (flushedCount <= 0)
                 return 0;
@@ -495,6 +613,7 @@ namespace VividRP.Runtime
             for (int regionIndex = 0; regionIndex < pageRegions.Count; regionIndex++)
             {
                 VTPageRegion region = pageRegions[regionIndex];
+                CancelAtomicRefreshes(region.Mip, region.PageRegion);
                 flushedCount += m_ResidencyManager.FlushRegion(region.Mip, region.PageRegion);
             }
 
@@ -517,6 +636,7 @@ namespace VividRP.Runtime
             m_EligiblePendingRequests.Clear();
             if (m_ResidentRefreshRequests.Count > 0)
             {
+                CancelAllAtomicRefreshes();
                 m_ResidentRefreshRequests.Clear();
                 IncrementResidentRefreshRequestRevision();
             }
@@ -586,6 +706,7 @@ namespace VividRP.Runtime
 
         public void Dispose()
         {
+            CancelAllAtomicRefreshes();
             CoreUtils.Destroy(m_ResidentPageStagingTexture);
             m_ResidentPageStagingTexture = null;
             for (int physicalGroup = 0; physicalGroup < m_ResidentPageConvertedStagingTextures.Length; physicalGroup++)
@@ -917,7 +1038,17 @@ namespace VividRP.Runtime
                 if (status == VTPageRequestStatus.Invalid)
                 {
                     m_PageProducer.CancelRequest(Descriptor, request);
-                    if (!RemoveResidentRefreshRequest(request))
+                    if (TryTakeAtomicRefresh(request, out AtomicResidentRefresh refresh))
+                    {
+                        m_ResidencyManager.CancelPageRefresh(
+                            Descriptor,
+                            m_MipOffsets,
+                            refresh.Request,
+                            refresh.OldPhysicalPageId,
+                            refresh.OldGeneration,
+                            refresh.OldLocked);
+                    }
+                    else if (!RemoveResidentRefreshRequest(request))
                         RollbackResidentPage(request.PageCoord);
                 }
 
@@ -1206,6 +1337,28 @@ namespace VividRP.Runtime
             if (request.SpaceId != SpaceId)
                 return false;
 
+            if (TryTakeAtomicRefresh(request, out AtomicResidentRefresh refresh))
+            {
+                bool committed = m_ResidencyManager.TryCommitPageRefresh(
+                    Descriptor,
+                    m_MipOffsets,
+                    refresh.Request,
+                    refresh.OldPhysicalPageId,
+                    refresh.OldGeneration,
+                    refresh.OldLocked,
+                    commitFrameIndex);
+                if (committed)
+                {
+                    m_DeferredAtomicRefreshReleases.Add(new DeferredAtomicRefreshRelease(
+                        request.PageCoord,
+                        refresh.OldPhysicalPageId,
+                        refresh.OldGeneration));
+                }
+                if (committed && rebuildPageTable)
+                    RebuildPageTable();
+                return committed;
+            }
+
             if (RemoveResidentRefreshRequest(request))
                 return true;
 
@@ -1244,6 +1397,117 @@ namespace VividRP.Runtime
             }
 
             return false;
+        }
+
+        private bool TryTakeAtomicRefresh(
+            in VTRequest request,
+            out AtomicResidentRefresh refresh)
+        {
+            for (int refreshIndex = 0; refreshIndex < m_AtomicResidentRefreshes.Count; refreshIndex++)
+            {
+                AtomicResidentRefresh candidate = m_AtomicResidentRefreshes[refreshIndex];
+                if (!candidate.Request.Equals(request))
+                    continue;
+
+                refresh = candidate;
+                m_AtomicResidentRefreshes.RemoveAt(refreshIndex);
+                RemoveResidentRefreshRequest(request);
+                return true;
+            }
+
+            refresh = default;
+            return false;
+        }
+
+        private void CancelAtomicRefreshes(int mip, RectInt pageRegion)
+        {
+            for (int refreshIndex = m_AtomicResidentRefreshes.Count - 1;
+                 refreshIndex >= 0;
+                 refreshIndex--)
+            {
+                AtomicResidentRefresh refresh = m_AtomicResidentRefreshes[refreshIndex];
+                VirtualTexturePageCoord coord = refresh.Request.PageCoord;
+                if (coord.Mip != mip
+                    || !pageRegion.Contains(new Vector2Int(coord.X, coord.Y)))
+                {
+                    continue;
+                }
+
+                m_ResidencyManager.CancelPageRefresh(
+                    Descriptor,
+                    m_MipOffsets,
+                    refresh.Request,
+                    refresh.OldPhysicalPageId,
+                    refresh.OldGeneration,
+                    refresh.OldLocked);
+                m_AtomicResidentRefreshes.RemoveAt(refreshIndex);
+                RemoveResidentRefreshRequest(refresh.Request);
+            }
+        }
+
+        private void CancelAllAtomicRefreshes()
+        {
+            for (int refreshIndex = m_AtomicResidentRefreshes.Count - 1;
+                 refreshIndex >= 0;
+                 refreshIndex--)
+            {
+                AtomicResidentRefresh refresh = m_AtomicResidentRefreshes[refreshIndex];
+                m_ResidencyManager.CancelPageRefresh(
+                    Descriptor,
+                    m_MipOffsets,
+                    refresh.Request,
+                    refresh.OldPhysicalPageId,
+                    refresh.OldGeneration,
+                    refresh.OldLocked);
+            }
+
+            m_AtomicResidentRefreshes.Clear();
+        }
+
+        private void CaptureDeferredAtomicRefreshReleases(int pendingVersion)
+        {
+            for (int releaseIndex = 0;
+                 releaseIndex < m_DeferredAtomicRefreshReleases.Count;
+                 releaseIndex++)
+            {
+                DeferredAtomicRefreshRelease release =
+                    m_DeferredAtomicRefreshReleases[releaseIndex];
+                if (!m_PageTableUpdater.IsEntryPendingUpload(
+                        Descriptor,
+                        m_MipOffsets,
+                        release.Coord))
+                {
+                    continue;
+                }
+
+                release.CapturedPendingVersion = pendingVersion;
+                release.CapturedForUpload = true;
+                m_DeferredAtomicRefreshReleases[releaseIndex] = release;
+            }
+        }
+
+        private void RetireDeferredAtomicRefreshReleases(int pendingVersion)
+        {
+            for (int releaseIndex = m_DeferredAtomicRefreshReleases.Count - 1;
+                 releaseIndex >= 0;
+                 releaseIndex--)
+            {
+                DeferredAtomicRefreshRelease release =
+                    m_DeferredAtomicRefreshReleases[releaseIndex];
+                if (!release.CapturedForUpload
+                    || release.CapturedPendingVersion != pendingVersion)
+                {
+                    continue;
+                }
+
+                m_ResidencyManager.ReleaseCommittedPageRefreshOldBinding(
+                    Descriptor,
+                    m_MipOffsets,
+                    release.Coord,
+                    release.OldPhysicalPageId,
+                    release.OldGeneration);
+                m_DeferredAtomicRefreshReleases.RemoveAt(releaseIndex);
+            }
         }
 
         private void IncrementResidentRefreshRequestRevision()

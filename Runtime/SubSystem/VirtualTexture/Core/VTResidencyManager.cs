@@ -832,6 +832,222 @@ namespace VividRP.Runtime
             return true;
         }
 
+        internal bool TryAllocatePageRefresh(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            int spaceId,
+            in VirtualTexturePageCoord coord,
+            int frameIndex,
+            out VTRequest request,
+            out int oldPhysicalPageId,
+            out int oldGeneration,
+            out bool oldLocked)
+        {
+            request = default;
+            oldPhysicalPageId = -1;
+            oldGeneration = 0;
+            oldLocked = false;
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, coord))
+                return false;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, coord);
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            if (!pageState.Resident || pageState.PendingUpload)
+                return false;
+
+            oldPhysicalPageId = pageState.PhysicalPageId;
+            oldGeneration = pageState.Generation;
+            oldLocked = pageState.Locked;
+            if (!m_PhysicalPool.TrySetLocked(
+                    oldPhysicalPageId,
+                    oldGeneration,
+                    this,
+                    pageIndex,
+                    true))
+            {
+                return false;
+            }
+
+#if VT_DEBUG
+            var requestDebugInfo = new VTPageRequestDebugInfo(
+                VTPageRequestKind.Locked,
+                coord,
+                coord,
+                mipGap: 0,
+                VTRequestPriorityUtility.ComputeMipWeightedScore(int.MaxValue, coord.Mip));
+#endif
+            if (!m_PhysicalPool.TryAllocatePage(
+                    this,
+                    m_ProducerHandle,
+                    m_ProducerName,
+                    pageIndex,
+                    m_PageMips[pageIndex],
+                    coord,
+                    VirtualTextureViewId.Invalid,
+                    VirtualTextureViewId.Invalid,
+                    updateAffinity: false,
+                    frameIndex,
+                    locked: true,
+                    pendingUpload: true,
+#if VT_DEBUG
+                    requestDebugInfo,
+#endif
+                    out int physicalPageId,
+                    out int generation,
+                    out _))
+            {
+                m_PhysicalPool.TrySetLocked(
+                    oldPhysicalPageId,
+                    oldGeneration,
+                    this,
+                    pageIndex,
+                    oldLocked);
+                return false;
+            }
+
+            request = new VTRequest(
+                spaceId,
+                coord,
+                physicalPageId,
+                generation,
+                int.MaxValue,
+                frameIndex,
+                int.MinValue,
+                isActiveView: false);
+            return true;
+        }
+
+        internal bool TryCommitPageRefresh(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            in VTRequest request,
+            int oldPhysicalPageId,
+            int oldGeneration,
+            bool oldLocked,
+            int commitFrameIndex)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                return false;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
+                desc,
+                mipOffsets,
+                request.PageCoord);
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            if (!pageState.Resident
+                || pageState.PhysicalPageId != oldPhysicalPageId
+                || pageState.Generation != oldGeneration
+                || !m_PhysicalPool.TryCommitPage(
+                    request.PhysicalPageId,
+                    request.Generation,
+                    commitFrameIndex))
+            {
+                CancelPageRefresh(
+                    desc,
+                    mipOffsets,
+                    request,
+                    oldPhysicalPageId,
+                    oldGeneration,
+                    oldLocked);
+                return false;
+            }
+
+            if (!m_PhysicalPool.TrySetVisibilityPending(
+                    oldPhysicalPageId,
+                    oldGeneration,
+                    this,
+                    pageIndex,
+                    visibilityPending: true))
+            {
+                m_PhysicalPool.TryReleasePageBinding(
+                    request.PhysicalPageId,
+                    request.Generation,
+                    this,
+                    pageIndex);
+                m_PhysicalPool.TryRestorePhysicalPageLookup(
+                    oldPhysicalPageId,
+                    oldGeneration);
+                return false;
+            }
+
+            pageState.PhysicalPageId = request.PhysicalPageId;
+            pageState.Generation = request.Generation;
+            pageState.LastAllocationFrame = commitFrameIndex >= 0
+                ? commitFrameIndex
+                : request.RequestFrame;
+            pageState.PendingUpload = false;
+            pageState.Resident = true;
+            pageState.Locked = oldLocked;
+            pageState.TransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
+            pageState.TransitionTracked = false;
+            pageState.TransitionQueued = false;
+            pageState.TransitionAncestorPageIndex = -1;
+            pageState.LastTransitionPhaseFrame = int.MinValue;
+            SetPageState(pageIndex, pageState);
+            m_PhysicalPool.TrySetLocked(
+                request.PhysicalPageId,
+                request.Generation,
+                this,
+                pageIndex,
+                oldLocked);
+            m_PhysicalPool.Touch(
+                request.PhysicalPageId,
+                VirtualTextureViewId.Invalid,
+                pageState.LastAllocationFrame,
+                updateAffinity: false);
+            MarkPageTableDirty(pageIndex);
+            return true;
+        }
+
+        internal bool ReleaseCommittedPageRefreshOldBinding(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            in VirtualTexturePageCoord coord,
+            int oldPhysicalPageId,
+            int oldGeneration)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, coord))
+                return false;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, coord);
+            return m_PhysicalPool.TryReleasePageBinding(
+                oldPhysicalPageId,
+                oldGeneration,
+                this,
+                pageIndex);
+        }
+
+        internal void CancelPageRefresh(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            in VTRequest request,
+            int oldPhysicalPageId,
+            int oldGeneration,
+            bool oldLocked)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                return;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
+                desc,
+                mipOffsets,
+                request.PageCoord);
+            m_PhysicalPool.TryReleasePageBinding(
+                request.PhysicalPageId,
+                request.Generation,
+                this,
+                pageIndex);
+            m_PhysicalPool.TryRestorePhysicalPageLookup(
+                oldPhysicalPageId,
+                oldGeneration);
+            m_PhysicalPool.TrySetLocked(
+                oldPhysicalPageId,
+                oldGeneration,
+                this,
+                pageIndex,
+                oldLocked);
+        }
+
         internal VTResidencyProcessResult ProcessRequests(
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,

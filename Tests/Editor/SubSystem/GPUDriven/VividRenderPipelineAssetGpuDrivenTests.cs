@@ -25,6 +25,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.EnableGPUDriven, Is.False);
                 Assert.That(asset.EnableGPUDrivenOcclusionCulling, Is.True);
                 Assert.That(asset.EnableTerrainRuntimeVirtualTexture, Is.False);
+                Assert.That(asset.DecalTechnique, Is.EqualTo(VividDecalTechnique.ClusteredBindless));
                 Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
                 Assert.That(
                     asset.GPUDrivenVirtualTexturePhysicalPoolQuality,
@@ -53,6 +54,7 @@ namespace VividRP.Editor.Tests
                 var property = serializedObject.FindProperty("m_EnableGPUDriven");
                 var occlusionProperty = serializedObject.FindProperty("m_EnableGPUDrivenOcclusionCulling");
                 var terrainRVTProperty = serializedObject.FindProperty("m_EnableTerrainRuntimeVirtualTexture");
+                var decalTechniqueProperty = serializedObject.FindProperty("m_DecalTechnique");
                 var textureBackendProperty = serializedObject.FindProperty("m_GPUDrivenTextureBackend");
                 var virtualTexturePhysicalPoolQualityProperty = serializedObject.FindProperty(
                     "m_GPUDrivenVirtualTexturePhysicalPoolQuality");
@@ -70,6 +72,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(property, Is.Not.Null);
                 Assert.That(occlusionProperty, Is.Not.Null);
                 Assert.That(terrainRVTProperty, Is.Not.Null);
+                Assert.That(decalTechniqueProperty, Is.Not.Null);
                 Assert.That(textureBackendProperty, Is.Not.Null);
                 Assert.That(virtualTexturePhysicalPoolQualityProperty, Is.Not.Null);
                 Assert.That(maxResidencyProperty, Is.Not.Null);
@@ -82,6 +85,7 @@ namespace VividRP.Editor.Tests
                 property.boolValue = true;
                 occlusionProperty.boolValue = false;
                 terrainRVTProperty.boolValue = true;
+                decalTechniqueProperty.enumValueIndex = (int)VividDecalTechnique.TerrainRuntimeVirtualTexture;
                 textureBackendProperty.enumValueIndex = (int) GPUDrivenTextureBackendMode.Bindless;
                 virtualTexturePhysicalPoolQualityProperty.enumValueIndex =
                     (int)GPUDrivenVirtualTexturePhysicalPoolQuality.High;
@@ -96,6 +100,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.EnableGPUDriven, Is.True);
                 Assert.That(asset.EnableGPUDrivenOcclusionCulling, Is.False);
                 Assert.That(asset.EnableTerrainRuntimeVirtualTexture, Is.True);
+                Assert.That(
+                    asset.DecalTechnique,
+                    Is.EqualTo(VividDecalTechnique.TerrainRuntimeVirtualTexture));
                 Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
                 Assert.That(
                     asset.GPUDrivenVirtualTexturePhysicalPoolQuality,
@@ -204,6 +211,36 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     VividGPUDrivenSystem.ResolveConfiguredTextureBackendMode(asset),
                     Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void TerrainRuntimeVirtualTextureDecals_ValidateRequiredPipelineDependenciesInOrder()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                Assert.That(
+                    asset.TryValidateTerrainRuntimeVirtualTextureDecals(out string gpuReason),
+                    Is.False);
+                Assert.That(gpuReason, Does.Contain("GPUDriven"));
+
+                asset.EnableGPUDriven = true;
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.Bindless;
+                Assert.That(
+                    asset.TryValidateTerrainRuntimeVirtualTextureDecals(out string backendReason),
+                    Is.False);
+                Assert.That(backendReason, Does.Contain("Virtual Texture"));
+
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.VirtualTexture;
+                Assert.That(
+                    asset.TryValidateTerrainRuntimeVirtualTextureDecals(out string terrainReason),
+                    Is.False);
+                Assert.That(terrainReason, Does.Contain("Terrain Runtime Virtual Texture"));
             }
             finally
             {

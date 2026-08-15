@@ -27,6 +27,9 @@ StructuredBuffer<TerrainRuntimeVirtualTextureLevelGPUData> _VividTerrainRVTLevel
 uint _VividTerrainRVTRecordCount;
 uint _VividTerrainRVTEnabled;
 
+#define VIVID_TERRAIN_RVT_RECEIVE_DECALS (1u << 0)
+#define VIVID_TERRAIN_RVT_HAS_DECAL_CACHE (1u << 1)
+
 float3 VividDecodeTerrainRVTNormal(float4 packedNormal)
 {
     const float2 normalXY = packedNormal.wy * 2.0 - 1.0;

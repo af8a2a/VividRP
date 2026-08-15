@@ -3,6 +3,9 @@
 #pragma use_dxc
 #pragma target 5.0
 
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VirtualTextureSurfaceSampling.hlsl"
+
 Texture2D<float4> _BaseColor0;
 Texture2D<float4> _BaseColor1;
 Texture2D<float4> _BaseColor2;
@@ -29,6 +32,7 @@ Texture2D<float4> _Mask6;
 Texture2D<float4> _Mask7;
 Texture2D<float4> _Control0;
 Texture2D<float4> _Control1;
+Texture2D<float> _TerrainHeightTexture;
 
 SamplerState sampler_LinearRepeat;
 SamplerState sampler_LinearClamp;
@@ -40,6 +44,33 @@ int4 _RVTPageLayout;
 float4 _RVTOutputDimensions;
 float4 _RVTLayerTilingOffset[8];
 float4 _RVTLayerMaterialParams[8];
+float4x4 _RVTLocalToWorld;
+float4 _RVTTerrainSize;
+float4 _RVTHeightTexelSize;
+int2 _RVTPageDecalRange;
+
+struct TerrainRuntimeVirtualTextureDecalGPUData
+{
+    float4x4 WorldToDecal;
+    float4 BaseColor;
+    VividSurfaceBindingData SurfaceBinding;
+    float4 TangentWS;
+    float4 BitangentWS;
+    float4 NormalWS;
+    float BlendDistance;
+    float Metallic;
+    float Roughness;
+    float Padding0;
+};
+
+struct TerrainRuntimeVirtualTexturePageDecalIndexGPUData
+{
+    uint DecalIndex;
+    uint SourceMip;
+};
+
+StructuredBuffer<TerrainRuntimeVirtualTextureDecalGPUData> _RVTDecals;
+StructuredBuffer<TerrainRuntimeVirtualTexturePageDecalIndexGPUData> _RVTPageDecalIndices;
 
 static const uint kSubsampleGridSize = 2u;
 static const float kSubsampleFootprintScale = 0.5;
@@ -171,6 +202,158 @@ float3 EncodeLinearToSRGB(float3 value)
     return saturate(lerp(highSegment, lowSegment, useLowSegment));
 }
 
+float4 SampleDecalVirtualTextureLayer(
+    const TerrainRuntimeVirtualTextureDecalGPUData decal,
+    const uint resource,
+    const float2 uv,
+    const uint sourceMip,
+    const float4 fallback)
+{
+    if (resource == 0xFFFFFFFFu)
+        return fallback;
+
+    const float2 virtualUv = VividApplySurfaceBindingUV(decal.SurfaceBinding, uv);
+    const VTResolvedAddress resolved = VTResolveAddress(virtualUv, sourceMip);
+    if (!resolved.valid || !resolved.resident || resolved.resolvedMip != sourceMip)
+        return fallback;
+
+    return VTSamplePhysicalCacheLayer(
+        virtualUv,
+        resolved,
+        VividGetVirtualTextureResourceLayer(resource));
+}
+
+void CreateTerrainFrame(
+    const float2 terrainUv,
+    out float3 positionWS,
+    out float3 tangentWS,
+    out float3 bitangentWS,
+    out float3 normalWS)
+{
+    const float height = _TerrainHeightTexture.SampleLevel(sampler_LinearClamp, terrainUv, 0.0);
+    const float heightMinusX = _TerrainHeightTexture.SampleLevel(
+        sampler_LinearClamp,
+        terrainUv - float2(_RVTHeightTexelSize.x, 0.0),
+        0.0);
+    const float heightPlusX = _TerrainHeightTexture.SampleLevel(
+        sampler_LinearClamp,
+        terrainUv + float2(_RVTHeightTexelSize.x, 0.0),
+        0.0);
+    const float heightMinusY = _TerrainHeightTexture.SampleLevel(
+        sampler_LinearClamp,
+        terrainUv - float2(0.0, _RVTHeightTexelSize.y),
+        0.0);
+    const float heightPlusY = _TerrainHeightTexture.SampleLevel(
+        sampler_LinearClamp,
+        terrainUv + float2(0.0, _RVTHeightTexelSize.y),
+        0.0);
+
+    const float3 positionLS = float3(
+        terrainUv.x * _RVTTerrainSize.x,
+        height * _RVTTerrainSize.y,
+        terrainUv.y * _RVTTerrainSize.z);
+    const float3 tangentLS = float3(
+        2.0 * _RVTHeightTexelSize.x * _RVTTerrainSize.x,
+        (heightPlusX - heightMinusX) * _RVTTerrainSize.y,
+        0.0);
+    const float3 forwardLS = float3(
+        0.0,
+        (heightPlusY - heightMinusY) * _RVTTerrainSize.y,
+        2.0 * _RVTHeightTexelSize.y * _RVTTerrainSize.z);
+    positionWS = mul(_RVTLocalToWorld, float4(positionLS, 1.0)).xyz;
+    tangentWS = normalize(mul((float3x3)_RVTLocalToWorld, tangentLS));
+    const float3 forwardWS = normalize(mul((float3x3)_RVTLocalToWorld, forwardLS));
+    normalWS = normalize(cross(forwardWS, tangentWS));
+    bitangentWS = normalize(cross(normalWS, tangentWS));
+}
+
+void ApplyTerrainDecals(
+    const float2 terrainUv,
+    inout float3 baseColor,
+    inout float3 normalTS,
+    inout float3 mask)
+{
+    if (_RVTPageDecalRange.y <= 0)
+        return;
+
+    float3 positionWS;
+    float3 tangentWS;
+    float3 bitangentWS;
+    float3 terrainNormalWS;
+    CreateTerrainFrame(terrainUv, positionWS, tangentWS, bitangentWS, terrainNormalWS);
+    float3 normalWS = normalize(
+        normalTS.x * tangentWS
+        + normalTS.y * bitangentWS
+        + normalTS.z * terrainNormalWS);
+
+    [loop]
+    for (int localIndex = 0; localIndex < _RVTPageDecalRange.y; ++localIndex)
+    {
+        const TerrainRuntimeVirtualTexturePageDecalIndexGPUData pageDecal =
+            _RVTPageDecalIndices[_RVTPageDecalRange.x + localIndex];
+        const TerrainRuntimeVirtualTextureDecalGPUData decal = _RVTDecals[pageDecal.DecalIndex];
+        const float3 positionDS = mul(decal.WorldToDecal, float4(positionWS, 1.0)).xyz;
+        const float3 volumeDistance = 0.5 - abs(positionDS);
+        if (any(volumeDistance < 0.0))
+            continue;
+
+        const float2 uv = positionDS.xz + 0.5;
+        float4 decalBaseColor = SampleDecalVirtualTextureLayer(
+            decal,
+            decal.SurfaceBinding.BaseColorResource,
+            uv,
+            pageDecal.SourceMip,
+            1.0.xxxx);
+        decalBaseColor.rgb = VTApplyLayerColorSpace(
+            decalBaseColor.rgb,
+            VividGetVirtualTextureResourceLayer(decal.SurfaceBinding.BaseColorResource));
+        const float blendDistance = clamp(decal.BlendDistance, 0.0, 0.5);
+        const float edgeDistance = min(volumeDistance.x, volumeDistance.z);
+        const float volumeFade = blendDistance > 1e-5
+            ? saturate(edgeDistance / blendDistance)
+            : step(0.0, edgeDistance);
+        const float opacity = saturate(decal.BaseColor.a * decalBaseColor.a) * volumeFade;
+        if (opacity <= 0.0)
+            continue;
+
+        const float4 decalMask = SampleDecalVirtualTextureLayer(
+            decal,
+            decal.SurfaceBinding.MaskResource,
+            uv,
+            pageDecal.SourceMip,
+            float4(decal.Metallic, 1.0, 1.0, 1.0 - decal.Roughness));
+        const float surfacePerceptualRoughness = 1.0 - saturate(mask.b);
+        const float decalPerceptualRoughness = 1.0 - saturate(decalMask.a);
+        baseColor = lerp(baseColor, decal.BaseColor.rgb * decalBaseColor.rgb, opacity);
+        mask.r = lerp(mask.r, saturate(decalMask.r), opacity);
+        mask.b = 1.0 - lerp(
+            surfacePerceptualRoughness,
+            decalPerceptualRoughness,
+            opacity);
+
+        const float4 packedNormal = SampleDecalVirtualTextureLayer(
+            decal,
+            decal.SurfaceBinding.NormalResource,
+            uv,
+            pageDecal.SourceMip,
+            float4(0.5, 0.5, 1.0, 0.5));
+        const float2 decalNormalXY = packedNormal.wy * 2.0 - 1.0;
+        const float3 decalNormalTS = float3(
+            decalNormalXY,
+            sqrt(saturate(1.0 - dot(decalNormalXY, decalNormalXY))));
+        const float3 decalNormalWS = normalize(
+            decalNormalTS.x * decal.TangentWS.xyz
+            + decalNormalTS.y * decal.BitangentWS.xyz
+            + decalNormalTS.z * decal.NormalWS.xyz);
+        normalWS = normalize(lerp(normalWS, decalNormalWS, opacity));
+    }
+
+    normalTS = normalize(float3(
+        dot(normalWS, tangentWS),
+        dot(normalWS, bitangentWS),
+        dot(normalWS, terrainNormalWS)));
+}
+
 [numthreads(8, 8, 1)]
 void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -198,10 +381,14 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
             float weights[8];
             ResolveWeights(terrainUv, weights);
 
+            float3 subsampleBaseColor = 0.0.xxx;
+            float3 subsampleNormalTS = 0.0.xxx;
+            float3 subsampleMask = 0.0.xxx;
+
             [unroll]
             for (uint layerIndex = 0u; layerIndex < 8u; ++layerIndex)
             {
-                const float weight = weights[layerIndex] * kSubsampleWeight;
+                const float weight = weights[layerIndex];
                 if (weight <= 0.0)
                     continue;
 
@@ -229,10 +416,24 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
                     sampledSmoothness = sampledMask.a;
                 }
 
-                baseColor += sampledBaseColor * weight;
-                normalTS += sampledNormal * weight;
-                mask += float3(sampledMetallic, sampledAmbientOcclusion, sampledSmoothness) * weight;
+                subsampleBaseColor += sampledBaseColor * weight;
+                subsampleNormalTS += sampledNormal * weight;
+                subsampleMask += float3(sampledMetallic, sampledAmbientOcclusion, sampledSmoothness) * weight;
             }
+
+
+            const float subsampleNormalLengthSquared = dot(subsampleNormalTS, subsampleNormalTS);
+            subsampleNormalTS = subsampleNormalLengthSquared > 1e-8
+                ? subsampleNormalTS * rsqrt(subsampleNormalLengthSquared)
+                : float3(0.0, 0.0, 1.0);
+            ApplyTerrainDecals(
+                terrainUv,
+                subsampleBaseColor,
+                subsampleNormalTS,
+                subsampleMask);
+            baseColor += subsampleBaseColor * kSubsampleWeight;
+            normalTS += subsampleNormalTS * kSubsampleWeight;
+            mask += subsampleMask * kSubsampleWeight;
         }
     }
 

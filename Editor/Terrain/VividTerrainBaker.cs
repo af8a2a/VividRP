@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Editor.GPUDriven;
 using VividRP.Editor.GPUDriven.Meshlets;
@@ -63,6 +64,9 @@ namespace VividRP.Editor.TerrainTools
                     createdVirtualTexturePaths);
                 AssetDatabase.CreateAsset(data, assetPath);
                 mainAssetCreated = true;
+
+                if (data.NormalizedHeightTexture != null)
+                    AssetDatabase.AddObjectToAsset(data.NormalizedHeightTexture, data);
 
                 for (int chunkIndex = 0; chunkIndex < data.Chunks.Count; chunkIndex++)
                 {
@@ -237,7 +241,8 @@ namespace VividRP.Editor.TerrainTools
                     parameters.SourceMaterial,
                     CaptureLayers(terrainData.terrainLayers),
                     chunks.ToArray(),
-                    CaptureControlMaps(terrainData)
+                    CaptureControlMaps(terrainData),
+                    CreateNormalizedHeightTexture(terrainData.name, heights)
                 );
             }
             catch
@@ -671,6 +676,36 @@ namespace VividRP.Editor.TerrainTools
             terrainData.SetCompositeVirtualTexture(compositeVirtualTexture);
         }
 
+        private static Texture2D CreateNormalizedHeightTexture(string terrainName, float[,] heights)
+        {
+            int height = heights.GetLength(0);
+            int width = heights.GetLength(1);
+            var samples = new ushort[checked(width * height)];
+            for (int y = 0; y < height; y++)
+            {
+                int rowStart = y * width;
+                for (int x = 0; x < width; x++)
+                {
+                    samples[rowStart + x] = (ushort)Mathf.RoundToInt(
+                        Mathf.Clamp01(heights[y, x]) * ushort.MaxValue);
+                }
+            }
+
+            var texture = new Texture2D(
+                width,
+                height,
+                GraphicsFormat.R16_UNorm,
+                TextureCreationFlags.MipChain)
+            {
+                name = $"{terrainName}_NormalizedHeight",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+            texture.SetPixelData(samples, 0);
+            texture.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+            return texture;
+        }
+
         private static string CreateVirtualTextureAssetPath(string terrainAssetPath, string suffix)
         {
             return CreateSiblingAssetPath(
@@ -780,6 +815,9 @@ namespace VividRP.Editor.TerrainTools
                     Object.DestroyImmediate(meshlets);
                 }
             }
+
+            if (data.NormalizedHeightTexture != null)
+                Object.DestroyImmediate(data.NormalizedHeightTexture);
 
             Object.DestroyImmediate(data);
         }

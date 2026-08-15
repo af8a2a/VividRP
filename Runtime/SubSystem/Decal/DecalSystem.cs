@@ -11,6 +11,102 @@ using VividRP.Runtime.GPUDriven.Bindless;
 
 namespace VividRP.Runtime.SubSystem.Decal
 {
+    internal readonly struct TerrainVirtualTextureDecalData
+    {
+        internal TerrainVirtualTextureDecalData(
+            DecalProjector projector,
+            EntityId entityId,
+            Bounds worldBounds,
+            Matrix4x4 worldToDecal,
+            Color baseColor,
+            float normalizedBlendDistance,
+            float metallic,
+            float roughness,
+            int drawOrder,
+            VividVirtualTextureAsset virtualTextureAsset,
+            uint assetContentVersion)
+        {
+            Projector = projector;
+            EntityId = entityId;
+            WorldBounds = worldBounds;
+            WorldToDecal = worldToDecal;
+            BaseColor = baseColor;
+            NormalizedBlendDistance = normalizedBlendDistance;
+            Metallic = metallic;
+            Roughness = roughness;
+            DrawOrder = drawOrder;
+            VirtualTextureAsset = virtualTextureAsset;
+            AssetContentVersion = assetContentVersion;
+        }
+
+        internal DecalProjector Projector { get; }
+        internal EntityId EntityId { get; }
+        internal Bounds WorldBounds { get; }
+        internal Matrix4x4 WorldToDecal { get; }
+        internal Color BaseColor { get; }
+        internal float NormalizedBlendDistance { get; }
+        internal float Metallic { get; }
+        internal float Roughness { get; }
+        internal int DrawOrder { get; }
+        internal VividVirtualTextureAsset VirtualTextureAsset { get; }
+        internal uint AssetContentVersion { get; }
+    }
+
+    internal readonly struct TerrainVirtualTextureDecalDirtyRegion
+    {
+        internal TerrainVirtualTextureDecalDirtyRegion(
+            EntityId entityId,
+            bool hasOldBounds,
+            Bounds oldBounds,
+            bool hasNewBounds,
+            Bounds newBounds)
+        {
+            EntityId = entityId;
+            HasOldBounds = hasOldBounds;
+            OldBounds = oldBounds;
+            HasNewBounds = hasNewBounds;
+            NewBounds = newBounds;
+        }
+
+        internal EntityId EntityId { get; }
+        internal bool HasOldBounds { get; }
+        internal Bounds OldBounds { get; }
+        internal bool HasNewBounds { get; }
+        internal Bounds NewBounds { get; }
+
+        internal Bounds UnionBounds
+        {
+            get
+            {
+                if (!HasOldBounds)
+                    return NewBounds;
+                if (!HasNewBounds)
+                    return OldBounds;
+
+                Bounds union = OldBounds;
+                union.Encapsulate(NewBounds);
+                return union;
+            }
+        }
+    }
+
+    internal readonly struct TerrainVirtualTextureDecalSnapshot
+    {
+        internal TerrainVirtualTextureDecalSnapshot(
+            uint revision,
+            IReadOnlyList<TerrainVirtualTextureDecalData> decals,
+            IReadOnlyList<TerrainVirtualTextureDecalDirtyRegion> dirtyRegions)
+        {
+            Revision = revision;
+            Decals = decals;
+            DirtyRegions = dirtyRegions;
+        }
+
+        internal uint Revision { get; }
+        internal IReadOnlyList<TerrainVirtualTextureDecalData> Decals { get; }
+        internal IReadOnlyList<TerrainVirtualTextureDecalDirtyRegion> DirtyRegions { get; }
+    }
+
     internal sealed class DecalSystem : VividSubsystem<DecalSystem>
     {
         private const int k_InlineJobDecalThreshold = 64;
@@ -19,6 +115,10 @@ namespace VividRP.Runtime.SubSystem.Decal
         private static readonly Quaternion s_ProjectorToDecalSpaceRotation = Quaternion.Euler(-90.0f, 0.0f, 0.0f);
 
         private readonly List<DecalProjector> m_Projectors = new();
+        private readonly List<TerrainVirtualTextureDecalData> m_VirtualTextureDecals = new();
+        private readonly List<TerrainVirtualTextureDecalDirtyRegion> m_VirtualTextureDirtyRegions = new();
+        private readonly Dictionary<EntityId, TerrainVirtualTextureDecalData> m_PreviousVirtualTextureDecals = new();
+        private readonly Dictionary<EntityId, TerrainVirtualTextureDecalData> m_CurrentVirtualTextureDecals = new();
 
         // Prepared snapshot produced by the PlayerLoop kick (or first SRP update) and consumed by SRP UpdateCore.
         // m_SourceProjectors[i] / m_Prepared[i] / m_CullingInstances[i] correspond to m_Sources[i] for i < m_SourceCount.
@@ -28,7 +128,10 @@ namespace VividRP.Runtime.SubSystem.Decal
         private NativeArray<float4> m_FrustumPlanes;
         private NativeList<int> m_VisibleIndices;
         private DecalProjector[] m_SourceProjectors = System.Array.Empty<DecalProjector>();
+        private int[] m_VisibleSortIndices = System.Array.Empty<int>();
         private int m_SourceCount;
+        private uint m_VirtualTextureRevision = 1u;
+        private bool m_TerrainVirtualTextureConfigurationWarningIssued;
         private JobHandle m_PreparedJobHandle;
         private JobHandle m_CullJobHandle;
         private EntityId m_CullScheduledForCameraId;
@@ -74,6 +177,10 @@ namespace VividRP.Runtime.SubSystem.Decal
             m_SourceCount = 0;
 
             m_Projectors.Clear();
+            m_VirtualTextureDecals.Clear();
+            m_VirtualTextureDirtyRegions.Clear();
+            m_PreviousVirtualTextureDecals.Clear();
+            m_CurrentVirtualTextureDecals.Clear();
         }
 
         internal static void Register(DecalProjector projector)
@@ -113,6 +220,8 @@ namespace VividRP.Runtime.SubSystem.Decal
             // Drain any leftover cull/prepare from the previous frame (e.g. SRP swapped, no camera rendered).
             CompleteScheduledWork();
 
+            BuildVirtualTextureSnapshot();
+
             int projectorCount = m_Projectors.Count;
             EnsureSnapshotCapacity(projectorCount);
 
@@ -136,6 +245,8 @@ namespace VividRP.Runtime.SubSystem.Decal
                     blendDistance = projector.BlendDistance,
                     metallic = projector.Metallic,
                     roughness = projector.Roughness,
+                    drawOrder = projector.DrawOrder,
+                    stableId = EntityId.ToULong(wd.entityId),
                 };
                 sourceCount++;
             }
@@ -198,6 +309,9 @@ namespace VividRP.Runtime.SubSystem.Decal
                 System.Array.Copy(m_SourceProjectors, grown, m_SourceProjectors.Length);
                 m_SourceProjectors = grown;
             }
+
+            if (m_VisibleSortIndices.Length < newCapacity)
+                System.Array.Resize(ref m_VisibleSortIndices, newCapacity);
         }
 
         internal static void ScheduleCullForCamera(Camera camera)
@@ -348,7 +462,7 @@ namespace VividRP.Runtime.SubSystem.Decal
             gpuDrivenDecalData.isEnabled = gpuDrivenDecalEnabled;
 
             var lightData = frameData.GetOrCreate<VividLightData>();
-            int visibleCount = visibleIndices.Length;
+            int visibleCount = gpuDrivenDecalEnabled ? visibleIndices.Length : 0;
             lightData.decalCount = visibleCount;
 
             if (visibleCount == 0)
@@ -358,8 +472,12 @@ namespace VividRP.Runtime.SubSystem.Decal
                 lightData.decalClusterData = new VividLightData.DecalClusterData[visibleCount];
 
             for (int i = 0; i < visibleCount; i++)
+                m_VisibleSortIndices[i] = visibleIndices[i];
+            SortVisibleIndices(m_VisibleSortIndices, visibleCount, m_Prepared);
+
+            for (int i = 0; i < visibleCount; i++)
             {
-                int idx = visibleIndices[i];
+                int idx = m_VisibleSortIndices[i];
                 DecalProjector projector = m_SourceProjectors[idx];
                 DecalPreparedData prepared = m_Prepared[idx];
 
@@ -466,7 +584,10 @@ namespace VividRP.Runtime.SubSystem.Decal
             bindlessTextureContainer = null;
 
             var asset = VividRenderPipelineAsset.GetActiveAsset();
-            if (asset == null || !asset.EnableGPUDriven || !asset.EnableGPUDrivenDecal)
+            if (asset == null
+                || !asset.EnableGPUDriven
+                || !asset.EnableGPUDrivenDecal
+                || asset.DecalTechnique != VividDecalTechnique.ClusteredBindless)
                 return false;
 
             var gpuDrivenSystem = VividGPUDrivenSystem.instance;
@@ -475,6 +596,213 @@ namespace VividRP.Runtime.SubSystem.Decal
 
             bindlessTextureContainer = gpuDrivenSystem.BindlessTextureContainer;
             return bindlessTextureContainer != null && bindlessTextureContainer.IsAvailable;
+        }
+
+        internal static TerrainVirtualTextureDecalSnapshot GetTerrainVirtualTextureSnapshot()
+        {
+            if (!IsInitialized)
+            {
+                return new TerrainVirtualTextureDecalSnapshot(
+                    0u,
+                    System.Array.Empty<TerrainVirtualTextureDecalData>(),
+                    System.Array.Empty<TerrainVirtualTextureDecalDirtyRegion>());
+            }
+
+            DecalSystem decalSystem = Instance;
+            return new TerrainVirtualTextureDecalSnapshot(
+                decalSystem.m_VirtualTextureRevision,
+                decalSystem.m_VirtualTextureDecals,
+                decalSystem.m_VirtualTextureDirtyRegions);
+        }
+
+#if UNITY_INCLUDE_TESTS
+        internal static void RebuildTerrainVirtualTextureSnapshotForTesting()
+        {
+            if (!IsInitialized)
+                Initialize();
+
+            Instance.BuildSnapshotAndSchedulePrepare(false);
+        }
+#endif
+
+        internal static int CompareStableOrder(
+            int leftDrawOrder,
+            ulong leftStableId,
+            int rightDrawOrder,
+            ulong rightStableId)
+        {
+            int drawOrderComparison = leftDrawOrder.CompareTo(rightDrawOrder);
+            return drawOrderComparison != 0
+                ? drawOrderComparison
+                : leftStableId.CompareTo(rightStableId);
+        }
+
+        private static void SortVisibleIndices(
+            int[] indices,
+            int count,
+            NativeArray<DecalPreparedData> prepared)
+        {
+            for (int i = 1; i < count; i++)
+            {
+                int value = indices[i];
+                DecalPreparedData valueData = prepared[value];
+                int insertIndex = i - 1;
+                while (insertIndex >= 0)
+                {
+                    DecalPreparedData candidateData = prepared[indices[insertIndex]];
+                    if (CompareStableOrder(
+                            candidateData.drawOrder,
+                            candidateData.stableId,
+                            valueData.drawOrder,
+                            valueData.stableId) <= 0)
+                    {
+                        break;
+                    }
+
+                    indices[insertIndex + 1] = indices[insertIndex];
+                    insertIndex--;
+                }
+
+                indices[insertIndex + 1] = value;
+            }
+        }
+
+        private void BuildVirtualTextureSnapshot()
+        {
+            WarnInvalidTerrainVirtualTextureConfiguration();
+            m_VirtualTextureDecals.Clear();
+            m_VirtualTextureDirtyRegions.Clear();
+            m_CurrentVirtualTextureDecals.Clear();
+
+            for (int projectorIndex = 0; projectorIndex < m_Projectors.Count; projectorIndex++)
+            {
+                DecalProjector projector = m_Projectors[projectorIndex];
+                if (projector == null
+                    || !projector.isActiveAndEnabled
+                    || !projector.TryCreateBoundProxyWorldData(out BoundProxyWorldData worldData))
+                {
+                    continue;
+                }
+
+                VividVirtualTextureAsset asset = projector.VirtualTextureAsset;
+                var data = new TerrainVirtualTextureDecalData(
+                    projector,
+                    worldData.entityId,
+                    worldData.worldAabb,
+                    CreateWorldToDecalMatrix(worldData),
+                    projector.BaseColor,
+                    NormalizeBlendDistance(projector.BlendDistance, worldData.boxSize),
+                    projector.Metallic,
+                    projector.Roughness,
+                    projector.DrawOrder,
+                    asset,
+                    asset != null ? asset.ContentVersion : 0u);
+                m_CurrentVirtualTextureDecals[worldData.entityId] = data;
+                m_VirtualTextureDecals.Add(data);
+
+                if (!m_PreviousVirtualTextureDecals.TryGetValue(
+                        worldData.entityId,
+                        out TerrainVirtualTextureDecalData previous))
+                {
+                    m_VirtualTextureDirtyRegions.Add(new TerrainVirtualTextureDecalDirtyRegion(
+                        worldData.entityId,
+                        false,
+                        default,
+                        true,
+                        data.WorldBounds));
+                }
+                else if (!VirtualTextureDataEquals(previous, data))
+                {
+                    m_VirtualTextureDirtyRegions.Add(new TerrainVirtualTextureDecalDirtyRegion(
+                        worldData.entityId,
+                        true,
+                        previous.WorldBounds,
+                        true,
+                        data.WorldBounds));
+                }
+            }
+
+            foreach (KeyValuePair<EntityId, TerrainVirtualTextureDecalData> previousPair
+                     in m_PreviousVirtualTextureDecals)
+            {
+                if (m_CurrentVirtualTextureDecals.ContainsKey(previousPair.Key))
+                    continue;
+
+                m_VirtualTextureDirtyRegions.Add(new TerrainVirtualTextureDecalDirtyRegion(
+                    previousPair.Key,
+                    true,
+                    previousPair.Value.WorldBounds,
+                    false,
+                    default));
+            }
+
+            m_VirtualTextureDecals.Sort(CompareVirtualTextureDecals);
+            if (m_VirtualTextureDirtyRegions.Count > 0)
+                IncrementVirtualTextureRevision();
+
+            m_PreviousVirtualTextureDecals.Clear();
+            foreach (KeyValuePair<EntityId, TerrainVirtualTextureDecalData> currentPair
+                     in m_CurrentVirtualTextureDecals)
+            {
+                m_PreviousVirtualTextureDecals.Add(currentPair.Key, currentPair.Value);
+            }
+        }
+
+        private void WarnInvalidTerrainVirtualTextureConfiguration()
+        {
+            if (m_TerrainVirtualTextureConfigurationWarningIssued)
+                return;
+
+            VividRenderPipelineAsset asset = VividRenderPipelineAsset.GetActiveAsset();
+            if (asset == null
+                || !asset.EnableGPUDrivenDecal
+                || asset.DecalTechnique != VividDecalTechnique.TerrainRuntimeVirtualTexture
+                || asset.TryValidateTerrainRuntimeVirtualTextureDecals(out string reason))
+            {
+                return;
+            }
+
+            m_TerrainVirtualTextureConfigurationWarningIssued = true;
+            Debug.LogWarning(
+                $"[VividRP] Terrain Runtime Virtual Texture decals are disabled: {reason} "
+                + "The renderer will not fall back to Clustered Bindless decals.",
+                asset);
+        }
+
+        private static int CompareVirtualTextureDecals(
+            TerrainVirtualTextureDecalData left,
+            TerrainVirtualTextureDecalData right)
+        {
+            return CompareStableOrder(
+                left.DrawOrder,
+                EntityId.ToULong(left.EntityId),
+                right.DrawOrder,
+                EntityId.ToULong(right.EntityId));
+        }
+
+        internal static bool VirtualTextureDataEquals(
+            in TerrainVirtualTextureDecalData left,
+            in TerrainVirtualTextureDecalData right)
+        {
+            return left.WorldBounds.Equals(right.WorldBounds)
+                   && left.WorldToDecal == right.WorldToDecal
+                   && left.BaseColor == right.BaseColor
+                   && left.NormalizedBlendDistance.Equals(right.NormalizedBlendDistance)
+                   && left.Metallic.Equals(right.Metallic)
+                   && left.Roughness.Equals(right.Roughness)
+                   && left.DrawOrder == right.DrawOrder
+                   && ReferenceEquals(left.VirtualTextureAsset, right.VirtualTextureAsset)
+                   && left.AssetContentVersion == right.AssetContentVersion;
+        }
+
+        private void IncrementVirtualTextureRevision()
+        {
+            unchecked
+            {
+                m_VirtualTextureRevision++;
+                if (m_VirtualTextureRevision == 0u)
+                    m_VirtualTextureRevision = 1u;
+            }
         }
 
         private static uint ResolveBindlessTextureIndex(

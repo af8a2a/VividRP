@@ -85,6 +85,8 @@ namespace VividRP.Runtime
                 ? m_PageTableEntries.Length
                 : m_UploadIndices.Count;
 
+        internal int PendingUploadVersion => m_PendingUploadVersion;
+
         internal void Rebuild(
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
@@ -154,6 +156,21 @@ namespace VividRP.Runtime
             int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, coord);
             entry = m_PageTableEntries[pageIndex];
             return true;
+        }
+
+        internal bool IsEntryPendingUpload(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            in VirtualTexturePageCoord coord)
+        {
+            if (!m_PageTableDirty || !VirtualTextureSpaceUtility.IsCoordValid(desc, coord))
+                return false;
+
+            if (ShouldUseFullUpload())
+                return true;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, coord);
+            return m_UploadMask[pageIndex];
         }
 
         internal int CopyPendingUpdates(

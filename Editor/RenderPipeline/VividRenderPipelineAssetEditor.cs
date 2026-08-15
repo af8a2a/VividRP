@@ -20,7 +20,7 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_GpuDrivenLabel = EditorGUIUtility.TrTextContent("GPU Driven");
         private static readonly GUIContent s_GpuDrivenDecalLabel = EditorGUIUtility.TrTextContent(
             "GPU Driven Decal",
-            "Experimental. Requires GPU Driven rendering and bindless texture descriptors; silently disables itself when bindless is unavailable.");
+            "Enables decals. The selected Decal Technique determines whether decals use clustered bindless sampling or are composed into Terrain RVT pages.");
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly GUIContent s_SupportProbeVolumeLabel = EditorGUIUtility.TrTextContent("Adaptive Probe Volumes");
         private static readonly GUIContent s_ProbeVolumeShBandsLabel = EditorGUIUtility.TrTextContent("APV SH Bands");
@@ -108,7 +108,7 @@ namespace VividRP.Editor.RenderPipeline
                 "GPUDriven Texture Backend")
             {
                 name = "vivid-rp-asset-gpu-driven-texture-backend-field",
-                tooltip = "Selects the material texture backend used by GPUDriven static meshes. Sky and decals keep using Bindless.",
+                tooltip = "Selects the material texture backend used by GPUDriven static meshes. Terrain RVT decals require the Virtual Texture backend.",
             };
             root.Add(gpuDrivenTextureBackendField);
 
@@ -122,6 +122,48 @@ namespace VividRP.Editor.RenderPipeline
                 tooltip = s_GpuDrivenDecalLabel.tooltip,
             };
             root.Add(gpuDrivenDecalField);
+
+            var decalTechniqueProperty = serializedObject.FindProperty("m_DecalTechnique");
+            var decalTechniqueField = new PropertyField(decalTechniqueProperty, "Decal Technique")
+            {
+                name = "vivid-rp-asset-decal-technique-field",
+                tooltip = "Clustered Bindless supports all receiving surfaces. Terrain Runtime Virtual Texture composes decals into VividTerrain RVT pages only.",
+            };
+            root.Add(decalTechniqueField);
+
+            var terrainRVTDecalDependencies = new HelpBox(
+                string.Empty,
+                HelpBoxMessageType.Warning)
+            {
+                name = "vivid-rp-asset-terrain-rvt-decal-dependencies",
+            };
+            root.Add(terrainRVTDecalDependencies);
+
+            void RefreshDecalDependencies()
+            {
+                serializedObject.UpdateIfRequiredOrScript();
+                bool terrainRVTTechnique = decalTechniqueProperty.enumValueIndex
+                                           == (int)VividDecalTechnique.TerrainRuntimeVirtualTexture;
+                bool valid = ((VividRenderPipelineAsset)target)
+                    .TryValidateTerrainRuntimeVirtualTextureDecals(out string reason);
+                terrainRVTDecalDependencies.text = valid
+                    ? "Terrain RVT decals affect VividTerrain receivers only. Projectors must use a compatible combined GPUDrivenSurface VVT asset."
+                    : reason + " The VT decal path remains disabled and does not fall back to Clustered Bindless.";
+                terrainRVTDecalDependencies.messageType = valid
+                    ? HelpBoxMessageType.Info
+                    : HelpBoxMessageType.Warning;
+                terrainRVTDecalDependencies.style.display = terrainRVTTechnique
+                    ? DisplayStyle.Flex
+                    : DisplayStyle.None;
+            }
+
+            gpuDrivenField.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            gpuDrivenTextureBackendField.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            gpuDrivenDecalField.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            decalTechniqueField.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            root.Q<PropertyField>("vivid-rp-asset-terrain-rvt-field")
+                ?.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            RefreshDecalDependencies();
 
             var srpBatcherField = new PropertyField(serializedObject.FindProperty("m_EnableSRPBatcher"), s_SrpBatcherLabel.text)
             {

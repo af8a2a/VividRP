@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Runtime
@@ -225,7 +226,8 @@ namespace VividRP.Runtime
     [CreateAssetMenu(menuName = "VividRP/Terrain Data", fileName = "New Vivid Terrain Data")]
     public sealed class VividTerrainData : ScriptableObject
     {
-        public const uint CurrentBakeVersion = 4u;
+        public const uint CurrentBakeVersion = 5u;
+        public const uint MinimumSupportedBakeVersion = 4u;
         public const int MaximumSurfaceLayerCount = 8;
         public const int MaximumControlMapCount = MaximumSurfaceLayerCount / 4;
         public const int MinimumChunkLODCount = VividTerrainBakeSettings.LegacyMaxMeshLODLevelCount;
@@ -271,6 +273,9 @@ namespace VividRP.Runtime
         private VividVirtualTextureAsset m_CompositeVirtualTexture;
 
         [SerializeField]
+        private Texture2D m_NormalizedHeightTexture;
+
+        [SerializeField]
         private VividTerrainChunkData[] m_Chunks = Array.Empty<VividTerrainChunkData>();
 
         public uint BakeVersion => m_BakeVersion;
@@ -299,6 +304,11 @@ namespace VividRP.Runtime
             m_ControlVirtualTextures ?? Array.Empty<VividVirtualTextureAsset>();
 
         public VividVirtualTextureAsset CompositeVirtualTexture => m_CompositeVirtualTexture;
+
+        public Texture2D NormalizedHeightTexture => m_NormalizedHeightTexture;
+
+        public bool SupportsRuntimeDecalProjection =>
+            TryValidateRuntimeDecalProjection(out _);
 
         public int SupportedSurfaceLayerCount => Mathf.Min(Layers.Count, MaximumSurfaceLayerCount);
 
@@ -378,9 +388,9 @@ namespace VividRP.Runtime
 
         public bool TryValidate(out string reason)
         {
-            if (m_BakeVersion != CurrentBakeVersion)
+            if (m_BakeVersion < MinimumSupportedBakeVersion || m_BakeVersion > CurrentBakeVersion)
             {
-                reason = $"Bake version {m_BakeVersion} is not supported; expected {CurrentBakeVersion}.";
+                reason = $"Bake version {m_BakeVersion} is not supported; expected {MinimumSupportedBakeVersion}..{CurrentBakeVersion}.";
                 return false;
             }
 
@@ -447,6 +457,42 @@ namespace VividRP.Runtime
             return true;
         }
 
+        public bool TryValidateRuntimeDecalProjection(out string reason)
+        {
+            if (!TryValidate(out reason))
+                return false;
+
+            if (m_BakeVersion < CurrentBakeVersion)
+            {
+                reason = $"Bake version {m_BakeVersion} can render the base terrain, but Terrain RVT decals require version {CurrentBakeVersion}. Re-bake this terrain.";
+                return false;
+            }
+            if (m_NormalizedHeightTexture == null)
+            {
+                reason = "The baked normalized height texture is missing. Re-bake this terrain to enable Terrain RVT decals.";
+                return false;
+            }
+            if (m_NormalizedHeightTexture.width != m_SourceHeightmapResolution
+                || m_NormalizedHeightTexture.height != m_SourceHeightmapResolution)
+            {
+                reason = $"The baked height texture is {m_NormalizedHeightTexture.width}x{m_NormalizedHeightTexture.height}; expected {m_SourceHeightmapResolution}x{m_SourceHeightmapResolution}.";
+                return false;
+            }
+            if (m_NormalizedHeightTexture.graphicsFormat != GraphicsFormat.R16_UNorm)
+            {
+                reason = $"The baked height texture uses {m_NormalizedHeightTexture.graphicsFormat}; Terrain RVT decals require linear R16_UNorm.";
+                return false;
+            }
+            if (m_NormalizedHeightTexture.wrapMode != TextureWrapMode.Clamp)
+            {
+                reason = "The baked height texture must use Clamp addressing.";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
+        }
+
         internal void Initialize(
             string sourceTerrainDataGUID,
             string sourceTerrainDataName,
@@ -458,7 +504,8 @@ namespace VividRP.Runtime
             Material sourceMaterial,
             VividTerrainLayerData[] layers,
             VividTerrainChunkData[] chunks,
-            Texture2D[] controlMaps = null)
+            Texture2D[] controlMaps = null,
+            Texture2D normalizedHeightTexture = null)
         {
             m_BakeVersion = CurrentBakeVersion;
             m_SourceTerrainDataGUID = sourceTerrainDataGUID ?? string.Empty;
@@ -473,6 +520,7 @@ namespace VividRP.Runtime
             m_ControlMaps = controlMaps ?? Array.Empty<Texture2D>();
             m_ControlVirtualTextures = Array.Empty<VividVirtualTextureAsset>();
             m_CompositeVirtualTexture = null;
+            m_NormalizedHeightTexture = normalizedHeightTexture;
             m_Chunks = chunks ?? Array.Empty<VividTerrainChunkData>();
         }
 

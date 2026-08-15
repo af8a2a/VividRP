@@ -1,4 +1,6 @@
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -135,6 +137,8 @@ namespace VividRP.Editor.Tests
         public void TerrainRVTRecordGPUData_MatchesExpandedShaderLayout()
         {
             Assert.That(Marshal.SizeOf<TerrainRuntimeVirtualTextureRecordGPUData>(), Is.EqualTo(80));
+            Assert.That(Marshal.SizeOf<TerrainRuntimeVirtualTextureDecalGPUData>(), Is.EqualTo(176));
+            Assert.That(Marshal.SizeOf<TerrainRuntimeVirtualTexturePageDecalIndexGPUData>(), Is.EqualTo(8));
         }
 
         [Test]
@@ -246,6 +250,61 @@ namespace VividRP.Editor.Tests
             Assert.That(level.WindowPageOrigin, Is.EqualTo(new Vector2Int(29, 29)));
             Assert.That(level.ResolveLogicalPageForTesting(5, 5), Is.EqualTo(new Vector2Int(29, 29)));
             Assert.That(level.ResolveLogicalPageForTesting(0, 0), Is.EqualTo(new Vector2Int(32, 32)));
+        }
+
+        [Test]
+        public void TerrainRVTDecalUpload_WaitsForGpuVisibleSourceMappingAndPinsUntilRelease()
+        {
+            var desc = new VirtualTextureSpaceDesc(
+                "TerrainRVTDecalDependencies",
+                pageSize: 128,
+                borderSize: 4,
+                virtualPageCountX: 32,
+                virtualPageCountY: 32,
+                mipCount: 6,
+                cachePageCount: 8,
+                graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
+                maxUploadsPerFrame: 4,
+                feedbackCapacity: 32);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                desc,
+                VTProceduralPageProducer.Instance);
+            var sourceCoord = new VirtualTexturePageCoord(1, 1, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(
+                    spaceId,
+                    sourceCoord,
+                    locked: false,
+                    frameIndex: 1),
+                Is.True);
+
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            level.SetPageDecalData(
+                cellIndex: 0,
+                startIndex: 0,
+                count: 1,
+                dependencies: new List<VirtualTexturePageCoord> { sourceCoord });
+            Assert.That(level.TryApproveAndQueue(spaceId, frameIndex: 2, cellIndex: 0), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPendingRequests(spaceId, out var pending), Is.True);
+            VTRequest targetRequest = pending.Single(request =>
+                request.PageCoord.Equals(new VirtualTexturePageCoord(11, 13, 0)));
+
+            Assert.That(level.TryPreparePageUpload(spaceId, targetRequest), Is.False);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
+
+            Assert.That(VirtualTextureSystem.RefreshPageTableBufferImmediatelyForTesting(spaceId), Is.True);
+            Assert.That(level.TryPreparePageUpload(spaceId, targetRequest), Is.True);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.EqualTo(1));
+
+            level.CancelPageUpload(targetRequest);
+            Assert.That(level.IsPageApproved(targetRequest.PageCoord), Is.False);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
+
+            Assert.That(level.TryApproveAndQueue(spaceId, frameIndex: 3, cellIndex: 0), Is.True);
+            Assert.That(level.TryPreparePageUpload(spaceId, targetRequest), Is.True);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.EqualTo(1));
+            level.ReleasePageUploadDependencies(targetRequest);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
         }
 
         [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Low, 256)]
@@ -997,6 +1056,49 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Destroy(baseColor);
+            }
+        }
+
+        [Test]
+        public void ExternalSurfaceBinding_AllowsMissingNormalAndMaskLayers()
+        {
+            Texture2D sourceTexture = new Texture2D(128, 128, TextureFormat.RGBA32, true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = Path.Combine(Path.GetTempPath(), $"GPUDrivenDecal_{System.Guid.NewGuid():N}.stream");
+
+            try
+            {
+                sourceTexture.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    StreamDataPath = streamDataPath,
+                    BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                    AddressMode = VividVirtualTextureAddressMode.Repeat,
+                    StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn,
+                    StreamCompression = VividVirtualTextureStreamCompression.None,
+                    PageSize = 128,
+                    BorderSize = 4,
+                });
+
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+                Assert.That(
+                    backend.TryAcquireExternalSurfaceBinding(asset, out var lease, out string reason),
+                    Is.True,
+                    reason);
+                using (lease)
+                {
+                    Assert.That(lease.Binding.Flags, Is.EqualTo(VividSurfaceBindingFlags.BaseColor));
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+                if (File.Exists(streamDataPath))
+                    File.Delete(streamDataPath);
             }
         }
 

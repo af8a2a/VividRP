@@ -8,8 +8,56 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
+    internal sealed class VTPagePinLease : IDisposable
+    {
+        private readonly int m_SpaceId;
+        private readonly VirtualTexturePageCoord m_Coord;
+        private bool m_IsDisposed;
+
+        internal VTPagePinLease(int spaceId, in VirtualTexturePageCoord coord)
+        {
+            m_SpaceId = spaceId;
+            m_Coord = coord;
+        }
+
+        public void Dispose()
+        {
+            if (m_IsDisposed)
+                return;
+
+            m_IsDisposed = true;
+            VirtualTextureSystem.ReleasePagePin(m_SpaceId, m_Coord);
+        }
+    }
+
     internal sealed class VirtualTextureSystem : VividSubsystem<VirtualTextureSystem>
     {
+        private readonly struct PagePinKey : IEquatable<PagePinKey>
+        {
+            internal PagePinKey(int spaceId, in VirtualTexturePageCoord coord)
+            {
+                SpaceId = spaceId;
+                Coord = coord;
+            }
+
+            internal int SpaceId { get; }
+            internal VirtualTexturePageCoord Coord { get; }
+
+            public bool Equals(PagePinKey other) =>
+                SpaceId == other.SpaceId && Coord.Equals(other.Coord);
+
+            public override bool Equals(object obj) =>
+                obj is PagePinKey other && Equals(other);
+
+            public override int GetHashCode() => HashCode.Combine(SpaceId, Coord);
+        }
+
+        private struct PagePinState
+        {
+            internal int RefCount;
+            internal bool WasLocked;
+        }
+
         private static readonly Dictionary<int, VTPageTableSpace> s_PageTableSpaces = new();
         private static readonly Dictionary<string, int> s_SpaceIdsByName = new(StringComparer.Ordinal);
         private static readonly Dictionary<int, VTAllocatedVirtualTexture> s_Allocations = new();
@@ -27,6 +75,8 @@ namespace VividRP.Runtime
         private static readonly Dictionary<int, int> s_AllocatedResidencyRequestsBySpace = new();
         private static readonly Dictionary<int, int> s_AllocatedPrefetchRequestsBySpace = new();
         private static readonly Dictionary<int, int> s_ScheduledUploadsBySpace = new();
+        private static readonly Dictionary<PagePinKey, PagePinState> s_PagePins = new();
+        private static readonly List<PagePinKey> s_PagePinKeysToRemove = new();
         private static readonly List<FeedbackMotionKey> s_FeedbackMotionKeysToRemove = new();
         private static readonly List<VTPageTableSpace> s_UploadSpaceOrder = new();
         private static readonly List<VTPendingUploadCandidate> s_PendingUploadCandidates = new();
@@ -314,6 +364,8 @@ namespace VividRP.Runtime
             s_AllocatedResidencyRequestsBySpace.Clear();
             s_AllocatedPrefetchRequestsBySpace.Clear();
             s_ScheduledUploadsBySpace.Clear();
+            s_PagePins.Clear();
+            s_PagePinKeysToRemove.Clear();
             s_FeedbackMotionKeysToRemove.Clear();
             s_UploadSpaceOrder.Clear();
             s_PendingUploadCandidates.Clear();
@@ -517,6 +569,8 @@ namespace VividRP.Runtime
             foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
                 addressSpace.BootstrapRuntimeState(frameIndex);
 
+            s_PagePins.Clear();
+            s_PagePinKeysToRemove.Clear();
             s_FeedbackAggregator.Clear();
             s_CompletedReadbacks.Clear();
             s_InjectedReadbacks.Clear();
@@ -1547,6 +1601,45 @@ namespace VividRP.Runtime
             return s_PageTableScatterUploader.Record(renderGraph, s_PageTableSpaces.Values);
         }
 
+        internal static bool TryGetSpaceBinding(
+            int spaceId,
+            out VirtualTextureSpaceBinding binding)
+        {
+            if (s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
+            {
+                binding = addressSpace.CreateBinding(
+                    allocationId: 0,
+                    privateSpace: false,
+                    feedbackRequests: null,
+                    feedbackCounter: null,
+                    feedbackResidentHash: null,
+                    feedbackRequestCapacity: 0,
+                    feedbackResidentHashCapacity: 0,
+                    feedbackState: null);
+                return binding.IsValid;
+            }
+
+            binding = default;
+            return false;
+        }
+
+        internal static bool IsPageTableEntryPendingUpload(
+            int spaceId,
+            in VirtualTexturePageCoord coord)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                   && addressSpace.IsPageTableEntryPendingUpload(coord);
+        }
+
+        internal static bool RefreshPageTableBufferImmediatelyForTesting(int spaceId)
+        {
+            if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
+                return false;
+
+            addressSpace.RefreshPageTableBufferImmediately();
+            return true;
+        }
+
         internal static void CommitPageTableUpdates()
         {
             s_PageTableScatterUploader.Commit();
@@ -1651,6 +1744,7 @@ namespace VividRP.Runtime
                 return 0;
 
             s_UploadScheduler.CancelUploadsForRegion(spaceId, mip, pageRegion);
+            RemovePagePinsForRegion(spaceId, mip, pageRegion);
             return addressSpace.FlushRegion(mip, pageRegion);
         }
 
@@ -1667,6 +1761,7 @@ namespace VividRP.Runtime
             {
                 VTPageRegion region = pageRegions[regionIndex];
                 s_UploadScheduler.CancelUploadsForRegion(spaceId, region.Mip, region.PageRegion);
+                RemovePagePinsForRegion(spaceId, region.Mip, region.PageRegion);
             }
 
             return addressSpace.FlushRegions(pageRegions);
@@ -1698,6 +1793,124 @@ namespace VividRP.Runtime
             // (normally locked), so it intentionally bypasses feedback-driven allocation budgets.
             return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
                    && addressSpace.TryQueuePageResident(coord, locked, frameIndex);
+        }
+
+        internal static bool TryQueuePageResidentWithinBudget(
+            int spaceId,
+            in VirtualTexturePageCoord coord,
+            bool locked = false,
+            int frameIndex = 0)
+        {
+            if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
+                return false;
+
+            VTResidencyRequestClassification classification =
+                addressSpace.GetExactResidencyClassification(coord);
+            if (classification == VTResidencyRequestClassification.Invalid)
+                return false;
+            if (classification != VTResidencyRequestClassification.Missing)
+                return true;
+
+            if (s_AllocatedResidencyRequestCount >= s_MaxResidencyAllocationsPerFrame
+                || GetAllocatedResidencyRequestCount(spaceId)
+                >= addressSpace.Descriptor.MaxResidencyAllocationsPerFrame)
+            {
+                return false;
+            }
+
+            int allocationFrameIndex = s_GlobalFrameIndex != int.MinValue
+                ? s_GlobalFrameIndex
+                : frameIndex;
+            if (!addressSpace.TryQueuePageResident(coord, locked, allocationFrameIndex))
+                return false;
+
+            RecordAllocatedResidencyRequests(spaceId, 1);
+            if (s_RemainingResidencyBudgetBySpace.TryGetValue(spaceId, out int remainingBudget))
+            {
+                s_RemainingResidencyBudgetBySpace[spaceId] = Mathf.Max(
+                    0,
+                    remainingBudget - 1);
+            }
+            return true;
+        }
+
+        internal static bool TryQueuePageRefresh(
+            int spaceId,
+            in VirtualTexturePageCoord coord,
+            int frameIndex = 0)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                   && addressSpace.TryQueuePageRefresh(coord, frameIndex);
+        }
+
+        internal static bool IsPageRefreshPending(
+            int spaceId,
+            in VirtualTexturePageCoord coord)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                   && addressSpace.IsPageRefreshPending(coord);
+        }
+
+        internal static bool TryAcquirePagePinLease(
+            int spaceId,
+            in VirtualTexturePageCoord coord,
+            out VTPagePinLease lease)
+        {
+            lease = null;
+            var key = new PagePinKey(spaceId, coord);
+            if (s_PagePins.TryGetValue(key, out PagePinState existing))
+            {
+                existing.RefCount += 1;
+                s_PagePins[key] = existing;
+                lease = new VTPagePinLease(spaceId, coord);
+                return true;
+            }
+
+            if (!TryGetPageTableEntry(spaceId, coord, out VirtualTexturePageTableEntry entry)
+                || !entry.Resident
+                || entry.PendingUpload
+                || entry.ResolvedMip != coord.Mip
+                || !SetPageLocked(spaceId, coord, true))
+            {
+                return false;
+            }
+
+            s_PagePins.Add(key, new PagePinState
+            {
+                RefCount = 1,
+                WasLocked = entry.Locked,
+            });
+            lease = new VTPagePinLease(spaceId, coord);
+            return true;
+        }
+
+        internal static void ReleasePagePin(
+            int spaceId,
+            in VirtualTexturePageCoord coord)
+        {
+            var key = new PagePinKey(spaceId, coord);
+            if (!s_PagePins.TryGetValue(key, out PagePinState state))
+                return;
+
+            state.RefCount -= 1;
+            if (state.RefCount > 0)
+            {
+                s_PagePins[key] = state;
+                return;
+            }
+
+            s_PagePins.Remove(key);
+            if (!state.WasLocked)
+                SetPageLocked(spaceId, coord, false);
+        }
+
+        internal static int GetPagePinCountForTesting(
+            int spaceId,
+            in VirtualTexturePageCoord coord)
+        {
+            return s_PagePins.TryGetValue(new PagePinKey(spaceId, coord), out PagePinState state)
+                ? state.RefCount
+                : 0;
         }
 
         internal static void InjectCompletedReadbackForTesting(CameraType cameraType, params ulong[] requestKeys)
@@ -1960,7 +2173,7 @@ namespace VividRP.Runtime
             int uploadedEntryCount)
         {
             return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
-                   && addressSpace.PageTableUpdater.CommitPendingUpload(
+                   && addressSpace.CommitPendingPageTableUpload(
                        pendingVersion,
                        fullUpload,
                        uploadedEntryCount);
@@ -2476,6 +2689,7 @@ namespace VividRP.Runtime
             }
 
             s_UploadScheduler.CancelUploadsForSpace(spaceId);
+            RemovePagePinsForSpace(spaceId);
             VTPhysicalPool physicalPool = addressSpace.PhysicalPool;
             VTProducerHandle producerHandle = addressSpace.ProducerHandle;
             addressSpace.Dispose();
@@ -2493,6 +2707,41 @@ namespace VividRP.Runtime
             s_InjectedReadbacks.Clear();
             ResetPendingAdaptiveFeedbackMeasurement();
             RemoveFeedbackMotionStateForSpace(spaceId);
+        }
+
+        private static void RemovePagePinsForRegion(
+            int spaceId,
+            int mip,
+            RectInt pageRegion)
+        {
+            s_PagePinKeysToRemove.Clear();
+            foreach (PagePinKey key in s_PagePins.Keys)
+            {
+                if (key.SpaceId == spaceId
+                    && key.Coord.Mip == mip
+                    && pageRegion.Contains(new Vector2Int(key.Coord.X, key.Coord.Y)))
+                {
+                    s_PagePinKeysToRemove.Add(key);
+                }
+            }
+
+            for (int keyIndex = 0; keyIndex < s_PagePinKeysToRemove.Count; keyIndex++)
+                s_PagePins.Remove(s_PagePinKeysToRemove[keyIndex]);
+            s_PagePinKeysToRemove.Clear();
+        }
+
+        private static void RemovePagePinsForSpace(int spaceId)
+        {
+            s_PagePinKeysToRemove.Clear();
+            foreach (PagePinKey key in s_PagePins.Keys)
+            {
+                if (key.SpaceId == spaceId)
+                    s_PagePinKeysToRemove.Add(key);
+            }
+
+            for (int keyIndex = 0; keyIndex < s_PagePinKeysToRemove.Count; keyIndex++)
+                s_PagePins.Remove(s_PagePinKeysToRemove[keyIndex]);
+            s_PagePinKeysToRemove.Clear();
         }
 
         private static void RemoveFeedbackMotionStateForSpace(int spaceId)

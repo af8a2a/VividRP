@@ -58,6 +58,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void DependencyResidencyRequest_ConsumesGlobalAllocationBudget()
+        {
+            VirtualTextureSystem.SetResidencyAllocationBudgetForTesting(1);
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "DependencyResidencyBudget",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 4,
+                maxResidencyAllocationsPerFrame: 4));
+            var first = new VirtualTexturePageCoord(0, 0, 0);
+            var second = new VirtualTexturePageCoord(1, 0, 0);
+
+            Assert.That(
+                VirtualTextureSystem.TryQueuePageResidentWithinBudget(
+                    spaceId,
+                    first,
+                    locked: false,
+                    frameIndex: 1),
+                Is.True);
+            Assert.That(
+                VirtualTextureSystem.TryQueuePageResidentWithinBudget(
+                    spaceId,
+                    second,
+                    locked: false,
+                    frameIndex: 1),
+                Is.False);
+            Assert.That(VirtualTextureSystem.TryGetPendingRequests(spaceId, out var pending), Is.True);
+            Assert.That(pending.Any(request => request.PageCoord.Equals(first)), Is.True);
+            Assert.That(pending.Any(request => request.PageCoord.Equals(second)), Is.False);
+        }
+
+        [Test]
         public void Update_PopulatesFrameBindingAndCreatesFeedbackState_ForGameCamera()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("GameCamera", cachePageCount: 2, maxUploadsPerFrame: 1);
@@ -314,6 +345,99 @@ namespace VividRP.Editor.Tests
                     supportsAsyncGpuReadback,
                     supportedRandomWriteTargetCount),
                 Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void PagePinLease_IsReferenceCountedAndRestoresOriginalLockState()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("PagePinLease", cachePageCount: 4, maxUploadsPerFrame: 1);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, VTProceduralPageProducer.Instance);
+            var coord = new VirtualTexturePageCoord(1, 2, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(spaceId, coord, locked: false, frameIndex: 7),
+                Is.True);
+
+            Assert.That(VirtualTextureSystem.TryAcquirePagePinLease(spaceId, coord, out VTPagePinLease first), Is.True);
+            Assert.That(VirtualTextureSystem.TryAcquirePagePinLease(spaceId, coord, out VTPagePinLease second), Is.True);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, coord), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var pinned), Is.True);
+            Assert.That(pinned.Locked, Is.True);
+
+            first.Dispose();
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, coord), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out pinned), Is.True);
+            Assert.That(pinned.Locked, Is.True);
+
+            second.Dispose();
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, coord), Is.Zero);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var released), Is.True);
+            Assert.That(released.Locked, Is.False);
+        }
+
+        [Test]
+        public void PageRefresh_KeepsOldMappingUntilAtomicCommitThenSwitchesOnce()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("AtomicPageRefresh", cachePageCount: 4, maxUploadsPerFrame: 1);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, VTProceduralPageProducer.Instance);
+            var coord = new VirtualTexturePageCoord(1, 2, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(spaceId, coord, locked: false, frameIndex: 7),
+                Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var oldEntry), Is.True);
+            int freeBeforeRefresh = VirtualTextureSystem.GetFreePageCountForTesting(spaceId);
+
+            Assert.That(VirtualTextureSystem.TryQueuePageRefresh(spaceId, coord, frameIndex: 8), Is.True);
+            Assert.That(VirtualTextureSystem.GetFreePageCountForTesting(spaceId), Is.EqualTo(freeBeforeRefresh - 1));
+            Assert.That(VirtualTextureSystem.IsPageRefreshPending(spaceId, coord), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var beforeCommit), Is.True);
+            Assert.That(beforeCommit.Resident, Is.True);
+            Assert.That(beforeCommit.PendingUpload, Is.False);
+            Assert.That(beforeCommit.PhysicalPageId, Is.EqualTo(oldEntry.PhysicalPageId));
+
+            Assert.That(VirtualTextureSystem.TryGetPendingRequests(spaceId, out var pending), Is.True);
+            VTRequest refreshRequest = pending.Single(request => request.PageCoord.Equals(coord));
+            Assert.That(refreshRequest.PhysicalPageId, Is.Not.EqualTo(oldEntry.PhysicalPageId));
+            Assert.That(VirtualTextureSystem.CommitRequest(refreshRequest), Is.True);
+
+            Assert.That(VirtualTextureSystem.IsPageRefreshPending(spaceId, coord), Is.False);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var committed), Is.True);
+            Assert.That(committed.Resident, Is.True);
+            Assert.That(committed.PendingUpload, Is.False);
+            Assert.That(committed.PhysicalPageId, Is.EqualTo(refreshRequest.PhysicalPageId));
+            Assert.That(committed.PhysicalPageId, Is.Not.EqualTo(oldEntry.PhysicalPageId));
+            Assert.That(
+                VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
+                Is.EqualTo(freeBeforeRefresh - 1),
+                "The old physical page must stay allocated until the page-table switch is submitted.");
+
+            Assert.That(
+                VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                    spaceId,
+                    out VTPageTableScatterUpdate[] updates,
+                    out int pendingVersion,
+                    out bool fullUpload),
+                Is.True);
+            Assert.That(
+                VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                    spaceId,
+                    unchecked(pendingVersion + 1),
+                    fullUpload,
+                    updates.Length),
+                Is.False);
+            Assert.That(
+                VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
+                Is.EqualTo(freeBeforeRefresh - 1),
+                "An aborted or stale page-table upload must not retire the old physical page.");
+            Assert.That(
+                VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                    spaceId,
+                    pendingVersion,
+                    fullUpload,
+                    updates.Length),
+                Is.True);
+            Assert.That(
+                VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
+                Is.EqualTo(freeBeforeRefresh));
         }
 
         [Test]

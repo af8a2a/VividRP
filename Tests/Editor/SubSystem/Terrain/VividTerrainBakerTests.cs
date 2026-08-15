@@ -6,6 +6,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using VividRP.Editor.TerrainTools;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
@@ -44,12 +45,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void TerrainData_RejectsPreviousBakeVersion()
+        public void TerrainData_PreviousBakeVersionRendersBaseTerrainButRejectsRuntimeDecals()
         {
             var data = ScriptableObject.CreateInstance<VividTerrainData>();
 
             try
             {
+                data.Initialize(
+                    string.Empty,
+                    "Legacy Terrain",
+                    2,
+                    Vector3.one,
+                    new Bounds(Vector3.one * 0.5f, Vector3.one),
+                    Vector2Int.one,
+                    VividTerrainBakeSettings.Default,
+                    null,
+                    System.Array.Empty<VividTerrainLayerData>(),
+                    new[]
+                    {
+                        new VividTerrainChunkData(
+                            Vector2Int.zero,
+                            Vector2Int.zero,
+                            Vector2Int.one,
+                            new Bounds(Vector3.one * 0.5f, Vector3.one),
+                            null),
+                    });
                 FieldInfo bakeVersionField = typeof(VividTerrainData).GetField(
                     "m_BakeVersion",
                     BindingFlags.Instance | BindingFlags.NonPublic
@@ -57,9 +77,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(bakeVersionField, Is.Not.Null);
                 bakeVersionField.SetValue(data, VividTerrainData.CurrentBakeVersion - 1u);
 
-                Assert.That(data.TryValidate(out string reason), Is.False);
-                Assert.That(reason, Does.Contain("Bake version 2 is not supported"));
-                Assert.That(reason, Does.Contain($"expected {VividTerrainData.CurrentBakeVersion}"));
+                Assert.That(data.TryValidate(out string baseReason), Is.True, baseReason);
+                Assert.That(data.TryValidateRuntimeDecalProjection(out string decalReason), Is.False);
+                Assert.That(decalReason, Does.Contain("can render the base terrain"));
+                Assert.That(decalReason, Does.Contain($"require version {VividTerrainData.CurrentBakeVersion}"));
             }
             finally
             {
@@ -548,6 +569,11 @@ namespace VividRP.Editor.Tests
             Assert.That(baked.CompositeVirtualTexture.VirtualPageCountX, Is.EqualTo(1));
             Assert.That(baked.CompositeVirtualTexture.VirtualPageCountY, Is.EqualTo(1));
             Assert.That(baked.CompositeVirtualTexture.ContentLayerMask, Is.EqualTo(7));
+            Assert.That(baked.NormalizedHeightTexture, Is.Not.Null);
+            Assert.That(EditorUtility.IsPersistent(baked.NormalizedHeightTexture), Is.True);
+            Assert.That(
+                AssetDatabase.GetAssetPath(baked.NormalizedHeightTexture),
+                Is.EqualTo(bakedPath));
             Assert.That(
                 baked.CompositeVirtualTexture.StorageProfile,
                 Is.EqualTo(VividVirtualTextureStorageProfile.DesktopBCn));
@@ -662,6 +688,18 @@ namespace VividRP.Editor.Tests
                 Assert.That(baked.SupportedSurfaceLayerCount, Is.EqualTo(2));
                 Assert.That(baked.RequiredControlMapCount, Is.EqualTo(1));
                 Assert.That(baked.HasCompleteControlMapData, Is.True);
+                Texture2D heightTexture = baked.NormalizedHeightTexture;
+                Assert.That(heightTexture, Is.Not.Null);
+                Assert.That(heightTexture.width, Is.EqualTo(source.heightmapResolution));
+                Assert.That(heightTexture.height, Is.EqualTo(source.heightmapResolution));
+                Assert.That(heightTexture.graphicsFormat, Is.EqualTo(GraphicsFormat.R16_UNorm));
+                Assert.That(heightTexture.wrapMode, Is.EqualTo(TextureWrapMode.Clamp));
+                var heightSamples = heightTexture.GetPixelData<ushort>(0);
+                Assert.That(heightSamples[0], Is.Zero);
+                Assert.That(
+                    heightSamples[heightSamples.Length - 1] / (float)ushort.MaxValue * source.size.y,
+                    Is.EqualTo(5.0f).Within(0.001f));
+                Assert.That(baked.TryValidateRuntimeDecalProjection(out string reason), Is.True, reason);
             }
             finally
             {
@@ -982,6 +1020,9 @@ namespace VividRP.Editor.Tests
                     Object.DestroyImmediate(chunk.MeshletCollection);
                 }
             }
+
+            if (data.NormalizedHeightTexture != null)
+                Object.DestroyImmediate(data.NormalizedHeightTexture);
 
             Object.DestroyImmediate(data);
         }

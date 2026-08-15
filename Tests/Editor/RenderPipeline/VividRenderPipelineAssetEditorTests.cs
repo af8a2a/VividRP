@@ -103,6 +103,8 @@ namespace VividRP.Tests
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-decode-concurrency-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-vt-decoded-cache-budget-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-decal-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-decal-technique-field"), Is.Not.Null);
+                Assert.That(root.Q<HelpBox>("vivid-rp-asset-terrain-rvt-decal-dependencies"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-debug-overlay-field"), Is.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-srp-batcher-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-support-probe-volume-field"), Is.Not.Null);
@@ -134,6 +136,7 @@ namespace VividRP.Tests
             Assert.That(m_PipelineAsset.EnableGPUDriven, Is.False);
             Assert.That(m_PipelineAsset.EnableGPUDrivenOcclusionCulling, Is.True);
             Assert.That(m_PipelineAsset.EnableGPUDrivenDecal, Is.False);
+            Assert.That(m_PipelineAsset.DecalTechnique, Is.EqualTo(VividDecalTechnique.ClusteredBindless));
             Assert.That(m_PipelineAsset.EnableSRPBatcher, Is.True);
             Assert.That(m_PipelineAsset.SupportProbeVolume, Is.False);
             Assert.That(m_PipelineAsset.ProbeVolumeSHBands, Is.EqualTo(ProbeVolumeSHBands.SphericalHarmonicsL2));
@@ -156,6 +159,30 @@ namespace VividRP.Tests
             serializedObject.ApplyModifiedProperties();
 
             Assert.That(m_PipelineAsset.EnableGPUDrivenDecal, Is.True);
+        }
+
+        [Test]
+        public void TerrainRVTDecalTechnique_ShowsDependencyWarningWithoutFallback()
+        {
+            m_PipelineAsset.DecalTechnique = VividDecalTechnique.TerrainRuntimeVirtualTexture;
+            var editor = UnityEditor.Editor.CreateEditor(
+                m_PipelineAsset,
+                typeof(VividRenderPipelineAssetEditor));
+            try
+            {
+                VisualElement root = editor.CreateInspectorGUI();
+                HelpBox helpBox = root.Q<HelpBox>("vivid-rp-asset-terrain-rvt-decal-dependencies");
+
+                Assert.That(helpBox, Is.Not.Null);
+                Assert.That(helpBox.style.display.value, Is.EqualTo(DisplayStyle.Flex));
+                Assert.That(helpBox.messageType, Is.EqualTo(HelpBoxMessageType.Warning));
+                Assert.That(helpBox.text, Does.Contain("GPUDriven"));
+                Assert.That(helpBox.text, Does.Contain("does not fall back"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(editor);
+            }
         }
 
         [Test]

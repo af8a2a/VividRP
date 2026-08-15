@@ -13,7 +13,7 @@ using Object = UnityEngine.Object;
 
 namespace VividRP.Editor
 {
-    [ScriptedImporter(3, Extension)]
+    [ScriptedImporter(4, Extension)]
     internal sealed class VividVirtualTextureAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vividvt";
@@ -63,7 +63,7 @@ namespace VividRP.Editor
 
         public Color FallbackColor = Color.black;
 
-        public Color NormalFallbackColor = new(0.5f, 0.5f, 1f, 1f);
+        public Color NormalFallbackColor = new(0.5f, 0.5f, 1f, 0.5f);
 
         public Color MaskFallbackColor = Color.white;
 
@@ -97,7 +97,9 @@ namespace VividRP.Editor
 
             var timer = Stopwatch.StartNew();
             string virtualTextureGUID = AssetDatabase.AssetPathToGUID(ctx.assetPath);
-            bool useVersion3Defaults = m_StorageSettingsInitialized || HasVersion3Marker(ctx.assetPath);
+            bool useVersion3Defaults = BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
+                                       || m_StorageSettingsInitialized
+                                       || HasVersion3Marker(ctx.assetPath);
             VividTerrainCompositeTextureSet generatedTextures = null;
             try
             {

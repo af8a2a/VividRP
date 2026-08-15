@@ -764,9 +764,6 @@ namespace VividRP.Editor
             var layers = new List<VividVirtualTextureLayerDescriptor>();
             if (gpuDrivenSurface)
             {
-                Color32 maskFallback = ResolveFallback(
-                    parameters.MaskFallbackColor,
-                    new Color32(255, 255, 255, 255));
                 layers.Add(new VividVirtualTextureLayerDescriptor(
                     VTLayerSemantic.BaseColor,
                     GraphicsFormat.RGBA_BC7_SRGB,
@@ -778,21 +775,21 @@ namespace VividRP.Editor
                     VTLayerSemantic.Normal,
                     GraphicsFormat.RG_BC5_UNorm,
                     sRGB: false,
-                    ResolveFallback(parameters.NormalFallbackColor, new Color32(128, 128, 255, 128)),
+                    new Color32(128, 128, 255, 128),
                     physicalGroup: 1,
                     VTLayerDataEncoding.NormalRG));
                 layers.Add(new VividVirtualTextureLayerDescriptor(
                     VTLayerSemantic.Mask,
                     GraphicsFormat.RGBA_BC7_UNorm,
                     sRGB: false,
-                    maskFallback,
+                    new Color32(255, 255, 255, 255),
                     physicalGroup: 2,
                     VTLayerDataEncoding.RGBA));
                 layers.Add(new VividVirtualTextureLayerDescriptor(
                     VTLayerSemantic.Height,
                     GraphicsFormat.R_BC4_UNorm,
                     sRGB: false,
-                    maskFallback,
+                    new Color32(255, 255, 255, 255),
                     physicalGroup: 3,
                     VTLayerDataEncoding.SingleChannelR));
                 return layers.ToArray();

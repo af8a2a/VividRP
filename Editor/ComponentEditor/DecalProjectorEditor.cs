@@ -18,6 +18,8 @@ namespace VividRP.Editor
 
         private SerializedProperty m_BoundProxy;
         private SerializedProperty m_BlendDistance;
+        private SerializedProperty m_VirtualTextureAsset;
+        private SerializedProperty m_DrawOrder;
         private SerializedProperty m_BaseColorTexture;
         private SerializedProperty m_NormalTexture;
         private SerializedProperty m_MetallicTexture;
@@ -32,6 +34,8 @@ namespace VividRP.Editor
         {
             m_BoundProxy = serializedObject.FindProperty("m_BoundProxy");
             m_BlendDistance = serializedObject.FindProperty("m_BlendDistance");
+            m_VirtualTextureAsset = serializedObject.FindProperty("m_VirtualTextureAsset");
+            m_DrawOrder = serializedObject.FindProperty("m_DrawOrder");
             m_BaseColorTexture = serializedObject.FindProperty("m_BaseColorTexture");
             m_NormalTexture = serializedObject.FindProperty("m_NormalTexture");
             m_MetallicTexture = serializedObject.FindProperty("m_MetallicTexture");
@@ -53,6 +57,12 @@ namespace VividRP.Editor
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Material", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(m_DrawOrder);
+            EditorGUILayout.PropertyField(
+                m_VirtualTextureAsset,
+                new GUIContent(
+                    "Virtual Texture Asset",
+                    "Combined BaseColor, Normal, and packed Metallic/Occlusion/Smoothness VVT used by the Terrain Runtime Virtual Texture decal technique."));
             EditorGUILayout.PropertyField(m_BaseColor);
             EditorGUILayout.PropertyField(m_BaseColorTexture);
             EditorGUILayout.PropertyField(m_NormalTexture);

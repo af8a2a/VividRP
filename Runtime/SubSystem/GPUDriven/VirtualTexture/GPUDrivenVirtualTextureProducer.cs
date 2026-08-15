@@ -171,6 +171,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             public void Dispose()
             {
+                if (m_Entry.IsRuntime)
+                    m_Entry.RuntimeLevel.ReleasePageUploadDependencies(m_Request);
             }
         }
 
@@ -386,9 +388,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (entry.IsRuntime)
             {
                 entry.RuntimeLevel.RecordFeedback(request.PageCoord, priorityKey);
-                return entry.RuntimeLevel.IsPageApproved(request.PageCoord)
-                    ? VTPageRequestStatus.Available
-                    : VTPageRequestStatus.Pending;
+                return entry.RuntimeLevel.GetPageUploadStatus(request.SpaceId, request);
             }
 
             if (!entry.IsStreamed)
@@ -435,7 +435,15 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {
-            if (!TryFindEntry(request.PageCoord, out AtlasEntry entry, out _) || !entry.IsStreamed)
+            if (!TryFindEntry(request.PageCoord, out AtlasEntry entry, out _))
+                return;
+
+            if (entry.IsRuntime)
+            {
+                entry.RuntimeLevel.CancelPageUpload(request);
+                return;
+            }
+            if (!entry.IsStreamed)
                 return;
 
             VTRequest localRequest = TranslateRequest(entry, request);
@@ -447,6 +455,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             for (int entryIndex = 0; entryIndex < m_Entries.Count; entryIndex++)
             {
                 AtlasEntry entry = m_Entries[entryIndex];
+                if (entry.IsRuntime)
+                {
+                    entry.RuntimeLevel.RetirePageUploadDependencies(liveRequests);
+                    continue;
+                }
                 if (!entry.IsStreamed)
                     continue;
 

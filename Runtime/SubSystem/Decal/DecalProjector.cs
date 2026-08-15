@@ -10,6 +10,8 @@ namespace VividRP.Runtime.SubSystem.Decal
         [SerializeField] [Min(0.0f)] private float m_BlendDistance;
 
         [Header("Decal Material")]
+        [SerializeField] private VividVirtualTextureAsset m_VirtualTextureAsset;
+        [SerializeField] private int m_DrawOrder;
         [SerializeField] private Texture2D m_BaseColorTexture;
         [SerializeField] private Texture2D m_NormalTexture;
         [SerializeField] private Texture2D m_MetallicTexture;
@@ -17,6 +19,18 @@ namespace VividRP.Runtime.SubSystem.Decal
         [SerializeField] private Color m_BaseColor = Color.white;
         [SerializeField] [Range(0.0f, 1.0f)] private float m_Metallic;
         [SerializeField] [Range(0.0f, 1.0f)] private float m_Roughness = 0.5f;
+
+        public VividVirtualTextureAsset VirtualTextureAsset
+        {
+            get => m_VirtualTextureAsset;
+            set => m_VirtualTextureAsset = value;
+        }
+
+        public int DrawOrder
+        {
+            get => m_DrawOrder;
+            set => m_DrawOrder = value;
+        }
 
         public Texture2D BaseColorTexture
         {

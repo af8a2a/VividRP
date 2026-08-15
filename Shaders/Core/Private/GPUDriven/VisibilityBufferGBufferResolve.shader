@@ -69,11 +69,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 VividInstanceData instanceData;
                 VividMaterialData materialData;
                 VividSurfaceBindingData surfaceBindingData;
-                VividDecodedMeshlet meshlet;
-                uint3 indices;
-                VividDecodedMeshletVertex vertex0;
-                VividDecodedMeshletVertex vertex1;
-                VividDecodedMeshletVertex vertex2;
+                VividMeshletVertex vertex0;
+                VividMeshletVertex vertex1;
+                VividMeshletVertex vertex2;
                 float3 positionWS0;
                 float3 positionWS1;
                 float3 positionWS2;
@@ -112,14 +110,38 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return (packedIndices >> shiftAmount) & 0xFFu;
             }
 
-            VividDecodedMeshletVertex PullVertex(const VividDecodedMeshlet meshlet, const uint index)
+            VividMeshletVertex PullVertex(const VividDecodedMeshlet meshlet, const uint index)
             {
-                return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
+                return _SharedVertexBuffer[meshlet.VertexOffset + index];
             }
 
-            float2 GetUV0(const VividDecodedMeshletVertex vertex)
+            float3 GetPositionOS(const VividMeshletVertex vertex)
             {
-                return vertex.UV.xy;
+                return float3(vertex.PositionX, vertex.PositionY, vertex.PositionZ);
+            }
+
+            float3 DecodeVertexNormalOS(const uint packedNormal)
+            {
+                return (packedNormal & VIVID_MESHLET_NORMAL_VALID_BIT) != 0u
+                    ? DecodeVividMeshletOctahedral15(packedNormal)
+                    : 0.0f;
+            }
+
+            float4 DecodeVertexTangentOS(const uint packedTangent)
+            {
+                if ((packedTangent & VIVID_MESHLET_TANGENT_VALID_BIT) == 0u)
+                    return 0.0f;
+
+                return float4(
+                    DecodeVividMeshletOctahedral15(packedTangent),
+                    (packedTangent & VIVID_MESHLET_TANGENT_NEGATIVE_HANDEDNESS_BIT) != 0u
+                        ? -1.0f
+                        : 1.0f);
+            }
+
+            float2 GetUV0(const VividMeshletVertex vertex)
+            {
+                return vertex.UV;
             }
 
             float3 TransformInstanceObjectToWorldDir(float3 dirOS, float4x4 objectToWorldMatrix, bool doNormalize = true)
@@ -156,9 +178,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             InterpolatedUV InterpolateUV(
                 const VividBarycentricDerivatives barycentric,
-                const VividDecodedMeshletVertex vertex0,
-                const VividDecodedMeshletVertex vertex1,
-                const VividDecodedMeshletVertex vertex2)
+                const VividMeshletVertex vertex0,
+                const VividMeshletVertex vertex1,
+                const VividMeshletVertex vertex2)
             {
                 const float3 u = InterpolateWithBarycentric(
                     barycentric,
@@ -246,21 +268,21 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 result.materialData = PullMaterialData(result.instanceData.MaterialIndex);
                 result.surfaceBindingData = PullSurfaceBindingData(result.materialData.SurfaceBindingIndex);
-                result.meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
+                const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
-                result.indices = uint3(
-                    PullIndex(result.meshlet, visibilityBufferValue.IndexID + 0u),
-                    PullIndex(result.meshlet, visibilityBufferValue.IndexID + 1u),
-                    PullIndex(result.meshlet, visibilityBufferValue.IndexID + 2u)
+                const uint3 indices = uint3(
+                    PullIndex(meshlet, visibilityBufferValue.IndexID + 0u),
+                    PullIndex(meshlet, visibilityBufferValue.IndexID + 1u),
+                    PullIndex(meshlet, visibilityBufferValue.IndexID + 2u)
                 );
 
-                result.vertex0 = PullVertex(result.meshlet, result.indices.x);
-                result.vertex1 = PullVertex(result.meshlet, result.indices.y);
-                result.vertex2 = PullVertex(result.meshlet, result.indices.z);
+                result.vertex0 = PullVertex(meshlet, indices.x);
+                result.vertex1 = PullVertex(meshlet, indices.y);
+                result.vertex2 = PullVertex(meshlet, indices.z);
 
-                result.positionWS0 = TransformPosition(result.instanceData.ObjectToWorldMatrix, result.vertex0.Position.xyz);
-                result.positionWS1 = TransformPosition(result.instanceData.ObjectToWorldMatrix, result.vertex1.Position.xyz);
-                result.positionWS2 = TransformPosition(result.instanceData.ObjectToWorldMatrix, result.vertex2.Position.xyz);
+                result.positionWS0 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex0));
+                result.positionWS1 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex1));
+                result.positionWS2 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex2));
 
                 result.clipPosition0 = TransformWorldToHClip(result.positionWS0);
                 result.clipPosition1 = TransformWorldToHClip(result.positionWS1);
@@ -524,13 +546,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
                 const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
                 const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(triangleData.vertex0.Normal.xyz),
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex0.PackedNormal)),
                     triangleData.instanceData.WorldToObjectMatrix);
                 const float3 vertexNormalWS1 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(triangleData.vertex1.Normal.xyz),
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex1.PackedNormal)),
                     triangleData.instanceData.WorldToObjectMatrix);
                 const float3 vertexNormalWS2 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(triangleData.vertex2.Normal.xyz),
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex2.PackedNormal)),
                     triangleData.instanceData.WorldToObjectMatrix);
 
                 VividBarycentricDerivatives barycentricVertexNormalWS = InterpolateWithBarycentric(
@@ -550,9 +572,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 {
                     float4 tangentOS = InterpolateWithBarycentricNoDerivatives(
                         barycentric,
-                        triangleData.vertex0.Tangent,
-                        triangleData.vertex1.Tangent,
-                        triangleData.vertex2.Tangent);
+                        DecodeVertexTangentOS(triangleData.vertex0.PackedTangent),
+                        DecodeVertexTangentOS(triangleData.vertex1.PackedTangent),
+                        DecodeVertexTangentOS(triangleData.vertex2.PackedTangent));
                     float3 tangentWS = TransformInstanceObjectToWorldDir(
                         tangentOS.xyz,
                         triangleData.instanceData.ObjectToWorldMatrix,

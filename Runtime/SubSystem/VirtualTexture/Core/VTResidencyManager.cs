@@ -2110,10 +2110,6 @@ namespace VividRP.Runtime
             int startedThisCall = 0;
             while (startedThisCall < maxStartsThisCall)
             {
-                int bestListIndex = -1;
-                int bestPageIndex = -1;
-                int bestAncestorPageIndex = -1;
-                int bestMip = int.MinValue;
                 for (int listIndex = m_QueuedTransitionPageIndices.Count - 1;
                      listIndex >= 0;
                      listIndex--)
@@ -2127,11 +2123,19 @@ namespace VividRP.Runtime
 
                     VTPageRuntimeState pageState = m_PageStates[pageIndex];
                     if (!pageState.Resident || !pageState.TransitionQueued)
-                    {
                         m_QueuedTransitionPageIndices.RemoveAt(listIndex);
-                        continue;
-                    }
+                }
 
+                int bestListIndex = -1;
+                int bestPageIndex = -1;
+                int bestAncestorPageIndex = -1;
+                int bestMip = int.MinValue;
+                for (int listIndex = m_QueuedTransitionPageIndices.Count - 1;
+                     listIndex >= 0;
+                     listIndex--)
+                {
+                    int pageIndex = m_QueuedTransitionPageIndices[listIndex];
+                    VTPageRuntimeState pageState = m_PageStates[pageIndex];
                     m_PhysicalPool.Touch(
                         pageState.PhysicalPageId,
                         VirtualTextureViewId.Invalid,

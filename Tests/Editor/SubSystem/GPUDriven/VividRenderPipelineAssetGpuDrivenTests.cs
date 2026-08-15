@@ -24,6 +24,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.Unreal));
                 Assert.That(asset.EnableGPUDriven, Is.False);
                 Assert.That(asset.EnableGPUDrivenOcclusionCulling, Is.True);
+                Assert.That(asset.EnableTerrainRuntimeVirtualTexture, Is.False);
                 Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
                 Assert.That(
                     asset.GPUDrivenVirtualTexturePhysicalPoolQuality,
@@ -51,6 +52,7 @@ namespace VividRP.Editor.Tests
                 var implementationProperty = serializedObject.FindProperty("m_AutoExposureImplementation");
                 var property = serializedObject.FindProperty("m_EnableGPUDriven");
                 var occlusionProperty = serializedObject.FindProperty("m_EnableGPUDrivenOcclusionCulling");
+                var terrainRVTProperty = serializedObject.FindProperty("m_EnableTerrainRuntimeVirtualTexture");
                 var textureBackendProperty = serializedObject.FindProperty("m_GPUDrivenTextureBackend");
                 var virtualTexturePhysicalPoolQualityProperty = serializedObject.FindProperty(
                     "m_GPUDrivenVirtualTexturePhysicalPoolQuality");
@@ -67,6 +69,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(implementationProperty, Is.Not.Null);
                 Assert.That(property, Is.Not.Null);
                 Assert.That(occlusionProperty, Is.Not.Null);
+                Assert.That(terrainRVTProperty, Is.Not.Null);
                 Assert.That(textureBackendProperty, Is.Not.Null);
                 Assert.That(virtualTexturePhysicalPoolQualityProperty, Is.Not.Null);
                 Assert.That(maxResidencyProperty, Is.Not.Null);
@@ -78,6 +81,7 @@ namespace VividRP.Editor.Tests
                 implementationProperty.enumValueIndex = (int)AutoExposureImplementationPath.HDRP;
                 property.boolValue = true;
                 occlusionProperty.boolValue = false;
+                terrainRVTProperty.boolValue = true;
                 textureBackendProperty.enumValueIndex = (int) GPUDrivenTextureBackendMode.Bindless;
                 virtualTexturePhysicalPoolQualityProperty.enumValueIndex =
                     (int)GPUDrivenVirtualTexturePhysicalPoolQuality.High;
@@ -91,6 +95,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.HDRP));
                 Assert.That(asset.EnableGPUDriven, Is.True);
                 Assert.That(asset.EnableGPUDrivenOcclusionCulling, Is.False);
+                Assert.That(asset.EnableTerrainRuntimeVirtualTexture, Is.True);
                 Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
                 Assert.That(
                     asset.GPUDrivenVirtualTexturePhysicalPoolQuality,
@@ -257,6 +262,48 @@ namespace VividRP.Editor.Tests
                         GPUDrivenTextureBackendMode.VirtualTexture,
                         asset),
                     Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void RequiresTextureBackendRecreation_TracksTerrainRVTOptInForVirtualTextureBackend()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        terrainRuntimeVirtualTextureRequested: false,
+                        asset),
+                    Is.False);
+
+                asset.EnableTerrainRuntimeVirtualTexture = true;
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        terrainRuntimeVirtualTextureRequested: false,
+                        asset),
+                    Is.True);
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        terrainRuntimeVirtualTextureRequested: true,
+                        asset),
+                    Is.False);
+
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.Bindless;
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.Bindless,
+                        terrainRuntimeVirtualTextureRequested: false,
+                        asset),
+                    Is.False,
+                    "Bindless ignores the experimental Terrain RVT toggle.");
             }
             finally
             {

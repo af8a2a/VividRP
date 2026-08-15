@@ -1,0 +1,254 @@
+#pragma kernel CS
+
+#pragma use_dxc
+#pragma target 5.0
+
+Texture2D<float4> _BaseColor0;
+Texture2D<float4> _BaseColor1;
+Texture2D<float4> _BaseColor2;
+Texture2D<float4> _BaseColor3;
+Texture2D<float4> _BaseColor4;
+Texture2D<float4> _BaseColor5;
+Texture2D<float4> _BaseColor6;
+Texture2D<float4> _BaseColor7;
+Texture2D<float4> _Normal0;
+Texture2D<float4> _Normal1;
+Texture2D<float4> _Normal2;
+Texture2D<float4> _Normal3;
+Texture2D<float4> _Normal4;
+Texture2D<float4> _Normal5;
+Texture2D<float4> _Normal6;
+Texture2D<float4> _Normal7;
+Texture2D<float4> _Mask0;
+Texture2D<float4> _Mask1;
+Texture2D<float4> _Mask2;
+Texture2D<float4> _Mask3;
+Texture2D<float4> _Mask4;
+Texture2D<float4> _Mask5;
+Texture2D<float4> _Mask6;
+Texture2D<float4> _Mask7;
+Texture2D<float4> _Control0;
+Texture2D<float4> _Control1;
+
+SamplerState sampler_LinearRepeat;
+SamplerState sampler_LinearClamp;
+
+RWTexture2DArray<float4> _OutputPages;
+
+int4 _RVTLogicalPageAndSlice;
+int4 _RVTPageLayout;
+float4 _RVTOutputDimensions;
+float4 _RVTLayerTilingOffset[8];
+float4 _RVTLayerMaterialParams[8];
+
+static const uint kSubsampleGridSize = 2u;
+static const float kSubsampleFootprintScale = 0.5;
+static const float kSubsampleWeight = 0.25;
+
+float ResolveMip(Texture2D<float4> sourceTexture, float2 uvScale)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    sourceTexture.GetDimensions(0, width, height, mipCount);
+    const float2 sourceFootprint = float2(width, height)
+        * abs(uvScale)
+        * _RVTOutputDimensions.zw
+        * kSubsampleFootprintScale;
+    return max(0.0, log2(max(max(sourceFootprint.x, sourceFootprint.y), 1e-6)));
+}
+
+float4 SampleRepeat(Texture2D<float4> sourceTexture, float2 uv, float2 uvScale)
+{
+    return sourceTexture.SampleLevel(sampler_LinearRepeat, uv, ResolveMip(sourceTexture, uvScale));
+}
+
+float4 SampleClamp(Texture2D<float4> sourceTexture, float2 uv)
+{
+    return sourceTexture.SampleLevel(sampler_LinearClamp, uv, ResolveMip(sourceTexture, 1.0.xx));
+}
+
+float4 SampleBaseColor(uint layerIndex, float2 uv, float2 uvScale)
+{
+    switch (layerIndex)
+    {
+        case 0u: return SampleRepeat(_BaseColor0, uv, uvScale);
+        case 1u: return SampleRepeat(_BaseColor1, uv, uvScale);
+        case 2u: return SampleRepeat(_BaseColor2, uv, uvScale);
+        case 3u: return SampleRepeat(_BaseColor3, uv, uvScale);
+        case 4u: return SampleRepeat(_BaseColor4, uv, uvScale);
+        case 5u: return SampleRepeat(_BaseColor5, uv, uvScale);
+        case 6u: return SampleRepeat(_BaseColor6, uv, uvScale);
+        default: return SampleRepeat(_BaseColor7, uv, uvScale);
+    }
+}
+
+float4 SampleNormal(uint layerIndex, float2 uv, float2 uvScale)
+{
+    switch (layerIndex)
+    {
+        case 0u: return SampleRepeat(_Normal0, uv, uvScale);
+        case 1u: return SampleRepeat(_Normal1, uv, uvScale);
+        case 2u: return SampleRepeat(_Normal2, uv, uvScale);
+        case 3u: return SampleRepeat(_Normal3, uv, uvScale);
+        case 4u: return SampleRepeat(_Normal4, uv, uvScale);
+        case 5u: return SampleRepeat(_Normal5, uv, uvScale);
+        case 6u: return SampleRepeat(_Normal6, uv, uvScale);
+        default: return SampleRepeat(_Normal7, uv, uvScale);
+    }
+}
+
+float4 SampleMask(uint layerIndex, float2 uv, float2 uvScale)
+{
+    switch (layerIndex)
+    {
+        case 0u: return SampleRepeat(_Mask0, uv, uvScale);
+        case 1u: return SampleRepeat(_Mask1, uv, uvScale);
+        case 2u: return SampleRepeat(_Mask2, uv, uvScale);
+        case 3u: return SampleRepeat(_Mask3, uv, uvScale);
+        case 4u: return SampleRepeat(_Mask4, uv, uvScale);
+        case 5u: return SampleRepeat(_Mask5, uv, uvScale);
+        case 6u: return SampleRepeat(_Mask6, uv, uvScale);
+        default: return SampleRepeat(_Mask7, uv, uvScale);
+    }
+}
+
+void ResolveWeights(float2 terrainUv, out float weights[8])
+{
+    const float4 control0 = _RVTPageLayout.w > 0
+        ? SampleClamp(_Control0, terrainUv)
+        : 0.0.xxxx;
+    const float4 control1 = _RVTPageLayout.w > 1
+        ? SampleClamp(_Control1, terrainUv)
+        : 0.0.xxxx;
+    weights[0] = control0.r;
+    weights[1] = control0.g;
+    weights[2] = control0.b;
+    weights[3] = control0.a;
+    weights[4] = control1.r;
+    weights[5] = control1.g;
+    weights[6] = control1.b;
+    weights[7] = control1.a;
+
+    const uint layerCount = min((uint)max(_RVTLogicalPageAndSlice.w, 0), 8u);
+    float weightSum = 0.0;
+    [unroll]
+    for (uint layerIndex = 0u; layerIndex < 8u; ++layerIndex)
+    {
+        weights[layerIndex] = layerIndex < layerCount ? max(weights[layerIndex], 0.0) : 0.0;
+        weightSum += weights[layerIndex];
+    }
+
+    if (layerCount == 1u)
+    {
+        weights[0] = 1.0;
+        return;
+    }
+    if (weightSum > 1e-5)
+    {
+        [unroll]
+        for (uint layerIndex = 0u; layerIndex < 8u; ++layerIndex)
+            weights[layerIndex] /= weightSum;
+        return;
+    }
+
+    weights[0] = layerCount > 0u ? 1.0 : 0.0;
+}
+
+float3 DecodeNormal(float4 packedNormal, float scale)
+{
+    float2 normalXY = packedNormal.wy * 2.0 - 1.0;
+    normalXY *= scale;
+    return float3(normalXY, sqrt(saturate(1.0 - dot(normalXY, normalXY))));
+}
+
+float3 EncodeLinearToSRGB(float3 value)
+{
+    value = max(value, 0.0);
+    const float3 useLowSegment = 1.0 - step(0.0031308.xxx, value);
+    const float3 lowSegment = value * 12.92;
+    const float3 highSegment = 1.055 * pow(value, 1.0 / 2.4) - 0.055;
+    return saturate(lerp(highSegment, lowSegment, useLowSegment));
+}
+
+[numthreads(8, 8, 1)]
+void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint physicalPageSize = (uint)_RVTPageLayout.z;
+    if (dispatchThreadID.x >= physicalPageSize || dispatchThreadID.y >= physicalPageSize)
+        return;
+
+    float3 baseColor = 0.0.xxx;
+    float3 normalTS = 0.0.xxx;
+    float3 mask = 0.0.xxx;
+    [unroll]
+    for (uint subsampleY = 0u; subsampleY < kSubsampleGridSize; ++subsampleY)
+    {
+        [unroll]
+        for (uint subsampleX = 0u; subsampleX < kSubsampleGridSize; ++subsampleX)
+        {
+            const float2 subsampleOffset =
+                (float2(subsampleX, subsampleY) + 0.5) / (float)kSubsampleGridSize;
+            const float2 logicalTexel =
+                (float2)_RVTLogicalPageAndSlice.xy * _RVTPageLayout.x
+                + (float2)dispatchThreadID.xy
+                - _RVTPageLayout.y
+                + subsampleOffset;
+            const float2 terrainUv = logicalTexel * _RVTOutputDimensions.zw;
+            float weights[8];
+            ResolveWeights(terrainUv, weights);
+
+            [unroll]
+            for (uint layerIndex = 0u; layerIndex < 8u; ++layerIndex)
+            {
+                const float weight = weights[layerIndex] * kSubsampleWeight;
+                if (weight <= 0.0)
+                    continue;
+
+                const float4 tilingOffset = _RVTLayerTilingOffset[layerIndex];
+                const float4 materialParams = _RVTLayerMaterialParams[layerIndex];
+                const uint presence = (uint)round(materialParams.w);
+                const float2 layerUv = terrainUv * tilingOffset.xy + tilingOffset.zw;
+                const float3 sampledBaseColor = (presence & 1u) != 0u
+                    ? SampleBaseColor(layerIndex, layerUv, tilingOffset.xy).rgb
+                    : 1.0.xxx;
+                const float3 sampledNormal = (presence & 2u) != 0u
+                    ? DecodeNormal(
+                        SampleNormal(layerIndex, layerUv, tilingOffset.xy),
+                        materialParams.x)
+                    : float3(0.0, 0.0, 1.0);
+
+                float sampledMetallic = materialParams.y;
+                float sampledAmbientOcclusion = 1.0;
+                float sampledSmoothness = materialParams.z;
+                if ((presence & 4u) != 0u)
+                {
+                    const float4 sampledMask = SampleMask(layerIndex, layerUv, tilingOffset.xy);
+                    sampledMetallic = sampledMask.r;
+                    sampledAmbientOcclusion = sampledMask.g;
+                    sampledSmoothness = sampledMask.a;
+                }
+
+                baseColor += sampledBaseColor * weight;
+                normalTS += sampledNormal * weight;
+                mask += float3(sampledMetallic, sampledAmbientOcclusion, sampledSmoothness) * weight;
+            }
+        }
+    }
+
+    const float normalLengthSquared = dot(normalTS, normalTS);
+    normalTS = normalLengthSquared > 1e-8
+        ? normalTS * rsqrt(normalLengthSquared)
+        : float3(0.0, 0.0, 1.0);
+    const float2 encodedNormal = normalTS.xy * 0.5 + 0.5;
+    const uint2 outputPixel = dispatchThreadID.xy;
+    const uint baseSlice = (uint)_RVTLogicalPageAndSlice.z;
+    _OutputPages[uint3(outputPixel, baseSlice + 0u)] = float4(EncodeLinearToSRGB(baseColor), 1.0);
+    _OutputPages[uint3(outputPixel, baseSlice + 1u)] = float4(encodedNormal, 1.0, encodedNormal.x);
+    _OutputPages[uint3(outputPixel, baseSlice + 2u)] = float4(
+        saturate(mask.r),
+        saturate(mask.g),
+        1.0,
+        saturate(mask.b));
+    _OutputPages[uint3(outputPixel, baseSlice + 3u)] = 1.0.xxxx;
+}

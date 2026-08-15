@@ -33,6 +33,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
             #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/TerrainRuntimeVirtualTextureSampling.hlsl"
+            #endif
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
 
@@ -448,6 +451,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 float ambientOcclusion;
                 bool isTerrain = (triangleData.materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u
                     && triangleData.materialData.Padding1 < _TerrainMaterialDataCount;
+                bool isTerrainRVT =
+                    (triangleData.materialData.MaterialFlags
+                        & VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE) != 0u;
 
                 UNITY_BRANCH
                 if (isTerrain)
@@ -490,13 +496,31 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         hasSampledNormal = true;
                     }
 
-                    if (VividSurfaceHasMask(triangleData.surfaceBindingData))
+                    float4 maskSample = VividSurfaceHasMask(triangleData.surfaceBindingData)
+                        ? VividSampleMaskGrad(
+                            triangleData.surfaceBindingData,
+                            surfaceSampleContext)
+                        : 1.0.xxxx;
+#if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                    if (isTerrainRVT)
+                    {
+                        bool sampledTerrainRVT = VividResolveTerrainRVT(
+                            triangleData.materialData.Padding1,
+                            terrainUv.uv,
+                            terrainUv.ddx,
+                            terrainUv.ddy,
+                            positionCS,
+                            baseColor,
+                            sampledNormalTS,
+                            maskSample);
+                        hasSampledNormal = hasSampledNormal || sampledTerrainRVT;
+                    }
+#endif
+                    if (VividSurfaceHasMask(triangleData.surfaceBindingData) || isTerrainRVT)
                     {
                         ApplyMaskSample(
                             triangleData.materialData.Padding0,
-                            VividSampleMaskGrad(
-                                triangleData.surfaceBindingData,
-                                surfaceSampleContext),
+                            maskSample,
                             perceptualRoughness,
                             metallic,
                             ambientOcclusion);

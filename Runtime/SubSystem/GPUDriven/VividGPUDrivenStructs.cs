@@ -59,6 +59,7 @@ namespace VividRP.Runtime.GPUDriven
         None = 0,
         Unlit = 1 << 0,
         Terrain = 1 << 1,
+        TerrainRuntimeVirtualTexture = 1 << 2,
     }
 
     [GenerateHLSL(PackingRules.Exact)]

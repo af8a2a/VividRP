@@ -1351,6 +1351,28 @@ namespace VividRP.Editor.Tests
                     compositeMaterial.Padding0,
                     Is.EqualTo((uint) GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness));
 
+                var terrainRVTSceneData = new VividGPUDrivenSceneData();
+                var terrainRVTBuilder = new VividGPUDrivenSceneDataBuilder();
+                using var terrainRVTBackend = new CompositeCapableTextureBackend(
+                    compositeVirtualTexture,
+                    terrainRVTRecordIndex: 17u);
+                terrainRVTBuilder.Build(
+                    terrainRVTSceneData,
+                    VividMeshletRendererDatabase.instance,
+                    terrainRVTBackend);
+
+                Assert.That(terrainRVTSceneData.SurfaceBindingCount, Is.EqualTo(1));
+                Assert.That(terrainRVTSceneData.TerrainMaterialCount, Is.Zero);
+                Assert.That(terrainRVTSceneData.TerrainLayerCount, Is.Zero);
+                VividMaterialData terrainRVTMaterial = terrainRVTSceneData.Materials[0];
+                Assert.That(
+                    terrainRVTMaterial.MaterialFlags & VividMaterialFlags.TerrainRuntimeVirtualTexture,
+                    Is.EqualTo(VividMaterialFlags.TerrainRuntimeVirtualTexture));
+                Assert.That(
+                    terrainRVTMaterial.MaterialFlags & VividMaterialFlags.Terrain,
+                    Is.EqualTo(VividMaterialFlags.None));
+                Assert.That(terrainRVTMaterial.Padding1, Is.EqualTo(17u));
+
                 compositeBuilder.Build(
                     compositeSceneData,
                     VividMeshletRendererDatabase.instance,
@@ -1409,13 +1431,19 @@ namespace VividRP.Editor.Tests
                 addressMode: VividVirtualTextureAddressMode.Clamp);
         }
 
-        private sealed class CompositeCapableTextureBackend : IGPUDrivenTextureBackend
+        private sealed class CompositeCapableTextureBackend :
+            IGPUDrivenTextureBackend,
+            IGPUDrivenTerrainRuntimeVirtualTextureBackend
         {
             private readonly VividVirtualTextureAsset m_CompositeAsset;
+            private readonly uint m_TerrainRVTRecordIndex;
 
-            internal CompositeCapableTextureBackend(VividVirtualTextureAsset compositeAsset)
+            internal CompositeCapableTextureBackend(
+                VividVirtualTextureAsset compositeAsset,
+                uint terrainRVTRecordIndex = VividSurfaceBindingData.InvalidResource)
             {
                 m_CompositeAsset = compositeAsset;
+                m_TerrainRVTRecordIndex = terrainRVTRecordIndex;
             }
 
             public string DisplayName => "Composite Test";
@@ -1425,6 +1453,9 @@ namespace VividRP.Editor.Tests
             public string UnavailableReason => string.Empty;
 
             public uint BindingRevision => 0u;
+
+            public bool TerrainRuntimeVirtualTextureEnabled =>
+                m_TerrainRVTRecordIndex != VividSurfaceBindingData.InvalidResource;
 
             public void PrepareFrame()
             {
@@ -1437,6 +1468,24 @@ namespace VividRP.Editor.Tests
             public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
             {
                 return asset == m_CompositeAsset;
+            }
+
+            public bool TryGetOrCreateTerrainRuntimeVirtualTexture(
+                VividTerrain terrain,
+                VividTerrainData terrainData,
+                uint revision,
+                out uint recordIndex)
+            {
+                recordIndex = m_TerrainRVTRecordIndex;
+                return TerrainRuntimeVirtualTextureEnabled;
+            }
+
+            public void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera)
+            {
+            }
+
+            public void BindTerrainRuntimeVirtualTextureGlobals(CommandBuffer cmd)
+            {
             }
 
             public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)

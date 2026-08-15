@@ -286,6 +286,7 @@ namespace VividRP.Runtime
             private readonly bool[] m_UsesGpuStaging;
             private readonly bool[] m_UsesEncodedStaging;
             private readonly RenderTexture[] m_ConvertedStagingTextures;
+            private readonly RenderTexture[] m_BlockCompressedStagingTextures;
             private readonly Texture2DArray[] m_EncodedStagingTextures;
 
             private int m_RequestCount;
@@ -311,6 +312,7 @@ namespace VividRP.Runtime
                 m_UsesGpuStaging = new bool[Capacity];
                 m_UsesEncodedStaging = new bool[Capacity];
                 m_ConvertedStagingTextures = new RenderTexture[Mathf.Max(1, key.PhysicalGroupCount)];
+                m_BlockCompressedStagingTextures = new RenderTexture[Mathf.Max(1, key.PhysicalGroupCount)];
                 m_EncodedStagingTextures = new Texture2DArray[Mathf.Max(1, key.PhysicalGroupCount)];
                 BatchIndex = batchIndex;
             }
@@ -342,7 +344,7 @@ namespace VividRP.Runtime
                         m_SpaceName,
                         m_PhysicalPageSize,
                         Capacity * LayerCount,
-                        m_Key.GraphicsFormat,
+                        GraphicsFormat.R8G8B8A8_UNorm,
                         $"GPUUploadBatch{BatchIndex}");
                     return m_GpuStagingTexture;
                 }
@@ -367,6 +369,36 @@ namespace VividRP.Runtime
                     $"ConvertedUploadBatch{BatchIndex}_Group{physicalGroup}",
                     enableRandomWrite: false);
                 m_ConvertedStagingTextures[physicalGroup] = stagingTexture;
+                return stagingTexture;
+            }
+
+            internal RenderTexture GetBlockCompressedStagingTexture(int physicalGroup)
+            {
+                if (physicalGroup < 0 || physicalGroup >= m_BlockCompressedStagingTextures.Length)
+                    throw new ArgumentOutOfRangeException(nameof(physicalGroup));
+
+                RenderTexture stagingTexture = m_BlockCompressedStagingTextures[physicalGroup];
+                if (stagingTexture != null)
+                    return stagingTexture;
+
+                GraphicsFormat storageFormat = m_Key.GetGroupStorageFormat(physicalGroup);
+                GraphicsFormat blockFormat = storageFormat switch
+                {
+                    GraphicsFormat.R_BC4_UNorm => GraphicsFormat.R32G32_UInt,
+                    GraphicsFormat.RG_BC5_UNorm => GraphicsFormat.R32G32B32A32_UInt,
+                    GraphicsFormat.RGBA_BC7_UNorm => GraphicsFormat.R32G32B32A32_UInt,
+                    _ => throw new InvalidOperationException(
+                        $"[VividRP] GPU block compression does not support {storageFormat}."),
+                };
+                int groupLayerCount = Mathf.Max(1, m_Key.GetGroupLayerCount(physicalGroup));
+                int blockWidth = Mathf.CeilToInt(m_PhysicalPageSize / 4.0f);
+                stagingTexture = VTPageUploadUtility.CreateGpuStagingTexture(
+                    m_SpaceName,
+                    blockWidth,
+                    Capacity * groupLayerCount,
+                    blockFormat,
+                    $"BlockCompressedUploadBatch{BatchIndex}_Group{physicalGroup}");
+                m_BlockCompressedStagingTextures[physicalGroup] = stagingTexture;
                 return stagingTexture;
             }
 
@@ -571,6 +603,9 @@ namespace VividRP.Runtime
                     if (m_ConvertedStagingTextures[groupIndex] != null)
                         CoreUtils.Destroy(m_ConvertedStagingTextures[groupIndex]);
                     m_ConvertedStagingTextures[groupIndex] = null;
+                    if (m_BlockCompressedStagingTextures[groupIndex] != null)
+                        CoreUtils.Destroy(m_BlockCompressedStagingTextures[groupIndex]);
+                    m_BlockCompressedStagingTextures[groupIndex] = null;
                     if (m_EncodedStagingTextures[groupIndex] != null)
                         CoreUtils.Destroy(m_EncodedStagingTextures[groupIndex]);
                     m_EncodedStagingTextures[groupIndex] = null;
@@ -936,6 +971,36 @@ namespace VividRP.Runtime
                                     $"[VividRP] Encoded VT staging format {stagingTexture.graphicsFormat} does not "
                                     + $"match physical cache format {physicalCache.graphicsFormat}. Runtime BC "
                                     + "conversion is intentionally disabled.");
+                            }
+
+                            if (GraphicsFormatUtility.IsCompressedFormat(physicalCache.graphicsFormat))
+                            {
+                                RenderTexture blockStagingTexture =
+                                    batch.GetBlockCompressedStagingTexture(physicalGroup);
+                                VTRuntimeBlockCompressor.RecordCompression(
+                                    cmd,
+                                    stagingTexture,
+                                    sourceSlice,
+                                    blockStagingTexture,
+                                    convertedSlice,
+                                    physicalCache.graphicsFormat,
+                                    destinationTile.width);
+                                int blockWidth = Mathf.CeilToInt(destinationTile.width / 4.0f);
+                                int blockHeight = Mathf.CeilToInt(destinationTile.height / 4.0f);
+                                cmd.CopyTexture(
+                                    blockStagingTexture,
+                                    convertedSlice,
+                                    0,
+                                    0,
+                                    0,
+                                    blockWidth,
+                                    blockHeight,
+                                    physicalCache,
+                                    0,
+                                    0,
+                                    destinationTile.x,
+                                    destinationTile.y);
+                                continue;
                             }
 
                             RenderTexture convertedStagingTexture =

@@ -653,7 +653,12 @@ namespace VividRP.Runtime.GPUDriven
                 Material material = GetMaterialForSubMesh(trackedResources.SharedMaterials, subMeshIndex);
                 GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(trackedResources.MaterialProxies, subMeshIndex);
                 int materialIndex = trackedResources.IsTerrain
-                    ? GetOrAppendTerrainMaterial(sceneData, trackedResources.TerrainData, material, textureBackend)
+                    ? GetOrAppendTerrainMaterial(
+                        sceneData,
+                        trackedResources.Terrain,
+                        trackedResources.TerrainData,
+                        material,
+                        textureBackend)
                     : GetOrAppendMaterial(
                         sceneData,
                         trackedResources.MeshletRenderer,
@@ -793,12 +798,26 @@ namespace VividRP.Runtime.GPUDriven
 
         private int GetOrAppendTerrainMaterial(
             VividGPUDrivenSceneData sceneData,
+            VividTerrain terrain,
             VividTerrainData terrainData,
             Material sourceMaterial,
             IGPUDrivenTextureBackend textureBackend
         )
         {
-            EntityId objectId = terrainData != null ? terrainData.GetEntityId() : EntityId.None;
+            uint terrainRevision = ComputeTerrainMaterialRevision(terrainData);
+            uint terrainRVTRecordIndex = 0u;
+            bool usesTerrainRVT = terrainData != null
+                                  && textureBackend is IGPUDrivenTerrainRuntimeVirtualTextureBackend terrainRVTBackend
+                                  && terrainRVTBackend.TryGetOrCreateTerrainRuntimeVirtualTexture(
+                                      terrain,
+                                      terrainData,
+                                      terrainRevision,
+                                      out terrainRVTRecordIndex);
+            EntityId objectId = usesTerrainRVT && terrain != null
+                ? terrain.GetEntityId()
+                : terrainData != null
+                    ? terrainData.GetEntityId()
+                    : EntityId.None;
             if (m_MaterialIndexByObjectId.TryGetValue(objectId, out int materialIndex))
             {
                 return materialIndex;
@@ -832,7 +851,10 @@ namespace VividRP.Runtime.GPUDriven
                             null,
                             null,
                             GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness));
-                    materialData = CreateCompositeTerrainMaterialData(surfaceBindingIndex);
+                    materialData = CreateCompositeTerrainMaterialData(
+                        surfaceBindingIndex,
+                        usesTerrainRVT,
+                        terrainRVTRecordIndex);
                 }
                 else
                 {
@@ -903,7 +925,7 @@ namespace VividRP.Runtime.GPUDriven
             {
                 m_MaterialMetadataByObjectId[objectId] = new MaterialMetadata(
                     materialIndex,
-                    ComputeTerrainMaterialRevision(terrainData)
+                    terrainRevision
                 );
             }
             return materialIndex;
@@ -920,6 +942,7 @@ namespace VividRP.Runtime.GPUDriven
             {
                 uint hash = 2166136261u;
                 hash = (hash ^ (uint) terrainData.Layers.Count) * 16777619u;
+                hash = (hash ^ (uint) terrainData.Size.GetHashCode()) * 16777619u;
                 hash = (hash ^ GetObjectRevisionId(terrainData.SourceMaterial)) * 16777619u;
                 VividVirtualTextureAsset compositeVirtualTexture = terrainData.CompositeVirtualTexture;
                 hash = (hash ^ GetObjectRevisionId(compositeVirtualTexture)) * 16777619u;
@@ -1139,7 +1162,10 @@ namespace VividRP.Runtime.GPUDriven
             };
         }
 
-        private static VividMaterialData CreateCompositeTerrainMaterialData(uint surfaceBindingIndex)
+        private static VividMaterialData CreateCompositeTerrainMaterialData(
+            uint surfaceBindingIndex,
+            bool usesTerrainRVT = false,
+            uint terrainRVTRecordIndex = 0u)
         {
             return new VividMaterialData
             {
@@ -1153,11 +1179,13 @@ namespace VividRP.Runtime.GPUDriven
                 SpecularAAScreenSpaceVariance = 0.0f,
                 SpecularAAThreshold = 0.0f,
                 GeometryFlags = VividGeometryFlags.None,
-                MaterialFlags = VividMaterialFlags.None,
+                MaterialFlags = usesTerrainRVT
+                    ? VividMaterialFlags.TerrainRuntimeVirtualTexture
+                    : VividMaterialFlags.None,
                 RendererListID = VividRendererListID.Default,
                 AlphaClipThreshold = 0.0f,
                 Padding0 = (uint) GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness,
-                Padding1 = 0u,
+                Padding1 = usesTerrainRVT ? terrainRVTRecordIndex : 0u,
             };
         }
 

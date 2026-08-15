@@ -78,6 +78,9 @@ namespace VividRP.Runtime
                 GPUDriven.VirtualTexture.GPUDrivenVirtualTexturePhysicalPoolQuality.Medium;
 
         [SerializeField]
+        private bool m_EnableTerrainRuntimeVirtualTexture;
+
+        [SerializeField]
         private VividVirtualTextureIOBackendMode m_VirtualTextureIOBackend = VividVirtualTextureIOBackendMode.Auto;
 
         [SerializeField, Min(0)]
@@ -215,6 +218,12 @@ namespace VividRP.Runtime
         {
             get => m_GPUDrivenVirtualTexturePhysicalPoolQuality;
             set => m_GPUDrivenVirtualTexturePhysicalPoolQuality = value;
+        }
+
+        public bool EnableTerrainRuntimeVirtualTexture
+        {
+            get => m_EnableTerrainRuntimeVirtualTexture;
+            set => m_EnableTerrainRuntimeVirtualTexture = value;
         }
 
         public VividVirtualTextureIOBackendMode VirtualTextureIOBackend

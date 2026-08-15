@@ -15,7 +15,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal const int NormalLayerIndex = 1;
         internal const int MaskLayerIndex = 2;
         internal const int ScalarMaskLayerIndex = 3;
-        internal const int LayerCount = 3;
+        internal const int HeightLayerIndex = 3;
+        internal const int LayerCount = 4;
 
         private const int ThreadGroupSize = 8;
 
@@ -30,6 +31,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private static readonly int s_BaseColorFallbackId = Shader.PropertyToID("_VTBaseColorFallback");
         private static readonly int s_NormalFallbackId = Shader.PropertyToID("_VTNormalFallback");
         private static readonly int s_MaskFallbackId = Shader.PropertyToID("_VTMaskFallback");
+        private static readonly int s_HeightFallbackId = Shader.PropertyToID("_VTHeightFallback");
 
         private sealed class AtlasEntry : IDisposable
         {
@@ -72,6 +74,18 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 StreamedProducer = new VividVirtualTextureAssetProducer(asset);
             }
 
+            internal AtlasEntry(
+                RectInt pageRegion,
+                TerrainRuntimeVirtualTextureClipmap.Level runtimeLevel)
+            {
+                PageRegion = pageRegion;
+                MaxMip = 0;
+                Repeat = false;
+                Sources = Array.Empty<Texture2D>();
+                SourceMipOffsets = Array.Empty<int>();
+                RuntimeLevel = runtimeLevel;
+            }
+
             internal RectInt PageRegion { get; }
 
             internal int MaxMip { get; }
@@ -86,9 +100,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             internal bool IsStreamed => StreamedProducer != null;
 
+            internal bool IsRuntime => RuntimeLevel != null;
+
             internal VirtualTextureSpaceDesc LocalDesc { get; }
 
             internal VividVirtualTextureAssetProducer StreamedProducer { get; }
+
+            internal TerrainRuntimeVirtualTextureClipmap.Level RuntimeLevel { get; }
 
             public void Dispose()
             {
@@ -119,6 +137,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             public void RecordGpuUpload(CommandBuffer cmd, RenderTexture stagingTexture, int baseSlice)
             {
+                if (m_Entry.IsRuntime)
+                {
+                    m_Entry.RuntimeLevel.RecordPageUpload(cmd, stagingTexture, baseSlice, m_Request);
+                    return;
+                }
+
                 m_Producer.RecordPageUpload(cmd, stagingTexture, baseSlice, m_Entry, m_Desc, m_Request);
             }
 
@@ -250,6 +274,22 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             StoreEntry(entry);
         }
 
+        internal void RegisterRuntimeEntry(
+            RectInt pageRegion,
+            TerrainRuntimeVirtualTextureClipmap.Level runtimeLevel)
+        {
+            if (runtimeLevel == null)
+                throw new ArgumentNullException(nameof(runtimeLevel));
+            if (pageRegion.width != TerrainRuntimeVirtualTextureClipmap.WindowPageCount
+                || pageRegion.height != TerrainRuntimeVirtualTextureClipmap.WindowPageCount)
+            {
+                throw new ArgumentException("Terrain RVT levels require an 8x8 page region.", nameof(pageRegion));
+            }
+
+            ValidateAndReservePageRegion(pageRegion);
+            StoreEntry(new AtlasEntry(pageRegion, runtimeLevel));
+        }
+
         internal bool UnregisterEntry(RectInt pageRegion)
         {
             if (pageRegion.width <= 0
@@ -302,6 +342,14 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             AtlasEntry entry = FindEntry(request.PageCoord);
             if (entry == null)
                 return VTPageRequestStatus.Invalid;
+
+            if (entry.IsRuntime)
+            {
+                entry.RuntimeLevel.RecordFeedback(request.PageCoord, priorityKey);
+                return entry.RuntimeLevel.IsPageApproved(request.PageCoord)
+                    ? VTPageRequestStatus.Available
+                    : VTPageRequestStatus.Pending;
+            }
 
             if (!entry.IsStreamed)
                 return VTPageRequestStatus.Available;
@@ -486,6 +534,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 m_ComputeShader,
                 s_MaskFallbackId,
                 ToVector(desc.StackDesc.GetLayer(MaskLayerIndex).FallbackColor));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_HeightFallbackId,
+                ToVector(desc.StackDesc.GetLayer(HeightLayerIndex).FallbackColor));
 
             int groupCount = Mathf.CeilToInt(desc.PhysicalPageSize / (float)ThreadGroupSize);
             cmd.DispatchCompute(m_ComputeShader, m_Kernel, groupCount, groupCount, 1);

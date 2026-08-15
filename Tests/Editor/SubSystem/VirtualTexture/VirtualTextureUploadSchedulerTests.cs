@@ -1042,6 +1042,9 @@ namespace VividRP.Editor.Tests
                 new[] { producer.GpuFinalizers[0].BaseSlice, producer.GpuFinalizers[1].BaseSlice },
                 Is.EquivalentTo(new[] { 0, 1 }));
             Assert.That(producer.GpuFinalizers[0].StagingTexture, Is.SameAs(producer.GpuFinalizers[1].StagingTexture));
+            Assert.That(
+                producer.GpuFinalizers[0].StagingTexture.graphicsFormat,
+                Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(producer.GpuFinalizers[0].IsDisposed, Is.True);
             Assert.That(producer.GpuFinalizers[1].IsDisposed, Is.True);
             Assert.That(VirtualTextureSystem.GetGpuUploadStagingTextureCountForTesting(), Is.EqualTo(1));

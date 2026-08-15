@@ -116,6 +116,59 @@ namespace VividRP.Editor.Tests
             Assert.That(physicalAtlas.height, Is.EqualTo(3128));
         }
 
+        [Test]
+        public void TerrainRVTClipmap_SinglePageMove_InvalidatesOnlyEnteringColumn()
+        {
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            var flushRegions = new System.Collections.Generic.List<VTPageRegion>();
+            level.UpdateWindow(PageCenterUv(32, 32), flushRegions);
+
+            level.UpdateWindow(PageCenterUv(33, 32), flushRegions);
+
+            Assert.That(flushRegions, Has.Count.EqualTo(8));
+            Assert.That(flushRegions, Has.All.Matches<VTPageRegion>(region =>
+                region.Mip == 0
+                && region.PageRegion.width == 1
+                && region.PageRegion.height == 1));
+        }
+
+        [Test]
+        public void TerrainRVTClipmap_DiagonalPageMove_MergesOverlappingCorner()
+        {
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            var flushRegions = new System.Collections.Generic.List<VTPageRegion>();
+            level.UpdateWindow(PageCenterUv(32, 32), flushRegions);
+
+            level.UpdateWindow(PageCenterUv(33, 33), flushRegions);
+
+            Assert.That(flushRegions, Has.Count.EqualTo(15));
+        }
+
+        [Test]
+        public void TerrainRVTClipmap_EightPageMove_InvalidatesWholeLevel()
+        {
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            var flushRegions = new System.Collections.Generic.List<VTPageRegion>();
+            level.UpdateWindow(PageCenterUv(24, 24), flushRegions);
+
+            level.UpdateWindow(PageCenterUv(32, 24), flushRegions);
+
+            Assert.That(flushRegions, Has.Count.EqualTo(1));
+            Assert.That(flushRegions[0].PageRegion, Is.EqualTo(new RectInt(11, 13, 8, 8)));
+        }
+
+        [Test]
+        public void TerrainRVTClipmap_RingCellMapsToCurrentLogicalWindow()
+        {
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            var flushRegions = new System.Collections.Generic.List<VTPageRegion>();
+            level.UpdateWindow(PageCenterUv(33, 33), flushRegions);
+
+            Assert.That(level.WindowPageOrigin, Is.EqualTo(new Vector2Int(29, 29)));
+            Assert.That(level.ResolveLogicalPageForTesting(5, 5), Is.EqualTo(new Vector2Int(29, 29)));
+            Assert.That(level.ResolveLogicalPageForTesting(0, 0), Is.EqualTo(new Vector2Int(32, 32)));
+        }
+
         [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Low, 256)]
         [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium, 512)]
         [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.High, 1024)]
@@ -127,6 +180,20 @@ namespace VividRP.Editor.Tests
                 VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(quality);
 
             Assert.That(profile.CachePageCount, Is.EqualTo(expectedCachePageCount));
+        }
+
+        private static TerrainRuntimeVirtualTextureClipmap.Level CreateTerrainRVTLevel()
+        {
+            return new TerrainRuntimeVirtualTextureClipmap.Level(
+                null,
+                0,
+                new RectInt(11, 13, 8, 8),
+                new Vector2Int(64, 64));
+        }
+
+        private static Vector2 PageCenterUv(int pageX, int pageY)
+        {
+            return new Vector2((pageX + 0.5f) / 64.0f, (pageY + 0.5f) / 64.0f);
         }
 
         [Test]

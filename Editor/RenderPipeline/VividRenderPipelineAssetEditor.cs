@@ -273,6 +273,13 @@ namespace VividRP.Editor.RenderPipeline
                 "vivid-rp-asset-gpu-driven-vt-physical-pool-quality-field");
             AddAssetProperty(
                 foldout,
+                "m_EnableTerrainRuntimeVirtualTexture",
+                EditorGUIUtility.TrTextContent(
+                    "Terrain Runtime Virtual Texture (Experimental)",
+                    "Enables the Direct3D 12 terrain RVT clipmap prototype. Composite SVT remains the fallback for missing pages and unsupported devices."),
+                "vivid-rp-asset-terrain-rvt-field");
+            AddAssetProperty(
+                foldout,
                 "m_VirtualTextureIOBackend",
                 EditorGUIUtility.TrTextContent("I/O Backend"),
                 "vivid-rp-asset-vt-io-backend-field");

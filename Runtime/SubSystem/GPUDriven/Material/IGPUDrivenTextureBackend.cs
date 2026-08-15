@@ -156,4 +156,19 @@ namespace VividRP.Runtime.GPUDriven
 
         int VirtualTextureAllocationId { get; }
     }
+
+    internal interface IGPUDrivenTerrainRuntimeVirtualTextureBackend
+    {
+        bool TerrainRuntimeVirtualTextureEnabled { get; }
+
+        bool TryGetOrCreateTerrainRuntimeVirtualTexture(
+            VividTerrain terrain,
+            VividTerrainData terrainData,
+            uint revision,
+            out uint recordIndex);
+
+        void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera);
+
+        void BindTerrainRuntimeVirtualTextureGlobals(UnityEngine.Rendering.CommandBuffer cmd);
+    }
 }

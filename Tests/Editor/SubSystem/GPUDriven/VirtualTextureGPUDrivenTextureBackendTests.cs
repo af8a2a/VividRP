@@ -118,6 +118,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CanUseStreamedVirtualTexture_DoesNotAllocateForNullAsset()
+        {
+            using var backend = new VirtualTextureGPUDrivenTextureBackend();
+            backend.CanUseStreamedVirtualTexture(null);
+
+            long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            bool canUse = backend.CanUseStreamedVirtualTexture(null);
+            long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(canUse, Is.False);
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void TerrainRVTRecordGPUData_MatchesExpandedShaderLayout()
         {
             Assert.That(Marshal.SizeOf<TerrainRuntimeVirtualTextureRecordGPUData>(), Is.EqualTo(80));

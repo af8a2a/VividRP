@@ -99,7 +99,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private const int NeighborPrefetchCount = 1;
         private const int ResourceLayerBitCount = 8;
         private const int TerrainRuntimeVirtualTexturePageBudget = 4;
+        private const int InitialSurfaceBindingCapacity = 16;
 
+        private static readonly VTStackDesc s_CompatibleStreamedStackDesc = CreateSpaceDesc(
+            ResolveDescriptorProfile(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium)).StackDesc;
         private static readonly int s_TerrainRVTRecordsId = Shader.PropertyToID("_VividTerrainRVTRecords");
         private static readonly int s_TerrainRVTLevelsId = Shader.PropertyToID("_VividTerrainRVTLevels");
         private static readonly int s_TerrainRVTRecordCountId = Shader.PropertyToID("_VividTerrainRVTRecordCount");
@@ -167,9 +170,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
         }
 
-        private sealed class BindingEntry
+        private struct BindingEntry
         {
-            internal TextureSetKey Key;
             internal VividSurfaceBindingData Binding;
             internal Texture2D BaseColor;
             internal Texture2D Normal;
@@ -177,7 +179,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             internal VividVirtualTextureAsset StreamedAsset;
             internal RectInt PageRegion;
             internal GPUDrivenVirtualTextureAtlasAllocator.Allocation AtlasAllocation;
-            internal VirtualTexturePageCoord[] MipTailCoords;
+            internal RectInt MipTailRegion;
             internal int MaxMip;
             internal int ResidentMipTailPageCount;
             internal uint LastTouchedUpdate;
@@ -205,16 +207,17 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             internal int LastScheduledFrame = -1;
         }
 
-        private readonly Dictionary<TextureSetKey, BindingEntry> m_Bindings = new();
-        private readonly HashSet<EntityId> m_RegisteredTextureIds = new();
+        private readonly Dictionary<TextureSetKey, BindingEntry> m_Bindings =
+            new(InitialSurfaceBindingCapacity);
+        private readonly HashSet<EntityId> m_RegisteredTextureIds = new(InitialSurfaceBindingCapacity);
         private readonly HashSet<EntityId> m_UnsupportedTextureWarningIds = new();
         private readonly HashSet<EntityId> m_InvalidStreamedAssetWarningIds = new();
         private readonly Dictionary<EntityId, uint> m_PermanentlyFailedStreamedAssets = new();
         private readonly HashSet<EntityId> m_IncompatibleScalarMaskWarningIds = new();
-        private readonly List<BindingEntry> m_PendingMipTailEntries = new();
-        private readonly List<BindingEntry> m_ReleaseEntries = new();
+        private readonly List<TextureSetKey> m_PendingMipTailEntries = new(InitialSurfaceBindingCapacity);
+        private readonly List<TextureSetKey> m_ReleaseEntries = new(InitialSurfaceBindingCapacity);
         private readonly List<VTPageRegion> m_ReleaseRegions = new();
-        private readonly List<BindingEntry> m_ReleaseAllocationEntries = new();
+        private readonly List<BindingEntry> m_ReleaseAllocationEntries = new(InitialSurfaceBindingCapacity);
         private readonly Dictionary<EntityId, TerrainRVTRegistration> m_TerrainRVTRegistrations = new();
         private readonly List<TerrainRVTRegistration> m_TerrainRVTRecords = new();
         private readonly Dictionary<EntityId, TerrainRVTCameraState> m_TerrainRVTCameraStates = new();
@@ -434,14 +437,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_ReleaseEntries.Clear();
             for (int tailIndex = m_PendingMipTailEntries.Count - 1; tailIndex >= 0; tailIndex--)
             {
-                BindingEntry bindingEntry = m_PendingMipTailEntries[tailIndex];
+                TextureSetKey bindingKey = m_PendingMipTailEntries[tailIndex];
+                BindingEntry bindingEntry = m_Bindings[bindingKey];
                 int residentPageCount = 0;
                 bool tailFailed = m_Producer.HasPermanentStreamFailure(bindingEntry.PageRegion);
-                for (int pageIndex = 0; pageIndex < bindingEntry.MipTailCoords.Length; pageIndex++)
+                int mipTailPageCount = GetPageCount(bindingEntry.MipTailRegion);
+                for (int pageIndex = 0; pageIndex < mipTailPageCount; pageIndex++)
                 {
                     if (VirtualTextureSystem.TryGetPageTableEntry(
                             VirtualTextureSpaceId,
-                            bindingEntry.MipTailCoords[pageIndex],
+                            GetPageCoord(bindingEntry.MipTailRegion, bindingEntry.MaxMip, pageIndex),
                             out VirtualTexturePageTableEntry entry)
                         && entry.Resident
                         && entry.Locked)
@@ -456,6 +461,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
                 int residentPageDelta = residentPageCount - bindingEntry.ResidentMipTailPageCount;
                 bindingEntry.ResidentMipTailPageCount = residentPageCount;
+                m_Bindings[bindingKey] = bindingEntry;
                 m_ResidentMipTailPageCount = Mathf.Max(0, m_ResidentMipTailPageCount + residentPageDelta);
                 if (tailFailed)
                 {
@@ -467,18 +473,19 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                         m_PermanentlyFailedStreamedAssets[bindingEntry.StreamedAsset.GetEntityId()] =
                             bindingEntry.StreamedAsset.ContentVersion;
                     }
-                    m_ReleaseEntries.Add(bindingEntry);
+                    m_ReleaseEntries.Add(bindingKey);
                     m_RetrySurfaceBindingUpdate = true;
                     continue;
                 }
 
-                if (residentPageCount != bindingEntry.MipTailCoords.Length)
+                if (residentPageCount != mipTailPageCount)
                     continue;
 
                 int lastTailIndex = m_PendingMipTailEntries.Count - 1;
                 m_PendingMipTailEntries[tailIndex] = m_PendingMipTailEntries[lastTailIndex];
                 m_PendingMipTailEntries.RemoveAt(lastTailIndex);
                 bindingEntry.MipTailResident = true;
+                m_Bindings[bindingKey] = bindingEntry;
                 m_ResidentMipTailCount += 1;
             }
 
@@ -706,10 +713,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return;
 
             m_ReleaseEntries.Clear();
-            foreach (BindingEntry bindingEntry in m_Bindings.Values)
+            foreach (KeyValuePair<TextureSetKey, BindingEntry> bindingPair in m_Bindings)
             {
-                if (bindingEntry.LastTouchedUpdate != m_SurfaceBindingUpdate)
-                    m_ReleaseEntries.Add(bindingEntry);
+                if (bindingPair.Value.LastTouchedUpdate != m_SurfaceBindingUpdate)
+                    m_ReleaseEntries.Add(bindingPair.Key);
             }
 
             m_SurfaceBindingUpdateActive = false;
@@ -737,10 +744,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return;
 
             m_ReleaseEntries.Clear();
-            foreach (BindingEntry bindingEntry in m_Bindings.Values)
+            foreach (KeyValuePair<TextureSetKey, BindingEntry> bindingPair in m_Bindings)
             {
-                if (bindingEntry.CreatedUpdate == m_SurfaceBindingUpdate)
-                    m_ReleaseEntries.Add(bindingEntry);
+                if (bindingPair.Value.CreatedUpdate == m_SurfaceBindingUpdate)
+                    m_ReleaseEntries.Add(bindingPair.Key);
             }
 
             m_SurfaceBindingUpdateActive = false;
@@ -780,7 +787,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             var key = new TextureSetKey(streamedAsset, baseColor, normal, mask, addressMode, textures.MaskMode);
             if (m_Bindings.TryGetValue(key, out BindingEntry existingEntry))
             {
-                TouchBindingEntry(existingEntry);
+                TouchBindingEntry(ref existingEntry);
+                m_Bindings[key] = existingEntry;
                 return existingEntry.Binding;
             }
 
@@ -788,10 +796,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             {
                 var emptyEntry = new BindingEntry
                 {
-                    Key = key,
                     Binding = CreateEmptyBinding(),
                 };
-                TouchNewBindingEntry(emptyEntry);
+                TouchNewBindingEntry(ref emptyEntry);
                 m_Bindings.Add(key, emptyEntry);
                 return emptyEntry.Binding;
             }
@@ -801,10 +808,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 WarnLegacyTextureFallback(baseColor, normal, mask);
                 var fallbackEntry = new BindingEntry
                 {
-                    Key = key,
                     Binding = CreateEmptyBinding(),
                 };
-                TouchNewBindingEntry(fallbackEntry);
+                TouchNewBindingEntry(ref fallbackEntry);
                 m_Bindings.Add(key, fallbackEntry);
                 return fallbackEntry.Binding;
             }
@@ -847,13 +853,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
 
             RectInt mipTailRegion = GetRegionAtMip(pageRegion, maxMip);
-            VirtualTexturePageCoord[] mipTailCoords = CreatePageCoords(mipTailRegion, maxMip);
+            int mipTailPageCount = GetPageCount(mipTailRegion);
             int queuedMipTailPageCount = 0;
             VirtualTexturePageCoord failedMipTailCoord = default;
             string mipTailFailureReason = string.Empty;
-            for (int pageIndex = 0; pageIndex < mipTailCoords.Length; pageIndex++)
+            for (int pageIndex = 0; pageIndex < mipTailPageCount; pageIndex++)
             {
-                failedMipTailCoord = mipTailCoords[pageIndex];
+                failedMipTailCoord = GetPageCoord(mipTailRegion, maxMip, pageIndex);
                 try
                 {
                     if (!VirtualTextureSystem.TryQueuePageResident(
@@ -874,7 +880,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 queuedMipTailPageCount += 1;
             }
 
-            if (queuedMipTailPageCount != mipTailCoords.Length)
+            if (queuedMipTailPageCount != mipTailPageCount)
             {
                 if (queuedMipTailPageCount > 0)
                     VirtualTextureSystem.FlushRegion(VirtualTextureSpaceId, maxMip, mipTailRegion);
@@ -945,7 +951,6 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             var bindingEntry = new BindingEntry
             {
-                Key = key,
                 Binding = binding,
                 BaseColor = streamedAsset == null ? baseColor : null,
                 Normal = streamedAsset == null ? normal : null,
@@ -953,15 +958,15 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 StreamedAsset = streamedAsset,
                 PageRegion = pageRegion,
                 AtlasAllocation = atlasAllocation,
-                MipTailCoords = mipTailCoords,
+                MipTailRegion = mipTailRegion,
                 MaxMip = maxMip,
                 HasAllocation = true,
             };
-            TouchNewBindingEntry(bindingEntry);
+            TouchNewBindingEntry(ref bindingEntry);
             m_Bindings.Add(key, bindingEntry);
-            m_PendingMipTailEntries.Add(bindingEntry);
+            m_PendingMipTailEntries.Add(key);
             m_QueuedMipTailCount += 1;
-            m_QueuedMipTailPageCount += mipTailCoords.Length;
+            m_QueuedMipTailPageCount += mipTailPageCount;
             m_CreateResourceCallCountThisFrame += 1;
             IncrementBindingRevision();
             return binding;
@@ -1032,14 +1037,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         {
             return IsCompatibleStreamedAsset(
                 asset,
-                CreateSpaceDesc(
-                    ResolveDescriptorProfile(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium)).StackDesc,
+                s_CompatibleStreamedStackDesc,
                 out validationMessage);
         }
 
         public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
         {
-            return IsCompatibleStreamedAsset(asset, out _);
+            return IsCompatibleStreamedAsset(asset, VirtualTextureSpaceDesc.StackDesc, out _);
         }
 
         private static bool IsCompatibleStreamedAsset(
@@ -1602,13 +1606,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             maxHeight = Mathf.Max(maxHeight, texture.height);
         }
 
-        private void TouchBindingEntry(BindingEntry bindingEntry)
+        private void TouchBindingEntry(ref BindingEntry bindingEntry)
         {
             if (m_SurfaceBindingUpdateActive)
                 bindingEntry.LastTouchedUpdate = m_SurfaceBindingUpdate;
         }
 
-        private void TouchNewBindingEntry(BindingEntry bindingEntry)
+        private void TouchNewBindingEntry(ref BindingEntry bindingEntry)
         {
             if (!m_SurfaceBindingUpdateActive)
                 return;
@@ -1617,18 +1621,19 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             bindingEntry.CreatedUpdate = m_SurfaceBindingUpdate;
         }
 
-        private void ReleaseBindingEntries(IReadOnlyList<BindingEntry> bindingEntries)
+        private void ReleaseBindingEntries(IReadOnlyList<TextureSetKey> bindingKeys)
         {
-            if (bindingEntries == null || bindingEntries.Count == 0)
+            if (bindingKeys == null || bindingKeys.Count == 0)
                 return;
 
             bool releasedAllocation = false;
             m_ReleaseRegions.Clear();
             m_ReleaseAllocationEntries.Clear();
-            for (int entryIndex = 0; entryIndex < bindingEntries.Count; entryIndex++)
+            for (int entryIndex = 0; entryIndex < bindingKeys.Count; entryIndex++)
             {
-                BindingEntry bindingEntry = bindingEntries[entryIndex];
-                if (bindingEntry == null || !m_Bindings.Remove(bindingEntry.Key))
+                TextureSetKey bindingKey = bindingKeys[entryIndex];
+                if (!m_Bindings.TryGetValue(bindingKey, out BindingEntry bindingEntry)
+                    || !m_Bindings.Remove(bindingKey))
                     continue;
 
                 if (!bindingEntry.HasAllocation)
@@ -1637,13 +1642,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 releasedAllocation = true;
                 m_ReleaseAllocationEntries.Add(bindingEntry);
                 if (!bindingEntry.MipTailResident)
-                    m_PendingMipTailEntries.Remove(bindingEntry);
+                    m_PendingMipTailEntries.Remove(bindingKey);
                 else
                     m_ResidentMipTailCount = Mathf.Max(0, m_ResidentMipTailCount - 1);
                 m_QueuedMipTailCount = Mathf.Max(0, m_QueuedMipTailCount - 1);
                 m_QueuedMipTailPageCount = Mathf.Max(
                     0,
-                    m_QueuedMipTailPageCount - bindingEntry.MipTailCoords.Length);
+                    m_QueuedMipTailPageCount - GetPageCount(bindingEntry.MipTailRegion));
                 m_ResidentMipTailPageCount = Mathf.Max(
                     0,
                     m_ResidentMipTailPageCount - bindingEntry.ResidentMipTailPageCount);
@@ -1699,17 +1704,17 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return new RectInt(xMin, yMin, xMax - xMin, yMax - yMin);
         }
 
-        private static VirtualTexturePageCoord[] CreatePageCoords(RectInt pageRegion, int mip)
+        private static int GetPageCount(RectInt pageRegion)
         {
-            var coords = new VirtualTexturePageCoord[pageRegion.width * pageRegion.height];
-            int pageIndex = 0;
-            for (int y = pageRegion.yMin; y < pageRegion.yMax; y++)
-            {
-                for (int x = pageRegion.xMin; x < pageRegion.xMax; x++)
-                    coords[pageIndex++] = new VirtualTexturePageCoord(x, y, mip);
-            }
+            return pageRegion.width * pageRegion.height;
+        }
 
-            return coords;
+        private static VirtualTexturePageCoord GetPageCoord(RectInt pageRegion, int mip, int pageIndex)
+        {
+            return new VirtualTexturePageCoord(
+                pageRegion.xMin + pageIndex % pageRegion.width,
+                pageRegion.yMin + pageIndex / pageRegion.width,
+                mip);
         }
 
         private static int ComputeMaxMip(int pageCountX, int pageCountY)

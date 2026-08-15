@@ -148,7 +148,11 @@ namespace VividRP.Editor
                         ? StreamCompression
                         : VividVirtualTextureStreamCompression.None,
                     MaskStorage = MaskStorage,
-                    BCQuality = useVersion3Defaults ? BCQuality : VividVirtualTextureBCQuality.Normal,
+                    BCQuality = terrainComposite
+                        ? VividVirtualTextureBCQuality.High
+                        : useVersion3Defaults
+                            ? BCQuality
+                            : VividVirtualTextureBCQuality.Normal,
                     ZstdLevel = Mathf.Clamp(ZstdLevel, 1, 3),
                     ChunkTargetKiB = Mathf.Clamp(ChunkTargetKiB, 128, 256),
                     LogWarningHandler = message => ctx.LogImportWarning(message),
@@ -175,7 +179,7 @@ namespace VividRP.Editor
             StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
             StreamCompression = VividVirtualTextureStreamCompression.Zstd;
             MaskStorage = VividVirtualTextureMaskStorage.PackedRGBA;
-            BCQuality = VividVirtualTextureBCQuality.Normal;
+            BCQuality = VividVirtualTextureBCQuality.High;
             ZstdLevel = 3;
             ChunkTargetKiB = 256;
             PageSize = 128;

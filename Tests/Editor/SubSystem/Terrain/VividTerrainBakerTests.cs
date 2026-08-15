@@ -178,6 +178,77 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CompositeBuilder_SupersamplesSourceFootprintBeforeEncoding()
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Terrain composite GPU baking is unavailable on this editor device.");
+
+            var checker = new Texture2D(4, 4, TextureFormat.RGBA32, mipChain: true, linear: false);
+            var mipZero = new Color32[16];
+            for (int y = 0; y < 4; y++)
+            {
+                for (int x = 0; x < 4; x++)
+                {
+                    byte value = (byte)(((x + y) & 1) == 0 ? 0 : 255);
+                    mipZero[y * 4 + x] = new Color32(value, value, value, 255);
+                }
+            }
+
+            checker.SetPixels32(mipZero, 0);
+            checker.SetPixels32(new Color32[4], 1);
+            checker.SetPixels32(new Color32[1], 2);
+            checker.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+            Texture2D control = CreateSolidTexture(new Color32(255, 0, 0, 0), linear: true);
+            try
+            {
+                var firstLayer = new VividTerrainLayerData(
+                    checker,
+                    null,
+                    null,
+                    Vector2.one / 64.0f,
+                    Vector2.zero,
+                    Color.white,
+                    0.0f,
+                    0.0f,
+                    1.0f);
+                var secondLayer = new VividTerrainLayerData(
+                    null,
+                    null,
+                    null,
+                    Vector2.one,
+                    Vector2.zero,
+                    Color.white,
+                    0.0f,
+                    0.0f,
+                    1.0f);
+                var source = new VividTerrainCompositeSource(
+                    string.Empty,
+                    Vector3.one,
+                    128,
+                    new[]
+                    {
+                        new VividTerrainCompositeLayerSource(firstLayer, Vector3.one),
+                        new VividTerrainCompositeLayerSource(secondLayer, Vector3.one),
+                    },
+                    new[] { control });
+
+                using VividTerrainCompositeTextureSet composite =
+                    VividTerrainCompositeVirtualTextureBuilder.Generate(source);
+                Color32 baseColor = composite.BaseColor.GetPixels32(0)[0];
+                int expected = Mathf.RoundToInt(Mathf.LinearToGammaSpace(0.5f) * 255.0f);
+
+                Assert.That(baseColor.r, Is.EqualTo(expected).Within(3));
+                Assert.That(baseColor.g, Is.EqualTo(expected).Within(3));
+                Assert.That(baseColor.b, Is.EqualTo(expected).Within(3));
+            }
+            finally
+            {
+                Object.DestroyImmediate(checker);
+                Object.DestroyImmediate(control);
+            }
+        }
+
+        [Test]
         public void CompositeBuilder_ZeroWeightsFallBackToFirstLayerDefaults()
         {
             if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
@@ -493,6 +564,7 @@ namespace VividRP.Editor.Tests
 
             string compositePath = AssetDatabase.GetAssetPath(baked.CompositeVirtualTexture);
             var compositeImporter = (VividVirtualTextureAssetImporter) AssetImporter.GetAtPath(compositePath);
+            Assert.That(compositeImporter.BCQuality, Is.EqualTo(VividVirtualTextureBCQuality.High));
             var serializedImporter = new SerializedObject(compositeImporter);
             Vector2Int capturedResolution = serializedImporter
                 .FindProperty("m_TerrainCompositeSource")

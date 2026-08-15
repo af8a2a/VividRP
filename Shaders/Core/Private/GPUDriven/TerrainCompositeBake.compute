@@ -28,61 +28,87 @@ int _LayerCount;
 int _LayerIndex;
 int _ControlCount;
 
-float ResolveMip(uint width, uint height, float2 uvScale)
+static const uint kSubsampleGridSize = 2u;
+static const float kSubsampleFootprintScale = 1.0 / (float)kSubsampleGridSize;
+static const float kSubsampleWeight = 1.0 / (float)(kSubsampleGridSize * kSubsampleGridSize);
+
+float ResolveMip(uint width, uint height, float2 uvScale, float footprintScale)
 {
-    const float2 sourceFootprint = float2(width, height) * abs(uvScale) * _OutputDimensions.zw;
+    const float2 sourceFootprint = float2(width, height)
+        * abs(uvScale)
+        * _OutputDimensions.zw
+        * footprintScale;
     return max(0.0, log2(max(max(sourceFootprint.x, sourceFootprint.y), 1e-6)));
 }
 
-float4 SampleBaseColor(float2 uv, float2 uvScale)
+float4 SampleBaseColor(float2 uv, float2 uvScale, float footprintScale)
 {
     uint width;
     uint height;
     uint mipCount;
     _BaseColor.GetDimensions(0, width, height, mipCount);
-    return _BaseColor.SampleLevel(sampler_LinearRepeat, uv, ResolveMip(width, height, uvScale));
+    return _BaseColor.SampleLevel(
+        sampler_LinearRepeat,
+        uv,
+        ResolveMip(width, height, uvScale, footprintScale));
 }
 
-float4 SampleNormal(float2 uv, float2 uvScale)
+float4 SampleNormal(float2 uv, float2 uvScale, float footprintScale)
 {
     uint width;
     uint height;
     uint mipCount;
     _Normal.GetDimensions(0, width, height, mipCount);
-    return _Normal.SampleLevel(sampler_LinearRepeat, uv, ResolveMip(width, height, uvScale));
+    return _Normal.SampleLevel(
+        sampler_LinearRepeat,
+        uv,
+        ResolveMip(width, height, uvScale, footprintScale));
 }
 
-float4 SampleMask(float2 uv, float2 uvScale)
+float4 SampleMask(float2 uv, float2 uvScale, float footprintScale)
 {
     uint width;
     uint height;
     uint mipCount;
     _Mask.GetDimensions(0, width, height, mipCount);
-    return _Mask.SampleLevel(sampler_LinearRepeat, uv, ResolveMip(width, height, uvScale));
+    return _Mask.SampleLevel(
+        sampler_LinearRepeat,
+        uv,
+        ResolveMip(width, height, uvScale, footprintScale));
 }
 
-float4 SampleControl0(float2 uv)
+float4 SampleControl0(float2 uv, float footprintScale)
 {
     uint width;
     uint height;
     uint mipCount;
     _Control0.GetDimensions(0, width, height, mipCount);
-    return _Control0.SampleLevel(sampler_LinearClamp, uv, ResolveMip(width, height, 1.0.xx));
+    return _Control0.SampleLevel(
+        sampler_LinearClamp,
+        uv,
+        ResolveMip(width, height, 1.0.xx, footprintScale));
 }
 
-float4 SampleControl1(float2 uv)
+float4 SampleControl1(float2 uv, float footprintScale)
 {
     uint width;
     uint height;
     uint mipCount;
     _Control1.GetDimensions(0, width, height, mipCount);
-    return _Control1.SampleLevel(sampler_LinearClamp, uv, ResolveMip(width, height, 1.0.xx));
+    return _Control1.SampleLevel(
+        sampler_LinearClamp,
+        uv,
+        ResolveMip(width, height, 1.0.xx, footprintScale));
 }
 
-float ResolveLayerWeight(float2 terrainUv)
+float ResolveLayerWeight(float2 terrainUv, float footprintScale)
 {
-    const float4 control0 = _ControlCount > 0 ? SampleControl0(terrainUv) : 0.0.xxxx;
-    const float4 control1 = _ControlCount > 1 ? SampleControl1(terrainUv) : 0.0.xxxx;
+    const float4 control0 = _ControlCount > 0
+        ? SampleControl0(terrainUv, footprintScale)
+        : 0.0.xxxx;
+    const float4 control1 = _ControlCount > 1
+        ? SampleControl1(terrainUv, footprintScale)
+        : 0.0.xxxx;
     float weights[8] =
     {
         control0.r,
@@ -137,26 +163,59 @@ void CSAccumulate(const uint3 dispatchThreadID : SV_DispatchThreadID)
     if (dispatchThreadID.x >= outputSize.x || dispatchThreadID.y >= outputSize.y)
         return;
 
-    const float2 terrainUv = ((float2)dispatchThreadID.xy + 0.5) * _OutputDimensions.zw;
-    const float weight = ResolveLayerWeight(terrainUv);
-    const float2 layerUv = terrainUv * _LayerTilingOffset.xy + _LayerTilingOffset.zw;
-
-    const float3 layerBaseColor = (_LayerPresence & 1) != 0
-        ? SampleBaseColor(layerUv, _LayerTilingOffset.xy).rgb
-        : 1.0.xxx;
-    const float3 layerNormal = (_LayerPresence & 2) != 0
-        ? DecodeNormal(SampleNormal(layerUv, _LayerTilingOffset.xy), _LayerMaterialParams.x)
-        : float3(0.0, 0.0, 1.0);
-
-    float layerMetallic = _LayerMaterialParams.y;
-    float layerAmbientOcclusion = 1.0;
-    float layerSmoothness = _LayerMaterialParams.z;
-    if ((_LayerPresence & 4) != 0)
+    float3 layerBaseColor = 0.0.xxx;
+    float3 layerNormal = 0.0.xxx;
+    float3 layerMask = 0.0.xxx;
+    [unroll]
+    for (uint subsampleY = 0u; subsampleY < kSubsampleGridSize; ++subsampleY)
     {
-        const float4 mask = SampleMask(layerUv, _LayerTilingOffset.xy);
-        layerMetallic = mask.r;
-        layerAmbientOcclusion = mask.g;
-        layerSmoothness = mask.a;
+        [unroll]
+        for (uint subsampleX = 0u; subsampleX < kSubsampleGridSize; ++subsampleX)
+        {
+            const float2 subsampleOffset =
+                (float2(subsampleX, subsampleY) + 0.5) / (float)kSubsampleGridSize;
+            const float2 terrainUv =
+                ((float2)dispatchThreadID.xy + subsampleOffset) * _OutputDimensions.zw;
+            const float weight = ResolveLayerWeight(terrainUv, kSubsampleFootprintScale)
+                * kSubsampleWeight;
+            const float2 layerUv = terrainUv * _LayerTilingOffset.xy + _LayerTilingOffset.zw;
+
+            const float3 sampledBaseColor = (_LayerPresence & 1) != 0
+                ? SampleBaseColor(
+                    layerUv,
+                    _LayerTilingOffset.xy,
+                    kSubsampleFootprintScale).rgb
+                : 1.0.xxx;
+            const float3 sampledNormal = (_LayerPresence & 2) != 0
+                ? DecodeNormal(
+                    SampleNormal(
+                        layerUv,
+                        _LayerTilingOffset.xy,
+                        kSubsampleFootprintScale),
+                    _LayerMaterialParams.x)
+                : float3(0.0, 0.0, 1.0);
+
+            float sampledMetallic = _LayerMaterialParams.y;
+            float sampledAmbientOcclusion = 1.0;
+            float sampledSmoothness = _LayerMaterialParams.z;
+            if ((_LayerPresence & 4) != 0)
+            {
+                const float4 sampledMask = SampleMask(
+                    layerUv,
+                    _LayerTilingOffset.xy,
+                    kSubsampleFootprintScale);
+                sampledMetallic = sampledMask.r;
+                sampledAmbientOcclusion = sampledMask.g;
+                sampledSmoothness = sampledMask.a;
+            }
+
+            layerBaseColor += sampledBaseColor * weight;
+            layerNormal += sampledNormal * weight;
+            layerMask += float3(
+                sampledMetallic,
+                sampledAmbientOcclusion,
+                sampledSmoothness) * weight;
+        }
     }
 
     const uint2 outputPixel = dispatchThreadID.xy;
@@ -164,13 +223,13 @@ void CSAccumulate(const uint3 dispatchThreadID : SV_DispatchThreadID)
     const float4 accumulatedBaseColor = clear ? 0.0.xxxx : _AccumulatedBaseColor[outputPixel];
     const float4 accumulatedNormal = clear ? 0.0.xxxx : _AccumulatedNormal[outputPixel];
     const float4 accumulatedMask = clear ? 0.0.xxxx : _AccumulatedMask[outputPixel];
-    _AccumulatedBaseColor[outputPixel] = accumulatedBaseColor + float4(layerBaseColor * weight, 0.0);
-    _AccumulatedNormal[outputPixel] = accumulatedNormal + float4(layerNormal * weight, 0.0);
+    _AccumulatedBaseColor[outputPixel] = accumulatedBaseColor + float4(layerBaseColor, 0.0);
+    _AccumulatedNormal[outputPixel] = accumulatedNormal + float4(layerNormal, 0.0);
     _AccumulatedMask[outputPixel] = accumulatedMask + float4(
-        layerMetallic * weight,
-        layerAmbientOcclusion * weight,
+        layerMask.r,
+        layerMask.g,
         0.0,
-        layerSmoothness * weight);
+        layerMask.b);
 }
 
 [numthreads(8, 8, 1)]

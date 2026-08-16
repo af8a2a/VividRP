@@ -420,7 +420,7 @@ namespace VividRP.Runtime.RenderPass.Core
             profilingSampler = new ProfilingSampler(RenderSSRProfilerTag);
 
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_HZBTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R16_SFloat);
+            m_HZBTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R32_SFloat);
             m_DefaultHZBTexture = m_HZBTexture;
             m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
@@ -2233,7 +2233,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (texture?.desc == null)
                 return;
 
-            texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
+            texture.desc.ColorFormat = GraphicsFormat.R32_SFloat;
             texture.desc.DepthBufferBits = DepthBits.None;
             texture.desc.MsaaSamples = MSAASamples.None;
             texture.desc.FilterMode = FilterMode.Point;

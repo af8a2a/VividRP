@@ -177,7 +177,7 @@ namespace VividRP.Runtime
         {
             profilingSampler = new ProfilingSampler(nameof(LightGridPass));
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_HzbDepthTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R16G16B16A16_SFloat);
+            m_HzbDepthTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R32_SFloat);
             m_DirectionalLightBuffer = RenderGraphBuffer.CreateStructured("DirectionalLights", 1, VividLightData.DirectionalLightData.Stride);
             m_PunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
             m_AreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", 1, VividLightData.AreaLightData.Stride);

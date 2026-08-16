@@ -197,7 +197,7 @@ float XeGTAO_ScreenSpaceToViewSpaceDepth( const float screenDepth, const GTAOCon
 
 lpfloat XeGTAO_ScreenSpaceToClampedViewSpaceDepth( const float screenDepth, const GTAOConstants consts )
 {
-#ifdef XE_GTAO_USE_HALF_FLOAT_PRECISION
+#if (XE_GTAO_USE_HALF_FLOAT_PRECISION != 0)
     return (lpfloat)clamp( XeGTAO_ScreenSpaceToViewSpaceDepth( screenDepth, consts ), 0.0, 65504.0 );
 #else
     return clamp( XeGTAO_ScreenSpaceToViewSpaceDepth( screenDepth, consts ), 0.0, 3.402823466e+38 );
@@ -697,7 +697,7 @@ lpfloat XeGTAO_DepthMIPFilter( lpfloat depth0, lpfloat depth1, lpfloat depth2, l
 // is required to be non-linear (i.e. very large outdoors environments).
 lpfloat XeGTAO_ClampDepth( float depth )
 {
-#ifdef XE_GTAO_USE_HALF_FLOAT_PRECISION
+#if (XE_GTAO_USE_HALF_FLOAT_PRECISION != 0)
     return (lpfloat)clamp( depth, 0.0, 65504.0 );
 #else
     return clamp( depth, 0.0, 3.402823466e+38 );

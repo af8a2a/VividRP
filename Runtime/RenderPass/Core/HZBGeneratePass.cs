@@ -218,9 +218,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static RenderGraphTexture CreateHzbTexture(string name)
         {
+            // Preserve device-depth precision before consumers linearize it. R16 quantization
+            // produces camera-near-dependent bands in GTAO on large, shallow-gradient surfaces.
             var texture = new RenderGraphTexture
             {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat)
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R32_SFloat)
             };
 
             texture.desc.Name = name;
@@ -242,7 +244,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             texture.desc.Width = Mathf.Max(1, width);
             texture.desc.Height = Mathf.Max(1, height);
-            texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
+            texture.desc.ColorFormat = GraphicsFormat.R32_SFloat;
             texture.desc.DepthBufferBits = DepthBits.None;
             texture.desc.EnableRandomWrite = true;
             texture.desc.UseMipMap = true;

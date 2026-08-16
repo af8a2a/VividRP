@@ -470,7 +470,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static RenderGraphTexture CreateHzbInput(string name)
         {
-            var texture = RenderGraphTexture.CreateInput(name, GraphicsFormat.R16_SFloat);
+            var texture = RenderGraphTexture.CreateInput(name, GraphicsFormat.R32_SFloat);
             texture.desc.FilterMode = FilterMode.Point;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
             texture.desc.UseMipMap = true;

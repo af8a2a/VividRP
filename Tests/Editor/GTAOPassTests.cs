@@ -237,7 +237,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(hzb.desc.UseMipMap, Is.True);
             Assert.That(hzb.desc.MipCount, Is.EqualTo(6));
-            Assert.That(hzb.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
+            Assert.That(hzb.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
             Assert.That(output.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8_UNorm));
             Assert.That(output.desc.ClearColor, Is.EqualTo(Color.white));
         }

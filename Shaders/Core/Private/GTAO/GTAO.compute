@@ -1,5 +1,4 @@
 #pragma use_dxc
-#pragma require Native16Bit
 
 #pragma kernel CSGTAOLow
 #pragma kernel CSGTAOMedium
@@ -11,6 +10,9 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ShaderVariablesFunctions.hlsl"
+// FP16 view-space depth reintroduces visible bands after the FP32 HZB is linearized.
+#define XE_GTAO_FP32_DEPTHS 1
+#define XE_GTAO_USE_HALF_FLOAT_PRECISION 0
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GTAO/XeGTAO.hlsl"
 
 cbuffer GTAOConstantBuffer

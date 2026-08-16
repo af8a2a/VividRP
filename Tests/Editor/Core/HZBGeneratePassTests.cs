@@ -54,7 +54,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(hzbTexture.desc.EnableRandomWrite, Is.True);
                 Assert.That(hzbTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
                 Assert.That(hzbTexture.desc.MipCount, Is.EqualTo(11));
-                Assert.That(hzbTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
+                Assert.That(hzbTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
             }
             finally
             {
@@ -116,8 +116,20 @@ namespace VividRP.Editor.Tests
             IRenderPass renderPass = new LightGridPass();
 
             var resources = renderPass.Initialize();
+            var hzbEntry = resources.Textures.Single(entry => entry.Name == "HZB");
 
-            Assert.That(resources.Textures.Select(entry => entry.Name), Does.Contain("HZB"));
+            Assert.That(hzbEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
+        }
+
+        [Test]
+        public void ScreenSpaceReflectionPass_RegistersHighPrecisionHzbInput()
+        {
+            IRenderPass renderPass = new ScreenSpaceReflectionPass();
+
+            var resources = renderPass.Initialize();
+            var hzbEntry = resources.Textures.Single(entry => entry.Name == "HZB");
+
+            Assert.That(hzbEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
         }
 
         private static RenderGraphTexture GetTextureField(HZBGeneratePass pass, string fieldName)

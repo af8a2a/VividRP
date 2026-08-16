@@ -27,7 +27,7 @@ namespace VividRP.Editor
             MaterialProperty[] properties)
         {
             EditorGUILayout.HelpBox(
-                "Experimental Closure material. The Stage 2 Closure Buffer preserves IOR, coat, transmission and subsurface semantics and shades the Slab directly. The legacy GBuffer still degrades these fields; experimental deferred transmission has no refraction yet, and subsurface currently uses a wrap-diffuse approximation.",
+                "Experimental Closure material. Stage 3 shades the Closure Buffer directly with directional shadows, clustered punctual and area lights, reflection probes, sky IBL, GTAO, and optional SSR consumption. Closure-native SSR production, transmission refraction, and profile-based subsurface scattering are not implemented yet.",
                 MessageType.Info);
             base.OnGUI(materialEditor, properties);
         }

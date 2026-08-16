@@ -76,7 +76,7 @@ namespace VividRP.Editor.Tests
             "ExperimentalClosureLit_Fast",
             "ExperimentalClosureLit_Single",
             "ExperimentalClosureLit_Complex")]
-        public void Stage2ComputeShader_ImportsWithoutErrorsAndExposesKernels(
+        public void ExperimentalClosureComputeShader_ImportsWithoutErrorsAndExposesKernels(
             string assetPath,
             params string[] kernelNames)
         {
@@ -97,6 +97,34 @@ namespace VividRP.Editor.Tests
 
             foreach (string kernelName in kernelNames)
                 Assert.That(compute.HasKernel(kernelName), Is.True, kernelName);
+        }
+
+        [Test]
+        public void ClosureDeferredLighting_ConsumesClosureWithoutLegacyGBufferConversion()
+        {
+            string source = File.ReadAllText(DeferredLitAssetPath);
+
+            StringAssert.Contains(
+                "VividExperimentalClosureMaterial material",
+                source);
+            StringAssert.Contains(
+                "VividLightingLoop::GetPunctualLightCount",
+                source);
+            StringAssert.Contains(
+                "VividLightingLoop::GetAreaLightCount",
+                source);
+            StringAssert.Contains(
+                "VividLightingLoop::TryEvaluateReflectionProbes",
+                source);
+            StringAssert.Contains(
+                "_DirectionalShadowTexture",
+                source);
+            StringAssert.Contains("_GTAOTexture", source);
+            StringAssert.Contains(
+                "_ScreenSpaceReflectionTexture",
+                source);
+            StringAssert.DoesNotContain("_GBuffer", source);
+            StringAssert.DoesNotContain("BuildVividHDRPLitBSDFData", source);
         }
     }
 }

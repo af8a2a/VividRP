@@ -83,6 +83,10 @@ namespace VividRP.Editor.Tests
                     "ExperimentalClosureBuffer4",
                     "ExperimentalClosureBuffer5",
                     "Depth",
+                    "DirectionalShadowTexture",
+                    "GTAOTexture",
+                    "ScreenSpaceReflectionOutput",
+                    "SkyIBLCubemap",
                     "ExperimentalClosureLighting",
                     "ExperimentalClosureDebug"
                 }));
@@ -92,7 +96,13 @@ namespace VividRP.Editor.Tests
                 {
                     "ExperimentalClosureTileList",
                     "ExperimentalClosureIndirectArgs",
-                    "DirectionalLights"
+                    "DirectionalLights",
+                    "PunctualLights",
+                    "AreaLights",
+                    "ReflectionProbes",
+                    "LayeredOffset",
+                    "LayeredLightList",
+                    "LogBaseBuffer"
                 }));
         }
 

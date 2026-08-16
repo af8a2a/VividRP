@@ -41,16 +41,18 @@ Shader "VividRP/Experimental/Material/StandardLit"
         [Sub(SurfaceInputs)] _ClearCoatMask("Clear Coat Mask", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _ClearCoatSmoothness("Clear Coat Smoothness", Range(0.0, 1.0)) = 1.0
 
-        // Kept for compatibility with the shared StandardLit material setup.
+        [Main(ExperimentalClosureInputs, _, on, off)] _ExperimentalClosureInputs("Experimental Closure Inputs", Float) = 1
+        [Sub(ExperimentalClosureInputs)] _SpecularIOR("Specular IOR", Range(1.0, 3.0)) = 1.5
+        [Sub(ExperimentalClosureInputs)] _TransmissionWeight("Transmission Weight", Range(0.0, 1.0)) = 0.0
+        [Sub(ExperimentalClosureInputs)] _SubsurfaceWeight("Subsurface Weight", Range(0.0, 1.0)) = 0.0
+
+        // Detailed fields are retained for the shared StandardLit sampling code.
         [HideInInspector] _ThinWalledTransmission("Thin-Walled Transmission", Float) = 0.0
-        [HideInInspector] _TransmissionWeight("Transmission Weight", Range(0.0, 1.0)) = 0.0
         [HideInInspector] _TransmissionMap("Transmission Map", 2D) = "white" {}
         [HideInInspector] _TransmissionColor("Transmission Color", Color) = (1, 1, 1, 1)
         [HideInInspector] _TransmissionDepth("Transmission Depth", Float) = 0.0
         [HideInInspector] _TransmissionScatter("Transmission Scatter", Color) = (0, 0, 0, 0)
         [HideInInspector] _TransmissionScatterAnisotropy("Transmission Scatter Anisotropy", Range(-0.95, 0.95)) = 0.0
-        [HideInInspector] _SpecularIOR("Specular IOR", Range(1.0, 3.0)) = 1.5
-        [HideInInspector] _SubsurfaceWeight("Subsurface Weight", Range(0.0, 1.0)) = 0.0
         [HideInInspector] _SubsurfaceColor("Subsurface Color", Color) = (1, 1, 1, 1)
         [HideInInspector] _SubsurfaceRadius("Subsurface Radius", Float) = 0.01
         [HideInInspector] _SubsurfaceRadiusScale("Subsurface Radius Scale", Color) = (1, 0.5, 0.25, 1)
@@ -279,6 +281,79 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
                 #define VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS 1
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitMotionVectorPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "IndirectDXR"
+            Tags { "LightMode" = "IndirectDXR" }
+
+            HLSLPROGRAM
+                #pragma only_renderers d3d11 xboxseries ps5 switch2
+                #pragma raytracing surface_shader
+                #pragma multi_compile _ INSTANCING_ON
+                #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+                #pragma shader_feature_local_raytracing _ALPHATEST_ON
+                #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+                #pragma shader_feature_local_raytracing _OCCLUSIONMAP
+                #pragma shader_feature_local_raytracing _EMISSION
+                #pragma shader_feature_local_raytracing _CLEARCOAT
+                #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+                #define VIVIDRP_INDIRECT_DIFFUSE_CLOSEST_HIT_NAME ExperimentalStandardLitIndirectDiffuseClosestHit
+                #define VIVIDRP_INDIRECT_DIFFUSE_ANY_HIT_NAME ExperimentalStandardLitIndirectDiffuseAnyHit
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalIndirectDiffuse.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "ReferencedPathtracingDXR"
+            Tags { "LightMode" = "ReferencedPathtracingDXR" }
+
+            HLSLPROGRAM
+                #pragma only_renderers d3d11 xboxseries ps5 switch2
+                #pragma raytracing surface_shader
+                #pragma multi_compile _ INSTANCING_ON
+                #pragma shader_feature_local_raytracing _ALPHATEST_ON
+                #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _TRANSMISSIONMAP
+                #pragma shader_feature_local_raytracing _SURFACE_TYPE_TRANSPARENT
+                #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+                #pragma shader_feature_local_raytracing _EMISSION
+                #pragma shader_feature_local_raytracing _CLEARCOAT
+                #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalReferencedPathtracingPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "RaytracingGBufferDXR"
+            Tags { "LightMode" = "RaytracingGBufferDXR" }
+
+            HLSLPROGRAM
+                #pragma only_renderers d3d11 xboxseries ps5 switch2
+                #pragma raytracing surface_shader
+                #pragma multi_compile _ INSTANCING_ON
+                #pragma shader_feature_local_raytracing _ALPHATEST_ON
+                #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _TRANSMISSIONMAP
+                #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+                #pragma shader_feature_local_raytracing _EMISSION
+                #pragma shader_feature_local_raytracing _CLEARCOAT
+                #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalRaytracingGBufferPass.hlsl"
             ENDHLSL
         }
     }

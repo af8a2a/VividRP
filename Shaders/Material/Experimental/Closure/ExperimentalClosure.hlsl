@@ -3,10 +3,49 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 
-// Phase 0 contract. This is deliberately not a packed storage ABI yet: it
-// separates authoring, closure evaluation, and legacy export while the
-// experimental path is validated against the current deferred renderer.
+// Phase 1 semantic contract. The high-level structs are intentionally not a
+// packed screen-space ABI; packing is deferred until the material binning and
+// Closure Buffer stages have supplied real bandwidth measurements.
+#define VIVID_EXPERIMENTAL_CLOSURE_SEMANTIC_VERSION 1u
+#define VIVID_EXPERIMENTAL_CLOSURE_MAX_COUNT 2u
+
+#define VIVID_EXPERIMENTAL_CLOSURE_MODEL_SLAB 0u
+
+#define VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_FAST 0u
+#define VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_SINGLE 1u
+#define VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_COMPLEX 2u
+
 #define VIVID_EXPERIMENTAL_CLOSURE_FEATURE_COAT (1u << 0)
+#define VIVID_EXPERIMENTAL_CLOSURE_FEATURE_TRANSMISSION (1u << 1)
+#define VIVID_EXPERIMENTAL_CLOSURE_FEATURE_SUBSURFACE (1u << 2)
+
+#define VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_SPECULAR_IOR (1u << 0)
+#define VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_COAT_ROUGHNESS (1u << 1)
+#define VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_TRANSMISSION (1u << 2)
+#define VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_SUBSURFACE (1u << 3)
+
+static const float kVividExperimentalLegacyDielectricIor = 1.5;
+static const float kVividExperimentalLegacyCoatLinearRoughness = 0.01;
+
+// Stage-independent sampled inputs. Raster, ray tracing and eventually the
+// VBuffer material evaluator all resolve through this structure.
+struct VividExperimentalStandardSurfaceParameters
+{
+    float3 baseColor;
+    float3 normalWS;
+    float perceptualRoughness;
+    float metallic;
+    float ambientOcclusion;
+    float coverage;
+    float specularIor;
+    float clearCoatWeight;
+    float clearCoatPerceptualRoughness;
+    float transmissionWeight;
+    float subsurfaceWeight;
+    float3 emissive;
+    uint materialFeatures;
+    VividBuiltinData builtinData;
+};
 
 struct VividExperimentalStandardSurface
 {
@@ -16,8 +55,11 @@ struct VividExperimentalStandardSurface
     float metallic;
     float ambientOcclusion;
     float coverage;
+    float specularIor;
     float clearCoatWeight;
     float clearCoatLinearRoughness;
+    float transmissionWeight;
+    float subsurfaceWeight;
     float3 emissive;
     uint materialFeatures;
     VividBuiltinData builtinData;
@@ -25,6 +67,8 @@ struct VividExperimentalStandardSurface
 
 struct VividExperimentalSlabClosure
 {
+    uint model;
+    uint featureFlags;
     float3 diffuseAlbedo;
     float3 specularF0;
     float3 specularF90;
@@ -33,7 +77,8 @@ struct VividExperimentalSlabClosure
     float coverage;
     float clearCoatWeight;
     float clearCoatLinearRoughness;
-    uint featureFlags;
+    float transmissionWeight;
+    float subsurfaceWeight;
 };
 
 // Data required by screen-space systems that cannot consume the closure yet.
@@ -45,15 +90,96 @@ struct VividExperimentalMaterialSummary
     float metallic;
     float ambientOcclusion;
     uint materialFeatures;
+    uint compatibilityLossFlags;
 };
 
 struct VividExperimentalClosureMaterial
 {
+    uint closureCount;
+    uint complexity;
     VividExperimentalSlabClosure slab;
     VividExperimentalMaterialSummary summary;
     float3 emissive;
     VividBuiltinData builtinData;
 };
+
+float VividExperimentalSanitizeIor(float specularIor)
+{
+    if (isnan(specularIor) || isinf(specularIor))
+        return kVividExperimentalLegacyDielectricIor;
+
+    return clamp(specularIor, 1.0, 3.0);
+}
+
+float VividExperimentalIorToF0(float specularIor)
+{
+    float ior = VividExperimentalSanitizeIor(specularIor);
+    float ratio = (ior - 1.0) / (ior + 1.0);
+    return ratio * ratio;
+}
+
+VividExperimentalStandardSurface VividResolveExperimentalStandardSurface(
+    VividExperimentalStandardSurfaceParameters parameters)
+{
+    VividExperimentalStandardSurface surface;
+    surface.baseColor = max(parameters.baseColor, 0.0);
+    surface.normalWS = normalize(parameters.normalWS);
+    float perceptualRoughness = saturate(parameters.perceptualRoughness);
+    surface.linearRoughness = perceptualRoughness * perceptualRoughness;
+    surface.metallic = saturate(parameters.metallic);
+    surface.ambientOcclusion = saturate(parameters.ambientOcclusion);
+    surface.coverage = saturate(parameters.coverage);
+    surface.specularIor = VividExperimentalSanitizeIor(parameters.specularIor);
+    surface.clearCoatWeight = saturate(parameters.clearCoatWeight);
+    float clearCoatPerceptualRoughness =
+        saturate(parameters.clearCoatPerceptualRoughness);
+    surface.clearCoatLinearRoughness = max(
+        clearCoatPerceptualRoughness * clearCoatPerceptualRoughness,
+        0.0001);
+    surface.transmissionWeight = saturate(parameters.transmissionWeight);
+    surface.subsurfaceWeight = saturate(parameters.subsurfaceWeight);
+    surface.emissive = max(parameters.emissive, 0.0);
+    surface.materialFeatures = parameters.materialFeatures;
+    surface.builtinData = parameters.builtinData;
+    return surface;
+}
+
+uint VividGetExperimentalLegacyCompatibilityLoss(
+    VividExperimentalStandardSurface surface)
+{
+    uint flags = 0u;
+    if (abs(surface.specularIor - kVividExperimentalLegacyDielectricIor) > 0.0001)
+        flags |= VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_SPECULAR_IOR;
+
+    if (surface.clearCoatWeight > 0.0
+        && abs(
+            surface.clearCoatLinearRoughness
+            - kVividExperimentalLegacyCoatLinearRoughness) > 0.0001)
+    {
+        flags |= VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_COAT_ROUGHNESS;
+    }
+
+    if (surface.transmissionWeight > 0.0)
+        flags |= VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_TRANSMISSION;
+
+    if (surface.subsurfaceWeight > 0.0)
+        flags |= VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_SUBSURFACE;
+
+    return flags;
+}
+
+uint VividClassifyExperimentalClosure(
+    uint closureCount,
+    uint featureFlags)
+{
+    if (closureCount > 1u)
+        return VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_COMPLEX;
+
+    if (featureFlags == 0u)
+        return VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_FAST;
+
+    return VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_SINGLE;
+}
 
 VividExperimentalClosureMaterial VividCompileExperimentalStandardSurface(
     VividExperimentalStandardSurface surface)
@@ -61,22 +187,45 @@ VividExperimentalClosureMaterial VividCompileExperimentalStandardSurface(
     VividExperimentalClosureMaterial material;
 
     float metallic = saturate(surface.metallic);
-    material.slab.diffuseAlbedo = saturate(surface.baseColor) * (1.0 - metallic);
-    material.slab.specularF0 = lerp(float3(0.04, 0.04, 0.04), saturate(surface.baseColor), metallic);
+    float dielectricF0 = VividExperimentalIorToF0(surface.specularIor);
+    material.closureCount = 1u;
+    material.slab.model = VIVID_EXPERIMENTAL_CLOSURE_MODEL_SLAB;
+    material.slab.featureFlags = 0u;
+    material.slab.diffuseAlbedo =
+        saturate(surface.baseColor)
+        * (1.0 - metallic)
+        * (1.0 - surface.transmissionWeight);
+    material.slab.specularF0 = lerp(
+        dielectricF0.xxx,
+        saturate(surface.baseColor),
+        metallic);
     material.slab.specularF90 = 1.0;
     material.slab.normalWS = normalize(surface.normalWS);
     material.slab.linearRoughness = saturate(surface.linearRoughness);
     material.slab.coverage = saturate(surface.coverage);
     material.slab.clearCoatWeight = saturate(surface.clearCoatWeight);
-    material.slab.clearCoatLinearRoughness = saturate(surface.clearCoatLinearRoughness);
-    material.slab.featureFlags = material.slab.clearCoatWeight > 0.0
-        ? VIVID_EXPERIMENTAL_CLOSURE_FEATURE_COAT
-        : 0u;
+    material.slab.clearCoatLinearRoughness =
+        saturate(surface.clearCoatLinearRoughness);
+    material.slab.transmissionWeight = saturate(surface.transmissionWeight);
+    material.slab.subsurfaceWeight = saturate(surface.subsurfaceWeight);
+
+    if (material.slab.clearCoatWeight > 0.0)
+        material.slab.featureFlags |= VIVID_EXPERIMENTAL_CLOSURE_FEATURE_COAT;
+    if (material.slab.transmissionWeight > 0.0)
+        material.slab.featureFlags |= VIVID_EXPERIMENTAL_CLOSURE_FEATURE_TRANSMISSION;
+    if (material.slab.subsurfaceWeight > 0.0)
+        material.slab.featureFlags |= VIVID_EXPERIMENTAL_CLOSURE_FEATURE_SUBSURFACE;
+
+    material.complexity = VividClassifyExperimentalClosure(
+        material.closureCount,
+        material.slab.featureFlags);
 
     material.summary.baseColor = max(surface.baseColor, 0.0);
     material.summary.metallic = metallic;
     material.summary.ambientOcclusion = saturate(surface.ambientOcclusion);
     material.summary.materialFeatures = surface.materialFeatures;
+    material.summary.compatibilityLossFlags =
+        VividGetExperimentalLegacyCompatibilityLoss(surface);
     material.emissive = max(surface.emissive, 0.0);
     material.builtinData = surface.builtinData;
     return material;

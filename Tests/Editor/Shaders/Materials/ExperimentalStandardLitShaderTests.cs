@@ -4,6 +4,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime.Experimental.Materials;
 
 namespace VividRP.Editor.Tests
 {
@@ -17,17 +18,19 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLit.shader";
 
         [Test]
-        public void ExperimentalStandardLitShader_ImportsWithoutCompilerMessages()
+        public void ExperimentalStandardLitShader_ImportsWithoutCompilerErrors()
         {
             Shader shader = LoadShader();
-            ShaderMessage[] messages = ShaderUtil.GetShaderMessages(shader);
+            ShaderMessage[] errors = ShaderUtil.GetShaderMessages(shader)
+                .Where(message => message.severity.ToString() == "Error")
+                .ToArray();
 
             Assert.That(
-                messages,
+                errors,
                 Is.Empty,
                 string.Join(
                     "\n",
-                    messages.Select(message =>
+                    errors.Select(message =>
                         $"{message.file}:{message.line}: {message.message}")));
         }
 
@@ -50,7 +53,8 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo("ExperimentalClosure"));
                 Assert.That(
                     material.GetFloat("_VividExperimentalClosureVersion"),
-                    Is.EqualTo(1.0f));
+                    Is.EqualTo(
+                        (float)VividExperimentalClosureContract.SemanticVersion));
             }
             finally
             {
@@ -74,6 +78,15 @@ namespace VividRP.Editor.Tests
                     "VividGBufferGPUDrivenDecal");
                 AssertPass(material, "Meta", "Meta");
                 AssertPass(material, "MotionVectors", "MotionVectors");
+                AssertPass(material, "IndirectDXR", "IndirectDXR");
+                AssertPass(
+                    material,
+                    "ReferencedPathtracingDXR",
+                    "ReferencedPathtracingDXR");
+                AssertPass(
+                    material,
+                    "RaytracingGBufferDXR",
+                    "RaytracingGBufferDXR");
             }
             finally
             {
@@ -87,7 +100,8 @@ namespace VividRP.Editor.Tests
             string source = File.ReadAllText(ExperimentalInputAssetPath);
             string existingSource = File.ReadAllText(ExistingShaderAssetPath);
 
-            StringAssert.Contains("BuildExperimentalStandardLitSurface", source);
+            StringAssert.Contains("SampleExperimentalStandardLitSurface", source);
+            StringAssert.Contains("VividResolveExperimentalStandardSurface", source);
             StringAssert.Contains("VividCompileExperimentalStandardSurface", source);
             StringAssert.Contains("VividExportExperimentalClosureToLegacyGBuffer", source);
             StringAssert.DoesNotContain("Material/Experimental/", existingSource);

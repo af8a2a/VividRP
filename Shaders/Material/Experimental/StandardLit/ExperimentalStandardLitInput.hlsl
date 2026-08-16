@@ -10,7 +10,7 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosure.hlsl"
 
-VividExperimentalStandardSurface BuildExperimentalStandardLitSurface(
+VividExperimentalStandardSurfaceParameters SampleExperimentalStandardLitSurface(
     FragInputs input)
 {
     float2 uv = GetStandardLitBaseUV(input);
@@ -19,35 +19,47 @@ VividExperimentalStandardSurface BuildExperimentalStandardLitSurface(
 
     float2 metallicSmoothness = SampleMetallicSmoothness(uv, baseSample.a);
 
-    VividExperimentalStandardSurface surface;
-    surface.baseColor = baseSample.rgb;
-    surface.normalWS = SampleNormalWS(input, uv);
-    surface.linearRoughness = (1.0 - metallicSmoothness.y) * (1.0 - metallicSmoothness.y);
-    surface.metallic = metallicSmoothness.x;
-    surface.ambientOcclusion = SampleAmbientOcclusion(uv);
-    surface.coverage = 1.0;
+    VividExperimentalStandardSurfaceParameters parameters;
+    parameters.baseColor = baseSample.rgb;
+    parameters.normalWS = SampleNormalWS(input, uv);
+    parameters.perceptualRoughness = 1.0 - metallicSmoothness.y;
+    parameters.metallic = metallicSmoothness.x;
+    parameters.ambientOcclusion = SampleAmbientOcclusion(uv);
+    parameters.coverage = 1.0;
+    parameters.specularIor = _SpecularIOR;
+    parameters.transmissionWeight = saturate(_TransmissionWeight);
+    parameters.subsurfaceWeight = saturate(_SubsurfaceWeight);
 
 #if defined(_CLEARCOAT)
-    surface.clearCoatWeight = saturate(_ClearCoatMask);
-    float clearCoatPerceptualRoughness = 1.0 - saturate(_ClearCoatSmoothness);
-    surface.clearCoatLinearRoughness = max(
-        clearCoatPerceptualRoughness * clearCoatPerceptualRoughness,
-        0.0001);
+    parameters.clearCoatWeight = saturate(_ClearCoatMask);
+    parameters.clearCoatPerceptualRoughness =
+        1.0 - saturate(_ClearCoatSmoothness);
 #else
-    surface.clearCoatWeight = 0.0;
-    surface.clearCoatLinearRoughness = 0.0001;
+    parameters.clearCoatWeight = 0.0;
+    parameters.clearCoatPerceptualRoughness = 0.0;
 #endif
 
-    surface.materialFeatures = GetStandardLitMaterialFeatures(surface.clearCoatWeight);
-    surface.emissive = SampleEmission(uv);
+    parameters.materialFeatures =
+        GetStandardLitMaterialFeatures(parameters.clearCoatWeight);
+    parameters.emissive = SampleEmission(uv);
 
     float2 lightmapUV = TransformVividLightmapUV(input.texCoord1.xy);
-    surface.builtinData = BuildVividBuiltinData(
-        SampleStandardLitBakedGI(lightmapUV, surface.normalWS, input.positionRWS),
+    parameters.builtinData = BuildVividBuiltinData(
+        SampleStandardLitBakedGI(
+            lightmapUV,
+            parameters.normalWS,
+            input.positionRWS),
         HasStandardLitBakedGI(),
         lightmapUV,
         input.positionRWS);
-    return surface;
+    return parameters;
+}
+
+VividExperimentalStandardSurface BuildExperimentalStandardLitSurface(
+    FragInputs input)
+{
+    return VividResolveExperimentalStandardSurface(
+        SampleExperimentalStandardLitSurface(input));
 }
 
 VividGBufferSurfaceData VividBuildGBufferSurfaceData(FragInputs input)

@@ -27,7 +27,7 @@ namespace VividRP.Editor
             MaterialProperty[] properties)
         {
             EditorGUILayout.HelpBox(
-                "Experimental Closure material. It currently validates the StandardSurface to SlabClosure path while exporting the legacy GBuffer.",
+                "Experimental Closure material. Raster resolves StandardSurface to SlabClosure, then explicitly degrades it to the legacy GBuffer. Non-default IOR, coat roughness, transmission and subsurface semantics are retained for the Closure and reference DXR paths but cannot yet be represented by deferred lighting.",
                 MessageType.Info);
             base.OnGUI(materialEditor, properties);
         }

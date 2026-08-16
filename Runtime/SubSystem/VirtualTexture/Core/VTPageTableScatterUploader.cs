@@ -148,7 +148,7 @@ namespace VividRP.Runtime
             for (int sliceIndex = 0; sliceIndex < m_PendingSlices.Count; sliceIndex++)
             {
                 PendingSlice slice = m_PendingSlices[sliceIndex];
-                slice.Updater.CommitPendingUpload(
+                slice.AddressSpace.CommitPendingPageTableUpload(
                     slice.PendingVersion,
                     slice.FullUpload,
                     slice.UpdateCount);
@@ -286,7 +286,7 @@ namespace VividRP.Runtime
                     continue;
 
                 m_PendingSlices.Add(new PendingSlice(
-                    addressSpace.PageTableUpdater,
+                    addressSpace,
                     addressSpace.PageTableBuffer,
                     updateOffset,
                     copiedCount,
@@ -475,14 +475,14 @@ namespace VividRP.Runtime
         private readonly struct PendingSlice
         {
             internal PendingSlice(
-                VTPageTableUpdater updater,
+                VTPageTableSpace addressSpace,
                 GraphicsBuffer destinationBuffer,
                 int updateStart,
                 int updateCount,
                 int pendingVersion,
                 bool fullUpload)
             {
-                Updater = updater;
+                AddressSpace = addressSpace;
                 DestinationBuffer = destinationBuffer;
                 UpdateStart = updateStart;
                 UpdateCount = updateCount;
@@ -490,7 +490,7 @@ namespace VividRP.Runtime
                 FullUpload = fullUpload;
             }
 
-            internal VTPageTableUpdater Updater { get; }
+            internal VTPageTableSpace AddressSpace { get; }
             internal GraphicsBuffer DestinationBuffer { get; }
             internal int UpdateStart { get; }
             internal int UpdateCount { get; }

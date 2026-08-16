@@ -202,6 +202,95 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void DecalProjector_StoresVirtualTextureAssetAndDrawOrder()
+        {
+            var owner = new GameObject("Decal VT Properties Test");
+            var asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            try
+            {
+                DecalProjector projector = owner.AddComponent<DecalProjector>();
+                projector.VirtualTextureAsset = asset;
+                projector.DrawOrder = -17;
+
+                Assert.That(projector.VirtualTextureAsset, Is.SameAs(asset));
+                Assert.That(projector.DrawOrder, Is.EqualTo(-17));
+            }
+            finally
+            {
+                Object.DestroyImmediate(owner);
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void StableOrder_SortsByDrawOrderThenEntityId()
+        {
+            Assert.That(DecalSystem.CompareStableOrder(1, 100ul, 2, 1ul), Is.LessThan(0));
+            Assert.That(DecalSystem.CompareStableOrder(2, 1ul, 1, 100ul), Is.GreaterThan(0));
+            Assert.That(DecalSystem.CompareStableOrder(3, 10ul, 3, 20ul), Is.LessThan(0));
+            Assert.That(DecalSystem.CompareStableOrder(3, 20ul, 3, 10ul), Is.GreaterThan(0));
+            Assert.That(DecalSystem.CompareStableOrder(3, 10ul, 3, 10ul), Is.Zero);
+        }
+
+        [Test]
+        public void TerrainVirtualTextureSnapshot_InvalidatesOldAndNewBoundsForMoveAndRemoval()
+        {
+            DecalSystem.Deinitialize();
+            GameObject owner = new GameObject("Decal VT Snapshot Test");
+            try
+            {
+                DecalProjector projector = owner.AddComponent<DecalProjector>();
+                owner.transform.position = new Vector3(1.0f, 2.0f, 3.0f);
+                owner.transform.localScale = new Vector3(2.0f, 4.0f, 6.0f);
+
+                DecalSystem.RebuildTerrainVirtualTextureSnapshotForTesting();
+                TerrainVirtualTextureDecalSnapshot created =
+                    DecalSystem.GetTerrainVirtualTextureSnapshot();
+                Assert.That(created.Decals, Has.Count.EqualTo(1));
+                Assert.That(created.DirtyRegions, Has.Count.EqualTo(1));
+                Assert.That(created.DirtyRegions[0].HasOldBounds, Is.False);
+                Assert.That(created.DirtyRegions[0].HasNewBounds, Is.True);
+
+                DecalSystem.RebuildTerrainVirtualTextureSnapshotForTesting();
+                TerrainVirtualTextureDecalSnapshot unchanged =
+                    DecalSystem.GetTerrainVirtualTextureSnapshot();
+                Assert.That(unchanged.Revision, Is.EqualTo(created.Revision));
+                Assert.That(unchanged.DirtyRegions, Is.Empty);
+
+                Bounds oldBounds = unchanged.Decals[0].WorldBounds;
+                owner.transform.position += new Vector3(20.0f, 0.0f, 0.0f);
+                DecalSystem.RebuildTerrainVirtualTextureSnapshotForTesting();
+                TerrainVirtualTextureDecalSnapshot moved =
+                    DecalSystem.GetTerrainVirtualTextureSnapshot();
+                Assert.That(moved.Revision, Is.GreaterThan(unchanged.Revision));
+                Assert.That(moved.DirtyRegions, Has.Count.EqualTo(1));
+                Assert.That(moved.DirtyRegions[0].HasOldBounds, Is.True);
+                Assert.That(moved.DirtyRegions[0].HasNewBounds, Is.True);
+                Assert.That(moved.DirtyRegions[0].OldBounds, Is.EqualTo(oldBounds));
+                Assert.That(moved.DirtyRegions[0].UnionBounds.Contains(oldBounds.center), Is.True);
+                Assert.That(
+                    moved.DirtyRegions[0].UnionBounds.Contains(moved.Decals[0].WorldBounds.center),
+                    Is.True);
+
+                Object.DestroyImmediate(owner);
+                owner = null;
+                DecalSystem.RebuildTerrainVirtualTextureSnapshotForTesting();
+                TerrainVirtualTextureDecalSnapshot removed =
+                    DecalSystem.GetTerrainVirtualTextureSnapshot();
+                Assert.That(removed.Decals, Is.Empty);
+                Assert.That(removed.DirtyRegions, Has.Count.EqualTo(1));
+                Assert.That(removed.DirtyRegions[0].HasOldBounds, Is.True);
+                Assert.That(removed.DirtyRegions[0].HasNewBounds, Is.False);
+            }
+            finally
+            {
+                DecalSystem.Deinitialize();
+                if (owner != null)
+                    Object.DestroyImmediate(owner);
+            }
+        }
+
+        [Test]
         public void CreateDecalProjectorGameObject_AddsProjectorSelectsObjectAndParentsToContext()
         {
             var parent = new GameObject("Decal Menu Parent");

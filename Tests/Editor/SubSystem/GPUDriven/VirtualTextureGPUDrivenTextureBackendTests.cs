@@ -1,4 +1,7 @@
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
@@ -26,7 +29,11 @@ namespace VividRP.Editor.Tests
                 | CopyTextureSupport.RTToTexture
                 | CopyTextureSupport.DifferentTypes;
 
+            internal int MaximumTextureSize { get; set; } = 16384;
+
             public bool SupportsComputeShaders => SupportsCompute;
+
+            public int MaxTextureSize => MaximumTextureSize;
 
             public CopyTextureSupport CopyTextureSupport => CopySupport;
 
@@ -110,6 +117,300 @@ namespace VividRP.Editor.Tests
             Assert.That(physicalAtlas.dimension, Is.EqualTo(TextureDimension.Tex2D));
             Assert.That(physicalAtlas.width, Is.EqualTo(3128));
             Assert.That(physicalAtlas.height, Is.EqualTo(3128));
+        }
+
+        [Test]
+        public void CanUseStreamedVirtualTexture_DoesNotAllocateForNullAsset()
+        {
+            using var backend = new VirtualTextureGPUDrivenTextureBackend();
+            backend.CanUseStreamedVirtualTexture(null);
+
+            long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            bool canUse = backend.CanUseStreamedVirtualTexture(null);
+            long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(canUse, Is.False);
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
+        public void TerrainRVTRecordGPUData_MatchesExpandedShaderLayout()
+        {
+            Assert.That(Marshal.SizeOf<TerrainRuntimeVirtualTextureRecordGPUData>(), Is.EqualTo(80));
+            Assert.That(Marshal.SizeOf<TerrainRuntimeVirtualTextureDecalGPUData>(), Is.EqualTo(176));
+            Assert.That(Marshal.SizeOf<TerrainRuntimeVirtualTexturePageDecalIndexGPUData>(), Is.EqualTo(8));
+        }
+
+        [Test]
+        public void TerrainRVT_PerGameCameraResolverDoesNotCollapseToMainCamera()
+        {
+            var mainCameraObject = new GameObject("Terrain RVT Main Camera");
+            var secondaryCameraObject = new GameObject("Terrain RVT Secondary Camera");
+            try
+            {
+                mainCameraObject.tag = "MainCamera";
+                Camera mainCamera = mainCameraObject.AddComponent<Camera>();
+                Camera secondaryCamera = secondaryCameraObject.AddComponent<Camera>();
+
+                Assert.That(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveTerrainRVTCamera(mainCamera),
+                    Is.SameAs(mainCamera));
+                Assert.That(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveTerrainRVTCamera(secondaryCamera),
+                    Is.SameAs(secondaryCamera));
+                Assert.That(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveTerrainRVTCamera(null),
+                    Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(secondaryCameraObject);
+                Object.DestroyImmediate(mainCameraObject);
+            }
+        }
+
+        [TestCase(CameraType.Game, true)]
+        [TestCase(CameraType.SceneView, true)]
+        [TestCase(CameraType.Preview, false)]
+        [TestCase(CameraType.Reflection, false)]
+        public void TerrainRVT_CameraTypeEligibilityMatchesSupportedViews(
+            CameraType cameraType,
+            bool expected)
+        {
+            Assert.That(
+                VirtualTextureGPUDrivenTextureBackend.IsTerrainRVTCameraType(cameraType),
+                Is.EqualTo(expected));
+        }
+
+        [TestCase(CameraType.Game, true, true)]
+        [TestCase(CameraType.Game, false, false)]
+        [TestCase(CameraType.SceneView, true, true)]
+        [TestCase(CameraType.SceneView, false, true)]
+        [TestCase(CameraType.Preview, true, false)]
+        public void TerrainRVT_CameraStateLifetimeMatchesCameraType(
+            CameraType cameraType,
+            bool isActiveAndEnabled,
+            bool expected)
+        {
+            Assert.That(
+                VirtualTextureGPUDrivenTextureBackend.ShouldKeepTerrainRVTCameraState(
+                    cameraType,
+                    isActiveAndEnabled),
+                Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void TerrainRVTClipmap_SinglePageMove_InvalidatesOnlyEnteringColumn()
+        {
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            var flushRegions = new System.Collections.Generic.List<VTPageRegion>();
+            level.UpdateWindow(PageCenterUv(32, 32), flushRegions);
+
+            level.UpdateWindow(PageCenterUv(33, 32), flushRegions);
+
+            Assert.That(flushRegions, Has.Count.EqualTo(8));
+            Assert.That(flushRegions, Has.All.Matches<VTPageRegion>(region =>
+                region.Mip == 0
+                && region.PageRegion.width == 1
+                && region.PageRegion.height == 1));
+        }
+
+        [Test]
+        public void TerrainRVTClipmap_DiagonalPageMove_MergesOverlappingCorner()
+        {
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            var flushRegions = new System.Collections.Generic.List<VTPageRegion>();
+            level.UpdateWindow(PageCenterUv(32, 32), flushRegions);
+
+            level.UpdateWindow(PageCenterUv(33, 33), flushRegions);
+
+            Assert.That(flushRegions, Has.Count.EqualTo(15));
+        }
+
+        [Test]
+        public void TerrainRVTClipmap_EightPageMove_InvalidatesWholeLevel()
+        {
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            var flushRegions = new System.Collections.Generic.List<VTPageRegion>();
+            level.UpdateWindow(PageCenterUv(24, 24), flushRegions);
+
+            level.UpdateWindow(PageCenterUv(32, 24), flushRegions);
+
+            Assert.That(flushRegions, Has.Count.EqualTo(1));
+            Assert.That(flushRegions[0].PageRegion, Is.EqualTo(new RectInt(11, 13, 8, 8)));
+        }
+
+        [Test]
+        public void TerrainRVTClipmap_RingCellMapsToCurrentLogicalWindow()
+        {
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            var flushRegions = new System.Collections.Generic.List<VTPageRegion>();
+            level.UpdateWindow(PageCenterUv(33, 33), flushRegions);
+
+            Assert.That(level.WindowPageOrigin, Is.EqualTo(new Vector2Int(29, 29)));
+            Assert.That(level.ResolveLogicalPageForTesting(5, 5), Is.EqualTo(new Vector2Int(29, 29)));
+            Assert.That(level.ResolveLogicalPageForTesting(0, 0), Is.EqualTo(new Vector2Int(32, 32)));
+        }
+
+        [Test]
+        public void TerrainRVTDecalUpload_WaitsForGpuVisibleSourceMappingAndPinsUntilRelease()
+        {
+            var desc = new VirtualTextureSpaceDesc(
+                "TerrainRVTDecalDependencies",
+                pageSize: 128,
+                borderSize: 4,
+                virtualPageCountX: 32,
+                virtualPageCountY: 32,
+                mipCount: 6,
+                cachePageCount: 8,
+                graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
+                maxUploadsPerFrame: 4,
+                feedbackCapacity: 32);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                desc,
+                VTProceduralPageProducer.Instance);
+            var sourceCoord = new VirtualTexturePageCoord(1, 1, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(
+                    spaceId,
+                    sourceCoord,
+                    locked: false,
+                    frameIndex: 1),
+                Is.True);
+
+            TerrainRuntimeVirtualTextureClipmap.Level level = CreateTerrainRVTLevel();
+            level.SetPageDecalData(
+                cellIndex: 0,
+                startIndex: 0,
+                count: 1,
+                dependencies: new List<VirtualTexturePageCoord> { sourceCoord });
+            Assert.That(level.TryApproveAndQueue(spaceId, frameIndex: 2, cellIndex: 0), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPendingRequests(spaceId, out var pending), Is.True);
+            VTRequest targetRequest = pending.Single(request =>
+                request.PageCoord.Equals(new VirtualTexturePageCoord(11, 13, 0)));
+
+            Assert.That(level.TryPreparePageUpload(spaceId, targetRequest), Is.False);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
+
+            Assert.That(VirtualTextureSystem.RefreshPageTableBufferImmediatelyForTesting(spaceId), Is.True);
+            Assert.That(level.TryPreparePageUpload(spaceId, targetRequest), Is.True);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.EqualTo(1));
+
+            level.CancelPageUpload(targetRequest);
+            Assert.That(level.IsPageApproved(targetRequest.PageCoord), Is.False);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
+
+            Assert.That(level.TryApproveAndQueue(spaceId, frameIndex: 3, cellIndex: 0), Is.True);
+            Assert.That(level.TryPreparePageUpload(spaceId, targetRequest), Is.True);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.EqualTo(1));
+            level.ReleasePageUploadDependencies(targetRequest);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
+        }
+
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Low, 256)]
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium, 512)]
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.High, 1024)]
+        public void DescriptorProfile_MapsPhysicalPoolQualityWithoutChangingStreamingBudgets(
+            GPUDrivenVirtualTexturePhysicalPoolQuality quality,
+            int expectedCachePageCount)
+        {
+            GPUDrivenVirtualTextureDescriptorProfile profile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(quality);
+
+            Assert.That(profile.CachePageCount, Is.EqualTo(expectedCachePageCount));
+        }
+
+        private static TerrainRuntimeVirtualTextureClipmap.Level CreateTerrainRVTLevel()
+        {
+            return new TerrainRuntimeVirtualTextureClipmap.Level(
+                null,
+                0,
+                new RectInt(11, 13, 8, 8),
+                new Vector2Int(64, 64));
+        }
+
+        private static Vector2 PageCenterUv(int pageX, int pageY)
+        {
+            return new Vector2((pageX + 0.5f) / 64.0f, (pageY + 0.5f) / 64.0f);
+        }
+
+        [Test]
+        public void DescriptorProfile_InvalidQualityFallsBackToMedium()
+        {
+            GPUDrivenVirtualTextureDescriptorProfile profile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    (GPUDrivenVirtualTexturePhysicalPoolQuality)99);
+
+            Assert.That(profile.CachePageCount, Is.EqualTo(512));
+        }
+
+        [TestCase(3000, 256)]
+        [TestCase(4096, 512)]
+        [TestCase(8192, 1024)]
+        public void SupportedDescriptorProfile_DowngradesHighToLargestTierThatFits(
+            int maxTextureSize,
+            int expectedCachePageCount)
+        {
+            GPUDrivenVirtualTextureDescriptorProfile requestedProfile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.High);
+
+            GPUDrivenVirtualTextureDescriptorProfile supportedProfile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveSupportedDescriptorProfile(
+                    requestedProfile,
+                    maxTextureSize);
+
+            Assert.That(supportedProfile.CachePageCount, Is.EqualTo(expectedCachePageCount));
+        }
+
+        [Test]
+        public void Constructor_DowngradesUnsupportedHighProfileBeforeCreatingSpace()
+        {
+            const string missingShaderReason =
+                "GPUDriven VT page producer compute shader resource is missing.";
+            LogAssert.Expect(
+                LogType.Warning,
+                "[VividRP] GPUDriven virtual texture physical pool was reduced from 1024 to 512 pages "
+                + "because the active device supports at most 4096x4096 2D textures.");
+            LogAssert.Expect(
+                LogType.Warning,
+                $"[VividRP] GPUDriven virtual texture backend is unavailable: {missingShaderReason}");
+            GPUDrivenVirtualTextureDescriptorProfile highProfile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.High);
+            var capabilities = new TestCapabilities { MaximumTextureSize = 4096 };
+
+            using var backend = new VirtualTextureGPUDrivenTextureBackend(
+                null,
+                capabilities,
+                highProfile);
+
+            Assert.That(backend.DescriptorProfile.CachePageCount, Is.EqualTo(512));
+            Assert.That(backend.VirtualTextureSpaceDesc.CachePageCount, Is.EqualTo(512));
+        }
+
+        [Test]
+        public void Constructor_AppliesRestrictedDescriptorProfileOverride()
+        {
+            const string reason = "GPUDriven VT page producer compute shader resource is missing.";
+            LogAssert.Expect(
+                LogType.Warning,
+                $"[VividRP] GPUDriven virtual texture backend is unavailable: {reason}");
+            var profile = new GPUDrivenVirtualTextureDescriptorProfile(cachePageCount: 7);
+
+            using var backend = new VirtualTextureGPUDrivenTextureBackend(
+                null,
+                new TestCapabilities(),
+                profile);
+
+            Assert.That(backend.VirtualTextureSpaceDesc.CachePageCount, Is.EqualTo(7));
+            Assert.That(backend.VirtualTextureSpaceDesc.MaxUploadsPerFrame, Is.EqualTo(16));
+            Assert.That(backend.VirtualTextureSpaceDesc.FeedbackCapacity, Is.EqualTo(65536));
+            Assert.That(backend.VirtualTextureSpaceDesc.NeighborPrefetchCount, Is.EqualTo(1));
+            Assert.That(backend.VirtualTextureSpaceDesc.PageSize, Is.EqualTo(128));
+            Assert.That(backend.VirtualTextureSpaceDesc.BorderSize, Is.EqualTo(4));
+            Assert.That(backend.VirtualTextureSpaceDesc.VirtualPageCountX, Is.EqualTo(256));
+            Assert.That(backend.VirtualTextureSpaceDesc.VirtualPageCountY, Is.EqualTo(256));
         }
 
         [Test]
@@ -755,6 +1056,49 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Destroy(baseColor);
+            }
+        }
+
+        [Test]
+        public void ExternalSurfaceBinding_AllowsMissingNormalAndMaskLayers()
+        {
+            Texture2D sourceTexture = new Texture2D(128, 128, TextureFormat.RGBA32, true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = Path.Combine(Path.GetTempPath(), $"GPUDrivenDecal_{System.Guid.NewGuid():N}.stream");
+
+            try
+            {
+                sourceTexture.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    StreamDataPath = streamDataPath,
+                    BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                    AddressMode = VividVirtualTextureAddressMode.Repeat,
+                    StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn,
+                    StreamCompression = VividVirtualTextureStreamCompression.None,
+                    PageSize = 128,
+                    BorderSize = 4,
+                });
+
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+                Assert.That(
+                    backend.TryAcquireExternalSurfaceBinding(asset, out var lease, out string reason),
+                    Is.True,
+                    reason);
+                using (lease)
+                {
+                    Assert.That(lease.Binding.Flags, Is.EqualTo(VividSurfaceBindingFlags.BaseColor));
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+                if (File.Exists(streamDataPath))
+                    File.Delete(streamDataPath);
             }
         }
 

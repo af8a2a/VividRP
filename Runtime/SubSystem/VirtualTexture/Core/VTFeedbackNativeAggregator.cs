@@ -34,12 +34,16 @@ namespace VividRP.Runtime
     {
         internal VTFeedbackRawRequest(
             ulong key,
+            int faultHitCount,
+            byte hasResidentAccess,
             int sequence,
             int cameraPriority,
             VirtualTextureViewId viewId,
             byte isActiveView)
         {
             Key = key;
+            FaultHitCount = faultHitCount;
+            HasResidentAccess = hasResidentAccess;
             Sequence = sequence;
             CameraPriority = cameraPriority;
             ViewId = viewId;
@@ -47,6 +51,8 @@ namespace VividRP.Runtime
         }
 
         internal readonly ulong Key;
+        internal readonly int FaultHitCount;
+        internal readonly byte HasResidentAccess;
         internal readonly int Sequence;
         internal readonly int CameraPriority;
         internal readonly VirtualTextureViewId ViewId;
@@ -135,6 +141,12 @@ namespace VividRP.Runtime
         public NativeArray<ulong> Keys;
 
         [ReadOnly]
+        public NativeArray<int> FaultHitCounts;
+
+        [ReadOnly]
+        public NativeArray<byte> ResidentFlags;
+
+        [ReadOnly]
         public NativeArray<VTFeedbackBatchMetadata> Batches;
 
         [WriteOnly]
@@ -147,6 +159,8 @@ namespace VividRP.Runtime
             VTFeedbackBatchMetadata batch = ResolveBatch(index);
             Requests[index] = new VTFeedbackRawRequest(
                 Keys[index],
+                FaultHitCounts[index],
+                ResidentFlags[index],
                 index,
                 batch.CameraPriority,
                 batch.ViewId,
@@ -196,7 +210,8 @@ namespace VividRP.Runtime
 
             VTFeedbackRawRequest first = Requests[0];
             ulong key = first.Key;
-            int hitCount = 1;
+            int faultHitCount = Mathf.Max(0, first.FaultHitCount);
+            byte hasResidentAccess = first.HasResidentAccess;
             int cameraPriority = first.CameraPriority;
             VirtualTextureViewId viewId = first.ViewId;
             byte isActiveView = first.IsActiveView;
@@ -206,16 +221,25 @@ namespace VividRP.Runtime
                 VTFeedbackRawRequest request = Requests[requestIndex];
                 if (request.Key != key)
                 {
-                    WriteRequest(key, hitCount, cameraPriority, viewId, isActiveView);
+                    WriteRequest(
+                        key,
+                        ResolvePriorityHitCount(faultHitCount, hasResidentAccess),
+                        cameraPriority,
+                        viewId,
+                        isActiveView);
                     key = request.Key;
-                    hitCount = 1;
+                    faultHitCount = Mathf.Max(0, request.FaultHitCount);
+                    hasResidentAccess = request.HasResidentAccess;
                     cameraPriority = request.CameraPriority;
                     viewId = request.ViewId;
                     isActiveView = request.IsActiveView;
                     continue;
                 }
 
-                hitCount += 1;
+                faultHitCount = SaturatingAdd(
+                    faultHitCount,
+                    Mathf.Max(0, request.FaultHitCount));
+                hasResidentAccess |= request.HasResidentAccess;
                 if (request.IsActiveView != 0)
                 {
                     isActiveView = 1;
@@ -230,7 +254,24 @@ namespace VividRP.Runtime
                     cameraPriority = request.CameraPriority;
             }
 
-            WriteRequest(key, hitCount, cameraPriority, viewId, isActiveView);
+            WriteRequest(
+                key,
+                ResolvePriorityHitCount(faultHitCount, hasResidentAccess),
+                cameraPriority,
+                viewId,
+                isActiveView);
+        }
+
+        private static int SaturatingAdd(int left, int right)
+        {
+            return left > int.MaxValue - right ? int.MaxValue : left + right;
+        }
+
+        private static int ResolvePriorityHitCount(int faultHitCount, byte hasResidentAccess)
+        {
+            return hasResidentAccess != 0
+                ? SaturatingAdd(faultHitCount, 1)
+                : faultHitCount;
         }
 
         private void WriteRequest(
@@ -339,6 +380,12 @@ namespace VividRP.Runtime
         public NativeArray<ulong> Keys;
 
         [ReadOnly]
+        public NativeArray<int> FaultHitCounts;
+
+        [ReadOnly]
+        public NativeArray<byte> ResidentFlags;
+
+        [ReadOnly]
         public NativeArray<VTFeedbackBatchMetadata> Batches;
 
         public NativeArray<VTFeedbackRawRequest> RawRequests;
@@ -356,6 +403,8 @@ namespace VividRP.Runtime
             var prepareJob = new VTFeedbackPrepareInputsJob
             {
                 Keys = Keys,
+                FaultHitCounts = FaultHitCounts,
+                ResidentFlags = ResidentFlags,
                 Batches = Batches,
                 Requests = RawRequests,
                 BatchCount = BatchCount,
@@ -395,6 +444,8 @@ namespace VividRP.Runtime
         private const int k_JobBatchSize = 64;
 
         private NativeArray<ulong> m_Keys;
+        private NativeArray<int> m_FaultHitCounts;
+        private NativeArray<byte> m_ResidentFlags;
         private NativeArray<VTFeedbackBatchMetadata> m_Batches;
         private NativeArray<VTFeedbackRawRequest> m_RawRequests;
         private NativeList<VirtualTextureAggregatedFeedbackRequest> m_AggregatedRequests;
@@ -427,7 +478,19 @@ namespace VividRP.Runtime
 
         internal bool LastUsedParallelJobs => m_LastUsedParallelJobs;
 
+        internal bool HasOutstandingJobs => m_HasOutstandingJobs;
+
         internal void Aggregate(
+            IReadOnlyList<VirtualTextureFeedbackBatch> batches,
+            VirtualTextureViewId priorityViewId,
+            VirtualTextureViewId activeViewId,
+            CameraType activeCameraType)
+        {
+            Schedule(batches, priorityViewId, activeViewId, activeCameraType);
+            Complete();
+        }
+
+        internal void Schedule(
             IReadOnlyList<VirtualTextureFeedbackBatch> batches,
             VirtualTextureViewId priorityViewId,
             VirtualTextureViewId activeViewId,
@@ -465,7 +528,12 @@ namespace VividRP.Runtime
                     if (count <= 0)
                         continue;
 
-                    batch.CopyRequestsTo(m_Keys, requestStart, count);
+                    batch.CopyRequestsTo(
+                        m_Keys,
+                        m_FaultHitCounts,
+                        m_ResidentFlags,
+                        requestStart,
+                        count);
                     bool isActiveView = VirtualTextureFeedbackProcessor.IsActiveViewBatch(
                         batch,
                         priorityViewId);
@@ -491,6 +559,8 @@ namespace VividRP.Runtime
                     new VTFeedbackAggregateInlineJob
                     {
                         Keys = m_Keys,
+                        FaultHitCounts = m_FaultHitCounts,
+                        ResidentFlags = m_ResidentFlags,
                         Batches = m_Batches,
                         RawRequests = m_RawRequests,
                         AggregatedRequests = m_AggregatedRequests,
@@ -512,6 +582,8 @@ namespace VividRP.Runtime
                 JobHandle prepareHandle = TrackOutstandingJob(new VTFeedbackPrepareInputsJob
                 {
                     Keys = m_Keys,
+                    FaultHitCounts = m_FaultHitCounts,
+                    ResidentFlags = m_ResidentFlags,
                     Batches = m_Batches,
                     Requests = m_RawRequests,
                     BatchCount = batchCount,
@@ -557,8 +629,6 @@ namespace VividRP.Runtime
                     GroupedRequests = m_GroupedRequests.AsDeferredJobArray(),
                     SpaceRanges = m_SpaceRanges,
                 }.Schedule(groupedSortHandle));
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackGroupBySpaceMarker.Auto())
-                    CompleteOutstandingJobs();
             }
             catch
             {
@@ -573,6 +643,13 @@ namespace VividRP.Runtime
 
                 throw;
             }
+        }
+
+        internal void Complete()
+        {
+            ThrowIfDisposed();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackGroupBySpaceMarker.Auto())
+                CompleteOutstandingJobs();
         }
 
         internal bool TryGetRequestsForSpace(
@@ -631,6 +708,10 @@ namespace VividRP.Runtime
             CompleteOutstandingJobs();
             if (m_Keys.IsCreated)
                 m_Keys.Dispose();
+            if (m_FaultHitCounts.IsCreated)
+                m_FaultHitCounts.Dispose();
+            if (m_ResidentFlags.IsCreated)
+                m_ResidentFlags.Dispose();
             if (m_Batches.IsCreated)
                 m_Batches.Dispose();
             if (m_RawRequests.IsCreated)
@@ -653,9 +734,21 @@ namespace VividRP.Runtime
                 int capacity = Mathf.NextPowerOfTwo(requestCount);
                 if (m_Keys.IsCreated)
                     m_Keys.Dispose();
+                if (m_FaultHitCounts.IsCreated)
+                    m_FaultHitCounts.Dispose();
+                if (m_ResidentFlags.IsCreated)
+                    m_ResidentFlags.Dispose();
                 if (m_RawRequests.IsCreated)
                     m_RawRequests.Dispose();
                 m_Keys = new NativeArray<ulong>(
+                    capacity,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory);
+                m_FaultHitCounts = new NativeArray<int>(
+                    capacity,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory);
+                m_ResidentFlags = new NativeArray<byte>(
                     capacity,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory);

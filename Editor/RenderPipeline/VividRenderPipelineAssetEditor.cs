@@ -20,7 +20,7 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_GpuDrivenLabel = EditorGUIUtility.TrTextContent("GPU Driven");
         private static readonly GUIContent s_GpuDrivenDecalLabel = EditorGUIUtility.TrTextContent(
             "GPU Driven Decal",
-            "Experimental. Requires GPU Driven rendering and bindless texture descriptors; silently disables itself when bindless is unavailable.");
+            "Enables decals. The selected Decal Technique determines whether decals use clustered bindless sampling or are composed into Terrain RVT pages.");
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly GUIContent s_SupportProbeVolumeLabel = EditorGUIUtility.TrTextContent("Adaptive Probe Volumes");
         private static readonly GUIContent s_ProbeVolumeShBandsLabel = EditorGUIUtility.TrTextContent("APV SH Bands");
@@ -108,9 +108,11 @@ namespace VividRP.Editor.RenderPipeline
                 "GPUDriven Texture Backend")
             {
                 name = "vivid-rp-asset-gpu-driven-texture-backend-field",
-                tooltip = "Selects the material texture backend used by GPUDriven static meshes. Sky and decals keep using Bindless.",
+                tooltip = "Selects the material texture backend used by GPUDriven static meshes. Terrain RVT decals require the Virtual Texture backend.",
             };
             root.Add(gpuDrivenTextureBackendField);
+
+            AddVirtualTextureFoldout(root);
 
             var gpuDrivenDecalField = new PropertyField(
                 serializedObject.FindProperty("m_EnableGPUDrivenDecal"),
@@ -120,6 +122,48 @@ namespace VividRP.Editor.RenderPipeline
                 tooltip = s_GpuDrivenDecalLabel.tooltip,
             };
             root.Add(gpuDrivenDecalField);
+
+            var decalTechniqueProperty = serializedObject.FindProperty("m_DecalTechnique");
+            var decalTechniqueField = new PropertyField(decalTechniqueProperty, "Decal Technique")
+            {
+                name = "vivid-rp-asset-decal-technique-field",
+                tooltip = "Clustered Bindless supports all receiving surfaces. Terrain Runtime Virtual Texture composes decals into VividTerrain RVT pages only.",
+            };
+            root.Add(decalTechniqueField);
+
+            var terrainRVTDecalDependencies = new HelpBox(
+                string.Empty,
+                HelpBoxMessageType.Warning)
+            {
+                name = "vivid-rp-asset-terrain-rvt-decal-dependencies",
+            };
+            root.Add(terrainRVTDecalDependencies);
+
+            void RefreshDecalDependencies()
+            {
+                serializedObject.UpdateIfRequiredOrScript();
+                bool terrainRVTTechnique = decalTechniqueProperty.enumValueIndex
+                                           == (int)VividDecalTechnique.TerrainRuntimeVirtualTexture;
+                bool valid = ((VividRenderPipelineAsset)target)
+                    .TryValidateTerrainRuntimeVirtualTextureDecals(out string reason);
+                terrainRVTDecalDependencies.text = valid
+                    ? "Terrain RVT decals affect VividTerrain receivers only. Projectors must use a compatible combined GPUDrivenSurface VVT asset."
+                    : reason + " The VT decal path remains disabled and does not fall back to Clustered Bindless.";
+                terrainRVTDecalDependencies.messageType = valid
+                    ? HelpBoxMessageType.Info
+                    : HelpBoxMessageType.Warning;
+                terrainRVTDecalDependencies.style.display = terrainRVTTechnique
+                    ? DisplayStyle.Flex
+                    : DisplayStyle.None;
+            }
+
+            gpuDrivenField.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            gpuDrivenTextureBackendField.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            gpuDrivenDecalField.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            decalTechniqueField.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            root.Q<PropertyField>("vivid-rp-asset-terrain-rvt-field")
+                ?.RegisterValueChangeCallback(_ => RefreshDecalDependencies());
+            RefreshDecalDependencies();
 
             var srpBatcherField = new PropertyField(serializedObject.FindProperty("m_EnableSRPBatcher"), s_SrpBatcherLabel.text)
             {
@@ -248,6 +292,84 @@ namespace VividRP.Editor.RenderPipeline
                 "m_ReflectionProbeAtlasDecreaseResToFit",
                 s_ReflectionProbeAtlasDecreaseResToFitLabel,
                 "vivid-rp-asset-reflection-probe-atlas-decrease-res-to-fit-field");
+
+            root.Add(foldout);
+        }
+
+        private void AddVirtualTextureFoldout(VisualElement root)
+        {
+            var foldout = new Foldout
+            {
+                text = "Virtual Texture",
+                value = true,
+                name = "vivid-rp-asset-virtual-texture-foldout",
+            };
+
+            AddAssetProperty(
+                foldout,
+                "m_GPUDrivenVirtualTexturePhysicalPoolQuality",
+                EditorGUIUtility.TrTextContent(
+                    "GPUDriven Physical Pool Quality",
+                    "Selects 256, 512, or 1024 physical cache pages for the GPUDriven virtual texture backend. "
+                    + "The setting is applied when the backend is next initialized; unsupported sizes fall back to the highest tier that fits the device."),
+                "vivid-rp-asset-gpu-driven-vt-physical-pool-quality-field");
+            AddAssetProperty(
+                foldout,
+                "m_EnableTerrainRuntimeVirtualTexture",
+                EditorGUIUtility.TrTextContent(
+                    "Terrain Runtime Virtual Texture (Experimental)",
+                    "Enables the Direct3D 12 terrain RVT clipmap prototype. Composite SVT remains the fallback for missing pages and unsupported devices."),
+                "vivid-rp-asset-terrain-rvt-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureIOBackend",
+                EditorGUIUtility.TrTextContent("I/O Backend"),
+                "vivid-rp-asset-vt-io-backend-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxResidencyAllocationsPerFrame",
+                EditorGUIUtility.TrTextContent(
+                    "Max Demand Residency Allocations / Frame",
+                    "Global feedback-driven demand allocation budget. Locked bootstrap and mip-tail reservations are excluded. Set to 0 for unlimited."),
+                "vivid-rp-asset-vt-max-residency-allocations-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxPrefetchAllocationsPerFrame",
+                EditorGUIUtility.TrTextContent(
+                    "Max Prefetch Allocations / Frame",
+                    "Global neighbor-prefetch allocation budget. Set to 0 to use the remaining residency budget."),
+                "vivid-rp-asset-vt-max-prefetch-allocations-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxPageUploadsPerFrame",
+                EditorGUIUtility.TrTextContent(
+                    "Max Page Uploads / Frame",
+                    "Global page-upload budget. Set to 0 for unlimited."),
+                "vivid-rp-asset-vt-max-page-uploads-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxUploadBytesPerFrameMiB",
+                EditorGUIUtility.TrTextContent(
+                    "Max Upload MiB / Frame",
+                    "Global upload byte budget. Set to 0 for unlimited."),
+                "vivid-rp-asset-vt-max-upload-mib-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureMaxInFlightChunks",
+                EditorGUIUtility.TrTextContent("Max In-Flight Chunks"),
+                "vivid-rp-asset-vt-max-in-flight-chunks-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureDecodeConcurrency",
+                EditorGUIUtility.TrTextContent(
+                    "Decode Concurrency",
+                    "Maximum concurrent chunk decodes. Set to 0 to derive it from the processor count."),
+                "vivid-rp-asset-vt-decode-concurrency-field");
+            AddAssetProperty(
+                foldout,
+                "m_VirtualTextureDecodedCacheBudgetMiB",
+                EditorGUIUtility.TrTextContent("Decoded Cache Budget MiB"),
+                "vivid-rp-asset-vt-decoded-cache-budget-field");
 
             root.Add(foldout);
         }

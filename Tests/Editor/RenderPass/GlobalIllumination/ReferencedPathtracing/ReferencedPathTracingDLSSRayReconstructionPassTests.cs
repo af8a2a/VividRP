@@ -4,6 +4,7 @@ using System.Linq;
 using NUnit.Framework;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
+using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -122,5 +123,68 @@ namespace VividRP.Editor.Tests
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
         }
+
+#if DLSS_PLUGIN_INTEGRATE
+        [Test]
+        public void NativeTexturePtrCache_ReusesPointerUntilTextureChanges()
+        {
+            var firstTexture = new RenderTexture(16, 16, 0);
+            var secondTexture = new RenderTexture(16, 16, 0);
+            var resolveCount = 0;
+            var cache = new DLSSRayReconstructionTexturePtrCache(
+                _ => new IntPtr(++resolveCount));
+            const DLSSRayReconstructionTexturePtrCache.Slot slot =
+                DLSSRayReconstructionTexturePtrCache.Slot.ColorInput;
+
+            try
+            {
+                var firstPointer = cache.Get(slot, firstTexture);
+
+                Assert.That(
+                    cache.Get(slot, firstTexture),
+                    Is.EqualTo(firstPointer));
+                Assert.That(resolveCount, Is.EqualTo(1));
+
+                var secondPointer = cache.Get(slot, secondTexture);
+
+                Assert.That(secondPointer, Is.Not.EqualTo(firstPointer));
+                Assert.That(
+                    cache.Get(slot, secondTexture),
+                    Is.EqualTo(secondPointer));
+                Assert.That(resolveCount, Is.EqualTo(2));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(firstTexture);
+                UnityEngine.Object.DestroyImmediate(secondTexture);
+            }
+        }
+
+        [Test]
+        public void NativeTexturePtrCache_RefreshesPointerWhenDescriptorChanges()
+        {
+            var texture = new RenderTexture(16, 16, 0);
+            var resolveCount = 0;
+            var cache = new DLSSRayReconstructionTexturePtrCache(
+                _ => new IntPtr(++resolveCount));
+            const DLSSRayReconstructionTexturePtrCache.Slot slot =
+                DLSSRayReconstructionTexturePtrCache.Slot.ColorInput;
+
+            try
+            {
+                var firstPointer = cache.Get(slot, texture);
+                texture.width = 32;
+
+                var resizedPointer = cache.Get(slot, texture);
+
+                Assert.That(resizedPointer, Is.Not.EqualTo(firstPointer));
+                Assert.That(resolveCount, Is.EqualTo(2));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(texture);
+            }
+        }
+#endif
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -18,6 +19,10 @@ namespace VividRP.Runtime
             Request = request;
             Locked = locked;
             FairnessRank = fairnessRank;
+            PriorityKey = VTRequestPriorityKey.FromRequest(
+                request,
+                locked,
+                addressSpace?.ProducerPriority ?? 0);
         }
 
         internal VTPageTableSpace AddressSpace { get; }
@@ -27,6 +32,8 @@ namespace VividRP.Runtime
         internal bool Locked { get; }
 
         internal int FairnessRank { get; }
+
+        internal VTRequestPriorityKey PriorityKey { get; }
     }
 
     internal sealed class VTPageTableSpace : IDisposable, IVTUploadRequestCommitter
@@ -43,11 +50,17 @@ namespace VividRP.Runtime
         private readonly List<VTRequest> m_SortedPendingRequests = new();
         private readonly List<VTRequest> m_EligiblePendingRequests = new();
         private readonly List<VTRequest> m_ResidentRefreshRequests = new();
+        private readonly List<AtomicResidentRefresh> m_AtomicResidentRefreshes = new();
+        private readonly List<DeferredAtomicRefreshRelease> m_DeferredAtomicRefreshReleases = new();
         private readonly List<VTRequest> m_LiveProducerRequests = new();
         private uint m_CachedPendingRequestRevision;
+        private uint m_ResidentRefreshRequestRevision;
+        private uint m_LastRetiredPendingRequestRevision;
+        private uint m_LastRetiredResidentRefreshRequestRevision;
         private int m_PendingOrderCacheBuildCount;
         private int m_PendingOrderCacheHitCount;
         private bool m_HasPendingOrderCache;
+        private bool m_HasRetiredProducerRequests;
         private Texture2DArray m_ResidentPageStagingTexture;
         private readonly Texture2D[] m_ResidentPageConvertedStagingTextures =
             new Texture2D[VTStackDesc.MaxLayerCount];
@@ -56,6 +69,47 @@ namespace VividRP.Runtime
         private readonly bool[] m_ResidentPageTouchedGroups = new bool[VTStackDesc.MaxLayerCount];
         private Color32[] m_ResidentPageScratchPixels;
         private IVTPageProducer m_FallbackResidentPageProducer;
+
+        private readonly struct AtomicResidentRefresh
+        {
+            internal AtomicResidentRefresh(
+                in VTRequest request,
+                int oldPhysicalPageId,
+                int oldGeneration,
+                bool oldLocked)
+            {
+                Request = request;
+                OldPhysicalPageId = oldPhysicalPageId;
+                OldGeneration = oldGeneration;
+                OldLocked = oldLocked;
+            }
+
+            internal VTRequest Request { get; }
+            internal int OldPhysicalPageId { get; }
+            internal int OldGeneration { get; }
+            internal bool OldLocked { get; }
+        }
+
+        private struct DeferredAtomicRefreshRelease
+        {
+            internal DeferredAtomicRefreshRelease(
+                in VirtualTexturePageCoord coord,
+                int oldPhysicalPageId,
+                int oldGeneration)
+            {
+                Coord = coord;
+                OldPhysicalPageId = oldPhysicalPageId;
+                OldGeneration = oldGeneration;
+                CapturedPendingVersion = 0;
+                CapturedForUpload = false;
+            }
+
+            internal VirtualTexturePageCoord Coord;
+            internal int OldPhysicalPageId;
+            internal int OldGeneration;
+            internal int CapturedPendingVersion;
+            internal bool CapturedForUpload;
+        }
 
         internal VTPageTableSpace(
             int spaceId,
@@ -101,6 +155,8 @@ namespace VividRP.Runtime
 
         internal VTStackDesc StackDesc => Descriptor.StackDesc;
 
+        internal int ProducerPriority => m_PageProducer?.ProducerDesc.ProducerPriority ?? 0;
+
         internal int TotalPageCount { get; }
 
         internal int ResidentPageCount => m_ResidencyManager.ResidentPageCount;
@@ -110,6 +166,9 @@ namespace VividRP.Runtime
         internal int PendingRequestCount => m_ResidencyManager.PendingRequestCount;
 
         internal uint PendingRequestRevision => m_ResidencyManager.PendingRequestRevision;
+
+        internal bool HasPendingUploadWork =>
+            PendingRequestCount > 0 || m_ResidentRefreshRequests.Count > 0;
 
         internal int PendingOrderCacheBuildCount => m_PendingOrderCacheBuildCount;
 
@@ -137,33 +196,53 @@ namespace VividRP.Runtime
 
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
-        internal int ResidencyClassificationCapacity => m_ResidencyManager.ClassificationCapacity;
+        internal int RequestPreparationCapacity =>
+            m_ResidencyManager.RequestPreparationCapacity;
 
-        internal bool LastResidencyClassificationUsedParallelJob =>
-            m_ResidencyManager.LastClassificationUsedParallelJob;
+        internal bool LastRequestPreparationUsedParallelJob =>
+            m_ResidencyManager.LastRequestPreparationUsedParallelJob;
+
+        internal int PrefetchCandidateCount => m_ResidencyManager.PrefetchCandidateCount;
+
+        internal VTPrefetchCandidate GetPrefetchCandidate(int index)
+        {
+            return m_ResidencyManager.GetPrefetchCandidate(index);
+        }
+
+#if UNITY_INCLUDE_TESTS
+        internal int ResidencyProcessRequestsCallCount =>
+            m_ResidencyManager.ProcessRequestsCallCount;
+
+        internal int PrefetchCandidateProcessCallCount =>
+            m_ResidencyManager.ProcessPrefetchCandidateCallCount;
+#endif
 
         internal int[] MipOffsets => m_MipOffsets;
 
-        internal bool RequiresNewPhysicalPage(in VirtualTexturePageCoord coord)
+        internal VTResidencyRequestClassification GetExactResidencyClassification(
+            in VirtualTexturePageCoord coord)
         {
             if (!VirtualTextureSpaceUtility.IsCoordValid(Descriptor, coord))
-                return false;
+                return VTResidencyRequestClassification.Invalid;
 
             int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
                 Descriptor,
                 m_MipOffsets,
                 coord);
-            VTPageResidencyState pageState = m_ResidencyManager.GetPageState(pageIndex);
-            return !pageState.Resident && !pageState.PendingUpload;
+            return m_ResidencyManager.GetPageClassification(pageIndex);
+        }
+
+        internal bool RequiresNewPhysicalPage(in VirtualTexturePageCoord coord)
+        {
+            return GetExactResidencyClassification(coord)
+                   == VTResidencyRequestClassification.Missing;
         }
 
         internal VTResidencyProcessResult ProcessRequests(
             NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
-            Vector2Int prefetchBias,
             int frameIndex,
             int maxNewRequests = int.MaxValue,
-            bool allowNeighborPrefetch = true,
             bool rebuildPageTable = true)
         {
             VTResidencyProcessResult result = m_ResidencyManager.ProcessRequests(
@@ -172,11 +251,58 @@ namespace VividRP.Runtime
                 SpaceId,
                 requests,
                 activeViewId,
-                prefetchBias,
                 frameIndex,
-                maxNewRequests,
-                allowNeighborPrefetch);
+                maxNewRequests);
 
+            return FinalizeResidencyProcessResult(result, rebuildPageTable);
+        }
+
+        internal int ScheduleRequestPreparation(
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
+            int frameIndex,
+            out JobHandle preparationHandle)
+        {
+            return m_ResidencyManager.ScheduleRequestPreparation(
+                requests,
+                frameIndex,
+                out preparationHandle);
+        }
+
+        internal void CompleteRequestPreparation()
+        {
+            m_ResidencyManager.CompleteRequestPreparation();
+        }
+
+        internal void TouchPreparedResidentRequests(
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
+            int frameIndex)
+        {
+            m_ResidencyManager.TouchPreparedResidentRequests(requests, frameIndex);
+        }
+
+        internal VTResidencyProcessResult ProcessPreparedRequests(
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
+            VirtualTextureViewId activeViewId,
+            int frameIndex,
+            int maxNewRequests = int.MaxValue,
+            bool rebuildPageTable = true)
+        {
+            VTResidencyProcessResult result = m_ResidencyManager.ProcessPreparedRequests(
+                Descriptor,
+                m_MipOffsets,
+                SpaceId,
+                requests,
+                activeViewId,
+                frameIndex,
+                maxNewRequests);
+
+            return FinalizeResidencyProcessResult(result, rebuildPageTable);
+        }
+
+        private VTResidencyProcessResult FinalizeResidencyProcessResult(
+            in VTResidencyProcessResult result,
+            bool rebuildPageTable)
+        {
             if (!rebuildPageTable)
                 return result;
 
@@ -195,6 +321,26 @@ namespace VividRP.Runtime
             return result;
         }
 
+        internal VTResidencyProcessResult ProcessPrefetchCandidate(
+            in VTPrefetchCandidate candidate,
+            VirtualTextureViewId activeViewId,
+            Vector2Int prefetchBias,
+            int frameIndex,
+            int maxResidencyRequests,
+            int maxPrefetchRequests)
+        {
+            return m_ResidencyManager.ProcessPrefetchCandidate(
+                Descriptor,
+                m_MipOffsets,
+                SpaceId,
+                candidate,
+                activeViewId,
+                prefetchBias,
+                frameIndex,
+                maxResidencyRequests,
+                maxPrefetchRequests);
+        }
+
         internal void CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)
         {
             m_LocalUploadCandidates.Clear();
@@ -203,8 +349,13 @@ namespace VividRP.Runtime
             int skippedUploadCount = 0;
             for (int candidateIndex = 0; candidateIndex < m_LocalUploadCandidates.Count; candidateIndex++)
             {
-                if (!TrySchedulePendingUpload(uploadScheduler, cmd, m_LocalUploadCandidates[candidateIndex].Request))
+                if (!TrySchedulePendingUpload(
+                        uploadScheduler,
+                        cmd,
+                        m_LocalUploadCandidates[candidateIndex]))
+                {
                     skippedUploadCount += 1;
+                }
             }
 
             uploadScheduler?.AddSkippedUploadCount(skippedUploadCount);
@@ -243,6 +394,51 @@ namespace VividRP.Runtime
             }
 
             return true;
+        }
+
+        internal bool TryQueuePageRefresh(
+            in VirtualTexturePageCoord coord,
+            int frameIndex)
+        {
+            for (int refreshIndex = 0; refreshIndex < m_AtomicResidentRefreshes.Count; refreshIndex++)
+            {
+                if (m_AtomicResidentRefreshes[refreshIndex].Request.PageCoord.Equals(coord))
+                    return true;
+            }
+
+            if (!m_ResidencyManager.TryAllocatePageRefresh(
+                    Descriptor,
+                    m_MipOffsets,
+                    SpaceId,
+                    coord,
+                    frameIndex,
+                    out VTRequest request,
+                    out int oldPhysicalPageId,
+                    out int oldGeneration,
+                    out bool oldLocked))
+            {
+                return false;
+            }
+
+            m_ResidentRefreshRequests.Add(request);
+            m_AtomicResidentRefreshes.Add(new AtomicResidentRefresh(
+                request,
+                oldPhysicalPageId,
+                oldGeneration,
+                oldLocked));
+            IncrementResidentRefreshRequestRevision();
+            return true;
+        }
+
+        internal bool IsPageRefreshPending(in VirtualTexturePageCoord coord)
+        {
+            for (int refreshIndex = 0; refreshIndex < m_AtomicResidentRefreshes.Count; refreshIndex++)
+            {
+                if (m_AtomicResidentRefreshes[refreshIndex].Request.PageCoord.Equals(coord))
+                    return true;
+            }
+
+            return false;
         }
 
         internal bool TryMakePageResident(
@@ -303,22 +499,51 @@ namespace VividRP.Runtime
             return m_PageTableUpdater.TryGetEntry(Descriptor, m_MipOffsets, coord, out entry);
         }
 
+        internal bool IsPageTableEntryPendingUpload(in VirtualTexturePageCoord coord)
+        {
+            RebuildPageTableIfDirty();
+            return m_PageTableUpdater.IsEntryPendingUpload(Descriptor, m_MipOffsets, coord);
+        }
+
         internal int CopyPendingPageTableUpdates(
             VTPageTableScatterUpdate[] destination,
             int destinationStartIndex,
             out int pendingVersion,
             out bool fullUpload)
         {
-            return m_PageTableUpdater.CopyPendingUpdates(
+            int copiedCount = m_PageTableUpdater.CopyPendingUpdates(
                 destination,
                 destinationStartIndex,
                 out pendingVersion,
                 out fullUpload);
+            if (copiedCount > 0)
+                CaptureDeferredAtomicRefreshReleases(pendingVersion);
+            return copiedCount;
         }
 
         internal void RefreshPageTableBufferImmediately()
         {
+            int pendingVersion = m_PageTableUpdater.PendingUploadVersion;
+            CaptureDeferredAtomicRefreshReleases(pendingVersion);
             m_PageTableUpdater.RefreshBufferImmediate();
+            RetireDeferredAtomicRefreshReleases(pendingVersion);
+        }
+
+        internal bool CommitPendingPageTableUpload(
+            int pendingVersion,
+            bool fullUpload,
+            int uploadedEntryCount)
+        {
+            if (!m_PageTableUpdater.CommitPendingUpload(
+                    pendingVersion,
+                    fullUpload,
+                    uploadedEntryCount))
+            {
+                return false;
+            }
+
+            RetireDeferredAtomicRefreshReleases(pendingVersion);
+            return true;
         }
 
         internal void AdvancePageTransitions(int frameIndex)
@@ -369,6 +594,7 @@ namespace VividRP.Runtime
 
         internal int FlushRegion(int mip, RectInt pageRegion)
         {
+            CancelAtomicRefreshes(mip, pageRegion);
             int flushedCount = m_ResidencyManager.FlushRegion(mip, pageRegion);
             if (flushedCount <= 0)
                 return 0;
@@ -387,6 +613,7 @@ namespace VividRP.Runtime
             for (int regionIndex = 0; regionIndex < pageRegions.Count; regionIndex++)
             {
                 VTPageRegion region = pageRegions[regionIndex];
+                CancelAtomicRefreshes(region.Mip, region.PageRegion);
                 flushedCount += m_ResidencyManager.FlushRegion(region.Mip, region.PageRegion);
             }
 
@@ -400,13 +627,19 @@ namespace VividRP.Runtime
 
         internal int ClearRuntimeState()
         {
+            m_ResidencyManager.DiscardRequestPreparation();
             RetireProducerRequests(Array.Empty<VTRequest>());
             m_LocalUploadCandidates.Clear();
             m_ProducerTasks.Clear();
             m_PendingUploadSortEntries.Clear();
             m_SortedPendingRequests.Clear();
             m_EligiblePendingRequests.Clear();
-            m_ResidentRefreshRequests.Clear();
+            if (m_ResidentRefreshRequests.Count > 0)
+            {
+                CancelAllAtomicRefreshes();
+                m_ResidentRefreshRequests.Clear();
+                IncrementResidentRefreshRequestRevision();
+            }
             m_LiveProducerRequests.Clear();
             m_CachedPendingRequestRevision = 0;
             m_HasPendingOrderCache = false;
@@ -426,6 +659,9 @@ namespace VividRP.Runtime
             }
 
             m_ResidencyManager.ResetPageTransitionsForRuntimeReset();
+            m_LastRetiredPendingRequestRevision = m_ResidencyManager.PendingRequestRevision;
+            m_LastRetiredResidentRefreshRequestRevision = m_ResidentRefreshRequestRevision;
+            m_HasRetiredProducerRequests = m_PageProducer is IVTPageRequestRetirement;
 
             return flushedCount;
         }
@@ -444,6 +680,7 @@ namespace VividRP.Runtime
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
             ComputeBuffer feedbackResidentHash,
+            int feedbackRequestCapacity,
             int feedbackResidentHashCapacity,
             VirtualTextureFeedbackBufferState feedbackState)
         {
@@ -459,6 +696,7 @@ namespace VividRP.Runtime
                 feedbackRequests,
                 feedbackCounter,
                 feedbackResidentHash,
+                feedbackRequestCapacity,
                 feedbackResidentHashCapacity,
                 feedbackState,
                 m_ShaderParams,
@@ -468,6 +706,7 @@ namespace VividRP.Runtime
 
         public void Dispose()
         {
+            CancelAllAtomicRefreshes();
             CoreUtils.Destroy(m_ResidentPageStagingTexture);
             m_ResidentPageStagingTexture = null;
             for (int physicalGroup = 0; physicalGroup < m_ResidentPageConvertedStagingTextures.Length; physicalGroup++)
@@ -517,7 +756,10 @@ namespace VividRP.Runtime
                     // Keep the locked fallback resident, then overwrite the same physical page once its
                     // encoded payload becomes available through the normal global upload scheduler.
                     if (usedFallback && m_PageProducer is VividVirtualTextureAssetProducer)
+                    {
                         m_ResidentRefreshRequests.Add(request);
+                        IncrementResidentRefreshRequestRevision();
+                    }
                 }
             }
         }
@@ -720,26 +962,14 @@ namespace VividRP.Runtime
 
             IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
             int pendingRequestCount = pendingRequests?.Count ?? 0;
+            RetireProducerRequestsIfChanged();
             if (pendingRequestCount == 0 && m_ResidentRefreshRequests.Count == 0)
-            {
-                RetireProducerRequests(Array.Empty<VTRequest>());
                 return;
-            }
 
             if (uploadScheduler == null || m_PageProducer == null || !uploadScheduler.IsEnabled)
             {
                 uploadScheduler?.AddSkippedUploadCount(pendingRequestCount + m_ResidentRefreshRequests.Count);
                 return;
-            }
-
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRetireMarker.Auto())
-            {
-                m_LiveProducerRequests.Clear();
-                for (int refreshIndex = 0; refreshIndex < m_ResidentRefreshRequests.Count; refreshIndex++)
-                    m_LiveProducerRequests.Add(m_ResidentRefreshRequests[refreshIndex]);
-                for (int requestIndex = 0; requestIndex < pendingRequestCount; requestIndex++)
-                    m_LiveProducerRequests.Add(pendingRequests[requestIndex]);
-                RetireProducerRequests(m_LiveProducerRequests);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingGatherTasksMarker.Auto())
@@ -787,20 +1017,38 @@ namespace VividRP.Runtime
         internal bool TrySchedulePendingUpload(
             VTUploadScheduler uploadScheduler,
             CommandBuffer cmd,
-            in VTRequest request)
+            in VTPendingUploadCandidate candidate)
         {
             if (uploadScheduler == null || m_PageProducer == null || cmd == null || !uploadScheduler.IsEnabled)
                 return false;
 
+            VTRequest request = candidate.Request;
             VTPageRequestStatus status;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRequestPageMarker.Auto())
-                status = m_PageProducer.RequestPageData(Descriptor, request);
+            {
+                status = m_PageProducer is IVTPrioritizedPageProducer prioritizedProducer
+                    ? prioritizedProducer.RequestPageData(
+                        Descriptor,
+                        request,
+                        candidate.PriorityKey)
+                    : m_PageProducer.RequestPageData(Descriptor, request);
+            }
             if (status != VTPageRequestStatus.Available)
             {
                 if (status == VTPageRequestStatus.Invalid)
                 {
                     m_PageProducer.CancelRequest(Descriptor, request);
-                    if (!RemoveResidentRefreshRequest(request))
+                    if (TryTakeAtomicRefresh(request, out AtomicResidentRefresh refresh))
+                    {
+                        m_ResidencyManager.CancelPageRefresh(
+                            Descriptor,
+                            m_MipOffsets,
+                            refresh.Request,
+                            refresh.OldPhysicalPageId,
+                            refresh.OldGeneration,
+                            refresh.OldLocked);
+                    }
+                    else if (!RemoveResidentRefreshRequest(request))
                         RollbackResidentPage(request.PageCoord);
                 }
 
@@ -825,7 +1073,8 @@ namespace VividRP.Runtime
                     Descriptor.SpaceName,
                     Descriptor,
                     m_ResidencyManager.PhysicalPool,
-                    new VTPageUploadPayload(request, finalizer));
+                    new VTPageUploadPayload(request, finalizer),
+                    candidate.PriorityKey);
             }
 
             return true;
@@ -957,6 +1206,37 @@ namespace VividRP.Runtime
                 retirement.RetireRequests(liveRequests);
         }
 
+        internal void RetireProducerRequestsIfChanged()
+        {
+            if (m_PageProducer is not IVTPageRequestRetirement retirement)
+                return;
+
+            uint pendingRequestRevision = m_ResidencyManager.PendingRequestRevision;
+            if (m_HasRetiredProducerRequests
+                && m_LastRetiredPendingRequestRevision == pendingRequestRevision
+                && m_LastRetiredResidentRefreshRequestRevision == m_ResidentRefreshRequestRevision)
+            {
+                return;
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRetireMarker.Auto())
+            {
+                m_LiveProducerRequests.Clear();
+                for (int refreshIndex = 0; refreshIndex < m_ResidentRefreshRequests.Count; refreshIndex++)
+                    m_LiveProducerRequests.Add(m_ResidentRefreshRequests[refreshIndex]);
+
+                IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
+                for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+                    m_LiveProducerRequests.Add(pendingRequests[requestIndex]);
+
+                retirement.RetireRequests(m_LiveProducerRequests);
+            }
+
+            m_LastRetiredPendingRequestRevision = pendingRequestRevision;
+            m_LastRetiredResidentRefreshRequestRevision = m_ResidentRefreshRequestRevision;
+            m_HasRetiredProducerRequests = true;
+        }
+
         private IReadOnlyList<VTRequest> GetOrderedPendingRequests(IReadOnlyList<VTRequest> pendingRequests)
         {
             if (pendingRequests == null || pendingRequests.Count == 0)
@@ -982,7 +1262,10 @@ namespace VividRP.Runtime
                     Descriptor,
                     m_MipOffsets,
                     request.PageCoord);
-                m_PendingUploadSortEntries.Add(new PendingUploadSortEntry(request, locked));
+                m_PendingUploadSortEntries.Add(new PendingUploadSortEntry(
+                    request,
+                    locked,
+                    ProducerPriority));
             }
 
             if (m_PendingUploadSortEntries.Count > 1)
@@ -999,37 +1282,23 @@ namespace VividRP.Runtime
 
         private readonly struct PendingUploadSortEntry
         {
-            internal PendingUploadSortEntry(in VTRequest request, bool locked)
+            internal PendingUploadSortEntry(
+                in VTRequest request,
+                bool locked,
+                int producerPriority)
             {
                 Request = request;
-                Locked = locked;
-                IsActiveView = request.IsActiveView;
-                CameraPriority = request.CameraPriority;
-                Priority = request.Priority;
-                MipWeightedPriority = VTRequestPriorityUtility.ComputeMipWeightedScore(
-                    request.Priority,
-                    request.PageCoord.Mip);
-                RequestFrame = request.RequestFrame;
-                Mip = request.PageCoord.Mip;
+                PriorityKey = VTRequestPriorityKey.FromRequest(
+                    request,
+                    locked,
+                    producerPriority);
                 Y = request.PageCoord.Y;
                 X = request.PageCoord.X;
             }
 
             internal VTRequest Request { get; }
 
-            internal bool Locked { get; }
-
-            internal bool IsActiveView { get; }
-
-            internal int CameraPriority { get; }
-
-            internal int Priority { get; }
-
-            internal long MipWeightedPriority { get; }
-
-            internal int RequestFrame { get; }
-
-            internal int Mip { get; }
+            internal VTRequestPriorityKey PriorityKey { get; }
 
             internal int Y { get; }
 
@@ -1046,31 +1315,11 @@ namespace VividRP.Runtime
 
             public int Compare(PendingUploadSortEntry left, PendingUploadSortEntry right)
             {
-                if (left.Locked != right.Locked)
-                    return left.Locked ? -1 : 1;
-
-                if (left.IsActiveView != right.IsActiveView)
-                    return left.IsActiveView ? -1 : 1;
-
-                int cameraCompare = left.CameraPriority.CompareTo(right.CameraPriority);
-                if (cameraCompare != 0)
-                    return cameraCompare;
-
-                int scoreCompare = right.MipWeightedPriority.CompareTo(left.MipWeightedPriority);
-                if (scoreCompare != 0)
-                    return scoreCompare;
-
-                int mipCompare = right.Mip.CompareTo(left.Mip);
-                if (mipCompare != 0)
-                    return mipCompare;
-
-                int priorityCompare = right.Priority.CompareTo(left.Priority);
+                int priorityCompare = VTRequestPriorityUtility.Compare(
+                    left.PriorityKey,
+                    right.PriorityKey);
                 if (priorityCompare != 0)
                     return priorityCompare;
-
-                int frameCompare = left.RequestFrame.CompareTo(right.RequestFrame);
-                if (frameCompare != 0)
-                    return frameCompare;
 
                 int yCompare = left.Y.CompareTo(right.Y);
                 if (yCompare != 0)
@@ -1087,6 +1336,28 @@ namespace VividRP.Runtime
         {
             if (request.SpaceId != SpaceId)
                 return false;
+
+            if (TryTakeAtomicRefresh(request, out AtomicResidentRefresh refresh))
+            {
+                bool committed = m_ResidencyManager.TryCommitPageRefresh(
+                    Descriptor,
+                    m_MipOffsets,
+                    refresh.Request,
+                    refresh.OldPhysicalPageId,
+                    refresh.OldGeneration,
+                    refresh.OldLocked,
+                    commitFrameIndex);
+                if (committed)
+                {
+                    m_DeferredAtomicRefreshReleases.Add(new DeferredAtomicRefreshRelease(
+                        request.PageCoord,
+                        refresh.OldPhysicalPageId,
+                        refresh.OldGeneration));
+                }
+                if (committed && rebuildPageTable)
+                    RebuildPageTable();
+                return committed;
+            }
 
             if (RemoveResidentRefreshRequest(request))
                 return true;
@@ -1121,10 +1392,130 @@ namespace VividRP.Runtime
                 }
 
                 m_ResidentRefreshRequests.RemoveAt(requestIndex);
+                IncrementResidentRefreshRequestRevision();
                 return true;
             }
 
             return false;
+        }
+
+        private bool TryTakeAtomicRefresh(
+            in VTRequest request,
+            out AtomicResidentRefresh refresh)
+        {
+            for (int refreshIndex = 0; refreshIndex < m_AtomicResidentRefreshes.Count; refreshIndex++)
+            {
+                AtomicResidentRefresh candidate = m_AtomicResidentRefreshes[refreshIndex];
+                if (!candidate.Request.Equals(request))
+                    continue;
+
+                refresh = candidate;
+                m_AtomicResidentRefreshes.RemoveAt(refreshIndex);
+                RemoveResidentRefreshRequest(request);
+                return true;
+            }
+
+            refresh = default;
+            return false;
+        }
+
+        private void CancelAtomicRefreshes(int mip, RectInt pageRegion)
+        {
+            for (int refreshIndex = m_AtomicResidentRefreshes.Count - 1;
+                 refreshIndex >= 0;
+                 refreshIndex--)
+            {
+                AtomicResidentRefresh refresh = m_AtomicResidentRefreshes[refreshIndex];
+                VirtualTexturePageCoord coord = refresh.Request.PageCoord;
+                if (coord.Mip != mip
+                    || !pageRegion.Contains(new Vector2Int(coord.X, coord.Y)))
+                {
+                    continue;
+                }
+
+                m_ResidencyManager.CancelPageRefresh(
+                    Descriptor,
+                    m_MipOffsets,
+                    refresh.Request,
+                    refresh.OldPhysicalPageId,
+                    refresh.OldGeneration,
+                    refresh.OldLocked);
+                m_AtomicResidentRefreshes.RemoveAt(refreshIndex);
+                RemoveResidentRefreshRequest(refresh.Request);
+            }
+        }
+
+        private void CancelAllAtomicRefreshes()
+        {
+            for (int refreshIndex = m_AtomicResidentRefreshes.Count - 1;
+                 refreshIndex >= 0;
+                 refreshIndex--)
+            {
+                AtomicResidentRefresh refresh = m_AtomicResidentRefreshes[refreshIndex];
+                m_ResidencyManager.CancelPageRefresh(
+                    Descriptor,
+                    m_MipOffsets,
+                    refresh.Request,
+                    refresh.OldPhysicalPageId,
+                    refresh.OldGeneration,
+                    refresh.OldLocked);
+            }
+
+            m_AtomicResidentRefreshes.Clear();
+        }
+
+        private void CaptureDeferredAtomicRefreshReleases(int pendingVersion)
+        {
+            for (int releaseIndex = 0;
+                 releaseIndex < m_DeferredAtomicRefreshReleases.Count;
+                 releaseIndex++)
+            {
+                DeferredAtomicRefreshRelease release =
+                    m_DeferredAtomicRefreshReleases[releaseIndex];
+                if (!m_PageTableUpdater.IsEntryPendingUpload(
+                        Descriptor,
+                        m_MipOffsets,
+                        release.Coord))
+                {
+                    continue;
+                }
+
+                release.CapturedPendingVersion = pendingVersion;
+                release.CapturedForUpload = true;
+                m_DeferredAtomicRefreshReleases[releaseIndex] = release;
+            }
+        }
+
+        private void RetireDeferredAtomicRefreshReleases(int pendingVersion)
+        {
+            for (int releaseIndex = m_DeferredAtomicRefreshReleases.Count - 1;
+                 releaseIndex >= 0;
+                 releaseIndex--)
+            {
+                DeferredAtomicRefreshRelease release =
+                    m_DeferredAtomicRefreshReleases[releaseIndex];
+                if (!release.CapturedForUpload
+                    || release.CapturedPendingVersion != pendingVersion)
+                {
+                    continue;
+                }
+
+                m_ResidencyManager.ReleaseCommittedPageRefreshOldBinding(
+                    Descriptor,
+                    m_MipOffsets,
+                    release.Coord,
+                    release.OldPhysicalPageId,
+                    release.OldGeneration);
+                m_DeferredAtomicRefreshReleases.RemoveAt(releaseIndex);
+            }
+        }
+
+        private void IncrementResidentRefreshRequestRevision()
+        {
+            unchecked
+            {
+                m_ResidentRefreshRequestRevision += 1u;
+            }
         }
 
         bool IVTUploadRequestCommitter.TryCommitUpload(in VTRequest request, int frameIndex)

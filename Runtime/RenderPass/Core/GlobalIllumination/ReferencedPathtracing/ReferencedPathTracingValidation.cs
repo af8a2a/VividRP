@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.ObjectDispatching;
+using Object = UnityEngine.Object;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -827,18 +830,55 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSceneSignatureUtility
     {
+        private sealed class RendererComparer : IComparer<Renderer>
+        {
+            public int Compare(Renderer left, Renderer right)
+            {
+                if (ReferenceEquals(left, right))
+                    return 0;
+                if (left == null)
+                    return 1;
+                if (right == null)
+                    return -1;
+                return left.GetEntityId().CompareTo(right.GetEntityId());
+            }
+        }
+
+        private sealed class RendererObjectTracker : ObjectTracker<Renderer>
+        {
+            internal RendererObjectTracker()
+                : base(ObjectDispatcherService.TypeTrackingFlags.SceneObjects)
+            {
+            }
+
+            public override void ProcessData(
+                List<Object> changed,
+                NativeArray<EntityId> changedId,
+                NativeArray<EntityId> destroyedId)
+            {
+                ProcessRendererChanges(changed, destroyedId);
+            }
+        }
+
         private static readonly List<Material> s_SharedMaterials = new();
+        private static readonly List<Renderer> s_Renderers = new();
+        private static readonly Dictionary<EntityId, int>
+            s_RendererIndices = new();
+        private static readonly RendererComparer s_RendererComparer = new();
+        private static RendererObjectTracker s_RendererObjectTracker;
+        private static bool s_RendererTrackingInitialized;
+        private static bool s_RenderersNeedSort;
 
         internal static ulong Resolve()
         {
-            var renderers = UnityEngine.Object.FindObjectsByType<Renderer>(
-                FindObjectsInactive.Exclude,
-                FindObjectsSortMode.InstanceID);
+            EnsureRendererTracking();
+            ObjectDispatcherService.ProcessUpdates();
+            PrepareTrackedRenderers();
             var database = VividMeshletRendererDatabase.instance;
             var hash = ReferencedPathTracingStableHash.OffsetBasis;
             ReferencedPathTracingStableHash.Add(
                 ref hash,
-                Compute(renderers));
+                Compute(s_Renderers, true));
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 Compute(
@@ -850,6 +890,13 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static ulong Compute(
             IReadOnlyList<Renderer> renderers)
         {
+            return Compute(renderers, false);
+        }
+
+        private static ulong Compute(
+            IReadOnlyList<Renderer> renderers,
+            bool activeRenderersOnly)
+        {
             var hash = ReferencedPathTracingStableHash.OffsetBasis;
             var rendererCount = renderers?.Count ?? 0;
             var supportedRendererCount = 0;
@@ -857,8 +904,12 @@ namespace VividRP.Runtime.RenderPass.Core
                  rendererIndex < rendererCount;
                  rendererIndex++)
             {
-                if (TryResolveMesh(renderers[rendererIndex], out _))
+                var renderer = renderers[rendererIndex];
+                if (IsIncluded(renderer, activeRenderersOnly)
+                    && TryResolveMesh(renderer, out _))
+                {
                     supportedRendererCount++;
+                }
             }
 
             ReferencedPathTracingStableHash.Add(
@@ -870,8 +921,11 @@ namespace VividRP.Runtime.RenderPass.Core
                  rendererIndex++)
             {
                 var renderer = renderers[rendererIndex];
-                if (!TryResolveMesh(renderer, out var mesh))
+                if (!IsIncluded(renderer, activeRenderersOnly)
+                    || !TryResolveMesh(renderer, out var mesh))
+                {
                     continue;
+                }
 
                 var gameObject = renderer.gameObject;
                 ReferencedPathTracingStableHash.Add(
@@ -921,6 +975,142 @@ namespace VividRP.Runtime.RenderPass.Core
 
             s_SharedMaterials.Clear();
             return hash;
+        }
+
+        [RuntimeInitializeOnLoadMethod(
+            RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRendererTracking()
+        {
+            if (s_RendererObjectTracker != null)
+            {
+                ObjectDispatcherService.UnregisterObjectTracker(
+                    s_RendererObjectTracker);
+            }
+
+            s_RendererObjectTracker = null;
+            s_Renderers.Clear();
+            s_RendererIndices.Clear();
+            s_RendererTrackingInitialized = false;
+            s_RenderersNeedSort = false;
+        }
+
+        private static void EnsureRendererTracking()
+        {
+            if (s_RendererTrackingInitialized)
+                return;
+
+            s_RendererTrackingInitialized = true;
+            // Seed objects that existed before change tracking was enabled.
+            var renderers = Object.FindObjectsByType<Renderer>(
+                FindObjectsInactive.Include);
+            for (var index = 0; index < renderers.Length; index++)
+                AddOrUpdateRenderer(renderers[index]);
+
+            s_RendererObjectTracker = new RendererObjectTracker();
+            ObjectDispatcherService.RegisterObjectTracker(
+                s_RendererObjectTracker);
+        }
+
+        private static void ProcessRendererChanges(
+            List<Object> changed,
+            NativeArray<EntityId> destroyedIds)
+        {
+            for (var index = 0; index < destroyedIds.Length; index++)
+                RemoveRenderer(destroyedIds[index]);
+
+            for (var index = 0; index < changed.Count; index++)
+            {
+                if (changed[index] is Renderer renderer)
+                    AddOrUpdateRenderer(renderer);
+            }
+        }
+
+        private static void AddOrUpdateRenderer(Renderer renderer)
+        {
+            if (renderer == null)
+                return;
+
+            var entityId = renderer.GetEntityId();
+            if (entityId.Equals(EntityId.None))
+                return;
+
+            if (s_RendererIndices.TryGetValue(
+                    entityId,
+                    out var existingIndex)
+                && existingIndex >= 0
+                && existingIndex < s_Renderers.Count)
+            {
+                s_Renderers[existingIndex] = renderer;
+                return;
+            }
+
+            s_RendererIndices[entityId] = s_Renderers.Count;
+            s_Renderers.Add(renderer);
+            s_RenderersNeedSort = true;
+        }
+
+        private static void RemoveRenderer(EntityId entityId)
+        {
+            if (entityId.Equals(EntityId.None)
+                || !s_RendererIndices.TryGetValue(
+                    entityId,
+                    out var rendererIndex))
+            {
+                return;
+            }
+
+            var lastIndex = s_Renderers.Count - 1;
+            var lastRenderer = s_Renderers[lastIndex];
+            s_Renderers[rendererIndex] = lastRenderer;
+            s_Renderers.RemoveAt(lastIndex);
+            s_RendererIndices.Remove(entityId);
+            if (rendererIndex != lastIndex && lastRenderer != null)
+            {
+                s_RendererIndices[lastRenderer.GetEntityId()] =
+                    rendererIndex;
+            }
+
+            s_RenderersNeedSort = true;
+        }
+
+        private static void PrepareTrackedRenderers()
+        {
+            for (var index = s_Renderers.Count - 1; index >= 0; index--)
+            {
+                if (s_Renderers[index] != null)
+                    continue;
+
+                s_Renderers.RemoveAt(index);
+                s_RenderersNeedSort = true;
+            }
+
+            if (!s_RenderersNeedSort)
+                return;
+
+            s_Renderers.Sort(s_RendererComparer);
+            s_RendererIndices.Clear();
+            for (var index = 0; index < s_Renderers.Count; index++)
+            {
+                var renderer = s_Renderers[index];
+                if (renderer != null)
+                {
+                    s_RendererIndices[renderer.GetEntityId()] = index;
+                }
+            }
+
+            s_RenderersNeedSort = false;
+        }
+
+        private static bool IsIncluded(
+            Renderer renderer,
+            bool activeRenderersOnly)
+        {
+            if (renderer == null)
+                return false;
+
+            var gameObject = renderer.gameObject;
+            return !activeRenderersOnly
+                || (gameObject != null && gameObject.activeInHierarchy);
         }
 
         private static bool TryResolveMesh(

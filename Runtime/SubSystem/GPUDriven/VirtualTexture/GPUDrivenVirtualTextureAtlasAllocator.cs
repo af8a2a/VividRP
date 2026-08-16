@@ -6,10 +6,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 {
     internal sealed class GPUDrivenVirtualTextureAtlasAllocator
     {
-        internal sealed class Allocation
+        private const int InitialNodeCapacity = 512;
+        private const int InitialNodeSetCapacity = 128;
+        private const int InitialAllocationCapacity = 16;
+
+        internal readonly struct Allocation
         {
             private readonly GPUDrivenVirtualTextureAtlasAllocator m_Owner;
-            private readonly List<int> m_NodeIndices = new();
 
             internal Allocation(
                 GPUDrivenVirtualTextureAtlasAllocator owner,
@@ -29,24 +32,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             internal int MaxMip { get; }
 
-            internal bool IsReleased { get; private set; }
-
-            internal IReadOnlyList<int> NodeIndices => m_NodeIndices;
-
             internal bool BelongsTo(GPUDrivenVirtualTextureAtlasAllocator allocator)
             {
-                return ReferenceEquals(m_Owner, allocator);
-            }
-
-            internal void AddNode(int nodeIndex)
-            {
-                m_NodeIndices.Add(nodeIndex);
-            }
-
-            internal void MarkReleased()
-            {
-                IsReleased = true;
-                m_NodeIndices.Clear();
+                return m_Owner == allocator;
             }
         }
 
@@ -58,18 +46,56 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             Allocated,
         }
 
-        private sealed class Node
+        private struct Node
         {
+            internal const int ChildCount = 4;
+
             internal int Index;
             internal int ParentIndex;
             internal int X;
             internal int Y;
             internal int Order;
             internal NodeState State;
-            internal Allocation Owner;
-            internal readonly int[] ChildIndices = { -1, -1, -1, -1 };
+            internal int OwnerAllocationId;
+            private int m_ChildIndex0;
+            private int m_ChildIndex1;
+            private int m_ChildIndex2;
+            private int m_ChildIndex3;
 
-            internal bool HasChildren => ChildIndices[0] >= 0;
+            internal bool HasChildren => m_ChildIndex0 >= 0;
+
+            internal int GetChildIndex(int childOffset)
+            {
+                return childOffset switch
+                {
+                    0 => m_ChildIndex0,
+                    1 => m_ChildIndex1,
+                    2 => m_ChildIndex2,
+                    3 => m_ChildIndex3,
+                    _ => throw new ArgumentOutOfRangeException(nameof(childOffset)),
+                };
+            }
+
+            internal void SetChildIndex(int childOffset, int childIndex)
+            {
+                switch (childOffset)
+                {
+                    case 0:
+                        m_ChildIndex0 = childIndex;
+                        break;
+                    case 1:
+                        m_ChildIndex1 = childIndex;
+                        break;
+                    case 2:
+                        m_ChildIndex2 = childIndex;
+                        break;
+                    case 3:
+                        m_ChildIndex3 = childIndex;
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(childOffset));
+                }
+            }
 
             internal void Initialize(int index, int parentIndex, int x, int y, int order)
             {
@@ -79,14 +105,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 Y = y;
                 Order = order;
                 State = NodeState.None;
-                Owner = null;
+                OwnerAllocationId = 0;
                 ClearChildren();
             }
 
             internal void ClearChildren()
             {
-                for (int childIndex = 0; childIndex < ChildIndices.Length; childIndex++)
-                    ChildIndices[childIndex] = -1;
+                m_ChildIndex0 = -1;
+                m_ChildIndex1 = -1;
+                m_ChildIndex2 = -1;
+                m_ChildIndex3 = -1;
             }
         }
 
@@ -132,11 +160,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         private readonly int m_MaxAllocationPageCount;
         private readonly int m_RootOrder;
-        private readonly List<Node> m_Nodes = new();
+        private readonly List<Node> m_Nodes = new(InitialNodeCapacity);
         private readonly Stack<int> m_RecycledNodeIndices = new();
-        private readonly SortedSet<NodeKey>[] m_FreeNodesByOrder;
-        private readonly SortedSet<NodeKey>[] m_PartiallyFreeNodesByOrder;
-        private readonly Dictionary<int, Allocation> m_Allocations = new();
+        private readonly List<NodeKey>[] m_FreeNodesByOrder;
+        private readonly List<NodeKey>[] m_PartiallyFreeNodesByOrder;
+        private readonly Dictionary<int, Allocation> m_Allocations = new(InitialAllocationCapacity);
         private readonly HashSet<int> m_CoalesceCandidates = new();
         private readonly List<int> m_CoalesceCandidateList = new();
         private int m_NextAllocationId = 1;
@@ -168,7 +196,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         internal bool TryAllocate(int width, int height, out Allocation allocation)
         {
-            allocation = null;
+            allocation = default;
             if (!TryValidateDimensions(width, height, out int maxMip))
                 return false;
             if (!TryFindCandidate(width, height, maxMip, out Candidate candidate))
@@ -183,8 +211,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 allocationId,
                 new RectInt(candidate.X, candidate.Y, width, height),
                 maxMip);
-            MarkAllocated(candidate.NodeIndex, allocation.PageRegion, allocation);
-            if (allocation.NodeIndices.Count == 0)
+            int allocatedNodeCount = MarkAllocated(
+                candidate.NodeIndex,
+                allocation.PageRegion,
+                allocation.Id);
+            if (allocatedNodeCount == 0)
                 throw new InvalidOperationException("The VT atlas allocator produced an empty allocation.");
 
             m_Allocations.Add(allocation.Id, allocation);
@@ -211,29 +242,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         internal bool Release(Allocation allocation)
         {
-            if (allocation == null
-                || allocation.IsReleased
-                || !allocation.BelongsTo(this)
-                || !m_Allocations.TryGetValue(allocation.Id, out Allocation activeAllocation)
-                || !ReferenceEquals(activeAllocation, allocation))
+            if (!allocation.BelongsTo(this)
+                || !m_Allocations.ContainsKey(allocation.Id))
             {
                 return false;
             }
 
             m_CoalesceCandidates.Clear();
-            IReadOnlyList<int> nodeIndices = allocation.NodeIndices;
-            for (int nodeListIndex = 0; nodeListIndex < nodeIndices.Count; nodeListIndex++)
-            {
-                int nodeIndex = nodeIndices[nodeListIndex];
-                Node node = m_Nodes[nodeIndex];
-                if (node.State != NodeState.Allocated || !ReferenceEquals(node.Owner, allocation))
-                    throw new InvalidOperationException("The VT atlas allocation owns an invalid buddy block.");
-
-                node.Owner = null;
-                node.State = NodeState.None;
-                SetNodeFree(nodeIndex);
-                AddCoalesceAncestors(node.ParentIndex);
-            }
+            int releasedNodeCount = ReleaseAllocatedNodes(0, allocation.PageRegion, allocation.Id);
+            if (releasedNodeCount == 0)
+                throw new InvalidOperationException("The VT atlas allocation owns no buddy blocks.");
 
             m_CoalesceCandidateList.Clear();
             m_CoalesceCandidateList.AddRange(m_CoalesceCandidates);
@@ -243,15 +261,14 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             m_Allocations.Remove(allocation.Id);
             AllocatedPageCount -= allocation.PageRegion.width * allocation.PageRegion.height;
-            allocation.MarkReleased();
             return true;
         }
 
-        private static SortedSet<NodeKey>[] CreateNodeSets(int count)
+        private static List<NodeKey>[] CreateNodeSets(int count)
         {
-            var sets = new SortedSet<NodeKey>[count];
+            var sets = new List<NodeKey>[count];
             for (int setIndex = 0; setIndex < sets.Length; setIndex++)
-                sets[setIndex] = new SortedSet<NodeKey>();
+                sets[setIndex] = new List<NodeKey>(InitialNodeSetCapacity);
             return sets;
         }
 
@@ -283,7 +300,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 if (m_FreeNodesByOrder[order].Count == 0)
                     continue;
 
-                NodeKey key = m_FreeNodesByOrder[order].Min;
+                NodeKey key = m_FreeNodesByOrder[order][0];
                 Node node = m_Nodes[key.NodeIndex];
                 if (!found || key.MortonAddress < candidate.MortonAddress)
                 {
@@ -337,20 +354,20 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (Contains(pageRegion, node))
                 return false;
 
-            for (int childOffset = 0; childOffset < node.ChildIndices.Length; childOffset++)
+            for (int childOffset = 0; childOffset < Node.ChildCount; childOffset++)
             {
-                if (!TestAllocation(node.ChildIndices[childOffset], pageRegion))
+                if (!TestAllocation(node.GetChildIndex(childOffset), pageRegion))
                     return false;
             }
 
             return true;
         }
 
-        private void MarkAllocated(int nodeIndex, RectInt pageRegion, Allocation allocation)
+        private int MarkAllocated(int nodeIndex, RectInt pageRegion, int allocationId)
         {
             Node node = m_Nodes[nodeIndex];
             if (!Overlaps(node, pageRegion))
-                return;
+                return 0;
 
             if (Contains(pageRegion, node))
             {
@@ -359,20 +376,65 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
                 RemoveFreeNode(nodeIndex);
                 node.State = NodeState.Allocated;
-                node.Owner = allocation;
-                allocation.AddNode(nodeIndex);
-                return;
+                node.OwnerAllocationId = allocationId;
+                m_Nodes[nodeIndex] = node;
+                return 1;
             }
 
             if (node.Order <= 0)
                 throw new InvalidOperationException("The VT atlas allocator could not subdivide an intersecting leaf block.");
             if (node.State == NodeState.Free)
+            {
                 Subdivide(nodeIndex);
+                node = m_Nodes[nodeIndex];
+            }
             else if (node.State != NodeState.PartiallyFree)
                 throw new InvalidOperationException("The VT atlas allocator encountered an occupied intersecting block.");
 
-            for (int childOffset = 0; childOffset < node.ChildIndices.Length; childOffset++)
-                MarkAllocated(node.ChildIndices[childOffset], pageRegion, allocation);
+            int allocatedNodeCount = 0;
+            for (int childOffset = 0; childOffset < Node.ChildCount; childOffset++)
+            {
+                allocatedNodeCount += MarkAllocated(
+                    node.GetChildIndex(childOffset),
+                    pageRegion,
+                    allocationId);
+            }
+
+            return allocatedNodeCount;
+        }
+
+        private int ReleaseAllocatedNodes(int nodeIndex, RectInt pageRegion, int allocationId)
+        {
+            Node node = m_Nodes[nodeIndex];
+            if (!Overlaps(node, pageRegion))
+                return 0;
+
+            if (node.State == NodeState.Allocated)
+            {
+                if (node.OwnerAllocationId != allocationId)
+                    throw new InvalidOperationException("The VT atlas allocation owns an invalid buddy block.");
+
+                node.OwnerAllocationId = 0;
+                node.State = NodeState.None;
+                m_Nodes[nodeIndex] = node;
+                SetNodeFree(nodeIndex);
+                AddCoalesceAncestors(node.ParentIndex);
+                return 1;
+            }
+
+            if (node.State != NodeState.PartiallyFree || !node.HasChildren)
+                throw new InvalidOperationException("The VT atlas allocation contains an invalid buddy block.");
+
+            int releasedNodeCount = 0;
+            for (int childOffset = 0; childOffset < Node.ChildCount; childOffset++)
+            {
+                releasedNodeCount += ReleaseAllocatedNodes(
+                    node.GetChildIndex(childOffset),
+                    pageRegion,
+                    allocationId);
+            }
+
+            return releasedNodeCount;
         }
 
         private void Subdivide(int nodeIndex)
@@ -383,18 +445,20 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             RemoveFreeNode(nodeIndex);
             node.State = NodeState.PartiallyFree;
+            m_Nodes[nodeIndex] = node;
             AddPartiallyFreeNode(nodeIndex);
 
             int childOrder = node.Order - 1;
             int childSize = 1 << childOrder;
-            for (int childOffset = 0; childOffset < node.ChildIndices.Length; childOffset++)
+            for (int childOffset = 0; childOffset < Node.ChildCount; childOffset++)
             {
                 int childX = node.X + ((childOffset & 1) != 0 ? childSize : 0);
                 int childY = node.Y + ((childOffset & 2) != 0 ? childSize : 0);
                 int childIndex = AcquireNode(nodeIndex, childX, childY, childOrder);
-                node.ChildIndices[childOffset] = childIndex;
+                node.SetChildIndex(childOffset, childIndex);
                 SetNodeFree(childIndex);
             }
+            m_Nodes[nodeIndex] = node;
         }
 
         private void AddCoalesceAncestors(int nodeIndex)
@@ -423,23 +487,24 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (node.State != NodeState.PartiallyFree || !node.HasChildren)
                 return;
 
-            for (int childOffset = 0; childOffset < node.ChildIndices.Length; childOffset++)
+            for (int childOffset = 0; childOffset < Node.ChildCount; childOffset++)
             {
-                Node child = m_Nodes[node.ChildIndices[childOffset]];
+                Node child = m_Nodes[node.GetChildIndex(childOffset)];
                 if (child.State != NodeState.Free || child.HasChildren)
                     return;
             }
 
             RemovePartiallyFreeNode(nodeIndex);
-            for (int childOffset = 0; childOffset < node.ChildIndices.Length; childOffset++)
+            for (int childOffset = 0; childOffset < Node.ChildCount; childOffset++)
             {
-                int childIndex = node.ChildIndices[childOffset];
+                int childIndex = node.GetChildIndex(childOffset);
                 RemoveFreeNode(childIndex);
                 RecycleNode(childIndex);
             }
 
             node.ClearChildren();
             node.State = NodeState.None;
+            m_Nodes[nodeIndex] = node;
             SetNodeFree(nodeIndex);
         }
 
@@ -455,11 +520,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             else
             {
                 nodeIndex = m_Nodes.Count;
-                node = new Node();
+                node = default;
                 m_Nodes.Add(node);
             }
 
             node.Initialize(nodeIndex, parentIndex, x, y, order);
+            m_Nodes[nodeIndex] = node;
             return nodeIndex;
         }
 
@@ -467,29 +533,32 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         {
             Node node = m_Nodes[nodeIndex];
             node.Initialize(nodeIndex, -1, 0, 0, 0);
+            m_Nodes[nodeIndex] = node;
             m_RecycledNodeIndices.Push(nodeIndex);
         }
 
         private void SetNodeFree(int nodeIndex)
         {
             Node node = m_Nodes[nodeIndex];
-            if (node.State != NodeState.None || node.HasChildren || node.Owner != null)
+            if (node.State != NodeState.None || node.HasChildren || node.OwnerAllocationId != 0)
                 throw new InvalidOperationException("The VT atlas allocator cannot add a non-empty node to a free list.");
 
             node.State = NodeState.Free;
-            m_FreeNodesByOrder[node.Order].Add(CreateNodeKey(node));
+            m_Nodes[nodeIndex] = node;
+            AddNodeKey(m_FreeNodesByOrder[node.Order], CreateNodeKey(node));
         }
 
         private void RemoveFreeNode(int nodeIndex)
         {
             Node node = m_Nodes[nodeIndex];
             if (node.State != NodeState.Free
-                || !m_FreeNodesByOrder[node.Order].Remove(CreateNodeKey(node)))
+                || !RemoveNodeKey(m_FreeNodesByOrder[node.Order], CreateNodeKey(node)))
             {
                 throw new InvalidOperationException("The VT atlas allocator free list is inconsistent.");
             }
 
             node.State = NodeState.None;
+            m_Nodes[nodeIndex] = node;
         }
 
         private void AddPartiallyFreeNode(int nodeIndex)
@@ -497,24 +566,44 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             Node node = m_Nodes[nodeIndex];
             if (node.State != NodeState.PartiallyFree)
                 throw new InvalidOperationException("Only partially free VT atlas nodes can be indexed.");
-            m_PartiallyFreeNodesByOrder[node.Order].Add(CreateNodeKey(node));
+            AddNodeKey(m_PartiallyFreeNodesByOrder[node.Order], CreateNodeKey(node));
         }
 
         private void RemovePartiallyFreeNode(int nodeIndex)
         {
             Node node = m_Nodes[nodeIndex];
             if (node.State != NodeState.PartiallyFree
-                || !m_PartiallyFreeNodesByOrder[node.Order].Remove(CreateNodeKey(node)))
+                || !RemoveNodeKey(m_PartiallyFreeNodesByOrder[node.Order], CreateNodeKey(node)))
             {
                 throw new InvalidOperationException("The VT atlas allocator partial list is inconsistent.");
             }
 
             node.State = NodeState.None;
+            m_Nodes[nodeIndex] = node;
         }
 
         private static NodeKey CreateNodeKey(Node node)
         {
             return new NodeKey(EncodeMorton(node.X, node.Y), node.Index);
+        }
+
+        private static void AddNodeKey(List<NodeKey> nodeKeys, NodeKey nodeKey)
+        {
+            int keyIndex = nodeKeys.BinarySearch(nodeKey);
+            if (keyIndex >= 0)
+                throw new InvalidOperationException("The VT atlas allocator node index contains a duplicate key.");
+
+            nodeKeys.Insert(~keyIndex, nodeKey);
+        }
+
+        private static bool RemoveNodeKey(List<NodeKey> nodeKeys, NodeKey nodeKey)
+        {
+            int keyIndex = nodeKeys.BinarySearch(nodeKey);
+            if (keyIndex < 0)
+                return false;
+
+            nodeKeys.RemoveAt(keyIndex);
+            return true;
         }
 
         private static bool Overlaps(Node node, RectInt pageRegion)

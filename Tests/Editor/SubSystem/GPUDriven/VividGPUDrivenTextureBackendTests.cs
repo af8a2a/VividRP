@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using Unity.Mathematics;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.Tests
@@ -97,6 +98,11 @@ namespace VividRP.Editor.Tests
             public void ResetPerFrameStats()
             {
                 ResetPerFrameStatsCallCount++;
+            }
+
+            public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
+            {
+                return false;
             }
 
             public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)

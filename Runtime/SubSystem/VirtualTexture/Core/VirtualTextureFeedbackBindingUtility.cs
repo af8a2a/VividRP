@@ -7,6 +7,9 @@ namespace VividRP.Runtime
     internal static class VirtualTextureFeedbackBindingUtility
     {
         internal const int MaxFeedbackTileShift = 15;
+        internal const int RequestsUavSlot = 5;
+        internal const int CounterUavSlot = 6;
+        internal const int HashUavSlot = 7;
 
         internal static int ResolveFeedbackTileShift(int feedbackSampleRate)
         {
@@ -76,6 +79,9 @@ namespace VividRP.Runtime
                 VirtualTextureShaderIDs._VTFeedbackSampleRate,
                 ResolveFeedbackSampleArea(feedbackSampleRate));
             cmd.SetGlobalInt(
+                VirtualTextureShaderIDs._VTFeedbackRequestCapacity,
+                binding.HasFeedback ? binding.FeedbackRequestCapacity : 0);
+            cmd.SetGlobalInt(
                 VirtualTextureShaderIDs._VTFeedbackResidentHashCapacity,
                 binding.HasFeedback ? binding.FeedbackResidentHashCapacity : 0);
             cmd.SetGlobalFloat(
@@ -89,9 +95,18 @@ namespace VividRP.Runtime
             if (cmd == null || !binding.HasFeedback)
                 return false;
 
-            cmd.SetRandomWriteTarget(1, binding.FeedbackRequests, preserveCounterValue: false);
-            cmd.SetRandomWriteTarget(2, binding.FeedbackCounter, preserveCounterValue: true);
-            cmd.SetRandomWriteTarget(3, binding.FeedbackResidentHash, preserveCounterValue: true);
+            cmd.SetRandomWriteTarget(
+                RequestsUavSlot,
+                binding.FeedbackRequests,
+                preserveCounterValue: false);
+            cmd.SetRandomWriteTarget(
+                CounterUavSlot,
+                binding.FeedbackCounter,
+                preserveCounterValue: true);
+            cmd.SetRandomWriteTarget(
+                HashUavSlot,
+                binding.FeedbackResidentHash,
+                preserveCounterValue: true);
             return true;
         }
 

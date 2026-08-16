@@ -197,6 +197,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal ReferencedPathTracingLightSpatialIndexBuildResult(
             uint[] words,
+            int wordCount,
             Vector3 boundsMin,
             Vector3 inverseBoundsExtent,
             int finiteLightCount,
@@ -205,6 +206,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ulong signature)
         {
             this.words = words ?? Array.Empty<uint>();
+            this.wordCount = Mathf.Clamp(wordCount, 0, this.words.Length);
             this.boundsMin = boundsMin;
             this.inverseBoundsExtent = inverseBoundsExtent;
             this.finiteLightCount = finiteLightCount;
@@ -214,6 +216,8 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         internal uint[] words { get; }
+
+        internal int wordCount { get; }
 
         internal Vector3 boundsMin { get; }
 
@@ -232,18 +236,27 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal ReferencedPathTracingLightListBuildResult(
             ReferencedPathTracingLightRecord[] records,
+            int recordCount,
             ReferencedPathTracingLightListParameters parameters,
             ReferencedPathTracingLightSpatialIndexBuildResult spatialIndex,
-            ReferencedPathTracingLightListStorageBlock[] storageBlocks)
+            ReferencedPathTracingLightListStorageBlock[] storageBlocks,
+            int storageBlockCount)
         {
             this.records = records ?? Array.Empty<ReferencedPathTracingLightRecord>();
+            this.recordCount = Mathf.Clamp(recordCount, 0, this.records.Length);
             this.parameters = parameters;
             this.spatialIndex = spatialIndex;
             this.storageBlocks = storageBlocks
                 ?? Array.Empty<ReferencedPathTracingLightListStorageBlock>();
+            this.storageBlockCount = Mathf.Clamp(
+                storageBlockCount,
+                0,
+                this.storageBlocks.Length);
         }
 
         internal ReferencedPathTracingLightRecord[] records { get; }
+
+        internal int recordCount { get; }
 
         internal ReferencedPathTracingLightListParameters parameters { get; }
 
@@ -256,6 +269,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             get;
         }
+
+        internal int storageBlockCount { get; }
     }
 
     internal static class ReferencedPathTracingLightSpatialIndexBuilder
@@ -283,13 +298,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private const ulong FnvPrime = 1099511628211UL;
         private const float MinimumBoundsExtent = 0.001f;
 
-        private sealed class CellBuilder
+        internal sealed class CellBuilder
         {
             internal readonly List<uint> lightIndices = new(CellCapacity);
             internal bool overflow;
         }
 
-        private readonly struct InfluenceBounds
+        internal readonly struct InfluenceBounds
         {
             internal InfluenceBounds(Vector3 min, Vector3 max)
             {
@@ -302,14 +317,53 @@ namespace VividRP.Runtime.RenderPass.Core
             internal Vector3 max { get; }
         }
 
-        internal static ReferencedPathTracingLightSpatialIndexBuildResult Build(
-            IReadOnlyList<ReferencedPathTracingLightRecord> records,
-            ReferencedPathTracingLightListParameters listParameters)
+        internal sealed class BuildWorkspace
         {
-            var recordCount = records?.Count ?? 0;
-            var unboundedLightIndices = new List<uint>();
-            var finiteLightIndices = new List<uint>();
-            var finiteLightBounds = new List<InfluenceBounds>();
+            internal readonly List<uint> m_UnboundedLightIndices = new();
+            internal readonly List<uint> m_FiniteLightIndices = new();
+            internal readonly List<InfluenceBounds> m_FiniteLightBounds = new();
+            internal readonly List<uint> m_PackedLightIndices = new();
+            internal readonly CellBuilder[] m_Cells =
+                new CellBuilder[GetCellCount()];
+            internal readonly uint[] m_CellOffsets =
+                new uint[GetCellCount()];
+            internal readonly uint[] m_CellCountsAndFlags =
+                new uint[GetCellCount()];
+            internal uint[] m_Words = Array.Empty<uint>();
+            internal ReferencedPathTracingLightListStorageBlock[]
+                m_StorageBlocks =
+                    Array.Empty<ReferencedPathTracingLightListStorageBlock>();
+        }
+
+        internal static ReferencedPathTracingLightSpatialIndexBuildResult Build(
+            ReferencedPathTracingLightRecord[] records,
+            int recordCount,
+            ReferencedPathTracingLightListParameters listParameters,
+            BuildWorkspace workspace)
+        {
+            records ??= Array.Empty<ReferencedPathTracingLightRecord>();
+            recordCount = Mathf.Clamp(recordCount, 0, records.Length);
+
+            var unboundedLightIndices = workspace?.m_UnboundedLightIndices
+                ?? new List<uint>();
+            var finiteLightIndices = workspace?.m_FiniteLightIndices
+                ?? new List<uint>();
+            var finiteLightBounds = workspace?.m_FiniteLightBounds
+                ?? new List<InfluenceBounds>();
+            var packedLightIndices = workspace?.m_PackedLightIndices
+                ?? new List<uint>();
+            var cells = workspace?.m_Cells
+                ?? new CellBuilder[GetCellCount()];
+            var cellOffsets = workspace?.m_CellOffsets
+                ?? new uint[cells.Length];
+            var cellCountsAndFlags = workspace?.m_CellCountsAndFlags
+                ?? new uint[cells.Length];
+            unboundedLightIndices.Clear();
+            finiteLightIndices.Clear();
+            finiteLightBounds.Clear();
+            packedLightIndices.Clear();
+            ClearCells(cells);
+
             var boundsMin = new Vector3(
                 float.PositiveInfinity,
                 float.PositiveInfinity,
@@ -350,7 +404,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 inverseBoundsExtent = Vector3.zero;
             }
 
-            var cells = new CellBuilder[GetCellCount()];
             for (var finiteIndex = 0;
                  finiteIndex < finiteLightIndices.Count;
                  finiteIndex++)
@@ -366,16 +419,17 @@ namespace VividRP.Runtime.RenderPass.Core
             var cellHeaderWordOffset = HeaderWordCount;
             var lightIndexWordOffset =
                 cellHeaderWordOffset + cells.Length * CellHeaderWordCount;
-            var packedLightIndices = new List<uint>(
-                unboundedLightIndices.Count + cells.Length);
+            var minimumPackedCapacity =
+                unboundedLightIndices.Count + cells.Length;
+            if (packedLightIndices.Capacity < minimumPackedCapacity)
+                packedLightIndices.Capacity = minimumPackedCapacity;
             packedLightIndices.AddRange(unboundedLightIndices);
-            var cellOffsets = new uint[cells.Length];
-            var cellCountsAndFlags = new uint[cells.Length];
             var overflowCellCount = 0;
             for (var cellIndex = 0; cellIndex < cells.Length; cellIndex++)
             {
                 var cell = cells[cellIndex];
                 cellOffsets[cellIndex] = (uint)packedLightIndices.Count;
+                cellCountsAndFlags[cellIndex] = 0u;
                 if (cell == null)
                     continue;
 
@@ -390,8 +444,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 cellCountsAndFlags[cellIndex] = countAndFlags;
             }
 
-            var words = new uint[
-                lightIndexWordOffset + packedLightIndices.Count];
+            var wordCount = lightIndexWordOffset + packedLightIndices.Count;
+            uint[] words;
+            if (workspace == null)
+            {
+                words = new uint[wordCount];
+            }
+            else
+            {
+                EnsureCapacity(ref workspace.m_Words, wordCount);
+                words = workspace.m_Words;
+            }
+
             words[0] = Version;
             words[1] = GridResolution;
             words[2] = CellCapacity;
@@ -439,8 +503,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 overflowCellCount);
             words[20] = (uint)signature;
             words[21] = (uint)(signature >> 32);
+            words[22] = 0u;
+            words[23] = 0u;
             return new ReferencedPathTracingLightSpatialIndexBuildResult(
                 words,
+                wordCount,
                 boundsMin,
                 inverseBoundsExtent,
                 finiteLightIndices.Count,
@@ -452,23 +519,48 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static ReferencedPathTracingLightListStorageBlock[]
             CreateStorageBlocks(
                 ReferencedPathTracingLightListParameters parameters,
-                ReferencedPathTracingLightSpatialIndexBuildResult spatialIndex)
+                ReferencedPathTracingLightSpatialIndexBuildResult spatialIndex,
+                BuildWorkspace workspace,
+                out int storageBlockCount)
         {
             var spatialWords = spatialIndex.words ?? Array.Empty<uint>();
+            var spatialWordCount = Mathf.Clamp(
+                spatialIndex.wordCount,
+                0,
+                spatialWords.Length);
             var spatialBlockCount =
-                (spatialWords.Length
+                (spatialWordCount
                     + ReferencedPathTracingLightListStorageBlock.WordCount
                     - 1)
                 / ReferencedPathTracingLightListStorageBlock.WordCount;
-            var blocks =
-                new ReferencedPathTracingLightListStorageBlock[
-                    1 + spatialBlockCount];
+            storageBlockCount = 1 + spatialBlockCount;
+            ReferencedPathTracingLightListStorageBlock[] blocks;
+            if (workspace == null)
+            {
+                blocks =
+                    new ReferencedPathTracingLightListStorageBlock[
+                        storageBlockCount];
+            }
+            else
+            {
+                EnsureCapacity(
+                    ref workspace.m_StorageBlocks,
+                    storageBlockCount);
+                blocks = workspace.m_StorageBlocks;
+                for (var blockIndex = 1;
+                     blockIndex < storageBlockCount;
+                     blockIndex++)
+                {
+                    blocks[blockIndex] = default;
+                }
+            }
+
             blocks[0] =
                 ReferencedPathTracingLightListStorageBlock.FromParameters(
                     parameters);
 
             for (var wordIndex = 0;
-                 wordIndex < spatialWords.Length;
+                 wordIndex < spatialWordCount;
                  wordIndex++)
             {
                 var blockIndex =
@@ -484,6 +576,33 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             return blocks;
+        }
+
+        private static void ClearCells(CellBuilder[] cells)
+        {
+            for (var cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+            {
+                var cell = cells[cellIndex];
+                if (cell == null)
+                    continue;
+
+                cell.lightIndices.Clear();
+                cell.overflow = false;
+            }
+        }
+
+        private static void EnsureCapacity<T>(
+            ref T[] values,
+            int requiredCapacity)
+        {
+            var currentCapacity = values?.Length ?? 0;
+            if (currentCapacity >= requiredCapacity)
+                return;
+
+            var doubledCapacity = currentCapacity <= int.MaxValue / 2
+                ? currentCapacity * 2
+                : int.MaxValue;
+            values = new T[Mathf.Max(requiredCapacity, doubledCapacity)];
         }
 
         private static bool TryCreateInfluenceBounds(
@@ -753,7 +872,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const float DirectionEpsilon = 1e-8f;
         private const float FiniteDirectionalThreshold = 1e-6f;
 
-        private readonly struct Candidate
+        internal readonly struct Candidate
         {
             internal Candidate(
                 ulong stableId,
@@ -768,10 +887,42 @@ namespace VividRP.Runtime.RenderPass.Core
             internal ReferencedPathTracingLightRecord record { get; }
         }
 
+        private sealed class CandidateComparer : IComparer<Candidate>
+        {
+            public int Compare(Candidate lhs, Candidate rhs)
+            {
+                return CompareCandidates(lhs, rhs);
+            }
+        }
+
+        private static readonly CandidateComparer s_CandidateComparer = new();
+
+        internal sealed class BuildWorkspace
+        {
+            internal readonly List<Candidate> m_Candidates = new();
+            internal ReferencedPathTracingLightRecord[] m_Records =
+                Array.Empty<ReferencedPathTracingLightRecord>();
+            internal readonly ReferencedPathTracingLightSpatialIndexBuilder
+                .BuildWorkspace m_SpatialIndexWorkspace = new();
+        }
+
         internal static ReferencedPathTracingLightListBuildResult Build(
             IReadOnlyList<VividLightRenderData> sceneLights)
         {
-            var candidates = new List<Candidate>(sceneLights?.Count ?? 0);
+            return Build(sceneLights, null);
+        }
+
+        internal static ReferencedPathTracingLightListBuildResult Build(
+            IReadOnlyList<VividLightRenderData> sceneLights,
+            BuildWorkspace workspace)
+        {
+            var sceneLightCount = sceneLights?.Count ?? 0;
+            var candidates = workspace?.m_Candidates
+                ?? new List<Candidate>(sceneLightCount);
+            candidates.Clear();
+            if (candidates.Capacity < sceneLightCount)
+                candidates.Capacity = sceneLightCount;
+
             uint unsupportedLightCount = 0;
             uint unstableLightCount = 0;
 
@@ -800,9 +951,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
             }
 
-            candidates.Sort(CompareCandidates);
-            var uniqueRecords =
-                new List<ReferencedPathTracingLightRecord>(candidates.Count);
+            candidates.Sort(s_CandidateComparer);
+            var recordCount = 0;
             for (var candidateIndex = 0;
                  candidateIndex < candidates.Count;)
             {
@@ -817,19 +967,52 @@ namespace VividRP.Runtime.RenderPass.Core
                 var duplicateCount =
                     nextCandidateIndex - candidateIndex;
                 if (duplicateCount == 1)
-                    uniqueRecords.Add(candidates[candidateIndex].record);
+                    recordCount++;
                 else
                     unstableLightCount += (uint)duplicateCount;
 
                 candidateIndex = nextCandidateIndex;
             }
 
-            var records = uniqueRecords.ToArray();
+            ReferencedPathTracingLightRecord[] records;
+            if (workspace == null)
+            {
+                records = recordCount > 0
+                    ? new ReferencedPathTracingLightRecord[recordCount]
+                    : Array.Empty<ReferencedPathTracingLightRecord>();
+            }
+            else
+            {
+                EnsureCapacity(ref workspace.m_Records, recordCount);
+                records = workspace.m_Records;
+            }
+
+            var recordIndex = 0;
+            for (var candidateIndex = 0;
+                 candidateIndex < candidates.Count;)
+            {
+                var nextCandidateIndex = candidateIndex + 1;
+                while (nextCandidateIndex < candidates.Count
+                    && candidates[nextCandidateIndex].stableId
+                        == candidates[candidateIndex].stableId)
+                {
+                    nextCandidateIndex++;
+                }
+
+                if (nextCandidateIndex - candidateIndex == 1)
+                {
+                    records[recordIndex++] =
+                        candidates[candidateIndex].record;
+                }
+
+                candidateIndex = nextCandidateIndex;
+            }
+
             double totalSelectionWeight = 0.0;
             uint activeLightCount = 0;
             uint incompleteLocalProposalLightCount = 0;
 
-            for (var lightIndex = 0; lightIndex < records.Length; lightIndex++)
+            for (var lightIndex = 0; lightIndex < recordCount; lightIndex++)
             {
                 var record = records[lightIndex];
                 if (record.selectionWeight <= 0.0f)
@@ -846,7 +1029,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var parameters =
                 ReferencedPathTracingLightListParameters.CreateEmpty();
-            parameters.lightCount = (uint)records.Length;
+            parameters.lightCount = (uint)recordCount;
             parameters.activeLightCount = activeLightCount;
             parameters.unsupportedLightCount = unsupportedLightCount;
             parameters.unstableLightCount = unstableLightCount;
@@ -859,24 +1042,52 @@ namespace VividRP.Runtime.RenderPass.Core
                 parameters.totalSelectionWeight = (float)totalSelectionWeight;
                 parameters.inverseTotalSelectionWeight =
                     1.0f / parameters.totalSelectionWeight;
-                AssignSelectionDistribution(records, totalSelectionWeight);
+                AssignSelectionDistribution(
+                    records,
+                    recordCount,
+                    totalSelectionWeight);
             }
 
-            var signature = ComputeSignature(records, parameters);
+            var signature = ComputeSignature(
+                records,
+                recordCount,
+                parameters);
             parameters.signatureLow = (uint)signature;
             parameters.signatureHigh = (uint)(signature >> 32);
             var spatialIndex =
                 ReferencedPathTracingLightSpatialIndexBuilder.Build(
                     records,
-                    parameters);
+                    recordCount,
+                    parameters,
+                    workspace?.m_SpatialIndexWorkspace);
             var storageBlocks =
                 ReferencedPathTracingLightSpatialIndexBuilder
-                    .CreateStorageBlocks(parameters, spatialIndex);
+                    .CreateStorageBlocks(
+                        parameters,
+                        spatialIndex,
+                        workspace?.m_SpatialIndexWorkspace,
+                        out var storageBlockCount);
             return new ReferencedPathTracingLightListBuildResult(
                 records,
+                recordCount,
                 parameters,
                 spatialIndex,
-                storageBlocks);
+                storageBlocks,
+                storageBlockCount);
+        }
+
+        private static void EnsureCapacity<T>(
+            ref T[] values,
+            int requiredCapacity)
+        {
+            var currentCapacity = values?.Length ?? 0;
+            if (currentCapacity >= requiredCapacity)
+                return;
+
+            var doubledCapacity = currentCapacity <= int.MaxValue / 2
+                ? currentCapacity * 2
+                : int.MaxValue;
+            values = new T[Mathf.Max(requiredCapacity, doubledCapacity)];
         }
 
         private static bool TryCreateRecord(
@@ -1085,11 +1296,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static void AssignSelectionDistribution(
             ReferencedPathTracingLightRecord[] records,
+            int recordCount,
             double totalSelectionWeight)
         {
             double accumulatedWeight = 0.0;
             var lastActiveIndex = -1;
-            for (var lightIndex = 0; lightIndex < records.Length; lightIndex++)
+            for (var lightIndex = 0; lightIndex < recordCount; lightIndex++)
             {
                 var record = records[lightIndex];
                 if (record.selectionWeight > 0.0f)
@@ -1112,7 +1324,7 @@ namespace VividRP.Runtime.RenderPass.Core
             lastRecord.cdf = 1.0f;
             records[lastActiveIndex] = lastRecord;
             for (var lightIndex = lastActiveIndex + 1;
-                 lightIndex < records.Length;
+                 lightIndex < recordCount;
                  lightIndex++)
             {
                 var record = records[lightIndex];
@@ -1250,6 +1462,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static ulong ComputeSignature(
             ReferencedPathTracingLightRecord[] records,
+            int recordCount,
             ReferencedPathTracingLightListParameters parameters)
         {
             var hash = FnvOffsetBasis;
@@ -1265,7 +1478,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ref hash,
                 parameters.incompleteLocalProposalLightCount);
 
-            for (var lightIndex = 0; lightIndex < records.Length; lightIndex++)
+            for (var lightIndex = 0; lightIndex < recordCount; lightIndex++)
                 Hash(ref hash, records[lightIndex]);
 
             return hash;

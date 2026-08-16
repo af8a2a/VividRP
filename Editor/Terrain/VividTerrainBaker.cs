@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Editor.GPUDriven;
 using VividRP.Editor.GPUDriven.Meshlets;
@@ -22,6 +23,7 @@ namespace VividRP.Editor.TerrainTools
             public string SourceTerrainDataGUID;
             public long SourceTerrainDataLocalFileID;
             public VividTerrainBakeSettings Settings;
+            public int CompositeMaxResolution;
             public Action<float, string> ProgressHandler;
             public Action<string> LogErrorHandler;
         }
@@ -46,14 +48,25 @@ namespace VividRP.Editor.TerrainTools
 
             try
             {
-                Generate(data, parameters);
+                Parameters generateParameters = parameters;
+                Action<float, string> progressHandler = parameters.ProgressHandler;
+                generateParameters.ProgressHandler = (progress, message) =>
+                    progressHandler?.Invoke(progress * 0.6f, message);
+                Generate(data, generateParameters);
+                progressHandler?.Invoke(0.6f, "Building terrain streamed virtual textures");
                 BuildStreamedVirtualTextures(
                     data,
                     parameters.SourceTerrainData,
+                    parameters.SourceTerrainDataGUID,
                     assetPath,
+                    parameters.CompositeMaxResolution,
+                    progressHandler,
                     createdVirtualTexturePaths);
                 AssetDatabase.CreateAsset(data, assetPath);
                 mainAssetCreated = true;
+
+                if (data.NormalizedHeightTexture != null)
+                    AssetDatabase.AddObjectToAsset(data.NormalizedHeightTexture, data);
 
                 for (int chunkIndex = 0; chunkIndex < data.Chunks.Count; chunkIndex++)
                 {
@@ -228,7 +241,8 @@ namespace VividRP.Editor.TerrainTools
                     parameters.SourceMaterial,
                     CaptureLayers(terrainData.terrainLayers),
                     chunks.ToArray(),
-                    CaptureControlMaps(terrainData)
+                    CaptureControlMaps(terrainData),
+                    CreateNormalizedHeightTexture(terrainData.name, heights)
                 );
             }
             catch
@@ -518,13 +532,19 @@ namespace VividRP.Editor.TerrainTools
         private static void BuildStreamedVirtualTextures(
             VividTerrainData terrainData,
             TerrainData sourceTerrainData,
+            string sourceTerrainDataGUID,
             string terrainAssetPath,
+            int compositeMaxResolution,
+            Action<float, string> progressHandler,
             List<string> createdAssetPaths)
         {
             var layerVirtualTextures = new VividVirtualTextureAsset[terrainData.Layers.Count];
             int supportedLayerCount = terrainData.SupportedSurfaceLayerCount;
             for (int layerIndex = 0; layerIndex < supportedLayerCount; layerIndex++)
             {
+                progressHandler?.Invoke(
+                    Mathf.Lerp(0.6f, 0.7f, layerIndex / (float)Mathf.Max(1, supportedLayerCount)),
+                    $"Building terrain layer VT {layerIndex + 1}/{supportedLayerCount}");
                 VividTerrainLayerData layer = terrainData.Layers[layerIndex];
                 if (layer.DiffuseTexture == null
                     && layer.NormalMapTexture == null
@@ -564,6 +584,9 @@ namespace VividRP.Editor.TerrainTools
             var controlVirtualTextures = new VividVirtualTextureAsset[controlMapCount];
             for (int controlMapIndex = 0; controlMapIndex < controlMapCount; controlMapIndex++)
             {
+                progressHandler?.Invoke(
+                    Mathf.Lerp(0.7f, 0.8f, controlMapIndex / (float)Mathf.Max(1, controlMapCount)),
+                    $"Building terrain control VT {controlMapIndex + 1}/{controlMapCount}");
                 string controlMapPath = CreateSiblingAssetPath(
                     terrainAssetPath,
                     $"Control{controlMapIndex}_Source",
@@ -601,6 +624,86 @@ namespace VividRP.Editor.TerrainTools
 
             terrainData.SetControlMaps(persistentControlMaps);
             terrainData.SetStreamedVirtualTextures(layerVirtualTextures, controlVirtualTextures);
+
+            if (supportedLayerCount <= 1)
+            {
+                terrainData.SetCompositeVirtualTexture(null);
+                progressHandler?.Invoke(1.0f, "Terrain streamed virtual textures complete");
+                return;
+            }
+
+            var compositeLayers = new VividTerrainCompositeLayerSource[supportedLayerCount];
+            for (int layerIndex = 0; layerIndex < supportedLayerCount; layerIndex++)
+            {
+                compositeLayers[layerIndex] = new VividTerrainCompositeLayerSource(
+                    terrainData.Layers[layerIndex],
+                    terrainData.Size);
+            }
+
+            string resolvedSourceGUID = sourceTerrainDataGUID;
+            if (string.IsNullOrWhiteSpace(resolvedSourceGUID))
+            {
+                string sourcePath = AssetDatabase.GetAssetPath(sourceTerrainData);
+                resolvedSourceGUID = AssetDatabase.AssetPathToGUID(sourcePath);
+            }
+
+            var compositeSource = new VividTerrainCompositeSource(
+                resolvedSourceGUID,
+                terrainData.Size,
+                compositeMaxResolution,
+                compositeLayers,
+                persistentControlMaps);
+            string compositeVirtualTexturePath = CreateVirtualTextureAssetPath(
+                terrainAssetPath,
+                "CompositeSurface");
+            bool compositeSuccess = VividTerrainCompositeVirtualTextureAssetUtility.BuildOrRefresh(
+                compositeVirtualTexturePath,
+                compositeSource,
+                (progress, message) => progressHandler?.Invoke(
+                    Mathf.Lerp(0.8f, 1.0f, progress),
+                    message),
+                out VividVirtualTextureAsset compositeVirtualTexture,
+                out bool compositeWasCreated,
+                out string compositeErrorMessage);
+            if (compositeWasCreated)
+                createdAssetPaths.Add(compositeVirtualTexturePath);
+            if (!compositeSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to build terrain composite streamed VT: {compositeErrorMessage}");
+            }
+
+            terrainData.SetCompositeVirtualTexture(compositeVirtualTexture);
+        }
+
+        private static Texture2D CreateNormalizedHeightTexture(string terrainName, float[,] heights)
+        {
+            int height = heights.GetLength(0);
+            int width = heights.GetLength(1);
+            var samples = new ushort[checked(width * height)];
+            for (int y = 0; y < height; y++)
+            {
+                int rowStart = y * width;
+                for (int x = 0; x < width; x++)
+                {
+                    samples[rowStart + x] = (ushort)Mathf.RoundToInt(
+                        Mathf.Clamp01(heights[y, x]) * ushort.MaxValue);
+                }
+            }
+
+            var texture = new Texture2D(
+                width,
+                height,
+                GraphicsFormat.R16_UNorm,
+                TextureCreationFlags.MipChain)
+            {
+                name = $"{terrainName}_NormalizedHeight",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+            texture.SetPixelData(samples, 0);
+            texture.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+            return texture;
         }
 
         private static string CreateVirtualTextureAssetPath(string terrainAssetPath, string suffix)
@@ -712,6 +815,9 @@ namespace VividRP.Editor.TerrainTools
                     Object.DestroyImmediate(meshlets);
                 }
             }
+
+            if (data.NormalizedHeightTexture != null)
+                Object.DestroyImmediate(data.NormalizedHeightTexture);
 
             Object.DestroyImmediate(data);
         }

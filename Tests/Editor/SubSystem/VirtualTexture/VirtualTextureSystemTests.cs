@@ -24,6 +24,71 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SpaceDesc_ResolvesIndependentAllocationBudgetDefaultsAndIdentity()
+        {
+            VTStackDesc legacyStack = CreateDesc(
+                "BudgetDefaults",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3).StackDesc;
+            VTStackDesc explicitStack = CreateDesc(
+                "BudgetIdentity",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3,
+                maxResidencyAllocationsPerFrame: 5,
+                maxPrefetchAllocationsPerFrame: 1).StackDesc;
+            VTStackDesc differentResidency = CreateDesc(
+                "BudgetIdentity",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3,
+                maxResidencyAllocationsPerFrame: 4,
+                maxPrefetchAllocationsPerFrame: 1).StackDesc;
+            VTStackDesc differentPrefetch = CreateDesc(
+                "BudgetIdentity",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3,
+                maxResidencyAllocationsPerFrame: 5,
+                maxPrefetchAllocationsPerFrame: 2).StackDesc;
+
+            Assert.That(legacyStack.MaxResidencyAllocationsPerFrame, Is.EqualTo(3));
+            Assert.That(legacyStack.MaxPrefetchAllocationsPerFrame, Is.EqualTo(int.MaxValue));
+            Assert.That(explicitStack.MaxResidencyAllocationsPerFrame, Is.EqualTo(5));
+            Assert.That(explicitStack.MaxPrefetchAllocationsPerFrame, Is.EqualTo(1));
+            Assert.That(explicitStack, Is.Not.EqualTo(differentResidency));
+            Assert.That(explicitStack, Is.Not.EqualTo(differentPrefetch));
+        }
+
+        [Test]
+        public void DependencyResidencyRequest_ConsumesGlobalAllocationBudget()
+        {
+            VirtualTextureSystem.SetResidencyAllocationBudgetForTesting(1);
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "DependencyResidencyBudget",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 4,
+                maxResidencyAllocationsPerFrame: 4));
+            var first = new VirtualTexturePageCoord(0, 0, 0);
+            var second = new VirtualTexturePageCoord(1, 0, 0);
+
+            Assert.That(
+                VirtualTextureSystem.TryQueuePageResidentWithinBudget(
+                    spaceId,
+                    first,
+                    locked: false,
+                    frameIndex: 1),
+                Is.True);
+            Assert.That(
+                VirtualTextureSystem.TryQueuePageResidentWithinBudget(
+                    spaceId,
+                    second,
+                    locked: false,
+                    frameIndex: 1),
+                Is.False);
+            Assert.That(VirtualTextureSystem.TryGetPendingRequests(spaceId, out var pending), Is.True);
+            Assert.That(pending.Any(request => request.PageCoord.Equals(first)), Is.True);
+            Assert.That(pending.Any(request => request.PageCoord.Equals(second)), Is.False);
+        }
+
+        [Test]
         public void Update_PopulatesFrameBindingAndCreatesFeedbackState_ForGameCamera()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("GameCamera", cachePageCount: 2, maxUploadsPerFrame: 1);
@@ -54,7 +119,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.PhysicalCache, Is.Not.Null);
                 AssertPhysicalAtlas(binding.PhysicalCache, desc, groupLayerCount: 1);
                 Assert.That(binding.HasFeedback, Is.True);
-                Assert.That(binding.FeedbackCounter.count, Is.EqualTo(2));
+                Assert.That(binding.FeedbackCounter.count, Is.EqualTo(8));
+                Assert.That(binding.FeedbackRequests.stride, Is.EqualTo(VirtualTextureCompactedFeedbackRequest.Stride));
+                Assert.That(binding.FeedbackRequestCapacity, Is.EqualTo(desc.FeedbackCapacity));
                 Assert.That(binding.ShaderParams.SpaceId, Is.EqualTo(spaceId));
                 Assert.That(binding.ShaderParams.PageSize, Is.EqualTo(desc.PageSize));
                 Assert.That(binding.MipOffsets, Is.EqualTo(VirtualTextureSpaceUtility.BuildMipOffsets(
@@ -262,6 +329,204 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(50, true, 8, true)]
+        [TestCase(49, true, 8, false)]
+        [TestCase(50, false, 8, false)]
+        [TestCase(50, true, 7, false)]
+        public void FeedbackPlatformSupport_RequiresSm5ReadbackAndAllEightOutputSlots(
+            int graphicsShaderLevel,
+            bool supportsAsyncGpuReadback,
+            int supportedRandomWriteTargetCount,
+            bool expected)
+        {
+            Assert.That(
+                VirtualTextureSystem.IsFeedbackPlatformSupported(
+                    graphicsShaderLevel,
+                    supportsAsyncGpuReadback,
+                    supportedRandomWriteTargetCount),
+                Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void PagePinLease_IsReferenceCountedAndRestoresOriginalLockState()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("PagePinLease", cachePageCount: 4, maxUploadsPerFrame: 1);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, VTProceduralPageProducer.Instance);
+            var coord = new VirtualTexturePageCoord(1, 2, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(spaceId, coord, locked: false, frameIndex: 7),
+                Is.True);
+
+            Assert.That(VirtualTextureSystem.TryAcquirePagePinLease(spaceId, coord, out VTPagePinLease first), Is.True);
+            Assert.That(VirtualTextureSystem.TryAcquirePagePinLease(spaceId, coord, out VTPagePinLease second), Is.True);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, coord), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var pinned), Is.True);
+            Assert.That(pinned.Locked, Is.True);
+
+            first.Dispose();
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, coord), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out pinned), Is.True);
+            Assert.That(pinned.Locked, Is.True);
+
+            second.Dispose();
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, coord), Is.Zero);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var released), Is.True);
+            Assert.That(released.Locked, Is.False);
+        }
+
+        [Test]
+        public void PageRefresh_KeepsOldMappingUntilAtomicCommitThenSwitchesOnce()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("AtomicPageRefresh", cachePageCount: 4, maxUploadsPerFrame: 1);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, VTProceduralPageProducer.Instance);
+            var coord = new VirtualTexturePageCoord(1, 2, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(spaceId, coord, locked: false, frameIndex: 7),
+                Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var oldEntry), Is.True);
+            int freeBeforeRefresh = VirtualTextureSystem.GetFreePageCountForTesting(spaceId);
+
+            Assert.That(VirtualTextureSystem.TryQueuePageRefresh(spaceId, coord, frameIndex: 8), Is.True);
+            Assert.That(VirtualTextureSystem.GetFreePageCountForTesting(spaceId), Is.EqualTo(freeBeforeRefresh - 1));
+            Assert.That(VirtualTextureSystem.IsPageRefreshPending(spaceId, coord), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var beforeCommit), Is.True);
+            Assert.That(beforeCommit.Resident, Is.True);
+            Assert.That(beforeCommit.PendingUpload, Is.False);
+            Assert.That(beforeCommit.PhysicalPageId, Is.EqualTo(oldEntry.PhysicalPageId));
+
+            Assert.That(VirtualTextureSystem.TryGetPendingRequests(spaceId, out var pending), Is.True);
+            VTRequest refreshRequest = pending.Single(request => request.PageCoord.Equals(coord));
+            Assert.That(refreshRequest.PhysicalPageId, Is.Not.EqualTo(oldEntry.PhysicalPageId));
+            Assert.That(VirtualTextureSystem.CommitRequest(refreshRequest), Is.True);
+
+            Assert.That(VirtualTextureSystem.IsPageRefreshPending(spaceId, coord), Is.False);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var committed), Is.True);
+            Assert.That(committed.Resident, Is.True);
+            Assert.That(committed.PendingUpload, Is.False);
+            Assert.That(committed.PhysicalPageId, Is.EqualTo(refreshRequest.PhysicalPageId));
+            Assert.That(committed.PhysicalPageId, Is.Not.EqualTo(oldEntry.PhysicalPageId));
+            Assert.That(
+                VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
+                Is.EqualTo(freeBeforeRefresh - 1),
+                "The old physical page must stay allocated until the page-table switch is submitted.");
+
+            Assert.That(
+                VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                    spaceId,
+                    out VTPageTableScatterUpdate[] updates,
+                    out int pendingVersion,
+                    out bool fullUpload),
+                Is.True);
+            Assert.That(
+                VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                    spaceId,
+                    unchecked(pendingVersion + 1),
+                    fullUpload,
+                    updates.Length),
+                Is.False);
+            Assert.That(
+                VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
+                Is.EqualTo(freeBeforeRefresh - 1),
+                "An aborted or stale page-table upload must not retire the old physical page.");
+            Assert.That(
+                VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                    spaceId,
+                    pendingVersion,
+                    fullUpload,
+                    updates.Length),
+                Is.True);
+            Assert.That(
+                VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
+                Is.EqualTo(freeBeforeRefresh));
+        }
+
+        [Test]
+        public void Update_SharesOneCompactedFeedbackStreamAcrossSpacesForCamera()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "SharedFeedbackA",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32));
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "SharedFeedbackB",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 64));
+            var cameraGameObject = new GameObject("VTSharedFeedbackCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera camera = cameraGameObject.AddComponent<Camera>();
+                ContextContainer frameData = CreateFrameData(camera, frameIndex: 21);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VividVirtualTextureFrameData virtualTextureFrameData =
+                    frameData.Get<VividVirtualTextureFrameData>();
+                Assert.That(virtualTextureFrameData.BindingCount, Is.EqualTo(2));
+                VirtualTextureSpaceBinding first = virtualTextureFrameData.Bindings[0];
+                VirtualTextureSpaceBinding second = virtualTextureFrameData.Bindings[1];
+                Assert.That(second.FeedbackRequests, Is.SameAs(first.FeedbackRequests));
+                Assert.That(second.FeedbackCounter, Is.SameAs(first.FeedbackCounter));
+                Assert.That(second.FeedbackResidentHash, Is.SameAs(first.FeedbackResidentHash));
+                Assert.That(first.FeedbackRequestCapacity, Is.EqualTo(96));
+                Assert.That(second.FeedbackRequestCapacity, Is.EqualTo(96));
+                Assert.That(first.FeedbackRequests.count, Is.EqualTo(96));
+                Assert.That(
+                    first.FeedbackResidentHashCapacity,
+                    Is.EqualTo(VirtualTextureFeedbackBufferState.ResolveFeedbackHashCapacityForTesting(
+                        feedbackCapacity: 96,
+                        pageCapacity: 12)));
+                Assert.That(second.FeedbackResidentHashCapacity, Is.EqualTo(first.FeedbackResidentHashCapacity));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(cameraGameObject);
+            }
+        }
+
+        [Test]
+        public void Update_KeepsCompactedFeedbackStreamsSeparateAcrossCameras()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "PerCameraFeedback",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32));
+            var firstCameraObject = new GameObject("VTFeedbackCameraA");
+            var secondCameraObject = new GameObject("VTFeedbackCameraB");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera firstCamera = firstCameraObject.AddComponent<Camera>();
+                Camera secondCamera = secondCameraObject.AddComponent<Camera>();
+                ContextContainer firstFrameData = CreateFrameData(firstCamera, frameIndex: 31);
+                ContextContainer secondFrameData = CreateFrameData(secondCamera, frameIndex: 31);
+
+                VirtualTextureSystem.Update(firstFrameData, commandBuffer);
+                commandBuffer.Clear();
+                VirtualTextureSystem.Update(secondFrameData, commandBuffer);
+
+                VirtualTextureSpaceBinding firstBinding =
+                    firstFrameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
+                VirtualTextureSpaceBinding secondBinding =
+                    secondFrameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
+                Assert.That(secondBinding.FeedbackRequests, Is.Not.SameAs(firstBinding.FeedbackRequests));
+                Assert.That(secondBinding.FeedbackCounter, Is.Not.SameAs(firstBinding.FeedbackCounter));
+                Assert.That(secondBinding.FeedbackResidentHash, Is.Not.SameAs(firstBinding.FeedbackResidentHash));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
+            }
+        }
+
         [Test]
         public void TryGetDefaultBinding_SkipsPrivateAllocations()
         {
@@ -404,6 +669,55 @@ namespace VividRP.Editor.Tests
             VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
             Assert.That(stats.FaultCount, Is.EqualTo(0));
             Assert.That(stats.DeduplicatedRequestCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Update_FiltersExactResidentAndInvalidFeedbackFromResidencyCandidates()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "ResidentCandidateFilter",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1));
+            ulong residentRoot = VirtualTextureFeedbackProcessor.EncodeKey(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 2));
+            ulong invalidRequest = VirtualTextureFeedbackProcessor.EncodeKey(
+                spaceId,
+                new VirtualTexturePageCoord(4, 0, 0));
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedResidentAccessReadbackForTesting(
+                    CameraType.Game,
+                    residentRoot);
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    invalidRequest);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.GetLastResidencyCandidateCountForTesting(), Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetLastDemandPrefetchCandidateCountForTesting(),
+                Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetLastPrefetchCandidateProcessCountForTesting(),
+                Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(spaceId),
+                Is.Zero);
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.Zero);
+            Assert.That(VirtualTextureStatsRegistry.LastStats.DeduplicatedRequestCount, Is.EqualTo(2));
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.Zero);
         }
 
         [Test]
@@ -625,6 +939,194 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_AppliesDebugMipBiasOverride_WithoutFreezingAdaptiveController()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "FixedAdaptiveMipBias",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0));
+            var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
+
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride = 2f;
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    1,
+                    0,
+                    requestKey);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                Assert.That(VirtualTextureStatsRegistry.LastStats.AdaptiveMipBias, Is.EqualTo(2f));
+                Assert.That(
+                    frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias,
+                    Is.EqualTo(2f));
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.EqualTo(0.5f));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureAdaptiveMipBiasOverride;
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_ZeroDebugFeedbackPressureOverrides_SuppressMeasuredPressureWithoutReplacingStats()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "FeedbackPressureOverrides",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
+
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride = 0;
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride = 0;
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    3,
+                    11);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+                Assert.That(stats.FeedbackOverflowCount, Is.EqualTo(3));
+                Assert.That(stats.FallbackSampleCount, Is.EqualTo(11));
+                Assert.That(stats.AdaptiveMipBias, Is.Zero);
+                Assert.That(frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias, Is.Zero);
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackOverflowInputCount, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFallbackSampleInputCount, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFeedbackOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFallbackSampleCount, Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFaultOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredResidentOverflowCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.AdaptiveMeasuredNonResidentFallbackSampleCount,
+                    Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredResidentFallbackSampleCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.AdaptiveMeasuredWeightedResolvedSampleCount,
+                    Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackOverflowPressure, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFallbackPressure, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveTotalPressure, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveTargetMipBias, Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackMeasurementWasFresh, Is.True);
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshFeedbackOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshFallbackSampleCount, Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshFaultOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshResidentOverflowCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.AdaptiveLastFreshNonResidentFallbackSampleCount,
+                    Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.AdaptiveLastFreshResidentFallbackSampleCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.AdaptiveLastFreshWeightedResolvedSampleCount,
+                    Is.EqualTo(11));
+                Assert.That(VirtualTextureSystem.FeedbackRequestReadbackErrorCount, Is.Zero);
+                Assert.That(VirtualTextureSystem.FeedbackCounterReadbackErrorCount, Is.Zero);
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureFeedbackOverflowCountOverride;
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureFallbackSampleCountOverride;
+                commandBuffer.Dispose();
+            }
+        }
+
+        [TestCase(1, -1)]
+        [TestCase(-1, int.MaxValue)]
+        public void Update_PositiveDebugFeedbackPressureOverrides_DriveAdaptiveBiasWithoutReplacingStats(
+            int feedbackOverflowCountOverride,
+            int fallbackSampleCountOverride)
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "InjectedFeedbackPressure",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
+
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride =
+                    feedbackOverflowCountOverride;
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride =
+                    fallbackSampleCountOverride;
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+                Assert.That(stats.FeedbackOverflowCount, Is.Zero);
+                Assert.That(stats.FallbackSampleCount, Is.Zero);
+                Assert.That(stats.AdaptiveMipBias, Is.EqualTo(0.5f));
+                Assert.That(
+                    frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias,
+                    Is.EqualTo(0.5f));
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.EqualTo(0.5f));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFeedbackOverflowCountOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureFeedbackOverflowCountOverride;
+                VividRenderingDebugDisplaySettings.Data.virtualTextureFallbackSampleCountOverride =
+                    VividRenderingDebugSettingsData.DefaultVirtualTextureFallbackSampleCountOverride;
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_CarriesFeedbackConsumedByLaterCameraUpdateIntoNextControllerFrame()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "DeferredAdaptiveFeedback",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            var cameraGameObject = new GameObject("DeferredAdaptiveFeedbackCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera camera = cameraGameObject.AddComponent<Camera>();
+                ContextContainer firstFrameData = CreateFrameData(camera, frameIndex: 17);
+
+                VirtualTextureSystem.Update(firstFrameData, commandBuffer);
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    feedbackOverflowCount: 3,
+                    fallbackSampleCount: 11);
+                VirtualTextureSystem.Update(firstFrameData, commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.Zero);
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackMeasurementWasFresh, Is.False);
+
+                ContextContainer nextFrameData = CreateFrameData(camera, frameIndex: 18);
+                VirtualTextureSystem.Update(nextFrameData, commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.EqualTo(0.5f));
+                Assert.That(VirtualTextureSystem.AdaptiveFeedbackMeasurementWasFresh, Is.True);
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFeedbackOverflowCount, Is.EqualTo(3));
+                Assert.That(VirtualTextureSystem.AdaptiveMeasuredFallbackSampleCount, Is.EqualTo(11));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(cameraGameObject);
+            }
+        }
+
+        [Test]
         public void Update_SchedulesNeighborPrefetchWithinUploadBudget_WhenEnabled()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
@@ -658,6 +1160,473 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.PendingMipGapSum, Is.EqualTo(2));
             Assert.That(stats.PendingMipGapMax, Is.EqualTo(2));
             Assert.That(stats.PendingMipGapAverage, Is.EqualTo(2f));
+            Assert.That(
+                VirtualTextureSystem.GetLastDemandPrefetchCandidateCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetLastPrefetchCandidateProcessCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(spaceId),
+                Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Update_KeepsPendingResidencyCandidateEligibleForNeighborPrefetch()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "PendingCandidatePrefetch",
+                cachePageCount: 6,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1));
+            var requestedCoord = new VirtualTexturePageCoord(1, 1, 0);
+            Assert.That(
+                VirtualTextureSystem.TryQueuePageResident(
+                    spaceId,
+                    requestedCoord,
+                    locked: false,
+                    frameIndex: 0),
+                Is.True);
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, requestedCoord));
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.GetLastResidencyCandidateCountForTesting(), Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetLastDemandPrefetchCandidateCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetLastPrefetchCandidateProcessCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(spaceId),
+                Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(2));
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Update_RechecksExactResidentStateBeforePrefetchAfterSharedAttach()
+        {
+            VirtualTextureSpaceDesc firstDesc = CreateDesc(
+                "SharedAttachSource",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1);
+            VirtualTextureSpaceDesc secondDesc = CreateDesc(
+                "SharedAttachTarget",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1);
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                firstDesc,
+                VTProceduralPageProducer.Instance);
+            int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                secondDesc,
+                VTProceduralPageProducer.Instance);
+            var sharedCoord = new VirtualTexturePageCoord(1, 0, 1);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(
+                    firstSpaceId,
+                    sharedCoord,
+                    locked: false,
+                    frameIndex: 0),
+                Is.True);
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(secondSpaceId), Is.EqualTo(1));
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(secondSpaceId, sharedCoord));
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.GetLastResidencyCandidateCountForTesting(), Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetLastDemandPrefetchCandidateCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetLastPrefetchCandidateProcessCountForTesting(),
+                Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(secondSpaceId),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(secondSpaceId),
+                Is.Zero);
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(secondSpaceId), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(secondSpaceId), Is.Zero);
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.Zero);
+        }
+
+        [Test]
+        public void Update_UsesReturnedResidencyBudgetForMissingSeedAfterPrefetchQuotaIsExhausted()
+        {
+            VirtualTextureSpaceDesc sourceDesc = CreateDesc(
+                "ReturnedBudgetSource",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 4,
+                neighborPrefetchCount: 1,
+                maxResidencyAllocationsPerFrame: 3);
+            VirtualTextureSpaceDesc warmupDesc = CreateDesc(
+                "ReturnedBudgetWarmup",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 4,
+                neighborPrefetchCount: 1,
+                maxResidencyAllocationsPerFrame: 3);
+            VirtualTextureSpaceDesc attachedDesc = CreateDesc(
+                "ReturnedBudgetAttached",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 4,
+                neighborPrefetchCount: 1,
+                maxResidencyAllocationsPerFrame: 3);
+            VirtualTextureSpaceDesc missingDesc = CreateDesc(
+                "ReturnedBudgetMissing",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 4,
+                neighborPrefetchCount: 1,
+                maxResidencyAllocationsPerFrame: 3);
+            int sourceSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                sourceDesc,
+                VTProceduralPageProducer.Instance);
+            int warmupSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                warmupDesc,
+                VTProceduralPageProducer.Instance);
+            int attachedSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                attachedDesc,
+                VTProceduralPageProducer.Instance);
+            int missingSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                missingDesc,
+                VTProceduralPageProducer.Instance);
+            var warmupCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var attachedCoord = new VirtualTexturePageCoord(1, 0, 1);
+            var missingCoord = new VirtualTexturePageCoord(3, 3, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(
+                    sourceSpaceId,
+                    attachedCoord,
+                    locked: false,
+                    frameIndex: 0),
+                Is.True);
+            var firstCameraObject = new GameObject("VTReturnedBudgetCameraA");
+            var secondCameraObject = new GameObject("VTReturnedBudgetCameraB");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera firstCamera = firstCameraObject.AddComponent<Camera>();
+                Camera secondCamera = secondCameraObject.AddComponent<Camera>();
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 3,
+                    maxPrefetchAllocationsPerFrame: 1,
+                    maxPageUploadsPerFrame: 8,
+                    maxUploadBytesPerFrame: int.MaxValue);
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    firstCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(warmupSpaceId, warmupCoord));
+                VirtualTextureSystem.Update(CreateFrameData(firstCamera, frameIndex: 73), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(warmupSpaceId), Is.EqualTo(2));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.EqualTo(1));
+
+                commandBuffer.Clear();
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    secondCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(attachedSpaceId, attachedCoord),
+                    VirtualTextureFeedbackProcessor.EncodeKey(missingSpaceId, missingCoord));
+                VirtualTextureSystem.Update(CreateFrameData(secondCamera, frameIndex: 73), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
+            }
+
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(attachedSpaceId), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(missingSpaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                missingSpaceId,
+                missingCoord,
+                out VirtualTexturePageTableEntry missingEntry), Is.True);
+            Assert.That(missingEntry.PendingUpload, Is.True);
+            Assert.That(missingEntry.Resident, Is.False);
+            Assert.That(
+                VirtualTextureSystem.GetLastDemandPrefetchCandidateCountForTesting(),
+                Is.EqualTo(2));
+            Assert.That(
+                VirtualTextureSystem.GetLastPrefetchCandidateProcessCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(attachedSpaceId),
+                Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(missingSpaceId),
+                Is.EqualTo(1));
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.Zero);
+        }
+
+        [Test]
+        public void Update_AttachesMissingPrefetchSeedWhenSharedPoolIsFull()
+        {
+            VirtualTextureSpaceDesc sourceDesc = CreateDesc(
+                "FullPoolAttachSource",
+                cachePageCount: 3,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1,
+                maxResidencyAllocationsPerFrame: 1);
+            VirtualTextureSpaceDesc highPriorityDesc = CreateDesc(
+                "FullPoolAttachHighPriority",
+                cachePageCount: 3,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1,
+                maxResidencyAllocationsPerFrame: 1);
+            VirtualTextureSpaceDesc lowPriorityDesc = CreateDesc(
+                "FullPoolAttachLowPriority",
+                cachePageCount: 3,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1,
+                maxResidencyAllocationsPerFrame: 1);
+            int sourceSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                sourceDesc,
+                VTProceduralPageProducer.Instance);
+            int highPrioritySpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                highPriorityDesc,
+                VTProceduralPageProducer.Instance);
+            int lowPrioritySpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                lowPriorityDesc,
+                VTProceduralPageProducer.Instance);
+            var highPriorityCoord = new VirtualTexturePageCoord(0, 0, 1);
+            var lowPriorityCoord = new VirtualTexturePageCoord(3, 3, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(
+                    sourceSpaceId,
+                    highPriorityCoord,
+                    locked: false,
+                    frameIndex: 0),
+                Is.True);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(
+                    sourceSpaceId,
+                    lowPriorityCoord,
+                    locked: false,
+                    frameIndex: 0),
+                Is.True);
+            Assert.That(VirtualTextureSystem.GetFreePageCountForTesting(sourceSpaceId), Is.Zero);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 1,
+                    maxPrefetchAllocationsPerFrame: 1,
+                    maxPageUploadsPerFrame: 4,
+                    maxUploadBytesPerFrame: int.MaxValue);
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(highPrioritySpaceId, highPriorityCoord),
+                    VirtualTextureFeedbackProcessor.EncodeKey(lowPrioritySpaceId, lowPriorityCoord));
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(sourceSpaceId), Is.EqualTo(3));
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(highPrioritySpaceId), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(lowPrioritySpaceId), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(lowPrioritySpaceId), Is.Zero);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                lowPrioritySpaceId,
+                lowPriorityCoord,
+                out VirtualTexturePageTableEntry lowPriorityEntry), Is.True);
+            Assert.That(lowPriorityEntry.Resident, Is.True);
+            Assert.That(lowPriorityEntry.PendingUpload, Is.False);
+            Assert.That(VirtualTextureSystem.GetFreePageCountForTesting(sourceSpaceId), Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetLastDemandPrefetchCandidateCountForTesting(),
+                Is.EqualTo(2));
+            Assert.That(
+                VirtualTextureSystem.GetLastPrefetchCandidateProcessCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(highPrioritySpaceId),
+                Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(lowPrioritySpaceId),
+                Is.EqualTo(1));
+            Assert.That(VirtualTextureStatsRegistry.LastStats.EvictionCount, Is.Zero);
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.Zero);
+        }
+
+        [Test]
+        public void Update_RespectsPerSpacePrefetchAllocationBudget()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "SpacePrefetchBudget",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 4,
+                neighborPrefetchCount: 2,
+                maxResidencyAllocationsPerFrame: 4,
+                maxPrefetchAllocationsPerFrame: 1));
+            var requestedCoord = new VirtualTexturePageCoord(1, 1, 0);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 4,
+                    maxPrefetchAllocationsPerFrame: 0,
+                    maxPageUploadsPerFrame: 4,
+                    maxUploadBytesPerFrame: int.MaxValue);
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, requestedCoord));
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(requests, Has.Count.EqualTo(2));
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Update_SharesGlobalPrefetchAllocationBudgetAcrossCamerasInSameFrame()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "GlobalPrefetchBudget",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 6,
+                neighborPrefetchCount: 2,
+                maxResidencyAllocationsPerFrame: 6));
+            var firstCameraObject = new GameObject("VTGlobalPrefetchCameraA");
+            var secondCameraObject = new GameObject("VTGlobalPrefetchCameraB");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera firstCamera = firstCameraObject.AddComponent<Camera>();
+                Camera secondCamera = secondCameraObject.AddComponent<Camera>();
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 6,
+                    maxPrefetchAllocationsPerFrame: 1,
+                    maxPageUploadsPerFrame: 6,
+                    maxUploadBytesPerFrame: int.MaxValue);
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    firstCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(
+                        spaceId,
+                        new VirtualTexturePageCoord(1, 1, 0)));
+                VirtualTextureSystem.Update(CreateFrameData(firstCamera, frameIndex: 73), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(2));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.EqualTo(1));
+
+                commandBuffer.Clear();
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    secondCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(
+                        spaceId,
+                        new VirtualTexturePageCoord(3, 3, 0)));
+                VirtualTextureSystem.Update(CreateFrameData(secondCamera, frameIndex: 73), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(3));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.GetLastDemandPrefetchCandidateCountForTesting(),
+                    Is.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetLastPrefetchCandidateProcessCountForTesting(),
+                    Is.Zero);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
+            }
+        }
+
+        [Test]
+        public void Update_SharesGlobalResidencyBudgetAcrossCamerasAndRestoresItNextFrame()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "GlobalResidencyBudget",
+                cachePageCount: 6,
+                maxUploadsPerFrame: 6,
+                maxResidencyAllocationsPerFrame: 6));
+            var firstCameraObject = new GameObject("VTGlobalResidencyCameraA");
+            var secondCameraObject = new GameObject("VTGlobalResidencyCameraB");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera firstCamera = firstCameraObject.AddComponent<Camera>();
+                Camera secondCamera = secondCameraObject.AddComponent<Camera>();
+                var firstCoord = new VirtualTexturePageCoord(0, 0, 0);
+                var secondCoord = new VirtualTexturePageCoord(3, 3, 0);
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 1,
+                    maxPrefetchAllocationsPerFrame: 0,
+                    maxPageUploadsPerFrame: 6,
+                    maxUploadBytesPerFrame: int.MaxValue);
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    firstCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, firstCoord));
+                VirtualTextureSystem.Update(CreateFrameData(firstCamera, frameIndex: 73), commandBuffer);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+                commandBuffer.Clear();
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    secondCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, secondCoord));
+                VirtualTextureSystem.Update(CreateFrameData(secondCamera, frameIndex: 73), commandBuffer);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+                commandBuffer.Clear();
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    secondCamera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, secondCoord));
+                VirtualTextureSystem.Update(CreateFrameData(secondCamera, frameIndex: 74), commandBuffer);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(2));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
+            }
         }
 
         [Test]
@@ -719,6 +1688,60 @@ namespace VividRP.Editor.Tests
             Assert.That(refinedRequests.Any(
                 request => request.PageCoord.Equals(new VirtualTexturePageCoord(6, 5, 0))
                            && request.Priority == 0), Is.True);
+        }
+
+        [Test]
+        public void Update_MergesDemandRefinementSeedsBeforePrefetch()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "MergedDemandPrefetchSeed",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1,
+                virtualPageCountX: 64,
+                virtualPageCountY: 64,
+                mipCount: 7,
+                maxResidencyAllocationsPerFrame: 2));
+            var firstSource = new VirtualTexturePageCoord(4, 4, 0);
+            var secondSource = new VirtualTexturePageCoord(5, 5, 0);
+            // The mip-6 bootstrap root gives both requests a gap of six. Cold-start
+            // refinement advances four levels, so both sources merge at mip 2.
+            var mergedSeed = new VirtualTexturePageCoord(1, 1, 2);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, firstSource),
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, secondSource));
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.GetLastResidencyCandidateCountForTesting(), Is.EqualTo(2));
+            Assert.That(
+                VirtualTextureSystem.GetLastDemandPrefetchCandidateCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetLastPrefetchCandidateProcessCountForTesting(),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId),
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPrefetchCandidateProcessCallCountForTesting(spaceId),
+                Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(requests, Has.Count.EqualTo(2));
+            Assert.That(requests.Any(request => request.PageCoord.Equals(mergedSeed)), Is.True);
+            Assert.That(requests.All(request => request.PageCoord.Mip == mergedSeed.Mip), Is.True);
+            Assert.That(requests.Any(request => request.PageCoord.Equals(firstSource)), Is.False);
+            Assert.That(requests.Any(request => request.PageCoord.Equals(secondSource)), Is.False);
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.EqualTo(1));
         }
 
         [Test]
@@ -988,7 +2011,8 @@ namespace VividRP.Editor.Tests
                 AssertPhysicalAtlas(updatedBinding.PhysicalCache, updatedDesc, groupLayerCount: 1);
                 Assert.That(updatedBinding.ShaderParams.PageSize, Is.EqualTo(updatedDesc.PageSize));
                 Assert.That(updatedBinding.ShaderParams.FeedbackCapacity, Is.EqualTo(updatedDesc.FeedbackCapacity));
-                Assert.That(updatedBinding.FeedbackResidentHashCapacity, Is.EqualTo(16));
+                Assert.That(updatedBinding.FeedbackRequestCapacity, Is.EqualTo(64));
+                Assert.That(updatedBinding.FeedbackResidentHashCapacity, Is.EqualTo(128));
                 Assert.That(updatedBinding.HasFeedback, Is.True);
             }
             finally
@@ -1119,68 +2143,139 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResidencyClassificationJob_ClassifiesStateAndResolvesResidentMipGap()
+        public void RequestPreparationJob_ClassifiesAndBuildsRefinementSeeds()
         {
-            var inputs = new NativeArray<VTResidencyClassificationInput>(4, Allocator.TempJob);
+            var requests = new NativeArray<VirtualTextureAggregatedFeedbackRequest>(4, Allocator.TempJob);
             var pageStateFlags = new NativeArray<byte>(21, Allocator.TempJob);
             var mipOffsets = new NativeArray<int>(new[] { 0, 16, 20 }, Allocator.TempJob);
-            var results = new NativeArray<VTResidencyClassificationResult>(4, Allocator.TempJob);
+            var results = new NativeArray<VTRequestPreparationResult>(4, Allocator.TempJob);
 
             try
             {
-                inputs[0] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(0, 0, 0));
-                inputs[1] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(1, 0, 0));
-                inputs[2] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(3, 3, 0));
-                inputs[3] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(4, 0, 0));
-                pageStateFlags[0] = VTResidencyClassificationJob.ResidentFlag;
-                pageStateFlags[1] = VTResidencyClassificationJob.PendingFlag;
-                pageStateFlags[16] = VTResidencyClassificationJob.ResidentFlag;
-                pageStateFlags[20] = VTResidencyClassificationJob.ResidentFlag;
+                requests[0] = CreateAggregatedRequest(new VirtualTexturePageCoord(0, 0, 0));
+                requests[1] = CreateAggregatedRequest(new VirtualTexturePageCoord(1, 0, 0));
+                requests[2] = CreateAggregatedRequest(new VirtualTexturePageCoord(3, 3, 0));
+                requests[3] = CreateAggregatedRequest(new VirtualTexturePageCoord(4, 0, 0));
+                pageStateFlags[0] = VTRequestPreparationJob.ResidentFlag;
+                pageStateFlags[1] = VTRequestPreparationJob.PendingFlag;
+                pageStateFlags[16] = VTRequestPreparationJob.ResidentFlag;
+                pageStateFlags[20] = VTRequestPreparationJob.ResidentFlag;
 
-                var job = new VTResidencyClassificationJob
+                var job = new VTRequestPreparationJob
                 {
-                    Inputs = inputs,
+                    Requests = new NativeSlice<VirtualTextureAggregatedFeedbackRequest>(requests),
                     PageStateFlags = pageStateFlags,
                     MipOffsets = mipOffsets,
                     Results = results,
                     VirtualPageCountX = 4,
                     VirtualPageCountY = 4,
                     MipCount = 3,
+                    MaxRefinementMipStep = 1,
                 };
-                job.Run(inputs.Length);
+                job.Run(requests.Length);
 
                 AssertClassification(
-                    results[0],
+                    results[0].Classification,
                     pageIndex: 0,
                     mipGap: 0,
                     VTResidencyRequestClassification.Resident);
                 AssertClassification(
-                    results[1],
+                    results[1].Classification,
                     pageIndex: 1,
                     mipGap: 1,
                     VTResidencyRequestClassification.Pending);
                 AssertClassification(
-                    results[2],
+                    results[2].Classification,
                     pageIndex: 15,
                     mipGap: 2,
                     VTResidencyRequestClassification.Missing);
                 AssertClassification(
-                    results[3],
+                    results[3].Classification,
                     pageIndex: -1,
                     mipGap: -1,
                     VTResidencyRequestClassification.Invalid);
+                Assert.That(results[0].HasCandidate, Is.False);
+                Assert.That(results[1].HasCandidate, Is.True);
+                Assert.That(
+                    results[1].Candidate.Request.PageCoord,
+                    Is.EqualTo(new VirtualTexturePageCoord(1, 0, 0)));
+                Assert.That(results[2].HasCandidate, Is.True);
+                Assert.That(
+                    results[2].Candidate.Request.PageCoord,
+                    Is.EqualTo(new VirtualTexturePageCoord(1, 1, 1)));
+                Assert.That(results[3].HasCandidate, Is.False);
             }
             finally
             {
                 results.Dispose();
                 mipOffsets.Dispose();
                 pageStateFlags.Dispose();
-                inputs.Dispose();
+                requests.Dispose();
             }
         }
 
         [Test]
-        public void Update_ReusesClassificationBuffers_AndSelectsParallelPathForLargeBatches()
+        public void RequestPreparationConsumeJob_MergesAndSortsCandidates()
+        {
+            var results = new NativeArray<VTRequestPreparationResult>(3, Allocator.TempJob);
+            var candidates = new NativeList<VTPrefetchCandidate>(3, Allocator.TempJob);
+            var candidateIndices =
+                new NativeParallelHashMap<VTRequestPreparationCandidateKey, int>(
+                    3,
+                    Allocator.TempJob);
+            VirtualTextureViewId activeViewId =
+                VirtualTextureViewId.FromCameraType(CameraType.Game);
+            var mergedCoord = new VirtualTexturePageCoord(1, 1, 0);
+            var backgroundCoord = new VirtualTexturePageCoord(2, 2, 0);
+
+            try
+            {
+                results[0] = CreatePreparedCandidate(CreateAggregatedRequest(
+                    mergedCoord,
+                    hitCount: 2,
+                    cameraPriority: 5,
+                    VirtualTextureViewId.Invalid,
+                    isActiveView: false));
+                results[1] = CreatePreparedCandidate(CreateAggregatedRequest(
+                    mergedCoord,
+                    hitCount: 3,
+                    cameraPriority: 3,
+                    activeViewId,
+                    isActiveView: true));
+                results[2] = CreatePreparedCandidate(CreateAggregatedRequest(
+                    backgroundCoord,
+                    hitCount: 10,
+                    cameraPriority: 0,
+                    VirtualTextureViewId.Invalid,
+                    isActiveView: false));
+
+                new VTRequestPreparationConsumeJob
+                {
+                    PreparationResults = results,
+                    Candidates = candidates,
+                    CandidateIndices = candidateIndices,
+                    RequestCount = results.Length,
+                }.Run();
+
+                Assert.That(candidates.Length, Is.EqualTo(2));
+                VirtualTextureAggregatedFeedbackRequest merged = candidates[0].Request;
+                Assert.That(merged.PageCoord, Is.EqualTo(mergedCoord));
+                Assert.That(merged.HitCount, Is.EqualTo(5));
+                Assert.That(merged.CameraPriority, Is.EqualTo(3));
+                Assert.That(merged.IsActiveView, Is.True);
+                Assert.That(merged.ViewId, Is.EqualTo(activeViewId));
+                Assert.That(candidates[1].Request.PageCoord, Is.EqualTo(backgroundCoord));
+            }
+            finally
+            {
+                candidateIndices.Dispose();
+                candidates.Dispose();
+                results.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_ReusesRequestPreparationBuffers_AndSelectsParallelPathForLargeBatches()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
                 "BurstClassification",
@@ -1205,10 +2300,10 @@ namespace VividRP.Editor.Tests
                 VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
 
                 Assert.That(
-                    VirtualTextureSystem.WasLastResidencyClassificationParallelForTesting(spaceId),
+                    VirtualTextureSystem.WasLastRequestPreparationParallelForTesting(spaceId),
                     Is.True);
                 Assert.That(
-                    VirtualTextureSystem.GetResidencyClassificationCapacityForTesting(spaceId),
+                    VirtualTextureSystem.GetRequestPreparationCapacityForTesting(spaceId),
                     Is.EqualTo(128));
 
                 commandBuffer.Clear();
@@ -1216,11 +2311,78 @@ namespace VividRP.Editor.Tests
                 VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
 
                 Assert.That(
-                    VirtualTextureSystem.WasLastResidencyClassificationParallelForTesting(spaceId),
+                    VirtualTextureSystem.WasLastRequestPreparationParallelForTesting(spaceId),
                     Is.False);
                 Assert.That(
-                    VirtualTextureSystem.GetResidencyClassificationCapacityForTesting(spaceId),
+                    VirtualTextureSystem.GetRequestPreparationCapacityForTesting(spaceId),
                     Is.EqualTo(128));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_SchedulesAllSpaceRequestPreparationsBeforeSingleWait()
+        {
+            int firstSpaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "ParallelClassificationA",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                virtualPageCountX: 16,
+                virtualPageCountY: 16,
+                mipCount: 5,
+                feedbackCapacity: 128));
+            int secondSpaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "ParallelClassificationB",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                virtualPageCountX: 16,
+                virtualPageCountY: 16,
+                mipCount: 5,
+                feedbackCapacity: 128));
+            var requestKeys = new ulong[130];
+            for (int requestIndex = 0; requestIndex < 65; requestIndex++)
+            {
+                var coord = new VirtualTexturePageCoord(
+                    requestIndex % 16,
+                    requestIndex / 16,
+                    0);
+                requestKeys[requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    firstSpaceId,
+                    coord);
+                requestKeys[65 + requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    secondSpaceId,
+                    coord);
+            }
+
+            var commandBuffer = new CommandBuffer();
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    requestKeys);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(
+                    VirtualTextureSystem.WasLastRequestPreparationParallelForTesting(firstSpaceId),
+                    Is.True);
+                Assert.That(
+                    VirtualTextureSystem.WasLastRequestPreparationParallelForTesting(secondSpaceId),
+                    Is.True);
+                Assert.That(
+                    VirtualTextureSystem.GetLastRequestPreparationScheduledJobCountForTesting(),
+                    Is.EqualTo(4));
+                Assert.That(
+                    VirtualTextureSystem.GetLastRequestPreparationWaitCountForTesting(),
+                    Is.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(firstSpaceId),
+                    Is.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(secondSpaceId),
+                    Is.EqualTo(1));
             }
             finally
             {
@@ -1250,7 +2412,9 @@ namespace VividRP.Editor.Tests
             int virtualPageCountX = 4,
             int virtualPageCountY = 4,
             int mipCount = 3,
-            int feedbackCapacity = 32)
+            int feedbackCapacity = 32,
+            int maxResidencyAllocationsPerFrame = 0,
+            int maxPrefetchAllocationsPerFrame = 0)
         {
             return new VirtualTextureSpaceDesc(
                 name,
@@ -1263,7 +2427,9 @@ namespace VividRP.Editor.Tests
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: maxUploadsPerFrame,
                 feedbackCapacity: feedbackCapacity,
-                neighborPrefetchCount: neighborPrefetchCount);
+                neighborPrefetchCount: neighborPrefetchCount,
+                maxResidencyAllocationsPerFrame: maxResidencyAllocationsPerFrame,
+                maxPrefetchAllocationsPerFrame: maxPrefetchAllocationsPerFrame);
         }
 
         private static void AssertClassification(
@@ -1275,6 +2441,50 @@ namespace VividRP.Editor.Tests
             Assert.That(result.PageIndex, Is.EqualTo(pageIndex));
             Assert.That(result.MipGap, Is.EqualTo(mipGap));
             Assert.That(result.Classification, Is.EqualTo(classification));
+        }
+
+        private static VirtualTextureAggregatedFeedbackRequest CreateAggregatedRequest(
+            in VirtualTexturePageCoord pageCoord)
+        {
+            return CreateAggregatedRequest(
+                pageCoord,
+                hitCount: 1,
+                cameraPriority: 0,
+                VirtualTextureViewId.Invalid,
+                isActiveView: false);
+        }
+
+        private static VirtualTextureAggregatedFeedbackRequest CreateAggregatedRequest(
+            in VirtualTexturePageCoord pageCoord,
+            int hitCount,
+            int cameraPriority,
+            VirtualTextureViewId viewId,
+            bool isActiveView)
+        {
+            return new VirtualTextureAggregatedFeedbackRequest(
+                spaceId: 1,
+                pageCoord,
+                hitCount,
+                cameraPriority,
+                viewId,
+                isActiveView);
+        }
+
+        private static VTRequestPreparationResult CreatePreparedCandidate(
+            in VirtualTextureAggregatedFeedbackRequest request)
+        {
+            var candidate = new VTPrefetchCandidate(
+                request
+#if VT_DEBUG
+                , request.PageCoord,
+                mipGap: 0,
+                requestKind: VTPageRequestKind.Demand
+#endif
+            );
+            return new VTRequestPreparationResult(
+                default,
+                candidate,
+                hasCandidate: true);
         }
 
         private static void AssertPhysicalAtlas(

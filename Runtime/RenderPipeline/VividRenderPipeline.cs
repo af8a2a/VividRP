@@ -79,6 +79,7 @@ namespace VividRP.Runtime
         private RenderGraph m_RenderGraph;
         private bool m_RuntimeResourcesInitialized;
         private bool m_RequiredResourcesWarningLogged;
+        private int m_EditModePipelineFrameIndex;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
@@ -106,8 +107,13 @@ namespace VividRP.Runtime
             if (!TryInitializeRuntimeResources())
                 return;
 
+            // Subsystems with global budgets must see one token for every camera in this render.
+            int frameIndex = ResolvePipelineFrameIndex(
+                Application.isPlaying,
+                Time.frameCount,
+                ref m_EditModePipelineFrameIndex);
             foreach (var camera in cameras)
-                RenderCamera(context, camera);
+                RenderCamera(context, camera, frameIndex);
 
             using (s_EndFrameMarker.Auto())
             {
@@ -115,11 +121,36 @@ namespace VividRP.Runtime
             }
         }
 
+        internal static int ResolvePipelineFrameIndex(
+            bool isPlaying,
+            int playModeFrameIndex,
+            ref int editModeFrameIndex)
+        {
+            if (isPlaying)
+                return playModeFrameIndex;
+
+            unchecked
+            {
+                editModeFrameIndex++;
+            }
+
+            if (editModeFrameIndex < 0)
+                editModeFrameIndex = 1;
+
+            return editModeFrameIndex;
+        }
+
         private static void ApplyVirtualTextureStreamingSettings(VividRenderPipelineAsset asset)
         {
             if (asset == null)
                 return;
 
+            VirtualTextureSystem.ConfigureBudgets(
+                asset.VirtualTextureMaxResidencyAllocationsPerFrame,
+                asset.VirtualTextureMaxPrefetchAllocationsPerFrame,
+                asset.VirtualTextureMaxPageUploadsPerFrame,
+                ResolveVirtualTextureUploadByteBudget(
+                    asset.VirtualTextureMaxUploadBytesPerFrameMiB));
             VTStreamChunkManager.Shared.Configure(
                 asset.VirtualTextureIOBackend,
                 asset.VirtualTextureMaxInFlightChunks,
@@ -127,7 +158,16 @@ namespace VividRP.Runtime
                 asset.VirtualTextureDecodedCacheBudgetMiB);
         }
 
-        private void RenderCamera(ScriptableRenderContext context, Camera camera)
+        internal static int ResolveVirtualTextureUploadByteBudget(int budgetMiB)
+        {
+            if (budgetMiB <= 0)
+                return 0;
+
+            long budgetBytes = (long)budgetMiB * 1024L * 1024L;
+            return budgetBytes >= int.MaxValue ? int.MaxValue : (int)budgetBytes;
+        }
+
+        private void RenderCamera(ScriptableRenderContext context, Camera camera, int frameIndex)
         {
             using var renderCameraScope = s_RenderCameraMarker.Auto();
             using (s_BeginCameraRenderingMarker.Auto())
@@ -213,7 +253,7 @@ namespace VividRP.Runtime
                     camera.scaledPixelWidth > 0 ? camera.scaledPixelWidth : camera.pixelWidth,
                     camera.scaledPixelHeight > 0 ? camera.scaledPixelHeight : camera.pixelHeight);
                 cameraHistoryFrameActive = true;
-                PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
+                PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset, frameIndex);
                 var cameraData = PassRecorder.GetFrameData().Get<VividCameraData>();
                 cameraHistory.SetReferenceSize(
                     cameraData?.actualWidth ?? camera.pixelWidth,

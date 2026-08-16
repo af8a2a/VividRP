@@ -14,11 +14,11 @@ SAMPLER(sampler_VTPhysicalCache);
 float4 _VTLayerFallbacks[4];
 
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
-RWStructuredBuffer<uint2> _VTFeedbackRequests : register(u1);
-RWStructuredBuffer<uint> _VTFeedbackCounter : register(u2);
-globallycoherent RWStructuredBuffer<uint4> _VTFeedbackResidentHash : register(u3);
+globallycoherent RWStructuredBuffer<uint4> _VTFeedbackRequests : register(u5);
+RWStructuredBuffer<uint> _VTFeedbackCounter : register(u6);
+globallycoherent RWStructuredBuffer<uint4> _VTFeedbackResidentHash : register(u7);
 #else
-StructuredBuffer<uint2> _VTFeedbackRequests;
+StructuredBuffer<uint4> _VTFeedbackRequests;
 StructuredBuffer<uint> _VTFeedbackCounter;
 StructuredBuffer<uint4> _VTFeedbackResidentHash;
 #endif
@@ -29,6 +29,7 @@ int _VTDebugMode;
 int _VTFeedbackEnabled;
 int _VTFeedbackFrameIndex;
 int _VTFeedbackSampleRate;
+int _VTFeedbackRequestCapacity;
 int _VTFeedbackResidentHashCapacity;
 float4 _VTFeedbackViewParams;
 float _VTAdaptiveMipBias;
@@ -69,9 +70,15 @@ float _VTAdaptiveMipBias;
 #define VT_FEEDBACK_REQUEST_COUNTER_INDEX 0
 #define VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX 1
 #define VT_FEEDBACK_RESIDENT_ACCESS_COUNTER_INDEX 2
+#define VT_FEEDBACK_FAULT_OVERFLOW_COUNTER_INDEX 3
+#define VT_FEEDBACK_RESIDENT_OVERFLOW_COUNTER_INDEX 4
+#define VT_FEEDBACK_RESIDENT_FALLBACK_COUNTER_INDEX 5
+#define VT_FEEDBACK_WEIGHTED_RESOLVED_SAMPLE_COUNTER_INDEX 6
+#define VT_FEEDBACK_ACCEPTED_FAULT_COUNTER_INDEX 7
 #define VT_FEEDBACK_RESIDENT_HASH_LOCK_BIT 0x80000000u
 #define VT_FEEDBACK_RESIDENT_HASH_EPOCH_MASK 0x7FFFFFFFu
 #define VT_FEEDBACK_RESIDENT_HASH_MAX_PROBES 16u
+#define VT_FEEDBACK_OUTPUT_OVERFLOW_SENTINEL 0xFFFFFFFFu
 #define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS 20u
 #define VT_PAGE_TABLE_RESOLVED_MIP_BITS 6u
 #define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_MASK ((1u << VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS) - 1u)
@@ -618,12 +625,103 @@ uint VTFeedbackResidentEpoch()
     return max(epoch, 1u);
 }
 
-bool VTShouldAppendResidentFeedback(uint2 key)
+void VTRecordFeedbackOverflow(bool residentAccess)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    uint overflowCounterIndex = residentAccess
+        ? VT_FEEDBACK_RESIDENT_OVERFLOW_COUNTER_INDEX
+        : VT_FEEDBACK_FAULT_OVERFLOW_COUNTER_INDEX;
+    uint previousOverflowCount = 0u;
+    InterlockedAdd(
+        _VTFeedbackCounter[overflowCounterIndex],
+        1u,
+        previousOverflowCount);
+#endif
+}
+
+void VTAppendCompactedFeedback(uint2 key, bool residentAccess)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    uint requestIndex = 0u;
+    InterlockedAdd(
+        _VTFeedbackCounter[VT_FEEDBACK_REQUEST_COUNTER_INDEX],
+        1u,
+        requestIndex);
+    uint requestCapacity = (uint)max(_VTFeedbackRequestCapacity, 0);
+    if (requestIndex >= requestCapacity)
+    {
+        VTRecordFeedbackOverflow(residentAccess);
+        return;
+    }
+
+    _VTFeedbackRequests[requestIndex] = uint4(
+        key,
+        residentAccess ? 0u : 1u,
+        residentAccess ? 1u : 0u);
+    if (residentAccess)
+    {
+        uint previousResidentAccessCount = 0u;
+        InterlockedAdd(
+            _VTFeedbackCounter[VT_FEEDBACK_RESIDENT_ACCESS_COUNTER_INDEX],
+            1u,
+            previousResidentAccessCount);
+    }
+    else
+    {
+        uint previousAcceptedFaultCount = 0u;
+        InterlockedAdd(
+            _VTFeedbackCounter[VT_FEEDBACK_ACCEPTED_FAULT_COUNTER_INDEX],
+            1u,
+            previousAcceptedFaultCount);
+    }
+#endif
+}
+
+void VTAccumulateCompactedFeedback(uint outputIndex, bool residentAccess)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    if (residentAccess)
+    {
+        uint previousResidentAccess = 0u;
+        InterlockedCompareExchange(
+            _VTFeedbackRequests[outputIndex].w,
+            0u,
+            1u,
+            previousResidentAccess);
+        if (previousResidentAccess == 0u)
+        {
+            uint previousResidentAccessCount = 0u;
+            InterlockedAdd(
+                _VTFeedbackCounter[VT_FEEDBACK_RESIDENT_ACCESS_COUNTER_INDEX],
+                1u,
+                previousResidentAccessCount);
+        }
+    }
+    else
+    {
+        uint previousFaultHitCount = 0u;
+        InterlockedAdd(
+            _VTFeedbackRequests[outputIndex].z,
+            1u,
+            previousFaultHitCount);
+        uint previousAcceptedFaultCount = 0u;
+        InterlockedAdd(
+            _VTFeedbackCounter[VT_FEEDBACK_ACCEPTED_FAULT_COUNTER_INDEX],
+            1u,
+            previousAcceptedFaultCount);
+    }
+#endif
+}
+
+void VTWriteCompactedFeedback(uint2 key, bool residentAccess)
 {
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
     uint capacity = (uint)max(_VTFeedbackResidentHashCapacity, 0);
     if (capacity == 0u)
-        return true;
+    {
+        VTRecordFeedbackOverflow(residentAccess);
+        return;
+    }
 
     uint epoch = VTFeedbackResidentEpoch();
     uint lockedEpoch = epoch | VT_FEEDBACK_RESIDENT_HASH_LOCK_BIT;
@@ -639,30 +737,26 @@ bool VTShouldAppendResidentFeedback(uint2 key)
         {
             DeviceMemoryBarrier();
             if (all(_VTFeedbackResidentHash[slot].xy == key))
-                return false;
+            {
+                uint outputIndexPlusOne = _VTFeedbackResidentHash[slot].w;
+                if (outputIndexPlusOne == VT_FEEDBACK_OUTPUT_OVERFLOW_SENTINEL)
+                    VTRecordFeedbackOverflow(residentAccess);
+                else if (outputIndexPlusOne > 0u)
+                    VTAccumulateCompactedFeedback(outputIndexPlusOne - 1u, residentAccess);
+                return;
+            }
 
             continue;
         }
 
         if (state == lockedEpoch)
         {
-            [unroll]
-            for (uint waitIndex = 0u; waitIndex < 4u; waitIndex++)
-            {
-                DeviceMemoryBarrier();
-                state = _VTFeedbackResidentHash[slot].z;
-                if (state != lockedEpoch)
-                    break;
-            }
-
-            if (state == epoch)
-            {
-                DeviceMemoryBarrier();
-                if (all(_VTFeedbackResidentHash[slot].xy == key))
-                    return false;
-            }
-
-            continue;
+            // Never spin on a pixel-shader lane. The lock owner may be masked in the
+            // same wave. Faults use a compact-record fallback and are merged again on CPU;
+            // resident refresh is best effort and the lock owner already records it.
+            if (!residentAccess)
+                VTAppendCompactedFeedback(key, false);
+            return;
         }
 
         uint observedState = 0u;
@@ -671,23 +765,89 @@ bool VTShouldAppendResidentFeedback(uint2 key)
             state,
             lockedEpoch,
             observedState);
-        if (observedState != state)
-            continue;
+        bool wonSlot = observedState == state;
+        if (wonSlot)
+        {
+            uint requestIndex = 0u;
+            InterlockedAdd(
+                _VTFeedbackCounter[VT_FEEDBACK_REQUEST_COUNTER_INDEX],
+                1u,
+                requestIndex);
+            uint requestCapacity = (uint)max(_VTFeedbackRequestCapacity, 0);
+            uint outputIndexPlusOne = requestIndex < requestCapacity
+                ? requestIndex + 1u
+                : VT_FEEDBACK_OUTPUT_OVERFLOW_SENTINEL;
 
-        _VTFeedbackResidentHash[slot].xy = key;
+            _VTFeedbackResidentHash[slot].xy = key;
+            if (outputIndexPlusOne != VT_FEEDBACK_OUTPUT_OVERFLOW_SENTINEL)
+            {
+                _VTFeedbackRequests[requestIndex] = uint4(
+                    key,
+                    residentAccess ? 0u : 1u,
+                    residentAccess ? 1u : 0u);
+            }
+            _VTFeedbackResidentHash[slot].w = outputIndexPlusOne;
+            DeviceMemoryBarrier();
+            uint publishedState = 0u;
+            InterlockedCompareExchange(
+                _VTFeedbackResidentHash[slot].z,
+                lockedEpoch,
+                epoch,
+                publishedState);
+
+            if (outputIndexPlusOne == VT_FEEDBACK_OUTPUT_OVERFLOW_SENTINEL)
+            {
+                VTRecordFeedbackOverflow(residentAccess);
+            }
+            else if (residentAccess)
+            {
+                uint previousResidentAccessCount = 0u;
+                InterlockedAdd(
+                    _VTFeedbackCounter[VT_FEEDBACK_RESIDENT_ACCESS_COUNTER_INDEX],
+                    1u,
+                    previousResidentAccessCount);
+            }
+            else
+            {
+                uint previousAcceptedFaultCount = 0u;
+                InterlockedAdd(
+                    _VTFeedbackCounter[VT_FEEDBACK_ACCEPTED_FAULT_COUNTER_INDEX],
+                    1u,
+                    previousAcceptedFaultCount);
+            }
+            return;
+        }
+
+        // Do not depend on lock-owner scheduling. If another wave still owns the slot,
+        // keep every fault through a fallback record rather than risking a lock-dependent
+        // loss. CPU aggregation removes these rare duplicates.
         DeviceMemoryBarrier();
-        uint publishedState = 0u;
-        InterlockedCompareExchange(
-            _VTFeedbackResidentHash[slot].z,
-            lockedEpoch,
-            epoch,
-            publishedState);
-        return true;
-    }
-#endif
+        uint resolvedState = _VTFeedbackResidentHash[slot].z;
+        if (resolvedState == epoch)
+        {
+            if (all(_VTFeedbackResidentHash[slot].xy == key))
+            {
+                uint outputIndexPlusOne = _VTFeedbackResidentHash[slot].w;
+                if (outputIndexPlusOne == VT_FEEDBACK_OUTPUT_OVERFLOW_SENTINEL)
+                    VTRecordFeedbackOverflow(residentAccess);
+                else if (outputIndexPlusOne > 0u)
+                {
+                    VTAccumulateCompactedFeedback(outputIndexPlusOne - 1u, residentAccess);
+                }
+                return;
+            }
 
-    // A saturated hash table must degrade to duplicate traffic, never a lost access.
-    return true;
+            continue;
+        }
+
+        if (!residentAccess)
+            VTAppendCompactedFeedback(key, false);
+        return;
+    }
+
+    if (!residentAccess)
+        VTAppendCompactedFeedback(key, false);
+#endif
 }
 
 bool VTShouldWriteFeedback(float2 virtualUv, uint requestedMip)
@@ -728,23 +888,7 @@ void VTWriteFeedbackRequest(float2 virtualUv, uint clampedMip, bool deduplicateR
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
     uint2 pageCoord = VTGetPageCoord(virtualUv, clampedMip);
     uint2 key = VTEncodeFeedbackKey(pageCoord, clampedMip);
-    if (deduplicateResidentAccess && !VTShouldAppendResidentFeedback(key))
-        return;
-
-    uint requestIndex = 0u;
-    InterlockedAdd(_VTFeedbackCounter[VT_FEEDBACK_REQUEST_COUNTER_INDEX], 1u, requestIndex);
-    if (requestIndex < (uint)VT_FEEDBACK_CAPACITY)
-    {
-        _VTFeedbackRequests[requestIndex] = key;
-        if (deduplicateResidentAccess)
-        {
-            uint previousResidentAccessCount = 0u;
-            InterlockedAdd(
-                _VTFeedbackCounter[VT_FEEDBACK_RESIDENT_ACCESS_COUNTER_INDEX],
-                1u,
-                previousResidentAccessCount);
-        }
-    }
+    VTWriteCompactedFeedback(key, deduplicateResidentAccess);
 #endif
 }
 
@@ -790,9 +934,37 @@ void VTWriteAccessFeedback(
     if (!VTShouldWriteFeedback(svPosition, virtualUv, clampedMip))
         return;
 
-    // Faults retain their duplicate hit counts for demand prioritization. Resident hits only
-    // need one entry per virtual page and frame to keep the physical LRU working set warm.
+    // Fault hit counts are accumulated in the compact record for demand prioritization.
+    // Resident hits retain one bit per virtual page and frame to refresh the physical LRU.
     VTWriteFeedbackRequest(virtualUv, clampedMip, resolved.resident);
+#endif
+}
+
+void VTWriteResolvedSampleStatusWeighted(uint sampleRate, VTResolvedAddress resolved)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    uint previousResolvedSampleCount = 0u;
+    InterlockedAdd(
+        _VTFeedbackCounter[VT_FEEDBACK_WEIGHTED_RESOLVED_SAMPLE_COUNTER_INDEX],
+        sampleRate,
+        previousResolvedSampleCount);
+
+    if (!resolved.fallback)
+        return;
+
+    uint previousFallbackSampleCount = 0u;
+    InterlockedAdd(
+        _VTFeedbackCounter[VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX],
+        sampleRate,
+        previousFallbackSampleCount);
+    if (resolved.resident)
+    {
+        uint previousResidentFallbackSampleCount = 0u;
+        InterlockedAdd(
+            _VTFeedbackCounter[VT_FEEDBACK_RESIDENT_FALLBACK_COUNTER_INDEX],
+            sampleRate,
+            previousResidentFallbackSampleCount);
+    }
 #endif
 }
 
@@ -807,10 +979,18 @@ void VTWriteFallbackSample(VTResolvedAddress resolved)
         _VTFeedbackCounter[VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX],
         1u,
         previousFallbackSampleCount);
+    if (resolved.resident)
+    {
+        uint previousResidentFallbackSampleCount = 0u;
+        InterlockedAdd(
+            _VTFeedbackCounter[VT_FEEDBACK_RESIDENT_FALLBACK_COUNTER_INDEX],
+            1u,
+            previousResidentFallbackSampleCount);
+    }
 #endif
 }
 
-void VTWriteFallbackSampleWeighted(uint sampleRate)
+void VTWriteFallbackSampleWeighted(uint sampleRate, bool resident)
 {
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
     uint previousFallbackSampleCount = 0u;
@@ -818,6 +998,33 @@ void VTWriteFallbackSampleWeighted(uint sampleRate)
         _VTFeedbackCounter[VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX],
         sampleRate,
         previousFallbackSampleCount);
+    if (resident)
+    {
+        uint previousResidentFallbackSampleCount = 0u;
+        InterlockedAdd(
+            _VTFeedbackCounter[VT_FEEDBACK_RESIDENT_FALLBACK_COUNTER_INDEX],
+            sampleRate,
+            previousResidentFallbackSampleCount);
+    }
+#endif
+}
+
+void VTWriteResolvedSampleStatus(
+    float2 virtualUv,
+    uint requestedMip,
+    VTResolvedAddress resolved,
+    float4 svPosition)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    if (_VTFeedbackEnabled == 0)
+        return;
+
+    uint clampedMip = min(requestedMip, (uint)max(VT_MIP_COUNT - 1, 0));
+    uint sampleRate = (uint)max(_VTFeedbackSampleRate, 1);
+    if (!VTShouldWriteFeedback(svPosition, virtualUv, clampedMip))
+        return;
+
+    VTWriteResolvedSampleStatusWeighted(sampleRate, resolved);
 #endif
 }
 
@@ -832,7 +1039,7 @@ void VTWriteFallbackSample(float2 virtualUv, uint requestedMip, VTResolvedAddres
     if (!VTShouldWriteFeedback(virtualUv, clampedMip))
         return;
 
-    VTWriteFallbackSampleWeighted(sampleRate);
+    VTWriteFallbackSampleWeighted(sampleRate, resolved.resident);
 #endif
 }
 
@@ -847,7 +1054,7 @@ void VTWriteFallbackSample(float2 virtualUv, uint requestedMip, VTResolvedAddres
     if (!VTShouldWriteFeedback(svPosition, virtualUv, clampedMip))
         return;
 
-    VTWriteFallbackSampleWeighted(sampleRate);
+    VTWriteFallbackSampleWeighted(sampleRate, resolved.resident);
 #endif
 }
 

@@ -1,5 +1,9 @@
 # Streaming Virtual Texture Roadmap
 
+> 当前状态：独立的 `VirtualTextureDemoController` / `VirtualTextureDemoPass` 渲染链路已退役。
+> Demo 内容改用正式的 `MeshletRenderer -> VisibilityBuffer -> VisibilityBufferGBufferResolve`
+> 链路和 `GPUDrivenSurface` streamed VT asset。下方独立 Demo 里程碑仅保留为历史实现背景。
+
 ## Context
 
 当前 VT 系统已经完成了一个可运行的单空间 SVT MVP：`VirtualTextureDemoController` 可以注册一个 2D address space，`VirtualTextureDemoPass` 绑定 page table、physical cache 和 feedback buffer，demo shader 能按 UV 反馈缺页并采样物理页缓存。最新迭代已经让 `Assets/vt/UVTest.jpg` 可以作为 source texture 被 `VTTexture2DPageProducer` 按需切 tile，并在 shader 侧加入上下 mip 的三线性混合，降低 mip 切换硬边。

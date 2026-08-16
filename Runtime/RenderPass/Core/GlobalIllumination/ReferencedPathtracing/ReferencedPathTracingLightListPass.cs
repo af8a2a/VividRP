@@ -21,6 +21,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.Write)]
         private RenderGraphBuffer m_ReferenceLightListParameters;
 
+        private readonly ReferencedPathTracingLightListBuilder.BuildWorkspace
+            m_BuildWorkspace = new();
         private ReferencedPathTracingLightListBuildResult m_BuildResult;
 
         public ReferencedPathTracingLightListPass()
@@ -49,26 +51,39 @@ namespace VividRP.Runtime.RenderPass.Core
             lightDatabase.CompleteSceneLightPrepare();
             m_BuildResult =
                 ReferencedPathTracingLightListBuilder.Build(
-                    lightDatabase.sceneLightData);
+                    lightDatabase.sceneLightData,
+                    m_BuildWorkspace);
 
             ConfigureBuffer(
                 m_ReferenceLightList,
-                Mathf.Max(m_BuildResult.records.Length, 1),
+                Mathf.Max(m_BuildResult.recordCount, 1),
                 ReferencedPathTracingLightRecord.Stride,
                 "ReferenceLightList");
             ConfigureBuffer(
                 m_ReferenceLightListParameters,
-                Mathf.Max(m_BuildResult.storageBlocks.Length, 1),
+                Mathf.Max(m_BuildResult.storageBlockCount, 1),
                 ReferencedPathTracingLightListStorageBlock.Stride,
                 "ReferenceLightListParameters");
             m_ReferenceLightList.EnsureImportedBuffer();
             m_ReferenceLightListParameters.EnsureImportedBuffer();
-            m_ReferenceLightList.SetData(
-                m_BuildResult.records.Length > 0
-                    ? m_BuildResult.records
-                    : s_EmptyLightUpload);
+            if (m_BuildResult.recordCount > 0)
+            {
+                m_ReferenceLightList.SetData(
+                    m_BuildResult.records,
+                    0,
+                    0,
+                    m_BuildResult.recordCount);
+            }
+            else
+            {
+                m_ReferenceLightList.SetData(s_EmptyLightUpload);
+            }
+
             m_ReferenceLightListParameters.SetData(
-                m_BuildResult.storageBlocks);
+                m_BuildResult.storageBlocks,
+                0,
+                0,
+                m_BuildResult.storageBlockCount);
         }
 
         public override void Record(ComputePassContext context)

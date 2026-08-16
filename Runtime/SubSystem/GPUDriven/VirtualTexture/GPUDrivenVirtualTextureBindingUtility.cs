@@ -75,6 +75,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             properties.SetInt(VirtualTextureShaderIDs._VTFeedbackEnabled, 0);
             properties.SetInt(VirtualTextureShaderIDs._VTFeedbackFrameIndex, frameIndex);
             properties.SetInt(VirtualTextureShaderIDs._VTFeedbackSampleRate, 1);
+            properties.SetInt(VirtualTextureShaderIDs._VTFeedbackRequestCapacity, 0);
+            properties.SetInt(VirtualTextureShaderIDs._VTFeedbackResidentHashCapacity, 0);
             properties.SetVector(VirtualTextureShaderIDs._VTFeedbackViewParams, Vector4.zero);
             properties.SetFloat(
                 VirtualTextureShaderIDs._VTAdaptiveMipBias,

@@ -1,15 +1,58 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using VividRP.Runtime.SubSystem.Decal;
 
 namespace VividRP.Runtime.GPUDriven.VirtualTexture
 {
+    public enum GPUDrivenVirtualTexturePhysicalPoolQuality
+    {
+        Low = 0,
+        Medium = 1,
+        High = 2,
+    }
+
+    internal readonly struct GPUDrivenVirtualTextureDescriptorProfile :
+        IEquatable<GPUDrivenVirtualTextureDescriptorProfile>
+    {
+        internal GPUDrivenVirtualTextureDescriptorProfile(int cachePageCount)
+        {
+            if (cachePageCount <= 0
+                || cachePageCount > VirtualTexturePageTableEntry.MaxPhysicalPageCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cachePageCount));
+            }
+
+            CachePageCount = cachePageCount;
+        }
+
+        internal int CachePageCount { get; }
+
+        public bool Equals(GPUDrivenVirtualTextureDescriptorProfile other)
+        {
+            return CachePageCount == other.CachePageCount;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is GPUDrivenVirtualTextureDescriptorProfile other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return CachePageCount;
+        }
+    }
+
     internal interface IGPUDrivenVirtualTextureRuntimeCapabilities
     {
         bool SupportsComputeShaders { get; }
+
+        int MaxTextureSize { get; }
 
         bool IsFormatSupported(GraphicsFormat format, GraphicsFormatUsage usage);
 
@@ -26,6 +69,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         public bool SupportsComputeShaders => SystemInfo.supportsComputeShaders;
 
+        public int MaxTextureSize => SystemInfo.maxTextureSize;
+
         public CopyTextureSupport CopyTextureSupport => SystemInfo.copyTextureSupport;
 
         public bool IsFormatSupported(GraphicsFormat format, GraphicsFormatUsage usage)
@@ -37,7 +82,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
     internal sealed class VirtualTextureGPUDrivenTextureBackend :
         IGPUDrivenTextureBackend,
         IGPUDrivenTextureBindingLifecycle,
-        IGPUDrivenVirtualTextureBackend
+        IGPUDrivenVirtualTextureBackend,
+        IGPUDrivenTerrainRuntimeVirtualTextureBackend
     {
         internal const int PageSize = 128;
         internal const int BorderSize = 4;
@@ -46,12 +92,24 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal const int VirtualPageCapacity = AtlasPageCount * AtlasPageCount;
         internal const string SpaceName = "VividGPUDriven.StaticMesh";
 
-        private const int CachePageCount = 512;
+        private const int LowCachePageCount = 256;
+        private const int MediumCachePageCount = 512;
+        private const int HighCachePageCount = 1024;
         private const int MaxUploadsPerFrame = 16;
         private const int FeedbackCapacity = 65536;
+        private const int NeighborPrefetchCount = 1;
         private const int ResourceLayerBitCount = 8;
+        private const int TerrainRuntimeVirtualTexturePageBudget = 4;
+        private const int InitialSurfaceBindingCapacity = 16;
 
-        private readonly struct TextureSetKey : IEquatable<TextureSetKey>
+        private static readonly VTStackDesc s_CompatibleStreamedStackDesc = CreateSpaceDesc(
+            ResolveDescriptorProfile(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium)).StackDesc;
+        private static readonly int s_TerrainRVTRecordsId = Shader.PropertyToID("_VividTerrainRVTRecords");
+        private static readonly int s_TerrainRVTLevelsId = Shader.PropertyToID("_VividTerrainRVTLevels");
+        private static readonly int s_TerrainRVTRecordCountId = Shader.PropertyToID("_VividTerrainRVTRecordCount");
+        private static readonly int s_TerrainRVTEnabledId = Shader.PropertyToID("_VividTerrainRVTEnabled");
+
+        internal readonly struct TextureSetKey : IEquatable<TextureSetKey>
         {
             internal TextureSetKey(
                 VividVirtualTextureAsset streamedAsset,
@@ -113,9 +171,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
         }
 
-        private sealed class BindingEntry
+        internal struct BindingEntry
         {
-            internal TextureSetKey Key;
             internal VividSurfaceBindingData Binding;
             internal Texture2D BaseColor;
             internal Texture2D Normal;
@@ -123,7 +180,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             internal VividVirtualTextureAsset StreamedAsset;
             internal RectInt PageRegion;
             internal GPUDrivenVirtualTextureAtlasAllocator.Allocation AtlasAllocation;
-            internal VirtualTexturePageCoord[] MipTailCoords;
+            internal RectInt MipTailRegion;
             internal int MaxMip;
             internal int ResidentMipTailPageCount;
             internal uint LastTouchedUpdate;
@@ -132,16 +189,83 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             internal bool MipTailResident;
         }
 
-        private readonly Dictionary<TextureSetKey, BindingEntry> m_Bindings = new();
-        private readonly HashSet<EntityId> m_RegisteredTextureIds = new();
+        internal sealed class ExternalSurfaceBindingLease : IDisposable
+        {
+            private VirtualTextureGPUDrivenTextureBackend m_Owner;
+            private readonly TextureSetKey m_Key;
+
+            internal ExternalSurfaceBindingLease(
+                VirtualTextureGPUDrivenTextureBackend owner,
+                in TextureSetKey key,
+                in BindingEntry entry)
+            {
+                m_Owner = owner;
+                m_Key = key;
+                Binding = entry.Binding;
+                PageRegion = entry.PageRegion;
+                MaxMip = entry.MaxMip;
+            }
+
+            internal VividSurfaceBindingData Binding { get; }
+            internal RectInt PageRegion { get; }
+            internal int MaxMip { get; }
+
+            public void Dispose()
+            {
+                VirtualTextureGPUDrivenTextureBackend owner = m_Owner;
+                if (owner == null)
+                    return;
+
+                m_Owner = null;
+                owner.ReleaseExternalSurfaceBinding(m_Key);
+            }
+        }
+
+        private sealed class TerrainRVTRegistration
+        {
+            internal VividTerrain Terrain;
+            internal VividTerrainData TerrainData;
+            internal EntityId EntityId;
+            internal uint Revision;
+            internal uint RecordIndex;
+            internal uint LastTouchedUpdate;
+            internal uint CreatedUpdate;
+        }
+
+        private sealed class TerrainRVTCameraState
+        {
+            internal Camera Camera;
+            internal EntityId CameraId;
+            internal readonly Dictionary<EntityId, TerrainRuntimeVirtualTextureClipmap> Clipmaps = new();
+            internal int LastScheduledFrame = -1;
+        }
+
+        private readonly Dictionary<TextureSetKey, BindingEntry> m_Bindings =
+            new(InitialSurfaceBindingCapacity);
+        private readonly Dictionary<TextureSetKey, int> m_ExternalBindingRefCounts =
+            new(InitialSurfaceBindingCapacity);
+        private readonly HashSet<EntityId> m_RegisteredTextureIds = new(InitialSurfaceBindingCapacity);
         private readonly HashSet<EntityId> m_UnsupportedTextureWarningIds = new();
         private readonly HashSet<EntityId> m_InvalidStreamedAssetWarningIds = new();
         private readonly Dictionary<EntityId, uint> m_PermanentlyFailedStreamedAssets = new();
         private readonly HashSet<EntityId> m_IncompatibleScalarMaskWarningIds = new();
-        private readonly List<BindingEntry> m_PendingMipTailEntries = new();
-        private readonly List<BindingEntry> m_ReleaseEntries = new();
+        private readonly HashSet<EntityId> m_InvalidTerrainDecalWarningIds = new();
+        private readonly HashSet<EntityId> m_InvalidTerrainDecalDataWarningIds = new();
+        private readonly List<TextureSetKey> m_PendingMipTailEntries = new(InitialSurfaceBindingCapacity);
+        private readonly List<TextureSetKey> m_ReleaseEntries = new(InitialSurfaceBindingCapacity);
         private readonly List<VTPageRegion> m_ReleaseRegions = new();
-        private readonly List<BindingEntry> m_ReleaseAllocationEntries = new();
+        private readonly List<BindingEntry> m_ReleaseAllocationEntries = new(InitialSurfaceBindingCapacity);
+        private readonly Dictionary<EntityId, TerrainRVTRegistration> m_TerrainRVTRegistrations = new();
+        private readonly List<TerrainRVTRegistration> m_TerrainRVTRecords = new();
+        private readonly Dictionary<EntityId, TerrainRVTCameraState> m_TerrainRVTCameraStates = new();
+        private readonly Dictionary<TerrainRuntimeVirtualTextureClipmap, GPUDrivenVirtualTextureAtlasAllocator.Allocation[]>
+            m_TerrainRVTAllocations = new();
+        private readonly List<TerrainRVTRegistration> m_TerrainRVTReleaseEntries = new();
+        private readonly List<TerrainRVTCameraState> m_TerrainRVTCameraReleaseEntries = new();
+        private readonly List<TerrainRuntimeVirtualTextureClipmap> m_TerrainRVTClipmapReleaseEntries = new();
+        private readonly List<TerrainRuntimeVirtualTextureClipmap.PageCandidate> m_TerrainRVTCandidates = new();
+        private readonly List<VTPageRegion> m_TerrainRVTFlushRegions = new();
+        private readonly ComputeShader m_TerrainRVTPageProducerCompute;
         private readonly GPUDrivenVirtualTextureAtlasAllocator m_AtlasAllocator = new(
             AtlasPageCount,
             MaxAllocationPageCount);
@@ -158,20 +282,89 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private string m_LastAtlasAllocationFailureReason = string.Empty;
         private bool m_SurfaceBindingUpdateActive;
         private bool m_RetrySurfaceBindingUpdate;
+        private readonly bool m_TerrainRVTRequested;
+        private TerrainRVTCameraState m_CurrentTerrainRVTCameraState;
+        private GraphicsBuffer m_TerrainRVTRecordBuffer;
+        private GraphicsBuffer m_TerrainRVTLevelBuffer;
+        private TerrainRuntimeVirtualTextureRecordGPUData[] m_TerrainRVTRecordUpload =
+            Array.Empty<TerrainRuntimeVirtualTextureRecordGPUData>();
+        private TerrainRuntimeVirtualTextureLevelGPUData[] m_TerrainRVTLevelUpload =
+            Array.Empty<TerrainRuntimeVirtualTextureLevelGPUData>();
         private bool m_IsDisposed;
+        private bool m_TerrainDecalConfigurationWarningIssued;
 
         internal VirtualTextureGPUDrivenTextureBackend()
             : this(
                 PipelineResourceManager.Get<VividRPCoreResources>()?.GPUDrivenVirtualTexturePageProducerCompute,
-                GPUDrivenVirtualTextureRuntimeCapabilities.Instance)
+                GPUDrivenVirtualTextureRuntimeCapabilities.Instance,
+                ResolveDescriptorProfile(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium),
+                VividRenderPipelineAsset.GetActiveAsset()?.EnableTerrainRuntimeVirtualTexture == true)
+        {
+        }
+
+        internal VirtualTextureGPUDrivenTextureBackend(
+            GPUDrivenVirtualTextureDescriptorProfile descriptorProfile)
+            : this(
+                PipelineResourceManager.Get<VividRPCoreResources>()?.GPUDrivenVirtualTexturePageProducerCompute,
+                GPUDrivenVirtualTextureRuntimeCapabilities.Instance,
+                descriptorProfile,
+                VividRenderPipelineAsset.GetActiveAsset()?.EnableTerrainRuntimeVirtualTexture == true)
+        {
+        }
+
+        internal VirtualTextureGPUDrivenTextureBackend(
+            GPUDrivenVirtualTextureDescriptorProfile descriptorProfile,
+            bool enableTerrainRuntimeVirtualTexture)
+            : this(
+                PipelineResourceManager.Get<VividRPCoreResources>()?.GPUDrivenVirtualTexturePageProducerCompute,
+                GPUDrivenVirtualTextureRuntimeCapabilities.Instance,
+                descriptorProfile,
+                enableTerrainRuntimeVirtualTexture)
         {
         }
 
         internal VirtualTextureGPUDrivenTextureBackend(
             ComputeShader pageProducerCompute,
             IGPUDrivenVirtualTextureRuntimeCapabilities capabilities)
+            : this(
+                pageProducerCompute,
+                capabilities,
+                ResolveDescriptorProfile(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium),
+                false)
         {
-            VirtualTextureSpaceDesc = CreateSpaceDesc();
+        }
+
+        internal VirtualTextureGPUDrivenTextureBackend(
+            ComputeShader pageProducerCompute,
+            IGPUDrivenVirtualTextureRuntimeCapabilities capabilities,
+            GPUDrivenVirtualTextureDescriptorProfile descriptorProfile)
+            : this(pageProducerCompute, capabilities, descriptorProfile, false)
+        {
+        }
+
+        internal VirtualTextureGPUDrivenTextureBackend(
+            ComputeShader pageProducerCompute,
+            IGPUDrivenVirtualTextureRuntimeCapabilities capabilities,
+            GPUDrivenVirtualTextureDescriptorProfile descriptorProfile,
+            bool enableTerrainRuntimeVirtualTexture)
+        {
+            m_TerrainRVTRequested = enableTerrainRuntimeVirtualTexture;
+            m_TerrainRVTPageProducerCompute = PipelineResourceManager
+                .Get<VividRPCoreResources>()
+                ?.TerrainRuntimeVirtualTexturePageProducerCompute;
+            DescriptorProfile = ResolveSupportedDescriptorProfile(
+                descriptorProfile,
+                capabilities?.MaxTextureSize ?? 0);
+            VirtualTextureSpaceDesc = CreateSpaceDesc(DescriptorProfile);
+
+            if (!DescriptorProfile.Equals(descriptorProfile))
+            {
+                Debug.LogWarning(
+                    $"[VividRP] GPUDriven virtual texture physical pool was reduced from "
+                    + $"{descriptorProfile.CachePageCount} to {DescriptorProfile.CachePageCount} pages "
+                    + $"because the active device supports at most {capabilities.MaxTextureSize}x"
+                    + $"{capabilities.MaxTextureSize} 2D textures.");
+            }
 
             if (!TryValidateGpuPageProducer(pageProducerCompute, capabilities, out string unavailableReason))
             {
@@ -227,6 +420,20 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         public int VirtualTextureAllocationId { get; }
 
+        public bool TerrainRuntimeVirtualTextureEnabled =>
+            m_TerrainRVTRequested
+            && IsAvailable
+            && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D12
+            && m_TerrainRVTPageProducerCompute != null
+            && m_TerrainRVTPageProducerCompute.HasKernel("CS")
+            && VTRuntimeBlockCompressor.IsAvailable(out _)
+            && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_UInt, GraphicsFormatUsage.LoadStore)
+            && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32_UInt, GraphicsFormatUsage.LoadStore);
+
+        internal bool TerrainRuntimeVirtualTextureRequested => m_TerrainRVTRequested;
+
+        internal GPUDrivenVirtualTextureDescriptorProfile DescriptorProfile { get; }
+
         internal VirtualTextureSpaceDesc VirtualTextureSpaceDesc { get; }
 
         internal int AtlasEntryCount => m_Producer?.EntryCount ?? 0;
@@ -249,11 +456,15 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         internal int QueuedMipTailPageCount => m_QueuedMipTailPageCount;
 
+        internal int TerrainRuntimeVirtualTextureRecordCount => m_TerrainRVTRegistrations.Count;
+
         public void PrepareFrame()
         {
             ThrowIfDisposed();
             if (!IsAvailable)
                 return;
+
+            PurgeInactiveTerrainRVTCameras();
 
             if (m_RetrySurfaceBindingUpdate)
             {
@@ -264,14 +475,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_ReleaseEntries.Clear();
             for (int tailIndex = m_PendingMipTailEntries.Count - 1; tailIndex >= 0; tailIndex--)
             {
-                BindingEntry bindingEntry = m_PendingMipTailEntries[tailIndex];
+                TextureSetKey bindingKey = m_PendingMipTailEntries[tailIndex];
+                BindingEntry bindingEntry = m_Bindings[bindingKey];
                 int residentPageCount = 0;
                 bool tailFailed = m_Producer.HasPermanentStreamFailure(bindingEntry.PageRegion);
-                for (int pageIndex = 0; pageIndex < bindingEntry.MipTailCoords.Length; pageIndex++)
+                int mipTailPageCount = GetPageCount(bindingEntry.MipTailRegion);
+                for (int pageIndex = 0; pageIndex < mipTailPageCount; pageIndex++)
                 {
                     if (VirtualTextureSystem.TryGetPageTableEntry(
                             VirtualTextureSpaceId,
-                            bindingEntry.MipTailCoords[pageIndex],
+                            GetPageCoord(bindingEntry.MipTailRegion, bindingEntry.MaxMip, pageIndex),
                             out VirtualTexturePageTableEntry entry)
                         && entry.Resident
                         && entry.Locked)
@@ -286,6 +499,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
                 int residentPageDelta = residentPageCount - bindingEntry.ResidentMipTailPageCount;
                 bindingEntry.ResidentMipTailPageCount = residentPageCount;
+                m_Bindings[bindingKey] = bindingEntry;
                 m_ResidentMipTailPageCount = Mathf.Max(0, m_ResidentMipTailPageCount + residentPageDelta);
                 if (tailFailed)
                 {
@@ -297,18 +511,19 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                         m_PermanentlyFailedStreamedAssets[bindingEntry.StreamedAsset.GetEntityId()] =
                             bindingEntry.StreamedAsset.ContentVersion;
                     }
-                    m_ReleaseEntries.Add(bindingEntry);
+                    m_ReleaseEntries.Add(bindingKey);
                     m_RetrySurfaceBindingUpdate = true;
                     continue;
                 }
 
-                if (residentPageCount != bindingEntry.MipTailCoords.Length)
+                if (residentPageCount != mipTailPageCount)
                     continue;
 
                 int lastTailIndex = m_PendingMipTailEntries.Count - 1;
                 m_PendingMipTailEntries[tailIndex] = m_PendingMipTailEntries[lastTailIndex];
                 m_PendingMipTailEntries.RemoveAt(lastTailIndex);
                 bindingEntry.MipTailResident = true;
+                m_Bindings[bindingKey] = bindingEntry;
                 m_ResidentMipTailCount += 1;
             }
 
@@ -321,6 +536,259 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         {
             ThrowIfDisposed();
             m_CreateResourceCallCountThisFrame = 0;
+        }
+
+        public bool TryGetOrCreateTerrainRuntimeVirtualTexture(
+            VividTerrain terrain,
+            VividTerrainData terrainData,
+            uint revision,
+            out uint recordIndex)
+        {
+            recordIndex = VividSurfaceBindingData.InvalidResource;
+            if (!CanCreateTerrainRuntimeVirtualTexture(terrain, terrainData))
+                return false;
+
+            EntityId terrainId = terrain.GetEntityId();
+            if (m_TerrainRVTRegistrations.TryGetValue(
+                    terrainId,
+                    out TerrainRVTRegistration existingRegistration))
+            {
+                if (existingRegistration.Revision == revision)
+                {
+                    TouchTerrainRVT(existingRegistration);
+                    recordIndex = existingRegistration.RecordIndex;
+                    return true;
+                }
+
+                ReleaseTerrainRVT(existingRegistration);
+            }
+
+            int recordSlot = FindTerrainRVTRecordSlot();
+            var registration = new TerrainRVTRegistration
+            {
+                Terrain = terrain,
+                TerrainData = terrainData,
+                EntityId = terrainId,
+                Revision = revision,
+                RecordIndex = (uint)recordSlot,
+            };
+            TouchNewTerrainRVT(registration);
+            m_TerrainRVTRecords[recordSlot] = registration;
+            m_TerrainRVTRegistrations.Add(terrainId, registration);
+            IncrementBindingRevision();
+            recordIndex = registration.RecordIndex;
+            return true;
+        }
+
+        private bool TryCreateTerrainRVTClipmap(
+            TerrainRVTCameraState cameraState,
+            TerrainRVTRegistration registration)
+        {
+            if (cameraState.Clipmaps.ContainsKey(registration.EntityId))
+                return true;
+
+            var allocations = new GPUDrivenVirtualTextureAtlasAllocator.Allocation[
+                TerrainRuntimeVirtualTextureClipmap.LevelCount];
+            var pageRegions = new RectInt[TerrainRuntimeVirtualTextureClipmap.LevelCount];
+            int allocatedLevelCount = 0;
+            TerrainRuntimeVirtualTextureClipmap clipmap = null;
+            try
+            {
+                for (int levelIndex = 0;
+                     levelIndex < TerrainRuntimeVirtualTextureClipmap.LevelCount;
+                     levelIndex++)
+                {
+                    if (!m_AtlasAllocator.TryAllocate(
+                            TerrainRuntimeVirtualTextureClipmap.WindowPageCount,
+                            TerrainRuntimeVirtualTextureClipmap.WindowPageCount,
+                            out allocations[levelIndex]))
+                    {
+                        return false;
+                    }
+
+                    pageRegions[levelIndex] = allocations[levelIndex].PageRegion;
+                    allocatedLevelCount += 1;
+                }
+
+                clipmap = new TerrainRuntimeVirtualTextureClipmap(
+                    registration.Terrain,
+                    registration.TerrainData,
+                    this,
+                    m_TerrainRVTPageProducerCompute,
+                    pageRegions,
+                    registration.Revision)
+                {
+                    RecordIndex = registration.RecordIndex,
+                };
+                int registeredLevelCount = 0;
+                try
+                {
+                    for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
+                    {
+                        m_Producer.RegisterRuntimeEntry(pageRegions[levelIndex], clipmap.Levels[levelIndex]);
+                        registeredLevelCount += 1;
+                    }
+                }
+                catch
+                {
+                    for (int levelIndex = 0; levelIndex < registeredLevelCount; levelIndex++)
+                        m_Producer.UnregisterEntry(pageRegions[levelIndex]);
+                    clipmap.Dispose();
+                    throw;
+                }
+
+                cameraState.Clipmaps.Add(registration.EntityId, clipmap);
+                m_TerrainRVTAllocations.Add(clipmap, allocations);
+                return true;
+            }
+            finally
+            {
+                if (clipmap == null || !cameraState.Clipmaps.ContainsKey(registration.EntityId))
+                {
+                    for (int levelIndex = 0; levelIndex < allocatedLevelCount; levelIndex++)
+                        m_AtlasAllocator.Release(allocations[levelIndex]);
+                }
+            }
+        }
+
+        public void UpdateTerrainRuntimeVirtualTextures(Camera renderingCamera, int frameIndex)
+        {
+            m_CurrentTerrainRVTCameraState = null;
+            bool terrainDecalsEnabled = ResolveTerrainDecalTechniqueEnabled();
+            if (!TerrainRuntimeVirtualTextureEnabled
+                || ResolveTerrainRVTCamera(renderingCamera) == null
+                || m_TerrainRVTRegistrations.Count == 0)
+            {
+                return;
+            }
+
+            TerrainRVTCameraState cameraState = GetOrCreateTerrainRVTCameraState(renderingCamera);
+            m_CurrentTerrainRVTCameraState = cameraState;
+            foreach (TerrainRVTRegistration registration in m_TerrainRVTRegistrations.Values)
+                TryCreateTerrainRVTClipmap(cameraState, registration);
+
+            int resolvedFrameIndex = frameIndex >= 0 ? frameIndex : Time.frameCount;
+            if (cameraState.LastScheduledFrame == resolvedFrameIndex)
+                return;
+
+            cameraState.LastScheduledFrame = resolvedFrameIndex;
+            TerrainVirtualTextureDecalSnapshot decalSnapshot =
+                DecalSystem.GetTerrainVirtualTextureSnapshot();
+            m_TerrainRVTFlushRegions.Clear();
+            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in cameraState.Clipmaps.Values)
+            {
+                Material terrainMaterial = clipmap.TerrainData.SourceMaterial;
+                bool materialReceivesDecals = terrainMaterial != null
+                                               && terrainMaterial.HasProperty("_SupportDecals")
+                                               && terrainMaterial.GetFloat("_SupportDecals") > 0.5f;
+                bool receiveVirtualTextureDecals = terrainDecalsEnabled && materialReceivesDecals;
+                if (receiveVirtualTextureDecals
+                    && !clipmap.TerrainData.TryValidateRuntimeDecalProjection(out string reason)
+                    && m_InvalidTerrainDecalDataWarningIds.Add(clipmap.EntityId))
+                {
+                    Debug.LogWarning(
+                        $"[VividRP] Terrain RVT decals are disabled for '{clipmap.Terrain.name}': {reason}",
+                        clipmap.Terrain);
+                }
+                clipmap.QueueDecalSnapshot(
+                    decalSnapshot,
+                    receiveVirtualTextureDecals,
+                    materialReceivesDecals);
+                for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
+                    clipmap.Levels[levelIndex].RetireResidentPages(VirtualTextureSpaceId);
+                clipmap.TryApplyPendingDecalSnapshot();
+                clipmap.UpdateCamera(renderingCamera.transform.position, m_TerrainRVTFlushRegions);
+            }
+            if (m_TerrainRVTFlushRegions.Count > 0)
+                VirtualTextureSystem.FlushRegions(VirtualTextureSpaceId, m_TerrainRVTFlushRegions);
+
+            m_TerrainRVTCandidates.Clear();
+            foreach (TerrainRuntimeVirtualTextureClipmap clipmap in cameraState.Clipmaps.Values)
+            {
+                for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
+                    clipmap.Levels[levelIndex].GatherCandidates(m_TerrainRVTCandidates);
+            }
+            m_TerrainRVTCandidates.Sort(CompareTerrainRVTCandidates);
+            int scheduledPageCount = 0;
+            for (int candidateIndex = 0;
+                 candidateIndex < m_TerrainRVTCandidates.Count
+                 && scheduledPageCount < TerrainRuntimeVirtualTexturePageBudget;
+                 candidateIndex++)
+            {
+                TerrainRuntimeVirtualTextureClipmap.PageCandidate candidate =
+                    m_TerrainRVTCandidates[candidateIndex];
+                if (candidate.Level.TryApproveAndQueue(
+                        VirtualTextureSpaceId,
+                        resolvedFrameIndex,
+                        candidate.CellIndex))
+                {
+                    scheduledPageCount += 1;
+                }
+            }
+        }
+
+        private bool ResolveTerrainDecalTechniqueEnabled()
+        {
+            VividRenderPipelineAsset asset = VividRenderPipelineAsset.GetActiveAsset();
+            if (asset == null
+                || !asset.EnableGPUDrivenDecal
+                || asset.DecalTechnique != VividDecalTechnique.TerrainRuntimeVirtualTexture)
+            {
+                return false;
+            }
+
+            if (!asset.TryValidateTerrainRuntimeVirtualTextureDecals(out _))
+                return false;
+
+            bool valid = TerrainRuntimeVirtualTextureEnabled;
+            if (!valid && !m_TerrainDecalConfigurationWarningIssued)
+            {
+                m_TerrainDecalConfigurationWarningIssued = true;
+                Debug.LogWarning(
+                    "[VividRP] Terrain Runtime Virtual Texture decals are disabled: "
+                    + "the active Terrain RVT backend does not expose the required DX12 compute capabilities. "
+                    + "The renderer will not fall back to Clustered Bindless decals.",
+                    asset);
+            }
+            return valid;
+        }
+
+        internal void WarnInvalidTerrainDecal(DecalProjector projector, string reason)
+        {
+            if (projector == null || !m_InvalidTerrainDecalWarningIds.Add(projector.GetEntityId()))
+                return;
+
+            Debug.LogWarning(
+                $"[VividRP] Decal Projector '{projector.name}' was skipped by the Terrain RVT decal backend: {reason}",
+                projector);
+        }
+
+        internal bool HasPermanentStreamFailure(RectInt pageRegion)
+        {
+            return m_Producer?.HasPermanentStreamFailure(pageRegion) == true;
+        }
+
+        public void BindTerrainRuntimeVirtualTextureGlobals(CommandBuffer cmd)
+        {
+            if (cmd == null)
+                throw new ArgumentNullException(nameof(cmd));
+
+            TerrainRVTCameraState cameraState = m_CurrentTerrainRVTCameraState;
+            int recordCount = cameraState != null && cameraState.Clipmaps.Count > 0
+                ? m_TerrainRVTRecords.Count
+                : 0;
+            if (recordCount > 0)
+            {
+                // Record slots stay terrain-stable while their contents are selected per camera.
+                // Queue the upload with this camera's rendering commands to preserve submission order.
+                UploadTerrainRVTBuffers(cmd, cameraState);
+            }
+            cmd.SetGlobalInt(s_TerrainRVTRecordCountId, recordCount);
+            cmd.SetGlobalInt(s_TerrainRVTEnabledId, recordCount > 0 ? 1 : 0);
+            if (recordCount > 0 && m_TerrainRVTRecordBuffer != null)
+                cmd.SetGlobalBuffer(s_TerrainRVTRecordsId, m_TerrainRVTRecordBuffer);
+            if (recordCount > 0 && m_TerrainRVTLevelBuffer != null)
+                cmd.SetGlobalBuffer(s_TerrainRVTLevelsId, m_TerrainRVTLevelBuffer);
         }
 
         public void BeginSurfaceBindingUpdate()
@@ -346,15 +814,30 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return;
 
             m_ReleaseEntries.Clear();
-            foreach (BindingEntry bindingEntry in m_Bindings.Values)
+            foreach (KeyValuePair<TextureSetKey, BindingEntry> bindingPair in m_Bindings)
             {
-                if (bindingEntry.LastTouchedUpdate != m_SurfaceBindingUpdate)
-                    m_ReleaseEntries.Add(bindingEntry);
+                if (bindingPair.Value.LastTouchedUpdate != m_SurfaceBindingUpdate
+                    && !m_ExternalBindingRefCounts.ContainsKey(bindingPair.Key))
+                    m_ReleaseEntries.Add(bindingPair.Key);
             }
 
             m_SurfaceBindingUpdateActive = false;
             ReleaseBindingEntries(m_ReleaseEntries);
             m_ReleaseEntries.Clear();
+
+            m_TerrainRVTReleaseEntries.Clear();
+            foreach (TerrainRVTRegistration registration in m_TerrainRVTRegistrations.Values)
+            {
+                if (registration.LastTouchedUpdate != m_SurfaceBindingUpdate)
+                    m_TerrainRVTReleaseEntries.Add(registration);
+            }
+            for (int registrationIndex = 0;
+                 registrationIndex < m_TerrainRVTReleaseEntries.Count;
+                 registrationIndex++)
+            {
+                ReleaseTerrainRVT(m_TerrainRVTReleaseEntries[registrationIndex]);
+            }
+            m_TerrainRVTReleaseEntries.Clear();
         }
 
         public void CancelSurfaceBindingUpdate()
@@ -363,15 +846,30 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return;
 
             m_ReleaseEntries.Clear();
-            foreach (BindingEntry bindingEntry in m_Bindings.Values)
+            foreach (KeyValuePair<TextureSetKey, BindingEntry> bindingPair in m_Bindings)
             {
-                if (bindingEntry.CreatedUpdate == m_SurfaceBindingUpdate)
-                    m_ReleaseEntries.Add(bindingEntry);
+                if (bindingPair.Value.CreatedUpdate == m_SurfaceBindingUpdate
+                    && !m_ExternalBindingRefCounts.ContainsKey(bindingPair.Key))
+                    m_ReleaseEntries.Add(bindingPair.Key);
             }
 
             m_SurfaceBindingUpdateActive = false;
             ReleaseBindingEntries(m_ReleaseEntries);
             m_ReleaseEntries.Clear();
+
+            m_TerrainRVTReleaseEntries.Clear();
+            foreach (TerrainRVTRegistration registration in m_TerrainRVTRegistrations.Values)
+            {
+                if (registration.CreatedUpdate == m_SurfaceBindingUpdate)
+                    m_TerrainRVTReleaseEntries.Add(registration);
+            }
+            for (int registrationIndex = 0;
+                 registrationIndex < m_TerrainRVTReleaseEntries.Count;
+                 registrationIndex++)
+            {
+                ReleaseTerrainRVT(m_TerrainRVTReleaseEntries[registrationIndex]);
+            }
+            m_TerrainRVTReleaseEntries.Clear();
         }
 
         public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
@@ -392,7 +890,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             var key = new TextureSetKey(streamedAsset, baseColor, normal, mask, addressMode, textures.MaskMode);
             if (m_Bindings.TryGetValue(key, out BindingEntry existingEntry))
             {
-                TouchBindingEntry(existingEntry);
+                TouchBindingEntry(ref existingEntry);
+                m_Bindings[key] = existingEntry;
                 return existingEntry.Binding;
             }
 
@@ -400,10 +899,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             {
                 var emptyEntry = new BindingEntry
                 {
-                    Key = key,
                     Binding = CreateEmptyBinding(),
                 };
-                TouchNewBindingEntry(emptyEntry);
+                TouchNewBindingEntry(ref emptyEntry);
                 m_Bindings.Add(key, emptyEntry);
                 return emptyEntry.Binding;
             }
@@ -413,10 +911,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 WarnLegacyTextureFallback(baseColor, normal, mask);
                 var fallbackEntry = new BindingEntry
                 {
-                    Key = key,
                     Binding = CreateEmptyBinding(),
                 };
-                TouchNewBindingEntry(fallbackEntry);
+                TouchNewBindingEntry(ref fallbackEntry);
                 m_Bindings.Add(key, fallbackEntry);
                 return fallbackEntry.Binding;
             }
@@ -459,13 +956,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
 
             RectInt mipTailRegion = GetRegionAtMip(pageRegion, maxMip);
-            VirtualTexturePageCoord[] mipTailCoords = CreatePageCoords(mipTailRegion, maxMip);
+            int mipTailPageCount = GetPageCount(mipTailRegion);
             int queuedMipTailPageCount = 0;
             VirtualTexturePageCoord failedMipTailCoord = default;
             string mipTailFailureReason = string.Empty;
-            for (int pageIndex = 0; pageIndex < mipTailCoords.Length; pageIndex++)
+            for (int pageIndex = 0; pageIndex < mipTailPageCount; pageIndex++)
             {
-                failedMipTailCoord = mipTailCoords[pageIndex];
+                failedMipTailCoord = GetPageCoord(mipTailRegion, maxMip, pageIndex);
                 try
                 {
                     if (!VirtualTextureSystem.TryQueuePageResident(
@@ -486,7 +983,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 queuedMipTailPageCount += 1;
             }
 
-            if (queuedMipTailPageCount != mipTailCoords.Length)
+            if (queuedMipTailPageCount != mipTailPageCount)
             {
                 if (queuedMipTailPageCount > 0)
                     VirtualTextureSystem.FlushRegion(VirtualTextureSpaceId, maxMip, mipTailRegion);
@@ -557,7 +1054,6 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             var bindingEntry = new BindingEntry
             {
-                Key = key,
                 Binding = binding,
                 BaseColor = streamedAsset == null ? baseColor : null,
                 Normal = streamedAsset == null ? normal : null,
@@ -565,18 +1061,99 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 StreamedAsset = streamedAsset,
                 PageRegion = pageRegion,
                 AtlasAllocation = atlasAllocation,
-                MipTailCoords = mipTailCoords,
+                MipTailRegion = mipTailRegion,
                 MaxMip = maxMip,
                 HasAllocation = true,
             };
-            TouchNewBindingEntry(bindingEntry);
+            TouchNewBindingEntry(ref bindingEntry);
             m_Bindings.Add(key, bindingEntry);
-            m_PendingMipTailEntries.Add(bindingEntry);
+            m_PendingMipTailEntries.Add(key);
             m_QueuedMipTailCount += 1;
-            m_QueuedMipTailPageCount += mipTailCoords.Length;
+            m_QueuedMipTailPageCount += mipTailPageCount;
             m_CreateResourceCallCountThisFrame += 1;
             IncrementBindingRevision();
             return binding;
+        }
+
+        internal bool TryAcquireExternalSurfaceBinding(
+            VividVirtualTextureAsset asset,
+            out ExternalSurfaceBindingLease lease,
+            out string reason)
+        {
+            lease = null;
+            if (!IsAvailable)
+            {
+                reason = UnavailableReason;
+                return false;
+            }
+            if (!IsCompatibleStreamedAsset(asset, VirtualTextureSpaceDesc.StackDesc, out reason))
+                return false;
+
+            var textures = new GPUDrivenSurfaceTextureSet(
+                asset,
+                null,
+                null,
+                null,
+                GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness);
+            VividSurfaceBindingData binding = CreateSurfaceBinding(textures);
+            var key = new TextureSetKey(
+                asset,
+                null,
+                null,
+                null,
+                asset.AddressMode == VividVirtualTextureAddressMode.Clamp
+                    ? GPUDrivenSurfaceAddressMode.Clamp
+                    : GPUDrivenSurfaceAddressMode.Repeat,
+                GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness);
+            bool hasEntry = m_Bindings.TryGetValue(key, out BindingEntry entry);
+            if (!hasEntry
+                || !entry.HasAllocation
+                || (binding.Flags & VividSurfaceBindingFlags.BaseColor) == 0)
+            {
+                reason = $"Streamed VT asset '{asset.name}' must contain a BaseColor layer with alpha.";
+                if (hasEntry
+                    && !m_SurfaceBindingUpdateActive
+                    && !m_ExternalBindingRefCounts.ContainsKey(key)
+                    && entry.LastTouchedUpdate != m_SurfaceBindingUpdate)
+                {
+                    m_ReleaseEntries.Clear();
+                    m_ReleaseEntries.Add(key);
+                    ReleaseBindingEntries(m_ReleaseEntries);
+                    m_ReleaseEntries.Clear();
+                }
+                return false;
+            }
+
+            m_ExternalBindingRefCounts.TryGetValue(key, out int refCount);
+            m_ExternalBindingRefCounts[key] = refCount + 1;
+            lease = new ExternalSurfaceBindingLease(this, key, entry);
+            reason = string.Empty;
+            return true;
+        }
+
+        private void ReleaseExternalSurfaceBinding(in TextureSetKey key)
+        {
+            if (m_IsDisposed
+                || !m_ExternalBindingRefCounts.TryGetValue(key, out int refCount))
+            {
+                return;
+            }
+
+            if (refCount <= 1)
+            {
+                m_ExternalBindingRefCounts.Remove(key);
+                if (!m_SurfaceBindingUpdateActive
+                    && m_Bindings.TryGetValue(key, out BindingEntry entry)
+                    && entry.LastTouchedUpdate != m_SurfaceBindingUpdate)
+                {
+                    m_ReleaseEntries.Clear();
+                    m_ReleaseEntries.Add(key);
+                    ReleaseBindingEntries(m_ReleaseEntries);
+                    m_ReleaseEntries.Clear();
+                }
+            }
+            else
+                m_ExternalBindingRefCounts[key] = refCount - 1;
         }
 
         public GPUDrivenTextureBackendStats GetStats()
@@ -598,12 +1175,37 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (VirtualTextureSpaceId > 0 && VirtualTextureSystem.IsInitialized)
                 VirtualTextureSystem.UnregisterAddressSpace(VirtualTextureSpaceId);
 
+            foreach (TerrainRVTCameraState cameraState in m_TerrainRVTCameraStates.Values)
+            {
+                foreach (TerrainRuntimeVirtualTextureClipmap clipmap in cameraState.Clipmaps.Values)
+                    clipmap.Dispose();
+                cameraState.Clipmaps.Clear();
+            }
+            m_TerrainRVTCameraStates.Clear();
+            m_TerrainRVTRegistrations.Clear();
+            m_TerrainRVTAllocations.Clear();
+            m_TerrainRVTRecords.Clear();
+            m_TerrainRVTReleaseEntries.Clear();
+            m_TerrainRVTCameraReleaseEntries.Clear();
+            m_TerrainRVTClipmapReleaseEntries.Clear();
+            m_TerrainRVTCandidates.Clear();
+            m_TerrainRVTFlushRegions.Clear();
+            m_TerrainRVTRecordBuffer?.Dispose();
+            m_TerrainRVTRecordBuffer = null;
+            m_TerrainRVTLevelBuffer?.Dispose();
+            m_TerrainRVTLevelBuffer = null;
+            m_TerrainRVTRecordUpload = Array.Empty<TerrainRuntimeVirtualTextureRecordGPUData>();
+            m_TerrainRVTLevelUpload = Array.Empty<TerrainRuntimeVirtualTextureLevelGPUData>();
+            m_CurrentTerrainRVTCameraState = null;
             m_Bindings.Clear();
+            m_ExternalBindingRefCounts.Clear();
             m_RegisteredTextureIds.Clear();
             m_UnsupportedTextureWarningIds.Clear();
             m_InvalidStreamedAssetWarningIds.Clear();
             m_PermanentlyFailedStreamedAssets.Clear();
             m_IncompatibleScalarMaskWarningIds.Clear();
+            m_InvalidTerrainDecalWarningIds.Clear();
+            m_InvalidTerrainDecalDataWarningIds.Clear();
             m_PendingMipTailEntries.Clear();
             m_ReleaseEntries.Clear();
             m_ReleaseRegions.Clear();
@@ -616,7 +1218,114 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return ((uint) maxMip << ResourceLayerBitCount) | (uint) layerIndex;
         }
 
-        private static VirtualTextureSpaceDesc CreateSpaceDesc()
+        internal static bool IsCompatibleStreamedAsset(
+            VividVirtualTextureAsset asset,
+            out string validationMessage)
+        {
+            return IsCompatibleStreamedAsset(
+                asset,
+                s_CompatibleStreamedStackDesc,
+                out validationMessage);
+        }
+
+        public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
+        {
+            return IsCompatibleStreamedAsset(asset, VirtualTextureSpaceDesc.StackDesc, out _);
+        }
+
+        private static bool IsCompatibleStreamedAsset(
+            VividVirtualTextureAsset asset,
+            VTStackDesc expectedStackDesc,
+            out string validationMessage)
+        {
+            if (asset == null)
+            {
+                validationMessage = "Assign a streamed virtual texture asset.";
+                return false;
+            }
+
+            VividVirtualTextureBuiltData builtData = asset.BuiltData;
+            if (builtData == null)
+            {
+                validationMessage = $"Streamed VT asset '{asset.name}' has no built data.";
+                return false;
+            }
+
+            bool valid = builtData.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
+                         && builtData.PageSize == PageSize
+                         && builtData.BorderSize == BorderSize
+                         && builtData.VirtualPageCountX > 0
+                         && builtData.VirtualPageCountY > 0
+                         && builtData.VirtualPageCountX <= MaxAllocationPageCount
+                         && builtData.VirtualPageCountY <= MaxAllocationPageCount
+                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountX)
+                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountY)
+                         && builtData.MipCount == ComputeMaxMip(
+                             builtData.VirtualPageCountX,
+                             builtData.VirtualPageCountY) + 1
+                         && builtData.MatchesStack(expectedStackDesc)
+                         && (builtData.HasInlineRawData || builtData.HasStreamData);
+            if (valid)
+            {
+                validationMessage = string.Empty;
+                return true;
+            }
+
+            validationMessage =
+                $"Streamed VT asset '{asset.name}' is not a compatible GPUDrivenSurface build. "
+                + $"Actual: profile={builtData.BuildProfile}, storage={builtData.StorageProfile}, "
+                + $"page={builtData.PageSize}, border={builtData.BorderSize}, "
+                + $"pages={builtData.VirtualPageCountX}x{builtData.VirtualPageCountY}, "
+                + $"mips={builtData.MipCount}, layers={builtData.LayerCount}. "
+                + "Required: GPUDrivenSurface, DesktopBCn, 128 texel pages, 4 texel borders, "
+                + "power-of-two dimensions, automatic full mip chain, and the GPUDriven four-layer stack.";
+            return false;
+        }
+
+        internal static GPUDrivenVirtualTextureDescriptorProfile ResolveDescriptorProfile(
+            GPUDrivenVirtualTexturePhysicalPoolQuality quality)
+        {
+            int cachePageCount = quality switch
+            {
+                GPUDrivenVirtualTexturePhysicalPoolQuality.Low => LowCachePageCount,
+                GPUDrivenVirtualTexturePhysicalPoolQuality.High => HighCachePageCount,
+                _ => MediumCachePageCount,
+            };
+            return new GPUDrivenVirtualTextureDescriptorProfile(cachePageCount);
+        }
+
+        internal static GPUDrivenVirtualTextureDescriptorProfile ResolveSupportedDescriptorProfile(
+            in GPUDrivenVirtualTextureDescriptorProfile requestedProfile,
+            int maxTextureSize)
+        {
+            if (maxTextureSize <= 0)
+                return requestedProfile;
+
+            int physicalPageSize = PageSize + BorderSize * 2;
+            int maxTilesPerDimension = maxTextureSize / physicalPageSize;
+            long maxPageCount = (long)maxTilesPerDimension * maxTilesPerDimension;
+            if (requestedProfile.CachePageCount <= maxPageCount)
+                return requestedProfile;
+
+            if (MediumCachePageCount <= maxPageCount)
+            {
+                return ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.Medium);
+            }
+
+            if (LowCachePageCount <= maxPageCount)
+            {
+                return ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.Low);
+            }
+
+            // There is no supported quality below Low. Keep the requested descriptor so
+            // normal backend construction reports the precise atlas capability failure.
+            return requestedProfile;
+        }
+
+        private static VirtualTextureSpaceDesc CreateSpaceDesc(
+            in GPUDrivenVirtualTextureDescriptorProfile descriptorProfile)
         {
             var layers = new[]
             {
@@ -652,11 +1361,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             var stackDesc = new VTStackDesc(
                 PageSize,
                 BorderSize,
-                CachePageCount,
+                descriptorProfile.CachePageCount,
                 layers,
                 MaxUploadsPerFrame,
                 FeedbackCapacity,
-                neighborPrefetchCount: 1);
+                NeighborPrefetchCount);
             int mipCount = Mathf.RoundToInt(Mathf.Log(AtlasPageCount, 2.0f)) + 1;
             return new VirtualTextureSpaceDesc(
                 SpaceName,
@@ -733,6 +1442,267 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return true;
         }
 
+        private bool CanCreateTerrainRuntimeVirtualTexture(
+            VividTerrain terrain,
+            VividTerrainData terrainData)
+        {
+            if (!TerrainRuntimeVirtualTextureEnabled
+                || terrain == null
+                || terrainData == null
+                || terrain.Data != terrainData
+                || terrainData.SupportedSurfaceLayerCount < 2
+                || terrainData.SupportedSurfaceLayerCount > VividTerrainData.MaximumSurfaceLayerCount
+                || !terrainData.HasCompleteControlMapData
+                || !CanUseStreamedVirtualTexture(terrainData.CompositeVirtualTexture))
+            {
+                return false;
+            }
+
+            for (int controlIndex = 0; controlIndex < terrainData.RequiredControlMapCount; controlIndex++)
+            {
+                if (terrainData.ControlMaps[controlIndex] == null)
+                    return false;
+            }
+            return true;
+        }
+
+        private static int CompareTerrainRVTCandidates(
+            TerrainRuntimeVirtualTextureClipmap.PageCandidate left,
+            TerrainRuntimeVirtualTextureClipmap.PageCandidate right)
+        {
+            int levelComparison = left.Level.LevelIndex.CompareTo(right.Level.LevelIndex);
+            if (levelComparison != 0)
+                return levelComparison;
+
+            int feedbackComparison = right.FeedbackHitCount.CompareTo(left.FeedbackHitCount);
+            return feedbackComparison != 0
+                ? feedbackComparison
+                : left.DistanceSquared.CompareTo(right.DistanceSquared);
+        }
+
+        private int FindTerrainRVTRecordSlot()
+        {
+            for (int recordIndex = 0; recordIndex < m_TerrainRVTRecords.Count; recordIndex++)
+            {
+                if (m_TerrainRVTRecords[recordIndex] == null)
+                    return recordIndex;
+            }
+
+            m_TerrainRVTRecords.Add(null);
+            return m_TerrainRVTRecords.Count - 1;
+        }
+
+        internal static Camera ResolveTerrainRVTCamera(Camera renderingCamera)
+        {
+            return renderingCamera != null && IsTerrainRVTCameraType(renderingCamera.cameraType)
+                ? renderingCamera
+                : null;
+        }
+
+        internal static bool IsTerrainRVTCameraType(CameraType cameraType)
+        {
+            return cameraType == CameraType.Game || cameraType == CameraType.SceneView;
+        }
+
+        internal static bool ShouldKeepTerrainRVTCameraState(
+            CameraType cameraType,
+            bool isActiveAndEnabled)
+        {
+            return IsTerrainRVTCameraType(cameraType)
+                   && (cameraType != CameraType.Game || isActiveAndEnabled);
+        }
+
+        private TerrainRVTCameraState GetOrCreateTerrainRVTCameraState(Camera camera)
+        {
+            EntityId cameraId = camera.GetEntityId();
+            if (m_TerrainRVTCameraStates.TryGetValue(cameraId, out TerrainRVTCameraState cameraState))
+            {
+                if (ReferenceEquals(cameraState.Camera, camera))
+                    return cameraState;
+                ReleaseTerrainRVTCameraState(cameraState);
+            }
+
+            cameraState = new TerrainRVTCameraState
+            {
+                Camera = camera,
+                CameraId = cameraId,
+            };
+            m_TerrainRVTCameraStates.Add(cameraId, cameraState);
+            return cameraState;
+        }
+
+        private void PurgeInactiveTerrainRVTCameras()
+        {
+            m_TerrainRVTCameraReleaseEntries.Clear();
+            foreach (TerrainRVTCameraState cameraState in m_TerrainRVTCameraStates.Values)
+            {
+                if (cameraState.Camera == null
+                    // Unity renders hidden SceneView cameras while their Camera component is disabled.
+                    || !ShouldKeepTerrainRVTCameraState(
+                        cameraState.Camera.cameraType,
+                        cameraState.Camera.isActiveAndEnabled))
+                {
+                    m_TerrainRVTCameraReleaseEntries.Add(cameraState);
+                }
+            }
+            for (int cameraIndex = 0;
+                 cameraIndex < m_TerrainRVTCameraReleaseEntries.Count;
+                 cameraIndex++)
+            {
+                ReleaseTerrainRVTCameraState(m_TerrainRVTCameraReleaseEntries[cameraIndex]);
+            }
+            m_TerrainRVTCameraReleaseEntries.Clear();
+        }
+
+        private void ReleaseTerrainRVTCameraState(TerrainRVTCameraState cameraState)
+        {
+            if (cameraState == null || !m_TerrainRVTCameraStates.Remove(cameraState.CameraId))
+                return;
+
+            if (ReferenceEquals(m_CurrentTerrainRVTCameraState, cameraState))
+                m_CurrentTerrainRVTCameraState = null;
+
+            m_TerrainRVTClipmapReleaseEntries.Clear();
+            m_TerrainRVTClipmapReleaseEntries.AddRange(cameraState.Clipmaps.Values);
+            for (int clipmapIndex = 0;
+                 clipmapIndex < m_TerrainRVTClipmapReleaseEntries.Count;
+                 clipmapIndex++)
+            {
+                ReleaseTerrainRVTClipmap(
+                    cameraState,
+                    m_TerrainRVTClipmapReleaseEntries[clipmapIndex]);
+            }
+            m_TerrainRVTClipmapReleaseEntries.Clear();
+        }
+
+        private void TouchTerrainRVT(TerrainRVTRegistration registration)
+        {
+            if (m_SurfaceBindingUpdateActive)
+                registration.LastTouchedUpdate = m_SurfaceBindingUpdate;
+        }
+
+        private void TouchNewTerrainRVT(TerrainRVTRegistration registration)
+        {
+            if (!m_SurfaceBindingUpdateActive)
+                return;
+
+            registration.LastTouchedUpdate = m_SurfaceBindingUpdate;
+            registration.CreatedUpdate = m_SurfaceBindingUpdate;
+        }
+
+        private void ReleaseTerrainRVT(TerrainRVTRegistration registration)
+        {
+            if (registration == null || !m_TerrainRVTRegistrations.Remove(registration.EntityId))
+                return;
+
+            foreach (TerrainRVTCameraState cameraState in m_TerrainRVTCameraStates.Values)
+            {
+                if (cameraState.Clipmaps.TryGetValue(
+                        registration.EntityId,
+                        out TerrainRuntimeVirtualTextureClipmap clipmap))
+                {
+                    ReleaseTerrainRVTClipmap(cameraState, clipmap);
+                }
+            }
+
+            int recordIndex = (int)registration.RecordIndex;
+            if (recordIndex >= 0
+                && recordIndex < m_TerrainRVTRecords.Count
+                && ReferenceEquals(m_TerrainRVTRecords[recordIndex], registration))
+            {
+                m_TerrainRVTRecords[recordIndex] = null;
+            }
+            IncrementBindingRevision();
+        }
+
+        private void ReleaseTerrainRVTClipmap(
+            TerrainRVTCameraState cameraState,
+            TerrainRuntimeVirtualTextureClipmap clipmap)
+        {
+            if (clipmap == null || !cameraState.Clipmaps.Remove(clipmap.EntityId))
+                return;
+
+            m_TerrainRVTFlushRegions.Clear();
+            for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
+            {
+                TerrainRuntimeVirtualTextureClipmap.Level level = clipmap.Levels[levelIndex];
+                m_TerrainRVTFlushRegions.Add(new VTPageRegion(0, level.PageRegion));
+                m_Producer.UnregisterEntry(level.PageRegion);
+            }
+            VirtualTextureSystem.FlushRegions(VirtualTextureSpaceId, m_TerrainRVTFlushRegions);
+
+            if (m_TerrainRVTAllocations.Remove(
+                    clipmap,
+                    out GPUDrivenVirtualTextureAtlasAllocator.Allocation[] allocations))
+            {
+                for (int allocationIndex = 0; allocationIndex < allocations.Length; allocationIndex++)
+                    m_AtlasAllocator.Release(allocations[allocationIndex]);
+            }
+
+            clipmap.Dispose();
+        }
+
+        private void UploadTerrainRVTBuffers(CommandBuffer cmd, TerrainRVTCameraState cameraState)
+        {
+            int recordCount = Mathf.Max(1, m_TerrainRVTRecords.Count);
+            int levelCount = recordCount * TerrainRuntimeVirtualTextureClipmap.LevelCount;
+            EnsureTerrainRVTBuffer(
+                ref m_TerrainRVTRecordBuffer,
+                recordCount,
+                Marshal.SizeOf<TerrainRuntimeVirtualTextureRecordGPUData>(),
+                "VividTerrainRVTRecords");
+            EnsureTerrainRVTBuffer(
+                ref m_TerrainRVTLevelBuffer,
+                levelCount,
+                Marshal.SizeOf<TerrainRuntimeVirtualTextureLevelGPUData>(),
+                "VividTerrainRVTLevels");
+
+            if (m_TerrainRVTRecordUpload.Length < recordCount)
+                m_TerrainRVTRecordUpload = new TerrainRuntimeVirtualTextureRecordGPUData[recordCount];
+            if (m_TerrainRVTLevelUpload.Length < levelCount)
+                m_TerrainRVTLevelUpload = new TerrainRuntimeVirtualTextureLevelGPUData[levelCount];
+            Array.Clear(m_TerrainRVTRecordUpload, 0, recordCount);
+            Array.Clear(m_TerrainRVTLevelUpload, 0, levelCount);
+            for (int recordIndex = 0; recordIndex < m_TerrainRVTRecords.Count; recordIndex++)
+            {
+                TerrainRVTRegistration registration = m_TerrainRVTRecords[recordIndex];
+                if (registration == null
+                    || !cameraState.Clipmaps.TryGetValue(
+                        registration.EntityId,
+                        out TerrainRuntimeVirtualTextureClipmap clipmap))
+                {
+                    continue;
+                }
+
+                int levelStartIndex = recordIndex * TerrainRuntimeVirtualTextureClipmap.LevelCount;
+                m_TerrainRVTRecordUpload[recordIndex] = clipmap.CreateGPUData((uint)levelStartIndex);
+                for (int levelIndex = 0; levelIndex < clipmap.Levels.Length; levelIndex++)
+                {
+                    m_TerrainRVTLevelUpload[levelStartIndex + levelIndex] =
+                        clipmap.Levels[levelIndex].CreateGPUData();
+                }
+            }
+
+            cmd.SetBufferData(m_TerrainRVTRecordBuffer, m_TerrainRVTRecordUpload, 0, 0, recordCount);
+            cmd.SetBufferData(m_TerrainRVTLevelBuffer, m_TerrainRVTLevelUpload, 0, 0, levelCount);
+        }
+
+        private static void EnsureTerrainRVTBuffer(
+            ref GraphicsBuffer buffer,
+            int count,
+            int stride,
+            string name)
+        {
+            if (buffer != null && buffer.count >= count && buffer.stride == stride)
+                return;
+
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, Mathf.Max(1, count), stride)
+            {
+                name = name,
+            };
+        }
+
         private Texture2D ResolveTexture2D(Texture texture)
         {
             if (texture == null)
@@ -777,23 +1747,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 m_PermanentlyFailedStreamedAssets.Remove(assetId);
             }
 
-            VividVirtualTextureBuiltData builtData = asset.BuiltData;
-            bool valid = builtData != null
-                         && builtData.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
-                         && builtData.PageSize == PageSize
-                         && builtData.BorderSize == BorderSize
-                         && builtData.VirtualPageCountX > 0
-                         && builtData.VirtualPageCountY > 0
-                         && builtData.VirtualPageCountX <= MaxAllocationPageCount
-                         && builtData.VirtualPageCountY <= MaxAllocationPageCount
-                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountX)
-                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountY)
-                         && builtData.MipCount == ComputeMaxMip(
-                             builtData.VirtualPageCountX,
-                             builtData.VirtualPageCountY) + 1
-                         && builtData.MatchesStack(VirtualTextureSpaceDesc.StackDesc)
-                         && (builtData.HasInlineRawData || builtData.HasStreamData);
-            if (valid)
+            if (IsCompatibleStreamedAsset(asset, VirtualTextureSpaceDesc.StackDesc, out _))
                 return asset;
 
             if (m_InvalidStreamedAssetWarningIds.Add(assetId))
@@ -845,13 +1799,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             maxHeight = Mathf.Max(maxHeight, texture.height);
         }
 
-        private void TouchBindingEntry(BindingEntry bindingEntry)
+        private void TouchBindingEntry(ref BindingEntry bindingEntry)
         {
             if (m_SurfaceBindingUpdateActive)
                 bindingEntry.LastTouchedUpdate = m_SurfaceBindingUpdate;
         }
 
-        private void TouchNewBindingEntry(BindingEntry bindingEntry)
+        private void TouchNewBindingEntry(ref BindingEntry bindingEntry)
         {
             if (!m_SurfaceBindingUpdateActive)
                 return;
@@ -860,18 +1814,19 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             bindingEntry.CreatedUpdate = m_SurfaceBindingUpdate;
         }
 
-        private void ReleaseBindingEntries(IReadOnlyList<BindingEntry> bindingEntries)
+        private void ReleaseBindingEntries(IReadOnlyList<TextureSetKey> bindingKeys)
         {
-            if (bindingEntries == null || bindingEntries.Count == 0)
+            if (bindingKeys == null || bindingKeys.Count == 0)
                 return;
 
             bool releasedAllocation = false;
             m_ReleaseRegions.Clear();
             m_ReleaseAllocationEntries.Clear();
-            for (int entryIndex = 0; entryIndex < bindingEntries.Count; entryIndex++)
+            for (int entryIndex = 0; entryIndex < bindingKeys.Count; entryIndex++)
             {
-                BindingEntry bindingEntry = bindingEntries[entryIndex];
-                if (bindingEntry == null || !m_Bindings.Remove(bindingEntry.Key))
+                TextureSetKey bindingKey = bindingKeys[entryIndex];
+                if (!m_Bindings.TryGetValue(bindingKey, out BindingEntry bindingEntry)
+                    || !m_Bindings.Remove(bindingKey))
                     continue;
 
                 if (!bindingEntry.HasAllocation)
@@ -880,13 +1835,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 releasedAllocation = true;
                 m_ReleaseAllocationEntries.Add(bindingEntry);
                 if (!bindingEntry.MipTailResident)
-                    m_PendingMipTailEntries.Remove(bindingEntry);
+                    m_PendingMipTailEntries.Remove(bindingKey);
                 else
                     m_ResidentMipTailCount = Mathf.Max(0, m_ResidentMipTailCount - 1);
                 m_QueuedMipTailCount = Mathf.Max(0, m_QueuedMipTailCount - 1);
                 m_QueuedMipTailPageCount = Mathf.Max(
                     0,
-                    m_QueuedMipTailPageCount - bindingEntry.MipTailCoords.Length);
+                    m_QueuedMipTailPageCount - GetPageCount(bindingEntry.MipTailRegion));
                 m_ResidentMipTailPageCount = Mathf.Max(
                     0,
                     m_ResidentMipTailPageCount - bindingEntry.ResidentMipTailPageCount);
@@ -942,17 +1897,17 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return new RectInt(xMin, yMin, xMax - xMin, yMax - yMin);
         }
 
-        private static VirtualTexturePageCoord[] CreatePageCoords(RectInt pageRegion, int mip)
+        private static int GetPageCount(RectInt pageRegion)
         {
-            var coords = new VirtualTexturePageCoord[pageRegion.width * pageRegion.height];
-            int pageIndex = 0;
-            for (int y = pageRegion.yMin; y < pageRegion.yMax; y++)
-            {
-                for (int x = pageRegion.xMin; x < pageRegion.xMax; x++)
-                    coords[pageIndex++] = new VirtualTexturePageCoord(x, y, mip);
-            }
+            return pageRegion.width * pageRegion.height;
+        }
 
-            return coords;
+        private static VirtualTexturePageCoord GetPageCoord(RectInt pageRegion, int mip, int pageIndex)
+        {
+            return new VirtualTexturePageCoord(
+                pageRegion.xMin + pageIndex % pageRegion.width,
+                pageRegion.yMin + pageIndex / pageRegion.width,
+                mip);
         }
 
         private static int ComputeMaxMip(int pageCountX, int pageCountY)

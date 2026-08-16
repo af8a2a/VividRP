@@ -51,6 +51,12 @@ namespace VividRP.Runtime
         HDRP,
     }
 
+    public enum VividDecalTechnique
+    {
+        ClusteredBindless = 0,
+        TerrainRuntimeVirtualTexture = 1,
+    }
+
     [CreateAssetMenu(menuName = "VividRP/Vivid Render Pipeline")]
     public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>, IProbeVolumeEnabledRenderPipeline, ISTPEnabledRenderPipeline
     {
@@ -73,7 +79,27 @@ namespace VividRP.Runtime
             GPUDriven.GPUDrivenTextureBackendMode.VirtualTexture;
 
         [SerializeField]
+        private GPUDriven.VirtualTexture.GPUDrivenVirtualTexturePhysicalPoolQuality
+            m_GPUDrivenVirtualTexturePhysicalPoolQuality =
+                GPUDriven.VirtualTexture.GPUDrivenVirtualTexturePhysicalPoolQuality.Medium;
+
+        [SerializeField]
+        private bool m_EnableTerrainRuntimeVirtualTexture;
+
+        [SerializeField]
         private VividVirtualTextureIOBackendMode m_VirtualTextureIOBackend = VividVirtualTextureIOBackendMode.Auto;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureMaxResidencyAllocationsPerFrame = 64;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureMaxPrefetchAllocationsPerFrame;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureMaxPageUploadsPerFrame = 64;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureMaxUploadBytesPerFrameMiB;
 
         [SerializeField, Min(1)]
         private int m_VirtualTextureMaxInFlightChunks = 64;
@@ -86,6 +112,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private bool m_EnableGPUDrivenDecal;
+
+        [SerializeField]
+        private VividDecalTechnique m_DecalTechnique = VividDecalTechnique.ClusteredBindless;
 
         [SerializeField]
         private bool m_EnableSRPBatcher = true;
@@ -193,10 +222,47 @@ namespace VividRP.Runtime
             set => m_GPUDrivenTextureBackend = value;
         }
 
+        public GPUDriven.VirtualTexture.GPUDrivenVirtualTexturePhysicalPoolQuality
+            GPUDrivenVirtualTexturePhysicalPoolQuality
+        {
+            get => m_GPUDrivenVirtualTexturePhysicalPoolQuality;
+            set => m_GPUDrivenVirtualTexturePhysicalPoolQuality = value;
+        }
+
+        public bool EnableTerrainRuntimeVirtualTexture
+        {
+            get => m_EnableTerrainRuntimeVirtualTexture;
+            set => m_EnableTerrainRuntimeVirtualTexture = value;
+        }
+
         public VividVirtualTextureIOBackendMode VirtualTextureIOBackend
         {
             get => m_VirtualTextureIOBackend;
             set => m_VirtualTextureIOBackend = value;
+        }
+
+        public int VirtualTextureMaxResidencyAllocationsPerFrame
+        {
+            get => Mathf.Max(0, m_VirtualTextureMaxResidencyAllocationsPerFrame);
+            set => m_VirtualTextureMaxResidencyAllocationsPerFrame = Mathf.Max(0, value);
+        }
+
+        public int VirtualTextureMaxPrefetchAllocationsPerFrame
+        {
+            get => Mathf.Max(0, m_VirtualTextureMaxPrefetchAllocationsPerFrame);
+            set => m_VirtualTextureMaxPrefetchAllocationsPerFrame = Mathf.Max(0, value);
+        }
+
+        public int VirtualTextureMaxPageUploadsPerFrame
+        {
+            get => Mathf.Max(0, m_VirtualTextureMaxPageUploadsPerFrame);
+            set => m_VirtualTextureMaxPageUploadsPerFrame = Mathf.Max(0, value);
+        }
+
+        public int VirtualTextureMaxUploadBytesPerFrameMiB
+        {
+            get => Mathf.Max(0, m_VirtualTextureMaxUploadBytesPerFrameMiB);
+            set => m_VirtualTextureMaxUploadBytesPerFrameMiB = Mathf.Max(0, value);
         }
 
         public int VirtualTextureMaxInFlightChunks
@@ -223,6 +289,44 @@ namespace VividRP.Runtime
         {
             get => m_EnableGPUDrivenDecal;
             set => m_EnableGPUDrivenDecal = value;
+        }
+
+        public VividDecalTechnique DecalTechnique
+        {
+            get => m_DecalTechnique;
+            set => m_DecalTechnique = value;
+        }
+
+        internal bool TryValidateTerrainRuntimeVirtualTextureDecals(out string reason)
+        {
+            if (!m_EnableGPUDriven)
+            {
+                reason = "Terrain Runtime Virtual Texture decals require GPU Driven rendering.";
+                return false;
+            }
+            if (m_GPUDrivenTextureBackend != GPUDriven.GPUDrivenTextureBackendMode.VirtualTexture)
+            {
+                reason = "Terrain Runtime Virtual Texture decals require the Virtual Texture GPUDriven texture backend.";
+                return false;
+            }
+            if (!m_EnableTerrainRuntimeVirtualTexture)
+            {
+                reason = "Terrain Runtime Virtual Texture decals require Terrain Runtime Virtual Texture.";
+                return false;
+            }
+            if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Direct3D12)
+            {
+                reason = "Terrain Runtime Virtual Texture decals currently require Direct3D 12.";
+                return false;
+            }
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                reason = "Terrain Runtime Virtual Texture decals require compute shader support.";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
         }
 
         public AutoExposureImplementationPath AutoExposureImplementation

@@ -23,6 +23,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VisualizationSpaceId = Shader.PropertyToID("_VTVisualizationSpaceId");
         private static readonly int VisualizationWorldPageSizeId =
             Shader.PropertyToID("_VTVisualizationWorldPageSize");
+        private static readonly int TerrainRVTVisualizationModeId =
+            Shader.PropertyToID("_TerrainRVTVisualizationMode");
 
         [RenderGraphResource(Name = "SourceTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SourceTexture;
@@ -46,6 +48,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private VirtualTextureVisualizationMode m_ResolvedVisualizationMode = VirtualTextureVisualizationMode.None;
         private VirtualTextureVisualizationTarget m_ResolvedVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
         private VirtualTextureVisualizationLayer m_ResolvedVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
+        private TerrainRuntimeVirtualTextureDebugMode m_ResolvedTerrainRVTVisualizationMode =
+            TerrainRuntimeVirtualTextureDebugMode.None;
         private float m_ResolvedVisualizationWorldPageSize =
             VividRenderingDebugSettingsData.DefaultVirtualTextureVisualizationWorldPageSize;
         private bool m_ShouldSkipExecution;
@@ -79,6 +83,7 @@ namespace VividRP.Runtime.RenderPass.Core
             VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             VividRenderingDebugSettingsData debugData = VividRenderingDebugDisplaySettings.Data;
             m_ResolvedVisualizationMode = ResolveVisualizationMode(debugData);
+            m_ResolvedTerrainRVTVisualizationMode = ResolveTerrainRVTVisualizationMode(debugData);
             m_ResolvedVisualizationTarget = debugData?.virtualTextureVisualizationTarget
                 ?? VirtualTextureVisualizationTarget.Auto;
             m_ResolvedVisualizationLayer = debugData?.virtualTextureVisualizationLayer
@@ -124,6 +129,7 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetTexture(DepthTextureId, depthTexture != null ? depthTexture : Texture2D.blackTexture);
             mpb.SetVector(DepthTextureScaleBiasId, (m_DepthTexture?.innerHandle).GetScaleBias());
             mpb.SetInt(VisualizationModeId, (int)m_ResolvedVisualizationMode);
+            mpb.SetInt(TerrainRVTVisualizationModeId, (int)m_ResolvedTerrainRVTVisualizationMode);
             mpb.SetInt(VisualizationLayerId, (int)m_ResolvedVisualizationLayer);
             mpb.SetFloat(VisualizationWorldPageSizeId, m_ResolvedVisualizationWorldPageSize);
 
@@ -131,13 +137,19 @@ namespace VividRP.Runtime.RenderPass.Core
             int gpuDrivenAllocationId = VividGPUDrivenSystem.TryGetVirtualTextureAllocationId(out int allocationId)
                 ? allocationId
                 : 0;
+            bool terrainRVTVisualizationActive =
+                m_ResolvedTerrainRVTVisualizationMode != TerrainRuntimeVirtualTextureDebugMode.None;
+            VirtualTextureVisualizationTarget effectiveTarget = ResolveVisualizationTarget(
+                m_ResolvedVisualizationTarget,
+                m_ResolvedTerrainRVTVisualizationMode);
             bool hasBinding = TryResolveVisualizationBinding(
                 m_VirtualTextureFrameData,
-                m_ResolvedVisualizationTarget,
+                effectiveTarget,
                 gpuDrivenAllocationId,
                 out binding);
             bool requiresDepth =
-                m_ResolvedVisualizationMode == VirtualTextureVisualizationMode.ResolvedWorldPosition;
+                terrainRVTVisualizationActive
+                || m_ResolvedVisualizationMode == VirtualTextureVisualizationMode.ResolvedWorldPosition;
             bool visualizationAvailable = hasBinding && (!requiresDepth || depthTexture != null);
             mpb.SetInt(VisualizationAvailableId, visualizationAvailable ? 1 : 0);
             mpb.SetInt(VisualizationSpaceId, hasBinding ? binding.SpaceId : 0);
@@ -158,12 +170,29 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_VirtualTextureFrameData = null;
             m_ShouldSkipExecution = false;
+            m_ResolvedTerrainRVTVisualizationMode = TerrainRuntimeVirtualTextureDebugMode.None;
         }
 
         internal static VirtualTextureVisualizationMode ResolveVisualizationMode(
             VividRenderingDebugSettingsData data)
         {
             return data?.virtualTextureVisualizationMode ?? VirtualTextureVisualizationMode.None;
+        }
+
+        internal static TerrainRuntimeVirtualTextureDebugMode ResolveTerrainRVTVisualizationMode(
+            VividRenderingDebugSettingsData data)
+        {
+            return data?.terrainRuntimeVirtualTextureDebugMode
+                   ?? TerrainRuntimeVirtualTextureDebugMode.None;
+        }
+
+        internal static VirtualTextureVisualizationTarget ResolveVisualizationTarget(
+            VirtualTextureVisualizationTarget target,
+            TerrainRuntimeVirtualTextureDebugMode terrainRVTMode)
+        {
+            return terrainRVTMode == TerrainRuntimeVirtualTextureDebugMode.None
+                ? target
+                : VirtualTextureVisualizationTarget.GPUDriven;
         }
 
         internal static bool TryResolveVisualizationBinding(

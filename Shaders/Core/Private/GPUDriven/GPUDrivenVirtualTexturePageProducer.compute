@@ -18,6 +18,7 @@ float4 _VTSourceMipOffsets;
 float4 _VTBaseColorFallback;
 float4 _VTNormalFallback;
 float4 _VTMaskFallback;
+float4 _VTHeightFallback;
 
 float4 SampleSource(Texture2D<float4> sourceTexture, float2 uv, float mip, bool repeat)
 {
@@ -84,4 +85,5 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
     _OutputPages[uint3(outputPixel, baseSlice + 0)] = baseColor;
     _OutputPages[uint3(outputPixel, baseSlice + 1)] = normal;
     _OutputPages[uint3(outputPixel, baseSlice + 2)] = mask;
+    _OutputPages[uint3(outputPixel, baseSlice + 3)] = _VTHeightFallback;
 }

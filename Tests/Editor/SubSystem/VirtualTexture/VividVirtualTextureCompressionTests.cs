@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -11,6 +13,131 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VividVirtualTextureCompressionTests
     {
+        private sealed class RecordingIOBackend : IVTIOBackend
+        {
+            internal List<List<VTIOReadCommand>> Batches { get; } = new();
+
+            internal List<long> PollOrder { get; } = new();
+
+            public string Name => nameof(RecordingIOBackend);
+
+            public bool IsAvailable => true;
+
+            public IVTIOBatch CreateBatch(
+                string path,
+                IReadOnlyList<VTIOReadCommand> commands)
+            {
+                Batches.Add(new List<VTIOReadCommand>(commands));
+                return new RecordingIOBatch(
+                    commands.Count,
+                    commands[0].FileOffset,
+                    PollOrder);
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class RecordingIOBatch : IVTIOBatch
+        {
+            private readonly long m_FirstFileOffset;
+            private readonly List<long> m_PollOrder;
+
+            internal RecordingIOBatch(
+                int count,
+                long firstFileOffset,
+                List<long> pollOrder)
+            {
+                Count = count;
+                m_FirstFileOffset = firstFileOffset;
+                m_PollOrder = pollOrder;
+            }
+
+            public int Count { get; }
+
+            public bool IsCompleted
+            {
+                get
+                {
+                    m_PollOrder.Add(m_FirstFileOffset);
+                    return false;
+                }
+            }
+
+            public bool Failed => false;
+
+            public string Error => null;
+
+            public bool TryGetResult(int commandIndex, out byte[] data)
+            {
+                data = null;
+                return false;
+            }
+
+            public void Cancel()
+            {
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class CompletedIOBackend : IVTIOBackend
+        {
+            public string Name => nameof(CompletedIOBackend);
+
+            public bool IsAvailable => true;
+
+            public IVTIOBatch CreateBatch(
+                string path,
+                IReadOnlyList<VTIOReadCommand> commands)
+            {
+                return new CompletedIOBatch(commands);
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class CompletedIOBatch : IVTIOBatch
+        {
+            private readonly byte[][] m_Results;
+
+            internal CompletedIOBatch(IReadOnlyList<VTIOReadCommand> commands)
+            {
+                m_Results = new byte[commands.Count][];
+                for (int commandIndex = 0; commandIndex < commands.Count; commandIndex++)
+                    m_Results[commandIndex] = new byte[commands[commandIndex].ByteSize];
+            }
+
+            public int Count => m_Results.Length;
+
+            public bool IsCompleted => true;
+
+            public bool Failed => false;
+
+            public string Error => null;
+
+            public bool TryGetResult(int commandIndex, out byte[] data)
+            {
+                data = commandIndex >= 0 && commandIndex < m_Results.Length
+                    ? m_Results[commandIndex]
+                    : null;
+                return data != null;
+            }
+
+            public void Cancel()
+            {
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
         private sealed class CapturingStorageEncoder : IVTGpuStorageEncoder
         {
             internal Color32[] NormalPage { get; private set; }
@@ -125,6 +252,440 @@ namespace VividRP.Editor.Tests
             finally
             {
                 VTStreamChunkManager.ResetShared();
+            }
+        }
+
+        [Test]
+        public void RequestPriorityKey_PreservesViewProducerMipAndIOTierOrdering()
+        {
+            var backgroundRequest = new VTRequest(
+                1,
+                new VirtualTexturePageCoord(0, 0, 0),
+                0,
+                1,
+                priority: 8,
+                requestFrame: 4,
+                cameraPriority: 0,
+                isActiveView: false);
+            var activeRequest = new VTRequest(
+                1,
+                new VirtualTexturePageCoord(1, 0, 0),
+                1,
+                1,
+                priority: 1,
+                requestFrame: 4,
+                cameraPriority: 0,
+                isActiveView: true);
+            VTRequestPriorityKey background = VTRequestPriorityKey.FromRequest(
+                backgroundRequest,
+                locked: false,
+                producerPriority: 10);
+            VTRequestPriorityKey active = VTRequestPriorityKey.FromRequest(
+                activeRequest,
+                locked: false,
+                producerPriority: 0);
+
+            Assert.That(VTRequestPriorityUtility.Compare(active, background), Is.LessThan(0));
+            Assert.That(active.IOTier, Is.EqualTo(VTIOPriorityTier.High));
+            Assert.That(background.IOTier, Is.EqualTo(VTIOPriorityTier.Normal));
+
+            VTRequestPriorityKey lowProducer = VTRequestPriorityKey.FromRequest(
+                backgroundRequest,
+                locked: false,
+                producerPriority: 0);
+            VTRequestPriorityKey highProducer = VTRequestPriorityKey.FromRequest(
+                backgroundRequest,
+                locked: false,
+                producerPriority: 2);
+            Assert.That(VTRequestPriorityUtility.Compare(highProducer, lowProducer), Is.LessThan(0));
+
+            var coarseRequest = new VTRequest(
+                1,
+                new VirtualTexturePageCoord(0, 0, 2),
+                2,
+                1,
+                priority: 1,
+                requestFrame: 4,
+                cameraPriority: 0,
+                isActiveView: false);
+            VTRequestPriorityKey coarse = VTRequestPriorityKey.FromRequest(
+                coarseRequest,
+                locked: false,
+                producerPriority: 0,
+                mipTail: true);
+            Assert.That(VTRequestPriorityUtility.CompareForIO(coarse, background), Is.LessThan(0));
+            Assert.That(coarse.IOTier, Is.EqualTo(VTIOPriorityTier.Critical));
+            Assert.That(
+                VTRequestPriorityUtility.ComputeMipWeightedScore(int.MaxValue, int.MaxValue),
+                Is.EqualTo((long)int.MaxValue * ((long)int.MaxValue + 1L)));
+        }
+
+        [Test]
+        public void ChunkManager_SubmitsActiveViewBeforeBackgroundAndMapsIOTier()
+        {
+            VTStreamChunkManager.ResetShared();
+            try
+            {
+                VTStreamChunkManager manager = VTStreamChunkManager.Shared;
+                var backend = new RecordingIOBackend();
+                manager.SetIOBackendForTesting(backend);
+                var backgroundLocation = CreateRawLocation(chunkIndex: 0, fileOffset: 64);
+                var activeLocation = CreateRawLocation(chunkIndex: 1, fileOffset: 0);
+                var backgroundRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    0,
+                    1,
+                    priority: 16,
+                    requestFrame: 1,
+                    cameraPriority: 0,
+                    isActiveView: false);
+                var activeRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    1,
+                    1,
+                    priority: 1,
+                    requestFrame: 1,
+                    cameraPriority: 0,
+                    isActiveView: true);
+
+                using VTChunkLease backgroundLease = manager.Acquire(
+                    "priority.stream",
+                    1,
+                    backgroundLocation,
+                    VTRequestPriorityKey.FromRequest(
+                        backgroundRequest,
+                        locked: false,
+                        producerPriority: 0));
+                using VTChunkLease activeLease = manager.Acquire(
+                    "priority.stream",
+                    1,
+                    activeLocation,
+                    VTRequestPriorityKey.FromRequest(
+                        activeRequest,
+                        locked: false,
+                        producerPriority: 0));
+
+                manager.SubmitPendingReads();
+
+                Assert.That(backend.Batches, Has.Count.EqualTo(2));
+                Assert.That(backend.Batches[0], Has.Count.EqualTo(1));
+                Assert.That(backend.Batches[0][0].FileOffset, Is.EqualTo(0));
+                Assert.That(backend.Batches[0][0].HighPriority, Is.True);
+                Assert.That(backend.Batches[1][0].FileOffset, Is.EqualTo(64));
+                Assert.That(backend.Batches[1][0].HighPriority, Is.False);
+
+                manager.PollProgress();
+                Assert.That(backend.PollOrder, Is.EqualTo(new long[] { 0, 64 }));
+            }
+            finally
+            {
+                VTStreamChunkManager.ResetShared();
+            }
+        }
+
+        [Test]
+        public void ChunkManager_PollsLaterActiveBatchBeforeEarlierLazyBackgroundBatch()
+        {
+            VTStreamChunkManager.ResetShared();
+            try
+            {
+                VTStreamChunkManager manager = VTStreamChunkManager.Shared;
+                var backend = new RecordingIOBackend();
+                manager.SetIOBackendForTesting(backend);
+                var backgroundRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    0,
+                    1,
+                    priority: 1,
+                    requestFrame: 1,
+                    cameraPriority: 1,
+                    isActiveView: false);
+                using VTChunkLease backgroundLease = manager.Acquire(
+                    "lazy-priority.stream",
+                    1,
+                    CreateRawLocation(chunkIndex: 0, fileOffset: 64),
+                    VTRequestPriorityKey.FromRequest(
+                        backgroundRequest,
+                        locked: false,
+                        producerPriority: 0));
+                manager.SubmitPendingReads();
+
+                var activeRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    1,
+                    1,
+                    priority: 1,
+                    requestFrame: 2,
+                    cameraPriority: 0,
+                    isActiveView: true);
+                using VTChunkLease activeLease = manager.Acquire(
+                    "lazy-priority.stream",
+                    1,
+                    CreateRawLocation(chunkIndex: 1, fileOffset: 0),
+                    VTRequestPriorityKey.FromRequest(
+                        activeRequest,
+                        locked: false,
+                        producerPriority: 0));
+                manager.SubmitPendingReads();
+
+                Assert.That(backend.Batches, Has.Count.EqualTo(2));
+                Assert.That(backend.Batches[0][0].FileOffset, Is.EqualTo(64));
+                Assert.That(backend.Batches[1][0].FileOffset, Is.Zero);
+
+                manager.PollProgress();
+
+                Assert.That(backend.PollOrder, Is.EqualTo(new long[] { 0, 64 }));
+            }
+            finally
+            {
+                VTStreamChunkManager.ResetShared();
+            }
+        }
+
+        [Test]
+        public void ChunkManager_PromotesQueuedChunkBeforeSubmission()
+        {
+            VTStreamChunkManager.ResetShared();
+            try
+            {
+                VTStreamChunkManager manager = VTStreamChunkManager.Shared;
+                var backend = new RecordingIOBackend();
+                manager.SetIOBackendForTesting(backend);
+                VividVirtualTextureTilePayloadLocation location =
+                    CreateRawLocation(chunkIndex: 0, fileOffset: 32);
+                var backgroundRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    0,
+                    1,
+                    priority: 1,
+                    requestFrame: 1,
+                    cameraPriority: 1,
+                    isActiveView: false);
+                var activeRequest = new VTRequest(
+                    1,
+                    backgroundRequest.PageCoord,
+                    0,
+                    1,
+                    priority: 4,
+                    requestFrame: 2,
+                    cameraPriority: 0,
+                    isActiveView: true);
+
+                using VTChunkLease lease = manager.Acquire(
+                    "promotion.stream",
+                    1,
+                    location,
+                    VTRequestPriorityKey.FromRequest(
+                        backgroundRequest,
+                        locked: false,
+                        producerPriority: 0));
+                lease.PromotePriority(VTRequestPriorityKey.FromRequest(
+                    activeRequest,
+                    locked: false,
+                    producerPriority: 0));
+
+                manager.SubmitPendingReads();
+
+                Assert.That(backend.Batches, Has.Count.EqualTo(1));
+                Assert.That(backend.Batches[0], Has.Count.EqualTo(1));
+                Assert.That(backend.Batches[0][0].HighPriority, Is.True);
+            }
+            finally
+            {
+                VTStreamChunkManager.ResetShared();
+            }
+        }
+
+        [Test]
+        public void ChunkManager_BoundsDecodeConcurrencyAndStartsHighestPriorityFirst()
+        {
+            using var firstDecodeStarted = new ManualResetEventSlim();
+            using var releaseFirstDecode = new ManualResetEventSlim();
+            var decodeOrder = new List<long>();
+            var manager = new VTStreamChunkManager(state =>
+            {
+                var entry = (VTStreamChunkManager.ChunkEntry)state;
+                lock (decodeOrder)
+                    decodeOrder.Add(entry.Location.FileOffset);
+                if (entry.Location.FileOffset == 0)
+                {
+                    firstDecodeStarted.Set();
+                    releaseFirstDecode.Wait(TimeSpan.FromSeconds(5));
+                }
+
+                return new VTStreamChunkManager.DecodeResult(entry.StoredData, null);
+            });
+            try
+            {
+                manager.SetIOBackendForTesting(new CompletedIOBackend());
+                manager.Configure(
+                    VividVirtualTextureIOBackendMode.AsyncReadManager,
+                    maxInFlightChunkCount: 4,
+                    decodeConcurrency: 1,
+                    decodedCacheBudgetMiB: 1);
+                var backgroundRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    0,
+                    1,
+                    priority: 16,
+                    requestFrame: 1,
+                    cameraPriority: 0,
+                    isActiveView: false);
+                var activeRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    1,
+                    1,
+                    priority: 1,
+                    requestFrame: 1,
+                    cameraPriority: 0,
+                    isActiveView: true);
+                using VTChunkLease backgroundLease = manager.Acquire(
+                    "decode-priority.stream",
+                    1,
+                    CreateRawLocation(chunkIndex: 0, fileOffset: 64),
+                    VTRequestPriorityKey.FromRequest(
+                        backgroundRequest,
+                        locked: false,
+                        producerPriority: 0));
+                using VTChunkLease activeLease = manager.Acquire(
+                    "decode-priority.stream",
+                    1,
+                    CreateRawLocation(chunkIndex: 1, fileOffset: 0),
+                    VTRequestPriorityKey.FromRequest(
+                        activeRequest,
+                        locked: false,
+                        producerPriority: 0));
+
+                manager.SubmitPendingReads();
+                manager.PollProgress();
+
+                Assert.That(firstDecodeStarted.Wait(TimeSpan.FromSeconds(5)), Is.True);
+                lock (decodeOrder)
+                    Assert.That(decodeOrder, Is.EqualTo(new long[] { 0 }));
+                Assert.That(manager.ActiveDecodeCount, Is.EqualTo(1));
+                Assert.That(manager.PendingDecodeCount, Is.EqualTo(1));
+                Assert.That(manager.LastDecodeSaturationCount, Is.EqualTo(1));
+                manager.BeginFrame();
+                Assert.That(manager.LastDecodeSaturationCount, Is.EqualTo(1));
+
+                releaseFirstDecode.Set();
+                WaitForLease(manager, activeLease);
+                Assert.That(
+                    SpinWait.SpinUntil(
+                        () =>
+                        {
+                            lock (decodeOrder)
+                                return decodeOrder.Count == 2;
+                        },
+                        TimeSpan.FromSeconds(5)),
+                    Is.True);
+                lock (decodeOrder)
+                    Assert.That(decodeOrder, Is.EqualTo(new long[] { 0, 64 }));
+                WaitForLease(manager, backgroundLease);
+            }
+            finally
+            {
+                releaseFirstDecode.Set();
+                manager.Dispose();
+            }
+        }
+
+        [Test]
+        public void ChunkManager_ReleasesUnreferencedPendingDecodeWithoutStartingIt()
+        {
+            using var firstDecodeStarted = new ManualResetEventSlim();
+            using var releaseFirstDecode = new ManualResetEventSlim();
+            var decodeOrder = new List<long>();
+            var manager = new VTStreamChunkManager(state =>
+            {
+                var entry = (VTStreamChunkManager.ChunkEntry)state;
+                lock (decodeOrder)
+                    decodeOrder.Add(entry.Location.FileOffset);
+                if (entry.Location.FileOffset == 0)
+                {
+                    firstDecodeStarted.Set();
+                    releaseFirstDecode.Wait(TimeSpan.FromSeconds(5));
+                }
+
+                return new VTStreamChunkManager.DecodeResult(entry.StoredData, null);
+            });
+            VTChunkLease activeLease = null;
+            VTChunkLease backgroundLease = null;
+            try
+            {
+                manager.SetIOBackendForTesting(new CompletedIOBackend());
+                manager.Configure(
+                    VividVirtualTextureIOBackendMode.AsyncReadManager,
+                    maxInFlightChunkCount: 4,
+                    decodeConcurrency: 1,
+                    decodedCacheBudgetMiB: 1);
+                var activeRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    0,
+                    1,
+                    priority: 1,
+                    requestFrame: 1,
+                    cameraPriority: 0,
+                    isActiveView: true);
+                var backgroundRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    1,
+                    1,
+                    priority: 1,
+                    requestFrame: 1,
+                    cameraPriority: 1,
+                    isActiveView: false);
+                activeLease = manager.Acquire(
+                    "decode-release.stream",
+                    1,
+                    CreateRawLocation(chunkIndex: 0, fileOffset: 0),
+                    VTRequestPriorityKey.FromRequest(
+                        activeRequest,
+                        locked: false,
+                        producerPriority: 0));
+                backgroundLease = manager.Acquire(
+                    "decode-release.stream",
+                    1,
+                    CreateRawLocation(chunkIndex: 1, fileOffset: 64),
+                    VTRequestPriorityKey.FromRequest(
+                        backgroundRequest,
+                        locked: false,
+                        producerPriority: 0));
+
+                manager.SubmitPendingReads();
+                manager.PollProgress();
+
+                Assert.That(firstDecodeStarted.Wait(TimeSpan.FromSeconds(5)), Is.True);
+                Assert.That(manager.ActiveDecodeCount, Is.EqualTo(1));
+                Assert.That(manager.PendingDecodeCount, Is.EqualTo(1));
+                Assert.That(manager.PendingChunkCount, Is.EqualTo(2));
+
+                backgroundLease.Dispose();
+                backgroundLease = null;
+
+                Assert.That(manager.PendingDecodeCount, Is.Zero);
+                Assert.That(manager.PendingChunkCount, Is.EqualTo(1));
+
+                releaseFirstDecode.Set();
+                WaitForLease(manager, activeLease);
+                lock (decodeOrder)
+                    Assert.That(decodeOrder, Is.EqualTo(new long[] { 0 }));
+            }
+            finally
+            {
+                releaseFirstDecode.Set();
+                backgroundLease?.Dispose();
+                activeLease?.Dispose();
+                manager.Dispose();
             }
         }
 
@@ -512,6 +1073,22 @@ namespace VividRP.Editor.Tests
                 if (File.Exists(streamPath))
                     File.Delete(streamPath);
             }
+        }
+
+        private static VividVirtualTextureTilePayloadLocation CreateRawLocation(
+            int chunkIndex,
+            long fileOffset)
+        {
+            return new VividVirtualTextureTilePayloadLocation(
+                chunkIndex,
+                fileOffset,
+                storedByteSize: 16,
+                decodedByteSize: 16,
+                tileByteOffset: 0,
+                tileByteSize: 16,
+                compression: VividVirtualTextureStreamCompression.None,
+                decodedPayloadCRC: 0,
+                flags: VividVirtualTextureChunkFlags.None);
         }
 
         private static Texture2D CreateTexture(int width, int height, bool normal)

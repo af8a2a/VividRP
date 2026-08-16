@@ -1,0 +1,435 @@
+#pragma kernel EncodeBC7
+#pragma kernel EncodeBC5
+#pragma kernel EncodeBC4
+// Unity imports Direct3D compute kernels through the d3d11 renderer token on DX12.
+#pragma only_renderers d3d11
+
+#pragma use_dxc
+#pragma target 5.0
+
+Texture2DArray<float4> _SourcePages;
+RWTexture2DArray<uint4> _OutputBC128;
+RWTexture2DArray<uint2> _OutputBC64;
+
+int4 _VTBlockCompressParams;
+
+static const uint kBC7Weights[16] =
+{
+    0u, 4u, 9u, 13u, 17u, 21u, 26u, 30u,
+    34u, 38u, 43u, 47u, 51u, 55u, 60u, 64u,
+};
+
+float4 LoadSourceTexel(uint2 blockCoord, uint texelIndex)
+{
+    const uint2 localCoord = uint2(texelIndex & 3u, texelIndex >> 2u);
+    const int2 sourceCoord = min(
+        int2(blockCoord * 4u + localCoord),
+        _VTBlockCompressParams.zw - 1);
+    return saturate(_SourcePages.Load(int4(sourceCoord, _VTBlockCompressParams.x, 0)));
+}
+
+void WriteBits64(inout uint2 block, inout uint bitPosition, uint value, uint bitCount)
+{
+    const uint wordIndex = bitPosition >> 5u;
+    const uint wordBit = bitPosition & 31u;
+    const uint maskedValue = value & ((1u << bitCount) - 1u);
+    if (wordIndex == 0u)
+        block.x |= maskedValue << wordBit;
+    else
+        block.y |= maskedValue << wordBit;
+
+    if (wordBit + bitCount > 32u)
+    {
+        const uint overflowValue = maskedValue >> (32u - wordBit);
+        if (wordIndex == 0u)
+            block.y |= overflowValue;
+    }
+    bitPosition += bitCount;
+}
+
+void WriteBits128(inout uint4 block, inout uint bitPosition, uint value, uint bitCount)
+{
+    const uint wordIndex = bitPosition >> 5u;
+    const uint wordBit = bitPosition & 31u;
+    const uint maskedValue = value & ((1u << bitCount) - 1u);
+    if (wordIndex == 0u)
+        block.x |= maskedValue << wordBit;
+    else if (wordIndex == 1u)
+        block.y |= maskedValue << wordBit;
+    else if (wordIndex == 2u)
+        block.z |= maskedValue << wordBit;
+    else
+        block.w |= maskedValue << wordBit;
+
+    if (wordBit + bitCount > 32u)
+    {
+        const uint overflowValue = maskedValue >> (32u - wordBit);
+        if (wordIndex == 0u)
+            block.y |= overflowValue;
+        else if (wordIndex == 1u)
+            block.z |= overflowValue;
+        else if (wordIndex == 2u)
+            block.w |= overflowValue;
+    }
+    bitPosition += bitCount;
+}
+
+void BuildBC4Palette(uint endpoint0, uint endpoint1, out float palette[8])
+{
+    palette[0] = endpoint0 / 255.0;
+    palette[1] = endpoint1 / 255.0;
+    if (endpoint0 > endpoint1)
+    {
+        [unroll]
+        for (uint index = 1u; index <= 6u; ++index)
+        {
+            palette[index + 1u] =
+                ((7u - index) * endpoint0 + index * endpoint1) / (7.0 * 255.0);
+        }
+    }
+    else
+    {
+        [unroll]
+        for (uint index = 1u; index <= 4u; ++index)
+        {
+            palette[index + 1u] =
+                ((5u - index) * endpoint0 + index * endpoint1) / (5.0 * 255.0);
+        }
+        palette[6] = 0.0;
+        palette[7] = 1.0;
+    }
+}
+
+float EvaluateBC4(float values[16], uint endpoint0, uint endpoint1, out uint indices[16])
+{
+    float palette[8];
+    BuildBC4Palette(endpoint0, endpoint1, palette);
+    float error = 0.0;
+    [unroll]
+    for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+    {
+        float bestError = 1e30;
+        uint bestIndex = 0u;
+        [unroll]
+        for (uint paletteIndex = 0u; paletteIndex < 8u; ++paletteIndex)
+        {
+            const float delta = values[texelIndex] - palette[paletteIndex];
+            const float candidateError = delta * delta;
+            if (candidateError < bestError)
+            {
+                bestError = candidateError;
+                bestIndex = paletteIndex;
+            }
+        }
+        indices[texelIndex] = bestIndex;
+        error += bestError;
+    }
+    return error;
+}
+
+uint2 EncodeBC4Block(float values[16])
+{
+    float minimumValue = values[0];
+    float maximumValue = values[0];
+    [unroll]
+    for (uint texelIndex = 1u; texelIndex < 16u; ++texelIndex)
+    {
+        minimumValue = min(minimumValue, values[texelIndex]);
+        maximumValue = max(maximumValue, values[texelIndex]);
+    }
+
+    const int minimumEndpoint = (int)round(minimumValue * 255.0);
+    const int maximumEndpoint = (int)round(maximumValue * 255.0);
+    float bestError = 1e30;
+    uint bestEndpoint0 = (uint)maximumEndpoint;
+    uint bestEndpoint1 = (uint)minimumEndpoint;
+    uint bestIndices[16];
+
+    if (maximumEndpoint == minimumEndpoint)
+    {
+        [unroll]
+        for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+            bestIndices[texelIndex] = 0u;
+        bestEndpoint1 = bestEndpoint0;
+    }
+    else
+    {
+        [loop]
+        for (int endpoint0Offset = -4; endpoint0Offset <= 4; ++endpoint0Offset)
+        {
+            const uint endpoint0 = (uint)clamp(maximumEndpoint + endpoint0Offset, 1, 255);
+            [loop]
+            for (int endpoint1Offset = -4; endpoint1Offset <= 4; ++endpoint1Offset)
+            {
+                const uint endpoint1 = (uint)clamp(minimumEndpoint + endpoint1Offset, 0, 254);
+                if (endpoint0 <= endpoint1)
+                    continue;
+
+                uint candidateIndices[16];
+                const float candidateError = EvaluateBC4(
+                    values,
+                    endpoint0,
+                    endpoint1,
+                    candidateIndices);
+                if (candidateError >= bestError)
+                    continue;
+
+                bestError = candidateError;
+                bestEndpoint0 = endpoint0;
+                bestEndpoint1 = endpoint1;
+                [unroll]
+                for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+                    bestIndices[texelIndex] = candidateIndices[texelIndex];
+            }
+        }
+    }
+
+    uint2 block = 0u.xx;
+    uint bitPosition = 0u;
+    WriteBits64(block, bitPosition, bestEndpoint0, 8u);
+    WriteBits64(block, bitPosition, bestEndpoint1, 8u);
+    [unroll]
+    for (uint packedTexelIndex = 0u; packedTexelIndex < 16u; ++packedTexelIndex)
+        WriteBits64(block, bitPosition, bestIndices[packedTexelIndex], 3u);
+    return block;
+}
+
+float4 ComputePrincipalAxis(float4 colors[16], out float4 meanColor)
+{
+    meanColor = 0.0.xxxx;
+    float4 minimumColor = colors[0];
+    float4 maximumColor = colors[0];
+    [unroll]
+    for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+    {
+        meanColor += colors[texelIndex];
+        minimumColor = min(minimumColor, colors[texelIndex]);
+        maximumColor = max(maximumColor, colors[texelIndex]);
+    }
+    meanColor *= 1.0 / 16.0;
+
+    float4 axis = maximumColor - minimumColor;
+    if (dot(axis, axis) < 1e-10)
+        axis = float4(1.0, 0.0, 0.0, 0.0);
+    axis *= rsqrt(max(dot(axis, axis), 1e-10));
+
+    [unroll]
+    for (uint iteration = 0u; iteration < 4u; ++iteration)
+    {
+        float4 nextAxis = 0.0.xxxx;
+        [unroll]
+        for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+        {
+            const float4 centered = colors[texelIndex] - meanColor;
+            nextAxis += centered * dot(centered, axis);
+        }
+        const float lengthSquared = dot(nextAxis, nextAxis);
+        if (lengthSquared > 1e-10)
+            axis = nextAxis * rsqrt(lengthSquared);
+    }
+    return axis;
+}
+
+float4 QuantizeBC7Endpoint(float4 endpoint, uint pBit, out uint4 quantized)
+{
+    quantized = (uint4)clamp(round((endpoint * 255.0 - pBit) * 0.5), 0.0, 127.0);
+    return (quantized * 2u + pBit) / 255.0;
+}
+
+float SelectBC7Indices(
+    float4 colors[16],
+    float4 endpoint0,
+    float4 endpoint1,
+    out uint indices[16])
+{
+    float error = 0.0;
+    [unroll]
+    for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+    {
+        float bestError = 1e30;
+        uint bestIndex = 0u;
+        const uint maximumIndex = texelIndex == 0u ? 8u : 16u;
+        [unroll]
+        for (uint paletteIndex = 0u; paletteIndex < maximumIndex; ++paletteIndex)
+        {
+            const uint weight = kBC7Weights[paletteIndex];
+            const float4 decoded =
+                (endpoint0 * (64u - weight) + endpoint1 * weight) * (1.0 / 64.0);
+            const float4 delta = colors[texelIndex] - decoded;
+            const float candidateError = dot(delta, delta);
+            if (candidateError < bestError)
+            {
+                bestError = candidateError;
+                bestIndex = paletteIndex;
+            }
+        }
+        indices[texelIndex] = bestIndex;
+        error += bestError;
+    }
+    return error;
+}
+
+void RefitBC7Endpoints(
+    float4 colors[16],
+    uint indices[16],
+    out float4 endpoint0,
+    out float4 endpoint1)
+{
+    float sumAA = 0.0;
+    float sumAB = 0.0;
+    float sumBB = 0.0;
+    float4 sumAY = 0.0.xxxx;
+    float4 sumBY = 0.0.xxxx;
+    [unroll]
+    for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+    {
+        const float b = kBC7Weights[indices[texelIndex]] * (1.0 / 64.0);
+        const float a = 1.0 - b;
+        sumAA += a * a;
+        sumAB += a * b;
+        sumBB += b * b;
+        sumAY += a * colors[texelIndex];
+        sumBY += b * colors[texelIndex];
+    }
+
+    const float determinant = sumAA * sumBB - sumAB * sumAB;
+    if (abs(determinant) <= 1e-8)
+        return;
+
+    const float inverseDeterminant = rcp(determinant);
+    endpoint0 = saturate((sumAY * sumBB - sumBY * sumAB) * inverseDeterminant);
+    endpoint1 = saturate((sumBY * sumAA - sumAY * sumAB) * inverseDeterminant);
+}
+
+uint4 EncodeBC7Block(float4 colors[16])
+{
+    float4 meanColor;
+    const float4 axis = ComputePrincipalAxis(colors, meanColor);
+    float minimumProjection = dot(colors[0] - meanColor, axis);
+    float maximumProjection = minimumProjection;
+    [unroll]
+    for (uint texelIndex = 1u; texelIndex < 16u; ++texelIndex)
+    {
+        const float projection = dot(colors[texelIndex] - meanColor, axis);
+        minimumProjection = min(minimumProjection, projection);
+        maximumProjection = max(maximumProjection, projection);
+    }
+
+    const float4 principalEndpoint0 = saturate(meanColor + axis * minimumProjection);
+    const float4 principalEndpoint1 = saturate(meanColor + axis * maximumProjection);
+    float bestError = 1e30;
+    uint4 bestQuantized0 = 0u.xxxx;
+    uint4 bestQuantized1 = 0u.xxxx;
+    uint bestPBit0 = 0u;
+    uint bestPBit1 = 0u;
+    uint bestIndices[16];
+
+    [unroll]
+    for (uint direction = 0u; direction < 2u; ++direction)
+    {
+        const float4 initialEndpoint0 = direction == 0u ? principalEndpoint0 : principalEndpoint1;
+        const float4 initialEndpoint1 = direction == 0u ? principalEndpoint1 : principalEndpoint0;
+        [unroll]
+        for (uint pBit0 = 0u; pBit0 < 2u; ++pBit0)
+        {
+            [unroll]
+            for (uint pBit1 = 0u; pBit1 < 2u; ++pBit1)
+            {
+                uint4 quantized0;
+                uint4 quantized1;
+                float4 endpoint0 = QuantizeBC7Endpoint(initialEndpoint0, pBit0, quantized0);
+                float4 endpoint1 = QuantizeBC7Endpoint(initialEndpoint1, pBit1, quantized1);
+                uint candidateIndices[16];
+                SelectBC7Indices(colors, endpoint0, endpoint1, candidateIndices);
+                RefitBC7Endpoints(colors, candidateIndices, endpoint0, endpoint1);
+                endpoint0 = QuantizeBC7Endpoint(endpoint0, pBit0, quantized0);
+                endpoint1 = QuantizeBC7Endpoint(endpoint1, pBit1, quantized1);
+                const float candidateError = SelectBC7Indices(
+                    colors,
+                    endpoint0,
+                    endpoint1,
+                    candidateIndices);
+                if (candidateError >= bestError)
+                    continue;
+
+                bestError = candidateError;
+                bestQuantized0 = quantized0;
+                bestQuantized1 = quantized1;
+                bestPBit0 = pBit0;
+                bestPBit1 = pBit1;
+                [unroll]
+                for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+                    bestIndices[texelIndex] = candidateIndices[texelIndex];
+            }
+        }
+    }
+
+    uint4 block = 0u.xxxx;
+    uint bitPosition = 0u;
+    WriteBits128(block, bitPosition, 1u << 6u, 7u);
+    WriteBits128(block, bitPosition, bestQuantized0.r, 7u);
+    WriteBits128(block, bitPosition, bestQuantized1.r, 7u);
+    WriteBits128(block, bitPosition, bestQuantized0.g, 7u);
+    WriteBits128(block, bitPosition, bestQuantized1.g, 7u);
+    WriteBits128(block, bitPosition, bestQuantized0.b, 7u);
+    WriteBits128(block, bitPosition, bestQuantized1.b, 7u);
+    WriteBits128(block, bitPosition, bestQuantized0.a, 7u);
+    WriteBits128(block, bitPosition, bestQuantized1.a, 7u);
+    WriteBits128(block, bitPosition, bestPBit0, 1u);
+    WriteBits128(block, bitPosition, bestPBit1, 1u);
+    WriteBits128(block, bitPosition, bestIndices[0], 3u);
+    [unroll]
+    for (uint packedTexelIndex = 1u; packedTexelIndex < 16u; ++packedTexelIndex)
+        WriteBits128(block, bitPosition, bestIndices[packedTexelIndex], 4u);
+    return block;
+}
+
+[numthreads(8, 8, 1)]
+void EncodeBC7(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint2 blockDimensions = ((uint2)_VTBlockCompressParams.zw + 3u) / 4u;
+    if (any(dispatchThreadID.xy >= blockDimensions))
+        return;
+
+    float4 colors[16];
+    [unroll]
+    for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+        colors[texelIndex] = LoadSourceTexel(dispatchThreadID.xy, texelIndex);
+    _OutputBC128[uint3(dispatchThreadID.xy, _VTBlockCompressParams.y)] = EncodeBC7Block(colors);
+}
+
+[numthreads(8, 8, 1)]
+void EncodeBC5(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint2 blockDimensions = ((uint2)_VTBlockCompressParams.zw + 3u) / 4u;
+    if (any(dispatchThreadID.xy >= blockDimensions))
+        return;
+
+    float redValues[16];
+    float greenValues[16];
+    [unroll]
+    for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+    {
+        const float4 color = LoadSourceTexel(dispatchThreadID.xy, texelIndex);
+        redValues[texelIndex] = color.r;
+        greenValues[texelIndex] = color.g;
+    }
+    const uint2 redBlock = EncodeBC4Block(redValues);
+    const uint2 greenBlock = EncodeBC4Block(greenValues);
+    _OutputBC128[uint3(dispatchThreadID.xy, _VTBlockCompressParams.y)] =
+        uint4(redBlock, greenBlock);
+}
+
+[numthreads(8, 8, 1)]
+void EncodeBC4(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint2 blockDimensions = ((uint2)_VTBlockCompressParams.zw + 3u) / 4u;
+    if (any(dispatchThreadID.xy >= blockDimensions))
+        return;
+
+    float values[16];
+    [unroll]
+    for (uint texelIndex = 0u; texelIndex < 16u; ++texelIndex)
+        values[texelIndex] = LoadSourceTexel(dispatchThreadID.xy, texelIndex).r;
+    _OutputBC64[uint3(dispatchThreadID.xy, _VTBlockCompressParams.y)] = EncodeBC4Block(values);
+}

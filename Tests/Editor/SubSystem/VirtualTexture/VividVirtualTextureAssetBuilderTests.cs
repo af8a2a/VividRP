@@ -741,6 +741,48 @@ namespace VividRP.Editor.Tests
                     AssetDatabase.AssetPathToGUID(vtAssetPath))));
         }
 
+        [Test]
+        public void Importer_GPUDrivenSurfaceProfile_UsesDesktopBCnWithoutVersion3Marker()
+        {
+            Directory.CreateDirectory(TempFolder);
+            string texturePath = $"{TempFolder}/GPUDrivenSurfaceSource.png";
+            Texture2D sourceTexture = CreateSourceTexture(256, 128, readable: true);
+            File.WriteAllBytes(texturePath, sourceTexture.EncodeToPNG());
+            Object.DestroyImmediate(sourceTexture);
+            AssetDatabase.ImportAsset(texturePath, ImportAssetOptions.ForceSynchronousImport);
+            Texture2D importedTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+            Assert.That(importedTexture, Is.Not.Null);
+
+            string vtAssetPath = $"{TempFolder}/GPUDrivenSurface.vividvt";
+            File.WriteAllText(vtAssetPath, string.Empty);
+            AssetDatabase.ImportAsset(vtAssetPath, ImportAssetOptions.ForceSynchronousImport);
+            var importer = (VividVirtualTextureAssetImporter)AssetImporter.GetAtPath(vtAssetPath);
+            Assert.That(importer, Is.Not.Null);
+            importer.SourceTexture = importedTexture;
+            importer.BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface;
+            importer.AddressMode = VividVirtualTextureAddressMode.Repeat;
+            importer.StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
+            importer.StreamCompression = VividVirtualTextureStreamCompression.None;
+            EditorUtility.SetDirty(importer);
+            importer.SaveAndReimport();
+
+            VividVirtualTextureAsset vtAsset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(vtAssetPath);
+            Assert.That(vtAsset, Is.Not.Null);
+            Assert.That(vtAsset.BuiltData, Is.Not.Null);
+            Assert.That(vtAsset.BuildProfile, Is.EqualTo(VividVirtualTextureBuildProfile.GPUDrivenSurface));
+            Assert.That(vtAsset.StorageProfile, Is.EqualTo(VividVirtualTextureStorageProfile.DesktopBCn));
+            Assert.That(vtAsset.PageSize, Is.EqualTo(128));
+            Assert.That(vtAsset.BorderSize, Is.EqualTo(4));
+            Assert.That(vtAsset.BuiltData.LayerCount, Is.EqualTo(4));
+            Assert.That(vtAsset.AddressMode, Is.EqualTo(VividVirtualTextureAddressMode.Repeat));
+            Assert.That(
+                VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(
+                    vtAsset,
+                    out string validationMessage),
+                Is.True,
+                validationMessage);
+        }
+
         private static Texture2D CreateSourceTexture(int width, int height, bool readable)
         {
             var texture = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: true);

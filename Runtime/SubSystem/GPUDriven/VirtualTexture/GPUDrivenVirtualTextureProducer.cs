@@ -7,6 +7,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 {
     internal sealed class GPUDrivenVirtualTextureProducer :
         IVTPageProducer,
+        IVTPrioritizedPageProducer,
         IVTPageRequestRetirement,
         IDisposable
     {
@@ -14,9 +15,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal const int NormalLayerIndex = 1;
         internal const int MaskLayerIndex = 2;
         internal const int ScalarMaskLayerIndex = 3;
-        internal const int LayerCount = 3;
+        internal const int HeightLayerIndex = 3;
+        internal const int LayerCount = 4;
 
         private const int ThreadGroupSize = 8;
+        private const int InitialEntryCapacity = 16;
 
         private static readonly int s_BaseColorTextureId = Shader.PropertyToID("_BaseColorTexture");
         private static readonly int s_NormalTextureId = Shader.PropertyToID("_NormalTexture");
@@ -29,8 +32,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private static readonly int s_BaseColorFallbackId = Shader.PropertyToID("_VTBaseColorFallback");
         private static readonly int s_NormalFallbackId = Shader.PropertyToID("_VTNormalFallback");
         private static readonly int s_MaskFallbackId = Shader.PropertyToID("_VTMaskFallback");
+        private static readonly int s_HeightFallbackId = Shader.PropertyToID("_VTHeightFallback");
 
-        private sealed class AtlasEntry : IDisposable
+        private readonly struct AtlasEntry
         {
             internal AtlasEntry(
                 RectInt pageRegion,
@@ -44,16 +48,18 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 PageRegion = pageRegion;
                 MaxMip = maxMip;
                 Repeat = repeat;
-                Sources = new[] { baseColor, normal, mask };
-                SourceMipOffsets = new[]
-                {
-                    ComputeSourceMipOffset(baseColor, pageRegion.width, pageRegion.height, pageSize),
-                    ComputeSourceMipOffset(normal, pageRegion.width, pageRegion.height, pageSize),
-                    ComputeSourceMipOffset(mask, pageRegion.width, pageRegion.height, pageSize),
-                };
+                BaseColor = baseColor;
+                Normal = normal;
+                Mask = mask;
+                BaseColorMipOffset = ComputeSourceMipOffset(baseColor, pageRegion.width, pageRegion.height, pageSize);
+                NormalMipOffset = ComputeSourceMipOffset(normal, pageRegion.width, pageRegion.height, pageSize);
+                MaskMipOffset = ComputeSourceMipOffset(mask, pageRegion.width, pageRegion.height, pageSize);
                 PresenceMask = (baseColor != null ? 1 : 0)
                                | (normal != null ? 2 : 0)
                                | (mask != null ? 4 : 0);
+                LocalDesc = default;
+                StreamedProducer = null;
+                RuntimeLevel = null;
             }
 
             internal AtlasEntry(
@@ -64,11 +70,35 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 PageRegion = pageRegion;
                 MaxMip = asset.MipCount - 1;
                 Repeat = true;
-                Sources = Array.Empty<Texture2D>();
-                SourceMipOffsets = Array.Empty<int>();
+                BaseColor = null;
+                Normal = null;
+                Mask = null;
+                BaseColorMipOffset = 0;
+                NormalMipOffset = 0;
+                MaskMipOffset = 0;
                 PresenceMask = asset.ContentLayerMask;
                 LocalDesc = localDesc;
                 StreamedProducer = new VividVirtualTextureAssetProducer(asset);
+                RuntimeLevel = null;
+            }
+
+            internal AtlasEntry(
+                RectInt pageRegion,
+                TerrainRuntimeVirtualTextureClipmap.Level runtimeLevel)
+            {
+                PageRegion = pageRegion;
+                MaxMip = 0;
+                Repeat = false;
+                BaseColor = null;
+                Normal = null;
+                Mask = null;
+                BaseColorMipOffset = 0;
+                NormalMipOffset = 0;
+                MaskMipOffset = 0;
+                PresenceMask = 0;
+                LocalDesc = default;
+                StreamedProducer = null;
+                RuntimeLevel = runtimeLevel;
             }
 
             internal RectInt PageRegion { get; }
@@ -77,17 +107,29 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             internal bool Repeat { get; }
 
-            internal Texture2D[] Sources { get; }
+            internal Texture2D BaseColor { get; }
 
-            internal int[] SourceMipOffsets { get; }
+            internal Texture2D Normal { get; }
+
+            internal Texture2D Mask { get; }
+
+            internal int BaseColorMipOffset { get; }
+
+            internal int NormalMipOffset { get; }
+
+            internal int MaskMipOffset { get; }
 
             internal int PresenceMask { get; }
 
             internal bool IsStreamed => StreamedProducer != null;
 
+            internal bool IsRuntime => RuntimeLevel != null;
+
             internal VirtualTextureSpaceDesc LocalDesc { get; }
 
             internal VividVirtualTextureAssetProducer StreamedProducer { get; }
+
+            internal TerrainRuntimeVirtualTextureClipmap.Level RuntimeLevel { get; }
 
             public void Dispose()
             {
@@ -118,16 +160,24 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             public void RecordGpuUpload(CommandBuffer cmd, RenderTexture stagingTexture, int baseSlice)
             {
+                if (m_Entry.IsRuntime)
+                {
+                    m_Entry.RuntimeLevel.RecordPageUpload(cmd, stagingTexture, baseSlice, m_Request);
+                    return;
+                }
+
                 m_Producer.RecordPageUpload(cmd, stagingTexture, baseSlice, m_Entry, m_Desc, m_Request);
             }
 
             public void Dispose()
             {
+                if (m_Entry.IsRuntime)
+                    m_Entry.RuntimeLevel.ReleasePageUploadDependencies(m_Request);
             }
         }
 
-        private readonly List<AtlasEntry> m_Entries = new();
-        private readonly AtlasEntry[,] m_EntriesByBasePage;
+        private readonly List<AtlasEntry> m_Entries = new(InitialEntryCapacity);
+        private readonly int[,] m_EntryIndicesByBasePage;
         private readonly ComputeShader m_ComputeShader;
         private readonly int m_Kernel;
         private readonly List<VTRequest> m_RetirementScratch = new();
@@ -149,7 +199,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             m_Kernel = m_ComputeShader.FindKernel("CS");
             ProducerDesc = VTProducerDesc.FromSpaceDesc(Name, desc);
-            m_EntriesByBasePage = new AtlasEntry[desc.VirtualPageCountX, desc.VirtualPageCountY];
+            m_EntryIndicesByBasePage = new int[desc.VirtualPageCountX, desc.VirtualPageCountY];
         }
 
         public string Name { get; }
@@ -194,16 +244,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (pageRegion.width <= 0
                 || pageRegion.xMin < 0
                 || pageRegion.yMin < 0
-                || pageRegion.xMax > m_EntriesByBasePage.GetLength(0)
-                || pageRegion.yMax > m_EntriesByBasePage.GetLength(1))
+                || pageRegion.xMax > m_EntryIndicesByBasePage.GetLength(0)
+                || pageRegion.yMax > m_EntryIndicesByBasePage.GetLength(1))
             {
                 return false;
             }
 
-            AtlasEntry entry = m_EntriesByBasePage[pageRegion.xMin, pageRegion.yMin];
-            return entry != null
-                   && entry.PageRegion.Equals(pageRegion)
-                   && entry.StreamedProducer?.HasPermanentFailure == true;
+            int encodedEntryIndex = m_EntryIndicesByBasePage[pageRegion.xMin, pageRegion.yMin];
+            return encodedEntryIndex > 0
+                   && m_Entries[encodedEntryIndex - 1].PageRegion.Equals(pageRegion)
+                   && m_Entries[encodedEntryIndex - 1].StreamedProducer?.HasPermanentFailure == true;
         }
 
         internal void RegisterEntry(
@@ -249,52 +299,113 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             StoreEntry(entry);
         }
 
+        internal void RegisterRuntimeEntry(
+            RectInt pageRegion,
+            TerrainRuntimeVirtualTextureClipmap.Level runtimeLevel)
+        {
+            if (runtimeLevel == null)
+                throw new ArgumentNullException(nameof(runtimeLevel));
+            if (pageRegion.width != TerrainRuntimeVirtualTextureClipmap.WindowPageCount
+                || pageRegion.height != TerrainRuntimeVirtualTextureClipmap.WindowPageCount)
+            {
+                throw new ArgumentException("Terrain RVT levels require an 8x8 page region.", nameof(pageRegion));
+            }
+
+            ValidateAndReservePageRegion(pageRegion);
+            StoreEntry(new AtlasEntry(pageRegion, runtimeLevel));
+        }
+
         internal bool UnregisterEntry(RectInt pageRegion)
         {
             if (pageRegion.width <= 0
                 || pageRegion.xMin < 0
                 || pageRegion.yMin < 0
-                || pageRegion.xMax > m_EntriesByBasePage.GetLength(0)
-                || pageRegion.yMax > m_EntriesByBasePage.GetLength(1))
+                || pageRegion.xMax > m_EntryIndicesByBasePage.GetLength(0)
+                || pageRegion.yMax > m_EntryIndicesByBasePage.GetLength(1))
             {
                 return false;
             }
 
-            AtlasEntry entry = m_EntriesByBasePage[pageRegion.xMin, pageRegion.yMin];
-            if (entry == null || !entry.PageRegion.Equals(pageRegion))
+            int encodedEntryIndex = m_EntryIndicesByBasePage[pageRegion.xMin, pageRegion.yMin];
+            if (encodedEntryIndex <= 0)
+                return false;
+
+            int entryIndex = encodedEntryIndex - 1;
+            AtlasEntry entry = m_Entries[entryIndex];
+            if (!entry.PageRegion.Equals(pageRegion))
                 return false;
 
             for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
             {
                 for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
                 {
-                    if (ReferenceEquals(m_EntriesByBasePage[pageX, pageY], entry))
-                        m_EntriesByBasePage[pageX, pageY] = null;
+                    if (m_EntryIndicesByBasePage[pageX, pageY] == encodedEntryIndex)
+                        m_EntryIndicesByBasePage[pageX, pageY] = 0;
                 }
             }
 
-            bool removed = m_Entries.Remove(entry);
-            if (removed)
-                entry.Dispose();
-            return removed;
+            int lastEntryIndex = m_Entries.Count - 1;
+            if (entryIndex != lastEntryIndex)
+            {
+                AtlasEntry movedEntry = m_Entries[lastEntryIndex];
+                m_Entries[entryIndex] = movedEntry;
+                int movedEncodedEntryIndex = entryIndex + 1;
+                RectInt movedPageRegion = movedEntry.PageRegion;
+                for (int pageY = movedPageRegion.yMin; pageY < movedPageRegion.yMax; pageY++)
+                {
+                    for (int pageX = movedPageRegion.xMin; pageX < movedPageRegion.xMax; pageX++)
+                        m_EntryIndicesByBasePage[pageX, pageY] = movedEncodedEntryIndex;
+                }
+            }
+
+            m_Entries.RemoveAt(lastEntryIndex);
+            entry.Dispose();
+            return true;
         }
 
         public VTPageRequestStatus RequestPageData(
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {
+            VTRequestPriorityKey priorityKey = VTRequestPriorityKey.FromRequest(
+                request,
+                locked: false,
+                producerPriority: ProducerDesc.ProducerPriority);
+            return RequestPageData(desc, request, priorityKey);
+        }
+
+        public VTPageRequestStatus RequestPageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request,
+            in VTRequestPriorityKey priorityKey)
+        {
             if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
                 return VTPageRequestStatus.Invalid;
 
-            AtlasEntry entry = FindEntry(request.PageCoord);
-            if (entry == null)
+            if (!TryFindEntry(request.PageCoord, out AtlasEntry entry, out _))
                 return VTPageRequestStatus.Invalid;
+
+            if (entry.IsRuntime)
+            {
+                entry.RuntimeLevel.RecordFeedback(request.PageCoord, priorityKey);
+                return entry.RuntimeLevel.GetPageUploadStatus(request.SpaceId, request);
+            }
 
             if (!entry.IsStreamed)
                 return VTPageRequestStatus.Available;
 
             VTRequest localRequest = TranslateRequest(entry, request);
-            return entry.StreamedProducer.RequestPageData(entry.LocalDesc, localRequest);
+            VTRequestPriorityKey localPriorityKey = VTRequestPriorityKey.FromRequest(
+                localRequest,
+                priorityKey.Locked,
+                entry.StreamedProducer.ProducerDesc.ProducerPriority);
+            localPriorityKey = VTRequestPriorityUtility.SelectHigher(
+                priorityKey,
+                localPriorityKey);
+            return entry.StreamedProducer.RequestPageData(
+                entry.LocalDesc,
+                localRequest,
+                localPriorityKey);
         }
 
         public IVTPageUploadFinalizer ProducePageData(
@@ -304,8 +415,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
                 return null;
 
-            AtlasEntry entry = FindEntry(request.PageCoord);
-            if (entry == null)
+            if (!TryFindEntry(request.PageCoord, out AtlasEntry entry, out _))
                 return null;
 
             if (!entry.IsStreamed)
@@ -325,8 +435,15 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {
-            AtlasEntry entry = FindEntry(request.PageCoord);
-            if (entry == null || !entry.IsStreamed)
+            if (!TryFindEntry(request.PageCoord, out AtlasEntry entry, out _))
+                return;
+
+            if (entry.IsRuntime)
+            {
+                entry.RuntimeLevel.CancelPageUpload(request);
+                return;
+            }
+            if (!entry.IsStreamed)
                 return;
 
             VTRequest localRequest = TranslateRequest(entry, request);
@@ -338,6 +455,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             for (int entryIndex = 0; entryIndex < m_Entries.Count; entryIndex++)
             {
                 AtlasEntry entry = m_Entries[entryIndex];
+                if (entry.IsRuntime)
+                {
+                    entry.RuntimeLevel.RetirePageUploadDependencies(liveRequests);
+                    continue;
+                }
                 if (!entry.IsStreamed)
                     continue;
 
@@ -347,7 +469,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     for (int requestIndex = 0; requestIndex < liveRequests.Count; requestIndex++)
                     {
                         VTRequest request = liveRequests[requestIndex];
-                        if (ReferenceEquals(FindEntry(request.PageCoord), entry))
+                        if (TryFindEntry(request.PageCoord, out _, out int liveEntryIndex)
+                            && liveEntryIndex == entryIndex)
                             m_RetirementScratch.Add(TranslateRequest(entry, request));
                     }
                 }
@@ -367,7 +490,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 m_Entries[entryIndex].Dispose();
 
             m_Entries.Clear();
-            Array.Clear(m_EntriesByBasePage, 0, m_EntriesByBasePage.Length);
+            Array.Clear(m_EntryIndicesByBasePage, 0, m_EntryIndicesByBasePage.Length);
             m_RetirementScratch.Clear();
             m_IsDisposed = true;
         }
@@ -402,9 +525,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (stagingTexture == null)
                 throw new ArgumentNullException(nameof(stagingTexture));
 
-            Texture2D baseColor = entry.Sources[BaseColorLayerIndex];
-            Texture2D normal = entry.Sources[NormalLayerIndex];
-            Texture2D mask = entry.Sources[MaskLayerIndex];
+            Texture2D baseColor = entry.BaseColor;
+            Texture2D normal = entry.Normal;
+            Texture2D mask = entry.Mask;
             int presenceMask = (baseColor != null ? 1 : 0)
                                | (normal != null ? 2 : 0)
                                | (mask != null ? 4 : 0);
@@ -447,9 +570,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 m_ComputeShader,
                 s_SourceMipOffsetsId,
                 new Vector4(
-                    entry.SourceMipOffsets[BaseColorLayerIndex],
-                    entry.SourceMipOffsets[NormalLayerIndex],
-                    entry.SourceMipOffsets[MaskLayerIndex],
+                    entry.BaseColorMipOffset,
+                    entry.NormalMipOffset,
+                    entry.MaskMipOffset,
                     presenceMask));
             cmd.SetComputeVectorParam(
                 m_ComputeShader,
@@ -463,26 +586,44 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 m_ComputeShader,
                 s_MaskFallbackId,
                 ToVector(desc.StackDesc.GetLayer(MaskLayerIndex).FallbackColor));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_HeightFallbackId,
+                ToVector(desc.StackDesc.GetLayer(HeightLayerIndex).FallbackColor));
 
             int groupCount = Mathf.CeilToInt(desc.PhysicalPageSize / (float)ThreadGroupSize);
             cmd.DispatchCompute(m_ComputeShader, m_Kernel, groupCount, groupCount, 1);
         }
 
-        private AtlasEntry FindEntry(in VirtualTexturePageCoord coord)
+        private bool TryFindEntry(
+            in VirtualTexturePageCoord coord,
+            out AtlasEntry entry,
+            out int entryIndex)
         {
             int basePageX = coord.X << coord.Mip;
             int basePageY = coord.Y << coord.Mip;
             if (basePageX < 0
                 || basePageY < 0
-                || basePageX >= m_EntriesByBasePage.GetLength(0)
-                || basePageY >= m_EntriesByBasePage.GetLength(1))
+                || basePageX >= m_EntryIndicesByBasePage.GetLength(0)
+                || basePageY >= m_EntryIndicesByBasePage.GetLength(1))
             {
-                return null;
+                entry = default;
+                entryIndex = -1;
+                return false;
             }
 
-            AtlasEntry entry = m_EntriesByBasePage[basePageX, basePageY];
-            if (entry == null || coord.Mip > entry.MaxMip)
-                return null;
+            int encodedEntryIndex = m_EntryIndicesByBasePage[basePageX, basePageY];
+            if (encodedEntryIndex <= 0)
+            {
+                entry = default;
+                entryIndex = -1;
+                return false;
+            }
+
+            entryIndex = encodedEntryIndex - 1;
+            entry = m_Entries[entryIndex];
+            if (coord.Mip > entry.MaxMip)
+                return false;
 
             int entryX = entry.PageRegion.x >> coord.Mip;
             int entryY = entry.PageRegion.y >> coord.Mip;
@@ -491,9 +632,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return coord.X >= entryX
                    && coord.Y >= entryY
                    && coord.X < entryX + entryWidth
-                   && coord.Y < entryY + entryHeight
-                ? entry
-                : null;
+                   && coord.Y < entryY + entryHeight;
         }
 
         private static void ValidatePageRegion(RectInt pageRegion, int maxMip)
@@ -523,8 +662,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         {
             if (pageRegion.xMin < 0
                 || pageRegion.yMin < 0
-                || pageRegion.xMax > m_EntriesByBasePage.GetLength(0)
-                || pageRegion.yMax > m_EntriesByBasePage.GetLength(1))
+                || pageRegion.xMax > m_EntryIndicesByBasePage.GetLength(0)
+                || pageRegion.yMax > m_EntryIndicesByBasePage.GetLength(1))
             {
                 throw new ArgumentOutOfRangeException(nameof(pageRegion));
             }
@@ -533,7 +672,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             {
                 for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
                 {
-                    if (m_EntriesByBasePage[pageX, pageY] != null)
+                    if (m_EntryIndicesByBasePage[pageX, pageY] != 0)
                         throw new InvalidOperationException("GPUDriven VT atlas entries must not overlap.");
                 }
             }
@@ -541,11 +680,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         private void StoreEntry(AtlasEntry entry)
         {
+            int encodedEntryIndex = m_Entries.Count + 1;
             RectInt pageRegion = entry.PageRegion;
             for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
             {
                 for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
-                    m_EntriesByBasePage[pageX, pageY] = entry;
+                    m_EntryIndicesByBasePage[pageX, pageY] = encodedEntryIndex;
             }
 
             m_Entries.Add(entry);

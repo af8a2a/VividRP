@@ -20,7 +20,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma editor_sync_compilation
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
-            #pragma use_dxc 
+            #pragma target 5.0
+            #pragma require randomwrite
+            #pragma use_dxc
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
@@ -31,18 +33,18 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
             #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/TerrainRuntimeVirtualTextureSampling.hlsl"
+            #endif
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
 
             TYPED_TEXTURE2D(float2, _VisibilityBuffer);
-            TEXTURE2D(_DepthTexture);
-            SAMPLER(sampler_DepthTexture);
 
             StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
             ByteAddressBuffer _SharedIndexBuffer;
 
             float4 _VisibilityBufferScaleBias;
-            float4 _DepthTextureScaleBias;
 
             struct Attributes
             {
@@ -67,11 +69,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 VividInstanceData instanceData;
                 VividMaterialData materialData;
                 VividSurfaceBindingData surfaceBindingData;
-                VividDecodedMeshlet meshlet;
-                uint3 indices;
-                VividDecodedMeshletVertex vertex0;
-                VividDecodedMeshletVertex vertex1;
-                VividDecodedMeshletVertex vertex2;
+                VividMeshletVertex vertex0;
+                VividMeshletVertex vertex1;
+                VividMeshletVertex vertex2;
                 float3 positionWS0;
                 float3 positionWS1;
                 float3 positionWS2;
@@ -83,15 +83,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             float2 ApplyScaleBias(float2 uv, float4 scaleBias)
             {
                 return uv * scaleBias.xy + scaleBias.zw;
-            }
-
-            bool IsSceneDepthValid(float sceneDepth)
-            {
-                #if UNITY_REVERSED_Z
-                return sceneDepth > 1e-6f;
-                #else
-                return sceneDepth < 0.999999f;
-                #endif
             }
 
             Varyings Vert(Attributes input)
@@ -110,14 +101,38 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return (packedIndices >> shiftAmount) & 0xFFu;
             }
 
-            VividDecodedMeshletVertex PullVertex(const VividDecodedMeshlet meshlet, const uint index)
+            VividMeshletVertex PullVertex(const VividDecodedMeshlet meshlet, const uint index)
             {
-                return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
+                return _SharedVertexBuffer[meshlet.VertexOffset + index];
             }
 
-            float2 GetUV0(const VividDecodedMeshletVertex vertex)
+            float3 GetPositionOS(const VividMeshletVertex vertex)
             {
-                return vertex.UV.xy;
+                return float3(vertex.PositionX, vertex.PositionY, vertex.PositionZ);
+            }
+
+            float3 DecodeVertexNormalOS(const uint packedNormal)
+            {
+                return (packedNormal & VIVID_MESHLET_NORMAL_VALID_BIT) != 0u
+                    ? DecodeVividMeshletOctahedral15(packedNormal)
+                    : 0.0f;
+            }
+
+            float4 DecodeVertexTangentOS(const uint packedTangent)
+            {
+                if ((packedTangent & VIVID_MESHLET_TANGENT_VALID_BIT) == 0u)
+                    return 0.0f;
+
+                return float4(
+                    DecodeVividMeshletOctahedral15(packedTangent),
+                    (packedTangent & VIVID_MESHLET_TANGENT_NEGATIVE_HANDEDNESS_BIT) != 0u
+                        ? -1.0f
+                        : 1.0f);
+            }
+
+            float2 GetUV0(const VividMeshletVertex vertex)
+            {
+                return vertex.UV;
             }
 
             float3 TransformInstanceObjectToWorldDir(float3 dirOS, float4x4 objectToWorldMatrix, bool doNormalize = true)
@@ -154,9 +169,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             InterpolatedUV InterpolateUV(
                 const VividBarycentricDerivatives barycentric,
-                const VividDecodedMeshletVertex vertex0,
-                const VividDecodedMeshletVertex vertex1,
-                const VividDecodedMeshletVertex vertex2)
+                const VividMeshletVertex vertex0,
+                const VividMeshletVertex vertex1,
+                const VividMeshletVertex vertex2)
             {
                 const float3 u = InterpolateWithBarycentric(
                     barycentric,
@@ -214,21 +229,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             bool TryLoadVisibilityValue(
                 Varyings input,
-                out VividVisibilityBufferValue visibilityBufferValue,
-                out float sceneDepth)
+                out VividVisibilityBufferValue visibilityBufferValue)
             {
-                sceneDepth = 1.0f;
                 float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
                 uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
                 if (!IsPackedVisibilityBufferValueValid(packedValue))
-                {
-                    visibilityBufferValue = (VividVisibilityBufferValue) 0;
-                    return false;
-                }
-
-                float2 depthUv = ApplyScaleBias(input.uv, _DepthTextureScaleBias);
-                sceneDepth = SAMPLE_TEXTURE2D_LOD(_DepthTexture, sampler_PointClamp, depthUv, 0).r;
-                if (!IsSceneDepthValid(sceneDepth))
                 {
                     visibilityBufferValue = (VividVisibilityBufferValue) 0;
                     return false;
@@ -244,45 +249,26 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 result.materialData = PullMaterialData(result.instanceData.MaterialIndex);
                 result.surfaceBindingData = PullSurfaceBindingData(result.materialData.SurfaceBindingIndex);
-                result.meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
+                const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
-                result.indices = uint3(
-                    PullIndex(result.meshlet, visibilityBufferValue.IndexID + 0u),
-                    PullIndex(result.meshlet, visibilityBufferValue.IndexID + 1u),
-                    PullIndex(result.meshlet, visibilityBufferValue.IndexID + 2u)
+                const uint3 indices = uint3(
+                    PullIndex(meshlet, visibilityBufferValue.IndexID + 0u),
+                    PullIndex(meshlet, visibilityBufferValue.IndexID + 1u),
+                    PullIndex(meshlet, visibilityBufferValue.IndexID + 2u)
                 );
 
-                result.vertex0 = PullVertex(result.meshlet, result.indices.x);
-                result.vertex1 = PullVertex(result.meshlet, result.indices.y);
-                result.vertex2 = PullVertex(result.meshlet, result.indices.z);
+                result.vertex0 = PullVertex(meshlet, indices.x);
+                result.vertex1 = PullVertex(meshlet, indices.y);
+                result.vertex2 = PullVertex(meshlet, indices.z);
 
-                result.positionWS0 = TransformPosition(result.instanceData.ObjectToWorldMatrix, result.vertex0.Position.xyz);
-                result.positionWS1 = TransformPosition(result.instanceData.ObjectToWorldMatrix, result.vertex1.Position.xyz);
-                result.positionWS2 = TransformPosition(result.instanceData.ObjectToWorldMatrix, result.vertex2.Position.xyz);
+                result.positionWS0 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex0));
+                result.positionWS1 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex1));
+                result.positionWS2 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex2));
 
                 result.clipPosition0 = TransformWorldToHClip(result.positionWS0);
                 result.clipPosition1 = TransformWorldToHClip(result.positionWS1);
                 result.clipPosition2 = TransformWorldToHClip(result.positionWS2);
                 return result;
-            }
-
-            float ResolveVisibilityDepth(
-                const TriangleData triangleData,
-                const VividBarycentricDerivatives barycentric)
-            {
-                float4 clipPosition = InterpolateWithBarycentricNoDerivatives(
-                    barycentric,
-                    triangleData.clipPosition0,
-                    triangleData.clipPosition1,
-                    triangleData.clipPosition2);
-
-                return saturate(clipPosition.z / max(abs(clipPosition.w), 1e-6f));
-            }
-
-            bool IsVisibilitySampleVisible(float visibilityDepth, float sceneDepth)
-            {
-                float depthTolerance = max(1e-4f, fwidth(visibilityDepth) * 2.0f);
-                return abs(visibilityDepth - sceneDepth) <= depthTolerance;
             }
 
             #define VIVID_MAX_TERRAIN_LAYERS 8u
@@ -465,6 +451,18 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 float ambientOcclusion;
                 bool isTerrain = (triangleData.materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u
                     && triangleData.materialData.Padding1 < _TerrainMaterialDataCount;
+                bool isTerrainRVT =
+                    (triangleData.materialData.MaterialFlags
+                        & VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE) != 0u;
+#if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                uint terrainRVTRecordFlags = 0u;
+                if (isTerrainRVT
+                    && triangleData.materialData.Padding1 < _VividTerrainRVTRecordCount)
+                {
+                    terrainRVTRecordFlags =
+                        _VividTerrainRVTRecords[triangleData.materialData.Padding1].Padding0;
+                }
+#endif
 
                 UNITY_BRANCH
                 if (isTerrain)
@@ -507,13 +505,31 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         hasSampledNormal = true;
                     }
 
-                    if (VividSurfaceHasMask(triangleData.surfaceBindingData))
+                    float4 maskSample = VividSurfaceHasMask(triangleData.surfaceBindingData)
+                        ? VividSampleMaskGrad(
+                            triangleData.surfaceBindingData,
+                            surfaceSampleContext)
+                        : 1.0.xxxx;
+#if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                    if (isTerrainRVT)
+                    {
+                        bool sampledTerrainRVT = VividResolveTerrainRVT(
+                            triangleData.materialData.Padding1,
+                            terrainUv.uv,
+                            terrainUv.ddx,
+                            terrainUv.ddy,
+                            positionCS,
+                            baseColor,
+                            sampledNormalTS,
+                            maskSample);
+                        hasSampledNormal = hasSampledNormal || sampledTerrainRVT;
+                    }
+#endif
+                    if (VividSurfaceHasMask(triangleData.surfaceBindingData) || isTerrainRVT)
                     {
                         ApplyMaskSample(
                             triangleData.materialData.Padding0,
-                            VividSampleMaskGrad(
-                                triangleData.surfaceBindingData,
-                                surfaceSampleContext),
+                            maskSample,
                             perceptualRoughness,
                             metallic,
                             ambientOcclusion);
@@ -522,13 +538,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
                 const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
                 const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(triangleData.vertex0.Normal.xyz),
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex0.PackedNormal)),
                     triangleData.instanceData.WorldToObjectMatrix);
                 const float3 vertexNormalWS1 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(triangleData.vertex1.Normal.xyz),
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex1.PackedNormal)),
                     triangleData.instanceData.WorldToObjectMatrix);
                 const float3 vertexNormalWS2 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(triangleData.vertex2.Normal.xyz),
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex2.PackedNormal)),
                     triangleData.instanceData.WorldToObjectMatrix);
 
                 VividBarycentricDerivatives barycentricVertexNormalWS = InterpolateWithBarycentric(
@@ -548,9 +564,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 {
                     float4 tangentOS = InterpolateWithBarycentricNoDerivatives(
                         barycentric,
-                        triangleData.vertex0.Tangent,
-                        triangleData.vertex1.Tangent,
-                        triangleData.vertex2.Tangent);
+                        DecodeVertexTangentOS(triangleData.vertex0.PackedTangent),
+                        DecodeVertexTangentOS(triangleData.vertex1.PackedTangent),
+                        DecodeVertexTangentOS(triangleData.vertex2.PackedTangent));
                     float3 tangentWS = TransformInstanceObjectToWorldDir(
                         tangentOS.xyz,
                         triangleData.instanceData.ObjectToWorldMatrix,
@@ -576,6 +592,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.customData = 0.0f;
                 surfaceData.customData1 = 0.0f;
                 surfaceData.materialFeatures = VIVID_MATERIALFEATURE_DEFAULT;
+#if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                if (isTerrainRVT
+                    && (terrainRVTRecordFlags & VIVID_TERRAIN_RVT_RECEIVE_DECALS) == 0u)
+                {
+                    surfaceData.materialFeatures &= ~VIVID_MATERIALFEATURE_DECAL_RECEIVE;
+                }
+#endif
                 surfaceData.emissive = max(triangleData.materialData.Emission.rgb, 0.0f);
                 surfaceData.builtinData = CreateVividBuiltinData(
                     SampleVividProbeVolume(
@@ -591,9 +614,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             VividGBufferFragmentOutput Frag(Varyings input)
             {
-                float sceneDepth;
                 VividVisibilityBufferValue visibilityBufferValue;
-                if (!TryLoadVisibilityValue(input, visibilityBufferValue, sceneDepth))
+                if (!TryLoadVisibilityValue(input, visibilityBufferValue))
                 {
                     discard;
                     return (VividGBufferFragmentOutput) 0;
@@ -609,13 +631,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     pixelNdc,
                     _ScreenSize.zw
                 );
-
-                float visibilityDepth = ResolveVisibilityDepth(triangleData, barycentric);
-                if (!IsVisibilitySampleVisible(visibilityDepth, sceneDepth))
-                {
-                    discard;
-                    return (VividGBufferFragmentOutput) 0;
-                }
 
                 VividGBufferSurfaceData surfaceData = ResolveSurfaceData(triangleData, barycentric, input.positionCS);
                 return PackVividGBufferSurfaceData(surfaceData);

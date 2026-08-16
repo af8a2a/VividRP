@@ -568,6 +568,7 @@ namespace VividRP.Runtime
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
             ComputeBuffer feedbackResidentHash,
+            int feedbackRequestCapacity,
             int feedbackResidentHashCapacity,
             VirtualTextureFeedbackBufferState feedbackState,
             VirtualTextureSpaceShaderParams shaderParams,
@@ -586,6 +587,7 @@ namespace VividRP.Runtime
             FeedbackRequests = feedbackRequests;
             FeedbackCounter = feedbackCounter;
             FeedbackResidentHash = feedbackResidentHash;
+            FeedbackRequestCapacity = feedbackRequestCapacity;
             FeedbackResidentHashCapacity = feedbackResidentHashCapacity;
             FeedbackState = feedbackState;
             ShaderParams = shaderParams;
@@ -617,6 +619,8 @@ namespace VividRP.Runtime
 
         public ComputeBuffer FeedbackResidentHash { get; }
 
+        public int FeedbackRequestCapacity { get; }
+
         public int FeedbackResidentHashCapacity { get; }
 
         private VirtualTextureFeedbackBufferState FeedbackState { get; }
@@ -630,6 +634,7 @@ namespace VividRP.Runtime
         public bool HasFeedback => FeedbackRequests != null
                                    && FeedbackCounter != null
                                    && FeedbackResidentHash != null
+                                   && FeedbackRequestCapacity > 0
                                    && FeedbackResidentHashCapacity > 0;
 
         public bool IsValid => PageTableBuffer != null && PhysicalCache != null;
@@ -653,6 +658,7 @@ namespace VividRP.Runtime
                 FeedbackRequests,
                 FeedbackCounter,
                 FeedbackResidentHash,
+                FeedbackRequestCapacity,
                 FeedbackResidentHashCapacity,
                 FeedbackState,
                 ShaderParams,
@@ -861,6 +867,7 @@ namespace VividRP.Runtime
         public static readonly int _VTFeedbackRequests = Shader.PropertyToID(nameof(_VTFeedbackRequests));
         public static readonly int _VTFeedbackCounter = Shader.PropertyToID(nameof(_VTFeedbackCounter));
         public static readonly int _VTFeedbackResidentHash = Shader.PropertyToID(nameof(_VTFeedbackResidentHash));
+        public static readonly int _VTFeedbackRequestCapacity = Shader.PropertyToID(nameof(_VTFeedbackRequestCapacity));
         public static readonly int _VTFeedbackResidentHashCapacity = Shader.PropertyToID(nameof(_VTFeedbackResidentHashCapacity));
         public static readonly int _VTFeedbackEnabled = Shader.PropertyToID(nameof(_VTFeedbackEnabled));
         public static readonly int _VTFeedbackViewParams = Shader.PropertyToID(nameof(_VTFeedbackViewParams));

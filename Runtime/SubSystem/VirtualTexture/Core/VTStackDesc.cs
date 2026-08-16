@@ -94,7 +94,9 @@ namespace VividRP.Runtime
             GraphicsFormat graphicsFormat,
             int maxUploadsPerFrame,
             int feedbackCapacity,
-            int neighborPrefetchCount = 0)
+            int neighborPrefetchCount = 0,
+            int maxResidencyAllocationsPerFrame = 0,
+            int maxPrefetchAllocationsPerFrame = 0)
             : this(
                 pageSize,
                 borderSize,
@@ -109,7 +111,9 @@ namespace VividRP.Runtime
                 },
                 maxUploadsPerFrame,
                 feedbackCapacity,
-                neighborPrefetchCount)
+                neighborPrefetchCount,
+                maxResidencyAllocationsPerFrame,
+                maxPrefetchAllocationsPerFrame)
         {
         }
 
@@ -120,7 +124,9 @@ namespace VividRP.Runtime
             VTLayerDesc[] layers,
             int maxUploadsPerFrame,
             int feedbackCapacity,
-            int neighborPrefetchCount = 0)
+            int neighborPrefetchCount = 0,
+            int maxResidencyAllocationsPerFrame = 0,
+            int maxPrefetchAllocationsPerFrame = 0)
         {
             if (pageSize <= 0)
                 throw new ArgumentOutOfRangeException(nameof(pageSize));
@@ -136,6 +142,10 @@ namespace VividRP.Runtime
                 throw new ArgumentOutOfRangeException(nameof(maxUploadsPerFrame));
             if (feedbackCapacity <= 0)
                 throw new ArgumentOutOfRangeException(nameof(feedbackCapacity));
+            if (maxResidencyAllocationsPerFrame < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxResidencyAllocationsPerFrame));
+            if (maxPrefetchAllocationsPerFrame < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxPrefetchAllocationsPerFrame));
 
             PageSize = pageSize;
             BorderSize = borderSize;
@@ -168,6 +178,12 @@ namespace VividRP.Runtime
 
             GraphicsFormat = m_Layers[0].GraphicsFormat;
             MaxUploadsPerFrame = maxUploadsPerFrame;
+            MaxResidencyAllocationsPerFrame = maxResidencyAllocationsPerFrame > 0
+                ? maxResidencyAllocationsPerFrame
+                : maxUploadsPerFrame;
+            MaxPrefetchAllocationsPerFrame = maxPrefetchAllocationsPerFrame > 0
+                ? maxPrefetchAllocationsPerFrame
+                : int.MaxValue;
             FeedbackCapacity = feedbackCapacity;
             NeighborPrefetchCount = Mathf.Clamp(neighborPrefetchCount, 0, 4);
         }
@@ -191,6 +207,10 @@ namespace VividRP.Runtime
         public Color32 FallbackColor => LayerCount > 0 ? m_Layers[0].FallbackColor : new Color32(0, 0, 0, 255);
 
         public int MaxUploadsPerFrame { get; }
+
+        public int MaxResidencyAllocationsPerFrame { get; }
+
+        public int MaxPrefetchAllocationsPerFrame { get; }
 
         public int FeedbackCapacity { get; }
 
@@ -235,6 +255,8 @@ namespace VividRP.Runtime
                 || BorderSize != other.BorderSize
                 || CachePageCount != other.CachePageCount
                 || MaxUploadsPerFrame != other.MaxUploadsPerFrame
+                || MaxResidencyAllocationsPerFrame != other.MaxResidencyAllocationsPerFrame
+                || MaxPrefetchAllocationsPerFrame != other.MaxPrefetchAllocationsPerFrame
                 || FeedbackCapacity != other.FeedbackCapacity
                 || NeighborPrefetchCount != other.NeighborPrefetchCount
                 || LayerCount != other.LayerCount)
@@ -263,6 +285,8 @@ namespace VividRP.Runtime
             hashCode.Add(BorderSize);
             hashCode.Add(CachePageCount);
             hashCode.Add(MaxUploadsPerFrame);
+            hashCode.Add(MaxResidencyAllocationsPerFrame);
+            hashCode.Add(MaxPrefetchAllocationsPerFrame);
             hashCode.Add(FeedbackCapacity);
             hashCode.Add(NeighborPrefetchCount);
             for (int layerIndex = 0; layerIndex < LayerCount; layerIndex++)

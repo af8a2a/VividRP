@@ -59,7 +59,8 @@ namespace VividRP.Runtime
             ScriptableRenderContext context,
             Camera camera,
             CullingResults cullingResults,
-            RenderGraphData graphAsset)
+            RenderGraphData graphAsset,
+            int pipelineFrameIndex = -1)
         {
             using var initializeContextScope = RenderPassProfilingUtility.InitializeContextMarker.Auto();
 
@@ -91,7 +92,9 @@ namespace VividRP.Runtime
             int frameIndex;
             using (RenderPassProfilingUtility.InitializeContextResolveFrameIndexMarker.Auto())
             {
-                frameIndex = ResolveFrameIndex();
+                frameIndex = pipelineFrameIndex >= 0
+                    ? pipelineFrameIndex
+                    : ResolveFrameIndex();
             }
 
             VividAdditionalCameraData additionalCameraData;

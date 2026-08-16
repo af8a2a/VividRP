@@ -449,6 +449,48 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PageTransition_RemovesStaleQueuedPageBeforeSelectingLaterPage()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(
+                CreateDesc("StaleQueuedTransition", 16, 16, 5, 32, 32));
+            var coords = new VirtualTexturePageCoord[18];
+            for (int pageIndex = 0; pageIndex < coords.Length; pageIndex++)
+                coords[pageIndex] = new VirtualTexturePageCoord(pageIndex % 8, pageIndex / 8, 1);
+
+            RequestPages(spaceId, coords);
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out var requests), Is.True);
+            Assert.That(requests, Has.Count.EqualTo(coords.Length));
+            VirtualTextureUploadRequest[] committedRequests = requests.ToArray();
+            foreach (VirtualTextureUploadRequest request in committedRequests)
+                Assert.That(VirtualTextureSystem.CommitUpload(request), Is.True);
+
+            // The cold-start budget starts the first sixteen transitions. Flushing the
+            // seventeenth leaves a stale entry before the final valid queued entry.
+            VirtualTexturePageCoord staleCoord = committedRequests[16].PageCoord;
+            Assert.That(VirtualTextureSystem.FlushRegion(
+                spaceId,
+                staleCoord.Mip,
+                new RectInt(staleCoord.X, staleCoord.Y, 1, 1)), Is.EqualTo(1));
+            int nextFrame = committedRequests[0].RequestFrame + 1;
+            Assert.That(
+                () => VirtualTextureSystem.AdvancePageTransitionsForTesting(nextFrame),
+                Throws.Nothing);
+
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(
+                nextFrame + VTResidencyManager.ColdStartPageTransitionFrameCount);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                committedRequests[17].PageCoord,
+                out VirtualTexturePageTableEntry revealedEntry), Is.True);
+            Assert.That(revealedEntry.Fallback, Is.False);
+            Assert.That(
+                revealedEntry.PhysicalPageId,
+                Is.EqualTo(committedRequests[17].PhysicalPageId));
+        }
+
+        [Test]
         public void PageTransition_OlderPageRevealsWhileNewerPageInSameSpaceKeepsTransitioning()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(

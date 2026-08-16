@@ -87,6 +87,108 @@ namespace VividRP.Runtime
     }
 
     /// <summary>
+    /// Avoids the render-thread synchronization caused by repeatedly resolving
+    /// the same RenderTexture's native resource pointer.
+    /// </summary>
+    internal sealed class DLSSRayReconstructionTexturePtrCache
+    {
+        internal enum Slot
+        {
+            ColorInput,
+            ColorOutput,
+            Depth,
+            MotionVectors,
+            ExposureTexture,
+            DiffuseAlbedo,
+            SpecularAlbedo,
+            Normals,
+            Roughness,
+            Emissive,
+            DiffuseRayDirection,
+            DiffuseHitDistance,
+            DiffuseRayDirectionHitDistance,
+            SpecularRayDirection,
+            SpecularHitDistance,
+            SpecularRayDirectionHitDistance,
+            Count
+        }
+
+        private struct Entry
+        {
+            public RenderTexture texture;
+            public RenderTextureDescriptor descriptor;
+            public IntPtr nativeTexturePtr;
+        }
+
+        private readonly Entry[] m_Entries;
+        private readonly Func<RenderTexture, IntPtr> m_Resolver;
+
+        internal DLSSRayReconstructionTexturePtrCache()
+            : this(ResolveNativeTexturePtr)
+        {
+        }
+
+        internal DLSSRayReconstructionTexturePtrCache(
+            Func<RenderTexture, IntPtr> resolver)
+        {
+            m_Entries = new Entry[(int)Slot.Count];
+            m_Resolver = resolver;
+        }
+
+        internal IntPtr Get(Slot slot, RenderTexture texture)
+        {
+            ref var entry = ref m_Entries[(int)slot];
+            if (texture == null)
+            {
+                entry = default;
+                return IntPtr.Zero;
+            }
+
+            var descriptor = texture.descriptor;
+            if (ReferenceEquals(entry.texture, texture)
+                && HasSameNativeResourceDescriptor(entry.descriptor, descriptor))
+            {
+                return entry.nativeTexturePtr;
+            }
+
+            var nativeTexturePtr = m_Resolver(texture);
+            entry.texture = texture;
+            entry.descriptor = descriptor;
+            entry.nativeTexturePtr = nativeTexturePtr;
+            return nativeTexturePtr;
+        }
+
+        internal void Clear()
+        {
+            Array.Clear(m_Entries, 0, m_Entries.Length);
+        }
+
+        private static IntPtr ResolveNativeTexturePtr(RenderTexture texture)
+        {
+            return texture.GetNativeTexturePtr();
+        }
+
+        private static bool HasSameNativeResourceDescriptor(
+            in RenderTextureDescriptor left,
+            in RenderTextureDescriptor right)
+        {
+            return left.width == right.width
+                && left.height == right.height
+                && left.msaaSamples == right.msaaSamples
+                && left.volumeDepth == right.volumeDepth
+                && left.mipCount == right.mipCount
+                && left.graphicsFormat == right.graphicsFormat
+                && left.depthStencilFormat == right.depthStencilFormat
+                && left.stencilFormat == right.stencilFormat
+                && left.dimension == right.dimension
+                && left.shadowSamplingMode == right.shadowSamplingMode
+                && left.vrUsage == right.vrUsage
+                && left.memoryless == right.memoryless
+                && left.flags == right.flags;
+        }
+    }
+
+    /// <summary>
     /// Performance/Quality presets matching NVSDK_NGX_PerfQuality_Value.
     /// </summary>
     public enum NVSDK_NGX_PerfQuality_Value : int
@@ -775,6 +877,7 @@ namespace VividRP.Runtime
         internal bool EvaluateRayReconstructionFeature(
             CommandBuffer cmd,
             int handle,
+            DLSSRayReconstructionTexturePtrCache texturePtrCache,
             RenderTexture colorInput,
             RenderTexture colorOutput,
             RenderTexture depth,
@@ -818,19 +921,56 @@ namespace VividRP.Runtime
                     renderSubrectWidth,
                     renderSubrectHeight,
                     exposure.PreExposure,
-                    exposure.ExposureScale),
-                exposureTexture = GetNativeTexturePtr(exposure.ExposureTexture),
-                diffuseAlbedo = GetNativeTexturePtr(diffuseAlbedo),
-                specularAlbedo = GetNativeTexturePtr(specularAlbedo),
-                normals = GetNativeTexturePtr(normals),
-                roughness = GetNativeTexturePtr(roughness),
-                emissive = GetNativeTexturePtr(emissive),
-                diffuseRayDirection = GetNativeTexturePtr(diffuseRayDirection),
-                diffuseHitDistance = GetNativeTexturePtr(diffuseHitDistance),
-                diffuseRayDirectionHitDistance = GetNativeTexturePtr(diffuseRayDirectionHitDistance),
-                specularRayDirection = GetNativeTexturePtr(specularRayDirection),
-                specularHitDistance = GetNativeTexturePtr(specularHitDistance),
-                specularRayDirectionHitDistance = GetNativeTexturePtr(specularRayDirectionHitDistance),
+                    exposure.ExposureScale,
+                    texturePtrCache),
+                exposureTexture = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.ExposureTexture,
+                    exposure.ExposureTexture),
+                diffuseAlbedo = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.DiffuseAlbedo,
+                    diffuseAlbedo),
+                specularAlbedo = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.SpecularAlbedo,
+                    specularAlbedo),
+                normals = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.Normals,
+                    normals),
+                roughness = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.Roughness,
+                    roughness),
+                emissive = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.Emissive,
+                    emissive),
+                diffuseRayDirection = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.DiffuseRayDirection,
+                    diffuseRayDirection),
+                diffuseHitDistance = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.DiffuseHitDistance,
+                    diffuseHitDistance),
+                diffuseRayDirectionHitDistance = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.DiffuseRayDirectionHitDistance,
+                    diffuseRayDirectionHitDistance),
+                specularRayDirection = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.SpecularRayDirection,
+                    specularRayDirection),
+                specularHitDistance = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.SpecularHitDistance,
+                    specularHitDistance),
+                specularRayDirectionHitDistance = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.SpecularRayDirectionHitDistance,
+                    specularRayDirectionHitDistance),
                 worldToView = DLSSMatrix4x4.FromRowMajor(worldToView),
                 viewToClip = DLSSMatrix4x4.FromRowMajor(viewToClip),
                 frameTimeDeltaMs = frameTimeDeltaMs
@@ -880,15 +1020,28 @@ namespace VividRP.Runtime
             uint renderSubrectWidth,
             uint renderSubrectHeight,
             float preExposure,
-            float exposureScale)
+            float exposureScale,
+            DLSSRayReconstructionTexturePtrCache texturePtrCache = null)
         {
             return new DLSSCommonEvaluateParams
             {
                 handle = handle,
-                color = GetNativeTexturePtr(colorInput),
-                output = GetNativeTexturePtr(colorOutput),
-                depth = GetNativeTexturePtr(depth),
-                motionVectors = GetNativeTexturePtr(motionVectors),
+                color = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.ColorInput,
+                    colorInput),
+                output = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.ColorOutput,
+                    colorOutput),
+                depth = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.Depth,
+                    depth),
+                motionVectors = GetNativeTexturePtr(
+                    texturePtrCache,
+                    DLSSRayReconstructionTexturePtrCache.Slot.MotionVectors,
+                    motionVectors),
                 jitterOffsetX = jitterRenderPixelX,
                 jitterOffsetY = jitterRenderPixelY,
                 motionVectorScaleX = motionVectorToPixelScaleX,
@@ -901,6 +1054,16 @@ namespace VividRP.Runtime
                 invertXAxis = 0,
                 invertYAxis = 1
             };
+        }
+
+        private static IntPtr GetNativeTexturePtr(
+            DLSSRayReconstructionTexturePtrCache texturePtrCache,
+            DLSSRayReconstructionTexturePtrCache.Slot slot,
+            RenderTexture texture)
+        {
+            return texturePtrCache != null
+                ? texturePtrCache.Get(slot, texture)
+                : GetNativeTexturePtr(texture);
         }
 
         private static IntPtr GetNativeTexturePtr(RenderTexture texture)

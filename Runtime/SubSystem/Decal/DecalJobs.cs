@@ -14,6 +14,8 @@ namespace VividRP.Runtime.SubSystem.Decal
         public float blendDistance;
         public float metallic;
         public float roughness;
+        public int drawOrder;
+        public ulong stableId;
     }
 
     internal struct DecalPreparedData
@@ -25,7 +27,8 @@ namespace VividRP.Runtime.SubSystem.Decal
         public float normalizedBlendDistance;
         public float clampedMetallic;
         public float clampedRoughness;
-        public float padding;
+        public int drawOrder;
+        public ulong stableId;
     }
 
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
@@ -74,7 +77,8 @@ namespace VividRP.Runtime.SubSystem.Decal
                 normalizedBlendDistance = normalizedBlendDistance,
                 clampedMetallic = math.saturate(src.metallic),
                 clampedRoughness = math.saturate(src.roughness),
-                padding = 0f,
+                drawOrder = src.drawOrder,
+                stableId = src.stableId,
             };
 
             CullingInstances[index] = new CullingInstance

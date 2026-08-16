@@ -10,7 +10,9 @@ namespace VividRP.Editor.Tools
 {
     internal static class CornellBoxSceneBuilder
     {
-        private const string SceneFolder = "Assets/Scenes/CornellBox";
+        private const string SceneFolder =
+            "Packages/com.vivid.render-pipelines/Editor/SceneTemplates/"
+            + "CornellBox";
         private const string MaterialFolder = SceneFolder + "/Materials";
         private const string MeshFolder = SceneFolder + "/Meshes";
         private const string Tier1ScenePath = SceneFolder + "/BoxScene.unity";
@@ -51,7 +53,8 @@ namespace VividRP.Editor.Tools
             "Packages/com.vivid.render-pipelines/Samples/DragonAttenuation/"
             + "Materials/Dragon with Attenuation VividRP.mat";
         private const string HdriPath =
-            "Assets/Scenes/ClassicSponza/Art/Generic/Skies/05-18_Day_D.hdr";
+            "Packages/com.vivid.render-pipelines/Texture/Default/"
+            + "DefaultHDRISky.exr";
         private const string StandardLitShaderName =
             "VividRP/Material/StandardLit";
 
@@ -873,8 +876,9 @@ namespace VividRP.Editor.Tools
             out Material green,
             out Material emission)
         {
-            EnsureFolder("Assets", "Scenes");
-            EnsureFolder("Assets/Scenes", "CornellBox");
+            EnsureFolder(
+                "Packages/com.vivid.render-pipelines/Editor/SceneTemplates",
+                "CornellBox");
             EnsureFolder(SceneFolder, "Materials");
             EnsureFolder(SceneFolder, "Meshes");
 

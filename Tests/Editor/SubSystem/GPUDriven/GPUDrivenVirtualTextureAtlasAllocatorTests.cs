@@ -93,6 +93,19 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TryAllocate_DoesNotAllocateManagedMemoryForMaximumAspectRatio()
+        {
+            var allocator = new GPUDrivenVirtualTextureAtlasAllocator(256, 64);
+
+            long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            bool succeeded = allocator.TryAllocate(64, 1, out _);
+            long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(succeeded, Is.True);
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void TryAllocate_RejectsNonPowerOfTwoOrOversizedDimensions()
         {
             var allocator = new GPUDrivenVirtualTextureAtlasAllocator(16, 8);

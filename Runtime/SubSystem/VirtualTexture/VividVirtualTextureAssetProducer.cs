@@ -56,7 +56,11 @@ namespace VividRP.Runtime
         }
     }
 
-    internal sealed class VividVirtualTextureAssetProducer : IVTPageProducer, IVTPageRequestRetirement, IDisposable
+    internal sealed class VividVirtualTextureAssetProducer :
+        IVTPageProducer,
+        IVTPrioritizedPageProducer,
+        IVTPageRequestRetirement,
+        IDisposable
     {
         private readonly struct TileKey : IEquatable<TileKey>
         {
@@ -250,6 +254,11 @@ namespace VividRP.Runtime
 
             internal string Error => m_Lease?.Error;
 
+            internal void PromotePriority(in VTRequestPriorityKey priorityKey)
+            {
+                m_Lease?.PromotePriority(priorityKey);
+            }
+
             public bool IsCompleted => State is VTStreamChunkState.Ready or VTStreamChunkState.Failed;
 
             internal VTChunkLease DetachLease()
@@ -428,6 +437,18 @@ namespace VividRP.Runtime
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {
+            VTRequestPriorityKey priorityKey = VTRequestPriorityKey.FromRequest(
+                request,
+                locked: false,
+                producerPriority: ProducerDesc.ProducerPriority);
+            return RequestPageData(desc, request, priorityKey);
+        }
+
+        public VTPageRequestStatus RequestPageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request,
+            in VTRequestPriorityKey priorityKey)
+        {
             if (m_HasPermanentFailure)
                 return VTPageRequestStatus.Invalid;
 
@@ -439,7 +460,7 @@ namespace VividRP.Runtime
             }
 
             if (UsesSharedChunkManager)
-                return RequestChunkData(request, location);
+                return RequestChunkData(request, location, priorityKey);
 
             if (m_BuiltData.HasInlineRawData)
                 return VTPageRequestStatus.Available;
@@ -507,7 +528,8 @@ namespace VividRP.Runtime
 
         private VTPageRequestStatus RequestChunkData(
             in VTRequest request,
-            in VividVirtualTextureTilePayloadLocation location)
+            in VividVirtualTextureTilePayloadLocation location,
+            in VTRequestPriorityKey requestPriorityKey)
         {
             if (!m_StorageSupported
                 || !m_ContainerHeaderValid
@@ -519,20 +541,32 @@ namespace VividRP.Runtime
             }
 
             TileKey key = new(request.PageCoord);
+            bool mipTail = request.PageCoord.Mip == m_BuiltData.MipCount - 1
+                           || (location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
+            VTRequestPriorityKey mipTailPriorityKey = VTRequestPriorityKey.FromRequest(
+                request,
+                locked: false,
+                producerPriority: ProducerDesc.ProducerPriority,
+                mipTail: mipTail);
+            VTRequestPriorityKey priorityKey = VTRequestPriorityUtility.SelectHigher(
+                requestPriorityKey,
+                mipTailPriorityKey);
             if (!m_ChunkRequests.TryGetValue(key, out ChunkTileRequest chunkRequest))
             {
-                bool highPriority = request.PageCoord.Mip == m_BuiltData.MipCount - 1
-                                    || (location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
                 VTChunkLease lease = VTStreamChunkManager.Shared.Acquire(
                     m_ResolvedStreamDataPath,
                     m_BuiltData.ContentVersion,
                     location,
-                    highPriority);
+                    priorityKey);
                 if (lease == null)
                     return VTPageRequestStatus.Saturated;
 
                 chunkRequest = RentChunkRequest(lease, location);
                 m_ChunkRequests.Add(key, chunkRequest);
+            }
+            else
+            {
+                chunkRequest.PromotePriority(priorityKey);
             }
 
             if (chunkRequest.State == VTStreamChunkState.Ready)

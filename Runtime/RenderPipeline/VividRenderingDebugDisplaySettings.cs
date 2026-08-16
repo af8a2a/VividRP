@@ -16,6 +16,17 @@ namespace VividRP.Runtime
         PhysicalPageId = 3,
     }
 
+    public enum TerrainRuntimeVirtualTextureDebugMode
+    {
+        None = 0,
+        [InspectorName("Clipmap Level")]
+        ClipmapLevel = 1,
+        [InspectorName("Page Residency")]
+        PageResidency = 2,
+        [InspectorName("Resolved Surface")]
+        ResolvedSurface = 3,
+    }
+
     public enum VirtualTextureVisualizationMode
     {
         None = 0,
@@ -76,6 +87,9 @@ namespace VividRP.Runtime
         internal const float DefaultReGIRDebugOpacity = 0.45f;
         internal const float DefaultVisibilityBufferWireframeThickness = 10f;
         internal const float DefaultVirtualTextureVisualizationWorldPageSize = 1f;
+        internal const float DefaultVirtualTextureAdaptiveMipBiasOverride = -1f;
+        internal const int DefaultVirtualTextureFeedbackOverflowCountOverride = -1;
+        internal const int DefaultVirtualTextureFallbackSampleCountOverride = -1;
         internal const ReferencedPathTracingTransportDebugMode
             DefaultReferencedPathTracingTransportDebugMode =
                 ReferencedPathTracingTransportDebugMode.Combined;
@@ -204,6 +218,10 @@ namespace VividRP.Runtime
         private VirtualTextureDebugMode m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
 
         [SerializeField]
+        private TerrainRuntimeVirtualTextureDebugMode m_TerrainRuntimeVirtualTextureDebugMode =
+            TerrainRuntimeVirtualTextureDebugMode.None;
+
+        [SerializeField]
         private VirtualTextureVisualizationMode m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.None;
 
         [SerializeField]
@@ -215,6 +233,18 @@ namespace VividRP.Runtime
         [SerializeField]
         private float m_VirtualTextureVisualizationWorldPageSize =
             DefaultVirtualTextureVisualizationWorldPageSize;
+
+        [SerializeField]
+        private float m_VirtualTextureAdaptiveMipBiasOverride =
+            DefaultVirtualTextureAdaptiveMipBiasOverride;
+
+        [SerializeField]
+        private int m_VirtualTextureFeedbackOverflowCountOverride =
+            DefaultVirtualTextureFeedbackOverflowCountOverride;
+
+        [SerializeField]
+        private int m_VirtualTextureFallbackSampleCountOverride =
+            DefaultVirtualTextureFallbackSampleCountOverride;
 
         [SerializeField]
         private float m_VirtualTextureVisualizationOverlayAmount;
@@ -462,6 +492,13 @@ namespace VividRP.Runtime
             set => m_VirtualTextureDebugMode = value;
         }
 
+        internal TerrainRuntimeVirtualTextureDebugMode terrainRuntimeVirtualTextureDebugMode
+        {
+            get => NormalizeTerrainRuntimeVirtualTextureDebugMode(m_TerrainRuntimeVirtualTextureDebugMode);
+            set => m_TerrainRuntimeVirtualTextureDebugMode =
+                NormalizeTerrainRuntimeVirtualTextureDebugMode(value);
+        }
+
         internal VirtualTextureVisualizationMode virtualTextureVisualizationMode
         {
             get => NormalizeVirtualTextureVisualizationMode(m_VirtualTextureVisualizationMode);
@@ -484,6 +521,38 @@ namespace VividRP.Runtime
         {
             get => Mathf.Max(m_VirtualTextureVisualizationWorldPageSize, 0.001f);
             set => m_VirtualTextureVisualizationWorldPageSize = Mathf.Max(value, 0.001f);
+        }
+
+        internal float virtualTextureAdaptiveMipBiasOverride
+        {
+            get => Mathf.Clamp(
+                m_VirtualTextureAdaptiveMipBiasOverride,
+                DefaultVirtualTextureAdaptiveMipBiasOverride,
+                VTAdaptiveMipBiasController.MaxMipBias);
+            set => m_VirtualTextureAdaptiveMipBiasOverride = Mathf.Clamp(
+                value,
+                DefaultVirtualTextureAdaptiveMipBiasOverride,
+                VTAdaptiveMipBiasController.MaxMipBias);
+        }
+
+        internal int virtualTextureFeedbackOverflowCountOverride
+        {
+            get => Mathf.Max(
+                DefaultVirtualTextureFeedbackOverflowCountOverride,
+                m_VirtualTextureFeedbackOverflowCountOverride);
+            set => m_VirtualTextureFeedbackOverflowCountOverride = Mathf.Max(
+                DefaultVirtualTextureFeedbackOverflowCountOverride,
+                value);
+        }
+
+        internal int virtualTextureFallbackSampleCountOverride
+        {
+            get => Mathf.Max(
+                DefaultVirtualTextureFallbackSampleCountOverride,
+                m_VirtualTextureFallbackSampleCountOverride);
+            set => m_VirtualTextureFallbackSampleCountOverride = Mathf.Max(
+                DefaultVirtualTextureFallbackSampleCountOverride,
+                value);
         }
 
         [Obsolete("VT visualization now emits a dedicated full-screen debug output.")]
@@ -555,7 +624,11 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_ReflectionProbeAtlasExposure, 0f)
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
+            || terrainRuntimeVirtualTextureDebugMode != TerrainRuntimeVirtualTextureDebugMode.None
             || virtualTextureVisualizationMode != VirtualTextureVisualizationMode.None
+            || virtualTextureAdaptiveMipBiasOverride >= 0f
+            || virtualTextureFeedbackOverflowCountOverride >= 0
+            || virtualTextureFallbackSampleCountOverride >= 0
             || m_VirtualTextureStatsViewMode != VirtualTextureStatsViewMode.Auto
             || m_VirtualTextureStatsCamera != null;
 
@@ -607,11 +680,18 @@ namespace VividRP.Runtime
             m_ReflectionProbeAtlasExposure = 0f;
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
+            m_TerrainRuntimeVirtualTextureDebugMode = TerrainRuntimeVirtualTextureDebugMode.None;
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.None;
             m_VirtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
             m_VirtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
             m_VirtualTextureVisualizationWorldPageSize =
                 DefaultVirtualTextureVisualizationWorldPageSize;
+            m_VirtualTextureAdaptiveMipBiasOverride =
+                DefaultVirtualTextureAdaptiveMipBiasOverride;
+            m_VirtualTextureFeedbackOverflowCountOverride =
+                DefaultVirtualTextureFeedbackOverflowCountOverride;
+            m_VirtualTextureFallbackSampleCountOverride =
+                DefaultVirtualTextureFallbackSampleCountOverride;
             m_VirtualTextureVisualizationOverlayAmount = 0f;
             m_VirtualTextureVisualizationOpacity = 1f;
             m_VirtualTextureStatsViewMode = VirtualTextureStatsViewMode.Auto;
@@ -626,6 +706,16 @@ namespace VividRP.Runtime
                     and <= VirtualTextureVisualizationMode.ResolvedWorldPosition
                     ? value
                     : VirtualTextureVisualizationMode.None;
+        }
+
+        private static TerrainRuntimeVirtualTextureDebugMode
+            NormalizeTerrainRuntimeVirtualTextureDebugMode(
+                TerrainRuntimeVirtualTextureDebugMode value)
+        {
+            return value is >= TerrainRuntimeVirtualTextureDebugMode.None
+                and <= TerrainRuntimeVirtualTextureDebugMode.ResolvedSurface
+                    ? value
+                    : TerrainRuntimeVirtualTextureDebugMode.None;
         }
 
         private static VisibilityBufferDebugVisualizationMode NormalizeVisibilityBufferDebugMode(
@@ -968,6 +1058,12 @@ namespace VividRP.Runtime
                 tooltip = "Select the virtual texture debug visualization mode."
             };
 
+            public static readonly NameAndTooltip TerrainRuntimeVirtualTextureDebugMode = new()
+            {
+                name = "Terrain RVT Visualization",
+                tooltip = "Clipmap Level uses red/green/blue for levels 0/1/2 and gray for Composite. Page Residency uses green for an exact hit, yellow for a coarser RVT fallback, red for a missing eligible page, and gray for intentional Composite fallback. Resolved Surface writes the selected resident RVT layer directly to the visualization output."
+            };
+
             public static readonly NameAndTooltip VirtualTextureVisualizationMode = new()
             {
                 name = "Visualization Mode",
@@ -983,13 +1079,31 @@ namespace VividRP.Runtime
             public static readonly NameAndTooltip VirtualTextureVisualizationLayer = new()
             {
                 name = "Visualization Layer",
-                tooltip = "Select the Base Color, Normal, or Mask layer displayed by atlas and resolved-page views."
+                tooltip = "Select the Base Color, Normal, or Mask layer displayed by atlas and resolved-page views. RVT Resolved Surface displays Mask as Metallic/AO/Smoothness in RGB."
             };
 
             public static readonly NameAndTooltip VirtualTextureVisualizationWorldPageSize = new()
             {
                 name = "World Units Per Page",
                 tooltip = "Set the XZ-world projection scale used by Resolved Page Content. One projected virtual page spans this many world units."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureAdaptiveMipBiasOverride = new()
+            {
+                name = "Adaptive Mip Bias Override",
+                tooltip = "Use -1 for adaptive control, or 0 through 4 to force a fixed mip bias for A/B validation."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureFeedbackOverflowCountOverride = new()
+            {
+                name = "Feedback Overflow Count Override",
+                tooltip = "Use -1 for measured fault overflow, or 0 and above to replace only the Adaptive Mip Bias controller input. Resident overflow and the displayed raw statistics remain unmodified. Set Adaptive Mip Bias Override to -1 for this input to affect rendering."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureFallbackSampleCountOverride = new()
+            {
+                name = "Fallback Sample Count Override",
+                tooltip = "Use -1 for measured nonresident fallback samples, or 0 and above to replace only the Adaptive Mip Bias controller input. Resident transition fallback and the displayed raw statistics remain unmodified. Set Adaptive Mip Bias Override to -1 for this input to affect rendering."
             };
 
             public static readonly NameAndTooltip VirtualTextureResetState = new()
@@ -1426,6 +1540,10 @@ namespace VividRP.Runtime
                     () => data.virtualTextureDebugMode,
                     value => data.virtualTextureDebugMode = value));
                 foldout.children.Add(CreateEnumField(
+                    Strings.TerrainRuntimeVirtualTextureDebugMode,
+                    () => data.terrainRuntimeVirtualTextureDebugMode,
+                    value => data.terrainRuntimeVirtualTextureDebugMode = value));
+                foldout.children.Add(CreateEnumField(
                     Strings.VirtualTextureVisualizationMode,
                     () => data.virtualTextureVisualizationMode,
                     value => data.virtualTextureVisualizationMode = value));
@@ -1441,7 +1559,9 @@ namespace VividRP.Runtime
                     () => data.virtualTextureVisualizationLayer,
                     value => data.virtualTextureVisualizationLayer = value);
                 layerField.isHiddenCallback = () =>
-                    data.virtualTextureVisualizationMode != VirtualTextureVisualizationMode.PhysicalAtlas
+                    data.terrainRuntimeVirtualTextureDebugMode
+                        != TerrainRuntimeVirtualTextureDebugMode.ResolvedSurface
+                    && data.virtualTextureVisualizationMode != VirtualTextureVisualizationMode.PhysicalAtlas
                     && data.virtualTextureVisualizationMode
                         != VirtualTextureVisualizationMode.PhysicalAtlasAndPageTableResidency
                     && data.virtualTextureVisualizationMode
@@ -1456,6 +1576,28 @@ namespace VividRP.Runtime
                     isHiddenCallback = () =>
                         data.virtualTextureVisualizationMode
                             != VirtualTextureVisualizationMode.ResolvedWorldPosition,
+                });
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.VirtualTextureAdaptiveMipBiasOverride,
+                    getter = () => data.virtualTextureAdaptiveMipBiasOverride,
+                    setter = value => data.virtualTextureAdaptiveMipBiasOverride = value,
+                    min = () => VividRenderingDebugSettingsData.DefaultVirtualTextureAdaptiveMipBiasOverride,
+                    max = () => VTAdaptiveMipBiasController.MaxMipBias,
+                });
+                foldout.children.Add(new DebugUI.IntField
+                {
+                    nameAndTooltip = Strings.VirtualTextureFeedbackOverflowCountOverride,
+                    getter = () => data.virtualTextureFeedbackOverflowCountOverride,
+                    setter = value => data.virtualTextureFeedbackOverflowCountOverride = value,
+                    min = () => VividRenderingDebugSettingsData.DefaultVirtualTextureFeedbackOverflowCountOverride,
+                });
+                foldout.children.Add(new DebugUI.IntField
+                {
+                    nameAndTooltip = Strings.VirtualTextureFallbackSampleCountOverride,
+                    getter = () => data.virtualTextureFallbackSampleCountOverride,
+                    setter = value => data.virtualTextureFallbackSampleCountOverride = value,
+                    min = () => VividRenderingDebugSettingsData.DefaultVirtualTextureFallbackSampleCountOverride,
                 });
                 foldout.children.Add(new DebugUI.Button
                 {
@@ -1494,6 +1636,13 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Faults", () => GetVirtualTextureDisplayStats(data).FaultCount));
                 foldout.children.Add(CreateStatsValue("Deduplicated Requests", () => GetVirtualTextureDisplayStats(data).DeduplicatedRequestCount));
                 foldout.children.Add(CreateStatsValue("Feedback Overflow", () => GetVirtualTextureDisplayStats(data).FeedbackOverflowCount));
+                foldout.children.Add(CreateStatsValue("Feedback Fault Overflow (Global)", () => VirtualTextureSystem.AdaptiveMeasuredFaultOverflowCount));
+                foldout.children.Add(CreateStatsValue("Feedback Resident Overflow (Global)", () => VirtualTextureSystem.AdaptiveMeasuredResidentOverflowCount));
+                foldout.children.Add(CreateStatsValue("Accepted Fault Requests (Global)", () => VirtualTextureSystem.AdaptiveMeasuredAcceptedFaultRequestCount));
+                foldout.children.Add(CreateStatsValue("Accepted Resident Requests (Global)", () => VirtualTextureSystem.AdaptiveMeasuredAcceptedResidentRequestCount));
+                foldout.children.Add(CreateStatsValue("Feedback Request Readback Errors (Global)", () => VirtualTextureSystem.FeedbackRequestReadbackErrorCount));
+                foldout.children.Add(CreateStatsValue("Feedback Counter Readback Errors (Global)", () => VirtualTextureSystem.FeedbackCounterReadbackErrorCount));
+                foldout.children.Add(CreateStatsValue("Feedback Last Readback Error Frame (Global)", () => FormatFrameIndex(VirtualTextureSystem.FeedbackLastReadbackErrorFrameIndex)));
                 foldout.children.Add(CreateStatsValue("Pending Mip Gap Avg", () => GetVirtualTextureDisplayStats(data).PendingMipGapAverage));
                 foldout.children.Add(CreateStatsValue("Pending Mip Gap Max", () => GetVirtualTextureDisplayStats(data).PendingMipGapMax));
                 foldout.children.Add(CreateStatsValue("Prefetch Requests", () => GetVirtualTextureDisplayStats(data).PrefetchRequestCount));
@@ -1505,6 +1654,28 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Duplicate Uploads", () => GetVirtualTextureDisplayStats(data).DuplicateUploadCount));
                 foldout.children.Add(CreateStatsValue("Skipped Uploads", () => GetVirtualTextureDisplayStats(data).SkippedUploadCount));
                 foldout.children.Add(CreateStatsValue("Fallback Samples", () => GetVirtualTextureDisplayStats(data).FallbackSampleCount));
+                foldout.children.Add(CreateStatsValue("Fallback Nonresident Samples (Global)", () => VirtualTextureSystem.AdaptiveMeasuredNonResidentFallbackSampleCount));
+                foldout.children.Add(CreateStatsValue("Fallback Resident Samples (Global)", () => VirtualTextureSystem.AdaptiveMeasuredResidentFallbackSampleCount));
+                foldout.children.Add(CreateStatsValue("Resolved VT Samples (Global)", () => VirtualTextureSystem.AdaptiveMeasuredWeightedResolvedSampleCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Fresh Feedback (Global)", () => VirtualTextureSystem.AdaptiveFeedbackMeasurementWasFresh));
+                foldout.children.Add(CreateStatsValue("Adaptive Measured Overflow (Global)", () => VirtualTextureSystem.AdaptiveMeasuredFeedbackOverflowCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Overflow Input (Global)", () => VirtualTextureSystem.AdaptiveFeedbackOverflowInputCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Overflow Pressure (Global)", () => VirtualTextureSystem.AdaptiveFeedbackOverflowPressure));
+                foldout.children.Add(CreateStatsValue("Adaptive Measured Fallback (Global)", () => VirtualTextureSystem.AdaptiveMeasuredFallbackSampleCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Fallback Input (Global)", () => VirtualTextureSystem.AdaptiveFallbackSampleInputCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Fallback Coverage (Global)", () => VirtualTextureSystem.AdaptiveFallbackCoverage));
+                foldout.children.Add(CreateStatsValue("Adaptive Total Pressure (Global)", () => VirtualTextureSystem.AdaptiveTotalPressure));
+                foldout.children.Add(CreateStatsValue("Adaptive Target Mip Bias (Global)", () => VirtualTextureSystem.AdaptiveTargetMipBias));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Frame (Global)", () => FormatFrameIndex(VirtualTextureSystem.AdaptiveLastFreshFeedbackFrameIndex)));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Overflow (Global)", () => VirtualTextureSystem.AdaptiveLastFreshFeedbackOverflowCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Fault Overflow (Global)", () => VirtualTextureSystem.AdaptiveLastFreshFaultOverflowCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Resident Overflow (Global)", () => VirtualTextureSystem.AdaptiveLastFreshResidentOverflowCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Effective Overflow Pressure (Global)", () => VirtualTextureSystem.AdaptiveLastFreshFeedbackOverflowPressure));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Fallback (Global)", () => VirtualTextureSystem.AdaptiveLastFreshFallbackSampleCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Nonresident Fallback (Global)", () => VirtualTextureSystem.AdaptiveLastFreshNonResidentFallbackSampleCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Resident Fallback (Global)", () => VirtualTextureSystem.AdaptiveLastFreshResidentFallbackSampleCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Resolved VT Samples (Global)", () => VirtualTextureSystem.AdaptiveLastFreshWeightedResolvedSampleCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Effective Fallback Pressure (Global)", () => VirtualTextureSystem.AdaptiveLastFreshFallbackPressure));
                 foldout.children.Add(CreateStatsValue("Adaptive Mip Bias", () => GetVirtualTextureDisplayStats(data).AdaptiveMipBias));
                 foldout.children.Add(new DebugUI.Value
                 {

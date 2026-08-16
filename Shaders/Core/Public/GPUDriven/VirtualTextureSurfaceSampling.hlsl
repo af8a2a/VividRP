@@ -122,14 +122,14 @@ VividSurfaceSampleContext VividCreateSurfaceSampleContextGrad(
                 positionCS);
         }
 
-        VTWriteFallbackSample(
+        VTWriteResolvedSampleStatus(
             context.virtualUv,
             context.requestedMips.lowerMip,
             context.lowerResolved,
             positionCS);
         if (!VTResolvedAddressMatches(context.lowerResolved, context.upperResolved))
         {
-            VTWriteFallbackSample(
+            VTWriteResolvedSampleStatus(
                 context.virtualUv,
                 context.requestedMips.upperMip,
                 context.upperResolved,

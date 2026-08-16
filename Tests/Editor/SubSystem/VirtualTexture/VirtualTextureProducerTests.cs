@@ -4,6 +4,8 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using VividRP.Editor;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Editor.Tests
 {
@@ -201,30 +203,87 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DemoController_AutoSizesVirtualSpaceFromSourceTexture()
+        public void DemoController_ValidatesVisibilityBufferWiringWithoutStandaloneSpace()
         {
-            var gameObject = new GameObject("VTAutoSizeController");
+            var gameObject = new GameObject("VTVisibilityBufferDemo");
             gameObject.SetActive(false);
-            var sourceTexture = new Texture2D(1024, 512, TextureFormat.RGBA32, false);
+            Mesh mesh = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+            VividVirtualTextureAsset virtualTextureAsset = null;
+            VividVirtualTextureBuiltData builtData = null;
 
             try
             {
+                mesh = CreateDemoMesh();
+                gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var sourceRenderer = gameObject.AddComponent<MeshRenderer>();
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                Assert.That(meshletRenderer.CaptureSourceFromGameObject(), Is.True);
+                meshletRenderer.SetTakeOverSourceRenderer(true);
+                Assert.That(meshletRenderer.takeOverSourceRenderer, Is.True);
+                Object.DestroyImmediate(sourceRenderer);
+
+                meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                meshletCollection.SourceSubmeshIndex = 0;
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+
+                virtualTextureAsset = CreateStructurallyCompatibleGPUDrivenVirtualTexture(out builtData);
+                materialProxy.StreamedVirtualTexture = virtualTextureAsset;
                 var controller = gameObject.AddComponent<VirtualTextureDemoController>();
-                SetPrivateField(controller, "m_SourceTexture", sourceTexture);
-                SetPrivateField(controller, "m_PageSize", 256);
-                SetPrivateField(controller, "m_AutoSizeFromSourceTexture", true);
+                SetPrivateField(controller, "m_MeshletRenderer", meshletRenderer);
+                SetPrivateField(controller, "m_MaterialProxy", materialProxy);
+                SetPrivateField(controller, "m_VirtualTextureAsset", virtualTextureAsset);
 
-                VirtualTextureSpaceDesc desc = InvokeCreateDescriptor(controller);
+                bool valid = controller.TryValidateVisibilityBufferDemo(out string validationMessage);
 
-                Assert.That(desc.VirtualPageCountX, Is.EqualTo(4));
-                Assert.That(desc.VirtualPageCountY, Is.EqualTo(2));
-                Assert.That(desc.MipCount, Is.EqualTo(3));
+                Assert.That(valid, Is.True, validationMessage);
+                Assert.That(materialProxy.StreamedVirtualTexture, Is.SameAs(virtualTextureAsset));
+                Assert.That(meshletRenderer.GetMaterialProxy(0), Is.SameAs(materialProxy));
+                Assert.That(gameObject.GetComponent<Renderer>(), Is.Null);
             }
             finally
             {
-                Object.DestroyImmediate(sourceTexture);
                 Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(mesh);
+                Object.DestroyImmediate(meshletCollection);
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(virtualTextureAsset);
+                Object.DestroyImmediate(builtData);
                 VirtualTextureSystem.Deinitialize();
+            }
+        }
+
+        [Test]
+        public void DemoController_RejectsEnabledSourceRenderer()
+        {
+            var gameObject = new GameObject("VTParallelRendererDemo");
+            gameObject.SetActive(false);
+            Mesh mesh = null;
+
+            try
+            {
+                mesh = CreateDemoMesh();
+                gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                gameObject.AddComponent<MeshRenderer>();
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                Assert.That(meshletRenderer.CaptureSourceFromGameObject(), Is.True);
+
+                var controller = gameObject.AddComponent<VirtualTextureDemoController>();
+                SetPrivateField(controller, "m_MeshletRenderer", meshletRenderer);
+
+                bool valid = controller.TryValidateVisibilityBufferDemo(out string validationMessage);
+
+                Assert.That(valid, Is.False);
+                Assert.That(validationMessage, Does.Contain("only through the GPUDriven VisibilityBuffer path"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(mesh);
             }
         }
 
@@ -272,13 +331,82 @@ namespace VividRP.Editor.Tests
             field.SetValue(controller, value);
         }
 
-        private static VirtualTextureSpaceDesc InvokeCreateDescriptor(VirtualTextureDemoController controller)
+        private static Mesh CreateDemoMesh()
         {
-            MethodInfo method = typeof(VirtualTextureDemoController).GetMethod(
-                "CreateDescriptor",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(method, Is.Not.Null);
-            return (VirtualTextureSpaceDesc)method.Invoke(controller, null);
+            var mesh = new Mesh { name = "VTVisibilityBufferDemoMesh" };
+            mesh.vertices = new[]
+            {
+                new Vector3(-1f, -1f, 0f),
+                new Vector3(1f, -1f, 0f),
+                new Vector3(0f, 1f, 0f),
+            };
+            mesh.uv = new[]
+            {
+                new Vector2(0f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(0.5f, 1f),
+            };
+            mesh.triangles = new[] { 0, 1, 2 };
+            return mesh;
+        }
+
+        // This is a wiring fixture. Builder/backend streaming coverage lives in
+        // VirtualTextureGPUDrivenTextureBackendTests.
+        private static VividVirtualTextureAsset CreateStructurallyCompatibleGPUDrivenVirtualTexture(
+            out VividVirtualTextureBuiltData builtData)
+        {
+            builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            builtData.Initialize(
+                "demo-guid",
+                "Assets/Demo.png",
+                pageSize: 128,
+                borderSize: 4,
+                virtualPageCountX: 1,
+                virtualPageCountY: 1,
+                mipCount: 1,
+                layers: new[]
+                {
+                    new VividVirtualTextureLayerDescriptor(
+                        VTLayerSemantic.BaseColor,
+                        GraphicsFormat.RGBA_BC7_SRGB,
+                        true,
+                        new Color32(255, 255, 255, 255),
+                        physicalGroup: 0,
+                        VTLayerDataEncoding.RGBA),
+                    new VividVirtualTextureLayerDescriptor(
+                        VTLayerSemantic.Normal,
+                        GraphicsFormat.RG_BC5_UNorm,
+                        false,
+                        new Color32(128, 128, 255, 128),
+                        physicalGroup: 1,
+                        VTLayerDataEncoding.NormalRG),
+                    new VividVirtualTextureLayerDescriptor(
+                        VTLayerSemantic.Mask,
+                        GraphicsFormat.RGBA_BC7_UNorm,
+                        false,
+                        new Color32(255, 255, 255, 255),
+                        physicalGroup: 2,
+                        VTLayerDataEncoding.RGBA),
+                    new VividVirtualTextureLayerDescriptor(
+                        VTLayerSemantic.Height,
+                        GraphicsFormat.R_BC4_UNorm,
+                        false,
+                        new Color32(255, 255, 255, 255),
+                        physicalGroup: 3,
+                        VTLayerDataEncoding.SingleChannelR),
+                },
+                chunks: System.Array.Empty<VividVirtualTextureChunkDescriptor>(),
+                tiles: System.Array.Empty<VividVirtualTextureTileDescriptor>(),
+                mipTileOffsets: new[] { 0 },
+                rawData: new byte[] { 1 },
+                buildProfile: VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                contentLayerMask: 1,
+                storageProfile: VividVirtualTextureStorageProfile.DesktopBCn);
+
+            var asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            asset.name = "VTVisibilityBufferDemoAsset";
+            asset.Initialize(builtData);
+            return asset;
         }
     }
 }

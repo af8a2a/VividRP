@@ -16,11 +16,13 @@ namespace VividRP.Runtime.GPUDriven
             internal BackendConfiguration(
                 IGPUDrivenTextureBackend activeBackend,
                 BindlessGPUDrivenTextureBackend legacyBindlessBackend,
-                GPUDrivenTextureBackendMode mode)
+                GPUDrivenTextureBackendMode mode,
+                bool terrainRuntimeVirtualTextureRequested = false)
             {
                 ActiveBackend = activeBackend;
                 LegacyBindlessBackend = legacyBindlessBackend;
                 Mode = mode;
+                TerrainRuntimeVirtualTextureRequested = terrainRuntimeVirtualTextureRequested;
             }
 
             internal IGPUDrivenTextureBackend ActiveBackend { get; }
@@ -28,6 +30,9 @@ namespace VividRP.Runtime.GPUDriven
             internal BindlessGPUDrivenTextureBackend LegacyBindlessBackend { get; }
 
             internal GPUDrivenTextureBackendMode Mode { get; }
+
+            internal bool TerrainRuntimeVirtualTextureRequested { get; }
+
         }
 
         private static int s_PreparedFrameIndex = -1;
@@ -38,6 +43,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly IGPUDrivenTextureBackend m_TextureBackend;
         private readonly BindlessGPUDrivenTextureBackend m_LegacyBindlessBackend;
         private readonly GPUDrivenTextureBackendMode m_TextureBackendMode;
+        private readonly bool m_TerrainRuntimeVirtualTextureRequested;
         private VividGPUDrivenCullingDispatcher m_ShadowCullingDispatcher;
         private int m_ShadowCullingContextCount;
         private bool m_IsDisposed;
@@ -59,7 +65,9 @@ namespace VividRP.Runtime.GPUDriven
                 textureBackend as BindlessGPUDrivenTextureBackend,
                 textureBackend is IGPUDrivenVirtualTextureBackend
                     ? GPUDrivenTextureBackendMode.VirtualTexture
-                    : GPUDrivenTextureBackendMode.Bindless)
+                    : GPUDrivenTextureBackendMode.Bindless,
+                textureBackend is VirtualTextureGPUDrivenTextureBackend virtualTextureBackend
+                    && virtualTextureBackend.TerrainRuntimeVirtualTextureRequested)
         {
         }
 
@@ -70,7 +78,8 @@ namespace VividRP.Runtime.GPUDriven
                 configuration.ActiveBackend,
                 sceneDataBuilder,
                 configuration.LegacyBindlessBackend,
-                configuration.Mode)
+                configuration.Mode,
+                configuration.TerrainRuntimeVirtualTextureRequested)
         {
         }
 
@@ -78,12 +87,14 @@ namespace VividRP.Runtime.GPUDriven
             IGPUDrivenTextureBackend textureBackend,
             VividGPUDrivenSceneDataBuilder sceneDataBuilder,
             BindlessGPUDrivenTextureBackend legacyBindlessBackend,
-            GPUDrivenTextureBackendMode textureBackendMode
+            GPUDrivenTextureBackendMode textureBackendMode,
+            bool terrainRuntimeVirtualTextureRequested
         )
         {
             m_TextureBackend = textureBackend ?? throw new ArgumentNullException(nameof(textureBackend));
             m_LegacyBindlessBackend = legacyBindlessBackend;
             m_TextureBackendMode = textureBackendMode;
+            m_TerrainRuntimeVirtualTextureRequested = terrainRuntimeVirtualTextureRequested;
             BindlessTextureContainer = legacyBindlessBackend?.TextureContainer;
             m_BufferSet = new VividGPUDrivenBufferSet();
             m_CullingDispatcher = new VividGPUDrivenCullingDispatcher();
@@ -100,11 +111,18 @@ namespace VividRP.Runtime.GPUDriven
             if (mode == GPUDrivenTextureBackendMode.Bindless)
                 return CreateBindlessBackendConfiguration(null);
 
+            GPUDrivenVirtualTextureDescriptorProfile descriptorProfile =
+                ResolveConfiguredVirtualTextureDescriptorProfile(asset);
+            bool enableTerrainRVT = asset?.EnableTerrainRuntimeVirtualTexture == true;
             var legacyBindlessBackend = new BindlessGPUDrivenTextureBackend();
+            var virtualTextureBackend = new VirtualTextureGPUDrivenTextureBackend(
+                descriptorProfile,
+                enableTerrainRVT);
             return new BackendConfiguration(
-                new VirtualTextureGPUDrivenTextureBackend(),
+                virtualTextureBackend,
                 legacyBindlessBackend,
-                GPUDrivenTextureBackendMode.VirtualTexture);
+                GPUDrivenTextureBackendMode.VirtualTexture,
+                enableTerrainRVT);
         }
 
         internal static GPUDrivenTextureBackendMode ResolveConfiguredTextureBackendMode(
@@ -112,6 +130,34 @@ namespace VividRP.Runtime.GPUDriven
         {
             return asset?.GPUDrivenTextureBackend
                    ?? GPUDrivenTextureBackendMode.VirtualTexture;
+        }
+
+        internal static GPUDrivenVirtualTextureDescriptorProfile
+            ResolveConfiguredVirtualTextureDescriptorProfile(VividRenderPipelineAsset asset)
+        {
+            GPUDrivenVirtualTexturePhysicalPoolQuality quality =
+                asset?.GPUDrivenVirtualTexturePhysicalPoolQuality
+                ?? GPUDrivenVirtualTexturePhysicalPoolQuality.Medium;
+            return VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(quality);
+        }
+
+        internal static bool RequiresTextureBackendRecreation(
+            GPUDrivenTextureBackendMode currentMode,
+            VividRenderPipelineAsset asset)
+        {
+            GPUDrivenTextureBackendMode configuredMode = ResolveConfiguredTextureBackendMode(asset);
+            return currentMode != configuredMode;
+        }
+
+        internal static bool RequiresTextureBackendRecreation(
+            GPUDrivenTextureBackendMode currentMode,
+            bool terrainRuntimeVirtualTextureRequested,
+            VividRenderPipelineAsset asset)
+        {
+            return RequiresTextureBackendRecreation(currentMode, asset)
+                   || (currentMode == GPUDrivenTextureBackendMode.VirtualTexture
+                       && terrainRuntimeVirtualTextureRequested
+                       != (asset?.EnableTerrainRuntimeVirtualTexture == true));
         }
 
         private static BackendConfiguration CreateBindlessBackendConfiguration(
@@ -474,6 +520,8 @@ namespace VividRP.Runtime.GPUDriven
             ThrowIfDisposed();
             m_BufferSet.BindGlobals(cmd);
             m_CullingDispatcher.BindGlobals(cmd);
+            if (m_TextureBackend is IGPUDrivenTerrainRuntimeVirtualTextureBackend terrainRVTBackend)
+                terrainRVTBackend.BindTerrainRuntimeVirtualTextureGlobals(cmd);
         }
 
         public static void Shutdown()
@@ -549,7 +597,10 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             VividGPUDrivenSystem gpuDrivenSystem = instance;
-            if (gpuDrivenSystem.TextureBackendMode != asset.GPUDrivenTextureBackend)
+            if (RequiresTextureBackendRecreation(
+                    gpuDrivenSystem.TextureBackendMode,
+                    gpuDrivenSystem.m_TerrainRuntimeVirtualTextureRequested,
+                    asset))
             {
                 Shutdown();
                 gpuDrivenSystem = instance;
@@ -567,6 +618,13 @@ namespace VividRP.Runtime.GPUDriven
                 gpuDrivenSystem.ReportStats(camera, cameraData.cameraName);
                 PassRecorder.SetGPUDrivenFrameData(null, null);
                 return;
+            }
+
+            if (gpuDrivenSystem.m_TextureBackend is IGPUDrivenTerrainRuntimeVirtualTextureBackend terrainRVTBackend)
+            {
+                terrainRVTBackend.UpdateTerrainRuntimeVirtualTextures(
+                    camera,
+                    cameraData.frameIndex);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenApplySettingsMarker.Auto())

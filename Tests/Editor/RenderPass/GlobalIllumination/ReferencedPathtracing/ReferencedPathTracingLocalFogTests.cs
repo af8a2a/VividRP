@@ -107,6 +107,103 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void State_WithWorkspace_ReusesBuffersAndTracksLogicalCounts()
+        {
+            var cameraObject =
+                new GameObject("Reference Local Fog Workspace Camera");
+            var fogObject =
+                new GameObject("Reference Local Fog Workspace Volume");
+            var camera = cameraObject.AddComponent<Camera>();
+            var fog =
+                fogObject.AddComponent<VividLocalVolumetricFog>();
+            var mask = new Texture3D(
+                1,
+                1,
+                1,
+                TextureFormat.RGBA32,
+                false);
+            try
+            {
+                var parameters =
+                    VividLocalVolumetricFogArtistParameters
+                        .CreateDefault();
+                parameters.priority = int.MaxValue;
+                parameters.anisotropy = 0.713f;
+                parameters.maskMode =
+                    VividLocalVolumetricFogMaskMode.Texture;
+                parameters.volumeMask = mask;
+                fog.parameters = parameters;
+
+                var workspace =
+                    new ReferencedPathTracingLocalFogState.BuildWorkspace();
+                var expected =
+                    ReferencedPathTracingLocalFogState.Resolve(
+                        camera,
+                        true);
+                var reusable =
+                    ReferencedPathTracingLocalFogState.Resolve(
+                        camera,
+                        true,
+                        workspace);
+
+                Assert.That(reusable.count, Is.EqualTo(expected.count));
+                Assert.That(
+                    reusable.maskTextureCount,
+                    Is.EqualTo(expected.maskTextures.Length));
+                Assert.That(
+                    reusable.signature,
+                    Is.EqualTo(expected.signature));
+                CollectionAssert.AreEqual(
+                    expected.records,
+                    reusable.records.Take(reusable.count));
+                CollectionAssert.AreEqual(
+                    expected.maskTextures,
+                    reusable.maskTextures.Take(
+                        reusable.maskTextureCount));
+
+                var recordBuffer = reusable.records;
+                var maskTextureBuffer = reusable.maskTextures;
+                parameters.maskMode =
+                    VividLocalVolumetricFogMaskMode.None;
+                parameters.volumeMask = null;
+                fog.parameters = parameters;
+
+                expected = ReferencedPathTracingLocalFogState.Resolve(
+                    camera,
+                    true);
+                reusable = ReferencedPathTracingLocalFogState.Resolve(
+                    camera,
+                    true,
+                    workspace);
+
+                Assert.That(reusable.records, Is.SameAs(recordBuffer));
+                Assert.That(
+                    reusable.maskTextures,
+                    Is.SameAs(maskTextureBuffer));
+                Assert.That(reusable.count, Is.EqualTo(expected.count));
+                Assert.That(
+                    reusable.maskTextureCount,
+                    Is.EqualTo(expected.maskTextures.Length));
+                Assert.That(
+                    reusable.signature,
+                    Is.EqualTo(expected.signature));
+                CollectionAssert.AreEqual(
+                    expected.records,
+                    reusable.records.Take(reusable.count));
+                CollectionAssert.AreEqual(
+                    expected.maskTextures,
+                    reusable.maskTextures.Take(
+                        reusable.maskTextureCount));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(fogObject);
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+                UnityEngine.Object.DestroyImmediate(mask);
+            }
+        }
+
+        [Test]
         public void State_ReportsDeferredBlendMode()
         {
             var cameraObject =

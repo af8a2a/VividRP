@@ -358,6 +358,12 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GPUDriven/GPUDrivenVirtualTexturePageProducer.compute")]
         public ComputeShader GPUDrivenVirtualTexturePageProducerCompute;
 
+        [VividResourcePath("Shaders/Core/Private/GPUDriven/TerrainRuntimeVirtualTexturePageProducer.compute")]
+        public ComputeShader TerrainRuntimeVirtualTexturePageProducerCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GPUDriven/VirtualTextureBlockCompress.compute")]
+        public ComputeShader VirtualTextureBlockCompressCompute;
+
         [VividResourcePath("Shaders/Core/Private/GPUDriven/VirtualTexturePageTableScatter.compute")]
         public ComputeShader VirtualTexturePageTableScatterCompute;
 

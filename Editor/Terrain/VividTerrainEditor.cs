@@ -41,6 +41,11 @@ namespace VividRP.Editor.TerrainTools
                 );
                 EditorGUILayout.IntField("Surface Layers", data.Layers.Count);
                 EditorGUILayout.IntField("Control Maps", data.ControlMaps.Count);
+                EditorGUILayout.ObjectField(
+                    "Normalized Height",
+                    data.NormalizedHeightTexture,
+                    typeof(Texture2D),
+                    allowSceneObjects: false);
             }
 
             if (!terrain.TryValidateData(out string validationReason))
@@ -75,6 +80,13 @@ namespace VividRP.Editor.TerrainTools
                         : "GPUDriven terrain rendering is active. Terrain chunks use the shared meshlet LOD selection, culling, visibility buffer, shadow, and texture backend paths.",
                     MessageType.Info
                 );
+            }
+
+            if (!data.TryValidateRuntimeDecalProjection(out string decalProjectionReason))
+            {
+                EditorGUILayout.HelpBox(
+                    $"Terrain RVT decals are unavailable: {decalProjectionReason}",
+                    MessageType.Warning);
             }
         }
     }

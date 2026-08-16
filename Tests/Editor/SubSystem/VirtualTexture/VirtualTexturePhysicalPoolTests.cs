@@ -982,6 +982,34 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FlushProducer_DoesNotClearDifferentProducerInstanceWithSameName()
+        {
+            var firstProducer = new NamedProducer("SameNameProducer");
+            var secondProducer = new NamedProducer("SameNameProducer");
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc("SameNameProducerA"),
+                firstProducer);
+            int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc("SameNameProducerB"),
+                secondProducer);
+            var coord = new VirtualTexturePageCoord(0, 0, 0);
+
+            RequestPage(firstSpaceId, coord);
+            RequestPage(secondSpaceId, coord);
+
+            int flushedCount = VirtualTextureSystem.FlushProducer(firstProducer);
+
+            Assert.That(flushedCount, Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(firstSpaceId), Is.Zero);
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(secondSpaceId), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                secondSpaceId,
+                coord,
+                out VirtualTexturePageTableEntry secondEntry), Is.True);
+            Assert.That(secondEntry.Resident, Is.True);
+        }
+
+        [Test]
         public void FlushRegion_RemovesOnlyMatchingSpaceBinding_WhenPhysicalPageIsShared()
         {
             var producer = new NamedProducer("RegionSharedProducer");
@@ -1017,9 +1045,21 @@ namespace VividRP.Editor.Tests
             VirtualTextureSpaceDesc desc = CreateDesc("DebugPoolA");
             VirtualTextureSystem.RegisterAddressSpace(desc, new NamedProducer("DebugProducerA"));
             VirtualTextureSystem.RegisterAddressSpace(CreateDesc("DebugPoolB"), new NamedProducer("DebugProducerB"));
+            int freePageCollectionCountBeforeUpdate =
+                VirtualTextureSystem.GetPhysicalPoolFreePageCollectionCountForTesting();
+            int fullStatsCollectionCountBeforeUpdate =
+                VirtualTextureSystem.GetPhysicalPoolStatsCollectionCountForTesting();
 
             UpdateOnce();
 
+            Assert.That(
+                VirtualTextureSystem.GetPhysicalPoolFreePageCollectionCountForTesting()
+                - freePageCollectionCountBeforeUpdate,
+                Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPhysicalPoolStatsCollectionCountForTesting()
+                - fullStatsCollectionCountBeforeUpdate,
+                Is.EqualTo(1));
             VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
             Assert.That(stats.ActiveSpaceCount, Is.EqualTo(2));
             Assert.That(stats.PhysicalPoolCount, Is.EqualTo(1));

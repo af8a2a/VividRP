@@ -1,5 +1,7 @@
 Shader "VividRP/Material/VirtualTextureDemo"
 {
+    // Legacy compatibility shader. The supported demo path uses MeshletRenderer and
+    // VisibilityBufferGBufferResolve; this shader intentionally emits no VT feedback.
     Properties
     {
         [Main(SurfaceInputs, _, on, off)] _SurfaceInputs("Surface Inputs", Float) = 1
@@ -29,12 +31,9 @@ Shader "VividRP/Material/VirtualTextureDemo"
 
             HLSLPROGRAM
                 #pragma target 5.0
-                #pragma require randomwrite
                 #pragma multi_compile_instancing
                 #pragma vertex Vert
                 #pragma fragment Frag
-
-                #define VIVID_VT_ENABLE_FEEDBACK_RW 1
 
                 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
                 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
@@ -133,26 +132,6 @@ Shader "VividRP/Material/VirtualTextureDemo"
                     VTMipRange requestedMips = VTComputeRequestedMipRange(input.uv);
                     VTResolvedAddress lowerResolved = VTResolveAddress(input.uv, requestedMips.lowerMip);
                     VTResolvedAddress upperResolved = VTResolveAddress(input.uv, requestedMips.upperMip);
-                    bool resolvedMipsDiffer = !VTResolvedAddressMatches(lowerResolved, upperResolved);
-
-                    VTWriteFallbackSample(input.uv, requestedMips.lowerMip, lowerResolved, input.positionCS);
-                    if (resolvedMipsDiffer)
-                        VTWriteFallbackSample(input.uv, requestedMips.upperMip, upperResolved, input.positionCS);
-
-                    VTWriteAccessFeedback(
-                        input.uv,
-                        requestedMips.lowerMip,
-                        lowerResolved,
-                        input.positionCS);
-                    if (requestedMips.upperMip != requestedMips.lowerMip)
-                    {
-                        VTWriteAccessFeedback(
-                            input.uv,
-                            requestedMips.upperMip,
-                            upperResolved,
-                            input.positionCS);
-                    }
-
                     float4 sampledColor = VTSampleBaseColor(
                         input.uv,
                         lowerResolved,

@@ -105,6 +105,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: d04bf75b8b000564fa609d6f99f8d981, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/MeshletListBuild
     ResourceObject: {fileID: 7200000, guid: 946e513ca242c63479056f13e12cadf9, type: 3}
+  - ResourceName: Shaders/Core/Private/GPUDriven/TerrainRuntimeVirtualTexturePageProducer.compute
+    ResourceObject: {fileID: 7200000, guid: fa545727f7478b64fbad1eb23792ead4, type: 3}
+  - ResourceName: Shaders/Core/Private/GPUDriven/VirtualTextureBlockCompress.compute
+    ResourceObject: {fileID: 7200000, guid: 12dc68ee6bda55a42bf4c72310eb7b1f, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/VirtualTexturePageTableScatter.compute
     ResourceObject: {fileID: 7200000, guid: c3254dd0e045f624ab545474aceaf2a0, type: 3}
   - ResourceName: Shaders/Core/Private/GTAO/GTAO.compute

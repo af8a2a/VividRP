@@ -27,11 +27,31 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        private sealed class StatusPageProducer : IVTPageProducer
+        private sealed class StatusPageProducer :
+            IVTPageProducer,
+            IVTPrioritizedPageProducer,
+            IVTPageRequestRetirement
         {
-            internal StatusPageProducer(in VirtualTextureSpaceDesc desc, VTPageRequestStatus status)
+            internal StatusPageProducer(
+                in VirtualTextureSpaceDesc desc,
+                VTPageRequestStatus status,
+                int producerPriority = 0)
             {
-                ProducerDesc = VTProducerDesc.FromSpaceDesc(nameof(StatusPageProducer), desc);
+                VTProducerDesc baseDesc = VTProducerDesc.FromSpaceDesc(nameof(StatusPageProducer), desc);
+                ProducerDesc = new VTProducerDesc(
+                    baseDesc.Name,
+                    baseDesc.TileSize,
+                    baseDesc.BorderSize,
+                    baseDesc.VirtualPageCountX,
+                    baseDesc.VirtualPageCountY,
+                    baseDesc.MipCount,
+                    baseDesc.LayerCount,
+                    baseDesc.Format,
+                    baseDesc.SRGB,
+                    baseDesc.FallbackColor,
+                    producerPriority,
+                    baseDesc.ContinuousUpdate,
+                    baseDesc.PersistentLowestMip);
                 Status = status;
             }
 
@@ -49,12 +69,31 @@ namespace VividRP.Editor.Tests
 
             internal int CancelCount { get; private set; }
 
+            internal int RetirementCount { get; private set; }
+
+            internal int LastRetiredRequestCount { get; private set; } = -1;
+
             internal List<VirtualTexturePageCoord> RequestedCoords { get; } = new();
+
+            internal List<VTRequestPriorityKey> RequestedPriorityKeys { get; } = new();
 
             public VTPageRequestStatus RequestPageData(in VirtualTextureSpaceDesc desc, in VTRequest request)
             {
+                VTRequestPriorityKey priorityKey = VTRequestPriorityKey.FromRequest(
+                    request,
+                    locked: false,
+                    producerPriority: ProducerDesc.ProducerPriority);
+                return RequestPageData(desc, request, priorityKey);
+            }
+
+            public VTPageRequestStatus RequestPageData(
+                in VirtualTextureSpaceDesc desc,
+                in VTRequest request,
+                in VTRequestPriorityKey priorityKey)
+            {
                 RequestCount += 1;
                 RequestedCoords.Add(request.PageCoord);
+                RequestedPriorityKeys.Add(priorityKey);
                 return Status;
             }
 
@@ -74,13 +113,22 @@ namespace VividRP.Editor.Tests
                 CancelCount += 1;
             }
 
+            public void RetireRequests(IReadOnlyList<VTRequest> liveRequests)
+            {
+                RetirementCount += 1;
+                LastRetiredRequestCount = liveRequests?.Count ?? 0;
+            }
+
             internal void ResetCounters()
             {
                 RequestCount = 0;
                 ProduceCount = 0;
                 GatherTaskCount = 0;
                 CancelCount = 0;
+                RetirementCount = 0;
+                LastRetiredRequestCount = -1;
                 RequestedCoords.Clear();
+                RequestedPriorityKeys.Clear();
             }
         }
 
@@ -420,6 +468,85 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UploadSpaceOrder_SkipsSortUntilPendingWorkExists()
+        {
+            VirtualTextureSpaceDesc firstDesc = CreateDesc("IdleUploadSpaceA");
+            VirtualTextureSpaceDesc secondDesc = CreateDesc("IdleUploadSpaceB");
+            var firstProducer = new StatusPageProducer(firstDesc, VTPageRequestStatus.Pending);
+            var secondProducer = new StatusPageProducer(secondDesc, VTPageRequestStatus.Pending);
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(firstDesc, firstProducer);
+            VirtualTextureSystem.RegisterAddressSpace(secondDesc, secondProducer);
+            int initialSortCount = VirtualTextureSystem.GetUploadSpaceSortCountForTesting();
+
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetUploadSpaceSortCountForTesting(), Is.EqualTo(initialSortCount));
+
+            IssueFeedback(firstSpaceId, new VirtualTexturePageCoord(0, 0, 0));
+
+            Assert.That(VirtualTextureSystem.GetUploadSpaceSortCountForTesting(), Is.EqualTo(initialSortCount + 1));
+        }
+
+        [Test]
+        public void ProducerRetirement_RunsOnlyWhenLiveRequestRevisionChanges()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("RevisionGatedRetirement");
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Pending);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            var coord = new VirtualTexturePageCoord(0, 0, 0);
+            producer.ResetCounters();
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(1));
+            Assert.That(producer.LastRetiredRequestCount, Is.Zero);
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(1));
+
+            IssueFeedback(spaceId, coord);
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(2));
+            Assert.That(producer.LastRetiredRequestCount, Is.EqualTo(1));
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(2));
+
+            IssueFeedback(spaceId, coord, coord);
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(3));
+            Assert.That(producer.LastRetiredRequestCount, Is.EqualTo(1));
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(3));
+
+            producer.Status = VTPageRequestStatus.Invalid;
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.Zero);
+            Assert.That(producer.RetirementCount, Is.EqualTo(3));
+            int sortCountAfterPendingRemoval = VirtualTextureSystem.GetUploadSpaceSortCountForTesting();
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(4));
+            Assert.That(producer.LastRetiredRequestCount, Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetUploadSpaceSortCountForTesting(),
+                Is.EqualTo(sortCountAfterPendingRemoval));
+
+            UpdateOnce();
+
+            Assert.That(producer.RetirementCount, Is.EqualTo(4));
+            Assert.That(
+                VirtualTextureSystem.GetUploadSpaceSortCountForTesting(),
+                Is.EqualTo(sortCountAfterPendingRemoval));
+        }
+
+        [Test]
         public void UploadOrder_SchedulesHigherMipWeightedHitCountFirst()
         {
             VirtualTextureSpaceDesc desc = CreateDesc(
@@ -483,6 +610,170 @@ namespace VividRP.Editor.Tests
             Assert.That(residentEntry.PendingUpload, Is.False);
         }
 
+        [TestCase(false, TestName = "Uploads_ShareGlobalPageBudgetAcrossCameraUpdatesInSameFrame")]
+        [TestCase(true, TestName = "Uploads_ShareGlobalByteBudgetAcrossCameraUpdatesInSameFrame")]
+        public void Uploads_ShareGlobalBudgetAcrossCameraUpdatesInSameFrame(bool useByteBudget)
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                useByteBudget ? "MultiCameraByteBudget" : "MultiCameraPageBudget",
+                maxUploadsPerFrame: 2,
+                cachePageCount: 4);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            RunWithTwoCameras("VTBudgetCamera", (firstCamera, secondCamera, commandBuffer) =>
+            {
+                int uploadByteSize = desc.PhysicalPageSize * desc.PhysicalPageSize * 4;
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(useByteBudget ? 2 : 1);
+                VirtualTextureSystem.SetUploadMemoryBudgetForTesting(
+                    useByteBudget ? uploadByteSize : int.MaxValue);
+
+                var firstCoord = new VirtualTexturePageCoord(0, 0, 0);
+                var secondCoord = new VirtualTexturePageCoord(3, 3, 0);
+                IssueFeedback(firstCamera, 73, commandBuffer, spaceId, firstCoord);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+
+                IssueFeedback(secondCamera, 73, commandBuffer, spaceId, secondCoord);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId),
+                    Is.EqualTo(2));
+
+                m_FenceFactory.Handles[0].IsPassed = true;
+                IssueFeedback(secondCamera, 74, commandBuffer, spaceId, secondCoord);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(2));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(2));
+            });
+        }
+
+        [Test]
+        public void Uploads_SharePerSpacePageBudgetAcrossCameraUpdatesInSameFrame()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "MultiCameraSpaceBudget",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            RunWithTwoCameras("VTSpaceBudgetCamera", (firstCamera, secondCamera, commandBuffer) =>
+            {
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(2);
+                VirtualTextureSystem.SetUploadMemoryBudgetForTesting(int.MaxValue);
+
+                IssueFeedback(
+                    firstCamera,
+                    73,
+                    commandBuffer,
+                    spaceId,
+                    new VirtualTexturePageCoord(0, 0, 0));
+                IssueFeedback(
+                    secondCamera,
+                    73,
+                    commandBuffer,
+                    spaceId,
+                    new VirtualTexturePageCoord(3, 3, 0));
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+                Assert.That(
+                    VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId),
+                    Is.EqualTo(1));
+            });
+        }
+
+        [Test]
+        public void Uploads_UseRemainingGlobalBudgetAcrossCameraUpdatesInSameFrame()
+        {
+            VirtualTextureSpaceDesc firstDesc = CreateDesc(
+                "MultiCameraRemainingBudgetA",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4);
+            VirtualTextureSpaceDesc secondDesc = CreateDesc(
+                "MultiCameraRemainingBudgetB",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4);
+            var firstProducer = new StatusPageProducer(firstDesc, VTPageRequestStatus.Available);
+            var secondProducer = new StatusPageProducer(secondDesc, VTPageRequestStatus.Available);
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(firstDesc, firstProducer);
+            int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(secondDesc, secondProducer);
+            firstProducer.ResetCounters();
+            secondProducer.ResetCounters();
+
+            RunWithTwoCameras("VTRemainingBudgetCamera", (firstCamera, secondCamera, commandBuffer) =>
+            {
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(2);
+                VirtualTextureSystem.SetUploadMemoryBudgetForTesting(int.MaxValue);
+
+                IssueFeedback(
+                    firstCamera,
+                    73,
+                    commandBuffer,
+                    firstSpaceId,
+                    new VirtualTexturePageCoord(0, 0, 0));
+                IssueFeedback(
+                    secondCamera,
+                    73,
+                    commandBuffer,
+                    secondSpaceId,
+                    new VirtualTexturePageCoord(0, 0, 0));
+
+                Assert.That(firstProducer.ProduceCount, Is.EqualTo(1));
+                Assert.That(secondProducer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(2));
+            });
+        }
+
+        [Test]
+        public void Uploads_SharePerSpaceScheduleBudgetAcrossCameraUpdatesInSameFrame()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "MultiCameraSpaceScheduleBudget",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            VirtualTextureSystem.SetUploadMemoryBudgetForTesting(1);
+            IssueFeedback(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            IssueFeedback(spaceId, new VirtualTexturePageCoord(3, 3, 0));
+
+            Assert.That(producer.ProduceCount, Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId),
+                Is.EqualTo(2));
+
+            RunWithTwoCameras("VTSpaceScheduleBudgetCamera", (firstCamera, secondCamera, commandBuffer) =>
+            {
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(2);
+                VirtualTextureSystem.SetUploadMemoryBudgetForTesting(int.MaxValue);
+
+                IssueFeedback(firstCamera, 73, commandBuffer, spaceId);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+
+                IssueFeedback(secondCamera, 73, commandBuffer, spaceId);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(1));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+
+                m_FenceFactory.Handles[0].IsPassed = true;
+                IssueFeedback(secondCamera, 74, commandBuffer, spaceId);
+
+                Assert.That(producer.ProduceCount, Is.EqualTo(2));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(2));
+            });
+        }
+
         [Test]
         public void Uploads_AccountForEachPhysicalGroupStorageFormat()
         {
@@ -507,7 +798,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Residency_UsesGlobalPageBudgetAcrossSpaces_AndKeepsHighestPriorityRequest()
+        public void Residency_UsesGlobalAllocationBudgetAcrossSpaces_AndKeepsHighestPriorityRequest()
         {
             VirtualTextureSpaceDesc lowDesc = CreateDesc("GlobalResidencyLow");
             VirtualTextureSpaceDesc highDesc = CreateDesc("GlobalResidencyHigh");
@@ -521,7 +812,7 @@ namespace VividRP.Editor.Tests
 
             try
             {
-                VirtualTextureSystem.SetUploadPageBudgetForTesting(1);
+                VirtualTextureSystem.SetResidencyAllocationBudgetForTesting(1);
                 VirtualTextureSystem.InjectCompletedReadbackForTesting(
                     CameraType.SceneView,
                     VirtualTextureFeedbackProcessor.EncodeKey(lowSpaceId, lowCoord));
@@ -539,6 +830,72 @@ namespace VividRP.Editor.Tests
             {
                 commandBuffer.Dispose();
             }
+        }
+
+        [Test]
+        public void Residency_CanAllocateMorePagesThanTheUploadBudget()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "IndependentResidencyBudget",
+                maxUploadsPerFrame: 1,
+                cachePageCount: 4,
+                maxResidencyAllocationsPerFrame: 2);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            VirtualTextureSystem.ConfigureBudgets(
+                maxResidencyAllocationsPerFrame: 2,
+                maxPrefetchAllocationsPerFrame: 0,
+                maxPageUploadsPerFrame: 1,
+                maxUploadBytesPerFrame: int.MaxValue);
+            IssueFeedback(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0),
+                new VirtualTexturePageCoord(1, 0, 0));
+
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(2));
+            Assert.That(producer.ProduceCount, Is.EqualTo(1));
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void Uploads_CanDrainMorePendingPagesThanTheResidencyBudget()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "IndependentUploadBudget",
+                maxUploadsPerFrame: 2,
+                cachePageCount: 4,
+                maxResidencyAllocationsPerFrame: 2);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Pending);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            VirtualTextureSystem.ConfigureBudgets(
+                maxResidencyAllocationsPerFrame: 2,
+                maxPrefetchAllocationsPerFrame: 0,
+                maxPageUploadsPerFrame: 2,
+                maxUploadBytesPerFrame: int.MaxValue);
+            IssueFeedback(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0),
+                new VirtualTexturePageCoord(1, 0, 0));
+
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(2));
+            Assert.That(producer.ProduceCount, Is.Zero);
+            Assert.That(m_FenceFactory.Handles, Is.Empty);
+
+            producer.Status = VTPageRequestStatus.Available;
+            producer.ResetCounters();
+            VirtualTextureSystem.ConfigureBudgets(
+                maxResidencyAllocationsPerFrame: 1,
+                maxPrefetchAllocationsPerFrame: 0,
+                maxPageUploadsPerFrame: 2,
+                maxUploadBytesPerFrame: int.MaxValue);
+            UpdateOnce();
+
+            Assert.That(producer.ProduceCount, Is.EqualTo(2));
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
         }
 
         [Test]
@@ -579,6 +936,54 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(highProducer.ProduceCount, Is.EqualTo(1));
                 Assert.That(lowProducer.ProduceCount, Is.EqualTo(0));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void ResidencyAndUploads_UseProducerPriorityWhenViewAndPageScoresTie()
+        {
+            VirtualTextureSpaceDesc lowDesc = CreateDesc("ProducerPriorityLow");
+            VirtualTextureSpaceDesc highDesc = CreateDesc("ProducerPriorityHigh");
+            var lowProducer = new StatusPageProducer(
+                lowDesc,
+                VTPageRequestStatus.Available,
+                producerPriority: 0);
+            var highProducer = new StatusPageProducer(
+                highDesc,
+                VTPageRequestStatus.Available,
+                producerPriority: 10);
+            int lowSpaceId = VirtualTextureSystem.RegisterAddressSpace(lowDesc, lowProducer);
+            int highSpaceId = VirtualTextureSystem.RegisterAddressSpace(highDesc, highProducer);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                lowProducer.ResetCounters();
+                highProducer.ResetCounters();
+                VirtualTextureSystem.ConfigureBudgets(
+                    maxResidencyAllocationsPerFrame: 1,
+                    maxPrefetchAllocationsPerFrame: 0,
+                    maxPageUploadsPerFrame: 1,
+                    maxUploadBytesPerFrame: int.MaxValue);
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(
+                        lowSpaceId,
+                        new VirtualTexturePageCoord(0, 0, 0)),
+                    VirtualTextureFeedbackProcessor.EncodeKey(
+                        highSpaceId,
+                        new VirtualTexturePageCoord(0, 0, 0)));
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(highProducer.ProduceCount, Is.EqualTo(1));
+                Assert.That(lowProducer.ProduceCount, Is.Zero);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(highSpaceId), Is.EqualTo(1));
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(lowSpaceId), Is.Zero);
                 Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
             }
             finally
@@ -637,6 +1042,9 @@ namespace VividRP.Editor.Tests
                 new[] { producer.GpuFinalizers[0].BaseSlice, producer.GpuFinalizers[1].BaseSlice },
                 Is.EquivalentTo(new[] { 0, 1 }));
             Assert.That(producer.GpuFinalizers[0].StagingTexture, Is.SameAs(producer.GpuFinalizers[1].StagingTexture));
+            Assert.That(
+                producer.GpuFinalizers[0].StagingTexture.graphicsFormat,
+                Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(producer.GpuFinalizers[0].IsDisposed, Is.True);
             Assert.That(producer.GpuFinalizers[1].IsDisposed, Is.True);
             Assert.That(VirtualTextureSystem.GetGpuUploadStagingTextureCountForTesting(), Is.EqualTo(1));
@@ -703,6 +1111,67 @@ namespace VividRP.Editor.Tests
             Assert.That(producer.GpuFinalizers[0].IsDisposed, Is.True);
             Assert.That(VirtualTextureSystem.GetGpuUploadStagingTextureCountForTesting(), Is.Zero);
             Assert.That(VirtualTextureStatsRegistry.LastStats.SkippedUploadCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void FinalizeUploads_PrioritizesQosWithinSharedPool_WhenQueueExceedsBatchCapacity()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("QueuedUploadQos", maxUploadsPerFrame: 1);
+            using var physicalPool = new VTPhysicalPool(
+                "QueuedUploadQos",
+                VTPhysicalPoolDesc.FromSpaceDesc(desc));
+            using var scheduler = new VTUploadScheduler();
+            using var commandBuffer = new CommandBuffer();
+            var lowFinalizer = new RecordingCpuFinalizer();
+            var highFinalizer = new RecordingCpuFinalizer();
+            var lowRequest = new VTRequest(
+                spaceId: 1,
+                pageCoord: new VirtualTexturePageCoord(0, 0, 0),
+                physicalPageId: 0,
+                generation: 1,
+                priority: 64,
+                requestFrame: 1,
+                cameraPriority: 0,
+                isActiveView: false);
+            var highRequest = new VTRequest(
+                spaceId: 2,
+                pageCoord: new VirtualTexturePageCoord(1, 0, 0),
+                physicalPageId: 1,
+                generation: 1,
+                priority: 1,
+                requestFrame: 1,
+                cameraPriority: 0,
+                isActiveView: true);
+
+            scheduler.EnqueueReservedUpload(
+                desc.SpaceName,
+                desc,
+                physicalPool,
+                new VTPageUploadPayload(lowRequest, lowFinalizer),
+                VTRequestPriorityKey.FromRequest(
+                    lowRequest,
+                    locked: false,
+                    producerPriority: 0));
+            scheduler.EnqueueReservedUpload(
+                desc.SpaceName,
+                desc,
+                physicalPool,
+                new VTPageUploadPayload(highRequest, highFinalizer),
+                VTRequestPriorityKey.FromRequest(
+                    highRequest,
+                    locked: true,
+                    producerPriority: 0));
+
+            Assert.That(scheduler.FinalizeUploads(commandBuffer), Is.True);
+
+            Assert.That(highFinalizer.FinalizeRenderCount, Is.EqualTo(1));
+            Assert.That(highFinalizer.FinalizeUploadCount, Is.EqualTo(1));
+            Assert.That(lowFinalizer.FinalizeRenderCount, Is.Zero);
+            Assert.That(lowFinalizer.FinalizeUploadCount, Is.Zero);
+            Assert.That(highFinalizer.IsDisposed, Is.True);
+            Assert.That(lowFinalizer.IsDisposed, Is.True);
+            Assert.That(scheduler.LastSkippedUploadCount, Is.EqualTo(1));
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
         }
 
         [Test]
@@ -780,6 +1249,8 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(feedbackOrderBuildCount + 1));
             Assert.That(producer.RequestedCoords, Is.Not.Empty);
             Assert.That(producer.RequestedCoords[0], Is.EqualTo(coord));
+            Assert.That(producer.RequestedPriorityKeys[0].Locked, Is.True);
+            Assert.That(producer.RequestedPriorityKeys[0].IOTier, Is.EqualTo(VTIOPriorityTier.Critical));
         }
 
         [Test]
@@ -953,7 +1424,8 @@ namespace VividRP.Editor.Tests
         private static VirtualTextureSpaceDesc CreateDesc(
             string name,
             int maxUploadsPerFrame = 1,
-            int cachePageCount = 4)
+            int cachePageCount = 4,
+            int maxResidencyAllocationsPerFrame = 0)
         {
             return new VirtualTextureSpaceDesc(
                 name,
@@ -965,7 +1437,8 @@ namespace VividRP.Editor.Tests
                 cachePageCount: cachePageCount,
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: maxUploadsPerFrame,
-                feedbackCapacity: 32);
+                feedbackCapacity: 32,
+                maxResidencyAllocationsPerFrame: maxResidencyAllocationsPerFrame);
         }
 
         private static VirtualTextureSpaceDesc CreateLayeredUploadDesc(string name)
@@ -1010,6 +1483,61 @@ namespace VividRP.Editor.Tests
             {
                 commandBuffer.Dispose();
             }
+        }
+
+        private static void RunWithTwoCameras(
+            string namePrefix,
+            System.Action<Camera, Camera, CommandBuffer> action)
+        {
+            var firstCameraObject = new GameObject($"{namePrefix}A");
+            var secondCameraObject = new GameObject($"{namePrefix}B");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                action(
+                    firstCameraObject.AddComponent<Camera>(),
+                    secondCameraObject.AddComponent<Camera>(),
+                    commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(firstCameraObject);
+                Object.DestroyImmediate(secondCameraObject);
+            }
+        }
+
+        private static void IssueFeedback(
+            Camera camera,
+            int frameIndex,
+            CommandBuffer commandBuffer,
+            int spaceId,
+            params VirtualTexturePageCoord[] coords)
+        {
+            commandBuffer.Clear();
+            foreach (VirtualTexturePageCoord coord in coords)
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    camera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, coord));
+            }
+
+            VirtualTextureSystem.Update(CreateFrameData(camera, frameIndex), commandBuffer);
+        }
+
+        private static ContextContainer CreateFrameData(Camera camera, int frameIndex)
+        {
+            var frameData = new ContextContainer();
+            VividCameraData cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.SetCamera(camera);
+            cameraData.actualWidth = 512;
+            cameraData.actualHeight = 512;
+            cameraData.pixelWidth = 512;
+            cameraData.pixelHeight = 512;
+            cameraData.pixelRect = new Rect(0f, 0f, 512f, 512f);
+            cameraData.frameIndex = frameIndex;
+            return frameData;
         }
 
         private static void UpdateOnce()

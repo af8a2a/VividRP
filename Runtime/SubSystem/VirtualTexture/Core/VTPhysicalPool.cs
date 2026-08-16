@@ -2469,6 +2469,52 @@ namespace VividRP.Runtime
             return true;
         }
 
+        internal bool TryReleasePageBinding(
+            int physicalPageId,
+            int generation,
+            IVTPhysicalPoolOwner owner,
+            int pageIndex)
+        {
+            if (!TryGetSlot(physicalPageId, generation, out _)
+                || owner == null)
+            {
+                return false;
+            }
+
+            List<PhysicalPageBinding> bindings = m_Bindings[physicalPageId];
+            for (int bindingIndex = bindings.Count - 1; bindingIndex >= 0; bindingIndex--)
+            {
+                PhysicalPageBinding binding = bindings[bindingIndex];
+                if (!ReferenceEquals(binding.Owner, owner)
+                    || binding.VirtualPageIndex != pageIndex)
+                {
+                    continue;
+                }
+
+                bindings.RemoveAt(bindingIndex);
+                if (bindings.Count == 0)
+                    ClearPhysicalPage(physicalPageId, releaseToFreeList: true);
+                else
+                    PromotePrimaryBinding(physicalPageId);
+                return true;
+            }
+
+            return false;
+        }
+
+        internal bool TryRestorePhysicalPageLookup(int physicalPageId, int generation)
+        {
+            if (!TryGetSlot(physicalPageId, generation, out PhysicalPageSlotState slotState)
+                || !slotState.Resident
+                || slotState.PendingUpload)
+            {
+                return false;
+            }
+
+            AddPhysicalPageLookup(physicalPageId, slotState.Identity);
+            return true;
+        }
+
         internal bool TrySetVisibilityPending(
             int physicalPageId,
             int generation,

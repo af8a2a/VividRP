@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 using VividRP.Runtime.SubSystem.Decal;
 
 namespace VividRP.Editor
@@ -63,6 +64,7 @@ namespace VividRP.Editor
                 new GUIContent(
                     "Virtual Texture Asset",
                     "Combined BaseColor, Normal, and packed Metallic/Occlusion/Smoothness VVT used by the Terrain Runtime Virtual Texture decal technique."));
+            DrawVirtualTextureAssetValidation();
             EditorGUILayout.PropertyField(m_BaseColor);
             EditorGUILayout.PropertyField(m_BaseColorTexture);
             EditorGUILayout.PropertyField(m_NormalTexture);
@@ -72,6 +74,60 @@ namespace VividRP.Editor
             EditorGUILayout.PropertyField(m_RoughnessTexture);
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        private void DrawVirtualTextureAssetValidation()
+        {
+            if (m_VirtualTextureAsset.hasMultipleDifferentValues
+                || m_VirtualTextureAsset.objectReferenceValue is not VividVirtualTextureAsset asset)
+            {
+                return;
+            }
+
+            string assetPath = AssetDatabase.GetAssetPath(asset);
+            using (new EditorGUI.DisabledScope(true))
+            {
+                EditorGUILayout.TextField("Resolved VVT Asset", assetPath);
+                EditorGUILayout.TextField("BaseColor Source", asset.SourceTexturePath);
+            }
+
+            if (VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(
+                    asset,
+                    out string validationMessage))
+            {
+                return;
+            }
+
+            EditorGUILayout.HelpBox(
+                validationMessage
+                + " Rebuild the asset before it can be sampled by Terrain RVT decals.",
+                MessageType.Warning);
+
+            VividVirtualTextureAssetImporter importer =
+                AssetImporter.GetAtPath(assetPath) as VividVirtualTextureAssetImporter;
+            using (new EditorGUI.DisabledScope(importer == null || importer.SourceTexture == null))
+            {
+                if (!GUILayout.Button("Rebuild For Terrain RVT Decals"))
+                    return;
+
+                Undo.RecordObject(importer, "Rebuild VVT For Terrain RVT Decals");
+                Undo.RecordObjects(targets, "Preserve Terrain RVT Decal Asset");
+                if (!importer.TryRebuildForGPUDrivenSurface(
+                        out VividVirtualTextureAsset rebuiltAsset,
+                        out string reason))
+                {
+                    Debug.LogWarning(
+                        $"[VividRP] Could not rebuild '{asset.name}' for Terrain RVT decals: {reason}",
+                        asset);
+                }
+                else
+                {
+                    serializedObject.Update();
+                    m_VirtualTextureAsset.objectReferenceValue = rebuiltAsset;
+                    serializedObject.ApplyModifiedProperties();
+                }
+                GUIUtility.ExitGUI();
+            }
         }
 
         private void OnSceneGUI()

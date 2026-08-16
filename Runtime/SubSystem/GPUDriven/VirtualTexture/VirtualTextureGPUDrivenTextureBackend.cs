@@ -1272,7 +1272,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
 
             validationMessage =
-                $"Streamed VT asset '{asset.name}' is not a compatible GPUDrivenSurface build (128 texel pages, 4 texel borders, power-of-two dimensions, and the GPUDriven BCn stack are required).";
+                $"Streamed VT asset '{asset.name}' is not a compatible GPUDrivenSurface build. "
+                + $"Actual: profile={builtData.BuildProfile}, storage={builtData.StorageProfile}, "
+                + $"page={builtData.PageSize}, border={builtData.BorderSize}, "
+                + $"pages={builtData.VirtualPageCountX}x{builtData.VirtualPageCountY}, "
+                + $"mips={builtData.MipCount}, layers={builtData.LayerCount}. "
+                + "Required: GPUDrivenSurface, DesktopBCn, 128 texel pages, 4 texel borders, "
+                + "power-of-two dimensions, automatic full mip chain, and the GPUDriven four-layer stack.";
             return false;
         }
 

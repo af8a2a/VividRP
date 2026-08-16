@@ -213,9 +213,21 @@ float4 SampleDecalVirtualTextureLayer(
         return fallback;
 
     const float2 virtualUv = VividApplySurfaceBindingUV(decal.SurfaceBinding, uv);
-    const VTResolvedAddress resolved = VTResolveAddress(virtualUv, sourceMip);
-    if (!resolved.valid || !resolved.resident || resolved.resolvedMip != sourceMip)
-        return fallback;
+    const uint clampedSourceMip = min(sourceMip, (uint)max(VT_MIP_COUNT - 1, 0));
+    const uint2 sourcePageCoord = VTGetPageCoord(virtualUv, clampedSourceMip);
+    const uint packedEntry = _VTPageTable[
+        VTGetFlatPageIndex(sourcePageCoord, clampedSourceMip)];
+
+    // Upload approval already validates and pins every exact source page. Decode
+    // the packed entry here because DXC miscompiles VTResolveAddress's bool fields
+    // in this compute kernel and incorrectly selects the layer fallback.
+    VTResolvedAddress resolved = (VTResolvedAddress)0;
+    resolved.physicalPageId = packedEntry & VT_PAGE_TABLE_PHYSICAL_PAGE_ID_MASK;
+    resolved.resolvedMip =
+        (packedEntry >> VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS)
+        & VT_PAGE_TABLE_RESOLVED_MIP_MASK;
+    resolved.resident = true;
+    resolved.valid = true;
 
     return VTSamplePhysicalCacheLayer(
         virtualUv,

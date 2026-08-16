@@ -316,6 +316,64 @@ namespace VividRP.Editor
             Save(path, importer);
         }
 
+        [MenuItem("Assets/VividRP/Virtual Texture/Rebuild For GPUDriven Surface", true)]
+        private static bool CanRebuildSelectedAssetForGPUDrivenSurface()
+        {
+            string path = AssetDatabase.GetAssetPath(Selection.activeObject);
+            return AssetImporter.GetAtPath(path) is VividVirtualTextureAssetImporter importer
+                   && importer.SourceTexture != null;
+        }
+
+        [MenuItem("Assets/VividRP/Virtual Texture/Rebuild For GPUDriven Surface")]
+        private static void RebuildSelectedAssetForGPUDrivenSurface()
+        {
+            string path = AssetDatabase.GetAssetPath(Selection.activeObject);
+            if (AssetImporter.GetAtPath(path) is not VividVirtualTextureAssetImporter importer)
+                return;
+
+            Undo.RecordObject(importer, "Rebuild VVT For GPUDriven Surface");
+            if (!importer.TryRebuildForGPUDrivenSurface(out _, out string reason))
+                Debug.LogWarning($"[VividRP] Could not rebuild '{path}' for GPUDriven Surface: {reason}");
+        }
+
+        internal bool TryRebuildForGPUDrivenSurface(
+            out VividVirtualTextureAsset rebuiltAsset,
+            out string reason)
+        {
+            rebuiltAsset = null;
+            if (SourceTexture == null)
+            {
+                reason = "A BaseColor source texture is required.";
+                return false;
+            }
+
+            BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface;
+            StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
+            StreamCompression = VividVirtualTextureStreamCompression.Zstd;
+            MaskStorage = VividVirtualTextureMaskStorage.PackedRGBA;
+            BCQuality = VividVirtualTextureBCQuality.Normal;
+            ZstdLevel = 3;
+            ChunkTargetKiB = 256;
+            PageSize = 128;
+            BorderSize = 4;
+            MipCount = 0;
+            FallbackColor = Color.white;
+            NormalFallbackColor = new Color(0.5f, 0.5f, 1.0f, 0.5f);
+            MaskFallbackColor = Color.white;
+            m_StorageSettingsInitialized = true;
+            EditorUtility.SetDirty(this);
+            string rebuiltAssetPath = assetPath;
+            SaveAndReimport();
+            rebuiltAsset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(rebuiltAssetPath);
+            if (rebuiltAsset == null)
+            {
+                reason = "The rebuilt VVT main asset could not be loaded.";
+                return false;
+            }
+            reason = string.Empty;
+            return true;
+        }
+
         private static bool HasVersion3Marker(string assetPath)
         {
             if (string.IsNullOrWhiteSpace(assetPath) || !File.Exists(assetPath))

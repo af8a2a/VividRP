@@ -245,6 +245,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
   - ResourceName: Shaders/Material/DeferredLit
     ResourceObject: {fileID: 7200000, guid: 4c43bc7556866e04b985dc155321bc61, type: 3}
+  - ResourceName: Shaders/Material/Experimental/Closure/ExperimentalClosureClassification
+    ResourceObject: {fileID: 7200000, guid: c7a15d9b78aeee14b9725cb68e74b23e, type: 3}
+  - ResourceName: Shaders/Material/Experimental/Closure/ExperimentalClosureDeferredLit
+    ResourceObject: {fileID: 7200000, guid: f90eff7e011a35e4fb4ad64315eabde5, type: 3}
   - ResourceName: Shaders/Material/Hair/HairDotsVertexUpdate.compute
     ResourceObject: {fileID: 7200000, guid: ae38dd41aa46f9f47b50c0ad31eb25d7, type: 3}
   - ResourceName: Shaders/Material/MaterialClassification

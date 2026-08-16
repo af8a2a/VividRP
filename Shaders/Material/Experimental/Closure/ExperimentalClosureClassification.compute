@@ -1,0 +1,113 @@
+#pragma use_dxc
+#pragma kernel ClearExperimentalClosureArgs
+#pragma kernel ClassifyExperimentalClosureTiles
+
+#define VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE 8
+#define VIVID_EXPERIMENTAL_CLOSURE_VARIANT_COUNT 3
+#define VIVID_EXPERIMENTAL_CLOSURE_INDIRECT_ARGS_COUNT 4
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBuffer.hlsl"
+
+Texture2D<float4> _ExperimentalClosureBuffer0;
+Texture2D<float> _DepthTexture;
+
+RWStructuredBuffer<uint> _ExperimentalClosureTileClasses;
+RWStructuredBuffer<uint> _ExperimentalClosureTileList;
+RWStructuredBuffer<uint> _ExperimentalClosureIndirectArgs;
+
+uint _ClassificationWidth;
+uint _ClassificationHeight;
+uint _ExperimentalClosureTileCount;
+uint _ExperimentalClosureTileCountX;
+
+groupshared uint gs_MaxComplexityPlusOne;
+
+bool IsExperimentalClosurePixelValid(uint2 pixelCoord)
+{
+    if (pixelCoord.x >= _ClassificationWidth
+        || pixelCoord.y >= _ClassificationHeight)
+    {
+        return false;
+    }
+
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+    if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+        return false;
+
+    float4 closureBuffer0 =
+        _ExperimentalClosureBuffer0.Load(int3(pixelCoord, 0));
+    uint header = VividDecodeExperimentalClosureHeader(closureBuffer0.a);
+    return VividIsExperimentalClosureHeaderValid(header);
+}
+
+[numthreads(VIVID_EXPERIMENTAL_CLOSURE_VARIANT_COUNT, 1, 1)]
+void ClearExperimentalClosureArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint variant = dispatchThreadId.x;
+    uint argsOffset = variant * VIVID_EXPERIMENTAL_CLOSURE_INDIRECT_ARGS_COUNT;
+    _ExperimentalClosureIndirectArgs[argsOffset + 0u] = 0u;
+    _ExperimentalClosureIndirectArgs[argsOffset + 1u] = 1u;
+    _ExperimentalClosureIndirectArgs[argsOffset + 2u] = 1u;
+    _ExperimentalClosureIndirectArgs[argsOffset + 3u] = 0u;
+}
+
+[numthreads(
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    1)]
+void ClassifyExperimentalClosureTiles(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupId : SV_GroupID,
+    uint groupIndex : SV_GroupIndex)
+{
+    if (groupIndex == 0u)
+        gs_MaxComplexityPlusOne = 0u;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (IsExperimentalClosurePixelValid(pixelCoord))
+    {
+        float4 closureBuffer0 =
+            _ExperimentalClosureBuffer0.Load(int3(pixelCoord, 0));
+        uint header = VividDecodeExperimentalClosureHeader(closureBuffer0.a);
+        uint complexity = min(
+            VividGetExperimentalClosureHeaderComplexity(header),
+            VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_COMPLEX);
+        InterlockedMax(gs_MaxComplexityPlusOne, complexity + 1u);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex != 0u)
+        return;
+
+    uint tileIndex =
+        groupId.y * _ExperimentalClosureTileCountX + groupId.x;
+    if (tileIndex >= _ExperimentalClosureTileCount)
+        return;
+
+    if (gs_MaxComplexityPlusOne == 0u)
+    {
+        _ExperimentalClosureTileClasses[tileIndex] = 0xffffffffu;
+        return;
+    }
+
+    uint variant = gs_MaxComplexityPlusOne - 1u;
+    _ExperimentalClosureTileClasses[tileIndex] = variant;
+
+    uint argsOffset = variant * VIVID_EXPERIMENTAL_CLOSURE_INDIRECT_ARGS_COUNT;
+    uint tileListOffset;
+    InterlockedAdd(
+        _ExperimentalClosureIndirectArgs[argsOffset],
+        1u,
+        tileListOffset);
+
+    uint packedTileCoord =
+        TileClassifaction::PackTileCoord(groupId.xy);
+    _ExperimentalClosureTileList[
+        variant * _ExperimentalClosureTileCount + tileListOffset] =
+            packedTileCoord;
+}

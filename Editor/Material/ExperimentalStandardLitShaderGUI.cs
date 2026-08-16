@@ -27,7 +27,7 @@ namespace VividRP.Editor
             MaterialProperty[] properties)
         {
             EditorGUILayout.HelpBox(
-                "Experimental Closure material. Raster resolves StandardSurface to SlabClosure, then explicitly degrades it to the legacy GBuffer. Non-default IOR, coat roughness, transmission and subsurface semantics are retained for the Closure and reference DXR paths but cannot yet be represented by deferred lighting.",
+                "Experimental Closure material. The Stage 2 Closure Buffer preserves IOR, coat, transmission and subsurface semantics and shades the Slab directly. The legacy GBuffer still degrades these fields; experimental deferred transmission has no refraction yet, and subsurface currently uses a wrap-diffuse approximation.",
                 MessageType.Info);
             base.OnGUI(materialEditor, properties);
         }

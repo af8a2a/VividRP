@@ -76,6 +76,10 @@ namespace VividRP.Editor.Tests
                     material,
                     "VividGBufferGPUDrivenDecal",
                     "VividGBufferGPUDrivenDecal");
+                AssertPass(
+                    material,
+                    "ExperimentalClosureBuffer",
+                    "ExperimentalClosureBuffer");
                 AssertPass(material, "Meta", "Meta");
                 AssertPass(material, "MotionVectors", "MotionVectors");
                 AssertPass(material, "IndirectDXR", "IndirectDXR");

@@ -114,4 +114,54 @@ namespace VividRP.Runtime.Experimental.Materials
             return loss;
         }
     }
+
+    public static class VividExperimentalClosureBufferContract
+    {
+        public const uint BufferVersion = 1;
+        public const int AttachmentCount = 6;
+        public const int BytesPerPixel = 28;
+
+        public const int ComplexityShift = 0;
+        public const uint ComplexityMask = 3;
+        public const int FeatureShift = 2;
+        public const uint FeatureMask = 7;
+        public const int ModelShift = 5;
+        public const uint ModelMask = 3;
+        public const uint ValidBit = 1u << 7;
+
+        public static byte PackHeader(
+            VividExperimentalClosureModel model,
+            VividExperimentalClosureComplexity complexity,
+            VividExperimentalClosureFeatures features)
+        {
+            uint header = ValidBit;
+            header |= ((uint)complexity & ComplexityMask) << ComplexityShift;
+            header |= ((uint)features & FeatureMask) << FeatureShift;
+            header |= ((uint)model & ModelMask) << ModelShift;
+            return (byte)header;
+        }
+
+        public static bool IsValid(byte header)
+        {
+            return (header & ValidBit) != 0;
+        }
+
+        public static VividExperimentalClosureComplexity GetComplexity(byte header)
+        {
+            return (VividExperimentalClosureComplexity)(
+                ((uint)header >> ComplexityShift) & ComplexityMask);
+        }
+
+        public static VividExperimentalClosureFeatures GetFeatures(byte header)
+        {
+            return (VividExperimentalClosureFeatures)(
+                ((uint)header >> FeatureShift) & FeatureMask);
+        }
+
+        public static VividExperimentalClosureModel GetModel(byte header)
+        {
+            return (VividExperimentalClosureModel)(
+                ((uint)header >> ModelShift) & ModelMask);
+        }
+    }
 }

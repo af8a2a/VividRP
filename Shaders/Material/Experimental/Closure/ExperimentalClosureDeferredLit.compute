@@ -1,0 +1,254 @@
+#pragma use_dxc
+#pragma kernel ExperimentalClosureLit_Fast
+#pragma kernel ExperimentalClosureLit_Single
+#pragma kernel ExperimentalClosureLit_Complex
+
+#define VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE 8
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBuffer.hlsl"
+
+Texture2D<float4> _ExperimentalClosureBuffer0;
+Texture2D<float4> _ExperimentalClosureBuffer1;
+Texture2D<float4> _ExperimentalClosureBuffer2;
+Texture2D<float4> _ExperimentalClosureBuffer3;
+Texture2D<float4> _ExperimentalClosureBuffer4;
+Texture2D<float4> _ExperimentalClosureBuffer5;
+Texture2D<float> _DepthTexture;
+StructuredBuffer<uint> _ExperimentalClosureTileList;
+
+RWTexture2D<float4> _ExperimentalClosureLightingTexture;
+RWTexture2D<float4> _ExperimentalClosureDebugTexture;
+
+uint _ExperimentalClosureTileListOffset;
+
+static const float kVividExperimentalPi = 3.14159265359;
+
+VividExperimentalClosureMaterial LoadExperimentalClosureMaterial(
+    uint2 pixelCoord)
+{
+    return VividUnpackExperimentalClosureBuffer(
+        _ExperimentalClosureBuffer0.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer1.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer2.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer3.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer4.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer5.Load(int3(pixelCoord, 0)));
+}
+
+float3 VividExperimentalFresnelSchlick(
+    float3 f0,
+    float3 f90,
+    float cosTheta)
+{
+    float fresnel = pow(1.0 - saturate(cosTheta), 5.0);
+    return lerp(f0, f90, fresnel);
+}
+
+float VividExperimentalD_GGX(float nDotH, float linearRoughness)
+{
+    float alpha = max(linearRoughness, 0.002);
+    float alphaSquared = alpha * alpha;
+    float denominator =
+        nDotH * nDotH * (alphaSquared - 1.0) + 1.0;
+    return alphaSquared
+        / max(kVividExperimentalPi * denominator * denominator, 1e-6);
+}
+
+float VividExperimentalV_SmithGGXCorrelated(
+    float nDotV,
+    float nDotL,
+    float linearRoughness)
+{
+    float alpha = max(linearRoughness, 0.002);
+    float alphaSquared = alpha * alpha;
+    float lambdaV = nDotL * sqrt(
+        nDotV * nDotV * (1.0 - alphaSquared) + alphaSquared);
+    float lambdaL = nDotV * sqrt(
+        nDotL * nDotL * (1.0 - alphaSquared) + alphaSquared);
+    return 0.5 / max(lambdaV + lambdaL, 1e-6);
+}
+
+float3 VividEvaluateExperimentalMicrofacet(
+    float3 f0,
+    float3 f90,
+    float linearRoughness,
+    float3 normalWS,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    float3 halfDirectionWS =
+        SafeNormalize(viewDirectionWS + lightDirectionWS);
+    float nDotV = saturate(dot(normalWS, viewDirectionWS));
+    float nDotL = saturate(dot(normalWS, lightDirectionWS));
+    float nDotH = saturate(dot(normalWS, halfDirectionWS));
+    float vDotH = saturate(dot(viewDirectionWS, halfDirectionWS));
+    float distribution =
+        VividExperimentalD_GGX(nDotH, linearRoughness);
+    float visibility = VividExperimentalV_SmithGGXCorrelated(
+        nDotV,
+        nDotL,
+        linearRoughness);
+    float3 fresnel = VividExperimentalFresnelSchlick(f0, f90, vDotH);
+    return distribution * visibility * fresnel * nDotL;
+}
+
+float3 VividEvaluateExperimentalSlabDirectional(
+    VividExperimentalSlabClosure slab,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    float rawNDotL = dot(slab.normalWS, lightDirectionWS);
+    float nDotL = saturate(rawNDotL);
+    float wrappedNDotL = saturate((rawNDotL + 0.5) / 1.5);
+    float diffuseNDotL = lerp(
+        nDotL,
+        wrappedNDotL,
+        saturate(slab.subsurfaceWeight));
+    float3 diffuse =
+        slab.diffuseAlbedo * (diffuseNDotL / kVividExperimentalPi);
+    float3 specular = VividEvaluateExperimentalMicrofacet(
+        slab.specularF0,
+        slab.specularF90,
+        slab.linearRoughness,
+        slab.normalWS,
+        viewDirectionWS,
+        lightDirectionWS);
+
+    if (slab.clearCoatWeight > 0.0)
+    {
+        float coatWeight = saturate(slab.clearCoatWeight);
+        float3 coatSpecular = VividEvaluateExperimentalMicrofacet(
+            0.04,
+            1.0,
+            slab.clearCoatLinearRoughness,
+            slab.normalWS,
+            viewDirectionWS,
+            lightDirectionWS);
+        float coatFresnelAtView = VividExperimentalFresnelSchlick(
+            0.04,
+            1.0,
+            saturate(dot(slab.normalWS, viewDirectionWS))).x;
+        float baseAttenuation = 1.0 - coatWeight * coatFresnelAtView;
+        diffuse *= baseAttenuation;
+        specular = specular * baseAttenuation + coatSpecular * coatWeight;
+    }
+
+    return max(diffuse + specular, 0.0);
+}
+
+void EvaluateExperimentalClosureTile(
+    uint expectedComplexity,
+    uint3 groupId,
+    uint3 groupThreadId)
+{
+    uint tileListIndex = groupId.x;
+    uint2 tileCoord = TileClassifaction::UnpackTileCoord(
+        _ExperimentalClosureTileList[
+            _ExperimentalClosureTileListOffset + tileListIndex]);
+    uint2 pixelCoord =
+        tileCoord * VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE
+        + groupThreadId.xy;
+    if (pixelCoord.x >= (uint)_ScreenSize.x
+        || pixelCoord.y >= (uint)_ScreenSize.y)
+    {
+        return;
+    }
+
+    VividExperimentalClosureMaterial material =
+        LoadExperimentalClosureMaterial(pixelCoord);
+    if (material.closureCount == 0u)
+        return;
+
+    // A tile is scheduled at its maximum complexity. Simpler pixels inside a
+    // mixed tile remain valid and use the same general Slab evaluator.
+    if (material.complexity > expectedComplexity)
+        return;
+
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+    if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+        return;
+
+    float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
+    float3 positionWS = ComputeWorldSpacePosition(
+        uv,
+        deviceDepth,
+        UNITY_MATRIX_I_VP);
+    float3 viewDirectionWS =
+        SafeNormalize(_WorldSpaceCameraPos - positionWS);
+    float3 directLighting = 0.0;
+
+    [loop]
+    for (uint lightIndex = 0u; lightIndex < _DirectionalLightCount; lightIndex++)
+    {
+        DirectionalLightData directionalLight =
+            GetDirectionalLight((int)lightIndex);
+        directLighting += VividEvaluateExperimentalSlabDirectional(
+            material.slab,
+            viewDirectionWS,
+            SafeNormalize(directionalLight.directionWS))
+            * max(directionalLight.color, 0.0);
+    }
+
+    float3 bakedLighting = material.slab.diffuseAlbedo
+        * material.builtinData.bakeDiffuseLighting
+        * material.builtinData.hasBakedGI;
+    float ambientOcclusion = saturate(material.summary.ambientOcclusion);
+    float3 lighting =
+        (directLighting + bakedLighting) * ambientOcclusion
+        + material.emissive;
+    lighting *= saturate(material.slab.coverage);
+
+    _ExperimentalClosureLightingTexture[pixelCoord] =
+        float4(VividApplyPreExposure(max(lighting, 0.0)), 1.0);
+    _ExperimentalClosureDebugTexture[pixelCoord] = float4(
+        material.complexity * 0.5,
+        material.slab.transmissionWeight,
+        material.slab.subsurfaceWeight,
+        (material.summary.compatibilityLossFlags & 15u) * (1.0 / 15.0));
+}
+
+[numthreads(
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    1)]
+void ExperimentalClosureLit_Fast(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    EvaluateExperimentalClosureTile(
+        VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_FAST,
+        groupId,
+        groupThreadId);
+}
+
+[numthreads(
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    1)]
+void ExperimentalClosureLit_Single(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    EvaluateExperimentalClosureTile(
+        VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_SINGLE,
+        groupId,
+        groupThreadId);
+}
+
+[numthreads(
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    1)]
+void ExperimentalClosureLit_Complex(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    EvaluateExperimentalClosureTile(
+        VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_COMPLEX,
+        groupId,
+        groupThreadId);
+}

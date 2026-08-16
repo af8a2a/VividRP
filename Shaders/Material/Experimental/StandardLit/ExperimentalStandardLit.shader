@@ -107,119 +107,119 @@ Shader "VividRP/Experimental/Material/StandardLit"
             ENDHLSL
         }
 
-        Pass
-        {
-            Name "ShadowCaster"
-            Tags { "LightMode" = "ShadowCaster" }
-
-            ZWrite On
-            ZTest LEqual
-            Cull [_Cull]
-            ColorMask 0
-
-            HLSLPROGRAM
-                #pragma use_dxc
-                #pragma multi_compile_instancing
-                #pragma instancing_options renderinglayer
-                #pragma shader_feature_local_fragment _ALPHATEST_ON
-                #pragma shader_feature_local_fragment _OPACITYMAP
-                #pragma vertex Vert
-                #pragma fragment Frag
-
-                #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
-                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitShadowCasterPass.hlsl"
-            ENDHLSL
-        }
-
-        Pass
-        {
-            Name "VividGBuffer"
-            Tags { "LightMode" = "VividGBuffer" }
-
-            Blend One Zero
-            ZWrite [_ZWrite]
-            ZTest Equal
-            Cull [_Cull]
-
-            HLSLPROGRAM
-                #pragma use_dxc
-                #pragma multi_compile_instancing
-                #pragma instancing_options renderinglayer
-                #pragma multi_compile _ LIGHTMAP_ON
-                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
-                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
-                #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
-                #pragma shader_feature_local_fragment _ALPHATEST_ON
-                #pragma shader_feature_local_fragment _OPACITYMAP
-                #pragma shader_feature_local_fragment _NORMALMAP
-                #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
-                #pragma shader_feature_local_fragment _ROUGHNESSMAP
-                #pragma shader_feature_local_fragment _OCCLUSIONMAP
-                #pragma shader_feature_local_fragment _EMISSION
-                #pragma shader_feature_local_fragment _CLEARCOAT
-                #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
-                #pragma vertex Vert
-                #pragma fragment FragGBuffer
-
-                #define VIVIDRP_SHADERPASS_GBUFFER 1
-                #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
-                #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
-                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
-                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
-                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitGBufferPass.hlsl"
-            ENDHLSL
-        }
-
-        Pass
-        {
-            Name "VividGBufferGPUDrivenDecal"
-            Tags { "LightMode" = "VividGBufferGPUDrivenDecal" }
-
-            Blend One Zero
-            ZWrite [_ZWrite]
-            ZTest Equal
-            Cull [_Cull]
-
-            HLSLPROGRAM
-                #pragma use_dxc
-                #pragma multi_compile_instancing
-                #pragma instancing_options renderinglayer
-                #pragma multi_compile _ LIGHTMAP_ON
-                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
-                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
-                #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
-                #pragma shader_feature_local_fragment _ALPHATEST_ON
-                #pragma shader_feature_local_fragment _OPACITYMAP
-                #pragma shader_feature_local_fragment _NORMALMAP
-                #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
-                #pragma shader_feature_local_fragment _ROUGHNESSMAP
-                #pragma shader_feature_local_fragment _OCCLUSIONMAP
-                #pragma shader_feature_local_fragment _EMISSION
-                #pragma shader_feature_local_fragment _CLEARCOAT
-                #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
-                #pragma vertex Vert
-                #pragma fragment FragGBuffer
-
-                #define VIVIDRP_SHADERPASS_GBUFFER 1
-                #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
-                #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
-                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
-                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
-                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
-                #define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1
-                #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitGBufferPass.hlsl"
-            ENDHLSL
-        }
+//        Pass
+//        {
+//            Name "ShadowCaster"
+//            Tags { "LightMode" = "ShadowCaster" }
+//
+//            ZWrite On
+//            ZTest LEqual
+//            Cull [_Cull]
+//            ColorMask 0
+//
+//            HLSLPROGRAM
+//                #pragma use_dxc
+//                #pragma multi_compile_instancing
+//                #pragma instancing_options renderinglayer
+//                #pragma shader_feature_local_fragment _ALPHATEST_ON
+//                #pragma shader_feature_local_fragment _OPACITYMAP
+//                #pragma vertex Vert
+//                #pragma fragment Frag
+//
+//                #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+//                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+//                #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitShadowCasterPass.hlsl"
+//            ENDHLSL
+//        }
+//
+//        Pass
+//        {
+//            Name "VividGBuffer"
+//            Tags { "LightMode" = "VividGBuffer" }
+//
+//            Blend One Zero
+//            ZWrite [_ZWrite]
+//            ZTest Equal
+//            Cull [_Cull]
+//
+//            HLSLPROGRAM
+//                #pragma use_dxc
+//                #pragma multi_compile_instancing
+//                #pragma instancing_options renderinglayer
+//                #pragma multi_compile _ LIGHTMAP_ON
+//                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+//                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
+//                #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+//                #pragma shader_feature_local_fragment _ALPHATEST_ON
+//                #pragma shader_feature_local_fragment _OPACITYMAP
+//                #pragma shader_feature_local_fragment _NORMALMAP
+//                #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+//                #pragma shader_feature_local_fragment _ROUGHNESSMAP
+//                #pragma shader_feature_local_fragment _OCCLUSIONMAP
+//                #pragma shader_feature_local_fragment _EMISSION
+//                #pragma shader_feature_local_fragment _CLEARCOAT
+//                #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+//                #pragma vertex Vert
+//                #pragma fragment FragGBuffer
+//
+//                #define VIVIDRP_SHADERPASS_GBUFFER 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+//                #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
+//                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
+//                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+//                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
+//                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitGBufferPass.hlsl"
+//            ENDHLSL
+//        }
+//
+//        Pass
+//        {
+//            Name "VividGBufferGPUDrivenDecal"
+//            Tags { "LightMode" = "VividGBufferGPUDrivenDecal" }
+//
+//            Blend One Zero
+//            ZWrite [_ZWrite]
+//            ZTest Equal
+//            Cull [_Cull]
+//
+//            HLSLPROGRAM
+//                #pragma use_dxc
+//                #pragma multi_compile_instancing
+//                #pragma instancing_options renderinglayer
+//                #pragma multi_compile _ LIGHTMAP_ON
+//                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+//                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
+//                #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+//                #pragma shader_feature_local_fragment _ALPHATEST_ON
+//                #pragma shader_feature_local_fragment _OPACITYMAP
+//                #pragma shader_feature_local_fragment _NORMALMAP
+//                #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+//                #pragma shader_feature_local_fragment _ROUGHNESSMAP
+//                #pragma shader_feature_local_fragment _OCCLUSIONMAP
+//                #pragma shader_feature_local_fragment _EMISSION
+//                #pragma shader_feature_local_fragment _CLEARCOAT
+//                #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+//                #pragma vertex Vert
+//                #pragma fragment FragGBuffer
+//
+//                #define VIVIDRP_SHADERPASS_GBUFFER 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+//                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+//                #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
+//                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
+//                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+//                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
+//                #define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1
+//                #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
+//                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitGBufferPass.hlsl"
+//            ENDHLSL
+//        }
 
         Pass
         {

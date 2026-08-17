@@ -112,6 +112,18 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             m_Material = CoreUtils.CreateEngineMaterial(shader);
         }
 
+        public override void Resize(int width, int height)
+        {
+            ResizeOutput(m_ClosureBuffer0, width, height);
+            ResizeOutput(m_ClosureBuffer1, width, height);
+            ResizeOutput(m_ClosureBuffer2, width, height);
+            ResizeOutput(m_ClosureBuffer3, width, height);
+            ResizeOutput(m_ClosureBuffer4, width, height);
+            ResizeOutput(m_ClosureBuffer5, width, height);
+            ResizeOutput(m_ClosureBuffer6, width, height);
+            ResizeOutput(m_ClosureBuffer7, width, height);
+        }
+
         public override void Prepare(ContextContainer frameData)
         {
             VividCameraData cameraData = frameData.GetOrCreate<VividCameraData>();
@@ -134,23 +146,6 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             {
                 m_MaterialTable.ClearImportedBuffer();
             }
-
-            int width = CameraDimensionUtility.ResolveCameraDimension(
-                cameraData.actualWidth,
-                cameraData.pixelWidth,
-                Screen.width);
-            int height = CameraDimensionUtility.ResolveCameraDimension(
-                cameraData.actualHeight,
-                cameraData.pixelHeight,
-                Screen.height);
-            ResizeOutput(m_ClosureBuffer0, width, height);
-            ResizeOutput(m_ClosureBuffer1, width, height);
-            ResizeOutput(m_ClosureBuffer2, width, height);
-            ResizeOutput(m_ClosureBuffer3, width, height);
-            ResizeOutput(m_ClosureBuffer4, width, height);
-            ResizeOutput(m_ClosureBuffer5, width, height);
-            ResizeOutput(m_ClosureBuffer6, width, height);
-            ResizeOutput(m_ClosureBuffer7, width, height);
         }
 
         public override void Record(UnsafePassContext context)
@@ -269,7 +264,7 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
 
         private static void ResizeOutput(RenderGraphTexture texture, int width, int height)
         {
-            if (texture?.desc == null || texture.desc.HasExplicitSize())
+            if (texture?.desc == null)
                 return;
             texture.Resize(Mathf.Max(1, width), Mathf.Max(1, height));
         }

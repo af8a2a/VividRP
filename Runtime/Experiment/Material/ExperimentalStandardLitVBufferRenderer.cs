@@ -5,7 +5,6 @@ namespace VividRP.Runtime.Experimental.Material
 {
     [ExecuteAlways]
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(MeshRenderer))]
     public sealed class ExperimentalStandardLitVBufferRenderer : MonoBehaviour
     {
         private readonly List<MeshRenderer> m_RegisteredRenderers = new();

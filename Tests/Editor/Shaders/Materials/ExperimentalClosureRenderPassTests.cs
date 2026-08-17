@@ -41,6 +41,19 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VisibilityBufferPass_ResizesAttachmentsWhenCameraSizeChanges()
+        {
+            var pass = new ExperimentalVisibilityBufferPass();
+
+            pass.Resize(1920, 1080);
+            pass.Resize(1506, 674);
+
+            AssertTexture(pass, "m_VisibilityBuffer", 1506, 674);
+            AssertTexture(pass, "m_Attributes0", 1506, 674);
+            AssertTexture(pass, "m_Attributes1", 1506, 674);
+        }
+
+        [Test]
         public void ClosureBufferPass_IsFullscreenResolveWithVBufferAndMaterialTableInputs()
         {
             IRenderPass pass = new ExperimentalClosureBufferPass();
@@ -68,6 +81,18 @@ namespace VividRP.Editor.Tests
                 resources.Buffers.Select(entry => entry.Name),
                 Does.Contain("ExperimentalVBufferMaterialTable"));
             Assert.That(pass, Is.InstanceOf<IAllowGlobalStateModificationPass>());
+        }
+
+        [Test]
+        public void ClosureBufferPass_ResizesOutputsWhenCameraSizeChanges()
+        {
+            var pass = new ExperimentalClosureBufferPass();
+
+            pass.Resize(1920, 1080);
+            pass.Resize(1506, 674);
+
+            for (int index = 0; index < 8; ++index)
+                AssertTexture(pass, $"m_ClosureBuffer{index}", 1506, 674);
         }
 
         [Test]

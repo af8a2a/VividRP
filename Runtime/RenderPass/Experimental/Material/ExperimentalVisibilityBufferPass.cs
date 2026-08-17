@@ -64,20 +64,15 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
         {
         }
 
-        public override void Prepare(ContextContainer frameData)
+        public override void Resize(int width, int height)
         {
-            VividCameraData cameraData = frameData.GetOrCreate<VividCameraData>();
-            int width = CameraDimensionUtility.ResolveCameraDimension(
-                cameraData.actualWidth,
-                cameraData.pixelWidth,
-                Screen.width);
-            int height = CameraDimensionUtility.ResolveCameraDimension(
-                cameraData.actualHeight,
-                cameraData.pixelHeight,
-                Screen.height);
             ResizeTarget(m_VisibilityBuffer, width, height);
             ResizeTarget(m_Attributes0, width, height);
             ResizeTarget(m_Attributes1, width, height);
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
         }
 
         public override void Record(UnsafePassContext context)
@@ -117,7 +112,7 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
 
         private static void ResizeTarget(RenderGraphTexture texture, int width, int height)
         {
-            if (texture?.desc == null || texture.desc.HasExplicitSize())
+            if (texture?.desc == null)
                 return;
             texture.Resize(Mathf.Max(1, width), Mathf.Max(1, height));
         }

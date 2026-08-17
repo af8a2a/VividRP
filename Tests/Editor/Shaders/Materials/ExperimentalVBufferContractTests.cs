@@ -18,7 +18,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VBufferAbi_UsesVersionedTwentyFourBytePayload()
         {
-            Assert.That(ExperimentalVBufferContract.Version, Is.EqualTo(1u));
+            Assert.That(ExperimentalVBufferContract.Version, Is.EqualTo(2u));
             Assert.That(ExperimentalVBufferContract.InvalidMaterialValue, Is.Zero);
             Assert.That(ExperimentalVBufferContract.MaterialValueOffset, Is.EqualTo(1u));
             Assert.That(ExperimentalVBufferContract.BytesPerPixel, Is.EqualTo(8 + 8 + 8));
@@ -43,13 +43,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ClosureResolve_ConsumesVBufferVtAndPreservesLayerCompiler()
+        public void ClosureResolve_ConsumesVBufferVtAndCompilesSingleStandardSurface()
         {
             string source = File.ReadAllText(ResolveAssetPath);
 
-            StringAssert.Contains("#define VIVID_EXPERIMENTAL_VBUFFER_VERSION 1u", source);
+            StringAssert.Contains("#define VIVID_EXPERIMENTAL_VBUFFER_VERSION 2u", source);
             StringAssert.Contains(
-                "#define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_STRIDE 272u",
+                "#define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_STRIDE 192u",
                 source);
             StringAssert.Contains("VividExperimentalVBufferMaterialData", source);
             StringAssert.Contains("VividCreateSurfaceSampleContextGrad", source);
@@ -58,7 +58,9 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VividSampleMaskGrad", source);
             StringAssert.Contains("ComputeWorldSpacePosition", source);
             StringAssert.Contains("ReconstructTangentToWorld", source);
-            StringAssert.Contains("VividCompileExperimentalLayeredSurface", source);
+            StringAssert.Contains("VividCompileExperimentalStandardSurface", source);
+            StringAssert.DoesNotContain("VividCompileExperimentalLayeredSurface", source);
+            StringAssert.DoesNotContain("TopBinding", source);
             StringAssert.Contains("VividPackExperimentalClosureBuffer", source);
             StringAssert.DoesNotContain("RendererList", source);
         }

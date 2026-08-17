@@ -20,7 +20,7 @@ VividExperimentalClosureBufferOutput FragClosureBuffer(
     VividExperimentalStandardSurface surface =
         BuildExperimentalStandardLitSurface(input);
     VividExperimentalClosureMaterial material =
-        BuildExperimentalStandardLitMaterial(input, surface);
+        BuildExperimentalStandardLitMaterial(surface);
     return VividPackExperimentalClosureBuffer(material);
 }
 

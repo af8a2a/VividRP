@@ -10,19 +10,6 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosure.hlsl"
 
-float4 _TopLayerBaseColor;
-float4 _TopLayerBaseMap_ST;
-float _TopLayerWeight;
-float _TopLayerOperator;
-float _TopLayerMetallic;
-float _TopLayerSmoothness;
-float _TopLayerSpecularIOR;
-
-TEXTURE2D(_TopLayerBaseMap);
-SAMPLER(sampler_TopLayerBaseMap);
-TEXTURE2D(_TopLayerMaskMap);
-SAMPLER(sampler_TopLayerMaskMap);
-
 VividExperimentalStandardSurfaceParameters SampleExperimentalStandardLitSurface(
     FragInputs input)
 {
@@ -76,63 +63,16 @@ VividExperimentalStandardSurface BuildExperimentalStandardLitSurface(
 }
 
 VividExperimentalClosureMaterial BuildExperimentalStandardLitMaterial(
-    FragInputs input,
     VividExperimentalStandardSurface baseSurface)
 {
-    float topLayerWeight = saturate(_TopLayerWeight);
-    if (topLayerWeight <=
-        VIVID_EXPERIMENTAL_CLOSURE_LAYER_WEIGHT_EPSILON)
-    {
-        return VividCompileExperimentalStandardSurface(baseSurface);
-    }
-
-    float2 topLayerUV = input.texCoord0.xy * _TopLayerBaseMap_ST.xy
-        + _TopLayerBaseMap_ST.zw;
-    float topLayerMask = SAMPLE_TEXTURE2D(
-        _TopLayerMaskMap,
-        sampler_TopLayerMaskMap,
-        topLayerUV).r;
-    topLayerWeight *= saturate(topLayerMask);
-    if (topLayerWeight <=
-        VIVID_EXPERIMENTAL_CLOSURE_LAYER_WEIGHT_EPSILON)
-    {
-        return VividCompileExperimentalStandardSurface(baseSurface);
-    }
-
-    float3 topLayerBaseColor = SAMPLE_TEXTURE2D(
-        _TopLayerBaseMap,
-        sampler_TopLayerBaseMap,
-        topLayerUV).rgb * _TopLayerBaseColor.rgb;
-
-    VividExperimentalStandardSurfaceParameters topParameters;
-    topParameters.baseColor = topLayerBaseColor;
-    topParameters.normalWS = baseSurface.normalWS;
-    topParameters.perceptualRoughness = 1.0
-        - saturate(_TopLayerSmoothness);
-    topParameters.metallic = saturate(_TopLayerMetallic);
-    topParameters.ambientOcclusion = 1.0;
-    topParameters.coverage = 1.0;
-    topParameters.specularIor = _TopLayerSpecularIOR;
-    topParameters.clearCoatWeight = 0.0;
-    topParameters.clearCoatPerceptualRoughness = 0.0;
-    topParameters.transmissionWeight = 0.0;
-    topParameters.subsurfaceWeight = 0.0;
-    topParameters.emissive = 0.0;
-    topParameters.materialFeatures = VIVID_MATERIALFEATURE_LIT;
-    topParameters.builtinData = baseSurface.builtinData;
-
-    return VividCompileExperimentalLayeredSurface(
-        baseSurface,
-        VividResolveExperimentalStandardSurface(topParameters),
-        (uint)round(saturate(_TopLayerOperator)),
-        topLayerWeight);
+    return VividCompileExperimentalStandardSurface(baseSurface);
 }
 
 VividGBufferSurfaceData VividBuildGBufferSurfaceData(FragInputs input)
 {
     VividExperimentalStandardSurface surface = BuildExperimentalStandardLitSurface(input);
     VividExperimentalClosureMaterial material =
-        BuildExperimentalStandardLitMaterial(input, surface);
+        BuildExperimentalStandardLitMaterial(surface);
     return VividExportExperimentalClosureToLegacyGBuffer(material);
 }
 

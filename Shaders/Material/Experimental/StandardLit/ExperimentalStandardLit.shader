@@ -46,17 +46,6 @@ Shader "VividRP/Experimental/Material/StandardLit"
         [Sub(ExperimentalClosureInputs)] _TransmissionWeight("Transmission Weight", Range(0.0, 1.0)) = 0.0
         [Sub(ExperimentalClosureInputs)] _SubsurfaceWeight("Subsurface Weight", Range(0.0, 1.0)) = 0.0
 
-        [Main(ExperimentalLayerInputs, _, on, off)] _ExperimentalLayerInputs("Experimental Top Layer", Float) = 1
-        [Tex(ExperimentalLayerInputs, _TopLayerBaseColor)] _TopLayerBaseMap("Top Layer Base Color", 2D) = "white" {}
-        [HideInInspector] _TopLayerBaseColor("Top Layer Color", Color) = (1, 1, 1, 1)
-        [TilingOffset(ExperimentalLayerInputs)] _TopLayerBaseMap_ST("Top Layer UV Tiling and Offset", Vector) = (1, 1, 0, 0)
-        [Tex(ExperimentalLayerInputs)] _TopLayerMaskMap("Top Layer Mask", 2D) = "white" {}
-        [Sub(ExperimentalLayerInputs)] _TopLayerWeight("Top Layer Weight", Range(0.0, 1.0)) = 0.0
-        [SubEnum(ExperimentalLayerInputs, Horizontal Mix, 0, Vertical Layer, 1)] _TopLayerOperator("Top Layer Operator", Float) = 1.0
-        [Sub(ExperimentalLayerInputs)] _TopLayerMetallic("Top Layer Metallic", Range(0.0, 1.0)) = 0.0
-        [Sub(ExperimentalLayerInputs)] _TopLayerSmoothness("Top Layer Smoothness", Range(0.0, 1.0)) = 0.5
-        [Sub(ExperimentalLayerInputs)] _TopLayerSpecularIOR("Top Layer Specular IOR", Range(1.0, 3.0)) = 1.5
-
         // Detailed fields are retained for the shared StandardLit sampling code.
         [HideInInspector] _ThinWalledTransmission("Thin-Walled Transmission", Float) = 0.0
         [HideInInspector] _TransmissionMap("Transmission Map", 2D) = "white" {}

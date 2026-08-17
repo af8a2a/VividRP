@@ -7,11 +7,11 @@ namespace VividRP.Runtime.Experimental.Material
 {
     public static class ExperimentalVBufferContract
     {
-        public const uint Version = 1;
+        public const uint Version = 2;
         public const uint InvalidMaterialValue = 0;
         public const uint MaterialValueOffset = 1;
         public const int BytesPerPixel = 24;
-        public const int MaterialRecordStride = 272;
+        public const int MaterialRecordStride = 192;
     }
 
     [Flags]
@@ -34,7 +34,6 @@ namespace VividRP.Runtime.Experimental.Material
     {
         internal VividSurfaceBindingData BaseBinding;
         internal VividSurfaceBindingData AuxiliaryBinding;
-        internal VividSurfaceBindingData TopBinding;
 
         internal float4 BaseColor;
         internal float4 BaseMapST;
@@ -43,9 +42,6 @@ namespace VividRP.Runtime.Experimental.Material
         internal float4 BaseRemap0;
         internal float4 BaseRemap1;
         internal float4 BaseClosure;
-        internal float4 TopColor;
-        internal float4 TopMapST;
-        internal float4 TopSurface;
         internal uint4 FeatureFlags;
     }
 }

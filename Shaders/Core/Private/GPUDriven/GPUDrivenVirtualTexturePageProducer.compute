@@ -37,6 +37,11 @@ float3 EncodeLinearToSRGB(float3 value)
     return saturate(lerp(highSegment, lowSegment, useLowSegment));
 }
 
+float4 ConvertLegacyNormalAGToNormalRG(float4 packedNormal)
+{
+    return float4(packedNormal.w, packedNormal.y, 1.0, 1.0);
+}
+
 [numthreads(8, 8, 1)]
 void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -75,7 +80,8 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
     const float4 normal = (presenceMask & 2u) != 0u
-        ? SampleSource(_NormalTexture, uv, normalMip, repeat)
+        ? ConvertLegacyNormalAGToNormalRG(
+            SampleSource(_NormalTexture, uv, normalMip, repeat))
         : _VTNormalFallback;
     const float4 mask = (presenceMask & 4u) != 0u
         ? SampleSource(_MaskTexture, uv, maskMip, repeat)

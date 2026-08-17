@@ -28,9 +28,9 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             #define VIVID_VT_ENABLE_FEEDBACK_RW 1
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VirtualTextureSurfaceSampling.hlsl"
 
-            #define VIVID_EXPERIMENTAL_VBUFFER_VERSION 1u
+            #define VIVID_EXPERIMENTAL_VBUFFER_VERSION 2u
             #define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_OFFSET 1u
-            #define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_STRIDE 272u
+            #define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_STRIDE 192u
 
             #define VIVID_EXPERIMENTAL_FEATURE_NORMAL_MAP (1u << 0)
             #define VIVID_EXPERIMENTAL_FEATURE_METALLIC_MAP (1u << 1)
@@ -58,7 +58,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             {
                 VividSurfaceBindingData BaseBinding;
                 VividSurfaceBindingData AuxiliaryBinding;
-                VividSurfaceBindingData TopBinding;
                 float4 BaseColor;
                 float4 BaseMapST;
                 float4 EmissionColor;
@@ -66,9 +65,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 float4 BaseRemap0;
                 float4 BaseRemap1;
                 float4 BaseClosure;
-                float4 TopColor;
-                float4 TopMapST;
-                float4 TopSurface;
                 uint4 FeatureFlags;
             };
 
@@ -360,61 +356,8 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 VividExperimentalStandardSurface baseSurface =
                     VividResolveExperimentalStandardSurface(baseParameters);
 
-                float topWeight = saturate(materialData.BaseClosure.w);
-                VividExperimentalClosureMaterial closureMaterial;
-                if (topWeight <= VIVID_EXPERIMENTAL_CLOSURE_LAYER_WEIGHT_EPSILON)
-                {
-                    closureMaterial = VividCompileExperimentalStandardSurface(baseSurface);
-                }
-                else
-                {
-                    float2 topUV = rawUV * materialData.TopMapST.xy
-                        + materialData.TopMapST.zw;
-                    float2 topUVDdx = rawUVDdx * materialData.TopMapST.xy;
-                    float2 topUVDdy = rawUVDdy * materialData.TopMapST.xy;
-                    VividSurfaceSampleContext topContext =
-                        VividCreateSurfaceSampleContextGrad(
-                            materialData.TopBinding,
-                            topUV,
-                            topUVDdx,
-                            topUVDdy,
-                            input.positionCS);
-                    float4 topBaseSample = VividSampleBaseColorGrad(
-                        materialData.TopBinding,
-                        topContext) * materialData.TopColor;
-                    topWeight *= saturate(VividSampleMaskGrad(
-                        materialData.TopBinding,
-                        topContext).r);
-
-                    if (topWeight <= VIVID_EXPERIMENTAL_CLOSURE_LAYER_WEIGHT_EPSILON)
-                    {
-                        closureMaterial = VividCompileExperimentalStandardSurface(baseSurface);
-                    }
-                    else
-                    {
-                        VividExperimentalStandardSurfaceParameters topParameters;
-                        topParameters.baseColor = topBaseSample.rgb;
-                        topParameters.normalWS = normalWS;
-                        topParameters.perceptualRoughness =
-                            1.0 - saturate(materialData.TopSurface.y);
-                        topParameters.metallic = saturate(materialData.TopSurface.x);
-                        topParameters.ambientOcclusion = 1.0;
-                        topParameters.coverage = 1.0;
-                        topParameters.specularIor = materialData.TopSurface.z;
-                        topParameters.clearCoatWeight = 0.0;
-                        topParameters.clearCoatPerceptualRoughness = 0.0;
-                        topParameters.transmissionWeight = 0.0;
-                        topParameters.subsurfaceWeight = 0.0;
-                        topParameters.emissive = 0.0;
-                        topParameters.materialFeatures = VIVID_MATERIALFEATURE_LIT;
-                        topParameters.builtinData = builtinData;
-                        closureMaterial = VividCompileExperimentalLayeredSurface(
-                            baseSurface,
-                            VividResolveExperimentalStandardSurface(topParameters),
-                            (uint)round(saturate(materialData.TopSurface.w)),
-                            topWeight);
-                    }
-                }
+                VividExperimentalClosureMaterial closureMaterial =
+                    VividCompileExperimentalStandardSurface(baseSurface);
 
                 return VividPackExperimentalClosureBuffer(closureMaterial);
             }

@@ -57,10 +57,10 @@ namespace VividRP.Editor.Tests
                     material.GetFloat("_VividExperimentalClosureVersion"),
                     Is.EqualTo(
                         (float)VividExperimentalClosureContract.SemanticVersion));
-                Assert.That(material.HasProperty("_TopLayerBaseMap"), Is.True);
-                Assert.That(material.HasProperty("_TopLayerMaskMap"), Is.True);
-                Assert.That(material.HasProperty("_TopLayerWeight"), Is.True);
-                Assert.That(material.HasProperty("_TopLayerOperator"), Is.True);
+                Assert.That(material.HasProperty("_TopLayerBaseMap"), Is.False);
+                Assert.That(material.HasProperty("_TopLayerMaskMap"), Is.False);
+                Assert.That(material.HasProperty("_TopLayerWeight"), Is.False);
+                Assert.That(material.HasProperty("_TopLayerOperator"), Is.False);
                 Assert.That(material.HasProperty("_VividExperimentalVBufferMaterialIndex"), Is.True);
                 Assert.That(material.GetFloat("_VividExperimentalVBufferMaterialIndex"), Is.Zero);
             }
@@ -129,7 +129,8 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VividResolveExperimentalStandardSurface", source);
             StringAssert.Contains("VividCompileExperimentalStandardSurface", source);
             StringAssert.Contains("BuildExperimentalStandardLitMaterial", source);
-            StringAssert.Contains("VividCompileExperimentalLayeredSurface", source);
+            StringAssert.DoesNotContain("VividCompileExperimentalLayeredSurface", source);
+            StringAssert.DoesNotContain("_TopLayer", source);
             StringAssert.Contains("VividExportExperimentalClosureToLegacyGBuffer", source);
             StringAssert.DoesNotContain("Material/Experimental/", existingSource);
         }

@@ -16,7 +16,6 @@ namespace VividRP.Runtime.Experimental.Material
         internal const string MaterialIndexPropertyName = "_VividExperimentalVBufferMaterialIndex";
 
         private const int InitialCapacity = 16;
-        private const float LayerWeightEpsilon = 0.5f / 255.0f;
         private const int MissingBridgeScanInterval = 120;
 
         private static readonly int s_MaterialIndexId = Shader.PropertyToID(MaterialIndexPropertyName);
@@ -46,16 +45,13 @@ namespace VividRP.Runtime.Experimental.Material
             internal ExperimentalVBufferMaterialData Data;
             internal VirtualTextureGPUDrivenTextureBackend.ExternalSurfaceBindingLease BaseLease;
             internal VirtualTextureGPUDrivenTextureBackend.ExternalSurfaceBindingLease AuxiliaryLease;
-            internal VirtualTextureGPUDrivenTextureBackend.ExternalSurfaceBindingLease TopLease;
 
             internal void ReleaseBindings()
             {
                 BaseLease?.Dispose();
                 AuxiliaryLease?.Dispose();
-                TopLease?.Dispose();
                 BaseLease = null;
                 AuxiliaryLease = null;
-                TopLease = null;
                 Valid = false;
             }
         }
@@ -428,7 +424,6 @@ namespace VividRP.Runtime.Experimental.Material
             bool roughnessEnabled = material.IsKeywordEnabled("_ROUGHNESSMAP");
             bool occlusionEnabled = material.IsKeywordEnabled("_OCCLUSIONMAP");
             bool emissionEnabled = material.IsKeywordEnabled("_EMISSION");
-            bool topEnabled = GetFloat(material, "_TopLayerWeight", 0.0f) > LayerWeightEpsilon;
             if (metallicEnabled && roughnessEnabled)
             {
                 reason = "The transition VBuffer supports either Metallic Map or Roughness Map, not both simultaneously.";
@@ -456,7 +451,6 @@ namespace VividRP.Runtime.Experimental.Material
                 return false;
 
             VirtualTextureGPUDrivenTextureBackend.ExternalSurfaceBindingLease auxiliaryLease = null;
-            VirtualTextureGPUDrivenTextureBackend.ExternalSurfaceBindingLease topLease = null;
             try
             {
                 Texture emissionMap = emissionEnabled ? material.GetTexture("_EmissionMap") : null;
@@ -477,22 +471,6 @@ namespace VividRP.Runtime.Experimental.Material
                             out reason))
                     {
                         baseLease.Dispose();
-                        return false;
-                    }
-                }
-
-                if (topEnabled)
-                {
-                    var topTextures = new GPUDrivenSurfaceTextureSet(
-                        null,
-                        material.GetTexture("_TopLayerBaseMap"),
-                        null,
-                        material.GetTexture("_TopLayerMaskMap"),
-                        GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness);
-                    if (!system.TryAcquireExternalSurfaceBinding(topTextures, out topLease, out reason))
-                    {
-                        baseLease.Dispose();
-                        auxiliaryLease?.Dispose();
                         return false;
                     }
                 }
@@ -520,7 +498,6 @@ namespace VividRP.Runtime.Experimental.Material
 
                 data.BaseBinding = baseLease.Binding;
                 data.AuxiliaryBinding = auxiliaryLease?.Binding ?? CreateEmptyBinding();
-                data.TopBinding = topLease?.Binding ?? CreateEmptyBinding();
                 data.BaseColor = ToFloat4(material.GetColor("_BaseColor"));
                 data.BaseMapST = ToFloat4(material.GetVector("_BaseMap_ST"));
                 data.EmissionColor = ToFloat4(material.GetColor("_EmissionColor"));
@@ -543,20 +520,12 @@ namespace VividRP.Runtime.Experimental.Material
                     GetFloat(material, "_ClearCoatSmoothness", 1.0f),
                     GetFloat(material, "_TransmissionWeight", 0.0f),
                     GetFloat(material, "_SubsurfaceWeight", 0.0f),
-                    GetFloat(material, "_TopLayerWeight", 0.0f));
-                data.TopColor = ToFloat4(material.GetColor("_TopLayerBaseColor"));
-                data.TopMapST = ToFloat4(material.GetVector("_TopLayerBaseMap_ST"));
-                data.TopSurface = new float4(
-                    GetFloat(material, "_TopLayerMetallic", 0.0f),
-                    GetFloat(material, "_TopLayerSmoothness", 0.5f),
-                    GetFloat(material, "_TopLayerSpecularIOR", 1.5f),
-                    GetFloat(material, "_TopLayerOperator", 1.0f));
+                    0.0f);
                 data.FeatureFlags = new uint4((uint)featureFlags, 0u, 0u, 0u);
 
                 MaterialEntry entry = s_Entries[material.GetEntityId()];
                 entry.BaseLease = baseLease;
                 entry.AuxiliaryLease = auxiliaryLease;
-                entry.TopLease = topLease;
                 reason = string.Empty;
                 return true;
             }
@@ -564,7 +533,6 @@ namespace VividRP.Runtime.Experimental.Material
             {
                 baseLease.Dispose();
                 auxiliaryLease?.Dispose();
-                topLease?.Dispose();
                 throw;
             }
         }
@@ -608,16 +576,12 @@ namespace VividRP.Runtime.Experimental.Material
             {
                 BaseBinding = CreateEmptyBinding(),
                 AuxiliaryBinding = CreateEmptyBinding(),
-                TopBinding = CreateEmptyBinding(),
                 BaseColor = new float4(1.0f, 0.0f, 1.0f, 1.0f),
                 BaseMapST = new float4(1.0f, 1.0f, 0.0f, 0.0f),
                 BaseSurface = new float4(0.0f, 0.25f, 1.0f, 1.0f),
                 BaseRemap0 = new float4(0.0f, 1.0f, 0.0f, 1.0f),
                 BaseRemap1 = new float4(0.0f, 1.0f, 1.5f, 0.0f),
                 BaseClosure = new float4(1.0f, 0.0f, 0.0f, 0.0f),
-                TopColor = new float4(1.0f),
-                TopMapST = new float4(1.0f, 1.0f, 0.0f, 0.0f),
-                TopSurface = new float4(0.0f, 0.5f, 1.5f, 1.0f),
             };
         }
 
@@ -645,7 +609,7 @@ namespace VividRP.Runtime.Experimental.Material
             string[] textures =
             {
                 "_BaseMap", "_BumpMap", "_MetallicGlossMap", "_RoughnessMap",
-                "_EmissionMap", "_OcclusionMap", "_TopLayerBaseMap", "_TopLayerMaskMap",
+                "_EmissionMap", "_OcclusionMap",
             };
             for (int index = 0; index < textures.Length; index++)
             {
@@ -655,7 +619,7 @@ namespace VividRP.Runtime.Experimental.Material
 
             string[] vectors =
             {
-                "_BaseColor", "_BaseMap_ST", "_EmissionColor", "_TopLayerBaseColor", "_TopLayerBaseMap_ST",
+                "_BaseColor", "_BaseMap_ST", "_EmissionColor",
             };
             for (int index = 0; index < vectors.Length; index++)
                 hash.Add(material.GetVector(vectors[index]));
@@ -665,8 +629,7 @@ namespace VividRP.Runtime.Experimental.Material
                 "_Metallic", "_Smoothness", "_BumpScale", "_OcclusionStrength",
                 "_MetallicRemapMin", "_MetallicRemapMax", "_SmoothnessRemapMin", "_SmoothnessRemapMax",
                 "_AORemapMin", "_AORemapMax", "_SpecularIOR", "_ClearCoatMask", "_ClearCoatSmoothness",
-                "_TransmissionWeight", "_SubsurfaceWeight", "_TopLayerWeight", "_TopLayerOperator",
-                "_TopLayerMetallic", "_TopLayerSmoothness", "_TopLayerSpecularIOR", "_ReceiveSSR", "_ReceiveDecals",
+                "_TransmissionWeight", "_SubsurfaceWeight", "_ReceiveSSR", "_ReceiveDecals",
             };
             for (int index = 0; index < floats.Length; index++)
                 hash.Add(GetFloat(material, floats[index], 0.0f));

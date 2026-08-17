@@ -2,155 +2,240 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.Experimental.Material;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
+using UnityMaterial = UnityEngine.Material;
 
 namespace VividRP.Runtime.RenderPass.Experimental.Material
 {
-    public sealed class ExperimentalClosureBufferPass : UnsafePass
+    public sealed class ExperimentalClosureBufferPass : UnsafePass, IAllowGlobalStateModificationPass
     {
-        internal const string ShaderTagName = "ExperimentalClosureBuffer";
+        internal const string ResolveShaderName = "Hidden/VividRP/Experimental/ClosureBufferResolve";
 
-        [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
-        private RenderGraphRenderList m_RenderList;
+        private static readonly int s_VisibilityBufferId = Shader.PropertyToID("_ExperimentalVisibilityBuffer");
+        private static readonly int s_Attributes0Id = Shader.PropertyToID("_ExperimentalVisibilityAttributes0");
+        private static readonly int s_Attributes1Id = Shader.PropertyToID("_ExperimentalVisibilityAttributes1");
+        private static readonly int s_DepthId = Shader.PropertyToID("_ExperimentalDepthTexture");
+        private static readonly int s_VisibilityScaleBiasId = Shader.PropertyToID("_ExperimentalVisibilityScaleBias");
+        private static readonly int s_Attributes0ScaleBiasId = Shader.PropertyToID("_ExperimentalAttributes0ScaleBias");
+        private static readonly int s_Attributes1ScaleBiasId = Shader.PropertyToID("_ExperimentalAttributes1ScaleBias");
+        private static readonly int s_DepthScaleBiasId = Shader.PropertyToID("_ExperimentalDepthScaleBias");
+        private static readonly int s_MaterialTableId = Shader.PropertyToID("_VividExperimentalVBufferMaterials");
+        private static readonly int s_MaterialCountId = Shader.PropertyToID("_VividExperimentalVBufferMaterialCount");
+        private static readonly int s_VirtualTextureAvailableId = Shader.PropertyToID("_VividExperimentalVBufferVTAvailable");
 
-        [RenderGraphResource(
-            Name = "ExperimentalClosureBuffer0",
-            Access = AccessFlags.Write,
-            AttachmentIndex = 0,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(Name = "ExperimentalVisibilityBuffer", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_VisibilityBuffer;
+
+        [RenderGraphResource(Name = "ExperimentalVisibilityAttributes0", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Attributes0;
+
+        [RenderGraphResource(Name = "ExperimentalVisibilityAttributes1", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Attributes1;
+
+        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Depth;
+
+        [RenderGraphResource(Name = "ExperimentalVBufferMaterialTable", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_MaterialTable;
+
+        [RenderGraphResource(Name = "ExperimentalClosureBuffer0", Access = AccessFlags.Write, AttachmentIndex = 0, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer0;
 
-        [RenderGraphResource(
-            Name = "ExperimentalClosureBuffer1",
-            Access = AccessFlags.Write,
-            AttachmentIndex = 1,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(Name = "ExperimentalClosureBuffer1", Access = AccessFlags.Write, AttachmentIndex = 1, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer1;
 
-        [RenderGraphResource(
-            Name = "ExperimentalClosureBuffer2",
-            Access = AccessFlags.Write,
-            AttachmentIndex = 2,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(Name = "ExperimentalClosureBuffer2", Access = AccessFlags.Write, AttachmentIndex = 2, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer2;
 
-        [RenderGraphResource(
-            Name = "ExperimentalClosureBuffer3",
-            Access = AccessFlags.Write,
-            AttachmentIndex = 3,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(Name = "ExperimentalClosureBuffer3", Access = AccessFlags.Write, AttachmentIndex = 3, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer3;
 
-        [RenderGraphResource(
-            Name = "ExperimentalClosureBuffer4",
-            Access = AccessFlags.Write,
-            AttachmentIndex = 4,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(Name = "ExperimentalClosureBuffer4", Access = AccessFlags.Write, AttachmentIndex = 4, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer4;
 
-        [RenderGraphResource(
-            Name = "ExperimentalClosureBuffer5",
-            Access = AccessFlags.Write,
-            AttachmentIndex = 5,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(Name = "ExperimentalClosureBuffer5", Access = AccessFlags.Write, AttachmentIndex = 5, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer5;
 
-        [RenderGraphResource(
-            Name = "ExperimentalClosureBuffer6",
-            Access = AccessFlags.Write,
-            AttachmentIndex = 6,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(Name = "ExperimentalClosureBuffer6", Access = AccessFlags.Write, AttachmentIndex = 6, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer6;
 
-        [RenderGraphResource(
-            Name = "ExperimentalClosureBuffer7",
-            Access = AccessFlags.Write,
-            AttachmentIndex = 7,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(Name = "ExperimentalClosureBuffer7", Access = AccessFlags.Write, AttachmentIndex = 7, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer7;
 
-        [RenderGraphResource(
-            Name = "Depth",
-            Access = AccessFlags.Read,
-            IsDepthAttachment = true)]
-        private RenderGraphTexture m_DepthTexture;
+        private readonly RenderTargetIdentifier[] m_ColorTargets = new RenderTargetIdentifier[8];
+        private readonly MaterialPropertyBlock m_DrawProperties = new();
+        private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
+        private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
+        private readonly Vector4[] m_VirtualTextureLayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
 
-        private readonly RenderTargetIdentifier[] m_ColorTargets =
-            new RenderTargetIdentifier[8];
+        [SerializeField, Min(1.0f)]
+        private float m_VirtualTextureFeedbackSampleRate = 4.0f;
+
+        private UnityMaterial m_Material;
+        private VividVirtualTextureFrameData m_VirtualTextureFrameData;
+        private int m_FrameIndex;
 
         public ExperimentalClosureBufferPass()
         {
-            m_RenderList = new RenderGraphRenderList
-            {
-                desc = RenderGraphRenderListDesc.CreateOpaque(ShaderTagName)
-            };
-            m_RenderList.desc.RendererConfiguration = PerObjectData.Lightmaps;
+            profilingSampler = new ProfilingSampler(nameof(ExperimentalClosureBufferPass));
+            m_VisibilityBuffer = CreateInput("ExperimentalVisibilityBuffer", GraphicsFormat.R32G32_UInt);
+            m_Attributes0 = CreateInput("ExperimentalVisibilityAttributes0", GraphicsFormat.R16G16B16A16_SFloat);
+            m_Attributes1 = CreateInput("ExperimentalVisibilityAttributes1", GraphicsFormat.R16G16B16A16_SFloat);
+            m_Depth = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_MaterialTable = RenderGraphBuffer.CreateStructured(
+                "ExperimentalVBufferMaterialTable",
+                1,
+                ExperimentalVBufferContract.MaterialRecordStride);
 
-            m_ClosureBuffer0 = RenderGraphTexture.CreateColorTarget(
-                "ExperimentalClosureBuffer0",
-                GraphicsFormat.R8G8B8A8_SRGB);
-            m_ClosureBuffer1 = RenderGraphTexture.CreateColorTarget(
-                "ExperimentalClosureBuffer1",
-                GraphicsFormat.A2B10G10R10_UNormPack32);
-            m_ClosureBuffer2 = RenderGraphTexture.CreateColorTarget(
-                "ExperimentalClosureBuffer2",
-                GraphicsFormat.R8G8B8A8_UNorm);
-            m_ClosureBuffer3 = RenderGraphTexture.CreateColorTarget(
-                "ExperimentalClosureBuffer3",
-                GraphicsFormat.R8G8B8A8_UNorm);
-            m_ClosureBuffer4 = RenderGraphTexture.CreateColorTarget(
-                "ExperimentalClosureBuffer4",
-                GraphicsFormat.B10G11R11_UFloatPack32);
-            m_ClosureBuffer5 = RenderGraphTexture.CreateColorTarget(
-                "ExperimentalClosureBuffer5",
-                GraphicsFormat.R16G16B16A16_SFloat);
-            m_ClosureBuffer6 = RenderGraphTexture.CreateColorTarget(
-                "ExperimentalClosureBuffer6",
-                GraphicsFormat.R8G8B8A8_UNorm);
-            m_ClosureBuffer7 = RenderGraphTexture.CreateColorTarget(
-                "ExperimentalClosureBuffer7",
-                GraphicsFormat.R8G8B8A8_UNorm);
-            m_DepthTexture = RenderGraphTexture.CreateInput(
-                "Depth",
-                GraphicsFormat.None,
-                DepthBits.Depth32);
+            m_ClosureBuffer0 = CreateOutput("ExperimentalClosureBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
+            m_ClosureBuffer1 = CreateOutput("ExperimentalClosureBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
+            m_ClosureBuffer2 = CreateOutput("ExperimentalClosureBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
+            m_ClosureBuffer3 = CreateOutput("ExperimentalClosureBuffer3", GraphicsFormat.R8G8B8A8_UNorm);
+            m_ClosureBuffer4 = CreateOutput("ExperimentalClosureBuffer4", GraphicsFormat.B10G11R11_UFloatPack32);
+            m_ClosureBuffer5 = CreateOutput("ExperimentalClosureBuffer5", GraphicsFormat.R16G16B16A16_SFloat);
+            m_ClosureBuffer6 = CreateOutput("ExperimentalClosureBuffer6", GraphicsFormat.R8G8B8A8_UNorm);
+            m_ClosureBuffer7 = CreateOutput("ExperimentalClosureBuffer7", GraphicsFormat.R8G8B8A8_UNorm);
         }
 
         public override void Create()
         {
+            Shader shader = PipelineResourceManager.Get<VividRPCoreResources>()?.ExperimentalClosureBufferResolveShader
+                            ?? Shader.Find(ResolveShaderName);
+            if (shader == null)
+            {
+                Debug.LogWarning(
+                    $"[VividRP] Could not find shader '{ResolveShaderName}' for {nameof(ExperimentalClosureBufferPass)}.");
+                return;
+            }
+            m_Material = CoreUtils.CreateEngineMaterial(shader);
         }
 
         public override void Prepare(ContextContainer frameData)
         {
-            var cameraData = frameData.Get<VividCameraData>();
-            var width = cameraData.actualWidth > 0
-                ? cameraData.actualWidth
-                : cameraData.pixelWidth;
-            var height = cameraData.actualHeight > 0
-                ? cameraData.actualHeight
-                : cameraData.pixelHeight;
+            VividCameraData cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
+            VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
+            m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
 
-            if (width <= 0)
-                width = Mathf.Max(1, Screen.width);
-            if (height <= 0)
-                height = Mathf.Max(1, Screen.height);
+            VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance ? VividGPUDrivenSystem.instance : null;
+            ExperimentalStandardLitVBufferMaterialRegistry.Prepare(system, out _);
+            ExperimentalStandardLitVBufferMaterialRegistry.WarnAboutMissingBridges(m_FrameIndex);
+            GraphicsBuffer materialBuffer = ExperimentalStandardLitVBufferMaterialRegistry.MaterialBuffer;
+            if (materialBuffer != null)
+            {
+                m_MaterialTable.desc.Count = materialBuffer.count;
+                m_MaterialTable.desc.Stride = materialBuffer.stride;
+                m_MaterialTable.desc.Target = materialBuffer.target;
+                m_MaterialTable.SetImportedBuffer(materialBuffer);
+            }
+            else
+            {
+                m_MaterialTable.ClearImportedBuffer();
+            }
 
-            m_ClosureBuffer0.Resize(width, height);
-            m_ClosureBuffer1.Resize(width, height);
-            m_ClosureBuffer2.Resize(width, height);
-            m_ClosureBuffer3.Resize(width, height);
-            m_ClosureBuffer4.Resize(width, height);
-            m_ClosureBuffer5.Resize(width, height);
-            m_ClosureBuffer6.Resize(width, height);
-            m_ClosureBuffer7.Resize(width, height);
-            m_DepthTexture.Resize(width, height);
+            int width = CameraDimensionUtility.ResolveCameraDimension(
+                cameraData.actualWidth,
+                cameraData.pixelWidth,
+                Screen.width);
+            int height = CameraDimensionUtility.ResolveCameraDimension(
+                cameraData.actualHeight,
+                cameraData.pixelHeight,
+                Screen.height);
+            ResizeOutput(m_ClosureBuffer0, width, height);
+            ResizeOutput(m_ClosureBuffer1, width, height);
+            ResizeOutput(m_ClosureBuffer2, width, height);
+            ResizeOutput(m_ClosureBuffer3, width, height);
+            ResizeOutput(m_ClosureBuffer4, width, height);
+            ResizeOutput(m_ClosureBuffer5, width, height);
+            ResizeOutput(m_ClosureBuffer6, width, height);
+            ResizeOutput(m_ClosureBuffer7, width, height);
         }
 
         public override void Record(UnsafePassContext context)
         {
-            if (m_RenderList == null || !m_RenderList.IsValid)
+            if (m_Material == null
+                || m_VisibilityBuffer?.IsValid() != true
+                || m_Attributes0?.IsValid() != true
+                || m_Attributes1?.IsValid() != true
+                || m_Depth?.IsValid() != true
+                || m_MaterialTable?.ImportedGraphicsBuffer == null
+                || !OutputsAreValid())
+            {
+                return;
+            }
+
+            Texture visibility = m_VisibilityBuffer.innerHandle.ResolveTexture();
+            Texture attributes0 = m_Attributes0.innerHandle.ResolveTexture();
+            Texture attributes1 = m_Attributes1.innerHandle.ResolveTexture();
+            Texture depth = m_Depth.innerHandle.ResolveTexture();
+            if (visibility == null || attributes0 == null || attributes1 == null || depth == null)
                 return;
 
-            var cmd = context.GetNativeCommandBuffer();
+            CommandBuffer cmd = context.GetNativeCommandBuffer();
+            VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance ? VividGPUDrivenSystem.instance : null;
+            VirtualTextureSpaceBinding binding = default;
+            bool virtualTextureAvailable = system?.UsesVirtualTexture == true
+                                           && system.IsAvailable
+                                           && GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
+                                               cmd,
+                                               m_VirtualTextureFrameData,
+                                               m_VirtualTextureSpaceParams,
+                                               m_VirtualTextureMipOffsets,
+                                               m_VirtualTextureLayerFallbacks,
+                                               m_FrameIndex,
+                                               Mathf.RoundToInt(m_VirtualTextureFeedbackSampleRate),
+                                               out binding);
+            bool hasFeedback = virtualTextureAvailable
+                               && VirtualTextureFeedbackBindingUtility.BindFeedbackTargets(cmd, binding);
+
+            m_DrawProperties.Clear();
+            m_DrawProperties.SetTexture(s_VisibilityBufferId, visibility);
+            m_DrawProperties.SetTexture(s_Attributes0Id, attributes0);
+            m_DrawProperties.SetTexture(s_Attributes1Id, attributes1);
+            m_DrawProperties.SetTexture(s_DepthId, depth);
+            m_DrawProperties.SetVector(s_VisibilityScaleBiasId, m_VisibilityBuffer.innerHandle.GetScaleBias());
+            m_DrawProperties.SetVector(s_Attributes0ScaleBiasId, m_Attributes0.innerHandle.GetScaleBias());
+            m_DrawProperties.SetVector(s_Attributes1ScaleBiasId, m_Attributes1.innerHandle.GetScaleBias());
+            m_DrawProperties.SetVector(s_DepthScaleBiasId, m_Depth.innerHandle.GetScaleBias());
+            m_DrawProperties.SetBuffer(s_MaterialTableId, m_MaterialTable.ImportedGraphicsBuffer);
+            m_DrawProperties.SetInt(s_MaterialCountId, ExperimentalStandardLitVBufferMaterialRegistry.MaterialCount);
+            m_DrawProperties.SetInt(s_VirtualTextureAvailableId, virtualTextureAvailable ? 1 : 0);
+
+            BindClosureTargets(cmd);
+            cmd.ClearRenderTarget(clearDepth: false, clearColor: true, Color.clear);
+            CoreUtils.DrawFullScreen(cmd, m_Material, m_DrawProperties, 0);
+            if (hasFeedback)
+                cmd.ClearRandomWriteTargets();
+        }
+
+        public override void Dispose()
+        {
+            m_MaterialTable?.ClearImportedBuffer();
+            m_VirtualTextureFrameData = null;
+            m_FrameIndex = 0;
+            if (m_Material != null)
+            {
+                CoreUtils.Destroy(m_Material);
+                m_Material = null;
+            }
+        }
+
+        private bool OutputsAreValid()
+        {
+            return m_ClosureBuffer0?.IsValid() == true
+                   && m_ClosureBuffer1?.IsValid() == true
+                   && m_ClosureBuffer2?.IsValid() == true
+                   && m_ClosureBuffer3?.IsValid() == true
+                   && m_ClosureBuffer4?.IsValid() == true
+                   && m_ClosureBuffer5?.IsValid() == true
+                   && m_ClosureBuffer6?.IsValid() == true
+                   && m_ClosureBuffer7?.IsValid() == true;
+        }
+
+        private void BindClosureTargets(CommandBuffer cmd)
+        {
             m_ColorTargets[0] = m_ClosureBuffer0;
             m_ColorTargets[1] = m_ClosureBuffer1;
             m_ColorTargets[2] = m_ClosureBuffer2;
@@ -159,16 +244,34 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             m_ColorTargets[5] = m_ClosureBuffer5;
             m_ColorTargets[6] = m_ClosureBuffer6;
             m_ColorTargets[7] = m_ClosureBuffer7;
-            cmd.SetRenderTarget(m_ColorTargets, m_DepthTexture);
-            cmd.ClearRenderTarget(
-                clearDepth: false,
-                clearColor: true,
-                Color.clear);
-            cmd.DrawRendererList(m_RenderList);
+            cmd.SetRenderTarget(m_ColorTargets, BuiltinRenderTextureType.None);
         }
 
-        public override void Dispose()
+        private static RenderGraphTexture CreateInput(string name, GraphicsFormat format)
         {
+            RenderGraphTexture texture = RenderGraphTexture.CreateInput(name, format);
+            texture.desc.FilterMode = FilterMode.Point;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.MsaaSamples = MSAASamples.None;
+            return texture;
+        }
+
+        private static RenderGraphTexture CreateOutput(string name, GraphicsFormat format)
+        {
+            RenderGraphTexture texture = RenderGraphTexture.CreateColorTarget(name, format);
+            texture.desc.FilterMode = FilterMode.Point;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.MsaaSamples = MSAASamples.None;
+            texture.desc.ClearBuffer = true;
+            texture.desc.ClearColor = Color.clear;
+            return texture;
+        }
+
+        private static void ResizeOutput(RenderGraphTexture texture, int width, int height)
+        {
+            if (texture?.desc == null || texture.desc.HasExplicitSize())
+                return;
+            texture.Resize(Mathf.Max(1, width), Mathf.Max(1, height));
         }
     }
 }

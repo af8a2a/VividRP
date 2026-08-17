@@ -1,0 +1,66 @@
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using VividRP.Runtime;
+using VividRP.Runtime.Experimental.Material;
+using VividRP.Runtime.RenderPass.Experimental.Material;
+
+namespace VividRP.Editor.Tests
+{
+    public sealed class ExperimentalVBufferContractTests
+    {
+        private const string ResolveAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBufferResolve.shader";
+
+        [Test]
+        public void VBufferAbi_UsesVersionedTwentyFourBytePayload()
+        {
+            Assert.That(ExperimentalVBufferContract.Version, Is.EqualTo(1u));
+            Assert.That(ExperimentalVBufferContract.InvalidMaterialValue, Is.Zero);
+            Assert.That(ExperimentalVBufferContract.MaterialValueOffset, Is.EqualTo(1u));
+            Assert.That(ExperimentalVBufferContract.BytesPerPixel, Is.EqualTo(8 + 8 + 8));
+            Assert.That(
+                Marshal.SizeOf<ExperimentalVBufferMaterialData>(),
+                Is.EqualTo(ExperimentalVBufferContract.MaterialRecordStride));
+
+            var pass = new ExperimentalVisibilityBufferPass();
+            var resources = ((IRenderPass)pass).Initialize();
+            Assert.That(
+                resources.Textures.Single(entry => entry.Name == "ExperimentalVisibilityBuffer")
+                    .Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R32G32_UInt));
+            Assert.That(
+                resources.Textures.Single(entry => entry.Name == "ExperimentalVisibilityAttributes0")
+                    .Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(
+                resources.Textures.Single(entry => entry.Name == "ExperimentalVisibilityAttributes1")
+                    .Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        [Test]
+        public void ClosureResolve_ConsumesVBufferVtAndPreservesLayerCompiler()
+        {
+            string source = File.ReadAllText(ResolveAssetPath);
+
+            StringAssert.Contains("#define VIVID_EXPERIMENTAL_VBUFFER_VERSION 1u", source);
+            StringAssert.Contains(
+                "#define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_STRIDE 272u",
+                source);
+            StringAssert.Contains("VividExperimentalVBufferMaterialData", source);
+            StringAssert.Contains("VividCreateSurfaceSampleContextGrad", source);
+            StringAssert.Contains("VividSampleBaseColorGrad", source);
+            StringAssert.Contains("VividSampleNormalGrad", source);
+            StringAssert.Contains("VividSampleMaskGrad", source);
+            StringAssert.Contains("ComputeWorldSpacePosition", source);
+            StringAssert.Contains("ReconstructTangentToWorld", source);
+            StringAssert.Contains("VividCompileExperimentalLayeredSurface", source);
+            StringAssert.Contains("VividPackExperimentalClosureBuffer", source);
+            StringAssert.DoesNotContain("RendererList", source);
+        }
+    }
+}

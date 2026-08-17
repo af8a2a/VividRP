@@ -13,9 +13,9 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalClosureRenderPassTests
     {
         [Test]
-        public void ClosureBufferPass_RegistersEightAttachmentsAndSharedDepth()
+        public void VisibilityBufferPass_RegistersThreeAttachmentsAndSharedDepth()
         {
-            IRenderPass pass = new ExperimentalClosureBufferPass();
+            IRenderPass pass = new ExperimentalVisibilityBufferPass();
             var resources = pass.Initialize();
             var colorEntries = resources.Textures
                 .Where(entry => !entry.IsDepthAttachment)
@@ -25,12 +25,36 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
             Assert.That(
                 resources.RenderLists[0].RenderList.desc.ShaderTagNames,
-                Is.EqualTo(new[] { "ExperimentalClosureBuffer" }));
-            Assert.That(colorEntries, Has.Length.EqualTo(8));
+                Is.EqualTo(new[] { "ExperimentalVisibilityBuffer" }));
+            Assert.That(colorEntries, Has.Length.EqualTo(3));
             Assert.That(
                 colorEntries.Select(entry => entry.Name),
                 Is.EqualTo(new[]
                 {
+                    "ExperimentalVisibilityBuffer",
+                    "ExperimentalVisibilityAttributes0",
+                    "ExperimentalVisibilityAttributes1",
+                }));
+            Assert.That(
+                resources.Textures.Single(entry => entry.IsDepthAttachment).Name,
+                Is.EqualTo("Depth"));
+        }
+
+        [Test]
+        public void ClosureBufferPass_IsFullscreenResolveWithVBufferAndMaterialTableInputs()
+        {
+            IRenderPass pass = new ExperimentalClosureBufferPass();
+            var resources = pass.Initialize();
+
+            Assert.That(resources.RenderLists, Is.Empty);
+            Assert.That(
+                resources.Textures.Select(entry => entry.Name),
+                Is.SupersetOf(new[]
+                {
+                    "ExperimentalVisibilityBuffer",
+                    "ExperimentalVisibilityAttributes0",
+                    "ExperimentalVisibilityAttributes1",
+                    "Depth",
                     "ExperimentalClosureBuffer0",
                     "ExperimentalClosureBuffer1",
                     "ExperimentalClosureBuffer2",
@@ -38,11 +62,12 @@ namespace VividRP.Editor.Tests
                     "ExperimentalClosureBuffer4",
                     "ExperimentalClosureBuffer5",
                     "ExperimentalClosureBuffer6",
-                    "ExperimentalClosureBuffer7"
+                    "ExperimentalClosureBuffer7",
                 }));
             Assert.That(
-                resources.Textures.Single(entry => entry.IsDepthAttachment).Name,
-                Is.EqualTo("Depth"));
+                resources.Buffers.Select(entry => entry.Name),
+                Does.Contain("ExperimentalVBufferMaterialTable"));
+            Assert.That(pass, Is.InstanceOf<IAllowGlobalStateModificationPass>());
         }
 
         [Test]

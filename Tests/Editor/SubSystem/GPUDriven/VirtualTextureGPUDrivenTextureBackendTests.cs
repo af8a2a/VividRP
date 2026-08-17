@@ -1103,6 +1103,59 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ExternalSurfaceBinding_TextureSet_IsPinnedAndReferenceCounted()
+        {
+            if (!VTRuntimeBlockCompressor.IsAvailable(out string unavailableReason))
+                Assert.Ignore(unavailableReason);
+
+            Texture2D baseColor = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            VirtualTextureGPUDrivenTextureBackend.ExternalSurfaceBindingLease firstLease = null;
+            VirtualTextureGPUDrivenTextureBackend.ExternalSurfaceBindingLease secondLease = null;
+            try
+            {
+                baseColor.SetPixel(0, 0, Color.red);
+                baseColor.Apply(false, false);
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+                var textures = new GPUDrivenSurfaceTextureSet(baseColor, null, null);
+
+                Assert.That(
+                    backend.TryAcquireExternalSurfaceBinding(
+                        textures,
+                        out firstLease,
+                        out string firstReason),
+                    Is.True,
+                    firstReason);
+                Assert.That(
+                    backend.TryAcquireExternalSurfaceBinding(
+                        textures,
+                        out secondLease,
+                        out string secondReason),
+                    Is.True,
+                    secondReason);
+                Assert.That(
+                    firstLease.Binding.Flags,
+                    Is.EqualTo(VividSurfaceBindingFlags.BaseColor));
+                Assert.That(backend.AllocatedPageCount, Is.EqualTo(1));
+
+                firstLease.Dispose();
+                firstLease = null;
+                backend.BeginSurfaceBindingUpdate();
+                backend.EndSurfaceBindingUpdate();
+                Assert.That(backend.AllocatedPageCount, Is.EqualTo(1));
+
+                secondLease.Dispose();
+                secondLease = null;
+                Assert.That(backend.AllocatedPageCount, Is.Zero);
+            }
+            finally
+            {
+                firstLease?.Dispose();
+                secondLease?.Dispose();
+                Object.DestroyImmediate(baseColor);
+            }
+        }
+
+        [Test]
         public void SurfaceTextureSet_UsesFirstAvailableLayerAndReportsFallbackModes()
         {
             Texture2D baseColor = null;

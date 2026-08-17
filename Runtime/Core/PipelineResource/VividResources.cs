@@ -186,6 +186,8 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Material/Experimental/Closure/ExperimentalClosureDeferredLit")]
         public ComputeShader ExperimentalClosureDeferredLitCompute;
 
+        [VividResourcePath("Shaders/Material/Experimental/Closure/ExperimentalClosureBufferResolve")]
+        public Shader ExperimentalClosureBufferResolveShader;
 
         [VividResourcePath("Shaders/Core/Private/Lighting/scrbound")]
         public ComputeShader BuildScreenAABBCompute;

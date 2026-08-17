@@ -874,6 +874,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
         {
+            return CreateSurfaceBinding(textures, allowRuntimeTextureProducer: false);
+        }
+
+        private VividSurfaceBindingData CreateSurfaceBinding(
+            in GPUDrivenSurfaceTextureSet textures,
+            bool allowRuntimeTextureProducer)
+        {
             ThrowIfDisposed();
             if (!IsAvailable || m_Producer == null)
                 return CreateEmptyBinding();
@@ -890,9 +897,19 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             var key = new TextureSetKey(streamedAsset, baseColor, normal, mask, addressMode, textures.MaskMode);
             if (m_Bindings.TryGetValue(key, out BindingEntry existingEntry))
             {
-                TouchBindingEntry(ref existingEntry);
-                m_Bindings[key] = existingEntry;
-                return existingEntry.Binding;
+                if (allowRuntimeTextureProducer
+                    && streamedAsset == null
+                    && !existingEntry.HasAllocation
+                    && (baseColor != null || normal != null || mask != null))
+                {
+                    m_Bindings.Remove(key);
+                }
+                else
+                {
+                    TouchBindingEntry(ref existingEntry);
+                    m_Bindings[key] = existingEntry;
+                    return existingEntry.Binding;
+                }
             }
 
             if (streamedAsset == null && baseColor == null && normal == null && mask == null)
@@ -906,7 +923,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return emptyEntry.Binding;
             }
 
-            if (streamedAsset == null && (baseColor != null || normal != null || mask != null))
+            if (streamedAsset == null
+                && !allowRuntimeTextureProducer
+                && (baseColor != null || normal != null || mask != null))
             {
                 WarnLegacyTextureFallback(baseColor, normal, mask);
                 var fallbackEntry = new BindingEntry
@@ -1111,6 +1130,72 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 || (binding.Flags & VividSurfaceBindingFlags.BaseColor) == 0)
             {
                 reason = $"Streamed VT asset '{asset.name}' must contain a BaseColor layer with alpha.";
+                if (hasEntry
+                    && !m_SurfaceBindingUpdateActive
+                    && !m_ExternalBindingRefCounts.ContainsKey(key)
+                    && entry.LastTouchedUpdate != m_SurfaceBindingUpdate)
+                {
+                    m_ReleaseEntries.Clear();
+                    m_ReleaseEntries.Add(key);
+                    ReleaseBindingEntries(m_ReleaseEntries);
+                    m_ReleaseEntries.Clear();
+                }
+                return false;
+            }
+
+            m_ExternalBindingRefCounts.TryGetValue(key, out int refCount);
+            m_ExternalBindingRefCounts[key] = refCount + 1;
+            lease = new ExternalSurfaceBindingLease(this, key, entry);
+            reason = string.Empty;
+            return true;
+        }
+
+        internal bool TryAcquireExternalSurfaceBinding(
+            in GPUDrivenSurfaceTextureSet textures,
+            out ExternalSurfaceBindingLease lease,
+            out string reason)
+        {
+            lease = null;
+            if (!IsAvailable)
+            {
+                reason = UnavailableReason;
+                return false;
+            }
+
+            VividVirtualTextureAsset streamedAsset = ResolveStreamedAsset(textures.StreamedVirtualTexture);
+            Texture2D baseColor = streamedAsset == null ? ResolveTexture2D(textures.BaseColor) : null;
+            Texture2D normal = streamedAsset == null ? ResolveTexture2D(textures.Normal) : null;
+            Texture2D mask = streamedAsset == null ? ResolveTexture2D(textures.Mask) : null;
+            if (streamedAsset == null && baseColor == null && normal == null && mask == null)
+            {
+                reason = "The external VT texture set does not contain a supported Texture2D.";
+                return false;
+            }
+
+            GPUDrivenSurfaceAddressMode addressMode = streamedAsset != null
+                ? streamedAsset.AddressMode == VividVirtualTextureAddressMode.Clamp
+                    ? GPUDrivenSurfaceAddressMode.Clamp
+                    : GPUDrivenSurfaceAddressMode.Repeat
+                : textures.AddressMode;
+            var key = new TextureSetKey(
+                streamedAsset,
+                baseColor,
+                normal,
+                mask,
+                addressMode,
+                textures.MaskMode);
+            if (streamedAsset == null && !VTRuntimeBlockCompressor.IsAvailable(out reason))
+                return false;
+
+            VividSurfaceBindingData binding = CreateSurfaceBinding(
+                textures,
+                allowRuntimeTextureProducer: true);
+            bool hasEntry = m_Bindings.TryGetValue(key, out BindingEntry entry);
+            if (!hasEntry
+                || !entry.HasAllocation
+                || binding.Flags == VividSurfaceBindingFlags.None)
+            {
+                reason = "The external VT texture set could not allocate a valid surface binding.";
                 if (hasEntry
                     && !m_SurfaceBindingUpdateActive
                     && !m_ExternalBindingRefCounts.ContainsKey(key)

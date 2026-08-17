@@ -71,6 +71,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
         [HideInInspector] _SubsurfaceTransmissionWeight("Subsurface Transmission Weight", Range(0.0, 1.0)) = 0.0
 
         [HideInInspector] _VividExperimentalClosureVersion("Experimental Closure Version", Float) = 2.0
+        [HideInInspector] _VividExperimentalVBufferMaterialIndex("Experimental VBuffer Material Index", Float) = 0.0
         [HideInInspector] _Blend("__blend", Float) = 0.0
         [HideInInspector] _SrcBlend("__src", Float) = 1.0
         [HideInInspector] _DstBlend("__dst", Float) = 0.0
@@ -234,8 +235,8 @@ Shader "VividRP/Experimental/Material/StandardLit"
 
         Pass
         {
-            Name "ExperimentalClosureBuffer"
-            Tags { "LightMode" = "ExperimentalClosureBuffer" }
+            Name "ExperimentalVisibilityBuffer"
+            Tags { "LightMode" = "ExperimentalVisibilityBuffer" }
 
             Blend One Zero
             ZWrite Off
@@ -246,32 +247,10 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #pragma use_dxc
                 #pragma multi_compile_instancing
                 #pragma instancing_options renderinglayer
-                #pragma multi_compile _ LIGHTMAP_ON
-                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
-                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
-                #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
-                #pragma shader_feature_local_fragment _ALPHATEST_ON
-                #pragma shader_feature_local_fragment _OPACITYMAP
-                #pragma shader_feature_local_fragment _NORMALMAP
-                #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
-                #pragma shader_feature_local_fragment _ROUGHNESSMAP
-                #pragma shader_feature_local_fragment _OCCLUSIONMAP
-                #pragma shader_feature_local_fragment _EMISSION
-                #pragma shader_feature_local_fragment _CLEARCOAT
-                #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
                 #pragma vertex Vert
-                #pragma fragment FragClosureBuffer
+                #pragma fragment FragVisibilityBuffer
 
-                #define VIVIDRP_SHADERPASS_GBUFFER 1
-                #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
-                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
-                #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
-                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
-                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
-                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitClosureBufferPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitVisibilityBufferPass.hlsl"
             ENDHLSL
         }
 

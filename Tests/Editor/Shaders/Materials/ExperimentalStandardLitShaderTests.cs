@@ -14,6 +14,8 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLit.shader";
         private const string ExperimentalInputAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitInput.hlsl";
+        private const string ExperimentalVisibilityAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitVisibilityBufferPass.hlsl";
         private const string ExistingShaderAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLit.shader";
 
@@ -59,6 +61,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(material.HasProperty("_TopLayerMaskMap"), Is.True);
                 Assert.That(material.HasProperty("_TopLayerWeight"), Is.True);
                 Assert.That(material.HasProperty("_TopLayerOperator"), Is.True);
+                Assert.That(material.HasProperty("_VividExperimentalVBufferMaterialIndex"), Is.True);
+                Assert.That(material.GetFloat("_VividExperimentalVBufferMaterialIndex"), Is.Zero);
             }
             finally
             {
@@ -67,23 +71,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ExperimentalStandardLitShader_ExposesRequiredDeferredPasses()
+        public void ExperimentalStandardLitShader_ExposesVBufferAndAuxiliaryPassesOnly()
         {
             Shader shader = LoadShader();
             var material = new Material(shader);
             try
             {
                 AssertPass(material, "VividPreDepth", "VividPreDepth");
-                AssertPass(material, "ShadowCaster", "ShadowCaster");
-                AssertPass(material, "VividGBuffer", "VividGBuffer");
                 AssertPass(
                     material,
-                    "VividGBufferGPUDrivenDecal",
-                    "VividGBufferGPUDrivenDecal");
-                AssertPass(
-                    material,
-                    "ExperimentalClosureBuffer",
-                    "ExperimentalClosureBuffer");
+                    "ExperimentalVisibilityBuffer",
+                    "ExperimentalVisibilityBuffer");
                 AssertPass(material, "Meta", "Meta");
                 AssertPass(material, "MotionVectors", "MotionVectors");
                 AssertPass(material, "IndirectDXR", "IndirectDXR");
@@ -95,11 +93,30 @@ namespace VividRP.Editor.Tests
                     material,
                     "RaytracingGBufferDXR",
                     "RaytracingGBufferDXR");
+                Assert.That(material.FindPass("ExperimentalClosureBuffer"), Is.EqualTo(-1));
+                Assert.That(material.FindPass("VividGBuffer"), Is.EqualTo(-1));
+                Assert.That(material.FindPass("VividGBufferGPUDrivenDecal"), Is.EqualTo(-1));
             }
             finally
             {
                 Object.DestroyImmediate(material);
             }
+        }
+
+        [Test]
+        public void ExperimentalVisibilityBuffer_UsesAttributeAbiWithoutMaterialSampling()
+        {
+            string source = File.ReadAllText(ExperimentalVisibilityAssetPath);
+
+            StringAssert.Contains("uint2 visibility : SV_Target0", source);
+            StringAssert.Contains("float4 attributes0 : SV_Target1", source);
+            StringAssert.Contains("float4 attributes1 : SV_Target2", source);
+            StringAssert.Contains("uint primitiveID : SV_PrimitiveID", source);
+            StringAssert.Contains("ddx(input.uv0)", source);
+            StringAssert.Contains("ddy(input.uv0)", source);
+            StringAssert.Contains("VividExperimentalEncodeNormalOct", source);
+            StringAssert.DoesNotContain("SAMPLE_TEXTURE2D", source);
+            StringAssert.DoesNotContain("ExperimentalClosureBuffer", source);
         }
 
         [Test]

@@ -15,6 +15,12 @@ namespace VividRP.Runtime.Experimental.Materials
         Complex = 2,
     }
 
+    public enum VividExperimentalClosureOperator : uint
+    {
+        HorizontalMix = 0,
+        VerticalLayer = 1,
+    }
+
     [Flags]
     public enum VividExperimentalClosureFeatures : uint
     {
@@ -32,11 +38,12 @@ namespace VividRP.Runtime.Experimental.Materials
         CoatRoughness = 1 << 1,
         Transmission = 1 << 2,
         Subsurface = 1 << 3,
+        MultiLayer = 1 << 4,
     }
 
     public static class VividExperimentalClosureContract
     {
-        public const uint SemanticVersion = 1;
+        public const uint SemanticVersion = 2;
         public const uint MaxClosureCount = 2;
         public const float LegacyDielectricIor = 1.5f;
         public const float LegacyCoatLinearRoughness = 0.01f;
@@ -117,9 +124,9 @@ namespace VividRP.Runtime.Experimental.Materials
 
     public static class VividExperimentalClosureBufferContract
     {
-        public const uint BufferVersion = 1;
-        public const int AttachmentCount = 6;
-        public const int BytesPerPixel = 28;
+        public const uint BufferVersion = 2;
+        public const int AttachmentCount = 8;
+        public const int BytesPerPixel = 36;
 
         public const int ComplexityShift = 0;
         public const uint ComplexityMask = 3;

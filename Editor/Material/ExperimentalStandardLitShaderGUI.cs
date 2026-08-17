@@ -27,7 +27,7 @@ namespace VividRP.Editor
             MaterialProperty[] properties)
         {
             EditorGUILayout.HelpBox(
-                "Experimental Closure material. Stage 3 shades the Closure Buffer directly with directional shadows, clustered punctual and area lights, reflection probes, sky IBL, GTAO, and optional SSR consumption. Closure-native SSR production, transmission refraction, and profile-based subsurface scattering are not implemented yet.",
+                "Experimental Closure material. Stage 4 supports a two-Slab top layer with Horizontal Mix and Vertical Layer operators. The compact top layer shares the base normal; arbitrary Closure trees, Closure-native SSR production, transmission refraction, and profile-based subsurface scattering are not implemented yet.",
                 MessageType.Info);
             base.OnGUI(materialEditor, properties);
         }

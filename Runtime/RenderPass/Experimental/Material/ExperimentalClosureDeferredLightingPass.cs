@@ -22,7 +22,9 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             Shader.PropertyToID("_ExperimentalClosureBuffer2"),
             Shader.PropertyToID("_ExperimentalClosureBuffer3"),
             Shader.PropertyToID("_ExperimentalClosureBuffer4"),
-            Shader.PropertyToID("_ExperimentalClosureBuffer5")
+            Shader.PropertyToID("_ExperimentalClosureBuffer5"),
+            Shader.PropertyToID("_ExperimentalClosureBuffer6"),
+            Shader.PropertyToID("_ExperimentalClosureBuffer7")
         };
 
         private static readonly int DepthTextureId =
@@ -143,6 +145,16 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             Name = "ExperimentalClosureBuffer5",
             Access = AccessFlags.Read)]
         private RenderGraphTexture m_ClosureBuffer5;
+
+        [RenderGraphResource(
+            Name = "ExperimentalClosureBuffer6",
+            Access = AccessFlags.Read)]
+        private RenderGraphTexture m_ClosureBuffer6;
+
+        [RenderGraphResource(
+            Name = "ExperimentalClosureBuffer7",
+            Access = AccessFlags.Read)]
+        private RenderGraphTexture m_ClosureBuffer7;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -268,6 +280,12 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             m_ClosureBuffer5 = CreateClosureInput(
                 "ExperimentalClosureBuffer5",
                 GraphicsFormat.R16G16B16A16_SFloat);
+            m_ClosureBuffer6 = CreateClosureInput(
+                "ExperimentalClosureBuffer6",
+                GraphicsFormat.R8G8B8A8_UNorm);
+            m_ClosureBuffer7 = CreateClosureInput(
+                "ExperimentalClosureBuffer7",
+                GraphicsFormat.R8G8B8A8_UNorm);
             m_DepthTexture = RenderGraphTexture.CreateInput(
                 "Depth",
                 GraphicsFormat.None,
@@ -974,6 +992,8 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
                 3 => m_ClosureBuffer3,
                 4 => m_ClosureBuffer4,
                 5 => m_ClosureBuffer5,
+                6 => m_ClosureBuffer6,
+                7 => m_ClosureBuffer7,
                 _ => null,
             };
         }

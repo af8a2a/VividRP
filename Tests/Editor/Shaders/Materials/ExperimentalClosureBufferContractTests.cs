@@ -36,10 +36,13 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "VividUnpackExperimentalClosureBuffer(",
                 source);
+            StringAssert.Contains("float4 rt6 : SV_Target6", source);
+            StringAssert.Contains("float4 rt7 : SV_Target7", source);
+            StringAssert.Contains("material.topSlab", source);
 
             Assert.That(
                 VividExperimentalClosureBufferContract.BytesPerPixel,
-                Is.EqualTo(4 + 4 + 4 + 4 + 4 + 8));
+                Is.EqualTo(4 + 4 + 4 + 4 + 4 + 8 + 4 + 4));
         }
 
         [Test]
@@ -122,6 +125,12 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("_GTAOTexture", source);
             StringAssert.Contains(
                 "_ScreenSpaceReflectionTexture",
+                source);
+            StringAssert.Contains(
+                "VividEvaluateExperimentalMaterialDirectional",
+                source);
+            StringAssert.Contains(
+                "VIVID_EXPERIMENTAL_CLOSURE_OPERATOR_VERTICAL_LAYER",
                 source);
             StringAssert.DoesNotContain("_GBuffer", source);
             StringAssert.DoesNotContain("BuildVividHDRPLitBSDFData", source);

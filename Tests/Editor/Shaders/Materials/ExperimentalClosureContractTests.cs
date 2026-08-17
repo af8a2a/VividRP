@@ -34,6 +34,12 @@ namespace VividRP.Editor.Tests
                 "#define VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_COMPLEX 2u",
                 source);
             StringAssert.Contains(
+                "#define VIVID_EXPERIMENTAL_CLOSURE_OPERATOR_HORIZONTAL_MIX 0u",
+                source);
+            StringAssert.Contains(
+                "#define VIVID_EXPERIMENTAL_CLOSURE_OPERATOR_VERTICAL_LAYER 1u",
+                source);
+            StringAssert.Contains(
                 "#define VIVID_EXPERIMENTAL_CLOSURE_FEATURE_COAT (1u << 0)",
                 source);
             StringAssert.Contains(
@@ -55,6 +61,9 @@ namespace VividRP.Editor.Tests
                 "#define VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_SUBSURFACE (1u << 3)",
                 source);
             StringAssert.Contains(
+                "#define VIVID_EXPERIMENTAL_COMPATIBILITY_LOSS_MULTI_LAYER (1u << 4)",
+                source);
+            StringAssert.Contains(
                 "uint VividClassifyExperimentalClosure(",
                 source);
 
@@ -68,6 +77,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 (uint)VividExperimentalClosureComplexity.Complex,
                 Is.EqualTo(2u));
+            Assert.That(
+                (uint)VividExperimentalClosureOperator.HorizontalMix,
+                Is.Zero);
+            Assert.That(
+                (uint)VividExperimentalClosureOperator.VerticalLayer,
+                Is.EqualTo(1u));
             Assert.That(
                 (uint)VividExperimentalClosureFeatures.Coat,
                 Is.EqualTo(1u << 0));
@@ -89,6 +104,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 (uint)VividExperimentalCompatibilityLoss.Subsurface,
                 Is.EqualTo(1u << 3));
+            Assert.That(
+                (uint)VividExperimentalCompatibilityLoss.MultiLayer,
+                Is.EqualTo(1u << 4));
         }
 
         [Test]

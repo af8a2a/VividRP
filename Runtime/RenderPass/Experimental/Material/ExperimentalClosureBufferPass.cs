@@ -55,13 +55,27 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
         private RenderGraphTexture m_ClosureBuffer5;
 
         [RenderGraphResource(
+            Name = "ExperimentalClosureBuffer6",
+            Access = AccessFlags.Write,
+            AttachmentIndex = 6,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_ClosureBuffer6;
+
+        [RenderGraphResource(
+            Name = "ExperimentalClosureBuffer7",
+            Access = AccessFlags.Write,
+            AttachmentIndex = 7,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_ClosureBuffer7;
+
+        [RenderGraphResource(
             Name = "Depth",
             Access = AccessFlags.Read,
             IsDepthAttachment = true)]
         private RenderGraphTexture m_DepthTexture;
 
         private readonly RenderTargetIdentifier[] m_ColorTargets =
-            new RenderTargetIdentifier[6];
+            new RenderTargetIdentifier[8];
 
         public ExperimentalClosureBufferPass()
         {
@@ -89,6 +103,12 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             m_ClosureBuffer5 = RenderGraphTexture.CreateColorTarget(
                 "ExperimentalClosureBuffer5",
                 GraphicsFormat.R16G16B16A16_SFloat);
+            m_ClosureBuffer6 = RenderGraphTexture.CreateColorTarget(
+                "ExperimentalClosureBuffer6",
+                GraphicsFormat.R8G8B8A8_UNorm);
+            m_ClosureBuffer7 = RenderGraphTexture.CreateColorTarget(
+                "ExperimentalClosureBuffer7",
+                GraphicsFormat.R8G8B8A8_UNorm);
             m_DepthTexture = RenderGraphTexture.CreateInput(
                 "Depth",
                 GraphicsFormat.None,
@@ -120,6 +140,8 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             m_ClosureBuffer3.Resize(width, height);
             m_ClosureBuffer4.Resize(width, height);
             m_ClosureBuffer5.Resize(width, height);
+            m_ClosureBuffer6.Resize(width, height);
+            m_ClosureBuffer7.Resize(width, height);
             m_DepthTexture.Resize(width, height);
         }
 
@@ -135,6 +157,8 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             m_ColorTargets[3] = m_ClosureBuffer3;
             m_ColorTargets[4] = m_ClosureBuffer4;
             m_ColorTargets[5] = m_ClosureBuffer5;
+            m_ColorTargets[6] = m_ClosureBuffer6;
+            m_ColorTargets[7] = m_ClosureBuffer7;
             cmd.SetRenderTarget(m_ColorTargets, m_DepthTexture);
             cmd.ClearRenderTarget(
                 clearDepth: false,

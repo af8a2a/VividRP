@@ -55,6 +55,10 @@ namespace VividRP.Editor.Tests
                     material.GetFloat("_VividExperimentalClosureVersion"),
                     Is.EqualTo(
                         (float)VividExperimentalClosureContract.SemanticVersion));
+                Assert.That(material.HasProperty("_TopLayerBaseMap"), Is.True);
+                Assert.That(material.HasProperty("_TopLayerMaskMap"), Is.True);
+                Assert.That(material.HasProperty("_TopLayerWeight"), Is.True);
+                Assert.That(material.HasProperty("_TopLayerOperator"), Is.True);
             }
             finally
             {
@@ -107,6 +111,8 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("SampleExperimentalStandardLitSurface", source);
             StringAssert.Contains("VividResolveExperimentalStandardSurface", source);
             StringAssert.Contains("VividCompileExperimentalStandardSurface", source);
+            StringAssert.Contains("BuildExperimentalStandardLitMaterial", source);
+            StringAssert.Contains("VividCompileExperimentalLayeredSurface", source);
             StringAssert.Contains("VividExportExperimentalClosureToLegacyGBuffer", source);
             StringAssert.DoesNotContain("Material/Experimental/", existingSource);
         }

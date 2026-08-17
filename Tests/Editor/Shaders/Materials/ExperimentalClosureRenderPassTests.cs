@@ -13,7 +13,7 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalClosureRenderPassTests
     {
         [Test]
-        public void ClosureBufferPass_RegistersSixAttachmentsAndSharedDepth()
+        public void ClosureBufferPass_RegistersEightAttachmentsAndSharedDepth()
         {
             IRenderPass pass = new ExperimentalClosureBufferPass();
             var resources = pass.Initialize();
@@ -26,7 +26,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 resources.RenderLists[0].RenderList.desc.ShaderTagNames,
                 Is.EqualTo(new[] { "ExperimentalClosureBuffer" }));
-            Assert.That(colorEntries, Has.Length.EqualTo(6));
+            Assert.That(colorEntries, Has.Length.EqualTo(8));
             Assert.That(
                 colorEntries.Select(entry => entry.Name),
                 Is.EqualTo(new[]
@@ -36,7 +36,9 @@ namespace VividRP.Editor.Tests
                     "ExperimentalClosureBuffer2",
                     "ExperimentalClosureBuffer3",
                     "ExperimentalClosureBuffer4",
-                    "ExperimentalClosureBuffer5"
+                    "ExperimentalClosureBuffer5",
+                    "ExperimentalClosureBuffer6",
+                    "ExperimentalClosureBuffer7"
                 }));
             Assert.That(
                 resources.Textures.Single(entry => entry.IsDepthAttachment).Name,
@@ -82,6 +84,8 @@ namespace VividRP.Editor.Tests
                     "ExperimentalClosureBuffer3",
                     "ExperimentalClosureBuffer4",
                     "ExperimentalClosureBuffer5",
+                    "ExperimentalClosureBuffer6",
+                    "ExperimentalClosureBuffer7",
                     "Depth",
                     "DirectionalShadowTexture",
                     "GTAOTexture",

@@ -81,6 +81,10 @@ Shader "VividRP/Experimental/Material/StandardLit"
             "VividMaterialSystem" = "ExperimentalClosure"
         }
 
+        HLSLINCLUDE
+            #define VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION float _VividExperimentalVBufferMaterialIndex;
+        ENDHLSL
+
         Pass
         {
             Name "VividPreDepth"

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -115,8 +116,28 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("ddx(input.uv0)", source);
             StringAssert.Contains("ddy(input.uv0)", source);
             StringAssert.Contains("VividExperimentalEncodeNormalOct", source);
+            StringAssert.Contains("StandardLit/StandardLitInput.hlsl", source);
+            StringAssert.DoesNotContain("CBUFFER_START(UnityPerMaterial)", source);
             StringAssert.DoesNotContain("SAMPLE_TEXTURE2D", source);
             StringAssert.DoesNotContain("ExperimentalClosureBuffer", source);
+        }
+
+        [Test]
+        public void ExperimentalStandardLitShader_IsSRPBatcherCompatible_ForRasterPasses()
+        {
+            var material = new Material(LoadShader());
+            try
+            {
+                AssertNoSRPBatcherIssue(material, "VividPreDepth");
+                AssertNoSRPBatcherIssue(material, "ShadowCaster");
+                AssertNoSRPBatcherIssue(material, "ExperimentalVisibilityBuffer");
+                AssertNoSRPBatcherIssue(material, "Meta");
+                AssertNoSRPBatcherIssue(material, "MotionVectors");
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
         }
 
         [Test]
@@ -158,6 +179,34 @@ namespace VividRP.Editor.Tests
                     passIndex,
                     new ShaderTagId("LightMode")),
                 Is.EqualTo(new ShaderTagId(expectedLightMode)));
+        }
+
+        private static void AssertNoSRPBatcherIssue(
+            Material material,
+            string passName)
+        {
+            int passIndex = material.FindPass(passName);
+            Assert.That(passIndex, Is.GreaterThanOrEqualTo(0), passName);
+
+            MethodInfo method = typeof(ShaderUtil).GetMethod(
+                "GetSRPBatcherCompatibilityIssueReason",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(Shader), typeof(int), typeof(int) },
+                null);
+            if (method == null)
+                Assert.Ignore("This Unity version does not expose ShaderUtil.GetSRPBatcherCompatibilityIssueReason.");
+
+            string issueReason =
+                (string)method.Invoke(null, new object[] { material.shader, 0, passIndex })
+                ?? string.Empty;
+            bool isCompatible = string.IsNullOrEmpty(issueReason)
+                || issueReason.StartsWith("OK", System.StringComparison.OrdinalIgnoreCase)
+                || issueReason.StartsWith("Not initialized", System.StringComparison.OrdinalIgnoreCase);
+            Assert.That(
+                isCompatible,
+                Is.True,
+                $"Pass '{passName}' is not SRP Batcher compatible: {issueReason}");
         }
     }
 }

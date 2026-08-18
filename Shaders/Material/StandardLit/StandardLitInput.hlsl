@@ -54,6 +54,9 @@ CBUFFER_START(UnityPerMaterial)
     float _SubsurfaceRadius;
     float _SubsurfaceScatterAnisotropy;
     float _SubsurfaceTransmissionWeight;
+#if defined(VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION)
+    VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION
+#endif
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);

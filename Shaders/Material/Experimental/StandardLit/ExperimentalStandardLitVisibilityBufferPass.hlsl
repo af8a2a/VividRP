@@ -1,11 +1,7 @@
 #ifndef VIVIDRP_EXPERIMENTAL_STANDARD_LIT_VISIBILITY_BUFFER_PASS_INCLUDED
 #define VIVIDRP_EXPERIMENTAL_STANDARD_LIT_VISIBILITY_BUFFER_PASS_INCLUDED
 
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
-
-CBUFFER_START(UnityPerMaterial)
-    float _VividExperimentalVBufferMaterialIndex;
-CBUFFER_END
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitInput.hlsl"
 
 struct VividExperimentalVisibilityAttributes
 {

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -7,9 +9,11 @@ using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.PrimitiveScene
 {
-    internal sealed class VividPrimitiveScene
+    internal sealed class VividPrimitiveScene : IDisposable
     {
         internal const uint InvalidIndex = uint.MaxValue;
+
+        private static int s_NextSceneToken;
 
         private readonly VividVersionedSlotAllocator m_PrimitiveSlots = new();
         private readonly VividVersionedSlotAllocator m_GeometrySlots = new();
@@ -23,6 +27,9 @@ namespace VividRP.Runtime.PrimitiveScene
         private readonly List<MaterialRecord> m_MaterialRecords = new();
         private readonly List<VividPrimitiveDrawSectionData> m_SectionUpdateScratch = new();
         private readonly HashSet<int> m_MovedPrimitiveSlots = new();
+        private NativeList<VividPrimitiveCullRecord> m_ActiveCullRecords;
+        private NativeList<int> m_PrimitiveSlotToActiveIndex;
+        private NativeList<VividPrimitiveDrawSourceData> m_DrawSetSources;
 
         private int m_PreparedFrameIndex = int.MinValue;
         private int m_ActiveDrawSectionCount;
@@ -32,6 +39,44 @@ namespace VividRP.Runtime.PrimitiveScene
         private int m_LastUploadRangeCount;
         private long m_LastUploadBytes;
         private uint m_SceneRevision;
+        private bool m_IsDisposed;
+
+        internal VividPrimitiveScene()
+        {
+            SceneToken = AllocateSceneToken();
+            m_ActiveCullRecords = new NativeList<VividPrimitiveCullRecord>(16, Allocator.Persistent);
+            m_PrimitiveSlotToActiveIndex = new NativeList<int>(16, Allocator.Persistent);
+            m_DrawSetSources = new NativeList<VividPrimitiveDrawSourceData>(16, Allocator.Persistent);
+        }
+
+        internal uint SceneToken { get; }
+
+        internal NativeArray<VividPrimitiveCullRecord> ActiveCullRecords
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_ActiveCullRecords.AsArray();
+            }
+        }
+
+        internal NativeArray<VividPrimitiveDrawSourceData> DrawSetSources
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_DrawSetSources.AsArray();
+            }
+        }
+
+        internal uint SceneRevision
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_SceneRevision;
+            }
+        }
 
         internal VividPrimitiveGpuTable<VividPrimitiveData> PrimitiveTable { get; } = new();
         internal VividPrimitiveGpuTable<VividPrimitiveTransformData> TransformTable { get; } = new();
@@ -43,10 +88,26 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal VividPrimitiveHandle RegisterOrUpdate(in VividPrimitiveSourceDescriptor descriptor)
         {
+            return RegisterOrUpdate(VividPrimitiveHandle.Invalid, descriptor);
+        }
+
+        internal VividPrimitiveHandle RegisterOrUpdate(
+            VividPrimitiveHandle candidateHandle,
+            in VividPrimitiveSourceDescriptor descriptor)
+        {
+            ThrowIfDisposed();
             if (descriptor.SourceEntityId.Equals(EntityId.None))
                 throw new ArgumentException("PrimitiveScene requires a valid source EntityId.", nameof(descriptor));
 
-            if (!m_PrimitivesByEntityId.TryGetValue(descriptor.SourceEntityId, out VividPrimitiveHandle handle)
+            VividPrimitiveHandle handle = VividPrimitiveHandle.Invalid;
+            if (IsValid(candidateHandle)
+                && m_PrimitiveRecords[candidateHandle.Index].SourceEntityId.Equals(descriptor.SourceEntityId))
+            {
+                handle = candidateHandle;
+            }
+            else if (!m_PrimitivesByEntityId.TryGetValue(
+                    descriptor.SourceEntityId,
+                    out handle)
                 || !IsValid(handle))
             {
                 handle = Register(descriptor);
@@ -62,6 +123,7 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal bool Remove(EntityId sourceEntityId)
         {
+            ThrowIfDisposed();
             if (sourceEntityId.Equals(EntityId.None)
                 || !m_PrimitivesByEntityId.TryGetValue(sourceEntityId, out VividPrimitiveHandle handle)
                 || !IsValid(handle))
@@ -74,6 +136,7 @@ namespace VividRP.Runtime.PrimitiveScene
             m_ActiveDrawSectionCount -= record.DrawSectionCount;
             m_PrimitivesByEntityId.Remove(sourceEntityId);
             m_MovedPrimitiveSlots.Remove(handle.Index);
+            RemoveCullRecord(handle);
 
             if (!m_PrimitiveSlots.Free(handle.Index, handle.Generation, out uint nextGeneration))
                 return false;
@@ -95,6 +158,7 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal bool TryGetHandle(EntityId sourceEntityId, out VividPrimitiveHandle handle)
         {
+            ThrowIfDisposed();
             handle = VividPrimitiveHandle.Invalid;
             return !sourceEntityId.Equals(EntityId.None)
                 && m_PrimitivesByEntityId.TryGetValue(sourceEntityId, out handle)
@@ -103,7 +167,10 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal bool IsValid(VividPrimitiveHandle handle)
         {
-            return handle.IsValid && m_PrimitiveSlots.IsValid(handle.Index, handle.Generation);
+            return !m_IsDisposed
+                && handle.IsValid
+                && handle.SceneToken == SceneToken
+                && m_PrimitiveSlots.IsValid(handle.Index, handle.Generation);
         }
 
         internal void CollectSourceEntityIds(List<EntityId> destination)
@@ -121,6 +188,7 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal void BeginFrame(int frameIndex)
         {
+            ThrowIfDisposed();
             if (m_PreparedFrameIndex == frameIndex)
                 return;
 
@@ -249,6 +317,40 @@ namespace VividRP.Runtime.PrimitiveScene
             LegacyInstanceMappingTable.Set(index, mapping);
         }
 
+        internal void BeginDrawSetSourceRebuild()
+        {
+            ThrowIfDisposed();
+            m_DrawSetSources.Clear();
+            m_DrawSetSources.Resize(
+                DrawSectionTable.Count,
+                NativeArrayOptions.ClearMemory);
+        }
+
+        internal void SetDrawSetSource(
+            int absoluteDrawSectionIndex,
+            in VividPrimitiveDrawSourceData source)
+        {
+            ThrowIfDisposed();
+            if ((uint) absoluteDrawSectionIndex >= (uint) m_DrawSetSources.Length)
+                throw new ArgumentOutOfRangeException(nameof(absoluteDrawSectionIndex));
+
+            m_DrawSetSources[absoluteDrawSectionIndex] = source;
+        }
+
+        internal bool IsDrawSectionRenderable(int absoluteDrawSectionIndex)
+        {
+            ThrowIfDisposed();
+            if ((uint) absoluteDrawSectionIndex >= (uint) DrawSectionTable.Count)
+                return false;
+
+            VividPrimitiveDrawSectionData section = DrawSectionTable[absoluteDrawSectionIndex];
+            return (section.Flags & VividPrimitiveDrawSectionFlags.Valid) != 0
+                && section.GeometryIndex <= int.MaxValue
+                && section.MaterialIndex <= int.MaxValue
+                && m_GeometrySlots.IsValid((int) section.GeometryIndex, section.GeometryGeneration)
+                && m_MaterialSlots.IsValid((int) section.MaterialIndex, section.MaterialGeneration);
+        }
+
         internal VividPrimitiveSceneStats GetStats()
         {
             return new VividPrimitiveSceneStats(
@@ -278,10 +380,24 @@ namespace VividRP.Runtime.PrimitiveScene
             m_LastUploadBytes = Math.Max(0L, byteCount);
         }
 
+        public void Dispose()
+        {
+            if (m_IsDisposed)
+                return;
+
+            if (m_ActiveCullRecords.IsCreated)
+                m_ActiveCullRecords.Dispose();
+            if (m_PrimitiveSlotToActiveIndex.IsCreated)
+                m_PrimitiveSlotToActiveIndex.Dispose();
+            if (m_DrawSetSources.IsCreated)
+                m_DrawSetSources.Dispose();
+            m_IsDisposed = true;
+        }
+
         private VividPrimitiveHandle Register(in VividPrimitiveSourceDescriptor descriptor)
         {
             int primitiveSlot = m_PrimitiveSlots.Allocate(out uint generation);
-            var handle = new VividPrimitiveHandle(primitiveSlot, generation);
+            var handle = new VividPrimitiveHandle(primitiveSlot, generation, SceneToken);
             EnsureRecordCount(m_PrimitiveRecords, primitiveSlot + 1);
 
             int sectionCount = descriptor.DrawSections.Count;
@@ -305,6 +421,7 @@ namespace VividRP.Runtime.PrimitiveScene
             {
                 PreviousObjectToWorldMatrix = objectToWorld,
             });
+            AddCullRecord(handle, descriptor, sectionOffset, sectionCount);
             return handle;
         }
 
@@ -361,7 +478,12 @@ namespace VividRP.Runtime.PrimitiveScene
             bool primitiveDataChanged = PrimitiveTable.SetIfChanged(
                 handle.Index,
                 CreatePrimitiveData(descriptor, handle, record.DrawSectionOffset, record.DrawSectionCount));
-            return sectionsChanged || transformChanged || primitiveDataChanged;
+            bool cullRecordChanged = UpdateCullRecord(
+                handle,
+                descriptor,
+                record.DrawSectionOffset,
+                record.DrawSectionCount);
+            return sectionsChanged || transformChanged || primitiveDataChanged || cullRecordChanged;
         }
 
         private int AllocateSections(IReadOnlyList<VividPrimitiveDrawSectionDescriptor> descriptors)
@@ -589,6 +711,101 @@ namespace VividRP.Runtime.PrimitiveScene
                 && m_MaterialRecords[handle.Index].Key.Equals(key);
         }
 
+        private void AddCullRecord(
+            VividPrimitiveHandle handle,
+            in VividPrimitiveSourceDescriptor descriptor,
+            int sectionOffset,
+            int sectionCount)
+        {
+            EnsureSlotToActiveIndexCount(handle.Index + 1);
+            int activeIndex = m_ActiveCullRecords.Length;
+            m_ActiveCullRecords.Add(CreateCullRecord(handle, descriptor, sectionOffset, sectionCount));
+            m_PrimitiveSlotToActiveIndex[handle.Index] = activeIndex;
+        }
+
+        private bool UpdateCullRecord(
+            VividPrimitiveHandle handle,
+            in VividPrimitiveSourceDescriptor descriptor,
+            int sectionOffset,
+            int sectionCount)
+        {
+            if ((uint) handle.Index >= (uint) m_PrimitiveSlotToActiveIndex.Length)
+                return false;
+
+            int activeIndex = m_PrimitiveSlotToActiveIndex[handle.Index];
+            if ((uint) activeIndex >= (uint) m_ActiveCullRecords.Length)
+                return false;
+
+            VividPrimitiveCullRecord updated = CreateCullRecord(
+                handle,
+                descriptor,
+                sectionOffset,
+                sectionCount);
+            if (AreEqual(m_ActiveCullRecords[activeIndex], updated))
+                return false;
+
+            m_ActiveCullRecords[activeIndex] = updated;
+            return true;
+        }
+
+        private void RemoveCullRecord(VividPrimitiveHandle handle)
+        {
+            if ((uint) handle.Index >= (uint) m_PrimitiveSlotToActiveIndex.Length)
+                return;
+
+            int activeIndex = m_PrimitiveSlotToActiveIndex[handle.Index];
+            if ((uint) activeIndex >= (uint) m_ActiveCullRecords.Length)
+                return;
+
+            int lastIndex = m_ActiveCullRecords.Length - 1;
+            VividPrimitiveCullRecord movedRecord = m_ActiveCullRecords[lastIndex];
+            m_ActiveCullRecords.RemoveAtSwapBack(activeIndex);
+            m_PrimitiveSlotToActiveIndex[handle.Index] = -1;
+            if (activeIndex != lastIndex)
+                m_PrimitiveSlotToActiveIndex[movedRecord.Handle.Index] = activeIndex;
+        }
+
+        private void EnsureSlotToActiveIndexCount(int count)
+        {
+            while (m_PrimitiveSlotToActiveIndex.Length < count)
+                m_PrimitiveSlotToActiveIndex.Add(-1);
+        }
+
+        private static VividPrimitiveCullRecord CreateCullRecord(
+            VividPrimitiveHandle handle,
+            in VividPrimitiveSourceDescriptor descriptor,
+            int sectionOffset,
+            int sectionCount)
+        {
+            Vector3 minimum = descriptor.WorldBounds.min;
+            Vector3 maximum = descriptor.WorldBounds.max;
+            return new VividPrimitiveCullRecord
+            {
+                Handle = handle,
+                BoundsMin = new float3(minimum.x, minimum.y, minimum.z),
+                BoundsMax = new float3(maximum.x, maximum.y, maximum.z),
+                DrawSectionOffset = sectionCount > 0 ? (uint) sectionOffset : InvalidIndex,
+                DrawSectionCount = (uint) sectionCount,
+                PassMask = descriptor.PassMask,
+                Flags = descriptor.Flags,
+                CameraLayerMask = descriptor.CameraLayerMask,
+            };
+        }
+
+        private static bool AreEqual(
+            in VividPrimitiveCullRecord left,
+            in VividPrimitiveCullRecord right)
+        {
+            return left.Handle.Equals(right.Handle)
+                && math.all(left.BoundsMin == right.BoundsMin)
+                && math.all(left.BoundsMax == right.BoundsMax)
+                && left.DrawSectionOffset == right.DrawSectionOffset
+                && left.DrawSectionCount == right.DrawSectionCount
+                && left.PassMask == right.PassMask
+                && left.Flags == right.Flags
+                && left.CameraLayerMask == right.CameraLayerMask;
+        }
+
         private static VividPrimitiveData CreatePrimitiveData(
             in VividPrimitiveSourceDescriptor descriptor,
             VividPrimitiveHandle handle,
@@ -637,6 +854,23 @@ namespace VividRP.Runtime.PrimitiveScene
         private void IncrementSceneRevision()
         {
             m_SceneRevision = m_SceneRevision == uint.MaxValue ? 1u : m_SceneRevision + 1u;
+        }
+
+        private static uint AllocateSceneToken()
+        {
+            uint token;
+            do
+            {
+                token = unchecked((uint) Interlocked.Increment(ref s_NextSceneToken));
+            }
+            while (token == 0u);
+            return token;
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (m_IsDisposed)
+                throw new ObjectDisposedException(nameof(VividPrimitiveScene));
         }
 
         private static float4x4 ToFloat4x4(Matrix4x4 value)

@@ -19,6 +19,7 @@ namespace VividRP.Runtime.GPUDriven
         private int m_OcclusionRetestKernel = -1;
         private int m_FixupVisibleMeshletIndirectDrawArgsKernel = -1;
         private readonly VividGPUCullingContext[] m_SingleCullingContext = new VividGPUCullingContext[1];
+        private GraphicsBuffer m_DrawSetInstanceIndicesPlaceholder;
         private bool m_IsDisposed;
 
         public VividGPUDrivenCullingDispatcher(bool supportsOcclusion = true)
@@ -40,7 +41,9 @@ namespace VividRP.Runtime.GPUDriven
             VividInstancePassMask passMask,
             int forcedMeshLODNodeDepth,
             float meshLODErrorThreshold,
-            VividGPUDrivenOcclusionCullingParameters occlusionParameters = default
+            VividGPUDrivenOcclusionCullingParameters occlusionParameters = default,
+            GraphicsBuffer drawSetInstanceIndices = null,
+            int drawSetInstanceCount = -1
         )
         {
             if (camera == null)
@@ -73,7 +76,9 @@ namespace VividRP.Runtime.GPUDriven
                     fixupVisibleMeshletIndirectDrawArgsCompute,
                     forcedMeshLODNodeDepth,
                     meshLODErrorThreshold,
-                    occlusionParameters
+                    occlusionParameters,
+                    drawSetInstanceIndices,
+                    drawSetInstanceCount
                 );
             }
         }
@@ -90,11 +95,13 @@ namespace VividRP.Runtime.GPUDriven
             ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
             int forcedMeshLODNodeDepth,
             float meshLODErrorThreshold,
-            VividGPUDrivenOcclusionCullingParameters occlusionParameters = default
+            VividGPUDrivenOcclusionCullingParameters occlusionParameters = default,
+            GraphicsBuffer drawSetInstanceIndices = null,
+            int drawSetInstanceCount = -1
         )
         {
             m_SingleCullingContext[0] = cullingContext;
-            DispatchBatch(
+            DispatchInternal(
                 cmd,
                 m_SingleCullingContext,
                 1,
@@ -107,7 +114,9 @@ namespace VividRP.Runtime.GPUDriven
                 fixupVisibleMeshletIndirectDrawArgsCompute,
                 forcedMeshLODNodeDepth,
                 meshLODErrorThreshold,
-                occlusionParameters);
+                occlusionParameters,
+                drawSetInstanceIndices,
+                drawSetInstanceCount);
         }
 
         public void DispatchBatch(
@@ -125,6 +134,41 @@ namespace VividRP.Runtime.GPUDriven
             float meshLODErrorThreshold,
             VividGPUDrivenOcclusionCullingParameters occlusionParameters = default
         )
+        {
+            DispatchInternal(
+                cmd,
+                cullingContexts,
+                cullingContextCount,
+                lodSelectionContext,
+                sceneData,
+                sceneBuffers,
+                gpuInstanceCullingCompute,
+                meshletListBuildCompute,
+                gpuMeshletCullingCompute,
+                fixupVisibleMeshletIndirectDrawArgsCompute,
+                forcedMeshLODNodeDepth,
+                meshLODErrorThreshold,
+                occlusionParameters,
+                null,
+                -1);
+        }
+
+        private void DispatchInternal(
+            CommandBuffer cmd,
+            VividGPUCullingContext[] cullingContexts,
+            int cullingContextCount,
+            in VividGPULODSelectionContext lodSelectionContext,
+            VividGPUDrivenSceneData sceneData,
+            VividGPUDrivenBufferSet sceneBuffers,
+            ComputeShader gpuInstanceCullingCompute,
+            ComputeShader meshletListBuildCompute,
+            ComputeShader gpuMeshletCullingCompute,
+            ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
+            int forcedMeshLODNodeDepth,
+            float meshLODErrorThreshold,
+            in VividGPUDrivenOcclusionCullingParameters occlusionParameters,
+            GraphicsBuffer drawSetInstanceIndices,
+            int drawSetInstanceCount)
         {
             ThrowIfDisposed();
 
@@ -153,6 +197,11 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentOutOfRangeException(nameof(cullingContextCount));
             }
 
+            bool drawSetEnabled = ValidateDrawSetInput(drawSetInstanceIndices, drawSetInstanceCount);
+            int instanceDispatchCount = drawSetEnabled
+                ? drawSetInstanceCount
+                : sceneData.InstanceCount;
+
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchEnsureCapacityMarker.Auto())
             {
                 BufferSet.EnsureCapacity(sceneData, cullingContextCount);
@@ -163,7 +212,8 @@ namespace VividRP.Runtime.GPUDriven
                 BufferSet.Reset(cmd);
             }
 
-            if (sceneData.InstanceCount == 0 ||
+            if (instanceDispatchCount == 0 ||
+                sceneData.InstanceCount == 0 ||
                 sceneBuffers.InstanceDataBuffer == null ||
                 sceneBuffers.MaterialDataBuffer == null ||
                 sceneBuffers.MeshLODNodesBuffer == null ||
@@ -193,7 +243,14 @@ namespace VividRP.Runtime.GPUDriven
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchInstanceCullingMarker.Auto())
             {
-                DispatchGPUInstanceCulling(cmd, sceneData.InstanceCount, cullingContextCount, sceneBuffers);
+                DispatchGPUInstanceCulling(
+                    cmd,
+                    sceneData.InstanceCount,
+                    instanceDispatchCount,
+                    cullingContextCount,
+                    sceneBuffers,
+                    drawSetEnabled,
+                    drawSetInstanceIndices);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchMeshletListBuildMarker.Auto())
@@ -231,6 +288,8 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             BufferSet.Dispose();
+            m_DrawSetInstanceIndicesPlaceholder?.Dispose();
+            m_DrawSetInstanceIndicesPlaceholder = null;
             m_GPUInstanceCullingCompute = null;
             m_MeshletListBuildCompute = null;
             m_GPUMeshletCullingCompute = null;
@@ -249,8 +308,11 @@ namespace VividRP.Runtime.GPUDriven
         private void DispatchGPUInstanceCulling(
             CommandBuffer cmd,
             int instanceCount,
+            int instanceDispatchCount,
             int cullingContextCount,
-            VividGPUDrivenBufferSet sceneBuffers
+            VividGPUDrivenBufferSet sceneBuffers,
+            bool drawSetEnabled,
+            GraphicsBuffer drawSetInstanceIndices
         )
         {
             cmd.SetComputeBufferParam(
@@ -278,6 +340,24 @@ namespace VividRP.Runtime.GPUDriven
             cmd.SetComputeBufferParam(
                 m_GPUInstanceCullingCompute,
                 m_GPUInstanceCullingKernel,
+                VividGPUDrivenShaderIDs._VividPrimitiveDrawSetInstanceIndices,
+                drawSetEnabled && drawSetInstanceIndices != null
+                    ? drawSetInstanceIndices
+                    : GetDrawSetInstanceIndicesPlaceholder()
+            );
+            cmd.SetComputeIntParam(
+                m_GPUInstanceCullingCompute,
+                VividGPUDrivenShaderIDs._VividPrimitiveDrawSetInstanceCount,
+                drawSetEnabled ? instanceDispatchCount : 0
+            );
+            cmd.SetComputeIntParam(
+                m_GPUInstanceCullingCompute,
+                VividGPUDrivenShaderIDs._VividPrimitiveDrawSetEnabled,
+                drawSetEnabled ? 1 : 0
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUInstanceCullingCompute,
+                m_GPUInstanceCullingKernel,
                 VividGPUDrivenShaderIDs._MeshletListBuildJobs,
                 BufferSet.MeshletListBuildJobsBuffer
             );
@@ -295,14 +375,66 @@ namespace VividRP.Runtime.GPUDriven
             );
 
             int threadGroupCountX =
-                (instanceCount + (int) Meshlets.VividMeshletComputeShaders.GPUInstanceCullingThreadGroupSize - 1) /
+                (instanceDispatchCount + (int) Meshlets.VividMeshletComputeShaders.GPUInstanceCullingThreadGroupSize - 1) /
                 (int) Meshlets.VividMeshletComputeShaders.GPUInstanceCullingThreadGroupSize;
             cmd.DispatchCompute(
                 m_GPUInstanceCullingCompute,
                 m_GPUInstanceCullingKernel,
-                Mathf.Max(1, threadGroupCountX),
+                threadGroupCountX,
                 cullingContextCount,
                 1);
+        }
+
+        private bool ValidateDrawSetInput(
+            GraphicsBuffer drawSetInstanceIndices,
+            int drawSetInstanceCount)
+        {
+            if (drawSetInstanceCount < -1)
+                throw new ArgumentOutOfRangeException(nameof(drawSetInstanceCount));
+
+            bool drawSetEnabled = drawSetInstanceCount >= 0;
+            if (!drawSetEnabled)
+            {
+                if (drawSetInstanceIndices != null)
+                {
+                    throw new ArgumentException(
+                        "A DrawSet instance count is required when a DrawSet index buffer is provided.",
+                        nameof(drawSetInstanceIndices));
+                }
+                return false;
+            }
+
+            if (drawSetInstanceCount == 0)
+                return true;
+
+            if (drawSetInstanceIndices == null)
+                throw new ArgumentNullException(nameof(drawSetInstanceIndices));
+            if ((drawSetInstanceIndices.target & GraphicsBuffer.Target.Structured) == 0
+                || drawSetInstanceIndices.stride != sizeof(uint))
+            {
+                throw new ArgumentException(
+                    "The DrawSet instance index buffer must be a structured uint buffer.",
+                    nameof(drawSetInstanceIndices));
+            }
+            if (drawSetInstanceCount > drawSetInstanceIndices.count)
+                throw new ArgumentOutOfRangeException(nameof(drawSetInstanceCount));
+            return true;
+        }
+
+        private GraphicsBuffer GetDrawSetInstanceIndicesPlaceholder()
+        {
+            if (m_DrawSetInstanceIndicesPlaceholder != null)
+                return m_DrawSetInstanceIndicesPlaceholder;
+
+            m_DrawSetInstanceIndicesPlaceholder = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                1,
+                sizeof(uint))
+            {
+                name = "VividPrimitiveDrawSet_InstanceIndicesPlaceholder",
+            };
+            m_DrawSetInstanceIndicesPlaceholder.SetData(new[] { 0u });
+            return m_DrawSetInstanceIndicesPlaceholder;
         }
 
         private void DispatchMeshletListBuild(

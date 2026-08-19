@@ -158,15 +158,27 @@ namespace VividRP.Runtime.PrimitiveScene
                     sectionFlags));
             }
 
-            primitiveScene.RegisterOrUpdate(new VividPrimitiveSourceDescriptor(
-                trackedData.meshletRendererEntityId,
-                trackedData.objectToWorldMatrix,
-                trackedData.worldToObjectMatrix,
-                trackedData.worldBounds,
-                trackedData.renderingLayerMask,
-                ExtractPassMask(trackedData.shadowCastingMode),
-                ExtractPrimitiveFlags(trackedData, trackedResources.IsTerrain),
-                m_SectionDescriptors));
+            VividPrimitiveHandle candidateHandle = trackedResources.MeshletRenderer != null
+                ? trackedResources.MeshletRenderer.primitiveHandle
+                : trackedResources.Terrain != null
+                    ? trackedResources.Terrain.primitiveHandle
+                    : VividPrimitiveHandle.Invalid;
+            VividPrimitiveHandle handle = primitiveScene.RegisterOrUpdate(
+                candidateHandle,
+                new VividPrimitiveSourceDescriptor(
+                    trackedData.meshletRendererEntityId,
+                    trackedData.objectToWorldMatrix,
+                    trackedData.worldToObjectMatrix,
+                    trackedData.worldBounds,
+                    trackedData.renderingLayerMask,
+                    trackedData.cameraLayerMask,
+                    ExtractPassMask(trackedData.shadowCastingMode),
+                    ExtractPrimitiveFlags(trackedData, trackedResources.IsTerrain),
+                    m_SectionDescriptors));
+            if (trackedResources.MeshletRenderer != null)
+                trackedResources.MeshletRenderer.NotifyPrimitiveHandleAssigned(handle);
+            if (trackedResources.Terrain != null)
+                trackedResources.Terrain.NotifyPrimitiveHandleAssigned(handle);
         }
 
         internal static void RebuildLegacyBridge(
@@ -177,6 +189,7 @@ namespace VividRP.Runtime.PrimitiveScene
             {
                 primitiveScene.InvalidateLegacyResourcePayloads();
                 primitiveScene.ResizeLegacyInstanceMappings(legacySceneData.InstanceCount);
+                primitiveScene.BeginDrawSetSourceRebuild();
                 IReadOnlyList<VividGPUDrivenInstanceSourceData> sources = legacySceneData.InstanceSources;
                 int sourceCount = Mathf.Min(legacySceneData.InstanceCount, sources.Count);
                 for (int instanceIndex = 0; instanceIndex < legacySceneData.InstanceCount; instanceIndex++)
@@ -189,12 +202,16 @@ namespace VividRP.Runtime.PrimitiveScene
                         VividPrimitiveResourceKey geometryKey = CreateGeometryKey(source);
                         VividPrimitiveResourceKey materialKey = CreateMaterialKey(source);
                         primitiveScene.UpdateGeometryPayload(geometryKey, legacyInstance);
-                        if (legacyInstance.MaterialIndex < (uint) legacySceneData.MaterialCount)
+                        bool hasLegacyMaterial = legacyInstance.MaterialIndex < (uint) legacySceneData.MaterialCount;
+                        VividMaterialData legacyMaterial = hasLegacyMaterial
+                            ? legacySceneData.Materials[(int) legacyInstance.MaterialIndex]
+                            : default;
+                        if (hasLegacyMaterial)
                         {
                             primitiveScene.UpdateMaterialPayload(
                                 materialKey,
                                 legacyInstance.MaterialIndex,
-                                legacySceneData.Materials[(int) legacyInstance.MaterialIndex]);
+                                legacyMaterial);
                         }
 
                         if (primitiveScene.TryGetAbsoluteDrawSectionIndex(
@@ -210,6 +227,21 @@ namespace VividRP.Runtime.PrimitiveScene
                                 DrawSectionIndex = (uint) drawSectionIndex,
                                 Flags = 1u,
                             };
+
+                            if (hasLegacyMaterial
+                                && primitiveScene.IsDrawSectionRenderable(drawSectionIndex))
+                            {
+                                primitiveScene.SetDrawSetSource(
+                                    drawSectionIndex,
+                                    new VividPrimitiveDrawSourceData
+                                    {
+                                        PrimitiveHandle = primitiveHandle,
+                                        AbsoluteDrawSectionIndex = (uint) drawSectionIndex,
+                                        LegacyInstanceIndex = (uint) instanceIndex,
+                                        RendererListID = legacyMaterial.RendererListID,
+                                        Flags = VividPrimitiveDrawSourceFlags.Valid,
+                                    });
+                            }
                         }
                     }
                     primitiveScene.SetLegacyInstanceMapping(instanceIndex, mapping);

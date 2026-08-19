@@ -223,11 +223,13 @@ namespace VividRP.Runtime
 
         internal static void SetGPUDrivenFrameData(
             GraphicsBuffer visibleMeshletRenderRequestsBuffer,
-            GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer)
+            GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer,
+            PrimitiveScene.VividPrimitiveDrawSet primitiveDrawSet = null)
         {
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
             gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer = visibleMeshletRenderRequestsBuffer;
             gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer = visibleMeshletIndirectDrawArgsBuffer;
+            gpuDrivenFrameData.primitiveDrawSet = primitiveDrawSet;
             gpuDrivenFrameData.ResetOcclusion();
         }
 

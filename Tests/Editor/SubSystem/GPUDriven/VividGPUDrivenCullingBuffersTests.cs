@@ -1,3 +1,4 @@
+using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -157,8 +158,123 @@ namespace VividRP.Editor.Tests
 
                 if (cameraObject != null)
                 {
-                    Object.DestroyImmediate(cameraObject);
+                    UnityEngine.Object.DestroyImmediate(cameraObject);
                 }
+            }
+        }
+
+        [Test]
+        public void GPUInstanceCullingShader_MapsDrawSetEntriesToLegacyInstanceIds()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VividGPUDrivenSceneData).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "GPUInstanceCulling.compute");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+            StringAssert.Contains("StructuredBuffer<uint> _VividPrimitiveDrawSetInstanceIndices", source);
+            StringAssert.Contains("dispatchInstanceIndex >= _VividPrimitiveDrawSetInstanceCount", source);
+            StringAssert.Contains("_VividPrimitiveDrawSetInstanceIndices[dispatchInstanceIndex]", source);
+            StringAssert.Contains("instanceID >= _InstanceDataCount", source);
+            StringAssert.Contains("job.InstanceID = instanceID", source);
+
+            Assert.That(
+                VividGPUDrivenShaderIDs._VividPrimitiveDrawSetInstanceIndices,
+                Is.EqualTo(Shader.PropertyToID("_VividPrimitiveDrawSetInstanceIndices")));
+            Assert.That(
+                VividGPUDrivenShaderIDs._VividPrimitiveDrawSetInstanceCount,
+                Is.EqualTo(Shader.PropertyToID("_VividPrimitiveDrawSetInstanceCount")));
+            Assert.That(
+                VividGPUDrivenShaderIDs._VividPrimitiveDrawSetEnabled,
+                Is.EqualTo(Shader.PropertyToID("_VividPrimitiveDrawSetEnabled")));
+        }
+
+        [Test]
+        public void Dispatcher_DrawSetCountContractAcceptsZeroAndValidPositiveInputs()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            using var sceneBuffers = new VividGPUDrivenBufferSet();
+            using var dispatcher = new VividGPUDrivenCullingDispatcher(supportsOcclusion: false);
+            using var drawSetIndices = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                1,
+                sizeof(uint));
+            drawSetIndices.SetData(new[] { 0u });
+
+            GameObject cameraObject = null;
+            CommandBuffer cmd = null;
+            try
+            {
+                cameraObject = new GameObject("GPUDrivenDrawSetContractCamera");
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.Build(
+                    VividInstancePassMask.Main,
+                    out VividGPUCullingContext cullingContext,
+                    out VividGPULODSelectionContext lodSelectionContext);
+                cmd = CommandBufferPool.Get("GPUDrivenDrawSetContract");
+
+                Assert.DoesNotThrow(() => dispatcher.Dispatch(
+                    cmd,
+                    cullingContext,
+                    lodSelectionContext,
+                    sceneData,
+                    sceneBuffers,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    0.0f,
+                    default,
+                    null,
+                    0));
+                Assert.DoesNotThrow(() => dispatcher.Dispatch(
+                    cmd,
+                    cullingContext,
+                    lodSelectionContext,
+                    sceneData,
+                    sceneBuffers,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    0.0f,
+                    default,
+                    drawSetIndices,
+                    1));
+                Assert.Throws<System.ArgumentOutOfRangeException>(() => dispatcher.Dispatch(
+                    cmd,
+                    cullingContext,
+                    lodSelectionContext,
+                    sceneData,
+                    sceneBuffers,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    0.0f,
+                    default,
+                    drawSetIndices,
+                    2));
+            }
+            finally
+            {
+                if (cmd != null)
+                {
+                    cmd.Clear();
+                    CommandBufferPool.Release(cmd);
+                }
+                if (cameraObject != null)
+                    UnityEngine.Object.DestroyImmediate(cameraObject);
             }
         }
     }

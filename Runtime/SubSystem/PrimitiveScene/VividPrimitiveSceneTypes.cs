@@ -8,25 +8,31 @@ using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.PrimitiveScene
 {
+    [StructLayout(LayoutKind.Sequential)]
     internal readonly struct VividPrimitiveHandle : IEquatable<VividPrimitiveHandle>
     {
-        internal static readonly VividPrimitiveHandle Invalid = new(-1, 0u);
+        internal static readonly VividPrimitiveHandle Invalid = new(-1, 0u, 0u);
 
-        internal VividPrimitiveHandle(int index, uint generation)
+        internal VividPrimitiveHandle(int index, uint generation, uint sceneToken)
         {
             Index = index;
             Generation = generation;
+            SceneToken = sceneToken;
         }
 
         internal int Index { get; }
 
         internal uint Generation { get; }
 
-        internal bool IsValid => Index >= 0 && Generation != 0u;
+        internal uint SceneToken { get; }
+
+        internal bool IsValid => Index >= 0 && Generation != 0u && SceneToken != 0u;
 
         public bool Equals(VividPrimitiveHandle other)
         {
-            return Index == other.Index && Generation == other.Generation;
+            return Index == other.Index
+                && Generation == other.Generation
+                && SceneToken == other.SceneToken;
         }
 
         public override bool Equals(object obj)
@@ -38,9 +44,23 @@ namespace VividRP.Runtime.PrimitiveScene
         {
             unchecked
             {
-                return (Index * 397) ^ (int) Generation;
+                int hashCode = (Index * 397) ^ (int) Generation;
+                return (hashCode * 397) ^ (int) SceneToken;
             }
         }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VividPrimitiveCullRecord
+    {
+        internal VividPrimitiveHandle Handle;
+        internal float3 BoundsMin;
+        internal float3 BoundsMax;
+        internal uint DrawSectionOffset;
+        internal uint DrawSectionCount;
+        internal VividInstancePassMask PassMask;
+        internal VividPrimitiveFlags Flags;
+        internal uint CameraLayerMask;
     }
 
     internal readonly struct VividPrimitiveGeometryHandle : IEquatable<VividPrimitiveGeometryHandle>
@@ -330,12 +350,36 @@ namespace VividRP.Runtime.PrimitiveScene
             VividInstancePassMask passMask,
             VividPrimitiveFlags flags,
             IReadOnlyList<VividPrimitiveDrawSectionDescriptor> drawSections)
+            : this(
+                sourceEntityId,
+                objectToWorldMatrix,
+                worldToObjectMatrix,
+                worldBounds,
+                renderingLayerMask,
+                uint.MaxValue,
+                passMask,
+                flags,
+                drawSections)
+        {
+        }
+
+        internal VividPrimitiveSourceDescriptor(
+            EntityId sourceEntityId,
+            Matrix4x4 objectToWorldMatrix,
+            Matrix4x4 worldToObjectMatrix,
+            Bounds worldBounds,
+            uint renderingLayerMask,
+            uint cameraLayerMask,
+            VividInstancePassMask passMask,
+            VividPrimitiveFlags flags,
+            IReadOnlyList<VividPrimitiveDrawSectionDescriptor> drawSections)
         {
             SourceEntityId = sourceEntityId;
             ObjectToWorldMatrix = objectToWorldMatrix;
             WorldToObjectMatrix = worldToObjectMatrix;
             WorldBounds = worldBounds;
             RenderingLayerMask = renderingLayerMask;
+            CameraLayerMask = cameraLayerMask;
             PassMask = passMask;
             Flags = flags;
             DrawSections = drawSections ?? Array.Empty<VividPrimitiveDrawSectionDescriptor>();
@@ -350,6 +394,8 @@ namespace VividRP.Runtime.PrimitiveScene
         internal Bounds WorldBounds { get; }
 
         internal uint RenderingLayerMask { get; }
+
+        internal uint CameraLayerMask { get; }
 
         internal VividInstancePassMask PassMask { get; }
 

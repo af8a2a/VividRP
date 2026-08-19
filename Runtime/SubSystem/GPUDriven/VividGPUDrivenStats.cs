@@ -32,7 +32,8 @@ namespace VividRP.Runtime.GPUDriven
             int registeredBackendResourceCount,
             int forcedMeshLODNodeDepth,
             float meshLODErrorThreshold,
-            VividPrimitiveSceneStats primitiveSceneStats = default)
+            VividPrimitiveSceneStats primitiveSceneStats = default,
+            VividPrimitiveDrawSetStats primitiveDrawSetStats = default)
         {
             IsAvailable = isAvailable;
             StatusMessage = statusMessage;
@@ -61,6 +62,7 @@ namespace VividRP.Runtime.GPUDriven
             ForcedMeshLODNodeDepth = forcedMeshLODNodeDepth;
             MeshLODErrorThreshold = meshLODErrorThreshold;
             PrimitiveSceneStats = primitiveSceneStats;
+            PrimitiveDrawSetStats = primitiveDrawSetStats;
         }
 
         internal bool IsAvailable { get; }
@@ -90,6 +92,7 @@ namespace VividRP.Runtime.GPUDriven
         internal int ForcedMeshLODNodeDepth { get; }
         internal float MeshLODErrorThreshold { get; }
         internal VividPrimitiveSceneStats PrimitiveSceneStats { get; }
+        internal VividPrimitiveDrawSetStats PrimitiveDrawSetStats { get; }
     }
 
     internal static class VividGPUDrivenStatsRegistry

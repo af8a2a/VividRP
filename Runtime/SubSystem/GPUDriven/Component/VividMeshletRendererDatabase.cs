@@ -53,6 +53,7 @@ namespace VividRP.Runtime.GPUDriven
         public Matrix4x4 worldToObjectMatrix;
         public Bounds localBounds;
         public Bounds worldBounds;
+        internal uint cameraLayerMask;
         public uint renderingLayerMask;
         public ShadowCastingMode shadowCastingMode;
         public MotionVectorGenerationMode motionVectorGenerationMode;
@@ -278,6 +279,29 @@ namespace VividRP.Runtime.GPUDriven
             return updatedTrackedData;
         }
 
+        internal VividMeshletRendererRenderData UpdateTerrainRenderData(VividTerrain terrain)
+        {
+            if (terrain == null)
+            {
+                return default;
+            }
+
+            EntityId terrainEntityId = terrain.GetEntityId();
+            if (!TryGetRendererResources(terrainEntityId, out VividMeshletRendererResources trackedResources))
+            {
+                return UpdateTerrainData(terrain);
+            }
+
+            VividMeshletRendererRenderData trackedData = CreateTerrainData(terrain);
+            StoreRendererData(trackedData, trackedResources);
+            MarkInstancesChanged();
+            MarkPrimitiveChanged(
+                trackedData.meshletRendererEntityId,
+                VividMeshletRendererChangeFlags.Transform | VividMeshletRendererChangeFlags.RenderState);
+            terrain.NotifyTerrainDataSynchronized();
+            return trackedData;
+        }
+
         internal bool TryGetRendererData(MeshletRenderer meshletRenderer, out VividMeshletRendererRenderData trackedData)
         {
             trackedData = default;
@@ -347,6 +371,8 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
+            meshletRenderer.InvalidatePrimitiveHandle();
+
             EntityId meshletRendererEntityId = meshletRenderer.GetEntityId();
             if (meshletRendererEntityId.Equals(EntityId.None)
                 || !m_EntityIdToDataIndex.TryGetValue(meshletRendererEntityId, out int removedIndex))
@@ -365,6 +391,8 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
+            terrain.InvalidatePrimitiveHandle();
+
             EntityId terrainEntityId = terrain.GetEntityId();
             if (terrainEntityId.Equals(EntityId.None)
                 || !m_EntityIdToDataIndex.TryGetValue(terrainEntityId, out int removedIndex))
@@ -381,6 +409,7 @@ namespace VividRP.Runtime.GPUDriven
             bool hadRenderers = m_RendererData.Count > 0
                 || m_RendererResources.Count > 0
                 || m_EntityIdToDataIndex.Count > 0;
+            InvalidatePrimitiveHandles();
             m_RendererData.Clear();
             m_RendererResources.Clear();
             m_EntityIdToDataIndex.Clear();
@@ -388,6 +417,18 @@ namespace VividRP.Runtime.GPUDriven
             m_PrimitiveChangeJournalRequiresFullResync = true;
             if (hadRenderers)
                 MarkStructureChanged();
+        }
+
+        internal void InvalidatePrimitiveHandles()
+        {
+            for (int index = 0; index < m_RendererResources.Count; index++)
+            {
+                VividMeshletRendererResources resources = m_RendererResources[index];
+                if (resources.MeshletRenderer != null)
+                    resources.MeshletRenderer.InvalidatePrimitiveHandle();
+                if (resources.Terrain != null)
+                    resources.Terrain.InvalidatePrimitiveHandle();
+            }
         }
 
         internal void ConsumePrimitiveChanges(
@@ -542,6 +583,7 @@ namespace VividRP.Runtime.GPUDriven
                 worldToObjectMatrix = worldToObjectMatrix,
                 localBounds = localBounds,
                 worldBounds = worldBounds,
+                cameraLayerMask = GetCameraLayerMask(meshletRenderer.gameObject),
                 renderingLayerMask = meshletRenderer.renderingLayerMask,
                 shadowCastingMode = meshletRenderer.shadowCastingMode,
                 motionVectorGenerationMode = meshletRenderer.motionVectorGenerationMode,
@@ -605,7 +647,7 @@ namespace VividRP.Runtime.GPUDriven
             VividTerrainData terrainData = terrain.Data;
             Matrix4x4 objectToWorldMatrix = terrain.transform.localToWorldMatrix;
             Matrix4x4 worldToObjectMatrix = terrain.transform.worldToLocalMatrix;
-            Bounds localBounds = terrainData != null ? terrainData.LocalBounds : default;
+            Bounds localBounds = ResolveTerrainLocalBounds(terrainData);
             int chunkCount = terrainData?.Chunks.Count ?? 0;
 
             return new VividMeshletRendererRenderData
@@ -617,6 +659,7 @@ namespace VividRP.Runtime.GPUDriven
                 worldToObjectMatrix = worldToObjectMatrix,
                 localBounds = localBounds,
                 worldBounds = TransformBounds(localBounds, objectToWorldMatrix),
+                cameraLayerMask = GetCameraLayerMask(terrain.gameObject),
                 renderingLayerMask = terrain.RenderingLayerMask,
                 shadowCastingMode = terrain.ShadowCastingMode,
                 motionVectorGenerationMode = MotionVectorGenerationMode.Camera,
@@ -624,6 +667,18 @@ namespace VividRP.Runtime.GPUDriven
                 subMeshCount = chunkCount,
                 materialCount = terrainData != null ? 1 : 0,
             };
+        }
+
+        private static Bounds ResolveTerrainLocalBounds(VividTerrainData terrainData)
+        {
+            IReadOnlyList<VividTerrainChunkData> chunks = terrainData?.Chunks;
+            if (chunks == null || chunks.Count == 0)
+                return terrainData != null ? terrainData.LocalBounds : default;
+
+            Bounds localBounds = chunks[0].LocalBounds;
+            for (int chunkIndex = 1; chunkIndex < chunks.Count; chunkIndex++)
+                localBounds.Encapsulate(chunks[chunkIndex].LocalBounds);
+            return localBounds;
         }
 
         private static VividMeshletRendererResources CreateTerrainResources(VividTerrain terrain)
@@ -719,6 +774,11 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return flags;
+        }
+
+        private static uint GetCameraLayerMask(GameObject gameObject)
+        {
+            return 1u << gameObject.layer;
         }
 
         private static VividMeshletRendererFlags BuildTerrainFlags(VividTerrain terrain)

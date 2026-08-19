@@ -86,9 +86,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SceneToken_RejectsHandleFromAnotherScene()
+        {
+            using var firstScene = new VividPrimitiveScene();
+            using var secondScene = new VividPrimitiveScene();
+            EntityId source = CreateEntity("Scene Token Primitive");
+
+            VividPrimitiveHandle firstHandle = firstScene.RegisterOrUpdate(CreateDescriptor(source));
+            VividPrimitiveHandle secondHandle = secondScene.RegisterOrUpdate(
+                firstHandle,
+                CreateDescriptor(source));
+
+            Assert.That(firstHandle.Index, Is.EqualTo(secondHandle.Index));
+            Assert.That(firstHandle.Generation, Is.EqualTo(secondHandle.Generation));
+            Assert.That(firstHandle.SceneToken, Is.Not.EqualTo(secondHandle.SceneToken));
+            Assert.That(firstScene.IsValid(firstHandle), Is.True);
+            Assert.That(firstScene.IsValid(secondHandle), Is.False);
+            Assert.That(secondScene.IsValid(firstHandle), Is.False);
+            Assert.That(secondScene.IsValid(secondHandle), Is.True);
+        }
+
+        [Test]
         public void RemoveAndRegister_ReusesPrimitiveSlotWithNewGeneration()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             EntityId firstEntity = CreateEntity("First Primitive");
             EntityId secondEntity = CreateEntity("Second Primitive");
 
@@ -110,9 +131,57 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ActiveCullRecords_AreDenseAndRemainAddressableAfterSwapBack()
+        {
+            using var scene = new VividPrimitiveScene();
+            EntityId first = CreateEntity("Cull Record A");
+            EntityId second = CreateEntity("Cull Record B");
+            EntityId third = CreateEntity("Cull Record C");
+            VividPrimitiveHandle firstHandle = scene.RegisterOrUpdate(CreateDescriptor(
+                first,
+                cameraLayerMask: 1u << 2));
+            VividPrimitiveHandle secondHandle = scene.RegisterOrUpdate(CreateDescriptor(
+                second,
+                cameraLayerMask: 1u << 3));
+            VividPrimitiveHandle thirdHandle = scene.RegisterOrUpdate(CreateDescriptor(
+                third,
+                cameraLayerMask: 1u << 4));
+
+            Assert.That(UnsafeUtility.SizeOf<VividPrimitiveHandle>(), Is.EqualTo(12));
+            Assert.That(UnsafeUtility.SizeOf<VividPrimitiveCullRecord>(), Is.EqualTo(56));
+            Assert.That(scene.ActiveCullRecords.Length, Is.EqualTo(3));
+            Assert.That(scene.ActiveCullRecords[0].Handle, Is.EqualTo(firstHandle));
+            Assert.That(scene.ActiveCullRecords[1].Handle, Is.EqualTo(secondHandle));
+            Assert.That(scene.ActiveCullRecords[2].Handle, Is.EqualTo(thirdHandle));
+            Assert.That(scene.ActiveCullRecords[2].CameraLayerMask, Is.EqualTo(1u << 4));
+
+            Assert.That(scene.Remove(second), Is.True);
+
+            Assert.That(scene.ActiveCullRecords.Length, Is.EqualTo(2));
+            Assert.That(scene.ActiveCullRecords[0].Handle, Is.EqualTo(firstHandle));
+            Assert.That(scene.ActiveCullRecords[1].Handle, Is.EqualTo(thirdHandle));
+            Assert.That(scene.ActiveCullRecords[0].Handle, Is.Not.EqualTo(secondHandle));
+            Assert.That(scene.ActiveCullRecords[1].Handle, Is.Not.EqualTo(secondHandle));
+
+            Matrix4x4 moved = Matrix4x4.Translate(new Vector3(7.0f, 0.0f, 0.0f));
+            VividPrimitiveHandle updatedHandle = scene.RegisterOrUpdate(
+                thirdHandle,
+                CreateDescriptor(
+                    third,
+                    objectToWorld: moved,
+                    cameraLayerMask: 1u << 7));
+
+            Assert.That(updatedHandle, Is.EqualTo(thirdHandle));
+            Assert.That(scene.ActiveCullRecords[1].Handle, Is.EqualTo(thirdHandle));
+            Assert.That(scene.ActiveCullRecords[1].BoundsMin.x, Is.EqualTo(6.0f));
+            Assert.That(scene.ActiveCullRecords[1].BoundsMax.x, Is.EqualTo(8.0f));
+            Assert.That(scene.ActiveCullRecords[1].CameraLayerMask, Is.EqualTo(1u << 7));
+        }
+
+        [Test]
         public void Register_ThreeSectionsCreatesOnePrimitiveAndOneTransform()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             EntityId source = CreateEntity("Three Section Primitive");
             VividPrimitiveResourceKey geometryKey = CreateResourceKey(
                 VividPrimitiveResourceDomain.MeshletGeometry,
@@ -150,7 +219,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SharedResources_AreReleasedOnlyAfterLastPrimitiveIsRemoved()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             EntityId firstEntity = CreateEntity("First Shared Primitive");
             EntityId secondEntity = CreateEntity("Second Shared Primitive");
             VividPrimitiveResourceKey geometryKey = CreateResourceKey(
@@ -198,7 +267,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SameSectionCountUpdate_KeepsRangeAndStableSharedHandles()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             EntityId source = CreateEntity("In Place Primitive");
             VividPrimitiveResourceKey firstGeometry = CreateResourceKey(
                 VividPrimitiveResourceDomain.MeshletGeometry,
@@ -250,7 +319,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void LegacyPayloadChanges_DoNotChangeLogicalHandles()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             EntityId source = CreateEntity("Legacy Payload Primitive");
             VividPrimitiveResourceKey geometry = CreateResourceKey(
                 VividPrimitiveResourceDomain.MeshletGeometry,
@@ -300,7 +369,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void RebuildLegacyBridge_MapsAllResourceDomainsAndPreservesLogicalHandlesOnReorder()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             var legacyScene = new VividGPUDrivenSceneData();
             EntityId[] primitiveIds =
             {
@@ -380,6 +449,17 @@ namespace VividRP.Editor.Tests
 
             VividPrimitiveSceneAdapter.RebuildLegacyBridge(scene, legacyScene);
             AssertBridgeRows(scene, primitiveIds, handles, sections, new[] { 0u, 1u, 2u, 3u });
+            Assert.That(scene.DrawSetSources.Length, Is.EqualTo(scene.DrawSectionTable.Count));
+            for (int row = 0; row < primitiveIds.Length; row++)
+            {
+                uint absoluteSectionIndex = scene.LegacyInstanceMappingTable[row].DrawSectionIndex;
+                VividPrimitiveDrawSourceData drawSource = scene.DrawSetSources[(int) absoluteSectionIndex];
+                Assert.That(drawSource.PrimitiveHandle, Is.EqualTo(handles[row]));
+                Assert.That(drawSource.AbsoluteDrawSectionIndex, Is.EqualTo(absoluteSectionIndex));
+                Assert.That(drawSource.LegacyInstanceIndex, Is.EqualTo((uint) row));
+                Assert.That(drawSource.RendererListID, Is.EqualTo((VividRendererListID) row));
+                Assert.That(drawSource.Flags, Is.EqualTo(VividPrimitiveDrawSourceFlags.Valid));
+            }
 
             legacyScene.ClearInstances();
             uint[] reorderedMaterialIndices = { 2u, 0u, 3u, 1u };
@@ -417,13 +497,22 @@ namespace VividRP.Editor.Tests
                 Assert.That(stableSection.GeometryGeneration, Is.EqualTo(sections[sourceIndex].GeometryGeneration));
                 Assert.That(stableSection.MaterialIndex, Is.EqualTo(sections[sourceIndex].MaterialIndex));
                 Assert.That(stableSection.MaterialGeneration, Is.EqualTo(sections[sourceIndex].MaterialGeneration));
+
+                VividPrimitiveDrawSourceData drawSource =
+                    scene.DrawSetSources[(int) mapping.DrawSectionIndex];
+                Assert.That(drawSource.PrimitiveHandle, Is.EqualTo(handles[sourceIndex]));
+                Assert.That(drawSource.AbsoluteDrawSectionIndex, Is.EqualTo(mapping.DrawSectionIndex));
+                Assert.That(drawSource.LegacyInstanceIndex, Is.EqualTo((uint) row));
+                Assert.That(drawSource.RendererListID, Is.EqualTo(
+                    legacyScene.Materials[(int) reorderedMaterialIndices[sourceIndex]].RendererListID));
+                Assert.That(drawSource.Flags, Is.EqualTo(VividPrimitiveDrawSourceFlags.Valid));
             }
         }
 
         [Test]
         public void MissingMaterialKeys_DoNotMergeAcrossOwnersOrSections()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             EntityId firstEntity = CreateEntity("First Missing Material Primitive");
             EntityId secondEntity = CreateEntity("Second Missing Material Primitive");
             VividPrimitiveDrawSectionDescriptor[] firstSections =
@@ -496,7 +585,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void TransformUpdate_DirtiesOnlyTransformTablesAndPreviousCatchesUpOnce()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             EntityId source = CreateEntity("Moving Primitive");
             VividPrimitiveResourceKey geometryKey = CreateResourceKey(
                 VividPrimitiveResourceDomain.MeshletGeometry,
@@ -566,7 +655,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Upload_EmptySceneCreatesPlaceholdersAndBuffersGrowWithoutShrinking()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             using var buffers = new VividPrimitiveSceneBufferSet();
 
             buffers.Upload(scene);
@@ -614,7 +703,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void FullResync_MarksEveryPopulatedTableForWholeTableUpload()
         {
-            var scene = new VividPrimitiveScene();
+            using var scene = new VividPrimitiveScene();
             EntityId source = CreateEntity("Full Resync Primitive");
             VividPrimitiveResourceKey geometry = CreateResourceKey(
                 VividPrimitiveResourceDomain.MeshletGeometry,
@@ -662,7 +751,8 @@ namespace VividRP.Editor.Tests
         private static VividPrimitiveSourceDescriptor CreateDescriptor(
             EntityId source,
             IReadOnlyList<VividPrimitiveDrawSectionDescriptor> sections = null,
-            Matrix4x4? objectToWorld = null)
+            Matrix4x4? objectToWorld = null,
+            uint cameraLayerMask = uint.MaxValue)
         {
             Matrix4x4 transform = objectToWorld ?? Matrix4x4.identity;
             var center = new Vector3(transform.m03, transform.m13, transform.m23);
@@ -672,6 +762,7 @@ namespace VividRP.Editor.Tests
                 transform.inverse,
                 new Bounds(center, Vector3.one * 2.0f),
                 uint.MaxValue,
+                cameraLayerMask,
                 VividInstancePassMask.Main | VividInstancePassMask.Shadows,
                 VividPrimitiveFlags.Valid | VividPrimitiveFlags.ReceiveShadows,
                 sections ?? Array.Empty<VividPrimitiveDrawSectionDescriptor>());

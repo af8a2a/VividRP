@@ -9,6 +9,9 @@
 
 StructuredBuffer<VividGPUCullingContext> _CullingContexts;
 uint _CullingContextCount;
+StructuredBuffer<uint> _VividPrimitiveDrawSetInstanceIndices;
+uint _VividPrimitiveDrawSetInstanceCount;
+uint _VividPrimitiveDrawSetEnabled;
 
 RWStructuredBuffer<VividMeshletListBuildJob> _MeshletListBuildJobs;
 RWStructuredBuffer<uint> _MeshletListBuildJobCounter;
@@ -30,7 +33,16 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
         _MeshletListBuildIndirectArgs[2] = 1u;
     }
 
-    const uint instanceID = dispatchThreadID.x;
+    const uint dispatchInstanceIndex = dispatchThreadID.x;
+    if (_VividPrimitiveDrawSetEnabled != 0u &&
+        dispatchInstanceIndex >= _VividPrimitiveDrawSetInstanceCount)
+    {
+        return;
+    }
+
+    const uint instanceID = _VividPrimitiveDrawSetEnabled != 0u
+        ? _VividPrimitiveDrawSetInstanceIndices[dispatchInstanceIndex]
+        : dispatchInstanceIndex;
     if (instanceID >= _InstanceDataCount)
     {
         return;

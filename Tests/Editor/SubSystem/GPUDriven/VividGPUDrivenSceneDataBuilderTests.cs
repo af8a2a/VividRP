@@ -223,12 +223,13 @@ namespace VividRP.Editor.Tests
                 materialProxy.SourceMaterial = material;
                 meshletRenderer.SetMeshletCollections(new[] { firstCollection, secondCollection });
                 meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                gameObject.layer = 6;
                 VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
                 database.UpdateRendererData(meshletRenderer);
 
                 var legacyScene = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                var primitiveScene = new VividPrimitiveScene();
+                using var primitiveScene = new VividPrimitiveScene();
                 var adapter = new VividPrimitiveSceneAdapter();
                 using var textureBackend = new BindlessGPUDrivenTextureBackend(
                     new FakeBindlessTextureDescriptorAllocator(16));
@@ -255,6 +256,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(primitiveScene.TryGetHandle(
                     meshletRenderer.GetEntityId(),
                     out VividPrimitiveHandle handle), Is.True);
+                Assert.That(meshletRenderer.primitiveHandle, Is.EqualTo(handle));
+                Assert.That(primitiveScene.ActiveCullRecords.Length, Is.EqualTo(1));
+                Assert.That(primitiveScene.ActiveCullRecords[0].Handle, Is.EqualTo(handle));
+                Assert.That(primitiveScene.ActiveCullRecords[0].CameraLayerMask, Is.EqualTo(1u << 6));
                 VividPrimitiveData primitive = primitiveScene.PrimitiveTable[handle.Index];
                 Assert.That(primitive.DrawSectionCount, Is.EqualTo(2u));
                 for (int instanceIndex = 0; instanceIndex < legacyScene.InstanceCount; instanceIndex++)
@@ -301,8 +306,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(primitiveScene.GeometryTable.DirtyPageCount, Is.Zero);
                 Assert.That(primitiveScene.MaterialTable.DirtyPageCount, Is.Zero);
                 Assert.That(primitiveScene.LegacyInstanceMappingTable.DirtyPageCount, Is.Zero);
+                Assert.That(meshletRenderer.primitiveHandle, Is.EqualTo(handle));
 
                 database.UnregisterRenderer(meshletRenderer);
+                Assert.That(meshletRenderer.primitiveHandle.IsValid, Is.False);
+                Assert.That(primitiveScene.IsValid(handle), Is.True);
                 staticDataChanged = builder.Build(
                     legacyScene,
                     database,
@@ -317,6 +325,7 @@ namespace VividRP.Editor.Tests
                     materialDataChanged,
                     2);
                 Assert.That(primitiveScene.GetStats().ActivePrimitiveCount, Is.Zero);
+                Assert.That(primitiveScene.ActiveCullRecords.Length, Is.Zero);
                 Assert.That(primitiveScene.LegacyInstanceMappingTable.Count, Is.Zero);
                 Assert.That(primitiveScene.IsValid(handle), Is.False);
             }
@@ -1237,13 +1246,15 @@ namespace VividRP.Editor.Tests
                 );
                 var firstBounds = new Bounds(new Vector3(4.0f, 1.0f, 16.0f), new Vector3(8.0f, 2.0f, 32.0f));
                 var secondBounds = new Bounds(new Vector3(12.0f, 1.0f, 16.0f), new Vector3(8.0f, 2.0f, 32.0f));
+                Bounds expectedTerrainBounds = firstBounds;
+                expectedTerrainBounds.Encapsulate(secondBounds);
                 terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
                 terrainData.Initialize(
                     string.Empty,
                     "SceneBuilderTerrain",
                     33,
                     new Vector3(16.0f, 4.0f, 32.0f),
-                    new Bounds(new Vector3(8.0f, 1.0f, 16.0f), new Vector3(16.0f, 2.0f, 32.0f)),
+                    firstBounds,
                     new Vector2Int(2, 1),
                     VividTerrainBakeSettings.Default,
                     null,
@@ -1256,6 +1267,7 @@ namespace VividRP.Editor.Tests
                 );
 
                 gameObject = new GameObject("Terrain Scene Builder");
+                gameObject.layer = 9;
                 VividTerrain terrain = gameObject.AddComponent<VividTerrain>();
                 terrain.SetData(terrainData);
 
@@ -1283,7 +1295,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.Instances[0].PassMask,
                     Is.EqualTo(VividInstancePassMask.Main | VividInstancePassMask.Shadows));
 
-                var primitiveScene = new VividPrimitiveScene();
+                using var primitiveScene = new VividPrimitiveScene();
                 var primitiveAdapter = new VividPrimitiveSceneAdapter();
                 primitiveAdapter.Synchronize(
                     primitiveScene,
@@ -1295,6 +1307,14 @@ namespace VividRP.Editor.Tests
                 Assert.That(primitiveScene.TryGetHandle(
                     terrain.GetEntityId(),
                     out VividPrimitiveHandle terrainHandle), Is.True);
+                Assert.That(terrain.primitiveHandle, Is.EqualTo(terrainHandle));
+                Assert.That(primitiveScene.ActiveCullRecords.Length, Is.EqualTo(1));
+                Assert.That(primitiveScene.ActiveCullRecords[0].Handle, Is.EqualTo(terrainHandle));
+                Assert.That(primitiveScene.ActiveCullRecords[0].CameraLayerMask, Is.EqualTo(1u << 9));
+                Assert.That(primitiveScene.ActiveCullRecords[0].BoundsMin.x,
+                    Is.EqualTo(expectedTerrainBounds.min.x).Within(0.0001f));
+                Assert.That(primitiveScene.ActiveCullRecords[0].BoundsMax.x,
+                    Is.EqualTo(expectedTerrainBounds.max.x).Within(0.0001f));
                 Assert.That(primitiveScene.GetStats().ActivePrimitiveCount, Is.EqualTo(1));
                 Assert.That(primitiveScene.GetStats().ActiveDrawSectionCount, Is.EqualTo(2));
                 Assert.That(primitiveScene.GetStats().ActiveGeometryCount, Is.EqualTo(2));

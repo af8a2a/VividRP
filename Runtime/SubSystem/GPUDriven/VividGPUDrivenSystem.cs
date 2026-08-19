@@ -43,11 +43,13 @@ namespace VividRP.Runtime.GPUDriven
         private readonly VividGPUDrivenSceneDataBuilder m_SceneDataBuilder;
         private readonly VividPrimitiveSceneAdapter m_PrimitiveSceneAdapter;
         private readonly VividPrimitiveSceneBufferSet m_PrimitiveSceneBufferSet;
+        private readonly VividPrimitiveDrawSetSystem m_PrimitiveDrawSetSystem;
         private readonly IGPUDrivenTextureBackend m_TextureBackend;
         private readonly BindlessGPUDrivenTextureBackend m_LegacyBindlessBackend;
         private readonly GPUDrivenTextureBackendMode m_TextureBackendMode;
         private readonly bool m_TerrainRuntimeVirtualTextureRequested;
         private VividGPUDrivenCullingDispatcher m_ShadowCullingDispatcher;
+        private VividPrimitiveDrawSet m_CurrentMainViewDrawSet;
         private int m_ShadowCullingContextCount;
         private bool m_IsDisposed;
 
@@ -106,6 +108,7 @@ namespace VividRP.Runtime.GPUDriven
             PrimitiveScene = new VividPrimitiveScene();
             m_PrimitiveSceneAdapter = new VividPrimitiveSceneAdapter();
             m_PrimitiveSceneBufferSet = new VividPrimitiveSceneBufferSet();
+            m_PrimitiveDrawSetSystem = new VividPrimitiveDrawSetSystem();
             ForcedMeshLODNodeDepth = VividGPUDrivenCullingContextUtility.DefaultForcedMeshLODNodeDepth;
             MeshLODErrorThreshold = VividGPUDrivenCullingContextUtility.DefaultMeshLODErrorThreshold;
         }
@@ -238,6 +241,8 @@ namespace VividRP.Runtime.GPUDriven
 
         internal VividPrimitiveSceneBufferSet PrimitiveSceneBufferSet => m_PrimitiveSceneBufferSet;
 
+        internal VividPrimitiveDrawSet CurrentMainViewDrawSet => m_CurrentMainViewDrawSet;
+
         public bool IsAvailable => m_TextureBackend.IsAvailable;
 
         public string UnavailableReason => m_TextureBackend.UnavailableReason;
@@ -350,6 +355,7 @@ namespace VividRP.Runtime.GPUDriven
         public void PrepareFrame(bool reportStats = true)
         {
             ThrowIfDisposed();
+            m_CurrentMainViewDrawSet = null;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameMarker.Auto())
             {
@@ -428,7 +434,8 @@ namespace VividRP.Runtime.GPUDriven
                 fixupVisibleMeshletIndirectDrawArgsCompute,
                 passMask,
                 default,
-                cameraName);
+                cameraName,
+                null);
         }
 
         internal void CullMainView(
@@ -441,6 +448,7 @@ namespace VividRP.Runtime.GPUDriven
             in VividGPUDrivenOcclusionCullingParameters occlusionParameters,
             string cameraName = null)
         {
+            m_CurrentMainViewDrawSet = BuildMainViewDrawSet(camera);
             CullInternal(
                 camera,
                 cmd,
@@ -450,7 +458,22 @@ namespace VividRP.Runtime.GPUDriven
                 fixupVisibleMeshletIndirectDrawArgsCompute,
                 VividInstancePassMask.Main,
                 occlusionParameters,
-                cameraName);
+                cameraName,
+                m_CurrentMainViewDrawSet);
+        }
+
+        private VividPrimitiveDrawSet BuildMainViewDrawSet(Camera camera)
+        {
+            ThrowIfDisposed();
+            if (camera != null && camera.stereoEnabled)
+                return null;
+
+            return m_PrimitiveDrawSetSystem.Build(
+                camera,
+                PrimitiveScene.ActiveCullRecords,
+                PrimitiveScene.DrawSetSources,
+                PrimitiveScene.SceneRevision,
+                Time.frameCount);
         }
 
         private void CullInternal(
@@ -462,7 +485,8 @@ namespace VividRP.Runtime.GPUDriven
             ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
             VividInstancePassMask passMask,
             in VividGPUDrivenOcclusionCullingParameters occlusionParameters,
-            string cameraName)
+            string cameraName,
+            VividPrimitiveDrawSet drawSet)
         {
             ThrowIfDisposed();
 
@@ -480,7 +504,9 @@ namespace VividRP.Runtime.GPUDriven
                     passMask,
                     ForcedMeshLODNodeDepth,
                     MeshLODErrorThreshold,
-                    occlusionParameters
+                    occlusionParameters,
+                    drawSet?.LegacyInstanceIndexBuffer,
+                    drawSet?.DrawCount ?? -1
                 );
             }
 
@@ -579,6 +605,10 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             SceneData.Clear();
+            m_CurrentMainViewDrawSet = null;
+            m_PrimitiveDrawSetSystem.Dispose();
+            VividMeshletRendererDatabase.instance.InvalidatePrimitiveHandles();
+            PrimitiveScene.Dispose();
             m_BufferSet.Dispose();
             m_PrimitiveSceneBufferSet.Dispose();
             m_CullingDispatcher.Dispose();
@@ -739,7 +769,8 @@ namespace VividRP.Runtime.GPUDriven
             {
                 PassRecorder.SetGPUDrivenFrameData(
                     gpuDrivenSystem.VisibleMeshletRenderRequestsBuffer,
-                    gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer);
+                    gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer,
+                    gpuDrivenSystem.CurrentMainViewDrawSet);
                 PassRecorder.SetGPUDrivenOcclusionFrameData(
                     occlusionCullingEnabled,
                     hasOcclusionHistory,
@@ -842,7 +873,8 @@ namespace VividRP.Runtime.GPUDriven
                         backendStats.RegisteredResourceCount,
                         ForcedMeshLODNodeDepth,
                         MeshLODErrorThreshold,
-                        PrimitiveScene.GetStats()));
+                        PrimitiveScene.GetStats(),
+                        m_CurrentMainViewDrawSet?.GetStats() ?? default));
             }
         }
     }

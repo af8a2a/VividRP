@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 
 namespace VividRP.Editor.GPUDriven
 {
@@ -153,7 +154,10 @@ namespace VividRP.Editor.GPUDriven
             return new GPUDrivenMaterialProxyBindingResult(true, string.Empty, createdAssetPaths.ToArray(), warnings.ToArray());
         }
 
-        public static GPUDrivenMaterialProxyBindingResult CreateOrBindMaterialProxies(MeshletRenderer meshletRenderer)
+        public static GPUDrivenMaterialProxyBindingResult CreateOrBindMaterialProxies(
+            MeshletRenderer meshletRenderer,
+            bool skipStreamedVirtualTextureRebuildIfUpToDate = false
+        )
         {
             if (meshletRenderer == null)
             {
@@ -232,7 +236,12 @@ namespace VividRP.Editor.GPUDriven
                     warnings.AddRange(syncResult.Warnings);
                 }
 
-                if (!BuildOrRefreshStreamedVirtualTexture(materialProxy, out string streamedAssetPath, out bool streamedAssetCreated, out string streamError))
+                if (!BuildOrRefreshStreamedVirtualTexture(
+                        materialProxy,
+                        out string streamedAssetPath,
+                        out bool streamedAssetCreated,
+                        out string streamError,
+                        skipStreamedVirtualTextureRebuildIfUpToDate))
                 {
                     warnings.Add(streamError);
                 }
@@ -329,7 +338,10 @@ namespace VividRP.Editor.GPUDriven
                 warnings.ToArray());
         }
 
-        public static GPUDrivenMaterialProxySyncResult SyncMaterialProxiesFromSourceMaterials(MeshletRenderer meshletRenderer)
+        public static GPUDrivenMaterialProxySyncResult SyncMaterialProxiesFromSourceMaterials(
+            MeshletRenderer meshletRenderer,
+            bool skipStreamedVirtualTextureRebuildIfUpToDate = false
+        )
         {
             if (meshletRenderer == null)
             {
@@ -376,7 +388,12 @@ namespace VividRP.Editor.GPUDriven
                 changed |= syncResult.Changed;
                 warnings.AddRange(syncResult.Warnings);
                 uint revisionAfterSync = materialProxy.Revision;
-                if (!BuildOrRefreshStreamedVirtualTexture(materialProxy, out _, out _, out string streamError))
+                if (!BuildOrRefreshStreamedVirtualTexture(
+                        materialProxy,
+                        out _,
+                        out _,
+                        out string streamError,
+                        skipStreamedVirtualTextureRebuildIfUpToDate))
                     warnings.Add(streamError);
                 changed |= materialProxy.Revision != revisionAfterSync;
             }
@@ -393,7 +410,8 @@ namespace VividRP.Editor.GPUDriven
             GPUDrivenMaterialProxy materialProxy,
             out string assetPath,
             out bool wasCreated,
-            out string errorMessage)
+            out string errorMessage,
+            bool skipIfUpToDate = false)
         {
             assetPath = string.Empty;
             wasCreated = false;
@@ -437,7 +455,8 @@ namespace VividRP.Editor.GPUDriven
                     ResolveAddressMode(materialProxy),
                     out VividVirtualTextureAsset streamedAsset,
                     out wasCreated,
-                    out errorMessage))
+                    out errorMessage,
+                    skipIfUpToDate))
             {
                 return false;
             }
@@ -462,7 +481,8 @@ namespace VividRP.Editor.GPUDriven
             VividVirtualTextureAddressMode addressMode,
             out VividVirtualTextureAsset streamedAsset,
             out bool wasCreated,
-            out string errorMessage)
+            out string errorMessage,
+            bool skipIfUpToDate = false)
         {
             streamedAsset = null;
             wasCreated = false;
@@ -504,27 +524,62 @@ namespace VividRP.Editor.GPUDriven
                     return false;
                 }
 
-                Undo.RecordObject(importer, "Build GPUDriven Streamed VT Asset");
-                importer.SourceTexture = baseMap;
-                importer.NormalTexture = normalMap;
-                importer.MaskTexture = maskMap;
-                importer.BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface;
-                importer.AddressMode = addressMode;
-                importer.StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
-                importer.StreamCompression = VividVirtualTextureStreamCompression.Zstd;
-                importer.MaskStorage = maskMode == GPUDrivenMaterialMaskMode.Roughness
+                VividVirtualTextureMaskStorage maskStorage = maskMode == GPUDrivenMaterialMaskMode.Roughness
                     ? VividVirtualTextureMaskStorage.SingleChannelR
                     : VividVirtualTextureMaskStorage.PackedRGBA;
-                importer.BCQuality = VividVirtualTextureBCQuality.Normal;
-                importer.ZstdLevel = 3;
-                importer.ChunkTargetKiB = 256;
-                importer.PageSize = 128;
-                importer.BorderSize = 4;
-                importer.MipCount = 0;
-                importer.FallbackColor = Color.white;
-                importer.NormalFallbackColor = new Color(0.5f, 0.5f, 1.0f, 0.5f);
-                importer.MaskFallbackColor = Color.white;
-                EditorUtility.SetDirty(importer);
+                bool importerChanged = importer.SourceTexture != baseMap
+                                       || importer.NormalTexture != normalMap
+                                       || importer.MaskTexture != maskMap
+                                       || importer.BuildProfile != VividVirtualTextureBuildProfile.GPUDrivenSurface
+                                       || importer.AddressMode != addressMode
+                                       || importer.StorageProfile != VividVirtualTextureStorageProfile.DesktopBCn
+                                       || importer.StreamCompression != VividVirtualTextureStreamCompression.Zstd
+                                       || importer.MaskStorage != maskStorage
+                                       || importer.BCQuality != VividVirtualTextureBCQuality.Normal
+                                       || importer.ZstdLevel != 3
+                                       || importer.ChunkTargetKiB != 256
+                                       || importer.PageSize != 128
+                                       || importer.BorderSize != 4
+                                       || importer.MipCount != 0
+                                       || importer.FallbackColor != Color.white
+                                       || importer.NormalFallbackColor != new Color(0.5f, 0.5f, 1.0f, 0.5f)
+                                       || importer.MaskFallbackColor != Color.white;
+
+                streamedAsset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(assetPath);
+                if (skipIfUpToDate
+                    && !importerChanged
+                    && !EditorUtility.IsDirty(importer)
+                    && IsReusableSourceTexture(baseMap)
+                    && IsReusableSourceTexture(normalMap)
+                    && IsReusableSourceTexture(maskMap)
+                    && IsReusableStreamedVirtualTexture(streamedAsset))
+                {
+                    return true;
+                }
+
+                if (importerChanged)
+                {
+                    Undo.RecordObject(importer, "Build GPUDriven Streamed VT Asset");
+                    importer.SourceTexture = baseMap;
+                    importer.NormalTexture = normalMap;
+                    importer.MaskTexture = maskMap;
+                    importer.BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface;
+                    importer.AddressMode = addressMode;
+                    importer.StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
+                    importer.StreamCompression = VividVirtualTextureStreamCompression.Zstd;
+                    importer.MaskStorage = maskStorage;
+                    importer.BCQuality = VividVirtualTextureBCQuality.Normal;
+                    importer.ZstdLevel = 3;
+                    importer.ChunkTargetKiB = 256;
+                    importer.PageSize = 128;
+                    importer.BorderSize = 4;
+                    importer.MipCount = 0;
+                    importer.FallbackColor = Color.white;
+                    importer.NormalFallbackColor = new Color(0.5f, 0.5f, 1.0f, 0.5f);
+                    importer.MaskFallbackColor = Color.white;
+                    EditorUtility.SetDirty(importer);
+                }
+
                 importer.SaveAndReimport();
 
                 streamedAsset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(assetPath);
@@ -553,6 +608,33 @@ namespace VividRP.Editor.GPUDriven
             return texture != null && texture.wrapMode == TextureWrapMode.Clamp
                 ? VividVirtualTextureAddressMode.Clamp
                 : VividVirtualTextureAddressMode.Repeat;
+        }
+
+        private static bool IsReusableStreamedVirtualTexture(VividVirtualTextureAsset streamedAsset)
+        {
+            if (!VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(streamedAsset, out _))
+            {
+                return false;
+            }
+
+            VividVirtualTextureBuiltData builtData = streamedAsset.BuiltData;
+            if (builtData == null
+                || !builtData.HasStreamData
+                || builtData.ContainerSchemaVersion != VividVirtualTextureBuiltData.CurrentContainerSchemaVersion
+                || string.IsNullOrWhiteSpace(builtData.StreamDataPath)
+                || !File.Exists(builtData.StreamDataPath))
+            {
+                return false;
+            }
+
+            return VividVirtualTextureAssetProducer.ValidateContainerHeader(
+                builtData.StreamDataPath,
+                builtData);
+        }
+
+        private static bool IsReusableSourceTexture(Texture2D texture)
+        {
+            return texture == null || (AssetDatabase.Contains(texture) && !EditorUtility.IsDirty(texture));
         }
 
         private static void RefreshSource(MeshletRenderer meshletRenderer, string undoLabel)

@@ -111,12 +111,16 @@ namespace VividRP.Editor.GPUDriven
             materialProxy.CullMode = (CullMode) Mathf.RoundToInt(GetFloat(sourceMaterial, s_CullId, (float) CullMode.Back));
             materialProxy.DisableLighting = false;
 
-            EditorUtility.SetDirty(materialProxy);
-            AssetDatabase.SaveAssetIfDirty(materialProxy);
+            bool changed = materialProxy.Revision != initialRevision;
+            if (changed)
+            {
+                EditorUtility.SetDirty(materialProxy);
+                AssetDatabase.SaveAssetIfDirty(materialProxy);
+            }
 
             return new GPUDrivenMaterialProxySyncResult(
                 true,
-                materialProxy.Revision != initialRevision,
+                changed,
                 string.Empty,
                 warnings.ToArray()
             );

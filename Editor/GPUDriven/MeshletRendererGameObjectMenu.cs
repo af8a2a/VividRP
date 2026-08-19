@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Editor.GPUDriven
 {
@@ -27,13 +28,16 @@ namespace VividRP.Editor.GPUDriven
             int failedRendererCount = 0;
             int skippedRendererCount = 0;
             var warnings = new List<string>();
+            var meshletCollectionCache = new Dictionary<Mesh, VividMeshletCollectionAsset[]>();
 
             try
             {
                 for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
                 {
                     MeshletRendererRecursiveConversionResult result =
-                        MeshletRendererEditorUtility.TakeOverAndRemoveSourceMeshRenderersRecursively(roots[rootIndex]);
+                        MeshletRendererEditorUtility.TakeOverAndRemoveSourceMeshRenderersRecursively(
+                            roots[rootIndex],
+                            meshletCollectionCache);
 
                     convertedRendererCount += result.ConvertedRendererCount;
                     addedMeshletRendererCount += result.AddedMeshletRendererCount;

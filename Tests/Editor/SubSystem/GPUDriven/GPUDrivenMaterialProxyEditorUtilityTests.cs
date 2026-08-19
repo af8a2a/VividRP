@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using NUnit.Framework;
 using UnityEditor;
@@ -219,6 +220,46 @@ namespace VividRP.Editor.Tests
             Assert.That(materialProxy.StreamedVirtualTexture.BuiltData.HasStreamData, Is.True);
             Assert.That(materialProxy.StreamedVirtualTexture.BuiltData.RuntimeStreamDataPath, Is.Not.Empty);
             Assert.That(File.Exists(materialProxy.StreamedVirtualTexture.BuiltData.StreamDataPath), Is.True);
+
+            VividVirtualTextureAsset initialStreamedAsset = materialProxy.StreamedVirtualTexture;
+            string streamDataPath = initialStreamedAsset.BuiltData.StreamDataPath;
+            var sentinelWriteTime = new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(streamDataPath, sentinelWriteTime);
+
+            success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out _,
+                out wasCreated,
+                out errorMessage,
+                skipIfUpToDate: true);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.False);
+            Assert.That(materialProxy.StreamedVirtualTexture, Is.SameAs(initialStreamedAsset));
+            Assert.That(File.GetLastWriteTimeUtc(streamDataPath), Is.EqualTo(sentinelWriteTime));
+
+            File.Delete(streamDataPath);
+            success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out _,
+                out wasCreated,
+                out errorMessage,
+                skipIfUpToDate: true);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.False);
+            Assert.That(File.Exists(streamDataPath), Is.True);
+
+            File.SetLastWriteTimeUtc(streamDataPath, sentinelWriteTime);
+            success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out _,
+                out wasCreated,
+                out errorMessage);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.False);
+            Assert.That(File.GetLastWriteTimeUtc(streamDataPath), Is.Not.EqualTo(sentinelWriteTime));
         }
 
         [Test]

@@ -242,7 +242,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var nativeCmd = context.GetNativeCommandBuffer();
-            BindVisibilityTargets(nativeCmd, clearTargets: true);
+            BindVisibilityTargets(nativeCmd, false);
 
             GraphicsBuffer visibleMeshletRenderRequestsBuffer = m_VisibleMeshletRenderRequests?.ImportedGraphicsBuffer;
             GraphicsBuffer visibleMeshletIndirectArgsBuffer = m_VisibleMeshletIndirectArgs?.ImportedGraphicsBuffer;

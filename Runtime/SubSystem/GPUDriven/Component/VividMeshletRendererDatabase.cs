@@ -7,6 +7,30 @@ using VividRP.Runtime.GPUDriven.Meshlets;
 namespace VividRP.Runtime.GPUDriven
 {
     [Flags]
+    internal enum VividMeshletRendererChangeFlags : byte
+    {
+        None = 0,
+        Added = 1 << 0,
+        Removed = 1 << 1,
+        Transform = 1 << 2,
+        RenderState = 1 << 3,
+        Resources = 1 << 4,
+    }
+
+    internal readonly struct VividMeshletRendererChange
+    {
+        internal VividMeshletRendererChange(EntityId entityId, VividMeshletRendererChangeFlags flags)
+        {
+            EntityId = entityId;
+            Flags = flags;
+        }
+
+        internal EntityId EntityId { get; }
+
+        internal VividMeshletRendererChangeFlags Flags { get; }
+    }
+
+    [Flags]
     public enum VividMeshletRendererFlags : uint
     {
         None = 0,
@@ -106,9 +130,11 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMeshletRendererRenderData> m_RendererData = new();
         private readonly List<VividMeshletRendererResources> m_RendererResources = new();
         private readonly Dictionary<EntityId, int> m_EntityIdToDataIndex = new();
+        private readonly Dictionary<EntityId, VividMeshletRendererChangeFlags> m_PrimitiveChanges = new();
         private uint m_StructureRevision;
         private uint m_ResourceRevision;
         private uint m_InstanceRevision;
+        private bool m_PrimitiveChangeJournalRequiresFullResync = true;
 
         private static readonly VividMeshletRendererDatabase s_Instance = new();
 
@@ -145,6 +171,12 @@ namespace VividRP.Runtime.GPUDriven
                 MarkStructureChanged();
             else
                 MarkResourcesChanged();
+            MarkPrimitiveChanged(
+                trackedData.meshletRendererEntityId,
+                (added ? VividMeshletRendererChangeFlags.Added : VividMeshletRendererChangeFlags.None)
+                | VividMeshletRendererChangeFlags.Transform
+                | VividMeshletRendererChangeFlags.RenderState
+                | VividMeshletRendererChangeFlags.Resources);
             meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: true);
             return trackedData;
         }
@@ -165,6 +197,9 @@ namespace VividRP.Runtime.GPUDriven
             VividMeshletRendererRenderData trackedData = CreateRendererData(meshletRenderer);
             StoreRendererData(trackedData, trackedResources);
             MarkInstancesChanged();
+            MarkPrimitiveChanged(
+                trackedData.meshletRendererEntityId,
+                VividMeshletRendererChangeFlags.Transform | VividMeshletRendererChangeFlags.RenderState);
             meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: false);
             return trackedData;
         }
@@ -187,6 +222,9 @@ namespace VividRP.Runtime.GPUDriven
                 CreateTransformOnlyRendererData(meshletRenderer, trackedData);
             StoreRendererData(updatedTrackedData, trackedResources);
             MarkInstancesChanged();
+            MarkPrimitiveChanged(
+                updatedTrackedData.meshletRendererEntityId,
+                VividMeshletRendererChangeFlags.Transform);
             meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: false);
             return updatedTrackedData;
         }
@@ -205,6 +243,12 @@ namespace VividRP.Runtime.GPUDriven
                 MarkStructureChanged();
             else
                 MarkResourcesChanged();
+            MarkPrimitiveChanged(
+                trackedData.meshletRendererEntityId,
+                (added ? VividMeshletRendererChangeFlags.Added : VividMeshletRendererChangeFlags.None)
+                | VividMeshletRendererChangeFlags.Transform
+                | VividMeshletRendererChangeFlags.RenderState
+                | VividMeshletRendererChangeFlags.Resources);
             terrain.NotifyTerrainDataSynchronized();
             return trackedData;
         }
@@ -227,6 +271,9 @@ namespace VividRP.Runtime.GPUDriven
                 CreateTerrainTransformOnlyData(terrain, trackedData);
             StoreRendererData(updatedTrackedData, trackedResources);
             MarkInstancesChanged();
+            MarkPrimitiveChanged(
+                updatedTrackedData.meshletRendererEntityId,
+                VividMeshletRendererChangeFlags.Transform);
             terrain.NotifyTerrainDataSynchronized();
             return updatedTrackedData;
         }
@@ -307,6 +354,7 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
+            MarkPrimitiveChanged(meshletRendererEntityId, VividMeshletRendererChangeFlags.Removed);
             RemoveRendererAt(removedIndex);
         }
 
@@ -324,6 +372,7 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
+            MarkPrimitiveChanged(terrainEntityId, VividMeshletRendererChangeFlags.Removed);
             RemoveRendererAt(removedIndex);
         }
 
@@ -335,8 +384,25 @@ namespace VividRP.Runtime.GPUDriven
             m_RendererData.Clear();
             m_RendererResources.Clear();
             m_EntityIdToDataIndex.Clear();
+            m_PrimitiveChanges.Clear();
+            m_PrimitiveChangeJournalRequiresFullResync = true;
             if (hadRenderers)
                 MarkStructureChanged();
+        }
+
+        internal void ConsumePrimitiveChanges(
+            List<VividMeshletRendererChange> destination,
+            out bool requiresFullResync)
+        {
+            if (destination == null)
+                throw new ArgumentNullException(nameof(destination));
+
+            destination.Clear();
+            foreach (KeyValuePair<EntityId, VividMeshletRendererChangeFlags> change in m_PrimitiveChanges)
+                destination.Add(new VividMeshletRendererChange(change.Key, change.Value));
+            m_PrimitiveChanges.Clear();
+            requiresFullResync = m_PrimitiveChangeJournalRequiresFullResync;
+            m_PrimitiveChangeJournalRequiresFullResync = false;
         }
 
         private bool TryGetRendererData(int dataIndex, out VividMeshletRendererRenderData trackedData)
@@ -426,6 +492,30 @@ namespace VividRP.Runtime.GPUDriven
         private void MarkInstancesChanged()
         {
             m_InstanceRevision = IncrementRevision(m_InstanceRevision);
+        }
+
+        private void MarkPrimitiveChanged(EntityId entityId, VividMeshletRendererChangeFlags flags)
+        {
+            if (entityId.Equals(EntityId.None) || flags == VividMeshletRendererChangeFlags.None)
+                return;
+
+            if ((flags & VividMeshletRendererChangeFlags.Removed) != 0)
+            {
+                m_PrimitiveChanges[entityId] = VividMeshletRendererChangeFlags.Removed;
+                return;
+            }
+
+            if (m_PrimitiveChanges.TryGetValue(entityId, out VividMeshletRendererChangeFlags existingFlags))
+            {
+                if ((existingFlags & VividMeshletRendererChangeFlags.Removed) != 0
+                    && (flags & VividMeshletRendererChangeFlags.Added) != 0)
+                {
+                    m_PrimitiveChanges[entityId] = flags;
+                    return;
+                }
+                flags |= existingFlags;
+            }
+            m_PrimitiveChanges[entityId] = flags;
         }
 
         private static uint IncrementRevision(uint revision)

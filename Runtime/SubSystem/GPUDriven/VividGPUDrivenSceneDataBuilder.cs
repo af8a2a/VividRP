@@ -672,14 +672,61 @@ namespace VividRP.Runtime.GPUDriven
                     ? trackedResources.LocalBounds[subMeshIndex]
                     : trackedData.localBounds;
 
+                VividInstanceData instanceData = CreateInstanceData(
+                    trackedData,
+                    materialIndex,
+                    meshMetadata,
+                    localBounds);
                 sceneData.AddInstance(
-                    CreateInstanceData(
+                    instanceData,
+                    CreateInstanceSourceData(
                         trackedData,
-                        materialIndex,
-                        meshMetadata,
-                        localBounds),
+                        trackedResources,
+                        meshletCollection,
+                        materialProxy,
+                        material,
+                        subMeshIndex),
                     meshMetadata.MaxVisibleMeshletRenderRequestCount);
             }
+        }
+
+        private static VividGPUDrivenInstanceSourceData CreateInstanceSourceData(
+            in VividMeshletRendererRenderData trackedData,
+            in VividMeshletRendererResources trackedResources,
+            VividMeshletCollectionAsset meshletCollection,
+            GPUDrivenMaterialProxy materialProxy,
+            Material material,
+            int sourceSectionIndex)
+        {
+            VividGPUDrivenInstanceSourceFlags flags = VividGPUDrivenInstanceSourceFlags.None;
+            EntityId materialEntityId;
+            if (trackedResources.IsTerrain)
+            {
+                flags |= VividGPUDrivenInstanceSourceFlags.TerrainGeometry
+                    | VividGPUDrivenInstanceSourceFlags.TerrainMaterial;
+                materialEntityId = trackedData.meshletRendererEntityId;
+            }
+            else if (materialProxy != null)
+            {
+                flags |= VividGPUDrivenInstanceSourceFlags.MaterialProxy;
+                materialEntityId = materialProxy.GetEntityId();
+            }
+            else if (material != null)
+            {
+                materialEntityId = material.GetEntityId();
+            }
+            else
+            {
+                flags |= VividGPUDrivenInstanceSourceFlags.MissingMaterial;
+                materialEntityId = EntityId.None;
+            }
+
+            return new VividGPUDrivenInstanceSourceData(
+                trackedData.meshletRendererEntityId,
+                meshletCollection != null ? meshletCollection.GetEntityId() : EntityId.None,
+                materialEntityId,
+                sourceSectionIndex,
+                flags);
         }
 
         private void UpdateRendererRenderability(VividMeshletRendererDatabase database)

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -123,6 +124,54 @@ namespace VividRP.Editor.Tests
 
                 DestroyTestObjects(gameObject, material, mesh);
             }
+        }
+
+        [Test]
+        public void PrimitiveChangeJournal_RemoveThenRegisterKeepsFinalAddedState()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+            var changes = new List<VividMeshletRendererChange>();
+
+            try
+            {
+                database.ConsumePrimitiveChanges(changes, out bool initialFullResync);
+                Assert.That(initialFullResync, Is.True);
+
+                gameObject = CreateMeshRendererObject("MeshletRenderer_JournalReAdd", out mesh, out material);
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                database.UnregisterRenderer(meshletRenderer);
+                database.UpdateRendererData(meshletRenderer);
+
+                database.ConsumePrimitiveChanges(changes, out bool requiresFullResync);
+
+                Assert.That(requiresFullResync, Is.False);
+                Assert.That(changes, Has.Count.EqualTo(1));
+                Assert.That(changes[0].EntityId, Is.EqualTo(meshletRenderer.GetEntityId()));
+                Assert.That((changes[0].Flags & VividMeshletRendererChangeFlags.Added) != 0, Is.True);
+                Assert.That((changes[0].Flags & VividMeshletRendererChangeFlags.Removed) != 0, Is.False);
+                Assert.That((changes[0].Flags & VividMeshletRendererChangeFlags.Resources) != 0, Is.True);
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, material, mesh);
+            }
+        }
+
+        [Test]
+        public void PrimitiveChangeJournal_ClearRequestsFullReconciliation()
+        {
+            VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+            var changes = new List<VividMeshletRendererChange>();
+            database.ConsumePrimitiveChanges(changes, out _);
+
+            database.Clear();
+            database.ConsumePrimitiveChanges(changes, out bool requiresFullResync);
+
+            Assert.That(requiresFullResync, Is.True);
+            Assert.That(changes, Is.Empty);
         }
 
         [Test]

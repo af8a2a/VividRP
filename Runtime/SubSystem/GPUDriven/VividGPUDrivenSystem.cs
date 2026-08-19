@@ -4,6 +4,7 @@ using UnityEngine.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven.Bindless;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -40,6 +41,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly VividGPUDrivenBufferSet m_BufferSet;
         private readonly VividGPUDrivenCullingDispatcher m_CullingDispatcher;
         private readonly VividGPUDrivenSceneDataBuilder m_SceneDataBuilder;
+        private readonly VividPrimitiveSceneAdapter m_PrimitiveSceneAdapter;
+        private readonly VividPrimitiveSceneBufferSet m_PrimitiveSceneBufferSet;
         private readonly IGPUDrivenTextureBackend m_TextureBackend;
         private readonly BindlessGPUDrivenTextureBackend m_LegacyBindlessBackend;
         private readonly GPUDrivenTextureBackendMode m_TextureBackendMode;
@@ -100,6 +103,9 @@ namespace VividRP.Runtime.GPUDriven
             m_CullingDispatcher = new VividGPUDrivenCullingDispatcher();
             m_SceneDataBuilder = sceneDataBuilder ?? throw new ArgumentNullException(nameof(sceneDataBuilder));
             SceneData = new VividGPUDrivenSceneData();
+            PrimitiveScene = new VividPrimitiveScene();
+            m_PrimitiveSceneAdapter = new VividPrimitiveSceneAdapter();
+            m_PrimitiveSceneBufferSet = new VividPrimitiveSceneBufferSet();
             ForcedMeshLODNodeDepth = VividGPUDrivenCullingContextUtility.DefaultForcedMeshLODNodeDepth;
             MeshLODErrorThreshold = VividGPUDrivenCullingContextUtility.DefaultMeshLODErrorThreshold;
         }
@@ -227,6 +233,10 @@ namespace VividRP.Runtime.GPUDriven
         public BindlessTextureContainer BindlessTextureContainer { get; }
 
         public VividGPUDrivenSceneData SceneData { get; }
+
+        internal VividPrimitiveScene PrimitiveScene { get; }
+
+        internal VividPrimitiveSceneBufferSet PrimitiveSceneBufferSet => m_PrimitiveSceneBufferSet;
 
         public bool IsAvailable => m_TextureBackend.IsAvailable;
 
@@ -370,6 +380,16 @@ namespace VividRP.Runtime.GPUDriven
                         out instanceDataChanged
                     );
                 }
+
+                m_PrimitiveSceneAdapter.Synchronize(
+                    PrimitiveScene,
+                    VividMeshletRendererDatabase.instance,
+                    SceneData,
+                    staticDataChanged,
+                    materialDataChanged,
+                    Time.frameCount);
+
+                m_PrimitiveSceneBufferSet.Upload(PrimitiveScene);
 
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameUploadBuffersMarker.Auto())
                 {
@@ -537,6 +557,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             ThrowIfDisposed();
             m_BufferSet.BindGlobals(cmd);
+            m_PrimitiveSceneBufferSet.BindGlobals(cmd, PrimitiveScene);
             m_CullingDispatcher.BindGlobals(cmd);
             if (m_TextureBackend is IGPUDrivenTerrainRuntimeVirtualTextureBackend terrainRVTBackend)
                 terrainRVTBackend.BindTerrainRuntimeVirtualTextureGlobals(cmd);
@@ -559,6 +580,7 @@ namespace VividRP.Runtime.GPUDriven
 
             SceneData.Clear();
             m_BufferSet.Dispose();
+            m_PrimitiveSceneBufferSet.Dispose();
             m_CullingDispatcher.Dispose();
             m_ShadowCullingDispatcher?.Dispose();
             m_ShadowCullingDispatcher = null;
@@ -819,7 +841,8 @@ namespace VividRP.Runtime.GPUDriven
                         backendStats.CreateResourceCallCountThisFrame,
                         backendStats.RegisteredResourceCount,
                         ForcedMeshLODNodeDepth,
-                        MeshLODErrorThreshold));
+                        MeshLODErrorThreshold,
+                        PrimitiveScene.GetStats()));
             }
         }
     }

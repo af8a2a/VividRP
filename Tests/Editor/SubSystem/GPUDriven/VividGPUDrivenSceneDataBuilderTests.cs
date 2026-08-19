@@ -10,6 +10,7 @@ using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Bindless;
 using VividRP.Runtime.GPUDriven.Meshlets;
+using VividRP.Runtime.PrimitiveScene;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
@@ -170,6 +171,165 @@ namespace VividRP.Editor.Tests
             finally
             {
                 DestroyTestObjects(first, second, material, mesh, meshletCollection);
+            }
+        }
+
+        [Test]
+        public void PrimitiveSceneAdapter_BuildsRendererSectionsBridgeAndIncrementalTransformUpdate()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset firstCollection = null;
+            VividMeshletCollectionAsset secondCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateTwoSubMeshMesh("PrimitiveSceneAdapterMesh");
+                material = CreateTestMaterial();
+                firstCollection = CreateMeshletCollectionAsset(
+                    "PrimitiveSceneAdapterCollection0",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 });
+                secondCollection = CreateMeshletCollectionAsset(
+                    "PrimitiveSceneAdapterCollection1",
+                    1,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 });
+                gameObject = CreateMeshletRendererObject(
+                    "PrimitiveSceneAdapterRenderer",
+                    mesh,
+                    new[] { material },
+                    out MeshletRenderer meshletRenderer);
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
+                meshletRenderer.SetMeshletCollections(new[] { firstCollection, secondCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(meshletRenderer);
+
+                var legacyScene = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                var primitiveScene = new VividPrimitiveScene();
+                var adapter = new VividPrimitiveSceneAdapter();
+                using var textureBackend = new BindlessGPUDrivenTextureBackend(
+                    new FakeBindlessTextureDescriptorAllocator(16));
+                bool staticDataChanged = builder.Build(
+                    legacyScene,
+                    database,
+                    textureBackend,
+                    out bool materialDataChanged,
+                    out _);
+                adapter.Synchronize(
+                    primitiveScene,
+                    database,
+                    legacyScene,
+                    staticDataChanged,
+                    materialDataChanged,
+                    0);
+
+                Assert.That(legacyScene.InstanceCount, Is.EqualTo(2));
+                Assert.That(legacyScene.InstanceSources, Has.Count.EqualTo(2));
+                Assert.That(primitiveScene.GetStats().ActivePrimitiveCount, Is.EqualTo(1));
+                Assert.That(primitiveScene.GetStats().ActiveDrawSectionCount, Is.EqualTo(2));
+                Assert.That(primitiveScene.GetStats().ActiveGeometryCount, Is.EqualTo(2));
+                Assert.That(primitiveScene.GetStats().ActiveMaterialCount, Is.EqualTo(1));
+                Assert.That(primitiveScene.TryGetHandle(
+                    meshletRenderer.GetEntityId(),
+                    out VividPrimitiveHandle handle), Is.True);
+                VividPrimitiveData primitive = primitiveScene.PrimitiveTable[handle.Index];
+                Assert.That(primitive.DrawSectionCount, Is.EqualTo(2u));
+                for (int instanceIndex = 0; instanceIndex < legacyScene.InstanceCount; instanceIndex++)
+                {
+                    VividGPUDrivenInstanceSourceData source = legacyScene.InstanceSources[instanceIndex];
+                    VividLegacyInstanceMappingData mapping =
+                        primitiveScene.LegacyInstanceMappingTable[instanceIndex];
+                    Assert.That(source.PrimitiveEntityId, Is.EqualTo(meshletRenderer.GetEntityId()));
+                    Assert.That(source.SourceSectionIndex, Is.EqualTo(instanceIndex));
+                    Assert.That(mapping.PrimitiveIndex, Is.EqualTo((uint) handle.Index));
+                    Assert.That(mapping.PrimitiveGeneration, Is.EqualTo(handle.Generation));
+                    Assert.That(mapping.DrawSectionIndex, Is.EqualTo(
+                        primitive.DrawSectionOffset + (uint) instanceIndex));
+                }
+                VividPrimitiveDrawSectionData firstSection =
+                    primitiveScene.DrawSectionTable[(int) primitive.DrawSectionOffset];
+                VividPrimitiveDrawSectionData secondSection =
+                    primitiveScene.DrawSectionTable[(int) primitive.DrawSectionOffset + 1];
+                Assert.That(firstSection.GeometryIndex, Is.Not.EqualTo(secondSection.GeometryIndex));
+                Assert.That(firstSection.MaterialIndex, Is.EqualTo(secondSection.MaterialIndex));
+
+                using var buffers = new VividPrimitiveSceneBufferSet();
+                buffers.Upload(primitiveScene);
+                gameObject.transform.position = new Vector3(3.0f, 1.0f, -2.0f);
+                database.UpdateRendererTransformData(meshletRenderer);
+                staticDataChanged = builder.Build(
+                    legacyScene,
+                    database,
+                    textureBackend,
+                    out materialDataChanged,
+                    out _);
+                adapter.Synchronize(
+                    primitiveScene,
+                    database,
+                    legacyScene,
+                    staticDataChanged,
+                    materialDataChanged,
+                    1);
+
+                Assert.That(primitiveScene.PrimitiveTable.DirtyPageCount, Is.EqualTo(1));
+                Assert.That(primitiveScene.TransformTable.DirtyPageCount, Is.EqualTo(1));
+                Assert.That(primitiveScene.PreviousTransformTable.DirtyPageCount, Is.EqualTo(1));
+                Assert.That(primitiveScene.DrawSectionTable.DirtyPageCount, Is.Zero);
+                Assert.That(primitiveScene.GeometryTable.DirtyPageCount, Is.Zero);
+                Assert.That(primitiveScene.MaterialTable.DirtyPageCount, Is.Zero);
+                Assert.That(primitiveScene.LegacyInstanceMappingTable.DirtyPageCount, Is.Zero);
+
+                database.UnregisterRenderer(meshletRenderer);
+                staticDataChanged = builder.Build(
+                    legacyScene,
+                    database,
+                    textureBackend,
+                    out materialDataChanged,
+                    out _);
+                adapter.Synchronize(
+                    primitiveScene,
+                    database,
+                    legacyScene,
+                    staticDataChanged,
+                    materialDataChanged,
+                    2);
+                Assert.That(primitiveScene.GetStats().ActivePrimitiveCount, Is.Zero);
+                Assert.That(primitiveScene.LegacyInstanceMappingTable.Count, Is.Zero);
+                Assert.That(primitiveScene.IsValid(handle), Is.False);
+            }
+            finally
+            {
+                DestroyTestObjects(
+                    gameObject,
+                    null,
+                    material,
+                    mesh,
+                    firstCollection,
+                    secondCollection,
+                    materialProxy);
             }
         }
 
@@ -1122,6 +1282,47 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.Instances[1].AABBMin.x, Is.EqualTo(secondBounds.min.x).Within(0.0001f));
                 Assert.That(sceneData.Instances[0].PassMask,
                     Is.EqualTo(VividInstancePassMask.Main | VividInstancePassMask.Shadows));
+
+                var primitiveScene = new VividPrimitiveScene();
+                var primitiveAdapter = new VividPrimitiveSceneAdapter();
+                primitiveAdapter.Synchronize(
+                    primitiveScene,
+                    VividMeshletRendererDatabase.instance,
+                    sceneData,
+                    staticDataChanged,
+                    materialDataChanged,
+                    0);
+                Assert.That(primitiveScene.TryGetHandle(
+                    terrain.GetEntityId(),
+                    out VividPrimitiveHandle terrainHandle), Is.True);
+                Assert.That(primitiveScene.GetStats().ActivePrimitiveCount, Is.EqualTo(1));
+                Assert.That(primitiveScene.GetStats().ActiveDrawSectionCount, Is.EqualTo(2));
+                Assert.That(primitiveScene.GetStats().ActiveGeometryCount, Is.EqualTo(2));
+                Assert.That(primitiveScene.GetStats().ActiveMaterialCount, Is.EqualTo(1));
+                VividPrimitiveData terrainPrimitive = primitiveScene.PrimitiveTable[terrainHandle.Index];
+                VividPrimitiveDrawSectionData firstTerrainSection =
+                    primitiveScene.DrawSectionTable[(int) terrainPrimitive.DrawSectionOffset];
+                VividPrimitiveDrawSectionData secondTerrainSection =
+                    primitiveScene.DrawSectionTable[(int) terrainPrimitive.DrawSectionOffset + 1];
+                Assert.That(terrainPrimitive.DrawSectionCount, Is.EqualTo(2u));
+                Assert.That((terrainPrimitive.Flags & VividPrimitiveFlags.Terrain) != 0, Is.True);
+                Assert.That(firstTerrainSection.GeometryIndex, Is.Not.EqualTo(secondTerrainSection.GeometryIndex));
+                Assert.That(firstTerrainSection.MaterialIndex, Is.EqualTo(secondTerrainSection.MaterialIndex));
+                Assert.That(firstTerrainSection.MaterialGeneration, Is.EqualTo(secondTerrainSection.MaterialGeneration));
+                for (int instanceIndex = 0; instanceIndex < sceneData.InstanceCount; instanceIndex++)
+                {
+                    VividGPUDrivenInstanceSourceData source = sceneData.InstanceSources[instanceIndex];
+                    Assert.That(source.PrimitiveEntityId, Is.EqualTo(terrain.GetEntityId()));
+                    Assert.That(source.MaterialEntityId, Is.EqualTo(terrain.GetEntityId()));
+                    Assert.That((source.Flags & VividGPUDrivenInstanceSourceFlags.TerrainGeometry) != 0, Is.True);
+                    Assert.That((source.Flags & VividGPUDrivenInstanceSourceFlags.TerrainMaterial) != 0, Is.True);
+                    VividLegacyInstanceMappingData mapping =
+                        primitiveScene.LegacyInstanceMappingTable[instanceIndex];
+                    Assert.That(mapping.PrimitiveIndex, Is.EqualTo((uint) terrainHandle.Index));
+                    Assert.That(mapping.PrimitiveGeneration, Is.EqualTo(terrainHandle.Generation));
+                    Assert.That(mapping.DrawSectionIndex, Is.EqualTo(
+                        terrainPrimitive.DrawSectionOffset + (uint) instanceIndex));
+                }
 
                 VividMaterialData materialData = sceneData.Materials[0];
                 Assert.That(materialData.TextureTilingOffset.x, Is.EqualTo(4.0f).Within(0.0001f));

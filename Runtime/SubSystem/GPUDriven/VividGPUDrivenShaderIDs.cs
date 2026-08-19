@@ -15,6 +15,13 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _Meshlets = Shader.PropertyToID(nameof(_Meshlets));
         public static readonly int _SharedVertexBuffer = Shader.PropertyToID(nameof(_SharedVertexBuffer));
         public static readonly int _SharedIndexBuffer = Shader.PropertyToID(nameof(_SharedIndexBuffer));
+        public static readonly int _VividPrimitiveData = Shader.PropertyToID(nameof(_VividPrimitiveData));
+        public static readonly int _VividPrimitiveTransformData = Shader.PropertyToID(nameof(_VividPrimitiveTransformData));
+        public static readonly int _VividPrimitivePreviousTransformData = Shader.PropertyToID(nameof(_VividPrimitivePreviousTransformData));
+        public static readonly int _VividPrimitiveDrawSectionData = Shader.PropertyToID(nameof(_VividPrimitiveDrawSectionData));
+        public static readonly int _VividPrimitiveGeometryData = Shader.PropertyToID(nameof(_VividPrimitiveGeometryData));
+        public static readonly int _VividPrimitiveMaterialData = Shader.PropertyToID(nameof(_VividPrimitiveMaterialData));
+        public static readonly int _VividLegacyInstanceMappingData = Shader.PropertyToID(nameof(_VividLegacyInstanceMappingData));
 
         public static readonly int _InstanceDataCount = Shader.PropertyToID(nameof(_InstanceDataCount));
         public static readonly int _MaterialDataCount = Shader.PropertyToID(nameof(_MaterialDataCount));
@@ -25,6 +32,12 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _MeshletCount = Shader.PropertyToID(nameof(_MeshletCount));
         public static readonly int _SharedVertexCount = Shader.PropertyToID(nameof(_SharedVertexCount));
         public static readonly int _SharedIndexCount = Shader.PropertyToID(nameof(_SharedIndexCount));
+        public static readonly int _VividPrimitiveCount = Shader.PropertyToID(nameof(_VividPrimitiveCount));
+        public static readonly int _VividPrimitiveDrawSectionCount = Shader.PropertyToID(nameof(_VividPrimitiveDrawSectionCount));
+        public static readonly int _VividPrimitiveGeometryCount = Shader.PropertyToID(nameof(_VividPrimitiveGeometryCount));
+        public static readonly int _VividPrimitiveMaterialCount = Shader.PropertyToID(nameof(_VividPrimitiveMaterialCount));
+        public static readonly int _VividLegacyInstanceMappingCount = Shader.PropertyToID(nameof(_VividLegacyInstanceMappingCount));
+        public static readonly int _VividPrimitiveSceneRevision = Shader.PropertyToID(nameof(_VividPrimitiveSceneRevision));
 
         public static readonly int _CullingContexts = Shader.PropertyToID(nameof(_CullingContexts));
         public static readonly int _CullingContextCount = Shader.PropertyToID(nameof(_CullingContextCount));

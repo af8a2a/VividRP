@@ -13,9 +13,11 @@ namespace VividRP.Runtime.PrimitiveScene
     {
         private const int FrustumPlaneCount = 6;
         private const int CullJobBatchSize = 64;
+        private const float FrustumMarginPixels = 4.0f;
         private static readonly ProfilerMarker s_BuildMarker = new("VividRP.PrimitiveScene.DrawSet.Build");
         private static readonly ProfilerMarker s_CullMarker = new("VividRP.PrimitiveScene.DrawSet.Cull");
         private static readonly ProfilerMarker s_BucketMarker = new("VividRP.PrimitiveScene.DrawSet.Bucket");
+        private static readonly ProfilerMarker s_CompleteMarker = new("VividRP.PrimitiveScene.DrawSet.Complete");
         private static readonly ProfilerMarker s_UploadMarker = new("VividRP.PrimitiveScene.DrawSet.Upload");
 
         private readonly Plane[] m_PlaneScratch = new Plane[FrustumPlaneCount];
@@ -55,6 +57,8 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal bool IsBuilt => m_IsBuilt && !m_IsDisposed;
 
+        internal bool HasPendingBuild => m_HasPendingBuild && !m_IsDisposed;
+
         internal GraphicsBuffer LegacyInstanceIndexBuffer => m_LegacyInstanceIndexBuffer;
 
         internal NativeArray<VividPrimitiveDrawSetEntry> Entries =>
@@ -68,7 +72,17 @@ namespace VividRP.Runtime.PrimitiveScene
         internal NativeArray<VividPrimitiveDrawBucket> Buckets =>
             m_Buckets.IsCreated ? m_Buckets : default;
 
-        internal void Build(
+        internal bool MatchesPendingBuild(uint sceneRevision, int frameIndex)
+        {
+            return MatchesPendingBuild(sceneRevision) && m_FrameIndex == frameIndex;
+        }
+
+        internal bool MatchesPendingBuild(uint sceneRevision)
+        {
+            return HasPendingBuild && m_SceneRevision == sceneRevision;
+        }
+
+        internal void Schedule(
             Camera camera,
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
@@ -78,34 +92,32 @@ namespace VividRP.Runtime.PrimitiveScene
             ThrowIfDisposed();
             if (camera == null)
                 throw new ArgumentNullException(nameof(camera));
+            ValidateInputs(cullingRecords, drawSources);
 
-            CompletePendingBuild();
-            // Match the projection used by VividGPUDrivenCullingContextUtility so the
-            // CPU coarse test cannot reject geometry accepted by the jittered GPU view.
-            Matrix4x4 viewProjection = camera.projectionMatrix * camera.worldToCameraMatrix;
+            // beginCameraRendering precedes temporal jitter, so use an expanded form
+            // of the same non-jittered projection VividRP will use as its jitter base.
+            Matrix4x4 projection = ExpandProjectionForCoarseCulling(
+                CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera),
+                camera.pixelWidth,
+                camera.pixelHeight);
+            Matrix4x4 viewProjection = projection * camera.worldToCameraMatrix;
             GeometryUtility.CalculateFrustumPlanes(viewProjection, m_PlaneScratch);
-            EnsureFixedNativeResources();
-            for (int planeIndex = 0; planeIndex < FrustumPlaneCount; planeIndex++)
-            {
-                Plane plane = m_PlaneScratch[planeIndex];
-                Vector3 normal = plane.normal;
-                m_FrustumPlanes[planeIndex] = new float4(
-                    normal.x,
-                    normal.y,
-                    normal.z,
-                    plane.distance);
-            }
 
-            Build(
-                m_FrustumPlanes,
-                unchecked((uint) camera.cullingMask),
-                cullingRecords,
-                drawSources,
-                sceneRevision,
-                frameIndex);
+            using (s_BuildMarker.Auto())
+            {
+                JobHandle dependency = PrepareSchedule(cullingRecords.Length, drawSources.Length);
+                CopyFrustumPlanes(m_PlaneScratch);
+                ScheduleJobs(
+                    unchecked((uint) camera.cullingMask),
+                    cullingRecords,
+                    drawSources,
+                    sceneRevision,
+                    frameIndex,
+                    dependency);
+            }
         }
 
-        internal void Build(
+        internal void Schedule(
             NativeArray<float4> frustumPlanes,
             uint cameraCullingMask,
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
@@ -116,55 +128,59 @@ namespace VividRP.Runtime.PrimitiveScene
             ThrowIfDisposed();
             if (!frustumPlanes.IsCreated || frustumPlanes.Length < FrustumPlaneCount)
                 throw new ArgumentException("DrawSet requires six frustum planes.", nameof(frustumPlanes));
-            if (!cullingRecords.IsCreated)
-                throw new ArgumentException("Culling records must be a created NativeArray.", nameof(cullingRecords));
-            if (!drawSources.IsCreated)
-                throw new ArgumentException("Draw sources must be a created NativeArray.", nameof(drawSources));
+            ValidateInputs(cullingRecords, drawSources);
 
             using (s_BuildMarker.Auto())
             {
-                CompletePendingBuild();
-                EnsureCapacity(cullingRecords.Length, drawSources.Length);
+                JobHandle dependency = PrepareSchedule(cullingRecords.Length, drawSources.Length);
                 CopyFrustumPlanes(frustumPlanes);
-                m_InputPrimitiveCount = cullingRecords.Length;
-                m_InputDrawSourceCount = drawSources.Length;
-                m_FrameIndex = frameIndex;
-                m_SceneRevision = sceneRevision;
-                m_IsBuilt = false;
+                ScheduleJobs(
+                    cameraCullingMask,
+                    cullingRecords,
+                    drawSources,
+                    sceneRevision,
+                    frameIndex,
+                    dependency);
+            }
+        }
 
-                JobHandle cullHandle = default;
-                if (cullingRecords.Length > 0)
-                {
-                    using (s_CullMarker.Auto())
-                    {
-                        cullHandle = new VividPrimitiveFrustumCullJob
-                        {
-                            CullingRecords = cullingRecords,
-                            FrustumPlanes = m_FrustumPlanes,
-                            Visibility = m_Visibility.GetSubArray(0, cullingRecords.Length),
-                            CameraCullingMask = cameraCullingMask,
-                        }.Schedule(cullingRecords.Length, CullJobBatchSize);
-                    }
-                }
+        internal void Build(
+            Camera camera,
+            NativeArray<VividPrimitiveCullRecord> cullingRecords,
+            NativeArray<VividPrimitiveDrawSourceData> drawSources,
+            uint sceneRevision,
+            int frameIndex)
+        {
+            Schedule(camera, cullingRecords, drawSources, sceneRevision, frameIndex);
+            CompleteScheduledBuild();
+        }
 
-                using (s_BucketMarker.Auto())
-                {
-                    m_PendingBuild = new VividPrimitiveBuildDrawSetJob
-                    {
-                        CullingRecords = cullingRecords,
-                        Visibility = m_Visibility.GetSubArray(0, cullingRecords.Length),
-                        DrawSources = drawSources,
-                        Entries = m_Entries,
-                        LegacyInstanceIndices = m_LegacyInstanceIndices,
-                        Buckets = m_Buckets,
-                        BucketCounts = m_BucketCounts,
-                        BucketWriteCursors = m_BucketWriteCursors,
-                        Result = m_BuildResult,
-                    }.Schedule(cullHandle);
-                    m_HasPendingBuild = true;
-                    JobHandle.ScheduleBatchedJobs();
-                }
+        internal void Build(
+            NativeArray<float4> frustumPlanes,
+            uint cameraCullingMask,
+            NativeArray<VividPrimitiveCullRecord> cullingRecords,
+            NativeArray<VividPrimitiveDrawSourceData> drawSources,
+            uint sceneRevision,
+            int frameIndex)
+        {
+            Schedule(
+                frustumPlanes,
+                cameraCullingMask,
+                cullingRecords,
+                drawSources,
+                sceneRevision,
+                frameIndex);
+            CompleteScheduledBuild();
+        }
 
+        internal bool CompleteScheduledBuild()
+        {
+            ThrowIfDisposed();
+            if (!m_HasPendingBuild)
+                return m_IsBuilt;
+
+            using (s_CompleteMarker.Auto())
+            {
                 CompletePendingBuild();
                 VividPrimitiveDrawSetBuildResult result = m_BuildResult[0];
                 m_VisiblePrimitiveCount = result.VisiblePrimitiveCount;
@@ -172,7 +188,27 @@ namespace VividRP.Runtime.PrimitiveScene
                 m_NonEmptyBucketCount = result.NonEmptyBucketCount;
                 UploadLegacyInstanceIndices();
                 m_IsBuilt = true;
+                return true;
             }
+        }
+
+        internal void CompleteAndInvalidate()
+        {
+            ThrowIfDisposed();
+            // This is a write barrier for PrimitiveScene's NativeLists. Wait for any
+            // readers, but deliberately skip result publication and GPU upload because
+            // the source snapshot is about to change.
+            CompletePendingBuild();
+            m_IsBuilt = false;
+            m_InputPrimitiveCount = 0;
+            m_InputDrawSourceCount = 0;
+            m_VisiblePrimitiveCount = 0;
+            m_DrawCount = 0;
+            m_NonEmptyBucketCount = 0;
+            m_UploadCount = 0;
+            m_UploadBytes = 0L;
+            m_FrameIndex = -1;
+            m_SceneRevision = 0u;
         }
 
         internal bool TryGetBucket(
@@ -229,12 +265,51 @@ namespace VividRP.Runtime.PrimitiveScene
             m_IsDisposed = true;
         }
 
-        private void EnsureCapacity(int primitiveCount, int drawSourceCount)
+        private JobHandle PrepareSchedule(int primitiveCount, int drawSourceCount)
         {
             EnsureFixedNativeResources();
-            EnsureNativeCapacity(ref m_Visibility, primitiveCount);
-            EnsureNativeCapacity(ref m_Entries, drawSourceCount);
-            EnsureNativeCapacity(ref m_LegacyInstanceIndices, drawSourceCount);
+            JobHandle dependency = m_HasPendingBuild ? m_PendingBuild : default;
+            bool deferDisposal = m_HasPendingBuild;
+            JobHandle deferredDisposals = default;
+            bool hasDeferredDisposals = false;
+
+            // Plane coefficients are populated on the CPU. Allocate a fresh array while
+            // an earlier cull still reads the previous one, then retire the old storage
+            // after that build completes.
+            if (deferDisposal)
+            {
+                ScheduleDeferredDispose(ref m_FrustumPlanes, dependency, ref deferredDisposals, ref hasDeferredDisposals);
+                m_FrustumPlanes = CreateNativeArray<float4>(FrustumPlaneCount);
+            }
+
+            EnsureNativeCapacity(
+                ref m_Visibility,
+                primitiveCount,
+                dependency,
+                deferDisposal,
+                ref deferredDisposals,
+                ref hasDeferredDisposals);
+            EnsureNativeCapacity(
+                ref m_Entries,
+                drawSourceCount,
+                dependency,
+                deferDisposal,
+                ref deferredDisposals,
+                ref hasDeferredDisposals);
+            EnsureNativeCapacity(
+                ref m_LegacyInstanceIndices,
+                drawSourceCount,
+                dependency,
+                deferDisposal,
+                ref deferredDisposals,
+                ref hasDeferredDisposals);
+
+            JobHandle preparedDependency = hasDeferredDisposals
+                ? JobHandle.CombineDependencies(dependency, deferredDisposals)
+                : dependency;
+            if (m_HasPendingBuild)
+                m_PendingBuild = preparedDependency;
+            return preparedDependency;
         }
 
         private void EnsureFixedNativeResources()
@@ -280,6 +355,97 @@ namespace VividRP.Runtime.PrimitiveScene
         {
             for (int planeIndex = 0; planeIndex < FrustumPlaneCount; planeIndex++)
                 m_FrustumPlanes[planeIndex] = source[planeIndex];
+        }
+
+        private void CopyFrustumPlanes(Plane[] source)
+        {
+            for (int planeIndex = 0; planeIndex < FrustumPlaneCount; planeIndex++)
+            {
+                Plane plane = source[planeIndex];
+                Vector3 normal = plane.normal;
+                m_FrustumPlanes[planeIndex] = new float4(
+                    normal.x,
+                    normal.y,
+                    normal.z,
+                    plane.distance);
+            }
+        }
+
+        internal static Matrix4x4 ExpandProjectionForCoarseCulling(
+            Matrix4x4 projection,
+            int pixelWidth,
+            int pixelHeight)
+        {
+            // beginCameraRendering fires before VividRP applies temporal jitter. Expand
+            // the unjittered frustum by a small screen-space guard band so a later TAA,
+            // TSR, FSR or DLSS offset cannot turn this coarse CPU reject into a false
+            // negative. GPU culling still uses the exact jittered projection.
+            float horizontalScale = 1.0f
+                                    / (1.0f + (2.0f * FrustumMarginPixels)
+                                        / Mathf.Max(1, pixelWidth));
+            float verticalScale = 1.0f
+                                  / (1.0f + (2.0f * FrustumMarginPixels)
+                                      / Mathf.Max(1, pixelHeight));
+            for (int column = 0; column < 4; column++)
+            {
+                projection[0, column] *= horizontalScale;
+                projection[1, column] *= verticalScale;
+            }
+
+            return projection;
+        }
+
+        private void ScheduleJobs(
+            uint cameraCullingMask,
+            NativeArray<VividPrimitiveCullRecord> cullingRecords,
+            NativeArray<VividPrimitiveDrawSourceData> drawSources,
+            uint sceneRevision,
+            int frameIndex,
+            JobHandle dependency)
+        {
+            m_InputPrimitiveCount = cullingRecords.Length;
+            m_InputDrawSourceCount = drawSources.Length;
+            m_VisiblePrimitiveCount = 0;
+            m_DrawCount = 0;
+            m_NonEmptyBucketCount = 0;
+            m_UploadCount = 0;
+            m_UploadBytes = 0L;
+            m_FrameIndex = frameIndex;
+            m_SceneRevision = sceneRevision;
+            m_IsBuilt = false;
+
+            JobHandle cullHandle = dependency;
+            if (cullingRecords.Length > 0)
+            {
+                using (s_CullMarker.Auto())
+                {
+                    cullHandle = new VividPrimitiveFrustumCullJob
+                    {
+                        CullingRecords = cullingRecords,
+                        FrustumPlanes = m_FrustumPlanes,
+                        Visibility = m_Visibility.GetSubArray(0, cullingRecords.Length),
+                        CameraCullingMask = cameraCullingMask,
+                    }.Schedule(cullingRecords.Length, CullJobBatchSize, dependency);
+                }
+            }
+
+            using (s_BucketMarker.Auto())
+            {
+                m_PendingBuild = new VividPrimitiveBuildDrawSetJob
+                {
+                    CullingRecords = cullingRecords,
+                    Visibility = m_Visibility.GetSubArray(0, cullingRecords.Length),
+                    DrawSources = drawSources,
+                    Entries = m_Entries,
+                    LegacyInstanceIndices = m_LegacyInstanceIndices,
+                    Buckets = m_Buckets,
+                    BucketCounts = m_BucketCounts,
+                    BucketWriteCursors = m_BucketWriteCursors,
+                    Result = m_BuildResult,
+                }.Schedule(cullHandle);
+                m_HasPendingBuild = true;
+                JobHandle.ScheduleBatchedJobs();
+            }
         }
 
         private void CompletePendingBuild()
@@ -328,7 +494,13 @@ namespace VividRP.Runtime.PrimitiveScene
             }
         }
 
-        private static void EnsureNativeCapacity<T>(ref NativeArray<T> array, int requiredCount)
+        private static void EnsureNativeCapacity<T>(
+            ref NativeArray<T> array,
+            int requiredCount,
+            JobHandle dependency,
+            bool deferDisposal,
+            ref JobHandle deferredDisposals,
+            ref bool hasDeferredDisposals)
             where T : struct
         {
             requiredCount = Mathf.Max(1, requiredCount);
@@ -336,11 +508,38 @@ namespace VividRP.Runtime.PrimitiveScene
                 return;
 
             int capacity = Mathf.NextPowerOfTwo(requiredCount);
-            DisposeIfCreated(ref array);
-            array = new NativeArray<T>(
-                capacity,
+            if (deferDisposal)
+                ScheduleDeferredDispose(ref array, dependency, ref deferredDisposals, ref hasDeferredDisposals);
+            else
+                DisposeIfCreated(ref array);
+            array = CreateNativeArray<T>(capacity);
+        }
+
+        private static NativeArray<T> CreateNativeArray<T>(int length)
+            where T : struct
+        {
+            return new NativeArray<T>(
+                length,
                 Allocator.Persistent,
                 NativeArrayOptions.UninitializedMemory);
+        }
+
+        private static void ScheduleDeferredDispose<T>(
+            ref NativeArray<T> array,
+            JobHandle dependency,
+            ref JobHandle deferredDisposals,
+            ref bool hasDeferredDisposals)
+            where T : struct
+        {
+            if (!array.IsCreated)
+                return;
+
+            JobHandle disposeHandle = array.Dispose(dependency);
+            array = default;
+            deferredDisposals = hasDeferredDisposals
+                ? JobHandle.CombineDependencies(deferredDisposals, disposeHandle)
+                : disposeHandle;
+            hasDeferredDisposals = true;
         }
 
         private static void DisposeIfCreated<T>(ref NativeArray<T> array)
@@ -356,11 +555,21 @@ namespace VividRP.Runtime.PrimitiveScene
             if (m_IsDisposed)
                 throw new ObjectDisposedException(nameof(VividPrimitiveDrawSet));
         }
+
+        private static void ValidateInputs(
+            NativeArray<VividPrimitiveCullRecord> cullingRecords,
+            NativeArray<VividPrimitiveDrawSourceData> drawSources)
+        {
+            if (!cullingRecords.IsCreated)
+                throw new ArgumentException("Culling records must be a created NativeArray.", nameof(cullingRecords));
+            if (!drawSources.IsCreated)
+                throw new ArgumentException("Draw sources must be a created NativeArray.", nameof(drawSources));
+        }
     }
 
     internal sealed class VividPrimitiveDrawSetSystem : CameraRelativeSystem<VividPrimitiveDrawSet>
     {
-        internal VividPrimitiveDrawSet Build(
+        internal VividPrimitiveDrawSet Schedule(
             Camera camera,
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
@@ -372,13 +581,45 @@ namespace VividRP.Runtime.PrimitiveScene
 
             PurgeDestroyedCameras();
             VividPrimitiveDrawSet drawSet = GetOrCreateBase(camera);
-            drawSet.Build(
+            drawSet.Schedule(
                 camera,
                 cullingRecords,
                 drawSources,
                 sceneRevision,
                 frameIndex >= 0 ? frameIndex : Time.frameCount);
             return drawSet;
+        }
+
+        internal VividPrimitiveDrawSet Build(
+            Camera camera,
+            NativeArray<VividPrimitiveCullRecord> cullingRecords,
+            NativeArray<VividPrimitiveDrawSourceData> drawSources,
+            uint sceneRevision,
+            int frameIndex = -1)
+        {
+            VividPrimitiveDrawSet drawSet = Schedule(
+                camera,
+                cullingRecords,
+                drawSources,
+                sceneRevision,
+                frameIndex);
+            drawSet.CompleteScheduledBuild();
+            return drawSet;
+        }
+
+        internal int CompleteAndInvalidateAllBuilds()
+        {
+            int invalidatedCount = 0;
+            foreach (VividPrimitiveDrawSet drawSet in m_CameraStates.Values)
+            {
+                if (drawSet == null || (!drawSet.HasPendingBuild && !drawSet.IsBuilt))
+                    continue;
+
+                drawSet.CompleteAndInvalidate();
+                invalidatedCount++;
+            }
+
+            return invalidatedCount;
         }
 
         internal bool TryGet(Camera camera, out VividPrimitiveDrawSet drawSet)

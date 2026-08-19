@@ -57,7 +57,7 @@ slot-to-active indirection
 
 ## DrawSet
 
-DrawSet 是每 Camera 的短生命周期可见性结果，状态对象只复用容量，不跨 render request 缓存结果。
+DrawSet 是每 Camera 的短生命周期可见性结果，状态对象只复用容量，不跨 render request 缓存结果。每次 `beginCameraRendering` 都生成新的 pending build；只有 rendering Camera、实际 culling Camera、pipeline frame index、Scene revision 与 pending 状态全部匹配时，后续提交阶段才会消费它。
 
 ```text
 VividPrimitiveDrawSet
@@ -71,7 +71,7 @@ VividPrimitiveDrawSet
 
 Draw entry 保留 Primitive index/generation、absolute DrawSection index 和 legacy instance index，便于调试和未来移除 legacy bridge。当前 GPU 只消费紧凑的 `uint legacyInstanceIndex` buffer。
 
-V1 的 bounds test 使用并行 `IJobParallelFor`；确定性 bucket count/prefix/scatter 暂时使用单个 Burst `IJob`，并在 GPU 上传前同步完成。它避免了原子竞争并先验证数据模型，但多相机超大场景仍需通过 profile 判断是否升级为并行计数与 scatter。
+V1 的 bounds test 使用并行 `IJobParallelFor`；确定性 bucket count/prefix/scatter 暂时使用单个 Burst `IJob`。两个 job 在 `beginCameraRendering` 边界调度，与后续 Unity `ScriptableRenderContext.Cull` 重叠，并在 GPU 上传前完成。它避免了原子竞争并先验证数据模型，但多相机超大场景仍需通过 profile 判断是否升级为并行计数与 scatter。
 
 每个 bucket 是一个连续 range，key 直接复用当前 opaque `VividRendererListID`：
 
@@ -84,22 +84,38 @@ V1 的 bounds test 使用并行 `IJobParallelFor`；确定性 bucket count/prefi
 ## 每相机流程
 
 ```text
-PrepareFrame (once per frame)
-    SceneDataBuilder.Build
-    PrimitiveScene adapter sync / bridge rebuild
-    PrimitiveScene incremental GPU upload
-
-CullMainView (per camera)
-    GeometryUtility extracts planes from the same current projection used by GPU culling
-    Burst PrimitiveFrustumCullJob over dense active records
-    Burst BuildOpaqueDrawSetJob
+RenderPipelineManager.beginCameraRendering boundary (per render invocation)
+    dispatch external beginCameraRendering callbacks
+    PrepareFrameIfNeeded
+        play mode: once per pipeline frame; Editor: once per Camera render invocation
+        complete + invalidate outstanding DrawSet readers before Scene mutation
+        SceneDataBuilder.Build
+        PrimitiveScene adapter sync / bridge rebuild
+        PrimitiveScene incremental GPU upload
+    extract a conservative Camera frustum
+    schedule Burst PrimitiveFrustumCullJob over dense active records
+    schedule Burst BuildOpaqueDrawSetJob
         validate visible Primitive / DrawSection bridge
         count eight RenderState buckets
         prefix sum bucket ranges
         scatter deterministic entries and legacy instance indices
-    upload visible uint indices only
+
+ScriptableRenderContext.Cull
+    Unity lights / probes / shadows / RendererList culling
+    overlaps the scheduled PrimitiveScene jobs
+
+GPUDriven UpdateCore (per camera)
+    validate render Camera / culling Camera / frame / revision / pending token
+    complete the scheduled DrawSet jobs
+    publish bucket ranges and upload visible uint indices only
+    on token mismatch, synchronously rebuild from the current Camera
+    stereo Camera keeps the full-scene GPU instance-culling fallback
     GPUInstanceCulling dispatches DrawSet.Count threads
     existing meshlet LOD / fine cull / HZB / indirect args
+
+PrepareFrame mutation barrier
+    outstanding jobs are completed without publishing or uploading stale results
+    all prior DrawSet build metadata is invalidated before NativeArrays can change
 
 VisibilityBufferPass
     skip empty DrawSet RenderState buckets
@@ -118,6 +134,8 @@ VisibilityBufferPass
 - Terrain 仍是一个 Primitive；其粗剔除 bounds 运行时由所有 chunk bounds 求并集，因此任一部分可见时会提交该 Terrain 的全部 chunk DrawSection。chunk 级 coarse culling 需要 section bounds 或新的 chunk Primitive 策略。
 
 CPU DrawSet 只是 coarse visibility。GPU 仍执行原有 instance/meshlet 级精确剔除，因此 DrawSet 允许 false positive，但不允许 false negative。
+
+`beginCameraRendering` 发生在 VividRP 应用 TAA/TSR/FSR/DLSS jitter 之前。CPU coarse frustum 使用与后续 jitter 相同的 non-jittered projection 基准，并在左右、上下各增加 4 output-pixel guard band；后续 GPU culling 仍使用实际 jittered projection。该边界只增加少量 false positive，避免屏幕边缘物体因 temporal jitter 被 CPU 提前剔除。Preview Camera 不进入 GPUDriven FrameContext，因而不调度；stereo Camera 在双眼联合视锥实现前继续走旧路径。
 
 ## 资源与性能口径
 
@@ -138,6 +156,9 @@ GPU instance-cull threads = visible DrawSection count
 - Disabled、Main pass、Camera layer、FlipWinding 与八个 bucket 的行为和旧 GPUDriven 路径一致；
 - 一个三 section Primitive 只做一次 bounds test，生成三个 DrawSet entry；
 - 两个 Camera 拥有独立状态和 buffer，不能互相污染；
+- DrawSet job 在 `beginCameraRendering` callbacks 之后、Unity `context.Cull` 之前调度，并在 GPUDriven 提交点完成；
+- PrimitiveScene 更新前必须完成并失效所有 pending DrawSet，且不能上传或复用被丢弃的结果；
+- temporal jitter 只能让 CPU coarse frustum 产生 false positive，4 px guard band 内不能产生边缘 false negative；
 - empty DrawSet 安全 reset，主视图不重用旧 indirect args；
 - DrawSet-fed GPU culling 与 full-scene GPU culling 的最终 Visibility Buffer 在代表性 Meshlet/Terrain 场景中一致；
 - Unity `CullingResults` 仍服务于 lights/probes/shadows/RendererList，V1 不宣称已经完成整个 SRP culling replacement。

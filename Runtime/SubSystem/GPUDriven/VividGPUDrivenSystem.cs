@@ -50,6 +50,11 @@ namespace VividRP.Runtime.GPUDriven
         private readonly bool m_TerrainRuntimeVirtualTextureRequested;
         private VividGPUDrivenCullingDispatcher m_ShadowCullingDispatcher;
         private VividPrimitiveDrawSet m_CurrentMainViewDrawSet;
+        private EntityId m_ScheduledMainViewRenderingCameraId = EntityId.None;
+        private EntityId m_ScheduledMainViewCullingCameraId = EntityId.None;
+        private VividPrimitiveDrawSet m_ScheduledMainViewDrawSet;
+        private int m_ScheduledMainViewFrameIndex = -1;
+        private uint m_ScheduledMainViewSceneRevision;
         private int m_ShadowCullingContextCount;
         private bool m_IsDisposed;
 
@@ -352,9 +357,76 @@ namespace VividRP.Runtime.GPUDriven
             return false;
         }
 
+        internal static bool ScheduleCullForCamera(Camera camera, int frameIndex)
+        {
+            // A token belongs to exactly one beginCameraRendering invocation. Clear it
+            // even when this camera is intentionally unsupported so a same-frame render
+            // request cannot reuse an older DrawSet.
+            RawInstance?.ClearScheduledMainViewDrawSet();
+            if (camera == null
+                || camera.cameraType == CameraType.Preview
+                || camera.stereoEnabled)
+            {
+                return false;
+            }
+
+            try
+            {
+                VividRenderPipelineAsset asset = VividRenderPipelineAsset.GetActiveAsset();
+                if (asset == null || !asset.EnableGPUDriven)
+                    return false;
+
+                VividGPUDrivenSystem gpuDrivenSystem = instance;
+                if (RequiresTextureBackendRecreation(
+                        gpuDrivenSystem.TextureBackendMode,
+                        gpuDrivenSystem.m_TerrainRuntimeVirtualTextureRequested,
+                        asset))
+                {
+                    Shutdown();
+                    gpuDrivenSystem = instance;
+                }
+
+                if (!gpuDrivenSystem.IsAvailable)
+                    return false;
+
+                Camera cullingCamera = ResolveCullingCameraForDebug(camera);
+                if (cullingCamera == null || cullingCamera.stereoEnabled)
+                    return false;
+
+                int resolvedFrameIndex = ResolveFrameIndex(frameIndex);
+                PrepareFrameIfNeeded(gpuDrivenSystem, resolvedFrameIndex, reportStats: false);
+                if (!gpuDrivenSystem.IsAvailable)
+                    return false;
+
+                VividPrimitiveDrawSet drawSet = gpuDrivenSystem.m_PrimitiveDrawSetSystem.Schedule(
+                    cullingCamera,
+                    gpuDrivenSystem.PrimitiveScene.ActiveCullRecords,
+                    gpuDrivenSystem.PrimitiveScene.DrawSetSources,
+                    gpuDrivenSystem.PrimitiveScene.SceneRevision,
+                    resolvedFrameIndex);
+                gpuDrivenSystem.m_ScheduledMainViewRenderingCameraId = camera.GetEntityId();
+                gpuDrivenSystem.m_ScheduledMainViewCullingCameraId = cullingCamera.GetEntityId();
+                gpuDrivenSystem.m_ScheduledMainViewDrawSet = drawSet;
+                gpuDrivenSystem.m_ScheduledMainViewFrameIndex = resolvedFrameIndex;
+                gpuDrivenSystem.m_ScheduledMainViewSceneRevision =
+                    gpuDrivenSystem.PrimitiveScene.SceneRevision;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                RawInstance?.ClearScheduledMainViewDrawSet();
+                Debug.LogException(exception);
+                return false;
+            }
+        }
+
         public void PrepareFrame(bool reportStats = true)
         {
             ThrowIfDisposed();
+            // Scheduled culling jobs read PrimitiveScene NativeArrays directly. They
+            // must be retired before the adapter can resize or rewrite those arrays.
+            m_PrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds();
+            ClearScheduledMainViewDrawSet();
             m_CurrentMainViewDrawSet = null;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameMarker.Auto())
@@ -446,9 +518,16 @@ namespace VividRP.Runtime.GPUDriven
             ComputeShader gpuMeshletCullingCompute,
             ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
             in VividGPUDrivenOcclusionCullingParameters occlusionParameters,
-            string cameraName = null)
+            string cameraName = null,
+            int frameIndex = -1,
+            VividPrimitiveDrawSet scheduledDrawSet = null,
+            bool allowPrimitiveDrawSet = true)
         {
-            m_CurrentMainViewDrawSet = BuildMainViewDrawSet(camera);
+            m_CurrentMainViewDrawSet = BuildMainViewDrawSet(
+                camera,
+                frameIndex,
+                scheduledDrawSet,
+                allowPrimitiveDrawSet);
             CullInternal(
                 camera,
                 cmd,
@@ -462,18 +541,68 @@ namespace VividRP.Runtime.GPUDriven
                 m_CurrentMainViewDrawSet);
         }
 
-        private VividPrimitiveDrawSet BuildMainViewDrawSet(Camera camera)
+        private VividPrimitiveDrawSet BuildMainViewDrawSet(
+            Camera camera,
+            int frameIndex,
+            VividPrimitiveDrawSet scheduledDrawSet,
+            bool allowPrimitiveDrawSet)
         {
             ThrowIfDisposed();
-            if (camera != null && camera.stereoEnabled)
+            if (!allowPrimitiveDrawSet || camera == null || camera.stereoEnabled)
                 return null;
+
+            int resolvedFrameIndex = ResolveFrameIndex(frameIndex);
+            if (scheduledDrawSet != null
+                && scheduledDrawSet.cameraEntityID.Equals(camera.GetEntityId())
+                && scheduledDrawSet.MatchesPendingBuild(
+                    PrimitiveScene.SceneRevision,
+                    resolvedFrameIndex))
+            {
+                scheduledDrawSet.CompleteScheduledBuild();
+                return scheduledDrawSet;
+            }
 
             return m_PrimitiveDrawSetSystem.Build(
                 camera,
                 PrimitiveScene.ActiveCullRecords,
                 PrimitiveScene.DrawSetSources,
                 PrimitiveScene.SceneRevision,
-                Time.frameCount);
+                resolvedFrameIndex);
+        }
+
+        private bool TryConsumeScheduledMainViewDrawSet(
+            Camera renderingCamera,
+            Camera cullingCamera,
+            int frameIndex,
+            out VividPrimitiveDrawSet drawSet)
+        {
+            drawSet = m_ScheduledMainViewDrawSet;
+            int resolvedFrameIndex = ResolveFrameIndex(frameIndex);
+            bool matches = drawSet != null
+                           && !renderingCamera.stereoEnabled
+                           && !cullingCamera.stereoEnabled
+                           && m_ScheduledMainViewRenderingCameraId.Equals(renderingCamera.GetEntityId())
+                           && m_ScheduledMainViewCullingCameraId.Equals(cullingCamera.GetEntityId())
+                           && m_ScheduledMainViewFrameIndex == resolvedFrameIndex
+                           && m_ScheduledMainViewSceneRevision == PrimitiveScene.SceneRevision
+                           && drawSet.MatchesPendingBuild(
+                               m_ScheduledMainViewSceneRevision,
+                               m_ScheduledMainViewFrameIndex);
+            ClearScheduledMainViewDrawSet();
+            if (matches)
+                return true;
+
+            drawSet = null;
+            return false;
+        }
+
+        private void ClearScheduledMainViewDrawSet()
+        {
+            m_ScheduledMainViewRenderingCameraId = EntityId.None;
+            m_ScheduledMainViewCullingCameraId = EntityId.None;
+            m_ScheduledMainViewDrawSet = null;
+            m_ScheduledMainViewFrameIndex = -1;
+            m_ScheduledMainViewSceneRevision = 0u;
         }
 
         private void CullInternal(
@@ -606,6 +735,7 @@ namespace VividRP.Runtime.GPUDriven
 
             SceneData.Clear();
             m_CurrentMainViewDrawSet = null;
+            ClearScheduledMainViewDrawSet();
             m_PrimitiveDrawSetSystem.Dispose();
             VividMeshletRendererDatabase.instance.InvalidatePrimitiveHandles();
             PrimitiveScene.Dispose();
@@ -682,7 +812,14 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            PrepareFrameIfNeeded(gpuDrivenSystem, cameraData.frameIndex, reportStats: false);
+            Camera cullingCamera = ResolveCullingCameraForDebug(camera);
+            bool hasScheduledDrawSet = gpuDrivenSystem.TryConsumeScheduledMainViewDrawSet(
+                camera,
+                cullingCamera,
+                cameraData.frameIndex,
+                out VividPrimitiveDrawSet scheduledDrawSet);
+            if (!hasScheduledDrawSet)
+                PrepareFrameIfNeeded(gpuDrivenSystem, cameraData.frameIndex, reportStats: false);
             if (!gpuDrivenSystem.IsAvailable)
             {
                 gpuDrivenSystem.ReportStats(camera, cameraData.cameraName);
@@ -702,7 +839,6 @@ namespace VividRP.Runtime.GPUDriven
                 ApplyResolvedSettings(gpuDrivenSystem);
             }
 
-            Camera cullingCamera = ResolveCullingCameraForDebug(camera);
             VividGPUDrivenOcclusionHistorySystem.PurgeDestroyedCameras();
 
             VividRPCoreResources resources;
@@ -759,7 +895,10 @@ namespace VividRP.Runtime.GPUDriven
                 resources.GPUMeshletCullingCompute,
                 resources.FixupVisibleMeshletIndirectDrawArgsCompute,
                 occlusionParameters,
-                cameraName: cameraData.cameraName);
+                cameraName: cameraData.cameraName,
+                frameIndex: cameraData.frameIndex,
+                scheduledDrawSet: scheduledDrawSet,
+                allowPrimitiveDrawSet: !camera.stereoEnabled && !cullingCamera.stereoEnabled);
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenBindGlobalsMarker.Auto())
             {
                 gpuDrivenSystem.BindGlobals(cmd);
@@ -782,12 +921,17 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void PrepareFrameIfNeeded(VividGPUDrivenSystem gpuDrivenSystem, int frameIndex, bool reportStats = true)
         {
-            int resolvedFrameIndex = frameIndex >= 0 ? frameIndex : Time.frameCount;
+            int resolvedFrameIndex = ResolveFrameIndex(frameIndex);
             if (!ShouldPrepareFrame(s_PreparedFrameIndex, resolvedFrameIndex, Application.isPlaying))
                 return;
 
             gpuDrivenSystem.PrepareFrame(reportStats);
             s_PreparedFrameIndex = resolvedFrameIndex;
+        }
+
+        private static int ResolveFrameIndex(int frameIndex)
+        {
+            return frameIndex >= 0 ? frameIndex : Time.frameCount;
         }
 
         internal static bool ShouldPrepareFrame(int preparedFrameIndex, int frameIndex, bool isPlaying)

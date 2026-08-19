@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -388,6 +389,104 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RenderCamera_SchedulesCpuCullAfterBeginCameraCallbacksAndBeforeUnityCull()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPipeline",
+                "VividRenderPipeline.cs");
+            string renderCamera = SliceSource(
+                source,
+                "private void RenderCamera(",
+                "private void DispatchBeginCameraRendering(");
+
+            int beginCamera = renderCamera.IndexOf("DispatchBeginCameraRendering(context, camera)");
+            int gpuDrivenCull = renderCamera.IndexOf(
+                "VividGPUDrivenSystem.ScheduleCullForCamera(camera, frameIndex)");
+            int decalCull = renderCamera.IndexOf("DecalSystem.ScheduleCullForCamera(camera)");
+            int unityCull = renderCamera.IndexOf("context.Cull(ref cullingParameters)");
+            int prepareFrame = renderCamera.IndexOf("PassRecorder.PrepareFrame(graphAsset, cmdBuffer)");
+
+            Assert.That(beginCamera, Is.GreaterThanOrEqualTo(0));
+            Assert.That(gpuDrivenCull, Is.GreaterThan(beginCamera));
+            Assert.That(decalCull, Is.GreaterThan(gpuDrivenCull));
+            Assert.That(unityCull, Is.GreaterThan(decalCull));
+            Assert.That(prepareFrame, Is.GreaterThan(unityCull));
+        }
+
+        [Test]
+        public void PrepareFrame_InvalidatesDrawSetReadersBeforePrimitiveSceneSynchronization()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string prepareFrame = SliceSource(
+                source,
+                "public void PrepareFrame(bool reportStats = true)",
+                "public void Cull(");
+
+            int invalidateBuilds = prepareFrame.IndexOf(
+                "m_PrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int synchronizeScene = prepareFrame.IndexOf("m_PrimitiveSceneAdapter.Synchronize(");
+
+            Assert.That(invalidateBuilds, Is.GreaterThanOrEqualTo(0));
+            Assert.That(synchronizeScene, Is.GreaterThan(invalidateBuilds));
+        }
+
+        [Test]
+        public void ScheduledDrawSetToken_RequiresExactPendingCameraFrameAndRevisionMatch()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string consumeToken = SliceSource(
+                source,
+                "private bool TryConsumeScheduledMainViewDrawSet(",
+                "private void ClearScheduledMainViewDrawSet()");
+
+            StringAssert.Contains(
+                "m_ScheduledMainViewRenderingCameraId.Equals(renderingCamera.GetEntityId())",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewCullingCameraId.Equals(cullingCamera.GetEntityId())",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewFrameIndex == resolvedFrameIndex",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewSceneRevision == PrimitiveScene.SceneRevision",
+                consumeToken);
+            StringAssert.Contains("drawSet.MatchesPendingBuild(", consumeToken);
+            Assert.That(
+                consumeToken.IndexOf("ClearScheduledMainViewDrawSet();"),
+                Is.GreaterThan(consumeToken.IndexOf("bool matches =")),
+                "The pending token must be cleared after every consumption attempt.");
+        }
+
+        [Test]
+        public void ScheduleCullForCamera_SkipsPreviewWithoutChangingGpuDrivenSystemLifetime()
+        {
+            var preview = new PreviewRenderUtility();
+            bool hadInstance = VividGPUDrivenSystem.HasInstance;
+            try
+            {
+                Assert.That(preview.camera.cameraType, Is.EqualTo(CameraType.Preview));
+                Assert.That(
+                    VividGPUDrivenSystem.ScheduleCullForCamera(preview.camera, frameIndex: 3),
+                    Is.False);
+                Assert.That(VividGPUDrivenSystem.HasInstance, Is.EqualTo(hadInstance));
+            }
+            finally
+            {
+                preview.Cleanup();
+            }
+        }
+
+        [Test]
         public void FrameContextClear_KeepsGPUDrivenPreRenderCallbackRegistered_InEditor()
         {
             VividGPUDrivenSystem.Initialize();
@@ -427,6 +526,29 @@ namespace VividRP.Editor.Tests
                 && multicastDelegate.GetInvocationList().Any(
                     callback => callback.Method.DeclaringType == declaringType
                         && callback.Method.Name == methodName);
+        }
+
+        private static string ReadRuntimeSource(params string[] relativeSegments)
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VividRenderPipelineAsset).Assembly);
+            Assert.That(package, Is.Not.Null);
+
+            string path = package.resolvedPath;
+            for (int index = 0; index < relativeSegments.Length; index++)
+                path = Path.Combine(path, relativeSegments[index]);
+
+            Assert.That(File.Exists(path), Is.True, path);
+            return File.ReadAllText(path);
+        }
+
+        private static string SliceSource(string source, string startMarker, string endMarker)
+        {
+            int start = source.IndexOf(startMarker, StringComparison.Ordinal);
+            Assert.That(start, Is.GreaterThanOrEqualTo(0), startMarker);
+            int end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+            Assert.That(end, Is.GreaterThan(start), endMarker);
+            return source.Substring(start, end - start);
         }
     }
 }

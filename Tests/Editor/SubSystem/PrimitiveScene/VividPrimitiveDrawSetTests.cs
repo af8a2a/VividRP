@@ -265,6 +265,307 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void DrawSet_ScheduleDefersCompletionAndUpload_AndRepeatedSchedulePublishesLatestBuild()
+        {
+            using NativeArray<float4> firstPlanes = CreateBoxFrustumPlanes(5.0f);
+            using NativeArray<float4> secondPlanes = CreateBoxFrustumPlanes(10.0f);
+            VividPrimitiveHandle firstHandle = CreateHandle(0);
+            VividPrimitiveHandle secondHandle = CreateHandle(1);
+            using var firstRecords = new NativeArray<VividPrimitiveCullRecord>(1, Allocator.TempJob)
+            {
+                [0] = CreateRecord(
+                    firstHandle,
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    drawSectionCount: 1u),
+            };
+            using var firstSources = new NativeArray<VividPrimitiveDrawSourceData>(1, Allocator.TempJob)
+            {
+                [0] = CreateSource(firstHandle, 0, 101, VividRendererListID.Default),
+            };
+            using var secondRecords = new NativeArray<VividPrimitiveCullRecord>(1, Allocator.TempJob)
+            {
+                [0] = CreateRecord(
+                    secondHandle,
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    drawSectionCount: 3u),
+            };
+            using var secondSources = new NativeArray<VividPrimitiveDrawSourceData>(3, Allocator.TempJob)
+            {
+                [0] = CreateSource(secondHandle, 0, 201, VividRendererListID.Default),
+                [1] = CreateSource(secondHandle, 1, 202, VividRendererListID.Default),
+                [2] = CreateSource(secondHandle, 2, 203, VividRendererListID.Default),
+            };
+            var drawSet = new VividPrimitiveDrawSet();
+            try
+            {
+                drawSet.Schedule(
+                    firstPlanes,
+                    1u,
+                    firstRecords,
+                    firstSources,
+                    sceneRevision: 4u,
+                    frameIndex: 20);
+
+                Assert.That(drawSet.HasPendingBuild, Is.True);
+                Assert.That(drawSet.IsBuilt, Is.False);
+                Assert.That(drawSet.MatchesPendingBuild(4u), Is.True);
+                Assert.That(drawSet.MatchesPendingBuild(4u, 20), Is.True);
+                Assert.That(drawSet.GetStats().UploadCount, Is.Zero);
+                Assert.That(drawSet.LegacyInstanceIndexBuffer, Is.Null);
+
+                // Grow the output while the first build may still be running. The
+                // second build is chained without completing or uploading the first.
+                drawSet.Schedule(
+                    secondPlanes,
+                    1u,
+                    secondRecords,
+                    secondSources,
+                    sceneRevision: 5u,
+                    frameIndex: 21);
+
+                Assert.That(drawSet.HasPendingBuild, Is.True);
+                Assert.That(drawSet.IsBuilt, Is.False);
+                Assert.That(drawSet.MatchesPendingBuild(4u), Is.False);
+                Assert.That(drawSet.MatchesPendingBuild(5u), Is.True);
+                Assert.That(drawSet.MatchesPendingBuild(5u, 21), Is.True);
+                Assert.That(drawSet.GetStats().UploadCount, Is.Zero);
+
+                Assert.That(drawSet.CompleteScheduledBuild(), Is.True);
+
+                Assert.That(drawSet.HasPendingBuild, Is.False);
+                Assert.That(drawSet.IsBuilt, Is.True);
+                Assert.That(drawSet.DrawCount, Is.EqualTo(3));
+                Assert.That(drawSet.GetStats().UploadCount, Is.EqualTo(1));
+                var uploaded = new uint[drawSet.LegacyInstanceIndexBuffer.count];
+                drawSet.LegacyInstanceIndexBuffer.GetData(uploaded);
+                Assert.That(uploaded[0], Is.EqualTo(201u));
+                Assert.That(uploaded[1], Is.EqualTo(202u));
+                Assert.That(uploaded[2], Is.EqualTo(203u));
+
+                Assert.That(drawSet.CompleteScheduledBuild(), Is.True);
+                Assert.That(drawSet.GetStats().UploadCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                drawSet.Dispose();
+            }
+        }
+
+        [Test]
+        public void DrawSet_CameraScheduleUsesGuardBandForLaterTemporalJitter()
+        {
+            var cameraObject = new GameObject("Guard Band Primitive DrawSet Camera");
+            var target = new RenderTexture(100, 100, 0);
+            var drawSet = new VividPrimitiveDrawSet();
+            try
+            {
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.orthographic = true;
+                camera.orthographicSize = 5.0f;
+                camera.nearClipPlane = 0.1f;
+                camera.farClipPlane = 100.0f;
+                camera.targetTexture = target;
+
+                var boundaryBounds = new Bounds(
+                    new Vector3(5.2f, 0.0f, 5.0f),
+                    new Vector3(0.1f, 0.1f, 0.1f));
+                Plane[] originalPlanes = GeometryUtility.CalculateFrustumPlanes(
+                    camera.projectionMatrix * camera.worldToCameraMatrix);
+                Assert.That(
+                    GeometryUtility.TestPlanesAABB(originalPlanes, boundaryBounds),
+                    Is.False,
+                    "The test bound must start outside the unexpanded camera frustum.");
+
+                VividPrimitiveHandle handle = CreateHandle(0);
+                Vector3 boundsMin = boundaryBounds.min;
+                Vector3 boundsMax = boundaryBounds.max;
+                using var records = new NativeArray<VividPrimitiveCullRecord>(1, Allocator.TempJob)
+                {
+                    [0] = CreateRecord(handle, boundsMin, boundsMax, drawSectionCount: 1u),
+                };
+                using var sources = new NativeArray<VividPrimitiveDrawSourceData>(1, Allocator.TempJob)
+                {
+                    [0] = CreateSource(handle, 0, 44, VividRendererListID.Default),
+                };
+
+                drawSet.Schedule(camera, records, sources, sceneRevision: 1u, frameIndex: 1);
+                drawSet.CompleteScheduledBuild();
+
+                Assert.That(drawSet.DrawCount, Is.EqualTo(1));
+                Assert.That(drawSet.LegacyInstanceIndices[0], Is.EqualTo(44u));
+            }
+            finally
+            {
+                drawSet.Dispose();
+                target.Release();
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void DrawSet_CameraScheduleUsesNonJitteredProjectionAsItsGuardBandBase()
+        {
+            var cameraObject = new GameObject("Non-Jittered Primitive DrawSet Camera");
+            var target = new RenderTexture(100, 100, 0);
+            var drawSet = new VividPrimitiveDrawSet();
+            try
+            {
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.orthographic = true;
+                camera.orthographicSize = 5.0f;
+                camera.nearClipPlane = 0.1f;
+                camera.farClipPlane = 100.0f;
+                camera.targetTexture = target;
+
+                Matrix4x4 nonJitteredProjection = camera.projectionMatrix;
+                Matrix4x4 largeJitter = Matrix4x4.identity;
+                largeJitter.m03 = 0.5f;
+                camera.nonJitteredProjectionMatrix = nonJitteredProjection;
+                camera.projectionMatrix = largeJitter * nonJitteredProjection;
+
+                var bounds = new Bounds(
+                    new Vector3(4.5f, 0.0f, 5.0f),
+                    new Vector3(0.1f, 0.1f, 0.1f));
+                Assert.That(
+                    GeometryUtility.TestPlanesAABB(
+                        GeometryUtility.CalculateFrustumPlanes(
+                            camera.projectionMatrix * camera.worldToCameraMatrix),
+                        bounds),
+                    Is.False,
+                    "The current jittered projection must reject the test bound.");
+                Assert.That(
+                    GeometryUtility.TestPlanesAABB(
+                        GeometryUtility.CalculateFrustumPlanes(
+                            nonJitteredProjection * camera.worldToCameraMatrix),
+                        bounds),
+                    Is.True,
+                    "The non-jittered projection must contain the test bound.");
+
+                VividPrimitiveHandle handle = CreateHandle(0);
+                Vector3 boundsMin = bounds.min;
+                Vector3 boundsMax = bounds.max;
+                using var records = new NativeArray<VividPrimitiveCullRecord>(1, Allocator.TempJob)
+                {
+                    [0] = CreateRecord(handle, boundsMin, boundsMax, drawSectionCount: 1u),
+                };
+                using var sources = new NativeArray<VividPrimitiveDrawSourceData>(1, Allocator.TempJob)
+                {
+                    [0] = CreateSource(handle, 0, 45, VividRendererListID.Default),
+                };
+
+                drawSet.Build(camera, records, sources, sceneRevision: 1u, frameIndex: 1);
+
+                Assert.That(drawSet.DrawCount, Is.EqualTo(1));
+                Assert.That(drawSet.LegacyInstanceIndices[0], Is.EqualTo(45u));
+            }
+            finally
+            {
+                drawSet.Dispose();
+                target.Release();
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void DrawSet_DisposeCompletesPendingJobsWithoutUploading()
+        {
+            using NativeArray<float4> planes = CreateBoxFrustumPlanes(5.0f);
+            VividPrimitiveHandle handle = CreateHandle(0);
+            using var records = new NativeArray<VividPrimitiveCullRecord>(1, Allocator.TempJob)
+            {
+                [0] = CreateRecord(
+                    handle,
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    drawSectionCount: 1u),
+            };
+            using var sources = new NativeArray<VividPrimitiveDrawSourceData>(1, Allocator.TempJob)
+            {
+                [0] = CreateSource(handle, 0, 31, VividRendererListID.Default),
+            };
+            var drawSet = new VividPrimitiveDrawSet();
+
+            drawSet.Schedule(planes, 1u, records, sources, sceneRevision: 1u, frameIndex: 2);
+
+            Assert.That(drawSet.HasPendingBuild, Is.True);
+            Assert.DoesNotThrow(drawSet.Dispose);
+            Assert.That(drawSet.HasPendingBuild, Is.False);
+            Assert.That(drawSet.IsBuilt, Is.False);
+            Assert.That(drawSet.LegacyInstanceIndexBuffer, Is.Null);
+        }
+
+        [Test]
+        public void DrawSet_CompleteAndInvalidateDiscardsPendingBuildWithoutUploading()
+        {
+            using NativeArray<float4> planes = CreateBoxFrustumPlanes(5.0f);
+            VividPrimitiveHandle handle = CreateHandle(0);
+            using var records = new NativeArray<VividPrimitiveCullRecord>(1, Allocator.TempJob)
+            {
+                [0] = CreateRecord(
+                    handle,
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    drawSectionCount: 1u),
+            };
+            using var sources = new NativeArray<VividPrimitiveDrawSourceData>(1, Allocator.TempJob)
+            {
+                [0] = CreateSource(handle, 0, 61, VividRendererListID.Default),
+            };
+            using var drawSet = new VividPrimitiveDrawSet();
+            drawSet.Schedule(planes, 1u, records, sources, sceneRevision: 9u, frameIndex: 14);
+
+            Assert.That(drawSet.MatchesPendingBuild(9u, 14), Is.True);
+            drawSet.CompleteAndInvalidate();
+
+            Assert.That(drawSet.HasPendingBuild, Is.False);
+            Assert.That(drawSet.IsBuilt, Is.False);
+            Assert.That(drawSet.MatchesPendingBuild(9u), Is.False);
+            Assert.That(drawSet.LegacyInstanceIndexBuffer, Is.Null);
+            Assert.That(drawSet.GetStats().UploadCount, Is.Zero);
+            Assert.That(drawSet.GetStats().UploadBytes, Is.Zero);
+            Assert.That(drawSet.FrameIndex, Is.EqualTo(-1));
+            Assert.That(drawSet.SceneRevision, Is.Zero);
+        }
+
+        [Test]
+        public void DrawSet_CompleteAndInvalidateMakesPublishedBuildUnmatchable()
+        {
+            using NativeArray<float4> planes = CreateBoxFrustumPlanes(5.0f);
+            VividPrimitiveHandle handle = CreateHandle(0);
+            using var records = new NativeArray<VividPrimitiveCullRecord>(1, Allocator.TempJob)
+            {
+                [0] = CreateRecord(
+                    handle,
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    drawSectionCount: 1u),
+            };
+            using var sources = new NativeArray<VividPrimitiveDrawSourceData>(1, Allocator.TempJob)
+            {
+                [0] = CreateSource(handle, 0, 71, VividRendererListID.Default),
+            };
+            using var drawSet = new VividPrimitiveDrawSet();
+            drawSet.Build(planes, 1u, records, sources, sceneRevision: 10u, frameIndex: 15);
+
+            Assert.That(drawSet.IsBuilt, Is.True);
+            Assert.That(drawSet.SceneRevision, Is.EqualTo(10u));
+            Assert.That(drawSet.FrameIndex, Is.EqualTo(15));
+            Assert.That(drawSet.LegacyInstanceIndexBuffer, Is.Not.Null);
+
+            drawSet.CompleteAndInvalidate();
+
+            Assert.That(drawSet.IsBuilt, Is.False);
+            Assert.That(drawSet.TryGetBucket(VividRendererListID.Default, out _), Is.False);
+            Assert.That(drawSet.DrawCount, Is.Zero);
+            Assert.That(drawSet.FrameIndex, Is.EqualTo(-1));
+            Assert.That(drawSet.SceneRevision, Is.Zero);
+        }
+
+        [Test]
         public void DrawSetSystem_KeepsIndependentPersistentStatePerCamera()
         {
             using var records = new NativeArray<VividPrimitiveCullRecord>(0, Allocator.TempJob);
@@ -309,6 +610,73 @@ namespace VividRP.Editor.Tests
                 if (secondCameraObject != null)
                     Object.DestroyImmediate(secondCameraObject);
             }
+        }
+
+        [Test]
+        public void DrawSetSystem_InvalidatesAllPendingBuildsWithoutPublishingBeforeSceneMutation()
+        {
+            using var records = new NativeArray<VividPrimitiveCullRecord>(0, Allocator.TempJob);
+            using var sources = new NativeArray<VividPrimitiveDrawSourceData>(0, Allocator.TempJob);
+            using var system = new VividPrimitiveDrawSetSystem();
+            GameObject firstCameraObject = null;
+            GameObject secondCameraObject = null;
+            try
+            {
+                firstCameraObject = new GameObject("Pending Primitive DrawSet Camera A");
+                secondCameraObject = new GameObject("Pending Primitive DrawSet Camera B");
+                Camera firstCamera = firstCameraObject.AddComponent<Camera>();
+                Camera secondCamera = secondCameraObject.AddComponent<Camera>();
+
+                VividPrimitiveDrawSet first = system.Schedule(
+                    firstCamera,
+                    records,
+                    sources,
+                    sceneRevision: 12u,
+                    frameIndex: 30);
+                VividPrimitiveDrawSet second = system.Schedule(
+                    secondCamera,
+                    records,
+                    sources,
+                    sceneRevision: 12u,
+                    frameIndex: 30);
+
+                Assert.That(first.HasPendingBuild, Is.True);
+                Assert.That(second.HasPendingBuild, Is.True);
+                Assert.That(system.CompleteAndInvalidateAllBuilds(), Is.EqualTo(2));
+                Assert.That(first.HasPendingBuild, Is.False);
+                Assert.That(second.HasPendingBuild, Is.False);
+                Assert.That(first.IsBuilt, Is.False);
+                Assert.That(second.IsBuilt, Is.False);
+                Assert.That(first.MatchesPendingBuild(12u), Is.False);
+                Assert.That(second.MatchesPendingBuild(12u), Is.False);
+                Assert.That(first.GetStats().UploadCount, Is.Zero);
+                Assert.That(second.GetStats().UploadCount, Is.Zero);
+                Assert.That(system.CompleteAndInvalidateAllBuilds(), Is.Zero);
+            }
+            finally
+            {
+                if (firstCameraObject != null)
+                    Object.DestroyImmediate(firstCameraObject);
+                if (secondCameraObject != null)
+                    Object.DestroyImmediate(secondCameraObject);
+            }
+        }
+
+        [Test]
+        public void DrawSetSystem_PurgeDestroyedCameraCompletesItsPendingBuild()
+        {
+            using var records = new NativeArray<VividPrimitiveCullRecord>(0, Allocator.TempJob);
+            using var sources = new NativeArray<VividPrimitiveDrawSourceData>(0, Allocator.TempJob);
+            using var system = new VividPrimitiveDrawSetSystem();
+            var cameraObject = new GameObject("Destroyed Pending Primitive DrawSet Camera");
+            Camera camera = cameraObject.AddComponent<Camera>();
+            system.Schedule(camera, records, sources, sceneRevision: 1u, frameIndex: 1);
+
+            Object.DestroyImmediate(cameraObject);
+
+            Assert.DoesNotThrow(system.PurgeDestroyedCameras);
+            Assert.That(system.TryGet(camera, out _), Is.False);
+            Assert.That(system.CompleteAndInvalidateAllBuilds(), Is.Zero);
         }
 
         private static NativeArray<float4> CreateBoxFrustumPlanes(float halfExtent)

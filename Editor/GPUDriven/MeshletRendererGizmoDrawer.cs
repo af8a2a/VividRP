@@ -7,12 +7,14 @@ namespace VividRP.Editor.GPUDriven
 {
     internal static class MeshletRendererGizmoDrawer
     {
+        internal const GizmoType DrawOptions =
+            GizmoType.Selected | GizmoType.NonSelected | GizmoType.InSelectionHierarchy | GizmoType.Pickable;
+
         private static readonly Color NonSelectedBoundsFillColor = new(0.14f, 0.82f, 1.0f, 0.04f);
-        private static readonly Color NonSelectedBoundsWireColor = new(0.14f, 0.82f, 1.0f, 0.75f);
         private static readonly Color SelectedBoundsFillColor = new(0.14f, 0.82f, 1.0f, 0.08f);
         private static readonly Color SelectedBoundsWireColor = new(0.14f, 0.82f, 1.0f, 0.95f);
 
-        [DrawGizmo(GizmoType.Selected | GizmoType.NonSelected | GizmoType.InSelectionHierarchy | GizmoType.Pickable)]
+        [DrawGizmo(DrawOptions)]
         private static void DrawMeshletRendererGizmos(MeshletRenderer meshletRenderer, GizmoType gizmoType)
         {
             if (meshletRenderer == null || !meshletRenderer.isActiveAndEnabled)
@@ -25,16 +27,16 @@ namespace VividRP.Editor.GPUDriven
                 return;
             }
 
-            bool showMeshlets = (gizmoType & (GizmoType.Selected | GizmoType.InSelectionHierarchy)) != 0;
+            bool showSelectionDetails = ShouldDrawSelectionDetails(gizmoType);
             Matrix4x4 previousMatrix = Gizmos.matrix;
             Color previousColor = Gizmos.color;
 
             try
             {
                 Gizmos.matrix = meshletRenderer.transform.localToWorldMatrix;
-                DrawRendererBounds(localBounds, showMeshlets);
+                DrawRendererBounds(localBounds, showSelectionDetails);
 
-                if (showMeshlets)
+                if (showSelectionDetails)
                 {
                     DrawMeshletBounds(meshletRenderer);
                 }
@@ -46,12 +48,22 @@ namespace VividRP.Editor.GPUDriven
             }
         }
 
+        internal static bool ShouldDrawSelectionDetails(GizmoType gizmoType)
+        {
+            return (gizmoType & (GizmoType.Selected | GizmoType.InSelectionHierarchy)) != 0;
+        }
+
         private static void DrawRendererBounds(Bounds localBounds, bool isSelected)
         {
             Gizmos.color = isSelected ? SelectedBoundsFillColor : NonSelectedBoundsFillColor;
             Gizmos.DrawCube(localBounds.center, localBounds.size);
 
-            Gizmos.color = isSelected ? SelectedBoundsWireColor : NonSelectedBoundsWireColor;
+            if (!isSelected)
+            {
+                return;
+            }
+
+            Gizmos.color = SelectedBoundsWireColor;
             Gizmos.DrawWireCube(localBounds.center, localBounds.size);
         }
 

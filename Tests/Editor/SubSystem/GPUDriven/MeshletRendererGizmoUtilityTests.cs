@@ -1,5 +1,6 @@
 using System.Reflection;
 using NUnit.Framework;
+using UnityEditor;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.TestTools.Utils;
@@ -12,6 +13,21 @@ namespace VividRP.Editor.Tests
 {
     public class MeshletRendererGizmoUtilityTests
     {
+        [Test]
+        public void DrawOptions_KeepNonSelectedRenderersPickable()
+        {
+            Assert.That((MeshletRendererGizmoDrawer.DrawOptions & GizmoType.NonSelected) != 0, Is.True);
+            Assert.That((MeshletRendererGizmoDrawer.DrawOptions & GizmoType.Pickable) != 0, Is.True);
+        }
+
+        [TestCase(GizmoType.Selected, true)]
+        [TestCase(GizmoType.InSelectionHierarchy, true)]
+        [TestCase(GizmoType.NonSelected | GizmoType.Pickable, false)]
+        public void ShouldDrawSelectionDetails_MatchesSelectionState(GizmoType gizmoType, bool expected)
+        {
+            Assert.That(MeshletRendererGizmoDrawer.ShouldDrawSelectionDetails(gizmoType), Is.EqualTo(expected));
+        }
+
         [Test]
         public void TryGetLocalSelectionBounds_UsesSourceMeshBounds_WhenSourceMeshExists()
         {

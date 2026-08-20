@@ -2,9 +2,9 @@
 
 ## 目标边界
 
-V1 在 V0 旁路 PrimitiveScene 上增加第一个真实 raster 消费者：主相机的 Meshlet 不透明路径使用 PrimitiveScene 生成的 CPU DrawSet 作为 GPU 粗剔除输入。
+V1 在 V0 旁路 PrimitiveScene 上增加真实 raster 消费者：主相机的 Meshlet 不透明路径和主方向光的 Meshlet CSM 路径使用 PrimitiveScene 生成的 CPU DrawSet 作为 GPU 粗剔除输入。
 
-V1 只替代 Meshlet opaque visibility/submission 对 Unity `CullingResults` 的依赖。Unity `ScriptableRenderContext.Cull` 暂时保留，因为可见灯光、Reflection Probe、级联阴影矩阵、Shadow Caster 调度、普通 RendererList 和编辑器预览仍依赖它。
+V1 只替代 Meshlet opaque 与 Meshlet CSM 提交前的 Primitive 粗剔除输入。Unity `ScriptableRenderContext.Cull` 暂时保留，因为可见灯光、Reflection Probe、级联阴影矩阵、普通 Renderer 的 Shadow Caster 调度、RendererList 和编辑器预览仍依赖它。
 
 本阶段固定以下范围：
 
@@ -15,7 +15,7 @@ V1 只替代 Meshlet opaque visibility/submission 对 Unity `CullingResults` 的
 - 可见 Primitive 展开为 DrawSection，并按现有八个 `VividRendererListID` 状态桶形成 DrawSet；
 - DrawSet 只向 GPU 上传可见 legacy instance index，GPUInstanceCulling 不再扫描全场 instance；
 - 后续 Meshlet LOD、细粒度 frustum/cone、HZB occlusion、indirect args 和 Visibility Buffer 绘制保持原路径；
-- 透明、普通 Unity Renderer、阴影 DrawSet、RTAS 和 SDF 不切换。
+- 主方向光阴影使用全部 CSM 级联视锥的保守并集 DrawSet；透明、普通 Unity Renderer、非 Meshlet 阴影、RTAS 和 SDF 不切换。
 - stereo Camera 在 V1 保守回退到既有全场 GPU instance culling，避免单眼视锥产生 false negative；双眼联合 DrawSet 留待后续实现。
 - 不新增公开注册 API、序列化 handle 或 Pipeline Asset 开关；author handle、DrawSet 与 bridge 均保持 runtime internal。
 
@@ -122,6 +122,14 @@ VisibilityBufferPass
     existing DrawProceduralIndirect per non-empty bucket
 ```
 
+## 主方向光阴影 DrawSet
+
+`GPUDrivenSystem` 在 `SubsystemPreRender` 中检测当前编译图是否包含 `MeshletShadowPass`。当本相机的 CSM 数据有效时，它使用每个级联的逻辑 `projection * view` 矩阵调度独立的 Shadow DrawSet；主视图与阴影各自持有 per-camera 状态，不能覆盖对方的 pending job。
+
+阴影 CPU 粗剔除采用所有活动级联的 OR-union：Primitive 与任一级联相交就只写入一次 legacy instance index，随后现有二维 GPU workload 再按每个级联精确剔除。Shadow DrawSet 只接受 `VividInstancePassMask.Shadows`，并与现有 shadow pancaking 一致地禁用每个级联的 near plane；cascade sphere 仍由 GPU 路径处理，因此 CPU 结果只可能增加 false positive。
+
+Shadow job 在 PreRender 只调度，不等待也不上传。pending DrawSet 随本相机的 `VividGPUDrivenFrameData` 传给 `MeshletShadowPass`，直到该 pass 已构建全部级联 context、即将调用 `CullShadowCascades` 时才 Complete 并上传紧凑 index。相机、frame 或 Scene revision 不匹配时不消费旧结果，直接回退到原有全场景 GPU 阴影剔除。图中 pass 动态不活动时，pending reader 会在下一次 `PrepareFrame` mutation barrier 或系统 Dispose 时完成并失效，且不会发布或上传。
+
 空 DrawSet 仍先 reset GPU culling counters/indirect args，然后跳过 instance dispatch，不能保留上一相机或上一帧的结果。
 
 ## 粗剔除规则
@@ -160,5 +168,8 @@ GPU instance-cull threads = visible DrawSection count
 - PrimitiveScene 更新前必须完成并失效所有 pending DrawSet，且不能上传或复用被丢弃的结果；
 - temporal jitter 只能让 CPU coarse frustum 产生 false positive，4 px guard band 内不能产生边缘 false negative；
 - empty DrawSet 安全 reset，主视图不重用旧 indirect args；
+- Shadow DrawSet 必须按 Shadows pass 过滤、对全部活动级联取并集且禁用 near-plane coarse reject；
+- Shadow job 必须在 GPUDriven PreRender 调度，并延迟到 `MeshletShadowPass` 的 GPU cull 前才 Complete；
+- empty Shadow DrawSet 仍 reset 全部 cascade indirect args，失配时则回退 full-scene shadow instance culling；
 - DrawSet-fed GPU culling 与 full-scene GPU culling 的最终 Visibility Buffer 在代表性 Meshlet/Terrain 场景中一致；
 - Unity `CullingResults` 仍服务于 lights/probes/shadows/RendererList，V1 不宣称已经完成整个 SRP culling replacement。

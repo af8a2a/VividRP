@@ -21,6 +21,8 @@ namespace VividRP.Runtime.PrimitiveScene
         internal NativeArray<byte> Visibility;
 
         internal uint CameraCullingMask;
+        internal VividInstancePassMask RequiredPassMask;
+        internal int FrustumCount;
 
         public void Execute(int index)
         {
@@ -28,30 +30,41 @@ namespace VividRP.Runtime.PrimitiveScene
             bool visible = record.Handle.IsValid
                 && (record.Flags & VividPrimitiveFlags.Valid) != 0
                 && (record.Flags & VividPrimitiveFlags.Disabled) == 0
-                && (record.PassMask & VividInstancePassMask.Main) != 0
+                && (record.PassMask & RequiredPassMask) != 0
                 && (record.CameraLayerMask & CameraCullingMask) != 0u;
 
             if (visible && (record.Flags & VividPrimitiveFlags.Skinned) == 0)
-                visible = IntersectsFrustum(record.BoundsMin, record.BoundsMax);
+                visible = IntersectsAnyFrustum(record.BoundsMin, record.BoundsMax);
 
             Visibility[index] = visible ? (byte) 1 : (byte) 0;
         }
 
-        private bool IntersectsFrustum(float3 boundsMin, float3 boundsMax)
+        private bool IntersectsAnyFrustum(float3 boundsMin, float3 boundsMax)
         {
             float3 center = (boundsMin + boundsMax) * 0.5f;
             float3 extents = math.max((boundsMax - boundsMin) * 0.5f, float3.zero);
-            int planeCount = math.min(FrustumPlaneCount, FrustumPlanes.Length);
-            for (int planeIndex = 0; planeIndex < planeCount; planeIndex++)
+            int frustumCount = math.min(FrustumCount, FrustumPlanes.Length / FrustumPlaneCount);
+            for (int frustumIndex = 0; frustumIndex < frustumCount; frustumIndex++)
             {
-                float4 plane = FrustumPlanes[planeIndex];
-                float radius = math.dot(extents, math.abs(plane.xyz));
-                float distance = math.dot(plane.xyz, center) + plane.w;
-                if (distance < -radius)
-                    return false;
+                bool intersects = true;
+                int planeOffset = frustumIndex * FrustumPlaneCount;
+                for (int planeIndex = 0; planeIndex < FrustumPlaneCount; planeIndex++)
+                {
+                    float4 plane = FrustumPlanes[planeOffset + planeIndex];
+                    float radius = math.dot(extents, math.abs(plane.xyz));
+                    float distance = math.dot(plane.xyz, center) + plane.w;
+                    if (distance < -radius)
+                    {
+                        intersects = false;
+                        break;
+                    }
+                }
+
+                if (intersects)
+                    return true;
             }
 
-            return true;
+            return false;
         }
     }
 

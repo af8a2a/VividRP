@@ -39,6 +39,7 @@ namespace VividRP.Runtime
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
         private static bool s_HasCascadedShadowCasterPass;
+        private static bool s_HasMeshletShadowPass;
         private static int s_EditModeFrameIndex;
 
 #if UNITY_EDITOR
@@ -224,12 +225,14 @@ namespace VividRP.Runtime
         internal static void SetGPUDrivenFrameData(
             GraphicsBuffer visibleMeshletRenderRequestsBuffer,
             GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer,
-            PrimitiveScene.VividPrimitiveDrawSet primitiveDrawSet = null)
+            PrimitiveScene.VividPrimitiveDrawSet primitiveDrawSet = null,
+            PrimitiveScene.VividPrimitiveDrawSet primitiveShadowDrawSet = null)
         {
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
             gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer = visibleMeshletRenderRequestsBuffer;
             gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer = visibleMeshletIndirectDrawArgsBuffer;
             gpuDrivenFrameData.primitiveDrawSet = primitiveDrawSet;
+            gpuDrivenFrameData.primitiveShadowDrawSet = primitiveShadowDrawSet;
             gpuDrivenFrameData.ResetOcclusion();
         }
 
@@ -381,6 +384,7 @@ namespace VividRP.Runtime
             s_CurrentImportVersion = 0;
             s_IsCompiled = false;
             s_HasCascadedShadowCasterPass = false;
+            s_HasMeshletShadowPass = false;
             RenderPassProfilingUtility.Clear();
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -595,9 +599,16 @@ namespace VividRP.Runtime
 
         internal static bool HasCascadedShadowCasterPass => s_HasCascadedShadowCasterPass;
 
+        internal static bool HasMeshletShadowPass => s_HasMeshletShadowPass;
+
         internal static void RegisterCascadedShadowCasterPass()
         {
             s_HasCascadedShadowCasterPass = true;
+        }
+
+        internal static void RegisterMeshletShadowPass()
+        {
+            s_HasMeshletShadowPass = true;
         }
 
         internal static bool HasRenderGizmoPrePostProcessBoundary(IReadOnlyList<IRenderPass> renderPasses)

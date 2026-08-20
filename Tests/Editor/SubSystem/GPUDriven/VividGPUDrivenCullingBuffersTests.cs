@@ -277,5 +277,81 @@ namespace VividRP.Editor.Tests
                     UnityEngine.Object.DestroyImmediate(cameraObject);
             }
         }
+
+        [Test]
+        public void Dispatcher_BatchDrawSetCountContractAcceptsZeroAndValidPositiveInputs()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            using var sceneBuffers = new VividGPUDrivenBufferSet();
+            using var dispatcher = new VividGPUDrivenCullingDispatcher(supportsOcclusion: false);
+            using var drawSetIndices = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                1,
+                sizeof(uint));
+            drawSetIndices.SetData(new[] { 0u });
+            var cullingContexts = new VividGPUCullingContext[1];
+            CommandBuffer cmd = null;
+            try
+            {
+                cmd = CommandBufferPool.Get("GPUDrivenBatchDrawSetContract");
+
+                Assert.DoesNotThrow(() => dispatcher.DispatchBatch(
+                    cmd,
+                    cullingContexts,
+                    1,
+                    default,
+                    sceneData,
+                    sceneBuffers,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    0.0f,
+                    default,
+                    null,
+                    0));
+                Assert.DoesNotThrow(() => dispatcher.DispatchBatch(
+                    cmd,
+                    cullingContexts,
+                    1,
+                    default,
+                    sceneData,
+                    sceneBuffers,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    0.0f,
+                    default,
+                    drawSetIndices,
+                    1));
+                Assert.Throws<System.ArgumentOutOfRangeException>(() => dispatcher.DispatchBatch(
+                    cmd,
+                    cullingContexts,
+                    1,
+                    default,
+                    sceneData,
+                    sceneBuffers,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    0.0f,
+                    default,
+                    drawSetIndices,
+                    2));
+            }
+            finally
+            {
+                if (cmd != null)
+                {
+                    cmd.Clear();
+                    CommandBufferPool.Release(cmd);
+                }
+            }
+        }
     }
 }

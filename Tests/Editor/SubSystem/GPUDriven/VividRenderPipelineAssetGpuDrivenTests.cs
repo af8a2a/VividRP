@@ -429,10 +429,83 @@ namespace VividRP.Editor.Tests
 
             int invalidateBuilds = prepareFrame.IndexOf(
                 "m_PrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int invalidateShadowBuilds = prepareFrame.IndexOf(
+                "m_ShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
             int synchronizeScene = prepareFrame.IndexOf("m_PrimitiveSceneAdapter.Synchronize(");
 
             Assert.That(invalidateBuilds, Is.GreaterThanOrEqualTo(0));
+            Assert.That(invalidateShadowBuilds, Is.GreaterThan(invalidateBuilds));
             Assert.That(synchronizeScene, Is.GreaterThan(invalidateBuilds));
+            Assert.That(synchronizeScene, Is.GreaterThan(invalidateShadowBuilds));
+        }
+
+        [Test]
+        public void ShadowDrawSetScheduling_UsesMeshletPassCascadeUnionAndShadowSemantics()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string schedule = SliceSource(
+                source,
+                "private VividPrimitiveDrawSet ScheduleShadowDrawSet(",
+                "internal VividPrimitiveDrawSet CompleteShadowDrawSet(");
+
+            StringAssert.Contains("PassRecorder.HasMeshletShadowPass", schedule);
+            StringAssert.Contains("shadowData.isCSMActive", schedule);
+            StringAssert.Contains("shadowData.viewMatrices", schedule);
+            StringAssert.Contains("shadowData.projMatrices", schedule);
+            StringAssert.Contains("VividInstancePassMask.Shadows", schedule);
+            StringAssert.Contains("cullAgainstNearPlane: false", schedule);
+            StringAssert.Contains("m_ShadowPrimitiveDrawSetSystem.Schedule(", schedule);
+            StringAssert.DoesNotContain("CompleteScheduledBuild", schedule);
+        }
+
+        [Test]
+        public void GPUDrivenPreRender_SchedulesShadowDrawSetBeforePublishingFrameData()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string updateCore = SliceSource(
+                source,
+                "private static void UpdateCore(",
+                "private static void PrepareFrameIfNeeded(");
+
+            int schedule = updateCore.IndexOf("gpuDrivenSystem.ScheduleShadowDrawSet(");
+            int mainViewCull = updateCore.IndexOf("gpuDrivenSystem.CullMainView(");
+            int publishFrameData = updateCore.IndexOf("PassRecorder.SetGPUDrivenFrameData(");
+
+            Assert.That(schedule, Is.GreaterThanOrEqualTo(0));
+            Assert.That(mainViewCull, Is.GreaterThan(schedule));
+            Assert.That(publishFrameData, Is.GreaterThan(mainViewCull));
+            StringAssert.DoesNotContain("CompleteShadowDrawSet", updateCore);
+        }
+
+        [Test]
+        public void MeshletShadowRecord_CompletesDrawSetImmediatelyBeforeShadowGpuCull()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "MeshletShadowPass.cs");
+            string record = SliceSource(
+                source,
+                "public override void Record(",
+                "public override void Dispose()");
+
+            int buildContexts = record.IndexOf("BuildShadowCullingContext(");
+            int complete = record.IndexOf("system.CompleteShadowDrawSet(");
+            int gpuCull = record.IndexOf("system.CullShadowCascades(");
+
+            Assert.That(buildContexts, Is.GreaterThanOrEqualTo(0));
+            Assert.That(complete, Is.GreaterThan(buildContexts));
+            Assert.That(gpuCull, Is.GreaterThan(complete));
+            StringAssert.Contains("m_PrimitiveShadowDrawSet", record);
         }
 
         [Test]

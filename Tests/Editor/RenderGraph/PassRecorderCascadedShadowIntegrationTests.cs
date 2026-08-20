@@ -125,6 +125,37 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Compile_CachesMeshletShadowPassPresence_UntilRecorderIsDisposed()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<MeshletShadowPass>(),
+            });
+
+            try
+            {
+                Assert.That(PassRecorder.HasMeshletShadowPass, Is.False);
+
+                Compile(graphAsset);
+
+                Assert.That(PassRecorder.HasMeshletShadowPass, Is.True);
+                Assert.That(
+                    PassRecorder.HasCascadedShadowCasterPass,
+                    Is.False,
+                    "A Meshlet-only shadow graph must not schedule Unity Renderer shadow culling.");
+
+                PassRecorder.Dispose();
+
+                Assert.That(PassRecorder.HasMeshletShadowPass, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
         private static void Compile(RenderGraphData graphAsset)
         {
             var method = typeof(PassRecorder).GetMethod("Compile", BindingFlags.NonPublic | BindingFlags.Static);

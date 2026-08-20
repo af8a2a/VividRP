@@ -132,7 +132,9 @@ namespace VividRP.Runtime.GPUDriven
             ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
             int forcedMeshLODNodeDepth,
             float meshLODErrorThreshold,
-            VividGPUDrivenOcclusionCullingParameters occlusionParameters = default
+            VividGPUDrivenOcclusionCullingParameters occlusionParameters = default,
+            GraphicsBuffer drawSetInstanceIndices = null,
+            int drawSetInstanceCount = -1
         )
         {
             DispatchInternal(
@@ -149,8 +151,8 @@ namespace VividRP.Runtime.GPUDriven
                 forcedMeshLODNodeDepth,
                 meshLODErrorThreshold,
                 occlusionParameters,
-                null,
-                -1);
+                drawSetInstanceIndices,
+                drawSetInstanceCount);
         }
 
         private void DispatchInternal(

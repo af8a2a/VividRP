@@ -132,7 +132,10 @@ namespace VividRP.Editor.Tests
                 var cameraData = frameData.GetOrCreate<VividCameraData>();
                 cameraData.actualWidth = 16;
                 cameraData.actualHeight = 16;
-                frameData.GetOrCreate<VividGPUDrivenFrameData>().primitiveDrawSet = drawSet;
+                VividGPUDrivenFrameData frameGPUDrivenData =
+                    frameData.GetOrCreate<VividGPUDrivenFrameData>();
+                frameGPUDrivenData.primitiveDrawSet = drawSet;
+                frameGPUDrivenData.primitiveShadowDrawSet = drawSet;
 
                 pass.Prepare(frameData);
 
@@ -146,6 +149,7 @@ namespace VividRP.Editor.Tests
                     frameData.GetOrCreate<VividGPUDrivenFrameData>();
                 gpuDrivenFrameData.Reset();
                 Assert.That(gpuDrivenFrameData.primitiveDrawSet, Is.Null);
+                Assert.That(gpuDrivenFrameData.primitiveShadowDrawSet, Is.Null);
             }
             finally
             {

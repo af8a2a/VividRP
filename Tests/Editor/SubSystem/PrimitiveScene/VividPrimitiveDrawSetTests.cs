@@ -56,6 +56,8 @@ namespace VividRP.Editor.Tests
                 FrustumPlanes = planes,
                 Visibility = visibility,
                 CameraCullingMask = 1u,
+                RequiredPassMask = VividInstancePassMask.Main,
+                FrustumCount = 1,
             }.Schedule(records.Length, 1).Complete();
 
             Assert.That(visibility.ToArray(), Is.EqualTo(new byte[] { 1, 0, 0, 0, 0, 1 }));
@@ -84,10 +86,218 @@ namespace VividRP.Editor.Tests
                 FrustumPlanes = planes,
                 Visibility = visibility,
                 CameraCullingMask = uint.MaxValue,
+                RequiredPassMask = VividInstancePassMask.Main,
+                FrustumCount = 1,
             }.Schedule(records.Length, 1).Complete();
 
             Assert.That(visibility[0], Is.EqualTo(1));
             Assert.That(visibility[1], Is.Zero);
+        }
+
+        [Test]
+        public void FrustumCullJob_UsesRequiredPassMaskForMainAndShadow()
+        {
+            using NativeArray<float4> planes = CreateBoxFrustumPlanes(5.0f);
+            using var records = new NativeArray<VividPrimitiveCullRecord>(3, Allocator.TempJob)
+            {
+                [0] = CreateRecord(
+                    CreateHandle(0),
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    passMask: VividInstancePassMask.Main),
+                [1] = CreateRecord(
+                    CreateHandle(1),
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    passMask: VividInstancePassMask.Shadows),
+                [2] = CreateRecord(
+                    CreateHandle(2),
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    passMask: VividInstancePassMask.Main | VividInstancePassMask.Shadows),
+            };
+            using var visibility = new NativeArray<byte>(records.Length, Allocator.TempJob);
+
+            new VividPrimitiveFrustumCullJob
+            {
+                CullingRecords = records,
+                FrustumPlanes = planes,
+                Visibility = visibility,
+                CameraCullingMask = uint.MaxValue,
+                RequiredPassMask = VividInstancePassMask.Shadows,
+                FrustumCount = 1,
+            }.Schedule(records.Length, 1).Complete();
+
+            Assert.That(visibility.ToArray(), Is.EqualTo(new byte[] { 0, 1, 1 }));
+
+            new VividPrimitiveFrustumCullJob
+            {
+                CullingRecords = records,
+                FrustumPlanes = planes,
+                Visibility = visibility,
+                CameraCullingMask = uint.MaxValue,
+                RequiredPassMask = VividInstancePassMask.Main,
+                FrustumCount = 1,
+            }.Schedule(records.Length, 1).Complete();
+
+            Assert.That(visibility.ToArray(), Is.EqualTo(new byte[] { 1, 0, 1 }));
+        }
+
+        [Test]
+        public void ShadowDrawSet_UnionsCascadeFrusta()
+        {
+            var cameraObject = new GameObject("Shadow Primitive DrawSet Camera");
+            using var drawSet = new VividPrimitiveDrawSet();
+            try
+            {
+                Camera camera = cameraObject.AddComponent<Camera>();
+                Matrix4x4 projection = Matrix4x4.Ortho(-2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f);
+                var viewMatrices = new[]
+                {
+                    Matrix4x4.identity,
+                    Matrix4x4.Translate(new Vector3(-10.0f, 0.0f, 0.0f)),
+                };
+                var projectionMatrices = new[] { projection, projection };
+                var firstBounds = new Bounds(Vector3.zero, Vector3.one);
+                var secondBounds = new Bounds(new Vector3(10.0f, 0.0f, 0.0f), Vector3.one);
+                var rejectedBounds = new Bounds(new Vector3(5.0f, 0.0f, 0.0f), Vector3.one);
+
+                Plane[] firstPlanes = GeometryUtility.CalculateFrustumPlanes(
+                    projectionMatrices[0] * viewMatrices[0]);
+                Plane[] secondPlanes = GeometryUtility.CalculateFrustumPlanes(
+                    projectionMatrices[1] * viewMatrices[1]);
+                Assert.That(GeometryUtility.TestPlanesAABB(firstPlanes, firstBounds), Is.True);
+                Assert.That(GeometryUtility.TestPlanesAABB(secondPlanes, firstBounds), Is.False);
+                Assert.That(GeometryUtility.TestPlanesAABB(firstPlanes, secondBounds), Is.False);
+                Assert.That(GeometryUtility.TestPlanesAABB(secondPlanes, secondBounds), Is.True);
+                Assert.That(GeometryUtility.TestPlanesAABB(firstPlanes, rejectedBounds), Is.False);
+                Assert.That(GeometryUtility.TestPlanesAABB(secondPlanes, rejectedBounds), Is.False);
+
+                VividPrimitiveHandle firstHandle = CreateHandle(0);
+                VividPrimitiveHandle secondHandle = CreateHandle(1);
+                VividPrimitiveHandle rejectedHandle = CreateHandle(2);
+                using var records = new NativeArray<VividPrimitiveCullRecord>(3, Allocator.TempJob)
+                {
+                    [0] = CreateRecord(
+                        firstHandle,
+                        firstBounds.min,
+                        firstBounds.max,
+                        drawSectionOffset: 0u,
+                        drawSectionCount: 1u,
+                        passMask: VividInstancePassMask.Shadows),
+                    [1] = CreateRecord(
+                        secondHandle,
+                        secondBounds.min,
+                        secondBounds.max,
+                        drawSectionOffset: 1u,
+                        drawSectionCount: 1u,
+                        passMask: VividInstancePassMask.Shadows),
+                    [2] = CreateRecord(
+                        rejectedHandle,
+                        rejectedBounds.min,
+                        rejectedBounds.max,
+                        drawSectionOffset: 2u,
+                        drawSectionCount: 1u,
+                        passMask: VividInstancePassMask.Shadows),
+                };
+                using var sources = new NativeArray<VividPrimitiveDrawSourceData>(3, Allocator.TempJob)
+                {
+                    [0] = CreateSource(firstHandle, 0, 101, VividRendererListID.Default),
+                    [1] = CreateSource(secondHandle, 1, 102, VividRendererListID.Default),
+                    [2] = CreateSource(rejectedHandle, 2, 103, VividRendererListID.Default),
+                };
+
+                drawSet.Schedule(
+                    camera,
+                    viewMatrices,
+                    projectionMatrices,
+                    frustumCount: 2,
+                    requiredPassMask: VividInstancePassMask.Shadows,
+                    cullAgainstNearPlane: true,
+                    records,
+                    sources,
+                    sceneRevision: 6u,
+                    frameIndex: 17);
+                drawSet.CompleteScheduledBuild();
+
+                Assert.That(drawSet.VisiblePrimitiveCount, Is.EqualTo(2));
+                Assert.That(drawSet.DrawCount, Is.EqualTo(2));
+                Assert.That(drawSet.LegacyInstanceIndices.ToArray(), Is.EqualTo(new uint[] { 101, 102 }));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void ShadowDrawSet_CanIgnoreRasterNearPlaneForPancakedCasters()
+        {
+            var cameraObject = new GameObject("Near Plane Shadow Primitive DrawSet Camera");
+            using var drawSet = new VividPrimitiveDrawSet();
+            try
+            {
+                Camera camera = cameraObject.AddComponent<Camera>();
+                Matrix4x4 projection = Matrix4x4.Ortho(-5.0f, 5.0f, -5.0f, 5.0f, -5.0f, 5.0f);
+                var viewMatrices = new[] { Matrix4x4.identity };
+                var projectionMatrices = new[] { projection };
+                Plane[] planes = GeometryUtility.CalculateFrustumPlanes(projection);
+                Plane nearPlane = planes[4];
+                Vector3 pointOnNearPlane = -nearPlane.normal * nearPlane.distance;
+                var casterBounds = new Bounds(
+                    pointOnNearPlane - nearPlane.normal,
+                    Vector3.one * 0.1f);
+                var planesWithoutNear = new[] { planes[0], planes[1], planes[2], planes[3], planes[5] };
+                Assert.That(GeometryUtility.TestPlanesAABB(planes, casterBounds), Is.False);
+                Assert.That(GeometryUtility.TestPlanesAABB(planesWithoutNear, casterBounds), Is.True);
+
+                VividPrimitiveHandle handle = CreateHandle(0);
+                using var records = new NativeArray<VividPrimitiveCullRecord>(1, Allocator.TempJob)
+                {
+                    [0] = CreateRecord(
+                        handle,
+                        casterBounds.min,
+                        casterBounds.max,
+                        drawSectionCount: 1u,
+                        passMask: VividInstancePassMask.Shadows),
+                };
+                using var sources = new NativeArray<VividPrimitiveDrawSourceData>(1, Allocator.TempJob)
+                {
+                    [0] = CreateSource(handle, 0, 77, VividRendererListID.Default),
+                };
+
+                drawSet.Schedule(
+                    camera,
+                    viewMatrices,
+                    projectionMatrices,
+                    frustumCount: 1,
+                    requiredPassMask: VividInstancePassMask.Shadows,
+                    cullAgainstNearPlane: false,
+                    records,
+                    sources,
+                    sceneRevision: 8u,
+                    frameIndex: 18);
+                drawSet.CompleteScheduledBuild();
+                Assert.That(drawSet.DrawCount, Is.EqualTo(1));
+
+                drawSet.Schedule(
+                    camera,
+                    viewMatrices,
+                    projectionMatrices,
+                    frustumCount: 1,
+                    requiredPassMask: VividInstancePassMask.Shadows,
+                    cullAgainstNearPlane: true,
+                    records,
+                    sources,
+                    sceneRevision: 8u,
+                    frameIndex: 19);
+                drawSet.CompleteScheduledBuild();
+                Assert.That(drawSet.DrawCount, Is.Zero);
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]

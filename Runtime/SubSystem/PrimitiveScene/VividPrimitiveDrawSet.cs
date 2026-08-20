@@ -12,6 +12,7 @@ namespace VividRP.Runtime.PrimitiveScene
     internal sealed class VividPrimitiveDrawSet : CameraRelativeState
     {
         private const int FrustumPlaneCount = 6;
+        private const int NearFrustumPlaneIndex = 4;
         private const int CullJobBatchSize = 64;
         private const float FrustumMarginPixels = 4.0f;
         private static readonly ProfilerMarker s_BuildMarker = new("VividRP.PrimitiveScene.DrawSet.Build");
@@ -105,10 +106,12 @@ namespace VividRP.Runtime.PrimitiveScene
 
             using (s_BuildMarker.Auto())
             {
-                JobHandle dependency = PrepareSchedule(cullingRecords.Length, drawSources.Length);
+                JobHandle dependency = PrepareSchedule(cullingRecords.Length, drawSources.Length, 1);
                 CopyFrustumPlanes(m_PlaneScratch);
                 ScheduleJobs(
                     unchecked((uint) camera.cullingMask),
+                    VividInstancePassMask.Main,
+                    1,
                     cullingRecords,
                     drawSources,
                     sceneRevision,
@@ -132,10 +135,64 @@ namespace VividRP.Runtime.PrimitiveScene
 
             using (s_BuildMarker.Auto())
             {
-                JobHandle dependency = PrepareSchedule(cullingRecords.Length, drawSources.Length);
+                JobHandle dependency = PrepareSchedule(cullingRecords.Length, drawSources.Length, 1);
                 CopyFrustumPlanes(frustumPlanes);
                 ScheduleJobs(
                     cameraCullingMask,
+                    VividInstancePassMask.Main,
+                    1,
+                    cullingRecords,
+                    drawSources,
+                    sceneRevision,
+                    frameIndex,
+                    dependency);
+            }
+        }
+
+        internal void Schedule(
+            Camera camera,
+            Matrix4x4[] viewMatrices,
+            Matrix4x4[] projectionMatrices,
+            int frustumCount,
+            VividInstancePassMask requiredPassMask,
+            bool cullAgainstNearPlane,
+            NativeArray<VividPrimitiveCullRecord> cullingRecords,
+            NativeArray<VividPrimitiveDrawSourceData> drawSources,
+            uint sceneRevision,
+            int frameIndex)
+        {
+            ThrowIfDisposed();
+            if (camera == null)
+                throw new ArgumentNullException(nameof(camera));
+            if (viewMatrices == null)
+                throw new ArgumentNullException(nameof(viewMatrices));
+            if (projectionMatrices == null)
+                throw new ArgumentNullException(nameof(projectionMatrices));
+            if (frustumCount <= 0
+                || frustumCount > viewMatrices.Length
+                || frustumCount > projectionMatrices.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(frustumCount));
+            }
+            if (requiredPassMask == 0)
+                throw new ArgumentOutOfRangeException(nameof(requiredPassMask));
+            ValidateInputs(cullingRecords, drawSources);
+
+            using (s_BuildMarker.Auto())
+            {
+                JobHandle dependency = PrepareSchedule(
+                    cullingRecords.Length,
+                    drawSources.Length,
+                    frustumCount);
+                CopyFrustumPlanes(
+                    viewMatrices,
+                    projectionMatrices,
+                    frustumCount,
+                    cullAgainstNearPlane);
+                ScheduleJobs(
+                    unchecked((uint) camera.cullingMask),
+                    requiredPassMask,
+                    frustumCount,
                     cullingRecords,
                     drawSources,
                     sceneRevision,
@@ -265,7 +322,7 @@ namespace VividRP.Runtime.PrimitiveScene
             m_IsDisposed = true;
         }
 
-        private JobHandle PrepareSchedule(int primitiveCount, int drawSourceCount)
+        private JobHandle PrepareSchedule(int primitiveCount, int drawSourceCount, int frustumCount)
         {
             EnsureFixedNativeResources();
             JobHandle dependency = m_HasPendingBuild ? m_PendingBuild : default;
@@ -273,13 +330,30 @@ namespace VividRP.Runtime.PrimitiveScene
             JobHandle deferredDisposals = default;
             bool hasDeferredDisposals = false;
 
-            // Plane coefficients are populated on the CPU. Allocate a fresh array while
-            // an earlier cull still reads the previous one, then retire the old storage
-            // after that build completes.
+            // Plane coefficients are populated on the CPU. Allocate fresh storage while
+            // an earlier cull still reads the previous planes, then retire it after the
+            // earlier build completes.
+            int requiredPlaneCount = frustumCount * FrustumPlaneCount;
             if (deferDisposal)
             {
-                ScheduleDeferredDispose(ref m_FrustumPlanes, dependency, ref deferredDisposals, ref hasDeferredDisposals);
-                m_FrustumPlanes = CreateNativeArray<float4>(FrustumPlaneCount);
+                int planeCapacity = Mathf.NextPowerOfTwo(
+                    Mathf.Max(requiredPlaneCount, m_FrustumPlanes.IsCreated ? m_FrustumPlanes.Length : 1));
+                ScheduleDeferredDispose(
+                    ref m_FrustumPlanes,
+                    dependency,
+                    ref deferredDisposals,
+                    ref hasDeferredDisposals);
+                m_FrustumPlanes = CreateNativeArray<float4>(planeCapacity);
+            }
+            else
+            {
+                EnsureNativeCapacity(
+                    ref m_FrustumPlanes,
+                    requiredPlaneCount,
+                    dependency,
+                    false,
+                    ref deferredDisposals,
+                    ref hasDeferredDisposals);
             }
 
             EnsureNativeCapacity(
@@ -314,13 +388,6 @@ namespace VividRP.Runtime.PrimitiveScene
 
         private void EnsureFixedNativeResources()
         {
-            if (!m_FrustumPlanes.IsCreated)
-            {
-                m_FrustumPlanes = new NativeArray<float4>(
-                    FrustumPlaneCount,
-                    Allocator.Persistent,
-                    NativeArrayOptions.UninitializedMemory);
-            }
             if (!m_Buckets.IsCreated)
             {
                 m_Buckets = new NativeArray<VividPrimitiveDrawBucket>(
@@ -371,6 +438,31 @@ namespace VividRP.Runtime.PrimitiveScene
             }
         }
 
+        private void CopyFrustumPlanes(
+            Matrix4x4[] viewMatrices,
+            Matrix4x4[] projectionMatrices,
+            int frustumCount,
+            bool cullAgainstNearPlane)
+        {
+            for (int frustumIndex = 0; frustumIndex < frustumCount; frustumIndex++)
+            {
+                GeometryUtility.CalculateFrustumPlanes(
+                    projectionMatrices[frustumIndex] * viewMatrices[frustumIndex],
+                    m_PlaneScratch);
+                int planeOffset = frustumIndex * FrustumPlaneCount;
+                for (int planeIndex = 0; planeIndex < FrustumPlaneCount; planeIndex++)
+                {
+                    Plane plane = m_PlaneScratch[planeIndex];
+                    Vector3 normal = plane.normal;
+                    bool disablePlane = !cullAgainstNearPlane
+                                        && planeIndex == NearFrustumPlaneIndex;
+                    m_FrustumPlanes[planeOffset + planeIndex] = disablePlane
+                        ? float4.zero
+                        : new float4(normal.x, normal.y, normal.z, plane.distance);
+                }
+            }
+        }
+
         internal static Matrix4x4 ExpandProjectionForCoarseCulling(
             Matrix4x4 projection,
             int pixelWidth,
@@ -397,6 +489,8 @@ namespace VividRP.Runtime.PrimitiveScene
 
         private void ScheduleJobs(
             uint cameraCullingMask,
+            VividInstancePassMask requiredPassMask,
+            int frustumCount,
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
@@ -425,6 +519,8 @@ namespace VividRP.Runtime.PrimitiveScene
                         FrustumPlanes = m_FrustumPlanes,
                         Visibility = m_Visibility.GetSubArray(0, cullingRecords.Length),
                         CameraCullingMask = cameraCullingMask,
+                        RequiredPassMask = requiredPassMask,
+                        FrustumCount = frustumCount,
                     }.Schedule(cullingRecords.Length, CullJobBatchSize, dependency);
                 }
             }
@@ -604,6 +700,37 @@ namespace VividRP.Runtime.PrimitiveScene
                 sceneRevision,
                 frameIndex);
             drawSet.CompleteScheduledBuild();
+            return drawSet;
+        }
+
+        internal VividPrimitiveDrawSet Schedule(
+            Camera camera,
+            Matrix4x4[] viewMatrices,
+            Matrix4x4[] projectionMatrices,
+            int frustumCount,
+            VividInstancePassMask requiredPassMask,
+            bool cullAgainstNearPlane,
+            NativeArray<VividPrimitiveCullRecord> cullingRecords,
+            NativeArray<VividPrimitiveDrawSourceData> drawSources,
+            uint sceneRevision,
+            int frameIndex = -1)
+        {
+            if (camera == null)
+                throw new ArgumentNullException(nameof(camera));
+
+            PurgeDestroyedCameras();
+            VividPrimitiveDrawSet drawSet = GetOrCreateBase(camera);
+            drawSet.Schedule(
+                camera,
+                viewMatrices,
+                projectionMatrices,
+                frustumCount,
+                requiredPassMask,
+                cullAgainstNearPlane,
+                cullingRecords,
+                drawSources,
+                sceneRevision,
+                frameIndex >= 0 ? frameIndex : Time.frameCount);
             return drawSet;
         }
 

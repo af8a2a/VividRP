@@ -16,6 +16,7 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_BumpScalePropertyId = Shader.PropertyToID("_BumpScale");
         private static readonly int s_MetallicPropertyId = Shader.PropertyToID("_Metallic");
         private static readonly int s_SmoothnessPropertyId = Shader.PropertyToID("_Smoothness");
+        private static readonly int s_RMOMapPropertyId = Shader.PropertyToID("_RMOMap");
         private static readonly int s_MetallicGlossMapPropertyId = Shader.PropertyToID("_MetallicGlossMap");
         private static readonly int s_RoughnessMapPropertyId = Shader.PropertyToID("_RoughnessMap");
         private static readonly int s_MaskMapPropertyId = Shader.PropertyToID("_MaskMap");
@@ -1388,6 +1389,7 @@ namespace VividRP.Runtime.GPUDriven
             Texture baseColor = GetTexture(material, s_BaseMapPropertyId) ?? GetTexture(material, s_MainTexPropertyId);
             Texture normal = GetTexture(material, s_BumpMapPropertyId);
             Texture mask = GetTexture(material, s_MaskMapPropertyId)
+                           ?? GetTexture(material, s_RMOMapPropertyId)
                            ?? GetTexture(material, s_MetallicGlossMapPropertyId)
                            ?? GetTexture(material, s_RoughnessMapPropertyId);
             return new GPUDrivenSurfaceTextureSet(null, baseColor, normal, mask, GetMaskMode(material));
@@ -1397,6 +1399,8 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (GetTexture(material, s_MaskMapPropertyId) != null)
                 return GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness;
+            if (GetTexture(material, s_RMOMapPropertyId) != null)
+                return GPUDrivenMaterialMaskMode.RoughnessMetallicOcclusion;
             if (GetTexture(material, s_MetallicGlossMapPropertyId) != null)
                 return GPUDrivenMaterialMaskMode.MetallicSmoothness;
             if (GetTexture(material, s_RoughnessMapPropertyId) != null)

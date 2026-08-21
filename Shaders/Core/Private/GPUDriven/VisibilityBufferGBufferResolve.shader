@@ -295,6 +295,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     ambientOcclusion = maskSample.g;
                     perceptualRoughness = 1.0f - maskSample.a;
                 }
+                else if (maskMode == 4u)
+                {
+                    perceptualRoughness = maskSample.r;
+                    metallic = maskSample.g;
+                    ambientOcclusion = maskSample.b;
+                }
             }
 
             void LoadTerrainControlWeights(

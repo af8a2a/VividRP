@@ -15,6 +15,20 @@ namespace VividRP.Editor.Tests
         private const string StandardLayeredLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLayeredLit/StandardLayeredLit.shader";
 
         [Test]
+        public void StandardLitShader_ExposesPackedRMOMap()
+        {
+            Material material = CreateMaterial();
+            try
+            {
+                Assert.That(material.HasProperty("_RMOMap"), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
         public void StandardLitShader_DeclaresMetaPass_ForGlobalIlluminationBaking()
         {
             UnityEngine.Material material = CreateMaterial();
@@ -199,6 +213,38 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(opacityMap);
                 Object.DestroyImmediate(transmissionMap);
                 Object.DestroyImmediate(normalMap);
+                Object.DestroyImmediate(metallicMap);
+                Object.DestroyImmediate(roughnessMap);
+                Object.DestroyImmediate(occlusionMap);
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void SetupMaterial_PrioritizesRMOMapOverLegacyPBRMaps()
+        {
+            Material material = CreateMaterial();
+            Texture2D rmoMap = CreateTexture();
+            Texture2D metallicMap = CreateTexture();
+            Texture2D roughnessMap = CreateTexture();
+            Texture2D occlusionMap = CreateTexture();
+            try
+            {
+                material.SetTexture("_RMOMap", rmoMap);
+                material.SetTexture("_MetallicGlossMap", metallicMap);
+                material.SetTexture("_RoughnessMap", roughnessMap);
+                material.SetTexture("_OcclusionMap", occlusionMap);
+
+                StandardLitMaterialUtility.SetupMaterial(material, null, false);
+
+                Assert.That(material.IsKeywordEnabled("_RMOMAP"), Is.True);
+                Assert.That(material.IsKeywordEnabled("_METALLICSPECGLOSSMAP"), Is.False);
+                Assert.That(material.IsKeywordEnabled("_ROUGHNESSMAP"), Is.False);
+                Assert.That(material.IsKeywordEnabled("_OCCLUSIONMAP"), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(rmoMap);
                 Object.DestroyImmediate(metallicMap);
                 Object.DestroyImmediate(roughnessMap);
                 Object.DestroyImmediate(occlusionMap);

@@ -15,6 +15,7 @@ namespace VividRP.Runtime.GPUDriven
         MetallicSmoothness = 1,
         Roughness = 2,
         PackedMetallicOcclusionSmoothness = 3,
+        RoughnessMetallicOcclusion = 4,
     }
 
     public enum GPUDrivenMaterialProxyTextureMode

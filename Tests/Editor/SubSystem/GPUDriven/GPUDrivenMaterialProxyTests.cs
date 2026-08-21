@@ -220,7 +220,7 @@ namespace VividRP.Editor.Tests
                 material.SetTextureOffset("_BaseMap", new Vector2(0.1f, 0.2f));
                 material.SetTexture("_BumpMap", bumpMap);
                 material.SetFloat("_BumpScale", 0.6f);
-                material.SetTexture("_MetallicGlossMap", maskMap);
+                material.SetTexture("_RMOMap", maskMap);
                 material.SetFloat("_Metallic", 0.4f);
                 material.SetFloat("_Smoothness", 0.3f);
                 material.SetColor("_EmissionColor", new Color(1.0f, 0.5f, 0.0f, 1.0f));
@@ -244,7 +244,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialProxy.BumpMap, Is.SameAs(bumpMap));
                 Assert.That(materialProxy.BumpScale, Is.EqualTo(0.6f).Within(0.0001f));
                 Assert.That(materialProxy.MaskMap, Is.SameAs(maskMap));
-                Assert.That(materialProxy.MaskMode, Is.EqualTo(GPUDrivenMaterialMaskMode.MetallicSmoothness));
+                Assert.That(materialProxy.MaskMode, Is.EqualTo(GPUDrivenMaterialMaskMode.RoughnessMetallicOcclusion));
                 Assert.That(materialProxy.Metallic, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialProxy.Roughness, Is.EqualTo(0.7f).Within(0.0001f));
                 Assert.That(materialProxy.EmissionColor.r, Is.EqualTo(1.0f).Within(0.0001f));

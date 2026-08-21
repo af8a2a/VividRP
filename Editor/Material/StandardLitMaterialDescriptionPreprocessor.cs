@@ -559,7 +559,7 @@ namespace VividRP.Editor
 
         public override uint GetVersion()
         {
-            return 1;
+            return 2;
         }
 
         public override int GetPostprocessOrder()
@@ -592,7 +592,11 @@ namespace VividRP.Editor
             }
 
             _ = clips;
-            StandardLitMaterialImportUtility.TryImport(new MaterialDescriptionAdapter(description), material, shader);
+            var adapter = new MaterialDescriptionAdapter(description);
+            if (StandardLitMaterialImportUtility.TryImport(adapter, material, shader))
+            {
+                StandardLitRMOAutoPacker.BindOrSchedule(assetPath, adapter, material);
+            }
         }
 
         private sealed class MaterialDescriptionAdapter : IImportedMaterialDescription

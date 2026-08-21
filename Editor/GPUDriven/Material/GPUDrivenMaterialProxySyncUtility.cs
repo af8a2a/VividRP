@@ -69,6 +69,7 @@ namespace VividRP.Editor.GPUDriven
         private static readonly int s_CutoffId = Shader.PropertyToID("_Cutoff");
         private static readonly int s_CullId = Shader.PropertyToID("_Cull");
         private static readonly int s_OpacityMapId = Shader.PropertyToID("_OpacityMap");
+        private static readonly int s_RMOMapId = Shader.PropertyToID("_RMOMap");
         private static readonly int s_MetallicGlossMapId = Shader.PropertyToID("_MetallicGlossMap");
         private static readonly int s_RoughnessMapId = Shader.PropertyToID("_RoughnessMap");
         private static readonly int s_EmissionMapId = Shader.PropertyToID("_EmissionMap");
@@ -176,6 +177,11 @@ namespace VividRP.Editor.GPUDriven
             int baseTexturePropertyId = sourceMaterial.HasProperty(s_BaseMapId) ? s_BaseMapId : s_MainTexId;
             Texture2D baseMap = GetTexture2D(sourceMaterial, baseTexturePropertyId, "_BaseMap", warnings);
             Texture2D bumpMap = GetTexture2D(sourceMaterial, s_BumpMapId, "_BumpMap", warnings);
+            Texture2D rmoMap = GetTexture2D(
+                sourceMaterial,
+                s_RMOMapId,
+                "_RMOMap",
+                warnings);
             Texture2D metallicMap = GetTexture2D(
                 sourceMaterial,
                 s_MetallicGlossMapId,
@@ -186,12 +192,18 @@ namespace VividRP.Editor.GPUDriven
                 s_RoughnessMapId,
                 "_RoughnessMap",
                 warnings);
-            Texture2D maskMap = metallicMap != null ? metallicMap : roughnessMap;
-            GPUDrivenMaterialMaskMode maskMode = metallicMap != null
-                ? GPUDrivenMaterialMaskMode.MetallicSmoothness
-                : roughnessMap != null
-                    ? GPUDrivenMaterialMaskMode.Roughness
-                    : GPUDrivenMaterialMaskMode.None;
+            Texture2D maskMap = rmoMap != null
+                ? rmoMap
+                : metallicMap != null
+                    ? metallicMap
+                    : roughnessMap;
+            GPUDrivenMaterialMaskMode maskMode = rmoMap != null
+                ? GPUDrivenMaterialMaskMode.RoughnessMetallicOcclusion
+                : metallicMap != null
+                    ? GPUDrivenMaterialMaskMode.MetallicSmoothness
+                    : roughnessMap != null
+                        ? GPUDrivenMaterialMaskMode.Roughness
+                        : GPUDrivenMaterialMaskMode.None;
             return new GPUDrivenMaterialProxySourceTextures(baseMap, bumpMap, maskMap, maskMode);
         }
 

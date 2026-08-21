@@ -69,7 +69,9 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     baseSample = SampleBase(geometry.uv, baseTextureLod);
 #endif
     float materialTextureLod = baseTextureLod;
-#if defined(_METALLICSPECGLOSSMAP)
+#if defined(_RMOMAP)
+    materialTextureLod = max(computeTargetTextureLOD(_RMOMap, textureBaseLambda), 0.0);
+#elif defined(_METALLICSPECGLOSSMAP)
     materialTextureLod = max(computeTargetTextureLOD(_MetallicGlossMap, textureBaseLambda), 0.0);
 #elif defined(_ROUGHNESSMAP)
     materialTextureLod = max(computeTargetTextureLOD(_RoughnessMap, textureBaseLambda), 0.0);

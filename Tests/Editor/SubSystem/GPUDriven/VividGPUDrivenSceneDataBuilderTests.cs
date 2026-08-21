@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEditor;
@@ -1027,6 +1028,156 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_VirtualTextureMaterialProxy_PassesOnlyStreamedVirtualTextureToTextureBackend()
+        {
+            GPUDrivenMaterialProxy materialProxy = null;
+            VividVirtualTextureAsset streamedVirtualTexture = null;
+
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                streamedVirtualTexture = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+                materialProxy.StreamedVirtualTexture = streamedVirtualTexture;
+                using var textureBackend = new CapturingVirtualTextureBackend();
+
+                GPUDrivenSurfaceTextureSet capturedTextures =
+                    BuildAndCaptureMaterialProxyTextures(materialProxy, textureBackend);
+
+                Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.VirtualTexture));
+                Assert.That(capturedTextures.StreamedVirtualTexture, Is.SameAs(streamedVirtualTexture));
+                Assert.That(capturedTextures.BaseColor, Is.Null);
+                Assert.That(capturedTextures.Normal, Is.Null);
+                Assert.That(capturedTextures.Mask, Is.Null);
+            }
+            finally
+            {
+                DestroyTestObjects(null, null, materialProxy, streamedVirtualTexture);
+            }
+        }
+
+        [Test]
+        public void Build_BindlessMaterialProxy_PassesOnlyRawMapsToTextureBackend()
+        {
+            GPUDrivenMaterialProxy materialProxy = null;
+            Texture2D baseMap = null;
+            Texture2D bumpMap = null;
+            Texture2D maskMap = null;
+
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                baseMap = new Texture2D(1, 1);
+                bumpMap = new Texture2D(1, 1);
+                maskMap = new Texture2D(1, 1);
+                materialProxy.BaseMap = baseMap;
+                materialProxy.BumpMap = bumpMap;
+                materialProxy.MaskMap = maskMap;
+                using var textureBackend = new CapturingTextureBackend();
+
+                GPUDrivenSurfaceTextureSet capturedTextures =
+                    BuildAndCaptureMaterialProxyTextures(materialProxy, textureBackend);
+
+                Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.Bindless));
+                Assert.That(capturedTextures.StreamedVirtualTexture, Is.Null);
+                Assert.That(capturedTextures.BaseColor, Is.SameAs(baseMap));
+                Assert.That(capturedTextures.Normal, Is.SameAs(bumpMap));
+                Assert.That(capturedTextures.Mask, Is.SameAs(maskMap));
+            }
+            finally
+            {
+                DestroyTestObjects(null, null, materialProxy, baseMap, bumpMap, maskMap);
+            }
+        }
+
+        [Test]
+        public void Build_LegacyDualPayload_SelectsResourcesForEachTextureBackend()
+        {
+            GPUDrivenMaterialProxy materialProxy = null;
+            Texture2D baseMap = null;
+            Texture2D bumpMap = null;
+            Texture2D maskMap = null;
+            VividVirtualTextureAsset streamedVirtualTexture = null;
+
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                baseMap = new Texture2D(1, 1);
+                bumpMap = new Texture2D(1, 1);
+                maskMap = new Texture2D(1, 1);
+                streamedVirtualTexture = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+                SetLegacyDualTexturePayload(
+                    materialProxy,
+                    baseMap,
+                    bumpMap,
+                    maskMap,
+                    streamedVirtualTexture);
+
+                using var virtualTextureBackend = new CapturingVirtualTextureBackend();
+                GPUDrivenSurfaceTextureSet virtualTexturePayload =
+                    BuildAndCaptureMaterialProxyTextures(materialProxy, virtualTextureBackend);
+                using var bindlessBackend = new CapturingTextureBackend();
+                GPUDrivenSurfaceTextureSet bindlessPayload =
+                    BuildAndCaptureMaterialProxyTextures(materialProxy, bindlessBackend);
+
+                Assert.That(virtualTexturePayload.StreamedVirtualTexture, Is.SameAs(streamedVirtualTexture));
+                Assert.That(virtualTexturePayload.BaseColor, Is.Null);
+                Assert.That(virtualTexturePayload.Normal, Is.Null);
+                Assert.That(virtualTexturePayload.Mask, Is.Null);
+                Assert.That(bindlessPayload.StreamedVirtualTexture, Is.Null);
+                Assert.That(bindlessPayload.BaseColor, Is.SameAs(baseMap));
+                Assert.That(bindlessPayload.Normal, Is.SameAs(bumpMap));
+                Assert.That(bindlessPayload.Mask, Is.SameAs(maskMap));
+            }
+            finally
+            {
+                DestroyTestObjects(
+                    null,
+                    null,
+                    materialProxy,
+                    baseMap,
+                    bumpMap,
+                    maskMap,
+                    streamedVirtualTexture);
+            }
+        }
+
+        [Test]
+        public void Build_TextureBackendInstanceChange_InvalidatesDynamicData()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            var builder = new VividGPUDrivenSceneDataBuilder();
+            using var firstBackend = new CapturingTextureBackend();
+            using var secondBackend = new CapturingTextureBackend();
+
+            bool staticDataChanged = builder.Build(
+                sceneData,
+                VividMeshletRendererDatabase.instance,
+                firstBackend,
+                out bool materialDataChanged);
+
+            Assert.That(staticDataChanged, Is.True);
+            Assert.That(materialDataChanged, Is.True);
+
+            staticDataChanged = builder.Build(
+                sceneData,
+                VividMeshletRendererDatabase.instance,
+                firstBackend,
+                out materialDataChanged);
+
+            Assert.That(staticDataChanged, Is.False);
+            Assert.That(materialDataChanged, Is.False);
+
+            staticDataChanged = builder.Build(
+                sceneData,
+                VividMeshletRendererDatabase.instance,
+                secondBackend,
+                out materialDataChanged);
+
+            Assert.That(staticDataChanged, Is.False);
+            Assert.That(materialDataChanged, Is.True);
+        }
+
+        [Test]
         public void Build_UsesMaterialProxyData_WhenMeshRendererWasRemoved()
         {
             Shader shader = Shader.Find("VividRP/Material/StandardLit");
@@ -1995,6 +2146,84 @@ namespace VividRP.Editor.Tests
             return gameObject;
         }
 
+        private static GPUDrivenSurfaceTextureSet BuildAndCaptureMaterialProxyTextures(
+            GPUDrivenMaterialProxy materialProxy,
+            CapturingTextureBackend textureBackend)
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("CapturedProxyTextureMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "CapturedProxyTextureCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 });
+                gameObject = CreateMeshletRendererObject(
+                    "Renderer_CapturedProxyTextures",
+                    mesh,
+                    new[] { material },
+                    out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, textureBackend);
+
+                Assert.That(textureBackend.CreateSurfaceBindingCallCount, Is.EqualTo(1));
+                return textureBackend.LastTextures;
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection);
+            }
+        }
+
+        private static void SetLegacyDualTexturePayload(
+            GPUDrivenMaterialProxy materialProxy,
+            Texture2D baseMap,
+            Texture2D bumpMap,
+            Texture2D maskMap,
+            VividVirtualTextureAsset streamedVirtualTexture)
+        {
+            var serializedProxy = new SerializedObject(materialProxy);
+            serializedProxy.FindProperty("m_TextureMode").enumValueIndex =
+                (int) GPUDrivenMaterialProxyTextureMode.Bindless;
+            serializedProxy.FindProperty("m_BaseMap").objectReferenceValue = baseMap;
+            serializedProxy.FindProperty("m_BumpMap").objectReferenceValue = bumpMap;
+            serializedProxy.FindProperty("m_MaskMap").objectReferenceValue = maskMap;
+            serializedProxy.FindProperty("m_StreamedVirtualTexture").objectReferenceValue =
+                streamedVirtualTexture;
+            serializedProxy.ApplyModifiedPropertiesWithoutUndo();
+
+            MethodInfo onValidateMethod = typeof(GPUDrivenMaterialProxy).GetMethod(
+                "OnValidate",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(onValidateMethod, Is.Not.Null);
+            onValidateMethod.Invoke(materialProxy, null);
+
+            Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.Bindless));
+            Assert.That(materialProxy.BaseMap, Is.SameAs(baseMap));
+            Assert.That(materialProxy.BumpMap, Is.SameAs(bumpMap));
+            Assert.That(materialProxy.MaskMap, Is.SameAs(maskMap));
+            Assert.That(materialProxy.StreamedVirtualTexture, Is.SameAs(streamedVirtualTexture));
+        }
+
         private static Material CreateTestMaterial()
         {
             Shader shader = Shader.Find("Hidden/InternalErrorShader");
@@ -2188,6 +2417,59 @@ namespace VividRP.Editor.Tests
                 CreateSRVDescriptorCallCountThisFrame++;
                 return true;
             }
+        }
+
+        private class CapturingTextureBackend : IGPUDrivenTextureBackend
+        {
+            public string DisplayName => "Capturing";
+
+            public bool IsAvailable => true;
+
+            public string UnavailableReason => string.Empty;
+
+            public uint BindingRevision => 0u;
+
+            internal int CreateSurfaceBindingCallCount { get; private set; }
+
+            internal GPUDrivenSurfaceTextureSet LastTextures { get; private set; }
+
+            public void PrepareFrame()
+            {
+            }
+
+            public void ResetPerFrameStats()
+            {
+            }
+
+            public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
+            {
+                return false;
+            }
+
+            public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
+            {
+                CreateSurfaceBindingCallCount++;
+                LastTextures = textures;
+                return default;
+            }
+
+            public GPUDrivenTextureBackendStats GetStats()
+            {
+                return default;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class CapturingVirtualTextureBackend :
+            CapturingTextureBackend,
+            IGPUDrivenVirtualTextureBackend
+        {
+            public int VirtualTextureSpaceId => 1;
+
+            public int VirtualTextureAllocationId => 1;
         }
 
     }

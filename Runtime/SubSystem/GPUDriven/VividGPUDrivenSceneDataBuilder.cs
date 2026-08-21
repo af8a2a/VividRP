@@ -50,6 +50,7 @@ namespace VividRP.Runtime.GPUDriven
         private static bool s_SimpleForwardShaderResolved;
         private bool m_HasBuiltStaticData;
         private bool m_UsesFallbackMaterials;
+        private IGPUDrivenTextureBackend m_PreviousTextureBackend;
         private uint m_PreviousSurfaceBindingRevision;
         private uint m_PreviousDatabaseStructureRevision;
         private uint m_PreviousDatabaseResourceRevision;
@@ -126,13 +127,15 @@ namespace VividRP.Runtime.GPUDriven
                     staticDataChanged = true;
                 }
 
-                materialDataChanged = staticDataChanged || m_UsesFallbackMaterials;
+                materialDataChanged = staticDataChanged
+                                      || m_UsesFallbackMaterials
+                                      || !ReferenceEquals(m_PreviousTextureBackend, textureBackend);
                 if (!materialDataChanged && !AreEntityIdSetsEqual(m_CurrentReferencedMaterialProxyIds, m_PreviousReferencedMaterialProxyIds))
                 {
                     materialDataChanged = true;
                 }
 
-                if (!materialDataChanged && HasTrackedMaterialProxyVersionChanges(database))
+                if (!materialDataChanged && HasTrackedMaterialProxyVersionChanges(database, textureBackend))
                 {
                     materialDataChanged = true;
                 }
@@ -224,6 +227,7 @@ namespace VividRP.Runtime.GPUDriven
                 UpdateTrackedDependencies();
             }
             m_HasBuiltStaticData = true;
+            m_PreviousTextureBackend = textureBackend;
             m_PreviousSurfaceBindingRevision = textureBackend.BindingRevision;
             m_PreviousDatabaseStructureRevision = database.StructureRevision;
             m_PreviousDatabaseResourceRevision = database.ResourceRevision;
@@ -238,6 +242,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (!m_HasBuiltStaticData
                 || m_UsesFallbackMaterials
+                || !ReferenceEquals(m_PreviousTextureBackend, textureBackend)
                 || m_PreviousDatabaseStructureRevision != database.StructureRevision
                 || m_PreviousDatabaseResourceRevision != database.ResourceRevision
                 || m_PreviousDatabaseInstanceRevision != database.InstanceRevision
@@ -247,7 +252,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return !HaveTrackedMeshletAssetsChanged()
-                && !HaveTrackedMaterialProxiesChanged()
+                && !HaveTrackedMaterialProxiesChanged(textureBackend)
                 && !HaveTrackedTerrainDataChanged();
         }
 
@@ -274,14 +279,15 @@ namespace VividRP.Runtime.GPUDriven
             return false;
         }
 
-        private bool HaveTrackedMaterialProxiesChanged()
+        private bool HaveTrackedMaterialProxiesChanged(
+            IGPUDrivenTextureBackend textureBackend)
         {
             for (int proxyIndex = 0; proxyIndex < m_TrackedMaterialProxies.Count; proxyIndex++)
             {
                 GPUDrivenMaterialProxy materialProxy = m_TrackedMaterialProxies[proxyIndex];
                 if (materialProxy == null
                     || !m_MaterialMetadataByObjectId.TryGetValue(materialProxy.GetEntityId(), out MaterialMetadata metadata)
-                    || metadata.Revision != ComputeMaterialProxyRevision(materialProxy))
+                    || metadata.Revision != ComputeMaterialProxyRevision(materialProxy, textureBackend))
                 {
                     return true;
                 }
@@ -563,7 +569,9 @@ namespace VividRP.Runtime.GPUDriven
             return false;
         }
 
-        private bool HasTrackedMaterialProxyVersionChanges(VividMeshletRendererDatabase database)
+        private bool HasTrackedMaterialProxyVersionChanges(
+            VividMeshletRendererDatabase database,
+            IGPUDrivenTextureBackend textureBackend)
         {
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
             int rendererCount = m_RendererRenderability.Count;
@@ -592,7 +600,7 @@ namespace VividRP.Runtime.GPUDriven
 
                     EntityId materialProxyId = materialProxy.GetEntityId();
                     if (!m_MaterialMetadataByObjectId.TryGetValue(materialProxyId, out MaterialMetadata metadata) ||
-                        metadata.Revision != ComputeMaterialProxyRevision(materialProxy))
+                        metadata.Revision != ComputeMaterialProxyRevision(materialProxy, textureBackend))
                     {
                         return true;
                     }
@@ -1081,7 +1089,7 @@ namespace VividRP.Runtime.GPUDriven
             uint surfaceBindingIndex = (uint) sceneData.SurfaceBindingCount;
             if (materialProxy != null)
             {
-                surfaceTextures = ExtractSurfaceTextures(materialProxy);
+                surfaceTextures = ExtractSurfaceTextures(materialProxy, textureBackend);
                 materialData = CreateMaterialData(materialProxy, surfaceBindingIndex);
             }
             else
@@ -1099,7 +1107,7 @@ namespace VividRP.Runtime.GPUDriven
             {
                 m_MaterialMetadataByObjectId[objectId] = new MaterialMetadata(
                     materialIndex,
-                    ComputeMaterialProxyRevision(materialProxy));
+                    ComputeMaterialProxyRevision(materialProxy, textureBackend));
             }
             return materialIndex;
         }
@@ -1307,18 +1315,36 @@ namespace VividRP.Runtime.GPUDriven
             return surfaceBindingIndex;
         }
 
-        private static GPUDrivenSurfaceTextureSet ExtractSurfaceTextures(GPUDrivenMaterialProxy materialProxy)
+        private static GPUDrivenSurfaceTextureSet ExtractSurfaceTextures(
+            GPUDrivenMaterialProxy materialProxy,
+            IGPUDrivenTextureBackend textureBackend)
         {
+            if (UsesVirtualTexturePayload(materialProxy, textureBackend))
+            {
+                return new GPUDrivenSurfaceTextureSet(
+                    materialProxy.StreamedVirtualTexture,
+                    null,
+                    null,
+                    null,
+                    materialProxy.MaskMode);
+            }
+
+            if (materialProxy.TextureMode == GPUDrivenMaterialProxyTextureMode.VirtualTexture)
+            {
+                return ExtractSurfaceTextures(materialProxy.SourceMaterial);
+            }
+
             return new GPUDrivenSurfaceTextureSet(
-                materialProxy != null ? materialProxy.StreamedVirtualTexture : null,
-                materialProxy != null ? materialProxy.BaseMap : null,
-                materialProxy != null ? materialProxy.BumpMap : null,
-                materialProxy != null ? materialProxy.MaskMap : null,
-                materialProxy != null ? materialProxy.MaskMode : GPUDrivenMaterialMaskMode.None
-            );
+                null,
+                materialProxy.BaseMap,
+                materialProxy.BumpMap,
+                materialProxy.MaskMap,
+                materialProxy.MaskMode);
         }
 
-        private static uint ComputeMaterialProxyRevision(GPUDrivenMaterialProxy materialProxy)
+        private static uint ComputeMaterialProxyRevision(
+            GPUDrivenMaterialProxy materialProxy,
+            IGPUDrivenTextureBackend textureBackend)
         {
             if (materialProxy == null)
                 return 0u;
@@ -1327,11 +1353,34 @@ namespace VividRP.Runtime.GPUDriven
             {
                 uint hash = 2166136261u;
                 hash = (hash ^ materialProxy.Revision) * 16777619u;
-                VividVirtualTextureAsset asset = materialProxy.StreamedVirtualTexture;
-                hash = (hash ^ GetObjectRevisionId(asset)) * 16777619u;
-                hash = (hash ^ (asset != null ? asset.ContentVersion : 0u)) * 16777619u;
+                if (UsesVirtualTexturePayload(materialProxy, textureBackend))
+                {
+                    VividVirtualTextureAsset asset = materialProxy.StreamedVirtualTexture;
+                    hash = (hash ^ GetObjectRevisionId(asset)) * 16777619u;
+                    hash = (hash ^ (asset != null ? asset.ContentVersion : 0u)) * 16777619u;
+                }
+                else if (materialProxy.TextureMode == GPUDrivenMaterialProxyTextureMode.VirtualTexture)
+                {
+                    GPUDrivenSurfaceTextureSet fallbackTextures =
+                        ExtractSurfaceTextures(materialProxy.SourceMaterial);
+                    hash = (hash ^ GetObjectRevisionId(fallbackTextures.BaseColor)) * 16777619u;
+                    hash = (hash ^ GetObjectRevisionId(fallbackTextures.Normal)) * 16777619u;
+                    hash = (hash ^ GetObjectRevisionId(fallbackTextures.Mask)) * 16777619u;
+                }
                 return hash;
             }
+        }
+
+        private static bool UsesVirtualTexturePayload(
+            GPUDrivenMaterialProxy materialProxy,
+            IGPUDrivenTextureBackend textureBackend)
+        {
+            if (textureBackend is IGPUDrivenVirtualTextureBackend)
+                return true;
+
+            return materialProxy != null
+                   && materialProxy.StreamedVirtualTexture != null
+                   && textureBackend.CanUseStreamedVirtualTexture(materialProxy.StreamedVirtualTexture);
         }
 
         private static GPUDrivenSurfaceTextureSet ExtractSurfaceTextures(Material material)

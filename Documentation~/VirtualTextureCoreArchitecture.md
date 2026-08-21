@@ -341,6 +341,16 @@ next frames
 仅作为旧 RenderGraph 资产的序列化兼容节点保留，不再注册 page-table 依赖、绑定 feedback UAV
 或执行绘制；旧 `VirtualTextureDemo.shader` 同样不再写 feedback。
 
+`GPUDrivenMaterialProxy` 的纹理 payload 按后端互斥。Bindless 模式保存
+`BaseMap / BumpMap / MaskMap`；Virtual Texture 模式只保存 `StreamedVirtualTexture`，不再重复
+持有这三张源贴图。BaseColor、UV tiling/offset、normal strength、mask interpretation、材质因子、
+alpha clip、cull mode 和 lighting flags 仍属于两种后端共享的必要材质数据。Editor 首次把
+Bindless Proxy 转为 VT 时优先烘焙 Proxy 当前 raw maps；进入 VT 模式后的刷新则从源 Material，
+或从已有 `.vividvt` importer 的 source references，临时解析源贴图。构建完成后 Proxy 继续保持
+SVT-only。旧的 dual-payload Proxy 在显式同步前仍可读取，VT runtime
+只提交 SVT，Bindless runtime 只提交普通贴图。`SourceMaterial` 目前仍作为 Editor provenance 和
+RTAS fallback 保留，不属于提交给 VT 后端的 surface texture payload。
+
 旧 Demo 场景迁移时：先通过 `MeshletRenderer` Inspector 的 takeover 流程捕获并移除源
 `MeshRenderer`，再通过 GPUDriven Material Proxy Editor 构建并绑定 `GPUDrivenSurface` VT asset，
 最后将这些已配置资源赋给 `VirtualTextureDemoController` 做一致性校验。RenderGraph 中旧

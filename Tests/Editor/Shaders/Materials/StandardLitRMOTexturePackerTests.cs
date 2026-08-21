@@ -11,6 +11,10 @@ namespace VividRP.Editor.Tests
             "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLit.shader";
         private const string PackingShaderAssetPath =
             "Packages/com.af8a2a.vividrp/Editor/Shader/StandardLitRMOTexturePacker.shader";
+        private const string GeneratedOutputFolder =
+            "Assets/VividRPTests/StandardLitRMOTexturePackerOutput";
+        private const string GeneratedOutputAssetPath =
+            GeneratedOutputFolder + "/FirstImportRMO.png";
 
         [Test]
         public void PackingShader_ImportsWithoutCompilerErrors()
@@ -95,6 +99,86 @@ namespace VividRP.Editor.Tests
                 {
                     Object.DestroyImmediate(packedTexture);
                 }
+            }
+        }
+
+        [Test]
+        public void Pack_PreservesRawValueFromSRGBDataTextureWithoutReimportingSource()
+        {
+            Texture2D roughnessMap = CreateTexture(
+                new Color(0.5f, 0.0f, 0.0f, 1.0f),
+                linear: false);
+            Texture2D packedTexture = null;
+
+            try
+            {
+                bool sourceWasSRGB = roughnessMap.isDataSRGB;
+
+                packedTexture = StandardLitRMOTexturePacker.Pack(
+                    roughnessMap,
+                    null,
+                    null,
+                    0.0f,
+                    0.0f,
+                    1.0f);
+
+                Assert.That(
+                    packedTexture.GetPixel(0, 0).r,
+                    Is.EqualTo(0.5f).Within(1.0f / 255.0f));
+                Assert.That(roughnessMap.isDataSRGB, Is.EqualTo(sourceWasSRGB));
+            }
+            finally
+            {
+                Object.DestroyImmediate(roughnessMap);
+                if (packedTexture != null)
+                {
+                    Object.DestroyImmediate(packedTexture);
+                }
+            }
+        }
+
+        [Test]
+        public void TryPackToAsset_ConfiguresOutputImporterDuringFirstImport()
+        {
+            Texture2D roughnessMap = CreateTexture(new Color(0.25f, 0.0f, 0.0f, 1.0f));
+
+            try
+            {
+                bool packed = StandardLitRMOTexturePacker.TryPackToAsset(
+                    GeneratedOutputAssetPath,
+                    roughnessMap,
+                    null,
+                    null,
+                    0.0f,
+                    0.0f,
+                    1.0f,
+                    string.Empty,
+                    out Texture2D packedTexture,
+                    out string errorMessage);
+
+                Assert.That(packed, Is.True, errorMessage);
+                Assert.That(packedTexture, Is.Not.Null);
+
+                TextureImporter textureImporter =
+                    AssetImporter.GetAtPath(GeneratedOutputAssetPath) as TextureImporter;
+                Assert.That(textureImporter, Is.Not.Null);
+                Assert.That(textureImporter.sRGBTexture, Is.False);
+                Assert.That(textureImporter.alphaSource, Is.EqualTo(TextureImporterAlphaSource.None));
+                Assert.That(textureImporter.wrapMode, Is.EqualTo(TextureWrapMode.Repeat));
+                Assert.That(textureImporter.filterMode, Is.EqualTo(FilterMode.Trilinear));
+                Assert.That(textureImporter.mipmapEnabled, Is.True);
+                Assert.That(
+                    textureImporter.userData,
+                    Does.StartWith(StandardLitRMOTexturePacker.OutputImporterUserDataPrefix));
+                Assert.That(
+                    StandardLitRMOTexturePacker.IsRMOOutputAsset(GeneratedOutputAssetPath),
+                    Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(roughnessMap);
+                AssetDatabase.DeleteAsset(GeneratedOutputAssetPath);
+                AssetDatabase.DeleteAsset(GeneratedOutputFolder);
             }
         }
 
@@ -208,9 +292,9 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo("Assets/Models/VividRPGenerated/Robot_Body_RMO.png"));
         }
 
-        private static Texture2D CreateTexture(Color color)
+        private static Texture2D CreateTexture(Color color, bool linear = true)
         {
-            var texture = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            var texture = new Texture2D(1, 1, TextureFormat.RGBA32, false, linear);
             texture.SetPixel(0, 0, color);
             texture.Apply(updateMipmaps: false, makeNoLongerReadable: false);
             return texture;

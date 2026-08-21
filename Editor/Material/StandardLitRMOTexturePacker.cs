@@ -11,7 +11,12 @@ namespace VividRP.Editor
     internal static class StandardLitRMOTexturePacker
     {
         internal const string PackingShaderName = "Hidden/VividRP/Editor/StandardLit RMO Texture Packer";
+        internal const string OutputImporterUserDataPrefix = "VividRP.RMO.v1|";
         private const float SmoothnessFromAlbedoThreshold = 0.5f;
+
+        [NoAutoStaticsCleanup]
+        private static readonly Dictionary<string, string> PendingOutputImports =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly struct ChannelSource
         {
@@ -21,14 +26,14 @@ namespace VividRP.Editor
                 bool invert,
                 float scale,
                 float fallback,
-                bool prepareAsDataTexture)
+                bool treatAsDataTexture)
             {
                 Texture = texture;
                 Channel = channel;
                 Invert = invert;
                 Scale = scale;
                 Fallback = fallback;
-                PrepareAsDataTexture = prepareAsDataTexture;
+                TreatAsDataTexture = treatAsDataTexture;
             }
 
             internal Texture Texture { get; }
@@ -36,18 +41,7 @@ namespace VividRP.Editor
             internal bool Invert { get; }
             internal float Scale { get; }
             internal float Fallback { get; }
-            internal bool PrepareAsDataTexture { get; }
-
-            internal ChannelSource WithTexture(Texture texture)
-            {
-                return new ChannelSource(
-                    texture,
-                    Channel,
-                    Invert,
-                    Scale,
-                    Fallback,
-                    PrepareAsDataTexture);
-            }
+            internal bool TreatAsDataTexture { get; }
         }
 
         internal static Texture2D Pack(
@@ -191,6 +185,20 @@ namespace VividRP.Editor
                     source.Invert ? 1.0f : 0.0f,
                     Mathf.Clamp01(source.Fallback),
                     source.Texture != null ? 1.0f : 0.0f));
+            packingMaterial.SetFloat(
+                propertyPrefix + "UndoSRGB",
+                NeedsSRGBCompensation(source) ? 1.0f : 0.0f);
+        }
+
+        private static bool NeedsSRGBCompensation(ChannelSource source)
+        {
+            if (!source.TreatAsDataTexture || source.Texture == null || source.Channel == 3)
+            {
+                return false;
+            }
+
+            return QualitySettings.activeColorSpace == ColorSpace.Linear
+                && source.Texture.isDataSRGB;
         }
 
         private static Vector4 GetChannelMask(int channel)
@@ -274,11 +282,7 @@ namespace VividRP.Editor
                 return false;
             }
 
-            PrepareSourceTextures(
-                ref roughnessSource,
-                ref metallicSource,
-                ref ambientOcclusionSource);
-
+            byte[] pngData;
             Texture2D generatedTexture = null;
             try
             {
@@ -286,15 +290,7 @@ namespace VividRP.Editor
                     roughnessSource,
                     metallicSource,
                     ambientOcclusionSource);
-
-                string absolutePath = GetAbsoluteAssetPath(assetPath);
-                string directoryPath = Path.GetDirectoryName(absolutePath);
-                if (!string.IsNullOrEmpty(directoryPath))
-                {
-                    Directory.CreateDirectory(directoryPath);
-                }
-
-                File.WriteAllBytes(absolutePath, generatedTexture.EncodeToPNG());
+                pngData = generatedTexture.EncodeToPNG();
             }
             catch (Exception exception)
             {
@@ -309,65 +305,121 @@ namespace VividRP.Editor
                 }
             }
 
-            AssetDatabase.ImportAsset(
-                assetPath,
-                ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
-
-            if (AssetImporter.GetAtPath(assetPath) is not TextureImporter textureImporter)
+            if (string.IsNullOrEmpty(importerUserData))
             {
-                errorMessage = $"Unity did not create a texture importer for '{assetPath}'.";
+                importerUserData = OutputImporterUserDataPrefix + "manual";
+            }
+
+            PendingOutputImports[assetPath] = importerUserData;
+            try
+            {
+                if (AssetImporter.GetAtPath(assetPath) is TextureImporter existingTextureImporter)
+                {
+                    ConfigureOutputImporter(existingTextureImporter, importerUserData);
+                    AssetDatabase.WriteImportSettingsIfDirty(assetPath);
+                }
+
+                string absolutePath = GetAbsoluteAssetPath(assetPath);
+                string directoryPath = Path.GetDirectoryName(absolutePath);
+                if (!string.IsNullOrEmpty(directoryPath))
+                {
+                    Directory.CreateDirectory(directoryPath);
+                }
+
+                File.WriteAllBytes(absolutePath, pngData);
+                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+
+                if (AssetImporter.GetAtPath(assetPath) is not TextureImporter textureImporter)
+                {
+                    errorMessage = $"Unity did not create a texture importer for '{assetPath}'.";
+                    return false;
+                }
+
+                if (!HasOutputImporterSettings(textureImporter, importerUserData))
+                {
+                    ConfigureOutputImporter(textureImporter, importerUserData);
+                    textureImporter.SaveAndReimport();
+                }
+
+                packedTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+                if (packedTexture != null)
+                {
+                    return true;
+                }
+
+                errorMessage = $"Unity could not load the generated RMO texture at '{assetPath}'.";
+                return false;
+            }
+            catch (Exception exception)
+            {
+                errorMessage = exception.Message;
+                return false;
+            }
+            finally
+            {
+                PendingOutputImports.Remove(assetPath);
+            }
+        }
+
+        internal static bool IsRMOOutputAsset(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath))
+            {
                 return false;
             }
 
-            bool importerChanged = false;
-            if (textureImporter.sRGBTexture)
-            {
-                textureImporter.sRGBTexture = false;
-                importerChanged = true;
-            }
-
-            if (textureImporter.alphaSource != TextureImporterAlphaSource.None)
-            {
-                textureImporter.alphaSource = TextureImporterAlphaSource.None;
-                importerChanged = true;
-            }
-
-            if (textureImporter.wrapMode != TextureWrapMode.Repeat)
-            {
-                textureImporter.wrapMode = TextureWrapMode.Repeat;
-                importerChanged = true;
-            }
-
-            if (textureImporter.filterMode != FilterMode.Trilinear)
-            {
-                textureImporter.filterMode = FilterMode.Trilinear;
-                importerChanged = true;
-            }
-
-            if (!textureImporter.mipmapEnabled)
-            {
-                textureImporter.mipmapEnabled = true;
-                importerChanged = true;
-            }
-            if (!string.Equals(textureImporter.userData, importerUserData, StringComparison.Ordinal))
-            {
-                textureImporter.userData = importerUserData ?? string.Empty;
-                importerChanged = true;
-            }
-
-            if (importerChanged)
-            {
-                textureImporter.SaveAndReimport();
-            }
-
-            packedTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
-            if (packedTexture != null)
+            if (PendingOutputImports.ContainsKey(assetPath))
             {
                 return true;
             }
 
-            errorMessage = $"Unity could not load the generated RMO texture at '{assetPath}'.";
-            return false;
+            string fileName = Path.GetFileNameWithoutExtension(assetPath);
+            if (string.Equals(fileName, "RMO", StringComparison.OrdinalIgnoreCase)
+                || fileName.EndsWith("_RMO", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return AssetImporter.GetAtPath(assetPath) is TextureImporter textureImporter
+                && !string.IsNullOrEmpty(textureImporter.userData)
+                && textureImporter.userData.StartsWith(
+                    OutputImporterUserDataPrefix,
+                    StringComparison.Ordinal);
+        }
+
+        internal static void ApplyPendingOutputImporterSettings(
+            string assetPath,
+            TextureImporter textureImporter)
+        {
+            if (textureImporter != null
+                && PendingOutputImports.TryGetValue(assetPath, out string importerUserData))
+            {
+                ConfigureOutputImporter(textureImporter, importerUserData);
+            }
+        }
+
+        private static void ConfigureOutputImporter(
+            TextureImporter textureImporter,
+            string importerUserData)
+        {
+            textureImporter.sRGBTexture = false;
+            textureImporter.alphaSource = TextureImporterAlphaSource.None;
+            textureImporter.wrapMode = TextureWrapMode.Repeat;
+            textureImporter.filterMode = FilterMode.Trilinear;
+            textureImporter.mipmapEnabled = true;
+            textureImporter.userData = importerUserData;
+        }
+
+        private static bool HasOutputImporterSettings(
+            TextureImporter textureImporter,
+            string importerUserData)
+        {
+            return !textureImporter.sRGBTexture
+                && textureImporter.alphaSource == TextureImporterAlphaSource.None
+                && textureImporter.wrapMode == TextureWrapMode.Repeat
+                && textureImporter.filterMode == FilterMode.Trilinear
+                && textureImporter.mipmapEnabled
+                && string.Equals(textureImporter.userData, importerUserData, StringComparison.Ordinal);
         }
 
         private static void ResolveMaterialSources(
@@ -432,82 +484,6 @@ namespace VividRP.Editor
             return material.HasProperty(propertyName) ? material.GetFloat(propertyName) : fallback;
         }
 
-        private static void PrepareSourceTextures(
-            ref ChannelSource roughnessSource,
-            ref ChannelSource metallicSource,
-            ref ChannelSource ambientOcclusionSource)
-        {
-            var preparedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            roughnessSource = PrepareSourceTexture(roughnessSource, preparedPaths);
-            metallicSource = PrepareSourceTexture(metallicSource, preparedPaths);
-            ambientOcclusionSource = PrepareSourceTexture(ambientOcclusionSource, preparedPaths);
-        }
-
-        private static ChannelSource PrepareSourceTexture(
-            ChannelSource source,
-            HashSet<string> preparedPaths)
-        {
-            if (!source.PrepareAsDataTexture)
-            {
-                return source;
-            }
-
-            string assetPath = GetTextureAssetPath(source.Texture);
-            PrepareDataTextureImporter(assetPath, preparedPaths);
-            return source.WithTexture(ReloadTexture(source.Texture, assetPath));
-        }
-
-        internal static void PrepareDataTextures(
-            ref Texture roughnessMap,
-            ref Texture metallicMap,
-            ref Texture ambientOcclusionMap)
-        {
-            string roughnessPath = GetTextureAssetPath(roughnessMap);
-            string metallicPath = GetTextureAssetPath(metallicMap);
-            string ambientOcclusionPath = GetTextureAssetPath(ambientOcclusionMap);
-            var preparedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            PrepareDataTextureImporter(roughnessPath, preparedPaths);
-            PrepareDataTextureImporter(metallicPath, preparedPaths);
-            PrepareDataTextureImporter(ambientOcclusionPath, preparedPaths);
-
-            roughnessMap = ReloadTexture(roughnessMap, roughnessPath);
-            metallicMap = ReloadTexture(metallicMap, metallicPath);
-            ambientOcclusionMap = ReloadTexture(ambientOcclusionMap, ambientOcclusionPath);
-        }
-
-        private static string GetTextureAssetPath(Texture texture)
-        {
-            return texture != null ? AssetDatabase.GetAssetPath(texture) : string.Empty;
-        }
-
-        private static void PrepareDataTextureImporter(
-            string assetPath,
-            HashSet<string> preparedPaths)
-        {
-            if (string.IsNullOrEmpty(assetPath)
-                || !preparedPaths.Add(assetPath)
-                || AssetImporter.GetAtPath(assetPath) is not TextureImporter textureImporter
-                || !textureImporter.sRGBTexture)
-            {
-                return;
-            }
-
-            textureImporter.sRGBTexture = false;
-            textureImporter.SaveAndReimport();
-        }
-
-        private static Texture ReloadTexture(Texture originalTexture, string assetPath)
-        {
-            if (string.IsNullOrEmpty(assetPath)
-                || AssetImporter.GetAtPath(assetPath) is not TextureImporter)
-            {
-                return originalTexture;
-            }
-
-            return AssetDatabase.LoadAssetAtPath<Texture>(assetPath) ?? originalTexture;
-        }
-
         private static void ResolveOutputSize(
             Texture roughnessMap,
             Texture metallicMap,
@@ -540,10 +516,21 @@ namespace VividRP.Editor
 
     }
 
+    internal sealed class StandardLitRMOTexturePostprocessor : AssetPostprocessor
+    {
+        private void OnPreprocessTexture()
+        {
+            StandardLitRMOTexturePacker.ApplyPendingOutputImporterSettings(
+                assetPath,
+                assetImporter as TextureImporter);
+        }
+    }
+
     internal static class StandardLitRMOAutoPacker
     {
         private const string GeneratedFolderName = "VividRPGenerated";
-        private const string ImporterUserDataPrefix = "VividRP.RMO.v1|";
+        private const string ImporterUserDataPrefix =
+            StandardLitRMOTexturePacker.OutputImporterUserDataPrefix;
 
         [NoAutoStaticsCleanup]
         private static readonly Dictionary<string, PackRequest> PendingRequests =
@@ -635,7 +622,6 @@ namespace VividRP.Editor
             {
                 foreach (PackRequest request in requests)
                 {
-                    request.PrepareSourceTextures();
                     string fingerprint = request.GetFingerprint();
                     if (!TryLoadGeneratedTexture(request.OutputAssetPath, fingerprint, out _)
                         && !StandardLitRMOTexturePacker.TryPackToAsset(
@@ -736,26 +722,12 @@ namespace VividRP.Editor
 
             internal string ModelAssetPath { get; }
             internal string OutputAssetPath { get; }
-            internal Texture RoughnessMap { get; private set; }
-            internal Texture MetallicMap { get; private set; }
-            internal Texture AmbientOcclusionMap { get; private set; }
+            internal Texture RoughnessMap { get; }
+            internal Texture MetallicMap { get; }
+            internal Texture AmbientOcclusionMap { get; }
             internal float RoughnessFallback { get; }
             internal float MetallicFallback { get; }
             internal float AmbientOcclusionFallback { get; }
-
-            internal void PrepareSourceTextures()
-            {
-                Texture roughnessMap = RoughnessMap;
-                Texture metallicMap = MetallicMap;
-                Texture ambientOcclusionMap = AmbientOcclusionMap;
-                StandardLitRMOTexturePacker.PrepareDataTextures(
-                    ref roughnessMap,
-                    ref metallicMap,
-                    ref ambientOcclusionMap);
-                RoughnessMap = roughnessMap;
-                MetallicMap = metallicMap;
-                AmbientOcclusionMap = ambientOcclusionMap;
-            }
 
             internal string GetFingerprint()
             {

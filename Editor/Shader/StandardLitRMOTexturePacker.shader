@@ -11,6 +11,9 @@ Shader "Hidden/VividRP/Editor/StandardLit RMO Texture Packer"
         [HideInInspector] _RoughnessTransform("Roughness Transform", Vector) = (1, 0, 1, 0)
         [HideInInspector] _MetallicTransform("Metallic Transform", Vector) = (1, 0, 0, 0)
         [HideInInspector] _AmbientOcclusionTransform("AO Transform", Vector) = (1, 0, 1, 0)
+        [HideInInspector] _RoughnessUndoSRGB("Roughness Undo sRGB", Float) = 0
+        [HideInInspector] _MetallicUndoSRGB("Metallic Undo sRGB", Float) = 0
+        [HideInInspector] _AmbientOcclusionUndoSRGB("AO Undo sRGB", Float) = 0
     }
 
     CGINCLUDE
@@ -31,10 +34,19 @@ Shader "Hidden/VividRP/Editor/StandardLit RMO Texture Packer"
         float4 _RoughnessTransform;
         float4 _MetallicTransform;
         float4 _AmbientOcclusionTransform;
+        float _RoughnessUndoSRGB;
+        float _MetallicUndoSRGB;
+        float _AmbientOcclusionUndoSRGB;
 
-        float ResolveChannel(float4 sampleValue, float4 channelMask, float4 transform)
+        float ResolveChannel(
+            float4 sampleValue,
+            float4 channelMask,
+            float4 transform,
+            float undoSRGB)
         {
-            float value = dot(sampleValue, channelMask) * transform.x;
+            float value = dot(sampleValue, channelMask);
+            value = lerp(value, LinearToGammaSpaceExact(value), undoSRGB);
+            value *= transform.x;
             value = lerp(value, 1.0 - value, transform.y);
             return saturate(lerp(transform.z, value, transform.w));
         }
@@ -44,15 +56,18 @@ Shader "Hidden/VividRP/Editor/StandardLit RMO Texture Packer"
             float roughness = ResolveChannel(
                 tex2D(_RoughnessMap, input.uv),
                 _RoughnessChannelMask,
-                _RoughnessTransform);
+                _RoughnessTransform,
+                _RoughnessUndoSRGB);
             float metallic = ResolveChannel(
                 tex2D(_MetallicMap, input.uv),
                 _MetallicChannelMask,
-                _MetallicTransform);
+                _MetallicTransform,
+                _MetallicUndoSRGB);
             float ambientOcclusion = ResolveChannel(
                 tex2D(_AmbientOcclusionMap, input.uv),
                 _AmbientOcclusionChannelMask,
-                _AmbientOcclusionTransform);
+                _AmbientOcclusionTransform,
+                _AmbientOcclusionUndoSRGB);
             return float4(roughness, metallic, ambientOcclusion, 1.0);
         }
 

@@ -1149,9 +1149,11 @@ namespace VividRP.Runtime.GPUDriven
         {
             return new VividMaterialData
             {
-                AlbedoColor = ToFloat4(materialProxy != null ? materialProxy.BaseColor : Color.white),
+                AlbedoColor = ConvertMaterialColorForGPU(
+                    materialProxy != null ? materialProxy.BaseColor : Color.white),
                 TextureTilingOffset = ToFloat4(materialProxy != null ? materialProxy.TextureTilingOffset : new Vector4(1.0f, 1.0f, 0.0f, 0.0f)),
-                Emission = ToFloat4(materialProxy != null ? materialProxy.EmissionColor : Color.black),
+                Emission = ConvertMaterialColorForGPU(
+                    materialProxy != null ? materialProxy.EmissionColor : Color.black),
                 MetallicSmoothnessRemap = materialProxy != null
                     ? new float4(
                         materialProxy.MetallicRemap.x,
@@ -1535,6 +1537,21 @@ namespace VividRP.Runtime.GPUDriven
             Color color = material != null && material.HasProperty(propertyId)
                 ? material.GetColor(propertyId)
                 : fallback;
+            return ConvertMaterialColorForGPU(color);
+        }
+
+        internal static float4 ConvertMaterialColorForGPU(Color color)
+        {
+            if (QualitySettings.activeColorSpace == ColorSpace.Linear)
+            {
+                Color linearColor = color.linear;
+                return new float4(
+                    linearColor.r,
+                    linearColor.g,
+                    linearColor.b,
+                    color.a);
+            }
+
             return new float4(color.r, color.g, color.b, color.a);
         }
 
@@ -1700,11 +1717,6 @@ namespace VividRP.Runtime.GPUDriven
         private static float4 ToFloat4(Vector4 value)
         {
             return new float4(value.x, value.y, value.z, value.w);
-        }
-
-        private static float4 ToFloat4(Color value)
-        {
-            return new float4(value.r, value.g, value.b, value.a);
         }
 
         private static float4x4 ToFloat4x4(Matrix4x4 value)

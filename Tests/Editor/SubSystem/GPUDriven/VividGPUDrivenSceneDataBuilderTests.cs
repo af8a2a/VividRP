@@ -33,6 +33,21 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ConvertMaterialColorForGPU_MatchesShaderColorSpaceAndPreservesAlpha()
+        {
+            var source = new Color(0.25f, 0.5f, 0.75f, 0.35f);
+            float4 converted = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(source);
+            Color expected = QualitySettings.activeColorSpace == ColorSpace.Linear
+                ? source.linear
+                : source;
+
+            Assert.That(converted.x, Is.EqualTo(expected.r).Within(0.000001f));
+            Assert.That(converted.y, Is.EqualTo(expected.g).Within(0.000001f));
+            Assert.That(converted.z, Is.EqualTo(expected.b).Within(0.000001f));
+            Assert.That(converted.w, Is.EqualTo(source.a).Within(0.000001f));
+        }
+
+        [Test]
         public void AddInstance_ClassifiesActiveRendererBatchKeysByPass()
         {
             var sceneData = new VividGPUDrivenSceneData();
@@ -638,9 +653,11 @@ namespace VividRP.Editor.Tests
                 );
                 Assert.That(staticDataChanged, Is.False);
                 Assert.That(materialDataChanged, Is.True);
-                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(0.8f).Within(0.0001f));
-                Assert.That(sceneData.Materials[0].AlbedoColor.y, Is.EqualTo(0.7f).Within(0.0001f));
-                Assert.That(sceneData.Materials[0].AlbedoColor.z, Is.EqualTo(0.6f).Within(0.0001f));
+                float4 expectedColor = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    new Color(0.8f, 0.7f, 0.6f, 1.0f));
+                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(expectedColor.x).Within(0.0001f));
+                Assert.That(sceneData.Materials[0].AlbedoColor.y, Is.EqualTo(expectedColor.y).Within(0.0001f));
+                Assert.That(sceneData.Materials[0].AlbedoColor.z, Is.EqualTo(expectedColor.z).Within(0.0001f));
             }
             finally
             {
@@ -999,7 +1016,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 VividMaterialData materialData = sceneData.Materials[0];
                 VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
-                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(0.8f).Within(0.0001f));
+                float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    materialProxy.BaseColor);
+                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.y, Is.EqualTo(5.0f).Within(0.0001f));
                 Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.BaseColor, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
                 Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.Normal, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
@@ -1238,7 +1257,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(gameObject.GetComponent<MeshRenderer>(), Is.Null);
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
-                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(syncedProxy.BaseColor.r).Within(0.0001f));
+                float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    syncedProxy.BaseColor);
+                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));
                 VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) sceneData.Materials[0].SurfaceBindingIndex];
                 Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.BaseColor, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
             }
@@ -1318,9 +1339,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(system.BufferSet.SharedIndexCount, Is.EqualTo(3));
                 VividMaterialData materialData = system.SceneData.Materials[0];
                 VividSurfaceBindingData surfaceBindingData = system.SceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
-                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(0.25f).Within(0.0001f));
-                Assert.That(materialData.AlbedoColor.y, Is.EqualTo(0.5f).Within(0.0001f));
-                Assert.That(materialData.AlbedoColor.z, Is.EqualTo(0.75f).Within(0.0001f));
+                float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    new Color(0.25f, 0.5f, 0.75f, 1.0f));
+                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));
+                Assert.That(materialData.AlbedoColor.y, Is.EqualTo(expectedAlbedo.y).Within(0.0001f));
+                Assert.That(materialData.AlbedoColor.z, Is.EqualTo(expectedAlbedo.z).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.x, Is.EqualTo(2.0f).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.y, Is.EqualTo(3.0f).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.z, Is.EqualTo(0.1f).Within(0.0001f));
@@ -1333,7 +1356,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialData.NormalsStrength, Is.EqualTo(0.75f).Within(0.0001f));
                 Assert.That(materialData.Metallic, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialData.Roughness, Is.EqualTo(0.8f).Within(0.0001f));
-                Assert.That(materialData.Emission.x, Is.EqualTo(1.0f).Within(0.0001f));
+                float4 expectedEmission = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    new Color(1.0f, 0.5f, 0.0f, 0.25f));
+                Assert.That(materialData.Emission.x, Is.EqualTo(expectedEmission.x).Within(0.0001f));
+                Assert.That(materialData.Emission.y, Is.EqualTo(expectedEmission.y).Within(0.0001f));
+                Assert.That(materialData.Emission.w, Is.EqualTo(0.25f).Within(0.0001f));
                 Assert.That(materialData.RendererListID, Is.EqualTo(VividRendererListID.CullOff | VividRendererListID.AlphaTest));
                 Assert.That(materialData.AlphaClipThreshold, Is.EqualTo(0.33f).Within(0.0001f));
             }

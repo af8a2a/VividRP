@@ -143,6 +143,58 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoSync_SynchronizesIndexedProxyAndSkipsUnchangedMaterial()
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            if (shader == null)
+            {
+                Assert.Ignore("VividRP/Material/StandardLit shader is not available.");
+            }
+
+            string materialPath = TempFolder + "/AutoSyncSource.mat";
+            string proxyPath = TempFolder + "/AutoSyncProxy.asset";
+            var sourceMaterial = new Material(shader);
+            AssetDatabase.CreateAsset(sourceMaterial, materialPath);
+            sourceMaterial = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            materialProxy.SourceMaterial = sourceMaterial;
+            AssetDatabase.CreateAsset(materialProxy, proxyPath);
+            materialProxy = AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(proxyPath);
+
+            GPUDrivenMaterialProxyAutoSyncService.ResetForTests();
+            try
+            {
+                GPUDrivenMaterialProxyAutoSyncService.IndexProxyForTests(materialProxy);
+                sourceMaterial.SetColor("_BaseColor", new Color(0.15f, 0.35f, 0.55f, 1.0f));
+                sourceMaterial.SetFloat("_Metallic", 0.65f);
+                sourceMaterial.SetFloat("_Smoothness", 0.2f);
+
+                int changedProxyCount = GPUDrivenMaterialProxyAutoSyncService.SynchronizeMaterialNowForTests(
+                    sourceMaterial,
+                    GPUDrivenMaterialProxyTextureMode.Bindless);
+                uint synchronizedRevision = materialProxy.Revision;
+
+                Assert.That(changedProxyCount, Is.EqualTo(1));
+                Assert.That(materialProxy.BaseColor.r, Is.EqualTo(0.15f).Within(0.0001f));
+                Assert.That(materialProxy.Metallic, Is.EqualTo(0.65f).Within(0.0001f));
+                Assert.That(materialProxy.Roughness, Is.EqualTo(0.8f).Within(0.0001f));
+                Assert.That(EditorUtility.IsDirty(materialProxy), Is.True);
+
+                changedProxyCount = GPUDrivenMaterialProxyAutoSyncService.SynchronizeMaterialNowForTests(
+                    sourceMaterial,
+                    GPUDrivenMaterialProxyTextureMode.Bindless);
+
+                Assert.That(changedProxyCount, Is.Zero);
+                Assert.That(materialProxy.Revision, Is.EqualTo(synchronizedRevision));
+            }
+            finally
+            {
+                GPUDrivenMaterialProxyAutoSyncService.ResetForTests(requestIndexRebuild: true);
+            }
+        }
+
+        [Test]
         public void CreateOrBindMaterialProxies_CreatesAssetNextToPersistentMesh_WhenMaterialIsNonPersistent()
         {
             Shader shader = Shader.Find("Hidden/InternalErrorShader");

@@ -106,7 +106,9 @@ namespace VividRP.Editor.GPUDriven
         internal static GPUDrivenMaterialProxySyncResult SyncFromSourceMaterial(
             this GPUDrivenMaterialProxy materialProxy,
             Material sourceMaterial,
-            GPUDrivenMaterialProxyTextureMode textureMode
+            GPUDrivenMaterialProxyTextureMode textureMode,
+            bool recordUndo = true,
+            bool saveAsset = true
         )
         {
             if (materialProxy == null)
@@ -127,7 +129,10 @@ namespace VividRP.Editor.GPUDriven
                 ExtractSourceTextures(sourceMaterial, warnings);
             uint initialRevision = materialProxy.Revision;
 
-            Undo.RecordObject(materialProxy, "Sync GPUDriven Material Proxy");
+            if (recordUndo)
+            {
+                Undo.RecordObject(materialProxy, "Sync GPUDriven Material Proxy");
+            }
 
             materialProxy.SourceMaterial = sourceMaterial;
             materialProxy.Model = GPUDrivenMaterialProxyModel.StandardLit;
@@ -154,7 +159,10 @@ namespace VividRP.Editor.GPUDriven
             if (changed)
             {
                 EditorUtility.SetDirty(materialProxy);
-                AssetDatabase.SaveAssetIfDirty(materialProxy);
+                if (saveAsset)
+                {
+                    AssetDatabase.SaveAssetIfDirty(materialProxy);
+                }
             }
 
             return new GPUDrivenMaterialProxySyncResult(

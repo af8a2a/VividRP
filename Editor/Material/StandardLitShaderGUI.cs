@@ -20,6 +20,7 @@ namespace VividRP.Editor
         {
             base.ValidateMaterial(material);
             StandardLitMaterialUtility.SetupMaterial(material, null, true);
+            GPUDriven.GPUDrivenMaterialProxyAutoSyncService.QueueMaterial(material);
         }
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] properties)

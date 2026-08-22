@@ -7,6 +7,13 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    internal enum VTPendingUploadScheduleResult : byte
+    {
+        Deferred,
+        ResolvedResident,
+        Scheduled,
+    }
+
     internal readonly struct VTPendingUploadCandidate
     {
         internal VTPendingUploadCandidate(
@@ -164,6 +171,10 @@ namespace VividRP.Runtime
         internal int FreePageCount => m_ResidencyManager.FreePageCount;
 
         internal int PendingRequestCount => m_ResidencyManager.PendingRequestCount;
+
+        internal int PendingDataRequestCount => m_ResidencyManager.PendingDataRequestCount;
+
+        internal int PendingUploadRequestCount => m_ResidencyManager.PendingUploadRequestCount;
 
         internal uint PendingRequestRevision => m_ResidencyManager.PendingRequestRevision;
 
@@ -349,10 +360,13 @@ namespace VividRP.Runtime
             int skippedUploadCount = 0;
             for (int candidateIndex = 0; candidateIndex < m_LocalUploadCandidates.Count; candidateIndex++)
             {
-                if (!TrySchedulePendingUpload(
+                if (TrySchedulePendingUpload(
                         uploadScheduler,
                         cmd,
-                        m_LocalUploadCandidates[candidateIndex]))
+                        m_LocalUploadCandidates[candidateIndex],
+                        Time.frameCount,
+                        allowEviction: false,
+                        out _) != VTPendingUploadScheduleResult.Scheduled)
                 {
                     skippedUploadCount += 1;
                 }
@@ -601,6 +615,16 @@ namespace VividRP.Runtime
 
             m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
             m_ResidencyManager.ClearDirtyPageTableUpdates();
+            return flushedCount;
+        }
+
+        internal int FlushPendingDataRequests()
+        {
+            int flushedCount = m_ResidencyManager.FlushPendingDataRequests();
+            if (flushedCount <= 0)
+                return 0;
+
+            RebuildPageTable();
             return flushedCount;
         }
 
@@ -1014,13 +1038,17 @@ namespace VividRP.Runtime
             }
         }
 
-        internal bool TrySchedulePendingUpload(
+        internal VTPendingUploadScheduleResult TrySchedulePendingUpload(
             VTUploadScheduler uploadScheduler,
             CommandBuffer cmd,
-            in VTPendingUploadCandidate candidate)
+            in VTPendingUploadCandidate candidate,
+            int frameIndex,
+            bool allowEviction,
+            out bool evicted)
         {
+            evicted = false;
             if (uploadScheduler == null || m_PageProducer == null || cmd == null || !uploadScheduler.IsEnabled)
-                return false;
+                return VTPendingUploadScheduleResult.Deferred;
 
             VTRequest request = candidate.Request;
             VTPageRequestStatus status;
@@ -1052,19 +1080,65 @@ namespace VividRP.Runtime
                         RollbackResidentPage(request.PageCoord);
                 }
 
-                return false;
+                return VTPendingUploadScheduleResult.Deferred;
             }
 
             if (!uploadScheduler.TryReserveUpload(Descriptor.SpaceName, Descriptor))
-                return false;
+                return VTPendingUploadScheduleResult.Deferred;
+
+            bool promotedPendingData = request.PhysicalPageId < 0;
+            if (promotedPendingData)
+            {
+                VTRequest pendingDataRequest = request;
+                VTPendingDataTransition transition = m_ResidencyManager.TryPromotePendingDataToUpload(
+                    pendingDataRequest,
+                    frameIndex,
+                    allowEviction,
+                    out VTRequest promotedRequest,
+                    out evicted);
+                if (transition == VTPendingDataTransition.Failed)
+                {
+                    uploadScheduler.ReleaseUploadReservation(Descriptor);
+                    return VTPendingUploadScheduleResult.Deferred;
+                }
+
+                if (transition == VTPendingDataTransition.ResolvedResident)
+                {
+                    uploadScheduler.ReleaseUploadReservation(Descriptor);
+                    return VTPendingUploadScheduleResult.ResolvedResident;
+                }
+
+                request = promotedRequest;
+
+                // Logical PendingData requests deliberately have no physical identity.
+                // Producers such as Terrain RVT can only pin upload dependencies after
+                // promotion assigns the real physical page and generation.
+                VTPageRequestStatus promotedStatus =
+                    m_PageProducer is IVTPrioritizedPageProducer promotedPrioritizedProducer
+                        ? promotedPrioritizedProducer.RequestPageData(
+                            Descriptor,
+                            request,
+                            candidate.PriorityKey)
+                        : m_PageProducer.RequestPageData(Descriptor, request);
+                if (promotedStatus != VTPageRequestStatus.Available)
+                {
+                    if (promotedStatus == VTPageRequestStatus.Invalid)
+                        m_PageProducer.CancelRequest(Descriptor, request);
+                    m_ResidencyManager.RollbackPendingUploadToData(request);
+                    uploadScheduler.ReleaseUploadReservation(Descriptor);
+                    return VTPendingUploadScheduleResult.Deferred;
+                }
+            }
 
             IVTPageUploadFinalizer finalizer;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingProducePageMarker.Auto())
                 finalizer = m_PageProducer.ProducePageData(Descriptor, request);
             if (finalizer == null)
             {
+                if (promotedPendingData)
+                    m_ResidencyManager.RollbackPendingUploadToData(request);
                 uploadScheduler.ReleaseUploadReservation(Descriptor);
-                return false;
+                return VTPendingUploadScheduleResult.Deferred;
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingEnqueueMarker.Auto())
@@ -1077,7 +1151,7 @@ namespace VividRP.Runtime
                     candidate.PriorityKey);
             }
 
-            return true;
+            return VTPendingUploadScheduleResult.Scheduled;
         }
 
         private bool UploadEncodedResidentPage(

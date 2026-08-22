@@ -5,6 +5,10 @@
 #define VIVID_VT_MAX_MIPS 16
 #endif
 
+#ifndef VIVID_VT_MAX_ANISOTROPY
+#define VIVID_VT_MAX_ANISOTROPY 8.0
+#endif
+
 StructuredBuffer<uint> _VTPageTable;
 TEXTURE2D(_VTPhysicalCache);
 TEXTURE2D(_VTPhysicalCache1);
@@ -141,6 +145,19 @@ uint VTGetFlatPageIndex(uint2 pageCoord, uint mip)
     return (uint)_VTMipOffsets[mip] + pageCoord.y * pageCountX + pageCoord.x;
 }
 
+float VTMipLevelAniso2D(float2 dUVdx, float2 dUVdy)
+{
+    float px = max(dot(dUVdx, dUVdx), 1e-8);
+    float py = max(dot(dUVdy, dUVdy), 1e-8);
+    float minLevel = 0.5 * log2(min(px, py));
+    float maxLevel = 0.5 * log2(max(px, py));
+    float maxAnisotropy = min(
+        VIVID_VT_MAX_ANISOTROPY,
+        max((float)VT_BORDER_SIZE, 1.0));
+    float anisoBias = min(maxLevel - minLevel, log2(maxAnisotropy));
+    return maxLevel - anisoBias;
+}
+
 float VTComputeRequestedMipLevel(float2 virtualUv)
 {
     float2 virtualTexelCount = float2(
@@ -148,8 +165,7 @@ float VTComputeRequestedMipLevel(float2 virtualUv)
         max((float)(VT_VIRTUAL_PAGE_COUNT_Y * VT_PAGE_SIZE), 1.0));
     float2 dx = ddx(virtualUv * virtualTexelCount);
     float2 dy = ddy(virtualUv * virtualTexelCount);
-    float rho = max(dot(dx, dx), dot(dy, dy));
-    float requestedMip = 0.5 * log2(max(rho, 1e-8)) + max(_VTAdaptiveMipBias, 0.0);
+    float requestedMip = VTMipLevelAniso2D(dx, dy) + max(_VTAdaptiveMipBias, 0.0);
     return clamp(requestedMip, 0.0, (float)max(VT_MIP_COUNT - 1, 0));
 }
 
@@ -160,8 +176,7 @@ float VTComputeRequestedMipLevelGrad(float2 virtualUvDdx, float2 virtualUvDdy, u
         max((float)(VT_VIRTUAL_PAGE_COUNT_Y * VT_PAGE_SIZE), 1.0));
     float2 dx = virtualUvDdx * virtualTexelCount;
     float2 dy = virtualUvDdy * virtualTexelCount;
-    float rho = max(dot(dx, dx), dot(dy, dy));
-    float requestedMip = 0.5 * log2(max(rho, 1e-8)) + max(_VTAdaptiveMipBias, 0.0);
+    float requestedMip = VTMipLevelAniso2D(dx, dy) + max(_VTAdaptiveMipBias, 0.0);
     uint clampedMaxMip = min(maxMip, (uint)max(VT_MIP_COUNT - 1, 0));
     return clamp(requestedMip, 0.0, (float)clampedMaxMip);
 }
@@ -294,6 +309,20 @@ float2 VTComputePhysicalAtlasUv(float3 uvw, uint2 atlasDimensions)
     return atlasTexelCoord / max(float2(atlasDimensions), float2(1.0, 1.0));
 }
 
+float2 VTComputePhysicalAtlasGradient(
+    float2 virtualUvGradient,
+    uint resolvedMip,
+    uint2 atlasDimensions)
+{
+    float2 pageCount = float2(
+        VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_X, resolvedMip),
+        VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_Y, resolvedMip));
+    return virtualUvGradient
+        * pageCount
+        * (float)VT_PAGE_SIZE
+        / max(float2(atlasDimensions), float2(1.0, 1.0));
+}
+
 float4 VTSamplePhysicalCacheGroup(uint physicalGroup, float3 uvw)
 {
     uint clampedGroup = min(physicalGroup, 3u);
@@ -327,6 +356,58 @@ float4 VTSamplePhysicalCacheGroup(uint physicalGroup, float3 uvw)
     _VTPhysicalCache.GetDimensions(width, height);
     float2 atlasUv = VTComputePhysicalAtlasUv(uvw, uint2(width, height));
     return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, atlasUv, 0.0);
+}
+
+float4 VTSamplePhysicalCacheGroupGrad(
+    uint physicalGroup,
+    float3 uvw,
+    float2 virtualUvDdx,
+    float2 virtualUvDdy,
+    uint resolvedMip)
+{
+    uint clampedGroup = min(physicalGroup, 3u);
+    if (clampedGroup == 1u)
+    {
+        uint width;
+        uint height;
+        _VTPhysicalCache1.GetDimensions(width, height);
+        uint2 dimensions = uint2(width, height);
+        float2 atlasUv = VTComputePhysicalAtlasUv(uvw, dimensions);
+        float2 atlasDdx = VTComputePhysicalAtlasGradient(virtualUvDdx, resolvedMip, dimensions);
+        float2 atlasDdy = VTComputePhysicalAtlasGradient(virtualUvDdy, resolvedMip, dimensions);
+        return _VTPhysicalCache1.SampleGrad(sampler_VTPhysicalCache, atlasUv, atlasDdx, atlasDdy);
+    }
+    if (clampedGroup == 2u)
+    {
+        uint width;
+        uint height;
+        _VTPhysicalCache2.GetDimensions(width, height);
+        uint2 dimensions = uint2(width, height);
+        float2 atlasUv = VTComputePhysicalAtlasUv(uvw, dimensions);
+        float2 atlasDdx = VTComputePhysicalAtlasGradient(virtualUvDdx, resolvedMip, dimensions);
+        float2 atlasDdy = VTComputePhysicalAtlasGradient(virtualUvDdy, resolvedMip, dimensions);
+        return _VTPhysicalCache2.SampleGrad(sampler_VTPhysicalCache, atlasUv, atlasDdx, atlasDdy);
+    }
+    if (clampedGroup == 3u)
+    {
+        uint width;
+        uint height;
+        _VTPhysicalCache3.GetDimensions(width, height);
+        uint2 dimensions = uint2(width, height);
+        float2 atlasUv = VTComputePhysicalAtlasUv(uvw, dimensions);
+        float2 atlasDdx = VTComputePhysicalAtlasGradient(virtualUvDdx, resolvedMip, dimensions);
+        float2 atlasDdy = VTComputePhysicalAtlasGradient(virtualUvDdy, resolvedMip, dimensions);
+        return _VTPhysicalCache3.SampleGrad(sampler_VTPhysicalCache, atlasUv, atlasDdx, atlasDdy);
+    }
+
+    uint width;
+    uint height;
+    _VTPhysicalCache.GetDimensions(width, height);
+    uint2 dimensions = uint2(width, height);
+    float2 atlasUv = VTComputePhysicalAtlasUv(uvw, dimensions);
+    float2 atlasDdx = VTComputePhysicalAtlasGradient(virtualUvDdx, resolvedMip, dimensions);
+    float2 atlasDdy = VTComputePhysicalAtlasGradient(virtualUvDdy, resolvedMip, dimensions);
+    return _VTPhysicalCache.SampleGrad(sampler_VTPhysicalCache, atlasUv, atlasDdx, atlasDdy);
 }
 
 float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)
@@ -401,6 +482,26 @@ float4 VTSamplePhysicalCacheLayer(float2 virtualUv, VTResolvedAddress resolved, 
 
     float3 uvw = VTComputePhysicalUVWLayer(virtualUv, resolved, layerIndex);
     float4 value = VTSamplePhysicalCacheGroup(VTGetLayerPhysicalGroup(layerIndex), uvw);
+    return VTApplyLayerEncoding(value, layerIndex);
+}
+
+float4 VTSamplePhysicalCacheLayerGrad(
+    float2 virtualUv,
+    float2 virtualUvDdx,
+    float2 virtualUvDdy,
+    VTResolvedAddress resolved,
+    uint layerIndex)
+{
+    if (!resolved.valid)
+        return VTGetLayerFallback(layerIndex);
+
+    float3 uvw = VTComputePhysicalUVWLayer(virtualUv, resolved, layerIndex);
+    float4 value = VTSamplePhysicalCacheGroupGrad(
+        VTGetLayerPhysicalGroup(layerIndex),
+        uvw,
+        virtualUvDdx,
+        virtualUvDdy,
+        resolved.resolvedMip);
     return VTApplyLayerEncoding(value, layerIndex);
 }
 
@@ -491,6 +592,34 @@ float4 VTSamplePhysicalCacheLayerTransitioned(
     return VTSamplePhysicalCacheLayer(virtualUv, ancestor, layerIndex);
 }
 
+float4 VTSamplePhysicalCacheLayerTransitionedGrad(
+    float2 virtualUv,
+    float2 virtualUvDdx,
+    float2 virtualUvDdy,
+    VTResolvedAddress resolved,
+    uint layerIndex)
+{
+    if (!resolved.valid
+        || resolved.locked
+        || resolved.transitionPhase >= VT_PAGE_TABLE_TRANSITION_PHASE_MASK)
+    {
+        return VTSamplePhysicalCacheLayerGrad(
+            virtualUv, virtualUvDdx, virtualUvDdy, resolved, layerIndex);
+    }
+
+    VTResolvedAddress ancestor = VTFindStableTransitionAncestor(virtualUv, resolved);
+    if (!ancestor.valid
+        || (ancestor.physicalPageId == resolved.physicalPageId
+            && ancestor.resolvedMip == resolved.resolvedMip))
+    {
+        return VTSamplePhysicalCacheLayerGrad(
+            virtualUv, virtualUvDdx, virtualUvDdy, resolved, layerIndex);
+    }
+
+    return VTSamplePhysicalCacheLayerGrad(
+        virtualUv, virtualUvDdx, virtualUvDdy, ancestor, layerIndex);
+}
+
 float4 VTSamplePhysicalCacheTrilinear(
     float2 virtualUv,
     VTResolvedAddress lowerResolved,
@@ -525,6 +654,38 @@ float4 VTSamplePhysicalCacheTrilinearLayer(
         virtualUv, lowerResolved, layerIndex);
     float4 upperColor = VTSamplePhysicalCacheLayerTransitioned(
         virtualUv, upperResolved, layerIndex);
+
+    if (!lowerResolved.valid)
+        lowerColor = upperColor;
+    if (!upperResolved.valid)
+        upperColor = lowerColor;
+
+    return lerp(lowerColor, upperColor, saturate(mipBlend));
+}
+
+float4 VTSamplePhysicalCacheTrilinearLayerGrad(
+    float2 virtualUv,
+    float2 virtualUvDdx,
+    float2 virtualUvDdy,
+    VTResolvedAddress lowerResolved,
+    VTResolvedAddress upperResolved,
+    float mipBlend,
+    uint layerIndex)
+{
+    if (VTResolvedAddressMatches(lowerResolved, upperResolved))
+    {
+        return VTSamplePhysicalCacheLayerTransitionedGrad(
+            virtualUv,
+            virtualUvDdx,
+            virtualUvDdy,
+            lowerResolved,
+            layerIndex);
+    }
+
+    float4 lowerColor = VTSamplePhysicalCacheLayerTransitionedGrad(
+        virtualUv, virtualUvDdx, virtualUvDdy, lowerResolved, layerIndex);
+    float4 upperColor = VTSamplePhysicalCacheLayerTransitionedGrad(
+        virtualUv, virtualUvDdx, virtualUvDdy, upperResolved, layerIndex);
 
     if (!lowerResolved.valid)
         lowerColor = upperColor;

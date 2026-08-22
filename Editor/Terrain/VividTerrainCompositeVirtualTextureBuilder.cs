@@ -720,7 +720,10 @@ namespace VividRP.Editor.TerrainTools
             return asset != null
                    && asset.AddressMode == VividVirtualTextureAddressMode.Clamp
                    && (asset.ContentLayerMask & 7) == 7
-                   && VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(asset, out _);
+                   && VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(
+                       asset,
+                       VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality(),
+                       out _);
         }
 
         private static string CreateCompositeAssetPath(string terrainAssetPath)

@@ -263,6 +263,19 @@ namespace VividRP.Editor.Tests
                 Assert.That(system.CullingBufferSet.MeshletListBuildJobsBuffer, Is.Not.Null);
                 Assert.That(system.VisibleMeshletIndirectDrawArgsBuffer, Is.Not.Null);
                 Assert.DoesNotThrow(() => system.BindGlobals(cmd));
+
+                Assert.DoesNotThrow(() => system.CullMainView(
+                    camera,
+                    cmd,
+                    null,
+                    null,
+                    null,
+                    null,
+                    default));
+                Assert.That(system.CurrentMainViewDrawSet, Is.Not.Null);
+                Assert.That(system.CurrentMainViewDrawSet.IsBuilt, Is.True);
+                Assert.That(system.CurrentMainViewDrawSet.DrawCount, Is.Zero);
+                Assert.That(system.CurrentMainViewDrawSet.LegacyInstanceIndexBuffer, Is.Not.Null);
             }
             finally
             {

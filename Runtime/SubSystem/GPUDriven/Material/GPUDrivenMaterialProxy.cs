@@ -15,6 +15,13 @@ namespace VividRP.Runtime.GPUDriven
         MetallicSmoothness = 1,
         Roughness = 2,
         PackedMetallicOcclusionSmoothness = 3,
+        RoughnessMetallicOcclusion = 4,
+    }
+
+    public enum GPUDrivenMaterialProxyTextureMode
+    {
+        Bindless = 0,
+        VirtualTexture = 1,
     }
 
     [CreateAssetMenu(menuName = "VividRP/GPUDriven/Material Proxy", fileName = "New GPUDriven Material Proxy")]
@@ -25,6 +32,10 @@ namespace VividRP.Runtime.GPUDriven
 
         [SerializeField]
         private GPUDrivenMaterialProxyModel m_Model = GPUDrivenMaterialProxyModel.StandardLit;
+
+        [SerializeField]
+        private GPUDrivenMaterialProxyTextureMode m_TextureMode =
+            GPUDrivenMaterialProxyTextureMode.Bindless;
 
         [SerializeField]
         private Texture2D m_BaseMap;
@@ -58,6 +69,15 @@ namespace VividRP.Runtime.GPUDriven
         private float m_Roughness = 0.5f;
 
         [SerializeField]
+        private Vector2 m_MetallicRemap = new(0.0f, 1.0f);
+
+        [SerializeField]
+        private Vector2 m_SmoothnessRemap = new(0.0f, 1.0f);
+
+        [SerializeField]
+        private Vector2 m_AmbientOcclusionRemap = new(0.0f, 1.0f);
+
+        [SerializeField]
         private Color m_EmissionColor = Color.black;
 
         [SerializeField]
@@ -88,10 +108,16 @@ namespace VividRP.Runtime.GPUDriven
             set => SetValue(ref m_Model, value);
         }
 
+        public GPUDrivenMaterialProxyTextureMode TextureMode
+        {
+            get => m_TextureMode;
+            set => SetTextureMode(value);
+        }
+
         public Texture2D BaseMap
         {
             get => m_BaseMap;
-            set => SetValue(ref m_BaseMap, value);
+            set => SetRawTexture(ref m_BaseMap, value);
         }
 
         public Color BaseColor
@@ -109,7 +135,7 @@ namespace VividRP.Runtime.GPUDriven
         public Texture2D BumpMap
         {
             get => m_BumpMap;
-            set => SetValue(ref m_BumpMap, value);
+            set => SetRawTexture(ref m_BumpMap, value);
         }
 
         public float BumpScale
@@ -121,13 +147,21 @@ namespace VividRP.Runtime.GPUDriven
         public Texture2D MaskMap
         {
             get => m_MaskMap;
-            set => SetValue(ref m_MaskMap, value);
+            set => SetRawTexture(ref m_MaskMap, value);
         }
 
         public VividVirtualTextureAsset StreamedVirtualTexture
         {
             get => m_StreamedVirtualTexture;
-            set => SetValue(ref m_StreamedVirtualTexture, value);
+            set
+            {
+                if (value != null)
+                {
+                    SetTextureMode(GPUDrivenMaterialProxyTextureMode.VirtualTexture);
+                }
+
+                SetValue(ref m_StreamedVirtualTexture, value);
+            }
         }
 
         public GPUDrivenMaterialMaskMode MaskMode
@@ -146,6 +180,24 @@ namespace VividRP.Runtime.GPUDriven
         {
             get => m_Roughness;
             set => SetValue(ref m_Roughness, value);
+        }
+
+        public Vector2 MetallicRemap
+        {
+            get => m_MetallicRemap;
+            set => SetValue(ref m_MetallicRemap, value);
+        }
+
+        public Vector2 SmoothnessRemap
+        {
+            get => m_SmoothnessRemap;
+            set => SetValue(ref m_SmoothnessRemap, value);
+        }
+
+        public Vector2 AmbientOcclusionRemap
+        {
+            get => m_AmbientOcclusionRemap;
+            set => SetValue(ref m_AmbientOcclusionRemap, value);
         }
 
         public Color EmissionColor
@@ -195,6 +247,57 @@ namespace VividRP.Runtime.GPUDriven
         private void OnValidate()
         {
             IncrementRevision();
+        }
+
+        private void SetRawTexture(ref Texture2D field, Texture2D value)
+        {
+            if (value != null)
+            {
+                SetTextureMode(GPUDrivenMaterialProxyTextureMode.Bindless);
+            }
+
+            SetValue(ref field, value);
+        }
+
+        private void SetTextureMode(GPUDrivenMaterialProxyTextureMode textureMode)
+        {
+            bool changed = m_TextureMode != textureMode;
+            m_TextureMode = textureMode;
+            changed |= ClearIncompatibleTextureResources(textureMode);
+            if (changed)
+            {
+                IncrementRevision();
+            }
+        }
+
+        private bool ClearIncompatibleTextureResources(
+            GPUDrivenMaterialProxyTextureMode textureMode)
+        {
+            bool changed = false;
+            if (textureMode == GPUDrivenMaterialProxyTextureMode.VirtualTexture)
+            {
+                changed |= ClearValue(ref m_BaseMap);
+                changed |= ClearValue(ref m_BumpMap);
+                changed |= ClearValue(ref m_MaskMap);
+            }
+            else
+            {
+                changed |= ClearValue(ref m_StreamedVirtualTexture);
+            }
+
+            return changed;
+        }
+
+        private static bool ClearValue<T>(ref T field)
+            where T : Object
+        {
+            if (field == null)
+            {
+                return false;
+            }
+
+            field = null;
+            return true;
         }
 
         private void SetValue<T>(ref T field, T value)

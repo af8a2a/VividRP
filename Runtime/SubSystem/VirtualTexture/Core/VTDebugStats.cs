@@ -106,7 +106,9 @@ namespace VividRP.Runtime
             long physicalPoolResidentByteCount = 0,
             long pageTableByteCount = 0,
             long decodedStreamCacheByteCount = 0,
-            long decodedStreamCacheBudgetByteCount = 0)
+            long decodedStreamCacheBudgetByteCount = 0,
+            int pendingDataCount = 0,
+            int physicalPendingUploadCount = 0)
         {
             ActiveSpaceCount = activeSpaceCount;
             ResidentPageCount = residentPageCount;
@@ -152,6 +154,8 @@ namespace VividRP.Runtime
             PageTableByteCount = Math.Max(0L, pageTableByteCount);
             DecodedStreamCacheByteCount = Math.Max(0L, decodedStreamCacheByteCount);
             DecodedStreamCacheBudgetByteCount = Math.Max(0L, decodedStreamCacheBudgetByteCount);
+            PendingDataCount = Math.Max(0, pendingDataCount);
+            PhysicalPendingUploadCount = Math.Max(0, physicalPendingUploadCount);
         }
 
         internal int ActiveSpaceCount { get; }
@@ -161,6 +165,10 @@ namespace VividRP.Runtime
         internal int FreePageCount { get; }
 
         internal int PendingUploadCount { get; }
+
+        internal int PendingDataCount { get; }
+
+        internal int PhysicalPendingUploadCount { get; }
 
         internal int EvictionCount { get; }
 
@@ -317,7 +325,9 @@ namespace VividRP.Runtime
                 PhysicalPoolResidentByteCount,
                 PageTableByteCount,
                 DecodedStreamCacheByteCount,
-                DecodedStreamCacheBudgetByteCount);
+                DecodedStreamCacheBudgetByteCount,
+                PendingDataCount,
+                PhysicalPendingUploadCount);
         }
     }
 
@@ -534,7 +544,9 @@ namespace VividRP.Runtime
                 s_LastStats.PhysicalPoolResidentByteCount,
                 s_LastStats.PageTableByteCount,
                 s_LastStats.DecodedStreamCacheByteCount,
-                s_LastStats.DecodedStreamCacheBudgetByteCount);
+                s_LastStats.DecodedStreamCacheBudgetByteCount,
+                s_LastStats.PendingDataCount,
+                s_LastStats.PhysicalPendingUploadCount);
         }
 
         private static int ResolveCameraActualWidth(Camera camera)

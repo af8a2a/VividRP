@@ -67,6 +67,9 @@ CBUFFER_START(UnityPerMaterial)
     float _SubsurfaceRadius;
     float _SubsurfaceScatterAnisotropy;
     float _SubsurfaceTransmissionWeight;
+#if defined(VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION)
+    VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION
+#endif
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);
@@ -75,6 +78,8 @@ TEXTURE2D(_OpacityMap);
 SAMPLER(sampler_OpacityMap);
 TEXTURE2D(_TransmissionMap);
 SAMPLER(sampler_TransmissionMap);
+TEXTURE2D(_RMOMap);
+SAMPLER(sampler_RMOMap);
 TEXTURE2D(_MetallicGlossMap);
 SAMPLER(sampler_MetallicGlossMap);
 TEXTURE2D(_RoughnessMap);
@@ -225,7 +230,11 @@ float2 SampleMetallicSmoothness(float2 uv, float baseAlpha, float textureLod)
     float metallic = saturate(_Metallic);
     float smoothness = saturate(_Smoothness);
 
-#if defined(_METALLICSPECGLOSSMAP)
+#if defined(_RMOMAP)
+    float3 rmoSample = SAMPLE_TEXTURE2D_LOD(_RMOMap, sampler_RMOMap, uv, textureLod).rgb;
+    metallic = lerp(_MetallicRemapMin, _MetallicRemapMax, saturate(rmoSample.g));
+    smoothness = lerp(_SmoothnessRemapMin, _SmoothnessRemapMax, saturate(1.0 - rmoSample.r));
+#elif defined(_METALLICSPECGLOSSMAP)
     float4 metallicGlossSample = SAMPLE_TEXTURE2D_LOD(_MetallicGlossMap, sampler_MetallicGlossMap, uv, textureLod);
     metallic = lerp(_MetallicRemapMin, _MetallicRemapMax, saturate(metallicGlossSample.r));
 
@@ -254,11 +263,35 @@ float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
 
 float SampleAmbientOcclusion(float2 uv)
 {
-#if defined(_OCCLUSIONMAP)
+#if defined(_RMOMAP)
+    float occlusion = SAMPLE_TEXTURE2D_LOD(_RMOMap, sampler_RMOMap, uv, 0.0).b;
+    return saturate(lerp(_AORemapMin, _AORemapMax, occlusion));
+#elif defined(_OCCLUSIONMAP)
     float occlusion = SAMPLE_TEXTURE2D_LOD(_OcclusionMap, sampler_OcclusionMap, uv, 0.0).g;
     return saturate(lerp(_AORemapMin, _AORemapMax, occlusion));
 #else
     return 1.0;
+#endif
+}
+
+void SampleStandardLitPBR(
+    float2 uv,
+    float baseAlpha,
+    float textureLod,
+    out float metallic,
+    out float smoothness,
+    out float ambientOcclusion)
+{
+#if defined(_RMOMAP)
+    float3 rmoSample = SAMPLE_TEXTURE2D_LOD(_RMOMap, sampler_RMOMap, uv, textureLod).rgb;
+    metallic = lerp(_MetallicRemapMin, _MetallicRemapMax, saturate(rmoSample.g));
+    smoothness = lerp(_SmoothnessRemapMin, _SmoothnessRemapMax, saturate(1.0 - rmoSample.r));
+    ambientOcclusion = saturate(lerp(_AORemapMin, _AORemapMax, rmoSample.b));
+#else
+    float2 metallicSmoothness = SampleMetallicSmoothness(uv, baseAlpha, textureLod);
+    metallic = metallicSmoothness.x;
+    smoothness = metallicSmoothness.y;
+    ambientOcclusion = SampleAmbientOcclusion(uv);
 #endif
 }
 
@@ -382,14 +415,23 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(VividIndirectDiffuseHitGeome
 {
     baseSample = SampleBase(geometry.uv);
 
-    float2 metallicSmoothness = SampleMetallicSmoothness(geometry.uv, baseSample.a);
+    float metallic;
+    float smoothness;
+    float ambientOcclusion;
+    SampleStandardLitPBR(
+        geometry.uv,
+        baseSample.a,
+        0.0,
+        metallic,
+        smoothness,
+        ambientOcclusion);
 
     VividGBufferSurfaceData surfaceData;
     surfaceData.baseColor = baseSample.rgb;
     surfaceData.normalWS = VividIndirectDiffuseSampleNormalWS(geometry);
-    surfaceData.linearRoughness = (1.0 - metallicSmoothness.y) * (1.0 - metallicSmoothness.y);
-    surfaceData.metallic = metallicSmoothness.x;
-    surfaceData.ambientOcclusion = SampleAmbientOcclusion(geometry.uv);
+    surfaceData.linearRoughness = (1.0 - smoothness) * (1.0 - smoothness);
+    surfaceData.metallic = metallic;
+    surfaceData.ambientOcclusion = ambientOcclusion;
     surfaceData.customData1 = 0.0;
 
     uint materialFeatures = VIVID_MATERIALFEATURE_LIT;

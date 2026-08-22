@@ -685,13 +685,14 @@ namespace VividRP.Runtime
 
         private static Texture2D CreateReadableCopy(Texture2D sourceTexture)
         {
+            bool sourceSRGB = GraphicsFormatUtility.IsSRGBFormat(sourceTexture.graphicsFormat);
             RenderTexture previous = RenderTexture.active;
             RenderTexture temporary = RenderTexture.GetTemporary(
                 sourceTexture.width,
                 sourceTexture.height,
                 0,
                 RenderTextureFormat.ARGB32,
-                RenderTextureReadWrite.Default);
+                sourceSRGB ? RenderTextureReadWrite.sRGB : RenderTextureReadWrite.Linear);
 
             try
             {
@@ -703,7 +704,7 @@ namespace VividRP.Runtime
                     sourceTexture.height,
                     TextureFormat.RGBA32,
                     true,
-                    false)
+                    !sourceSRGB)
                 {
                     name = $"{sourceTexture.name}_VividVT_Readable",
                     hideFlags = HideFlags.HideAndDontSave,

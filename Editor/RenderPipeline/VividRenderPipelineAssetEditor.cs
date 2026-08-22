@@ -310,8 +310,10 @@ namespace VividRP.Editor.RenderPipeline
                 "m_GPUDrivenVirtualTexturePhysicalPoolQuality",
                 EditorGUIUtility.TrTextContent(
                     "GPUDriven Physical Pool Quality",
-                    "Selects 256, 512, or 1024 physical cache pages for the GPUDriven virtual texture backend. "
-                    + "The setting is applied when the backend is next initialized; unsupported sizes fall back to the highest tier that fits the device."),
+                    "Low/Medium use 256/512 pages with a 4px border; High uses 1024 pages with an 8px border; "
+                    + "Equal Quality uses 2048 pages with an 8px border and keeps adaptive mip bias at zero. "
+                    + "Changing the setting reimports GPUDriven VT assets to match its border; the backend uses it when next initialized. "
+                    + "Adaptive tiers may reduce only page count to fit the device; Equal Quality does not silently fall back."),
                 "vivid-rp-asset-gpu-driven-vt-physical-pool-quality-field");
             AddAssetProperty(
                 foldout,

@@ -138,6 +138,8 @@ struct VividMaterialData
     float4 AlbedoColor;
     float4 TextureTilingOffset;
     float4 Emission;
+    float4 MetallicSmoothnessRemap;
+    float4 AmbientOcclusionRemap;
     uint SurfaceBindingIndex;
     float NormalsStrength;
     float Roughness;

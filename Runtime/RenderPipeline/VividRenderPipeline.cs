@@ -173,6 +173,10 @@ namespace VividRP.Runtime
             using (s_BeginCameraRenderingMarker.Auto())
             {
                 DispatchBeginCameraRendering(context, camera);
+                // Schedule after beginCameraRendering callbacks so their final camera
+                // and authoring changes are captured, while Unity culling can overlap
+                // the PrimitiveScene Burst jobs below.
+                VividGPUDrivenSystem.ScheduleCullForCamera(camera, frameIndex);
             }
 
             DecalSystem.ScheduleCullForCamera(camera);

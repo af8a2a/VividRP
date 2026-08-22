@@ -1,6 +1,5 @@
 using System;
 using UnityEngine;
-using UnityEngine.Serialization;
 using Unity.Scripting.LifecycleManagement;
 
 namespace VividRP.Runtime.GPUDriven.Meshlets
@@ -13,21 +12,6 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         [SerializeField, HideInInspector] private uint m_ContentVersion = 1u;
         [SerializeField, HideInInspector] private uint m_MeshDataSerializationVersion = VividMeshletCollectionBinarySerializer.CurrentVersion;
         [SerializeField, HideInInspector] private byte[] m_MeshDataBlob = Array.Empty<byte>();
-
-        [SerializeField, HideInInspector, FormerlySerializedAs("MeshLODLevelNodeCounts")]
-        private int[] m_LegacyMeshLODLevelNodeCounts = Array.Empty<int>();
-
-        [SerializeField, HideInInspector, FormerlySerializedAs("MeshLODNodes")]
-        private VividMeshLODNodeLegacy64[] m_LegacyMeshLODNodes = Array.Empty<VividMeshLODNodeLegacy64>();
-
-        [SerializeField, HideInInspector, FormerlySerializedAs("Meshlets")]
-        private VividMeshletLegacy64[] m_LegacyMeshlets = Array.Empty<VividMeshletLegacy64>();
-
-        [SerializeField, HideInInspector, FormerlySerializedAs("VertexBuffer")]
-        private VividMeshletVertexLegacy64[] m_LegacyVertexBuffer = Array.Empty<VividMeshletVertexLegacy64>();
-
-        [SerializeField, HideInInspector, FormerlySerializedAs("IndexBuffer")]
-        private byte[] m_LegacyIndexBuffer = Array.Empty<byte>();
 
         [NonSerialized] private int[] m_MeshLODLevelNodeCounts = Array.Empty<int>();
         [NonSerialized] private VividMeshLODNode[] m_MeshLODNodes = Array.Empty<VividMeshLODNode>();
@@ -136,10 +120,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             if (!m_MeshDataLoaded)
             {
-                if (!TryMigrateLegacyMeshData())
-                {
-                    return;
-                }
+                return;
             }
 
             m_MeshDataSerializationVersion = VividMeshletCollectionBinarySerializer.CurrentVersion;
@@ -150,7 +131,6 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 m_VertexBuffer,
                 m_IndexBuffer
             );
-            ClearLegacyMeshData();
         }
 
         void ISerializationCallbackReceiver.OnAfterDeserialize()
@@ -166,58 +146,28 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 return;
             }
 
-            if (!TryMigrateLegacyMeshData())
+            try
             {
-                try
-                {
-                    VividMeshletCollectionBinarySerializer.Deserialize(
-                        m_MeshDataBlob,
-                        out m_MeshLODLevelNodeCounts,
-                        out m_MeshLODNodes,
-                        out m_Meshlets,
-                        out m_VertexBuffer,
-                        out m_IndexBuffer
-                    );
-                }
-                catch (Exception exception)
-                {
-                    Debug.LogError(
-                        $"[VividRP] Failed to deserialize meshlet data for asset '{name}'. " +
-                        $"Stored format version: {m_MeshDataSerializationVersion}. {exception.Message}",
-                        this
-                    );
-                    ClearRuntimeMeshData();
-                }
+                VividMeshletCollectionBinarySerializer.Deserialize(
+                    m_MeshDataBlob,
+                    out m_MeshLODLevelNodeCounts,
+                    out m_MeshLODNodes,
+                    out m_Meshlets,
+                    out m_VertexBuffer,
+                    out m_IndexBuffer
+                );
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(
+                    $"[VividRP] Failed to deserialize meshlet data for asset '{name}'. " +
+                    $"Stored format version: {m_MeshDataSerializationVersion}. {exception.Message}",
+                    this
+                );
+                ClearRuntimeMeshData();
             }
 
             m_MeshDataLoaded = true;
-        }
-
-        private bool TryMigrateLegacyMeshData()
-        {
-            if (!HasLegacyMeshData())
-            {
-                return false;
-            }
-
-            SetMeshData(
-                m_LegacyMeshLODLevelNodeCounts,
-                VividMeshletCollectionBinarySerializer.ConvertLegacyMeshLODNodes(m_LegacyMeshLODNodes),
-                VividMeshletCollectionBinarySerializer.ConvertLegacyMeshlets(m_LegacyMeshlets),
-                VividMeshletCollectionBinarySerializer.ConvertLegacyVertices(m_LegacyVertexBuffer),
-                m_LegacyIndexBuffer
-            );
-            ClearLegacyMeshData();
-            return true;
-        }
-
-        private bool HasLegacyMeshData()
-        {
-            return m_LegacyMeshLODLevelNodeCounts is { Length: > 0 }
-                   || m_LegacyMeshLODNodes is { Length: > 0 }
-                   || m_LegacyMeshlets is { Length: > 0 }
-                   || m_LegacyVertexBuffer is { Length: > 0 }
-                   || m_LegacyIndexBuffer is { Length: > 0 };
         }
 
         private void ClearRuntimeMeshData()
@@ -227,15 +177,6 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_Meshlets = Array.Empty<VividMeshlet>();
             m_VertexBuffer = Array.Empty<VividMeshletVertex>();
             m_IndexBuffer = Array.Empty<byte>();
-        }
-
-        private void ClearLegacyMeshData()
-        {
-            m_LegacyMeshLODLevelNodeCounts = Array.Empty<int>();
-            m_LegacyMeshLODNodes = Array.Empty<VividMeshLODNodeLegacy64>();
-            m_LegacyMeshlets = Array.Empty<VividMeshletLegacy64>();
-            m_LegacyVertexBuffer = Array.Empty<VividMeshletVertexLegacy64>();
-            m_LegacyIndexBuffer = Array.Empty<byte>();
         }
 
 #if UNITY_EDITOR

@@ -1,4 +1,5 @@
 using UnityEngine;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -30,7 +31,9 @@ namespace VividRP.Runtime.GPUDriven
             uint createBackendResourceCallCountThisFrame,
             int registeredBackendResourceCount,
             int forcedMeshLODNodeDepth,
-            float meshLODErrorThreshold)
+            float meshLODErrorThreshold,
+            VividPrimitiveSceneStats primitiveSceneStats = default,
+            VividPrimitiveDrawSetStats primitiveDrawSetStats = default)
         {
             IsAvailable = isAvailable;
             StatusMessage = statusMessage;
@@ -58,6 +61,8 @@ namespace VividRP.Runtime.GPUDriven
             RegisteredBackendResourceCount = registeredBackendResourceCount;
             ForcedMeshLODNodeDepth = forcedMeshLODNodeDepth;
             MeshLODErrorThreshold = meshLODErrorThreshold;
+            PrimitiveSceneStats = primitiveSceneStats;
+            PrimitiveDrawSetStats = primitiveDrawSetStats;
         }
 
         internal bool IsAvailable { get; }
@@ -86,6 +91,8 @@ namespace VividRP.Runtime.GPUDriven
         internal int RegisteredBackendResourceCount { get; }
         internal int ForcedMeshLODNodeDepth { get; }
         internal float MeshLODErrorThreshold { get; }
+        internal VividPrimitiveSceneStats PrimitiveSceneStats { get; }
+        internal VividPrimitiveDrawSetStats PrimitiveDrawSetStats { get; }
     }
 
     internal static class VividGPUDrivenStatsRegistry

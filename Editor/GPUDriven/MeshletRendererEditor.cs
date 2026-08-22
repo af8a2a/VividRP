@@ -355,7 +355,9 @@ namespace VividRP.Editor.GPUDriven
                                 ApplyMaterialChanges(meshletRenderer);
 
                                 GPUDrivenMaterialProxySyncResult syncResult =
-                                    GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(meshletRenderer);
+                                    GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(
+                                        meshletRenderer,
+                                        skipStreamedVirtualTextureRebuildIfUpToDate: true);
 
                                 if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
                                 {
@@ -732,6 +734,15 @@ namespace VividRP.Editor.GPUDriven
     {
         internal static MeshletRendererTakeOverRepairResult RepairTakeOverBindings(MeshletRenderer meshletRenderer)
         {
+            return RepairTakeOverBindings(meshletRenderer, null, false);
+        }
+
+        private static MeshletRendererTakeOverRepairResult RepairTakeOverBindings(
+            MeshletRenderer meshletRenderer,
+            Dictionary<Mesh, VividMeshletCollectionAsset[]> meshletCollectionCache,
+            bool skipStreamedVirtualTextureRebuildIfUpToDate
+        )
+        {
             if (meshletRenderer == null)
             {
                 return new MeshletRendererTakeOverRepairResult(false, false, "MeshletRenderer is null.", null, null, null);
@@ -760,24 +771,37 @@ namespace VividRP.Editor.GPUDriven
                 resolvedMeshletCollections[subMeshIndex] = meshletRenderer.GetMeshletCollection(subMeshIndex);
             }
 
-            FillMissingMeshletCollections(sourceMesh, resolvedMeshletCollections);
-
             if (HasMissingEntries(resolvedMeshletCollections))
             {
-                if (IsPersistentMesh(sourceMesh))
-                {
-                    string[] generatedAssetPaths = GenerateMissingMeshletCollections(sourceMesh);
-                    if (generatedAssetPaths.Length > 0)
-                    {
-                        createdMeshletAssetPaths.AddRange(generatedAssetPaths);
-                        changed = true;
-                    }
+                VividMeshletCollectionAsset[] collectedMeshletCollections = CollectMeshletCollections(
+                    sourceMesh,
+                    meshletCollectionCache);
+                FillMissingMeshletCollections(collectedMeshletCollections, resolvedMeshletCollections);
 
-                    FillMissingMeshletCollections(sourceMesh, resolvedMeshletCollections);
-                }
-                else
+                if (HasMissingEntries(resolvedMeshletCollections))
                 {
-                    warnings.Add("Source Mesh is not stored as an asset, so missing meshlet assets cannot be generated automatically.");
+                    if (IsPersistentMesh(sourceMesh))
+                    {
+                        string[] generatedAssetPaths = GenerateMissingMeshletCollections(
+                            sourceMesh,
+                            collectedMeshletCollections);
+                        if (generatedAssetPaths.Length > 0)
+                        {
+                            createdMeshletAssetPaths.AddRange(generatedAssetPaths);
+                            changed = true;
+                            collectedMeshletCollections = CollectMeshletCollections(sourceMesh);
+                            if (meshletCollectionCache != null)
+                            {
+                                meshletCollectionCache[sourceMesh] = collectedMeshletCollections;
+                            }
+                        }
+
+                        FillMissingMeshletCollections(collectedMeshletCollections, resolvedMeshletCollections);
+                    }
+                    else
+                    {
+                        warnings.Add("Source Mesh is not stored as an asset, so missing meshlet assets cannot be generated automatically.");
+                    }
                 }
             }
 
@@ -789,7 +813,9 @@ namespace VividRP.Editor.GPUDriven
             }
 
             GPUDrivenMaterialProxyBindingResult bindingResult =
-                GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+                GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(
+                    meshletRenderer,
+                    skipStreamedVirtualTextureRebuildIfUpToDate);
             warnings.AddRange(bindingResult.Warnings);
 
             if (!bindingResult.Success)
@@ -810,7 +836,9 @@ namespace VividRP.Editor.GPUDriven
             }
 
             GPUDrivenMaterialProxySyncResult syncResult =
-                GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(meshletRenderer);
+                GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(
+                    meshletRenderer,
+                    skipStreamedVirtualTextureRebuildIfUpToDate);
             warnings.AddRange(syncResult.Warnings);
 
             if (!syncResult.Success)
@@ -852,6 +880,15 @@ namespace VividRP.Editor.GPUDriven
 
         internal static MeshletRendererSourceRendererDetachResult TakeOverAndRemoveSourceMeshRenderer(MeshletRenderer meshletRenderer)
         {
+            return TakeOverAndRemoveSourceMeshRenderer(meshletRenderer, null, false);
+        }
+
+        private static MeshletRendererSourceRendererDetachResult TakeOverAndRemoveSourceMeshRenderer(
+            MeshletRenderer meshletRenderer,
+            Dictionary<Mesh, VividMeshletCollectionAsset[]> meshletCollectionCache,
+            bool skipStreamedVirtualTextureRebuildIfUpToDate
+        )
+        {
             if (meshletRenderer == null)
             {
                 return new MeshletRendererSourceRendererDetachResult(false, false, "MeshletRenderer is null.", null, null, null);
@@ -877,7 +914,10 @@ namespace VividRP.Editor.GPUDriven
                 EditorUtility.SetDirty(meshletRenderer);
             }
 
-            MeshletRendererTakeOverRepairResult repairResult = RepairTakeOverBindings(meshletRenderer);
+            MeshletRendererTakeOverRepairResult repairResult = RepairTakeOverBindings(
+                meshletRenderer,
+                meshletCollectionCache,
+                skipStreamedVirtualTextureRebuildIfUpToDate);
             if (!repairResult.Success)
             {
                 return new MeshletRendererSourceRendererDetachResult(
@@ -918,6 +958,16 @@ namespace VividRP.Editor.GPUDriven
 
         internal static MeshletRendererRecursiveConversionResult TakeOverAndRemoveSourceMeshRenderersRecursively(GameObject root)
         {
+            return TakeOverAndRemoveSourceMeshRenderersRecursively(
+                root,
+                new Dictionary<Mesh, VividMeshletCollectionAsset[]>());
+        }
+
+        internal static MeshletRendererRecursiveConversionResult TakeOverAndRemoveSourceMeshRenderersRecursively(
+            GameObject root,
+            Dictionary<Mesh, VividMeshletCollectionAsset[]> meshletCollectionCache
+        )
+        {
             if (root == null)
             {
                 return new MeshletRendererRecursiveConversionResult(false, 0, 0, 0, 0, "Root GameObject is null.", null, null, null);
@@ -945,10 +995,12 @@ namespace VividRP.Editor.GPUDriven
                     continue;
                 }
 
-                string hierarchyPath = GetHierarchyPath(meshRenderer.transform);
+                Transform rendererTransform = meshRenderer.transform;
+                string hierarchyPath = null;
                 if (!MeshletRenderer.TryExtractMesh(meshRenderer, out _))
                 {
                     skippedRendererCount++;
+                    hierarchyPath = GetHierarchyPath(rendererTransform);
                     warnings.Add($"Skipped '{hierarchyPath}' because it has no valid MeshFilter mesh.");
                     continue;
                 }
@@ -961,6 +1013,7 @@ namespace VividRP.Editor.GPUDriven
                     if (meshletRenderer == null)
                     {
                         failedRendererCount++;
+                        hierarchyPath = GetHierarchyPath(rendererTransform);
                         warnings.Add($"Failed to add MeshletRenderer to '{hierarchyPath}'.");
                         continue;
                     }
@@ -969,14 +1022,22 @@ namespace VividRP.Editor.GPUDriven
                     addedMeshletRendererCount++;
                 }
 
-                MeshletRendererSourceRendererDetachResult detachResult = TakeOverAndRemoveSourceMeshRenderer(meshletRenderer);
+                MeshletRendererSourceRendererDetachResult detachResult = TakeOverAndRemoveSourceMeshRenderer(
+                    meshletRenderer,
+                    meshletCollectionCache,
+                    true);
                 createdMeshletAssetPaths.AddRange(detachResult.CreatedMeshletAssetPaths);
                 createdMaterialProxyAssetPaths.AddRange(detachResult.CreatedMaterialProxyAssetPaths);
-                AddPrefixedWarnings(warnings, hierarchyPath, detachResult.Warnings);
+                if (detachResult.Warnings.Length > 0)
+                {
+                    hierarchyPath = GetHierarchyPath(rendererTransform);
+                    AddPrefixedWarnings(warnings, hierarchyPath, detachResult.Warnings);
+                }
 
                 if (!detachResult.Success)
                 {
                     failedRendererCount++;
+                    hierarchyPath ??= GetHierarchyPath(rendererTransform);
                     warnings.Add($"Failed to convert '{hierarchyPath}': {detachResult.ErrorMessage}");
                     if (addedMeshletRenderer && meshletRenderer != null)
                     {
@@ -1041,15 +1102,60 @@ namespace VividRP.Editor.GPUDriven
             return meshletCollections;
         }
 
+        private static VividMeshletCollectionAsset[] CollectMeshletCollections(
+            Mesh mesh,
+            Dictionary<Mesh, VividMeshletCollectionAsset[]> meshletCollectionCache
+        )
+        {
+            if (mesh == null)
+            {
+                return Array.Empty<VividMeshletCollectionAsset>();
+            }
+
+            int expectedCount = Mathf.Max(1, mesh.subMeshCount);
+            if (meshletCollectionCache != null
+                && meshletCollectionCache.TryGetValue(mesh, out VividMeshletCollectionAsset[] cachedCollections)
+                && cachedCollections != null
+                && cachedCollections.Length == expectedCount)
+            {
+                return cachedCollections;
+            }
+
+            VividMeshletCollectionAsset[] collectedMeshletCollections = CollectMeshletCollections(mesh);
+            if (collectedMeshletCollections.Length != expectedCount)
+            {
+                collectedMeshletCollections = new VividMeshletCollectionAsset[expectedCount];
+            }
+
+            if (meshletCollectionCache != null)
+            {
+                meshletCollectionCache[mesh] = collectedMeshletCollections;
+            }
+
+            return collectedMeshletCollections;
+        }
+
         internal static string[] GenerateMissingMeshletCollections(Mesh mesh)
+        {
+            return GenerateMissingMeshletCollections(mesh, CollectMeshletCollections(mesh));
+        }
+
+        private static string[] GenerateMissingMeshletCollections(
+            Mesh mesh,
+            VividMeshletCollectionAsset[] existingCollections
+        )
         {
             if (!TryGetMeshAssetKey(mesh, out _, out _, out _, out _))
             {
                 return Array.Empty<string>();
             }
 
-            VividMeshletCollectionAsset[] existingCollections = CollectMeshletCollections(mesh);
             int subMeshCount = Mathf.Max(1, mesh.subMeshCount);
+            if (existingCollections == null || existingCollections.Length != subMeshCount)
+            {
+                existingCollections = CollectMeshletCollections(mesh);
+            }
+
             var createdAssetPaths = new List<string>(subMeshCount);
 
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
@@ -1124,15 +1230,16 @@ namespace VividRP.Editor.GPUDriven
         }
 
         private static void FillMissingMeshletCollections(
-            Mesh sourceMesh,
+            VividMeshletCollectionAsset[] collectedMeshletCollections,
             VividMeshletCollectionAsset[] resolvedMeshletCollections)
         {
-            if (sourceMesh == null || resolvedMeshletCollections == null || resolvedMeshletCollections.Length == 0)
+            if (collectedMeshletCollections == null
+                || resolvedMeshletCollections == null
+                || resolvedMeshletCollections.Length == 0)
             {
                 return;
             }
 
-            VividMeshletCollectionAsset[] collectedMeshletCollections = CollectMeshletCollections(sourceMesh);
             int count = Mathf.Min(resolvedMeshletCollections.Length, collectedMeshletCollections.Length);
             for (int subMeshIndex = 0; subMeshIndex < count; subMeshIndex++)
             {

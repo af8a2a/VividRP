@@ -1631,7 +1631,9 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Pool Evicted Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolEvictedPageCount));
                 foldout.children.Add(CreateStatsValue("Resident Pages", () => GetVirtualTextureDisplayStats(data).ResidentPageCount));
                 foldout.children.Add(CreateStatsValue("Free Pages", () => GetVirtualTextureDisplayStats(data).FreePageCount));
-                foldout.children.Add(CreateStatsValue("Pending Uploads", () => GetVirtualTextureDisplayStats(data).PendingUploadCount));
+                foldout.children.Add(CreateStatsValue("Pending Requests", () => GetVirtualTextureDisplayStats(data).PendingUploadCount));
+                foldout.children.Add(CreateStatsValue("Pending Data", () => GetVirtualTextureDisplayStats(data).PendingDataCount));
+                foldout.children.Add(CreateStatsValue("Pending Uploads", () => GetVirtualTextureDisplayStats(data).PhysicalPendingUploadCount));
                 foldout.children.Add(CreateStatsValue("Evictions", () => GetVirtualTextureDisplayStats(data).EvictionCount));
                 foldout.children.Add(CreateStatsValue("Faults", () => GetVirtualTextureDisplayStats(data).FaultCount));
                 foldout.children.Add(CreateStatsValue("Deduplicated Requests", () => GetVirtualTextureDisplayStats(data).DeduplicatedRequestCount));
@@ -1664,6 +1666,13 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Adaptive Measured Fallback (Global)", () => VirtualTextureSystem.AdaptiveMeasuredFallbackSampleCount));
                 foldout.children.Add(CreateStatsValue("Adaptive Fallback Input (Global)", () => VirtualTextureSystem.AdaptiveFallbackSampleInputCount));
                 foldout.children.Add(CreateStatsValue("Adaptive Fallback Coverage (Global)", () => VirtualTextureSystem.AdaptiveFallbackCoverage));
+                foldout.children.Add(CreateStatsValue("Adaptive Recent Visible Pages (Worst Pool)", () => VirtualTextureSystem.AdaptiveRecentVisiblePhysicalPageCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Predicted Pages (Worst Pool)", () => VirtualTextureSystem.AdaptivePredictedPhysicalPageCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Pool Pages (Worst Pool)", () => VirtualTextureSystem.AdaptiveProspectivePhysicalPoolPageCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Locked Pages (Worst Pool)", () => VirtualTextureSystem.AdaptiveLockedPhysicalPageCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Locked Residency (Worst Pool)", () => VirtualTextureSystem.AdaptiveLockedPhysicalPageResidency));
+                foldout.children.Add(CreateStatsValue("Adaptive Projected Residency (Worst Pool)", () => VirtualTextureSystem.AdaptiveProspectiveResidency));
+                foldout.children.Add(CreateStatsValue("Adaptive Prospective Pressure (Worst Pool)", () => VirtualTextureSystem.AdaptiveProspectiveResidencyPressure));
                 foldout.children.Add(CreateStatsValue("Adaptive Total Pressure (Global)", () => VirtualTextureSystem.AdaptiveTotalPressure));
                 foldout.children.Add(CreateStatsValue("Adaptive Target Mip Bias (Global)", () => VirtualTextureSystem.AdaptiveTargetMipBias));
                 foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Frame (Global)", () => FormatFrameIndex(VirtualTextureSystem.AdaptiveLastFreshFeedbackFrameIndex)));
@@ -1676,7 +1685,7 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Resident Fallback (Global)", () => VirtualTextureSystem.AdaptiveLastFreshResidentFallbackSampleCount));
                 foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Resolved VT Samples (Global)", () => VirtualTextureSystem.AdaptiveLastFreshWeightedResolvedSampleCount));
                 foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Effective Fallback Pressure (Global)", () => VirtualTextureSystem.AdaptiveLastFreshFallbackPressure));
-                foldout.children.Add(CreateStatsValue("Adaptive Mip Bias", () => GetVirtualTextureDisplayStats(data).AdaptiveMipBias));
+                foldout.children.Add(CreateStatsValue("Adaptive Mip Bias (Worst Pool)", () => GetVirtualTextureDisplayStats(data).AdaptiveMipBias));
                 foldout.children.Add(new DebugUI.Value
                 {
                     displayName = "Status",

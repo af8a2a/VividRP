@@ -26,12 +26,16 @@ namespace VividRP.Runtime
         public GraphicsBuffer recoveredMeshletRenderRequestsBuffer;
         public GraphicsBuffer recoveredRendererListMeshletCountsBuffer;
         public GraphicsBuffer recoveredMeshletIndirectDrawArgsBuffer;
+        internal PrimitiveScene.VividPrimitiveDrawSet primitiveDrawSet;
+        internal PrimitiveScene.VividPrimitiveDrawSet primitiveShadowDrawSet;
         internal GPUDriven.VividGPUDrivenOcclusionCullingParameters observationRetestParameters;
 
         public override void Reset()
         {
             visibleMeshletRenderRequestsBuffer = null;
             visibleMeshletIndirectDrawArgsBuffer = null;
+            primitiveDrawSet = null;
+            primitiveShadowDrawSet = null;
             ResetOcclusion();
         }
 

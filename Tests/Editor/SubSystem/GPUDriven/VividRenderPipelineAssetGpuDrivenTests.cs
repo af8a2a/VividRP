@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -388,6 +389,177 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RenderCamera_SchedulesCpuCullAfterBeginCameraCallbacksAndBeforeUnityCull()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPipeline",
+                "VividRenderPipeline.cs");
+            string renderCamera = SliceSource(
+                source,
+                "private void RenderCamera(",
+                "private void DispatchBeginCameraRendering(");
+
+            int beginCamera = renderCamera.IndexOf("DispatchBeginCameraRendering(context, camera)");
+            int gpuDrivenCull = renderCamera.IndexOf(
+                "VividGPUDrivenSystem.ScheduleCullForCamera(camera, frameIndex)");
+            int decalCull = renderCamera.IndexOf("DecalSystem.ScheduleCullForCamera(camera)");
+            int unityCull = renderCamera.IndexOf("context.Cull(ref cullingParameters)");
+            int prepareFrame = renderCamera.IndexOf("PassRecorder.PrepareFrame(graphAsset, cmdBuffer)");
+
+            Assert.That(beginCamera, Is.GreaterThanOrEqualTo(0));
+            Assert.That(gpuDrivenCull, Is.GreaterThan(beginCamera));
+            Assert.That(decalCull, Is.GreaterThan(gpuDrivenCull));
+            Assert.That(unityCull, Is.GreaterThan(decalCull));
+            Assert.That(prepareFrame, Is.GreaterThan(unityCull));
+        }
+
+        [Test]
+        public void PrepareFrame_InvalidatesDrawSetReadersBeforePrimitiveSceneSynchronization()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string prepareFrame = SliceSource(
+                source,
+                "public void PrepareFrame(bool reportStats = true)",
+                "public void Cull(");
+
+            int invalidateBuilds = prepareFrame.IndexOf(
+                "m_PrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int invalidateShadowBuilds = prepareFrame.IndexOf(
+                "m_ShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int synchronizeScene = prepareFrame.IndexOf("m_PrimitiveSceneAdapter.Synchronize(");
+
+            Assert.That(invalidateBuilds, Is.GreaterThanOrEqualTo(0));
+            Assert.That(invalidateShadowBuilds, Is.GreaterThan(invalidateBuilds));
+            Assert.That(synchronizeScene, Is.GreaterThan(invalidateBuilds));
+            Assert.That(synchronizeScene, Is.GreaterThan(invalidateShadowBuilds));
+        }
+
+        [Test]
+        public void ShadowDrawSetScheduling_UsesMeshletPassCascadeUnionAndShadowSemantics()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string schedule = SliceSource(
+                source,
+                "private VividPrimitiveDrawSet ScheduleShadowDrawSet(",
+                "internal VividPrimitiveDrawSet CompleteShadowDrawSet(");
+
+            StringAssert.Contains("PassRecorder.HasMeshletShadowPass", schedule);
+            StringAssert.Contains("shadowData.isCSMActive", schedule);
+            StringAssert.Contains("shadowData.viewMatrices", schedule);
+            StringAssert.Contains("shadowData.projMatrices", schedule);
+            StringAssert.Contains("VividInstancePassMask.Shadows", schedule);
+            StringAssert.Contains("cullAgainstNearPlane: false", schedule);
+            StringAssert.Contains("m_ShadowPrimitiveDrawSetSystem.Schedule(", schedule);
+            StringAssert.DoesNotContain("CompleteScheduledBuild", schedule);
+        }
+
+        [Test]
+        public void GPUDrivenPreRender_SchedulesShadowDrawSetBeforePublishingFrameData()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string updateCore = SliceSource(
+                source,
+                "private static void UpdateCore(",
+                "private static void PrepareFrameIfNeeded(");
+
+            int schedule = updateCore.IndexOf("gpuDrivenSystem.ScheduleShadowDrawSet(");
+            int mainViewCull = updateCore.IndexOf("gpuDrivenSystem.CullMainView(");
+            int publishFrameData = updateCore.IndexOf("PassRecorder.SetGPUDrivenFrameData(");
+
+            Assert.That(schedule, Is.GreaterThanOrEqualTo(0));
+            Assert.That(mainViewCull, Is.GreaterThan(schedule));
+            Assert.That(publishFrameData, Is.GreaterThan(mainViewCull));
+            StringAssert.DoesNotContain("CompleteShadowDrawSet", updateCore);
+        }
+
+        [Test]
+        public void MeshletShadowRecord_CompletesDrawSetImmediatelyBeforeShadowGpuCull()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "MeshletShadowPass.cs");
+            string record = SliceSource(
+                source,
+                "public override void Record(",
+                "public override void Dispose()");
+
+            int buildContexts = record.IndexOf("BuildShadowCullingContext(");
+            int complete = record.IndexOf("system.CompleteShadowDrawSet(");
+            int gpuCull = record.IndexOf("system.CullShadowCascades(");
+
+            Assert.That(buildContexts, Is.GreaterThanOrEqualTo(0));
+            Assert.That(complete, Is.GreaterThan(buildContexts));
+            Assert.That(gpuCull, Is.GreaterThan(complete));
+            StringAssert.Contains("m_PrimitiveShadowDrawSet", record);
+        }
+
+        [Test]
+        public void ScheduledDrawSetToken_RequiresExactPendingCameraFrameAndRevisionMatch()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string consumeToken = SliceSource(
+                source,
+                "private bool TryConsumeScheduledMainViewDrawSet(",
+                "private void ClearScheduledMainViewDrawSet()");
+
+            StringAssert.Contains(
+                "m_ScheduledMainViewRenderingCameraId.Equals(renderingCamera.GetEntityId())",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewCullingCameraId.Equals(cullingCamera.GetEntityId())",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewFrameIndex == resolvedFrameIndex",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewSceneRevision == PrimitiveScene.SceneRevision",
+                consumeToken);
+            StringAssert.Contains("drawSet.MatchesPendingBuild(", consumeToken);
+            Assert.That(
+                consumeToken.IndexOf("ClearScheduledMainViewDrawSet();"),
+                Is.GreaterThan(consumeToken.IndexOf("bool matches =")),
+                "The pending token must be cleared after every consumption attempt.");
+        }
+
+        [Test]
+        public void ScheduleCullForCamera_SkipsPreviewWithoutChangingGpuDrivenSystemLifetime()
+        {
+            var preview = new PreviewRenderUtility();
+            bool hadInstance = VividGPUDrivenSystem.HasInstance;
+            try
+            {
+                Assert.That(preview.camera.cameraType, Is.EqualTo(CameraType.Preview));
+                Assert.That(
+                    VividGPUDrivenSystem.ScheduleCullForCamera(preview.camera, frameIndex: 3),
+                    Is.False);
+                Assert.That(VividGPUDrivenSystem.HasInstance, Is.EqualTo(hadInstance));
+            }
+            finally
+            {
+                preview.Cleanup();
+            }
+        }
+
+        [Test]
         public void FrameContextClear_KeepsGPUDrivenPreRenderCallbackRegistered_InEditor()
         {
             VividGPUDrivenSystem.Initialize();
@@ -427,6 +599,29 @@ namespace VividRP.Editor.Tests
                 && multicastDelegate.GetInvocationList().Any(
                     callback => callback.Method.DeclaringType == declaringType
                         && callback.Method.Name == methodName);
+        }
+
+        private static string ReadRuntimeSource(params string[] relativeSegments)
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VividRenderPipelineAsset).Assembly);
+            Assert.That(package, Is.Not.Null);
+
+            string path = package.resolvedPath;
+            for (int index = 0; index < relativeSegments.Length; index++)
+                path = Path.Combine(path, relativeSegments[index]);
+
+            Assert.That(File.Exists(path), Is.True, path);
+            return File.ReadAllText(path);
+        }
+
+        private static string SliceSource(string source, string startMarker, string endMarker)
+        {
+            int start = source.IndexOf(startMarker, StringComparison.Ordinal);
+            Assert.That(start, Is.GreaterThanOrEqualTo(0), startMarker);
+            int end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+            Assert.That(end, Is.GreaterThan(start), endMarker);
+            return source.Substring(start, end - start);
         }
     }
 }

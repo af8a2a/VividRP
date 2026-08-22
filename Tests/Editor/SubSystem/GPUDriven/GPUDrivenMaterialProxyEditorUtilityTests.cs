@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using NUnit.Framework;
 using UnityEditor;
@@ -142,6 +143,67 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoSync_SynchronizesIndexedProxyAndSkipsUnchangedMaterial()
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            if (shader == null)
+            {
+                Assert.Ignore("VividRP/Material/StandardLit shader is not available.");
+            }
+
+            string materialPath = TempFolder + "/AutoSyncSource.mat";
+            string proxyPath = TempFolder + "/AutoSyncProxy.asset";
+            var sourceMaterial = new Material(shader);
+            AssetDatabase.CreateAsset(sourceMaterial, materialPath);
+            sourceMaterial = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            materialProxy.SourceMaterial = sourceMaterial;
+            AssetDatabase.CreateAsset(materialProxy, proxyPath);
+            materialProxy = AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(proxyPath);
+
+            GPUDrivenMaterialProxyAutoSyncService.ResetForTests();
+            try
+            {
+                GPUDrivenMaterialProxyAutoSyncService.IndexProxyForTests(materialProxy);
+                sourceMaterial.SetColor("_BaseColor", new Color(0.15f, 0.35f, 0.55f, 1.0f));
+                sourceMaterial.SetFloat("_Metallic", 0.65f);
+                sourceMaterial.SetFloat("_Smoothness", 0.2f);
+                sourceMaterial.SetFloat("_MetallicRemapMin", 0.1f);
+                sourceMaterial.SetFloat("_MetallicRemapMax", 0.8f);
+                sourceMaterial.SetFloat("_SmoothnessRemapMin", 0.2f);
+                sourceMaterial.SetFloat("_SmoothnessRemapMax", 0.9f);
+                sourceMaterial.SetFloat("_AORemapMin", 0.3f);
+                sourceMaterial.SetFloat("_AORemapMax", 0.7f);
+
+                int changedProxyCount = GPUDrivenMaterialProxyAutoSyncService.SynchronizeMaterialNowForTests(
+                    sourceMaterial,
+                    GPUDrivenMaterialProxyTextureMode.Bindless);
+                uint synchronizedRevision = materialProxy.Revision;
+
+                Assert.That(changedProxyCount, Is.EqualTo(1));
+                Assert.That(materialProxy.BaseColor.r, Is.EqualTo(0.15f).Within(0.0001f));
+                Assert.That(materialProxy.Metallic, Is.EqualTo(0.65f).Within(0.0001f));
+                Assert.That(materialProxy.Roughness, Is.EqualTo(0.8f).Within(0.0001f));
+                Assert.That(materialProxy.MetallicRemap, Is.EqualTo(new Vector2(0.1f, 0.8f)));
+                Assert.That(materialProxy.SmoothnessRemap, Is.EqualTo(new Vector2(0.2f, 0.9f)));
+                Assert.That(materialProxy.AmbientOcclusionRemap, Is.EqualTo(new Vector2(0.3f, 0.7f)));
+                Assert.That(EditorUtility.IsDirty(materialProxy), Is.True);
+
+                changedProxyCount = GPUDrivenMaterialProxyAutoSyncService.SynchronizeMaterialNowForTests(
+                    sourceMaterial,
+                    GPUDrivenMaterialProxyTextureMode.Bindless);
+
+                Assert.That(changedProxyCount, Is.Zero);
+                Assert.That(materialProxy.Revision, Is.EqualTo(synchronizedRevision));
+            }
+            finally
+            {
+                GPUDrivenMaterialProxyAutoSyncService.ResetForTests(requestIndexRebuild: true);
+            }
+        }
+
+        [Test]
         public void CreateOrBindMaterialProxies_CreatesAssetNextToPersistentMesh_WhenMaterialIsNonPersistent()
         {
             Shader shader = Shader.Find("Hidden/InternalErrorShader");
@@ -175,9 +237,54 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateOrBindMaterialProxies_RebindsExistingProxyWhenSourceMaterialChanges()
+        {
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            string meshPath = TempFolder + "/ReboundMesh.asset";
+            Mesh mesh = CreateSingleSubMeshMesh("ReboundMesh");
+            AssetDatabase.CreateAsset(mesh, meshPath);
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+
+            var firstMaterial = new Material(shader);
+            var secondMaterial = new Material(shader);
+            GameObject gameObject = CreateMeshletRendererObject(
+                "ReboundMaterialRenderer",
+                mesh,
+                firstMaterial,
+                out MeshletRenderer meshletRenderer);
+
+            try
+            {
+                GPUDrivenMaterialProxyBindingResult firstResult =
+                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+                GPUDrivenMaterialProxy materialProxy = meshletRenderer.GetMaterialProxy(0);
+                Assert.That(firstResult.Success, Is.True, firstResult.ErrorMessage);
+                Assert.That(materialProxy, Is.Not.Null);
+                Assert.That(materialProxy.SourceMaterial, Is.SameAs(firstMaterial));
+
+                meshletRenderer.SetSourceMaterials(new[] { secondMaterial });
+                GPUDrivenMaterialProxyBindingResult secondResult =
+                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+
+                Assert.That(secondResult.Success, Is.True, secondResult.ErrorMessage);
+                Assert.That(meshletRenderer.GetMaterialProxy(0), Is.SameAs(materialProxy));
+                Assert.That(materialProxy.SourceMaterial, Is.SameAs(secondMaterial));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(firstMaterial);
+                Object.DestroyImmediate(secondMaterial);
+            }
+        }
+
+        [Test]
         public void BuildOrRefreshStreamedVirtualTexture_CreatesGpuSurfaceAssetAndBindsProxy()
         {
             string texturePath = TempFolder + "/SurfaceTexture.asset";
+            string sourceMaterialPath = TempFolder + "/SurfaceSource.mat";
             string proxyPath = TempFolder + "/SurfaceProxy.asset";
             var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true)
             {
@@ -194,8 +301,14 @@ namespace VividRP.Editor.Tests
             texture.Apply(true, false);
             AssetDatabase.CreateAsset(texture, texturePath);
 
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+            var sourceMaterial = new Material(shader);
+            AssetDatabase.CreateAsset(sourceMaterial, sourceMaterialPath);
+
             var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
             materialProxy.BaseMap = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+            materialProxy.SourceMaterial = AssetDatabase.LoadAssetAtPath<Material>(sourceMaterialPath);
             AssetDatabase.CreateAsset(materialProxy, proxyPath);
 
             bool success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
@@ -207,18 +320,128 @@ namespace VividRP.Editor.Tests
             Assert.That(success, Is.True, errorMessage);
             Assert.That(wasCreated, Is.True);
             Assert.That(assetPath, Is.EqualTo(TempFolder + "/SurfaceProxy_Surface.vividvt"));
+            Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.VirtualTexture));
             Assert.That(materialProxy.StreamedVirtualTexture, Is.Not.Null);
+            Assert.That(materialProxy.BaseMap, Is.Null);
+            Assert.That(materialProxy.BumpMap, Is.Null);
+            Assert.That(materialProxy.MaskMap, Is.Null);
             Assert.That(materialProxy.StreamedVirtualTexture.BuildProfile, Is.EqualTo(VividVirtualTextureBuildProfile.GPUDrivenSurface));
             Assert.That(materialProxy.StreamedVirtualTexture.AddressMode, Is.EqualTo(VividVirtualTextureAddressMode.Repeat));
             Assert.That(materialProxy.StreamedVirtualTexture.StorageProfile, Is.EqualTo(VividVirtualTextureStorageProfile.DesktopBCn));
-            Assert.That(
-                ((VividVirtualTextureAssetImporter)AssetImporter.GetAtPath(assetPath)).StreamCompression,
-                Is.EqualTo(VividVirtualTextureStreamCompression.Zstd));
+            var importer = (VividVirtualTextureAssetImporter) AssetImporter.GetAtPath(assetPath);
+            Assert.That(importer.StreamCompression, Is.EqualTo(VividVirtualTextureStreamCompression.Zstd));
+            Assert.That(importer.SourceTexture, Is.SameAs(texture));
             Assert.That(File.ReadAllText(assetPath).Trim(), Is.EqualTo(VividVirtualTextureAssetImporter.Version3Marker));
             Assert.That(materialProxy.StreamedVirtualTexture.ContentLayerMask, Is.EqualTo(1));
             Assert.That(materialProxy.StreamedVirtualTexture.BuiltData.HasStreamData, Is.True);
             Assert.That(materialProxy.StreamedVirtualTexture.BuiltData.RuntimeStreamDataPath, Is.Not.Empty);
             Assert.That(File.Exists(materialProxy.StreamedVirtualTexture.BuiltData.StreamDataPath), Is.True);
+
+            materialProxy.SourceMaterial = null;
+            VividVirtualTextureAsset initialStreamedAsset = materialProxy.StreamedVirtualTexture;
+            string streamDataPath = initialStreamedAsset.BuiltData.StreamDataPath;
+            var sentinelWriteTime = new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(streamDataPath, sentinelWriteTime);
+
+            success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out _,
+                out wasCreated,
+                out errorMessage,
+                skipIfUpToDate: true);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.False);
+            Assert.That(materialProxy.StreamedVirtualTexture, Is.SameAs(initialStreamedAsset));
+            Assert.That(materialProxy.BaseMap, Is.Null);
+            Assert.That(materialProxy.BumpMap, Is.Null);
+            Assert.That(materialProxy.MaskMap, Is.Null);
+            Assert.That(File.GetLastWriteTimeUtc(streamDataPath), Is.EqualTo(sentinelWriteTime));
+
+            File.Delete(streamDataPath);
+            success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out _,
+                out wasCreated,
+                out errorMessage,
+                skipIfUpToDate: true);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.False);
+            Assert.That(materialProxy.StreamedVirtualTexture, Is.SameAs(initialStreamedAsset));
+            Assert.That(materialProxy.BaseMap, Is.Null);
+            Assert.That(materialProxy.BumpMap, Is.Null);
+            Assert.That(materialProxy.MaskMap, Is.Null);
+            Assert.That(File.Exists(streamDataPath), Is.True);
+
+            File.SetLastWriteTimeUtc(streamDataPath, sentinelWriteTime);
+            success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out _,
+                out wasCreated,
+                out errorMessage);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.False);
+            Assert.That(materialProxy.StreamedVirtualTexture, Is.SameAs(initialStreamedAsset));
+            Assert.That(materialProxy.BaseMap, Is.Null);
+            Assert.That(materialProxy.BumpMap, Is.Null);
+            Assert.That(materialProxy.MaskMap, Is.Null);
+            Assert.That(File.GetLastWriteTimeUtc(streamDataPath), Is.Not.EqualTo(sentinelWriteTime));
+        }
+
+        [Test]
+        public void BuildOrRefreshStreamedVirtualTexture_SourceMaterialWithoutTexturesClearsStaleBinding()
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            if (shader == null)
+            {
+                Assert.Ignore("VividRP/Material/StandardLit shader is not available.");
+            }
+
+            string texturePath = TempFolder + "/RemovedSourceTexture.asset";
+            string materialPath = TempFolder + "/RemovedSourceMaterial.mat";
+            string proxyPath = TempFolder + "/RemovedSourceProxy.asset";
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true);
+            texture.Apply(true, false);
+            AssetDatabase.CreateAsset(texture, texturePath);
+            texture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+
+            var sourceMaterial = new Material(shader);
+            sourceMaterial.SetTexture("_BaseMap", texture);
+            AssetDatabase.CreateAsset(sourceMaterial, materialPath);
+            sourceMaterial = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            materialProxy.SourceMaterial = sourceMaterial;
+            AssetDatabase.CreateAsset(materialProxy, proxyPath);
+
+            bool success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out _,
+                out _,
+                out string errorMessage);
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(materialProxy.StreamedVirtualTexture, Is.Not.Null);
+
+            sourceMaterial.SetTexture("_BaseMap", null);
+            EditorUtility.SetDirty(sourceMaterial);
+            AssetDatabase.SaveAssetIfDirty(sourceMaterial);
+
+            success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out string assetPath,
+                out bool wasCreated,
+                out errorMessage);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.False);
+            Assert.That(assetPath, Is.Empty);
+            Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.VirtualTexture));
+            Assert.That(materialProxy.StreamedVirtualTexture, Is.Null);
+            Assert.That(materialProxy.BaseMap, Is.Null);
+            Assert.That(materialProxy.BumpMap, Is.Null);
+            Assert.That(materialProxy.MaskMap, Is.Null);
         }
 
         [Test]

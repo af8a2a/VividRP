@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime
 {
@@ -25,6 +26,12 @@ namespace VividRP.Runtime
         private uint m_RenderingLayerMask = 1u;
 
         private VividTerrainData m_TrackedData;
+
+        [System.NonSerialized]
+        private VividPrimitiveHandle m_PrimitiveHandle = VividPrimitiveHandle.Invalid;
+
+        [System.NonSerialized]
+        private int m_TrackedGameObjectLayer = -1;
 
         public VividTerrainData Data => m_Data;
 
@@ -63,7 +70,20 @@ namespace VividRP.Runtime
         internal void NotifyTerrainDataSynchronized()
         {
             m_TrackedData = m_Data;
+            m_TrackedGameObjectLayer = gameObject.layer;
             transform.hasChanged = false;
+        }
+
+        internal VividPrimitiveHandle primitiveHandle => m_PrimitiveHandle;
+
+        internal void NotifyPrimitiveHandleAssigned(VividPrimitiveHandle handle)
+        {
+            m_PrimitiveHandle = handle;
+        }
+
+        internal void InvalidatePrimitiveHandle()
+        {
+            m_PrimitiveHandle = VividPrimitiveHandle.Invalid;
         }
 
         private void OnEnable()
@@ -81,6 +101,12 @@ namespace VividRP.Runtime
             if (m_TrackedData != m_Data)
             {
                 SyncDatabaseRegistration();
+                return;
+            }
+
+            if (m_TrackedGameObjectLayer != gameObject.layer)
+            {
+                VividMeshletRendererDatabase.instance.UpdateTerrainRenderData(this);
                 return;
             }
 

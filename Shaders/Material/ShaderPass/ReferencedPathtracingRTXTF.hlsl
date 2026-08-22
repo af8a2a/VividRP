@@ -128,7 +128,23 @@ float2 ReferencedPathtracingSampleMetallicSmoothnessRTXTF(
     float metallic = saturate(_Metallic);
     float smoothness = saturate(_Smoothness);
 
-#if defined(_METALLICSPECGLOSSMAP)
+#if defined(_RMOMAP)
+    float3 rmoSample =
+        ReferencedPathtracingSampleRTXTFTexture2DLevel(
+            samplerState,
+            _RMOMap,
+            sampler_RMOMap,
+            uv,
+            textureLod).rgb;
+    metallic = lerp(
+        _MetallicRemapMin,
+        _MetallicRemapMax,
+        saturate(rmoSample.g));
+    smoothness = lerp(
+        _SmoothnessRemapMin,
+        _SmoothnessRemapMax,
+        saturate(1.0 - rmoSample.r));
+#elif defined(_METALLICSPECGLOSSMAP)
     float4 metallicGlossSample =
         ReferencedPathtracingSampleRTXTFTexture2DLevel(
             samplerState,

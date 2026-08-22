@@ -57,6 +57,18 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class DrawObjectPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class ExperimentalClosureBufferPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class ExperimentalClosureClassificationPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class ExperimentalClosureDeferredLightingPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class ExperimentalVisibilityBufferPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class ExposureDebugPass : RenderPassNodeData { }
 
     [Serializable]

@@ -44,6 +44,18 @@ namespace VividRP.Editor.Tests
             VirtualTextureSystem.Deinitialize();
         }
 
+        [TestCase(4, 4)]
+        [TestCase(8, 8)]
+        [TestCase(16, 8)]
+        public void PhysicalAnisotropy_IsLimitedByBorderAndMaximum(
+            int borderSize,
+            int expectedAnisotropy)
+        {
+            Assert.That(
+                VTPhysicalPool.ResolvePhysicalAnisotropy(borderSize),
+                Is.EqualTo(expectedAnisotropy));
+        }
+
         [Test]
         public void RegisterAddressSpace_SharesPhysicalPool_ForMatchingPoolDescriptor()
         {
@@ -1152,6 +1164,10 @@ namespace VividRP.Editor.Tests
             Assert.That(physicalAtlas.width, Is.EqualTo(layout.Width));
             Assert.That(physicalAtlas.height, Is.EqualTo(layout.Height));
             Assert.That(physicalAtlas.isReadable, Is.False);
+            Assert.That(physicalAtlas.filterMode, Is.EqualTo(FilterMode.Trilinear));
+            Assert.That(
+                physicalAtlas.anisoLevel,
+                Is.EqualTo(VTPhysicalPool.ResolvePhysicalAnisotropy(desc.BorderSize)));
         }
 
         private static bool TryAllocatePhysicalPage(

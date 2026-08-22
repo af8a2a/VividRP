@@ -14,12 +14,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         Low = 0,
         Medium = 1,
         High = 2,
+        EqualQuality = 3,
     }
 
     internal readonly struct GPUDrivenVirtualTextureDescriptorProfile :
         IEquatable<GPUDrivenVirtualTextureDescriptorProfile>
     {
-        internal GPUDrivenVirtualTextureDescriptorProfile(int cachePageCount)
+        internal GPUDrivenVirtualTextureDescriptorProfile(
+            int cachePageCount,
+            int borderSize = 4,
+            bool adaptiveMipBiasEnabled = true)
         {
             if (cachePageCount <= 0
                 || cachePageCount > VirtualTexturePageTableEntry.MaxPhysicalPageCount)
@@ -28,13 +32,21 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
 
             CachePageCount = cachePageCount;
+            BorderSize = Mathf.Max(0, borderSize);
+            AdaptiveMipBiasEnabled = adaptiveMipBiasEnabled;
         }
 
         internal int CachePageCount { get; }
 
+        internal int BorderSize { get; }
+
+        internal bool AdaptiveMipBiasEnabled { get; }
+
         public bool Equals(GPUDrivenVirtualTextureDescriptorProfile other)
         {
-            return CachePageCount == other.CachePageCount;
+            return CachePageCount == other.CachePageCount
+                   && BorderSize == other.BorderSize
+                   && AdaptiveMipBiasEnabled == other.AdaptiveMipBiasEnabled;
         }
 
         public override bool Equals(object obj)
@@ -44,7 +56,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         public override int GetHashCode()
         {
-            return CachePageCount;
+            return HashCode.Combine(CachePageCount, BorderSize, AdaptiveMipBiasEnabled);
         }
     }
 
@@ -86,7 +98,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         IGPUDrivenTerrainRuntimeVirtualTextureBackend
     {
         internal const int PageSize = 128;
-        internal const int BorderSize = 4;
+        internal const int DefaultBorderSize = 4;
+        internal const int HighQualityBorderSize = 8;
         internal const int AtlasPageCount = 256;
         internal const int MaxAllocationPageCount = 64;
         internal const int VirtualPageCapacity = AtlasPageCount * AtlasPageCount;
@@ -95,6 +108,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private const int LowCachePageCount = 256;
         private const int MediumCachePageCount = 512;
         private const int HighCachePageCount = 1024;
+        private const int EqualQualityCachePageCount = 2048;
         private const int MaxUploadsPerFrame = 16;
         private const int FeedbackCapacity = 65536;
         private const int NeighborPrefetchCount = 1;
@@ -360,8 +374,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (!DescriptorProfile.Equals(descriptorProfile))
             {
                 Debug.LogWarning(
-                    $"[VividRP] GPUDriven virtual texture physical pool was reduced from "
-                    + $"{descriptorProfile.CachePageCount} to {DescriptorProfile.CachePageCount} pages "
+                    $"[VividRP] GPUDriven virtual texture physical pool profile was reduced from "
+                    + $"{descriptorProfile.CachePageCount} pages/{descriptorProfile.BorderSize}px border to "
+                    + $"{DescriptorProfile.CachePageCount} pages/{DescriptorProfile.BorderSize}px border "
                     + $"because the active device supports at most {capabilities.MaxTextureSize}x"
                     + $"{capabilities.MaxTextureSize} 2D textures.");
             }
@@ -397,6 +412,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
                 VirtualTextureSpaceId = allocation.SpaceId;
                 VirtualTextureAllocationId = allocation.AllocationId;
+                VirtualTextureSystem.SetAdaptiveMipBiasEnabled(
+                    VirtualTextureSpaceId,
+                    DescriptorProfile.AdaptiveMipBiasEnabled);
                 UnavailableReason = string.Empty;
             }
             catch (Exception exception)
@@ -874,6 +892,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
         {
+            return CreateSurfaceBinding(textures, allowRuntimeTextureProducer: false);
+        }
+
+        private VividSurfaceBindingData CreateSurfaceBinding(
+            in GPUDrivenSurfaceTextureSet textures,
+            bool allowRuntimeTextureProducer)
+        {
             ThrowIfDisposed();
             if (!IsAvailable || m_Producer == null)
                 return CreateEmptyBinding();
@@ -890,9 +915,19 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             var key = new TextureSetKey(streamedAsset, baseColor, normal, mask, addressMode, textures.MaskMode);
             if (m_Bindings.TryGetValue(key, out BindingEntry existingEntry))
             {
-                TouchBindingEntry(ref existingEntry);
-                m_Bindings[key] = existingEntry;
-                return existingEntry.Binding;
+                if (allowRuntimeTextureProducer
+                    && streamedAsset == null
+                    && !existingEntry.HasAllocation
+                    && (baseColor != null || normal != null || mask != null))
+                {
+                    m_Bindings.Remove(key);
+                }
+                else
+                {
+                    TouchBindingEntry(ref existingEntry);
+                    m_Bindings[key] = existingEntry;
+                    return existingEntry.Binding;
+                }
             }
 
             if (streamedAsset == null && baseColor == null && normal == null && mask == null)
@@ -906,7 +941,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return emptyEntry.Binding;
             }
 
-            if (streamedAsset == null && (baseColor != null || normal != null || mask != null))
+            if (streamedAsset == null
+                && !allowRuntimeTextureProducer
+                && (baseColor != null || normal != null || mask != null))
             {
                 WarnLegacyTextureFallback(baseColor, normal, mask);
                 var fallbackEntry = new BindingEntry
@@ -1131,6 +1168,72 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return true;
         }
 
+        internal bool TryAcquireExternalSurfaceBinding(
+            in GPUDrivenSurfaceTextureSet textures,
+            out ExternalSurfaceBindingLease lease,
+            out string reason)
+        {
+            lease = null;
+            if (!IsAvailable)
+            {
+                reason = UnavailableReason;
+                return false;
+            }
+
+            VividVirtualTextureAsset streamedAsset = ResolveStreamedAsset(textures.StreamedVirtualTexture);
+            Texture2D baseColor = streamedAsset == null ? ResolveTexture2D(textures.BaseColor) : null;
+            Texture2D normal = streamedAsset == null ? ResolveTexture2D(textures.Normal) : null;
+            Texture2D mask = streamedAsset == null ? ResolveTexture2D(textures.Mask) : null;
+            if (streamedAsset == null && baseColor == null && normal == null && mask == null)
+            {
+                reason = "The external VT texture set does not contain a supported Texture2D.";
+                return false;
+            }
+
+            GPUDrivenSurfaceAddressMode addressMode = streamedAsset != null
+                ? streamedAsset.AddressMode == VividVirtualTextureAddressMode.Clamp
+                    ? GPUDrivenSurfaceAddressMode.Clamp
+                    : GPUDrivenSurfaceAddressMode.Repeat
+                : textures.AddressMode;
+            var key = new TextureSetKey(
+                streamedAsset,
+                baseColor,
+                normal,
+                mask,
+                addressMode,
+                textures.MaskMode);
+            if (streamedAsset == null && !VTRuntimeBlockCompressor.IsAvailable(out reason))
+                return false;
+
+            VividSurfaceBindingData binding = CreateSurfaceBinding(
+                textures,
+                allowRuntimeTextureProducer: true);
+            bool hasEntry = m_Bindings.TryGetValue(key, out BindingEntry entry);
+            if (!hasEntry
+                || !entry.HasAllocation
+                || binding.Flags == VividSurfaceBindingFlags.None)
+            {
+                reason = "The external VT texture set could not allocate a valid surface binding.";
+                if (hasEntry
+                    && !m_SurfaceBindingUpdateActive
+                    && !m_ExternalBindingRefCounts.ContainsKey(key)
+                    && entry.LastTouchedUpdate != m_SurfaceBindingUpdate)
+                {
+                    m_ReleaseEntries.Clear();
+                    m_ReleaseEntries.Add(key);
+                    ReleaseBindingEntries(m_ReleaseEntries);
+                    m_ReleaseEntries.Clear();
+                }
+                return false;
+            }
+
+            m_ExternalBindingRefCounts.TryGetValue(key, out int refCount);
+            m_ExternalBindingRefCounts[key] = refCount + 1;
+            lease = new ExternalSurfaceBindingLease(this, key, entry);
+            reason = string.Empty;
+            return true;
+        }
+
         private void ReleaseExternalSurfaceBinding(in TextureSetKey key)
         {
             if (m_IsDisposed
@@ -1228,6 +1331,17 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 out validationMessage);
         }
 
+        internal static bool IsCompatibleStreamedAsset(
+            VividVirtualTextureAsset asset,
+            GPUDrivenVirtualTexturePhysicalPoolQuality quality,
+            out string validationMessage)
+        {
+            return IsCompatibleStreamedAsset(
+                asset,
+                CreateSpaceDesc(ResolveDescriptorProfile(quality)).StackDesc,
+                out validationMessage);
+        }
+
         public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
         {
             return IsCompatibleStreamedAsset(asset, VirtualTextureSpaceDesc.StackDesc, out _);
@@ -1253,7 +1367,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             bool valid = builtData.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
                          && builtData.PageSize == PageSize
-                         && builtData.BorderSize == BorderSize
+                         && builtData.BorderSize == expectedStackDesc.BorderSize
                          && builtData.VirtualPageCountX > 0
                          && builtData.VirtualPageCountY > 0
                          && builtData.VirtualPageCountX <= MaxAllocationPageCount
@@ -1277,7 +1391,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 + $"page={builtData.PageSize}, border={builtData.BorderSize}, "
                 + $"pages={builtData.VirtualPageCountX}x{builtData.VirtualPageCountY}, "
                 + $"mips={builtData.MipCount}, layers={builtData.LayerCount}. "
-                + "Required: GPUDrivenSurface, DesktopBCn, 128 texel pages, 4 texel borders, "
+                + $"Required: GPUDrivenSurface, DesktopBCn, 128 texel pages, "
+                + $"{expectedStackDesc.BorderSize} texel borders, "
                 + "power-of-two dimensions, automatic full mip chain, and the GPUDriven four-layer stack.";
             return false;
         }
@@ -1285,13 +1400,32 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal static GPUDrivenVirtualTextureDescriptorProfile ResolveDescriptorProfile(
             GPUDrivenVirtualTexturePhysicalPoolQuality quality)
         {
-            int cachePageCount = quality switch
+            return quality switch
             {
-                GPUDrivenVirtualTexturePhysicalPoolQuality.Low => LowCachePageCount,
-                GPUDrivenVirtualTexturePhysicalPoolQuality.High => HighCachePageCount,
-                _ => MediumCachePageCount,
+                GPUDrivenVirtualTexturePhysicalPoolQuality.Low =>
+                    new GPUDrivenVirtualTextureDescriptorProfile(
+                        LowCachePageCount,
+                        DefaultBorderSize),
+                GPUDrivenVirtualTexturePhysicalPoolQuality.High =>
+                    new GPUDrivenVirtualTextureDescriptorProfile(
+                        HighCachePageCount,
+                        HighQualityBorderSize),
+                GPUDrivenVirtualTexturePhysicalPoolQuality.EqualQuality =>
+                    new GPUDrivenVirtualTextureDescriptorProfile(
+                        EqualQualityCachePageCount,
+                        HighQualityBorderSize,
+                        adaptiveMipBiasEnabled: false),
+                _ => new GPUDrivenVirtualTextureDescriptorProfile(
+                    MediumCachePageCount,
+                    DefaultBorderSize),
             };
-            return new GPUDrivenVirtualTextureDescriptorProfile(cachePageCount);
+        }
+
+        internal static GPUDrivenVirtualTexturePhysicalPoolQuality ResolveActivePhysicalPoolQuality()
+        {
+            return VividRenderPipelineAsset.GetActiveAsset()
+                       ?.GPUDrivenVirtualTexturePhysicalPoolQuality
+                   ?? GPUDrivenVirtualTexturePhysicalPoolQuality.Medium;
         }
 
         internal static GPUDrivenVirtualTextureDescriptorProfile ResolveSupportedDescriptorProfile(
@@ -1301,27 +1435,42 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (maxTextureSize <= 0)
                 return requestedProfile;
 
-            int physicalPageSize = PageSize + BorderSize * 2;
-            int maxTilesPerDimension = maxTextureSize / physicalPageSize;
-            long maxPageCount = (long)maxTilesPerDimension * maxTilesPerDimension;
-            if (requestedProfile.CachePageCount <= maxPageCount)
+            if (DoesDescriptorProfileFit(requestedProfile, maxTextureSize))
                 return requestedProfile;
 
-            if (MediumCachePageCount <= maxPageCount)
-            {
-                return ResolveDescriptorProfile(
-                    GPUDrivenVirtualTexturePhysicalPoolQuality.Medium);
-            }
+            // Equal Quality is an explicit guarantee: never silently enable adaptive
+            // degradation or reduce its pool. Normal construction reports unsupported
+            // atlas dimensions on devices that cannot satisfy it.
+            if (!requestedProfile.AdaptiveMipBiasEnabled)
+                return requestedProfile;
 
-            if (LowCachePageCount <= maxPageCount)
-            {
-                return ResolveDescriptorProfile(
-                    GPUDrivenVirtualTexturePhysicalPoolQuality.Low);
-            }
+            var medium = new GPUDrivenVirtualTextureDescriptorProfile(
+                MediumCachePageCount,
+                requestedProfile.BorderSize,
+                requestedProfile.AdaptiveMipBiasEnabled);
+            if (DoesDescriptorProfileFit(medium, maxTextureSize))
+                return medium;
+
+            var low = new GPUDrivenVirtualTextureDescriptorProfile(
+                LowCachePageCount,
+                requestedProfile.BorderSize,
+                requestedProfile.AdaptiveMipBiasEnabled);
+            if (DoesDescriptorProfileFit(low, maxTextureSize))
+                return low;
 
             // There is no supported quality below Low. Keep the requested descriptor so
             // normal backend construction reports the precise atlas capability failure.
             return requestedProfile;
+        }
+
+        private static bool DoesDescriptorProfileFit(
+            in GPUDrivenVirtualTextureDescriptorProfile profile,
+            int maxTextureSize)
+        {
+            int physicalPageSize = PageSize + profile.BorderSize * 2;
+            int maxTilesPerDimension = maxTextureSize / physicalPageSize;
+            long maxPageCount = (long)maxTilesPerDimension * maxTilesPerDimension;
+            return profile.CachePageCount <= maxPageCount;
         }
 
         private static VirtualTextureSpaceDesc CreateSpaceDesc(
@@ -1360,7 +1509,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             };
             var stackDesc = new VTStackDesc(
                 PageSize,
-                BorderSize,
+                descriptorProfile.BorderSize,
                 descriptorProfile.CachePageCount,
                 layers,
                 MaxUploadsPerFrame,

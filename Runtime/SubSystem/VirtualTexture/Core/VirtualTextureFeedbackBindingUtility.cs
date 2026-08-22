@@ -86,7 +86,9 @@ namespace VividRP.Runtime
                 binding.HasFeedback ? binding.FeedbackResidentHashCapacity : 0);
             cmd.SetGlobalFloat(
                 VirtualTextureShaderIDs._VTAdaptiveMipBias,
-                Mathf.Max(0f, adaptiveMipBias));
+                VirtualTextureSystem.ResolveAdaptiveMipBias(
+                    binding.SpaceId,
+                    adaptiveMipBias));
             cmd.SetGlobalInt(VirtualTextureShaderIDs._VTDebugMode, (int)debugMode);
         }
 

@@ -1,8 +1,10 @@
 using System.Reflection;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Editor.GPUDriven;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using Object = UnityEngine.Object;
 
@@ -12,6 +14,151 @@ namespace VividRP.Editor.Tests
     {
         private static readonly MethodInfo s_OnValidateMethod =
             typeof(GPUDrivenMaterialProxy).GetMethod("OnValidate", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        [Test]
+        public void TextureMode_DefaultsToLegacyCompatibleBindlessValue()
+        {
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+
+            try
+            {
+                Assert.That((int) GPUDrivenMaterialProxyTextureMode.Bindless, Is.Zero);
+                Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.Bindless));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+            }
+        }
+
+        [Test]
+        public void StreamedVirtualTexture_SwitchesToVirtualTextureAndClearsRawMapsButKeepsCommonData()
+        {
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var baseMap = new Texture2D(1, 1);
+            var bumpMap = new Texture2D(1, 1);
+            var maskMap = new Texture2D(1, 1);
+            var streamedVirtualTexture = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+
+            try
+            {
+                var baseColor = new Color(0.8f, 0.6f, 0.4f, 0.5f);
+                var textureTilingOffset = new Vector4(2.0f, 3.0f, 0.25f, 0.5f);
+                var emissionColor = new Color(0.1f, 0.2f, 0.3f, 1.0f);
+                materialProxy.BaseMap = baseMap;
+                materialProxy.BumpMap = bumpMap;
+                materialProxy.MaskMap = maskMap;
+                materialProxy.BaseColor = baseColor;
+                materialProxy.TextureTilingOffset = textureTilingOffset;
+                materialProxy.BumpScale = 0.4f;
+                materialProxy.MaskMode = GPUDrivenMaterialMaskMode.Roughness;
+                materialProxy.Metallic = 0.75f;
+                materialProxy.Roughness = 0.35f;
+                materialProxy.MetallicRemap = new Vector2(0.1f, 0.8f);
+                materialProxy.SmoothnessRemap = new Vector2(0.2f, 0.9f);
+                materialProxy.AmbientOcclusionRemap = new Vector2(0.3f, 0.7f);
+                materialProxy.EmissionColor = emissionColor;
+                materialProxy.AlphaClip = true;
+                materialProxy.Cutoff = 0.33f;
+                materialProxy.CullMode = CullMode.Off;
+                materialProxy.DisableLighting = true;
+
+                materialProxy.StreamedVirtualTexture = streamedVirtualTexture;
+
+                Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.VirtualTexture));
+                Assert.That(materialProxy.StreamedVirtualTexture, Is.SameAs(streamedVirtualTexture));
+                Assert.That(materialProxy.BaseMap, Is.Null);
+                Assert.That(materialProxy.BumpMap, Is.Null);
+                Assert.That(materialProxy.MaskMap, Is.Null);
+                Assert.That(materialProxy.BaseColor, Is.EqualTo(baseColor));
+                Assert.That(materialProxy.TextureTilingOffset, Is.EqualTo(textureTilingOffset));
+                Assert.That(materialProxy.BumpScale, Is.EqualTo(0.4f));
+                Assert.That(materialProxy.MaskMode, Is.EqualTo(GPUDrivenMaterialMaskMode.Roughness));
+                Assert.That(materialProxy.Metallic, Is.EqualTo(0.75f));
+                Assert.That(materialProxy.Roughness, Is.EqualTo(0.35f));
+                Assert.That(materialProxy.MetallicRemap, Is.EqualTo(new Vector2(0.1f, 0.8f)));
+                Assert.That(materialProxy.SmoothnessRemap, Is.EqualTo(new Vector2(0.2f, 0.9f)));
+                Assert.That(materialProxy.AmbientOcclusionRemap, Is.EqualTo(new Vector2(0.3f, 0.7f)));
+                Assert.That(materialProxy.EmissionColor, Is.EqualTo(emissionColor));
+                Assert.That(materialProxy.AlphaClip, Is.True);
+                Assert.That(materialProxy.Cutoff, Is.EqualTo(0.33f));
+                Assert.That(materialProxy.CullMode, Is.EqualTo(CullMode.Off));
+                Assert.That(materialProxy.DisableLighting, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(baseMap);
+                Object.DestroyImmediate(bumpMap);
+                Object.DestroyImmediate(maskMap);
+                Object.DestroyImmediate(streamedVirtualTexture);
+            }
+        }
+
+        [Test]
+        public void RawMap_SwitchesToBindlessAndClearsStreamedVirtualTexture()
+        {
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var baseMap = new Texture2D(1, 1);
+            var streamedVirtualTexture = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+
+            try
+            {
+                materialProxy.StreamedVirtualTexture = streamedVirtualTexture;
+
+                materialProxy.BaseMap = baseMap;
+
+                Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.Bindless));
+                Assert.That(materialProxy.BaseMap, Is.SameAs(baseMap));
+                Assert.That(materialProxy.StreamedVirtualTexture, Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(baseMap);
+                Object.DestroyImmediate(streamedVirtualTexture);
+            }
+        }
+
+        [Test]
+        public void OnValidate_PreservesLegacyDualTexturePayload()
+        {
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var baseMap = new Texture2D(1, 1);
+            var bumpMap = new Texture2D(1, 1);
+            var maskMap = new Texture2D(1, 1);
+            var streamedVirtualTexture = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+
+            try
+            {
+                var serializedProxy = new SerializedObject(materialProxy);
+                serializedProxy.FindProperty("m_TextureMode").enumValueIndex =
+                    (int) GPUDrivenMaterialProxyTextureMode.Bindless;
+                serializedProxy.FindProperty("m_BaseMap").objectReferenceValue = baseMap;
+                serializedProxy.FindProperty("m_BumpMap").objectReferenceValue = bumpMap;
+                serializedProxy.FindProperty("m_MaskMap").objectReferenceValue = maskMap;
+                serializedProxy.FindProperty("m_StreamedVirtualTexture").objectReferenceValue =
+                    streamedVirtualTexture;
+                serializedProxy.ApplyModifiedPropertiesWithoutUndo();
+
+                Assert.That(s_OnValidateMethod, Is.Not.Null);
+                s_OnValidateMethod.Invoke(materialProxy, null);
+
+                Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.Bindless));
+                Assert.That(materialProxy.BaseMap, Is.SameAs(baseMap));
+                Assert.That(materialProxy.BumpMap, Is.SameAs(bumpMap));
+                Assert.That(materialProxy.MaskMap, Is.SameAs(maskMap));
+                Assert.That(materialProxy.StreamedVirtualTexture, Is.SameAs(streamedVirtualTexture));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(baseMap);
+                Object.DestroyImmediate(bumpMap);
+                Object.DestroyImmediate(maskMap);
+                Object.DestroyImmediate(streamedVirtualTexture);
+            }
+        }
 
         [Test]
         public void OnValidate_IncrementsRevision_WhenProxyChanges()
@@ -79,7 +226,7 @@ namespace VividRP.Editor.Tests
                 material.SetTextureOffset("_BaseMap", new Vector2(0.1f, 0.2f));
                 material.SetTexture("_BumpMap", bumpMap);
                 material.SetFloat("_BumpScale", 0.6f);
-                material.SetTexture("_MetallicGlossMap", maskMap);
+                material.SetTexture("_RMOMap", maskMap);
                 material.SetFloat("_Metallic", 0.4f);
                 material.SetFloat("_Smoothness", 0.3f);
                 material.SetColor("_EmissionColor", new Color(1.0f, 0.5f, 0.0f, 1.0f));
@@ -103,7 +250,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialProxy.BumpMap, Is.SameAs(bumpMap));
                 Assert.That(materialProxy.BumpScale, Is.EqualTo(0.6f).Within(0.0001f));
                 Assert.That(materialProxy.MaskMap, Is.SameAs(maskMap));
-                Assert.That(materialProxy.MaskMode, Is.EqualTo(GPUDrivenMaterialMaskMode.MetallicSmoothness));
+                Assert.That(materialProxy.MaskMode, Is.EqualTo(GPUDrivenMaterialMaskMode.RoughnessMetallicOcclusion));
                 Assert.That(materialProxy.Metallic, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialProxy.Roughness, Is.EqualTo(0.7f).Within(0.0001f));
                 Assert.That(materialProxy.EmissionColor.r, Is.EqualTo(1.0f).Within(0.0001f));

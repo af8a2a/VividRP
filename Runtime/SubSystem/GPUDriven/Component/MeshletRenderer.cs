@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven.Meshlets;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -54,6 +55,12 @@ namespace VividRP.Runtime.GPUDriven
         private bool m_TakeOverSourceRenderer = true;
 
         private RendererTrackingDirtyFlags m_TrackingDirtyFlags = RendererTrackingDirtyFlags.All;
+
+        [NonSerialized]
+        private VividPrimitiveHandle m_PrimitiveHandle = VividPrimitiveHandle.Invalid;
+
+        [NonSerialized]
+        private int m_TrackedGameObjectLayer = -1;
 
         public Renderer sourceRenderer => null;
 
@@ -603,11 +610,27 @@ namespace VividRP.Runtime.GPUDriven
             m_TrackingDirtyFlags &= resourcesUpdated
                 ? RendererTrackingDirtyFlags.None
                 : ~RendererTrackingDirtyFlags.RenderData;
+            m_TrackedGameObjectLayer = gameObject.layer;
             transform.hasChanged = false;
+        }
+
+        internal VividPrimitiveHandle primitiveHandle => m_PrimitiveHandle;
+
+        internal void NotifyPrimitiveHandleAssigned(VividPrimitiveHandle handle)
+        {
+            m_PrimitiveHandle = handle;
+        }
+
+        internal void InvalidatePrimitiveHandle()
+        {
+            m_PrimitiveHandle = VividPrimitiveHandle.Invalid;
         }
 
         private void UpdateDatabaseIfNeeded()
         {
+            if (m_TrackedGameObjectLayer != gameObject.layer)
+                MarkRenderDataDirty();
+
             if ((m_TrackingDirtyFlags & RendererTrackingDirtyFlags.Resources) != 0)
             {
                 VividMeshletRendererDatabase.instance.UpdateRendererData(this);

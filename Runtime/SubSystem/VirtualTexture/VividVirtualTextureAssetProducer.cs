@@ -916,7 +916,7 @@ namespace VividRP.Runtime
             return true;
         }
 
-        private static bool ValidateContainerHeader(string path, VividVirtualTextureBuiltData builtData)
+        internal static bool ValidateContainerHeader(string path, VividVirtualTextureBuiltData builtData)
         {
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                 return false;

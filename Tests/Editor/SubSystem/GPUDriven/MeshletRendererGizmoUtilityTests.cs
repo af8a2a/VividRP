@@ -1,6 +1,6 @@
 using System.Reflection;
 using NUnit.Framework;
-using Unity.Mathematics;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.TestTools.Utils;
 using Object = UnityEngine.Object;
@@ -12,6 +12,20 @@ namespace VividRP.Editor.Tests
 {
     public class MeshletRendererGizmoUtilityTests
     {
+        [Test]
+        public void DrawOptions_KeepNonSelectedRenderersPickable()
+        {
+            Assert.That((MeshletRendererGizmoDrawer.DrawOptions & GizmoType.NonSelected) != 0, Is.True);
+            Assert.That((MeshletRendererGizmoDrawer.DrawOptions & GizmoType.Pickable) != 0, Is.True);
+        }
+
+        [Test]
+        public void DrawOptions_DoNotDrawCustomSelectedGizmos()
+        {
+            GizmoType selectedOptions = GizmoType.Selected | GizmoType.InSelectionHierarchy;
+            Assert.That((MeshletRendererGizmoDrawer.DrawOptions & selectedOptions) == 0, Is.True);
+        }
+
         [Test]
         public void TryGetLocalSelectionBounds_UsesSourceMeshBounds_WhenSourceMeshExists()
         {
@@ -68,20 +82,6 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(collectionB);
                 Object.DestroyImmediate(gameObject);
             }
-        }
-
-        [Test]
-        public void GetLocalMeshletBounds_UsesBoundingSphereCenterAndRadius()
-        {
-            var meshlet = new VividMeshlet
-            {
-                BoundingSphere = new float4(1.0f, 2.0f, 3.0f, 4.0f),
-            };
-
-            Bounds bounds = MeshletRendererGizmoUtility.GetLocalMeshletBounds(meshlet);
-
-            Assert.That(bounds.center, Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)).Using(Vector3EqualityComparer.Instance));
-            Assert.That(bounds.size, Is.EqualTo(new Vector3(8.0f, 8.0f, 8.0f)).Using(Vector3EqualityComparer.Instance));
         }
 
         private static Mesh CreateOffsetMesh(string meshName)

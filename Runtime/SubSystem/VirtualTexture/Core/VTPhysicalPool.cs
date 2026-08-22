@@ -283,7 +283,9 @@ namespace VividRP.Runtime
             int lockedPageCount,
             int evictedPageCount,
             long allocatedByteCount = 0,
-            long residentByteCount = 0)
+            long residentByteCount = 0,
+            int totalPageCount = 0,
+            int recentVisiblePageCount = 0)
         {
             PoolCount = poolCount;
             ResidentPageCount = residentPageCount;
@@ -292,6 +294,11 @@ namespace VividRP.Runtime
             EvictedPageCount = evictedPageCount;
             AllocatedByteCount = Math.Max(0L, allocatedByteCount);
             ResidentByteCount = Math.Max(0L, residentByteCount);
+            TotalPageCount = Math.Max(0, totalPageCount);
+            RecentVisiblePageCount = Mathf.Clamp(
+                recentVisiblePageCount,
+                0,
+                TotalPageCount);
         }
 
         internal int PoolCount { get; }
@@ -307,6 +314,10 @@ namespace VividRP.Runtime
         internal long AllocatedByteCount { get; }
 
         internal long ResidentByteCount { get; }
+
+        internal int TotalPageCount { get; }
+
+        internal int RecentVisiblePageCount { get; }
     }
 
     internal readonly struct VTPhysicalAtlasLayout : IEquatable<VTPhysicalAtlasLayout>
@@ -1864,6 +1875,7 @@ namespace VividRP.Runtime
 
     internal sealed class VTPhysicalPool : IDisposable
     {
+        internal const int MaxPhysicalAnisotropy = 8;
         internal const int AsyncCommitEvictionProtectionFrames = 3;
         internal const int FeedbackEvictionProtectionFrames = 16;
 
@@ -2065,6 +2077,8 @@ namespace VividRP.Runtime
 
         internal int FreePageCount => m_FreePhysicalPages.Count;
 
+        internal int TotalPageCount => m_Slots.Length;
+
         internal int ResidentPageCount
         {
             get
@@ -2096,6 +2110,60 @@ namespace VividRP.Runtime
         }
 
         internal int EvictedPageCount => m_EvictedPageCount;
+
+        internal VTPhysicalPoolStats CollectStats(int frameIndex, int visibilityWindowFrames)
+        {
+            int residentPageCount = 0;
+            int lockedPageCount = 0;
+            int recentVisiblePageCount = 0;
+            int clampedWindowFrames = Mathf.Max(0, visibilityWindowFrames);
+            for (int pageIndex = 0; pageIndex < m_Slots.Length; pageIndex++)
+            {
+                PhysicalPageSlotState slotState = m_Slots[pageIndex];
+                if (!IsOccupied(slotState))
+                    continue;
+
+                if (slotState.Resident)
+                    residentPageCount += 1;
+                if (slotState.Locked)
+                    lockedPageCount += 1;
+                if (IsRecentlyVisible(
+                        pageIndex,
+                        in slotState,
+                        frameIndex,
+                        clampedWindowFrames))
+                {
+                    recentVisiblePageCount += 1;
+                }
+            }
+
+            return new VTPhysicalPoolStats(
+                1,
+                residentPageCount,
+                FreePageCount,
+                lockedPageCount,
+                m_EvictedPageCount,
+                m_AllocatedByteCount,
+                residentPageCount * m_BytesPerPhysicalPage,
+                TotalPageCount,
+                recentVisiblePageCount);
+        }
+
+        private bool IsRecentlyVisible(
+            int physicalPageId,
+            in PhysicalPageSlotState slotState,
+            int frameIndex,
+            int visibilityWindowFrames)
+        {
+            if (slotState.Locked || slotState.PendingUpload || slotState.VisibilityPending)
+                return true;
+
+            int lastTouchFrame = m_LastLruTouchFrames[physicalPageId];
+            return frameIndex >= 0
+                   && lastTouchFrame != int.MinValue
+                   && (frameIndex < lastTouchFrame
+                       || (long)frameIndex - lastTouchFrame < visibilityWindowFrames);
+        }
 
         internal void ResetRuntimeState()
         {
@@ -2725,7 +2793,8 @@ namespace VividRP.Runtime
                     : $"VividVT_{poolName}_PhysicalAtlas_Group{physicalGroup}",
                 hideFlags = HideFlags.HideAndDontSave,
                 wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = ResolvePhysicalAnisotropy(desc.BorderSize),
             };
             NativeArray<byte> rawTextureData = texture.GetRawTextureData<byte>();
             unsafe
@@ -2734,6 +2803,11 @@ namespace VividRP.Runtime
             }
             texture.Apply(false, true);
             return texture;
+        }
+
+        internal static int ResolvePhysicalAnisotropy(int borderSize)
+        {
+            return Mathf.Clamp(borderSize, 1, MaxPhysicalAnisotropy);
         }
 
         private bool TryGetSlot(int physicalPageId, int generation, out PhysicalPageSlotState slotState)

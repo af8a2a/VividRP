@@ -9,12 +9,37 @@ namespace VividRP.Editor.GPUDriven
     {
         public override void OnInspectorGUI()
         {
+            var materialProxy = (GPUDrivenMaterialProxy) target;
             serializedObject.Update();
 
-            DrawPropertiesExcluding(serializedObject, "m_Script", "m_Revision");
-            serializedObject.ApplyModifiedProperties();
+            using (new EditorGUI.DisabledScope(true))
+            {
+                EditorGUILayout.EnumPopup(
+                    "Texture Payload",
+                    materialProxy.TextureMode);
+            }
 
-            var materialProxy = (GPUDrivenMaterialProxy) target;
+            if (materialProxy.TextureMode == GPUDrivenMaterialProxyTextureMode.VirtualTexture)
+            {
+                DrawPropertiesExcluding(
+                    serializedObject,
+                    "m_Script",
+                    "m_TextureMode",
+                    "m_BaseMap",
+                    "m_BumpMap",
+                    "m_MaskMap",
+                    "m_Revision");
+            }
+            else
+            {
+                DrawPropertiesExcluding(
+                    serializedObject,
+                    "m_Script",
+                    "m_TextureMode",
+                    "m_StreamedVirtualTexture",
+                    "m_Revision");
+            }
+            serializedObject.ApplyModifiedProperties();
 
             DrawWarnings(materialProxy);
 
@@ -22,12 +47,16 @@ namespace VividRP.Editor.GPUDriven
             {
                 if (GUILayout.Button("Sync From Source Material"))
                 {
-                    GPUDrivenMaterialProxySyncResult syncResult = materialProxy.SyncFromSourceMaterial();
+                    GPUDrivenMaterialProxySyncResult syncResult =
+                        materialProxy.SyncFromSourceMaterial(
+                            materialProxy.SourceMaterial,
+                            GPUDrivenMaterialProxyEditorUtility.ResolveActiveTextureMode());
                     if (!syncResult.Success)
                     {
                         Debug.LogWarning($"[VividRP] Failed to sync GPUDriven material proxy '{materialProxy.name}': {syncResult.ErrorMessage}", materialProxy);
                     }
-                    else if (AssetDatabase.Contains(materialProxy)
+                    else if (materialProxy.TextureMode == GPUDrivenMaterialProxyTextureMode.VirtualTexture
+                             && AssetDatabase.Contains(materialProxy)
                              && !GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
                                  materialProxy,
                                  out _,
@@ -45,7 +74,8 @@ namespace VividRP.Editor.GPUDriven
 
             using (new EditorGUI.DisabledScope(
                        EditorApplication.isCompiling
-                       || (materialProxy.BaseMap == null && materialProxy.BumpMap == null && materialProxy.MaskMap == null)))
+                       || (!AssetDatabase.Contains(materialProxy)
+                           && materialProxy.StreamedVirtualTexture == null)))
             {
                 if (GUILayout.Button("Build / Refresh Streamed VT Asset"))
                 {

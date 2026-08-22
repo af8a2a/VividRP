@@ -1,11 +1,47 @@
+using System;
 using System.Collections.Generic;
+using UnityEngine.Rendering;
 using UnityEngine;
 
 namespace VividRP.Runtime.GPUDriven
 {
+    [Flags]
+    internal enum VividGPUDrivenInstanceSourceFlags : byte
+    {
+        None = 0,
+        TerrainGeometry = 1 << 0,
+        MaterialProxy = 1 << 1,
+        TerrainMaterial = 1 << 2,
+        MissingMaterial = 1 << 3,
+    }
+
+    internal readonly struct VividGPUDrivenInstanceSourceData
+    {
+        internal VividGPUDrivenInstanceSourceData(
+            EntityId primitiveEntityId,
+            EntityId geometryEntityId,
+            EntityId materialEntityId,
+            int sourceSectionIndex,
+            VividGPUDrivenInstanceSourceFlags flags)
+        {
+            PrimitiveEntityId = primitiveEntityId;
+            GeometryEntityId = geometryEntityId;
+            MaterialEntityId = materialEntityId;
+            SourceSectionIndex = sourceSectionIndex;
+            Flags = flags;
+        }
+
+        internal EntityId PrimitiveEntityId { get; }
+        internal EntityId GeometryEntityId { get; }
+        internal EntityId MaterialEntityId { get; }
+        internal int SourceSectionIndex { get; }
+        internal VividGPUDrivenInstanceSourceFlags Flags { get; }
+    }
+
     public sealed class VividGPUDrivenSceneData
     {
         private readonly List<VividInstanceData> m_Instances = new();
+        private readonly List<VividGPUDrivenInstanceSourceData> m_InstanceSources = new();
         private readonly List<VividMaterialData> m_Materials = new();
         private readonly List<VividSurfaceBindingData> m_SurfaceBindings = new();
         private readonly List<VividTerrainMaterialData> m_TerrainMaterials = new();
@@ -75,6 +111,8 @@ namespace VividRP.Runtime.GPUDriven
 
         internal List<VividInstanceData> MutableInstances => m_Instances;
 
+        internal IReadOnlyList<VividGPUDrivenInstanceSourceData> InstanceSources => m_InstanceSources;
+
         internal List<VividMaterialData> MutableMaterials => m_Materials;
 
         internal List<VividSurfaceBindingData> MutableSurfaceBindings => m_SurfaceBindings;
@@ -95,7 +133,16 @@ namespace VividRP.Runtime.GPUDriven
             in VividInstanceData instanceData,
             int maxVisibleMeshletRenderRequestCount)
         {
+            AddInstance(instanceData, default, maxVisibleMeshletRenderRequestCount);
+        }
+
+        internal void AddInstance(
+            in VividInstanceData instanceData,
+            in VividGPUDrivenInstanceSourceData sourceData,
+            int maxVisibleMeshletRenderRequestCount)
+        {
             m_Instances.Add(instanceData);
+            m_InstanceSources.Add(sourceData);
             RegisterRendererBatch(instanceData);
 
             uint maxNodesPerJob = global::VividRP.Runtime.GPUDriven.Meshlets.VividMeshletListBuildJob.MaxLODNodesPerThreadGroup;
@@ -114,6 +161,7 @@ namespace VividRP.Runtime.GPUDriven
         internal void ClearInstances()
         {
             m_Instances.Clear();
+            m_InstanceSources.Clear();
             m_MaxMeshletListBuildJobCount = 0;
             m_MaxVisibleMeshletRenderRequestCount = 0;
             m_MainViewRendererBatchMask = 0;

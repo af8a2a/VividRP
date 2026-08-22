@@ -186,8 +186,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     return VTPageRequestStatus.Pending;
                 }
 
-                long uploadKey = GetUploadKey(request);
-                if (m_UploadPinLeases.ContainsKey(uploadKey))
+                bool hasPhysicalUploadIdentity = request.PhysicalPageId >= 0;
+                long uploadKey = hasPhysicalUploadIdentity ? GetUploadKey(request) : 0L;
+                if (hasPhysicalUploadIdentity && m_UploadPinLeases.ContainsKey(uploadKey))
                     return VTPageRequestStatus.Available;
 
                 List<VirtualTexturePageCoord> dependencies = m_PageSourceDependencies[cellIndex];
@@ -234,7 +235,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 if (!allResident)
                     return VTPageRequestStatus.Pending;
 
-                if (dependencies.Count == 0)
+                if (dependencies.Count == 0 || !hasPhysicalUploadIdentity)
                     return VTPageRequestStatus.Available;
 
                 var leases = new List<VTPagePinLease>(dependencies.Count);
@@ -260,6 +261,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             internal void ReleasePageUploadDependencies(in VTRequest request)
             {
+                if (request.PhysicalPageId < 0)
+                    return;
+
                 if (!m_UploadPinLeases.Remove(GetUploadKey(request), out List<VTPagePinLease> leases))
                     return;
 
@@ -288,7 +292,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     for (int requestIndex = 0; requestIndex < liveRequests.Count; requestIndex++)
                     {
                         VTRequest request = liveRequests[requestIndex];
-                        if (TryGetCellIndex(request.PageCoord.X, request.PageCoord.Y, out _))
+                        if (request.PhysicalPageId >= 0
+                            && TryGetCellIndex(request.PageCoord.X, request.PageCoord.Y, out _))
                             liveRuntimeRequests.Add(GetUploadKey(request));
                     }
                 }
@@ -425,9 +430,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     new[]
                     {
                         VirtualTextureGPUDrivenTextureBackend.PageSize,
-                        VirtualTextureGPUDrivenTextureBackend.BorderSize,
+                        m_Owner.m_Backend.VirtualTextureSpaceDesc.StackDesc.BorderSize,
                         VirtualTextureGPUDrivenTextureBackend.PageSize
-                        + VirtualTextureGPUDrivenTextureBackend.BorderSize * 2,
+                        + m_Owner.m_Backend.VirtualTextureSpaceDesc.StackDesc.BorderSize * 2,
                         m_Owner.m_ControlCount,
                     });
                 cmd.SetComputeVectorParam(
@@ -442,7 +447,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 m_Owner.BindSourceVirtualTextureResources(cmd, shader, kernel);
 
                 int physicalPageSize = VirtualTextureGPUDrivenTextureBackend.PageSize
-                                       + VirtualTextureGPUDrivenTextureBackend.BorderSize * 2;
+                                       + m_Owner.m_Backend.VirtualTextureSpaceDesc.StackDesc.BorderSize * 2;
                 int groupCount = Mathf.CeilToInt(physicalPageSize / (float)ThreadGroupSize);
                 cmd.DispatchCompute(shader, kernel, groupCount, groupCount, 1);
             }

@@ -428,11 +428,11 @@ namespace VividRP.Runtime
                         bestResolvedMip,
                         false,
                         true,
-                        pageState.PendingUpload || pageState.TransitionQueued,
+                        pageState.HasPendingWork || pageState.TransitionQueued,
                         pageState.Locked,
                         bestTransitionPhase)
                     : VirtualTexturePageTableEntry.Invalid(
-                        pageState.PendingUpload || pageState.TransitionQueued,
+                        pageState.HasPendingWork || pageState.TransitionQueued,
                         pageState.Locked);
             }
 
@@ -467,7 +467,7 @@ namespace VividRP.Runtime
 
             ancestorState = residencyManager.GetPageState(pageState.TransitionAncestorPageIndex);
             if (!ancestorState.Resident
-                || ancestorState.PendingUpload
+                || ancestorState.HasPendingWork
                 || ancestorState.TransitionQueued
                 || ancestorState.TransitionPhase < VirtualTexturePageTableEntry.MaxTransitionPhase)
             {

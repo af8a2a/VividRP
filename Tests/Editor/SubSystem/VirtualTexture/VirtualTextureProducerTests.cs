@@ -128,6 +128,49 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Texture2DPageProducer_PreservesLinearTexelsWhenReadableCopyIsRequired()
+        {
+            var expected = new Color32(128, 128, 255, 255);
+            var sourceTexture = new Texture2D(4, 4, TextureFormat.RGBA32, true, true);
+            var sourcePixels = new Color32[sourceTexture.width * sourceTexture.height];
+            VirtualTextureSpaceDesc desc = CreateDesc();
+            var outputPixels = new Color32[desc.PhysicalPageSize * desc.PhysicalPageSize];
+
+            try
+            {
+                for (int pixelIndex = 0; pixelIndex < sourcePixels.Length; pixelIndex++)
+                    sourcePixels[pixelIndex] = expected;
+
+                sourceTexture.SetPixels32(sourcePixels);
+                sourceTexture.Apply(updateMipmaps: true, makeNoLongerReadable: true);
+                Assert.That(sourceTexture.isReadable, Is.False);
+
+                var producer = new VTTexture2DPageProducer(sourceTexture);
+                var request = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    0,
+                    1,
+                    1,
+                    0);
+
+                producer.WritePage(desc, request, outputPixels);
+
+                foreach (Color32 actual in outputPixels)
+                {
+                    Assert.That(Mathf.Abs(actual.r - expected.r), Is.LessThanOrEqualTo(1));
+                    Assert.That(Mathf.Abs(actual.g - expected.g), Is.LessThanOrEqualTo(1));
+                    Assert.That(Mathf.Abs(actual.b - expected.b), Is.LessThanOrEqualTo(1));
+                    Assert.That(actual.a, Is.EqualTo(expected.a));
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+            }
+        }
+
+        [Test]
         public void VirtualTextureAssetProducer_ReplaysBakedTileWithoutSourceTexture()
         {
             Texture2D sourceTexture = CreateSourceTexture(4, 4);

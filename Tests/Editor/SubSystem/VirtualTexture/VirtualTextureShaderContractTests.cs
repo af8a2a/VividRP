@@ -1,3 +1,4 @@
+using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using VividRP.Runtime;
@@ -6,6 +7,14 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VirtualTextureShaderContractTests
     {
+        private const string PageProducerAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/GPUDrivenVirtualTexturePageProducer.compute";
+        private const string SurfaceSamplingAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VirtualTextureSurfaceSampling.hlsl";
+        private const string VirtualTextureAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl";
+        private const string GBufferResolveAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/VisibilityBufferGBufferResolve.shader";
 
         [Test]
         public void VirtualTextureShaderIds_MatchExpectedPropertyNames()
@@ -37,6 +46,51 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureFeedbackBindingUtility.RequestsUavSlot, Is.EqualTo(5));
             Assert.That(VirtualTextureFeedbackBindingUtility.CounterUavSlot, Is.EqualTo(6));
             Assert.That(VirtualTextureFeedbackBindingUtility.HashUavSlot, Is.EqualTo(7));
+        }
+
+        [Test]
+        public void NormalRgCache_PreservesLegacyNormalAgSamplingContract()
+        {
+            string producerSource = File.ReadAllText(PageProducerAssetPath);
+            string samplingSource = File.ReadAllText(SurfaceSamplingAssetPath);
+
+            StringAssert.Contains("ConvertLegacyNormalAGToNormalRG", producerSource);
+            StringAssert.Contains(
+                "float4(packedNormal.w, packedNormal.y, 1.0, 1.0)",
+                producerSource);
+            StringAssert.Contains(
+                "float4(1.0f, normalRG.g, normalRG.b, normalRG.r)",
+                samplingSource);
+        }
+
+        [Test]
+        public void PhysicalCacheSampling_UsesAnisotropicMipFootprintAndScaledGradients()
+        {
+            string virtualTextureSource = File.ReadAllText(VirtualTextureAssetPath);
+            string samplingSource = File.ReadAllText(SurfaceSamplingAssetPath);
+
+            StringAssert.Contains("VTMipLevelAniso2D", virtualTextureSource);
+            StringAssert.Contains("VIVID_VT_MAX_ANISOTROPY 8.0", virtualTextureSource);
+            StringAssert.Contains("max((float)VT_BORDER_SIZE, 1.0)", virtualTextureSource);
+            StringAssert.Contains("VTComputePhysicalAtlasGradient", virtualTextureSource);
+            StringAssert.Contains(".SampleGrad(sampler_VTPhysicalCache", virtualTextureSource);
+            StringAssert.Contains("VTSamplePhysicalCacheTrilinearLayerGrad", samplingSource);
+            StringAssert.Contains("context.virtualUvDdx", samplingSource);
+            StringAssert.Contains("context.virtualUvDdy", samplingSource);
+        }
+
+        [Test]
+        public void GBufferResolve_AppliesMaterialPbrRemapsAfterMaskSampling()
+        {
+            string resolveSource = File.ReadAllText(GBufferResolveAssetPath);
+
+            StringAssert.Contains("RemapPBRChannel", resolveSource);
+            StringAssert.Contains(
+                "triangleData.materialData.MetallicSmoothnessRemap",
+                resolveSource);
+            StringAssert.Contains(
+                "triangleData.materialData.AmbientOcclusionRemap.xy",
+                resolveSource);
         }
     }
 }

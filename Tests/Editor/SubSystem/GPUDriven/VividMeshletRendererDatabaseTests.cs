@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -5,6 +6,7 @@ using VividRP.Editor.GPUDriven;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
+using VividRP.Runtime.PrimitiveScene;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
@@ -47,6 +49,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(trackedData.sourceMeshEntityId, Is.EqualTo(EntityId.None));
                 Assert.That(trackedData.subMeshCount, Is.Zero);
                 Assert.That(trackedData.materialCount, Is.Zero);
+                Assert.That(trackedData.cameraLayerMask, Is.EqualTo(1u));
                 Assert.That((trackedData.flags & VividMeshletRendererFlags.Enabled) != 0, Is.True);
                 Assert.That((trackedData.flags & VividMeshletRendererFlags.Valid) != 0, Is.False);
             }
@@ -122,6 +125,73 @@ namespace VividRP.Editor.Tests
                     Object.DestroyImmediate(meshletCollection);
 
                 DestroyTestObjects(gameObject, material, mesh);
+            }
+        }
+
+        [Test]
+        public void PrimitiveChangeJournal_RemoveThenRegisterKeepsFinalAddedState()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+            var changes = new List<VividMeshletRendererChange>();
+
+            try
+            {
+                database.ConsumePrimitiveChanges(changes, out bool initialFullResync);
+                Assert.That(initialFullResync, Is.True);
+
+                gameObject = CreateMeshRendererObject("MeshletRenderer_JournalReAdd", out mesh, out material);
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                database.UnregisterRenderer(meshletRenderer);
+                database.UpdateRendererData(meshletRenderer);
+
+                database.ConsumePrimitiveChanges(changes, out bool requiresFullResync);
+
+                Assert.That(requiresFullResync, Is.False);
+                Assert.That(changes, Has.Count.EqualTo(1));
+                Assert.That(changes[0].EntityId, Is.EqualTo(meshletRenderer.GetEntityId()));
+                Assert.That((changes[0].Flags & VividMeshletRendererChangeFlags.Added) != 0, Is.True);
+                Assert.That((changes[0].Flags & VividMeshletRendererChangeFlags.Removed) != 0, Is.False);
+                Assert.That((changes[0].Flags & VividMeshletRendererChangeFlags.Resources) != 0, Is.True);
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, material, mesh);
+            }
+        }
+
+        [Test]
+        public void PrimitiveChangeJournal_ClearRequestsFullReconciliation()
+        {
+            VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+            var changes = new List<VividMeshletRendererChange>();
+            database.ConsumePrimitiveChanges(changes, out _);
+
+            database.Clear();
+            database.ConsumePrimitiveChanges(changes, out bool requiresFullResync);
+
+            Assert.That(requiresFullResync, Is.True);
+            Assert.That(changes, Is.Empty);
+        }
+
+        [Test]
+        public void Clear_InvalidatesAuthorPrimitiveHandle()
+        {
+            var gameObject = new GameObject("MeshletRenderer_ClearHandle");
+            try
+            {
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.NotifyPrimitiveHandleAssigned(new VividPrimitiveHandle(2, 3u, 4u));
+
+                VividMeshletRendererDatabase.instance.Clear();
+
+                Assert.That(meshletRenderer.primitiveHandle.IsValid, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
             }
         }
 
@@ -320,6 +390,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void LateUpdate_RefreshesCameraLayerMaskWithoutResourceChange()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            var changes = new List<VividMeshletRendererChange>();
+
+            try
+            {
+                gameObject = CreateMeshRendererObject("MeshletRenderer_Layer", out mesh, out material);
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+                database.ConsumePrimitiveChanges(changes, out _);
+
+                gameObject.layer = 12;
+                InvokeLateUpdate(meshletRenderer);
+
+                Assert.That(database.TryGetRendererData(meshletRenderer, out var trackedData), Is.True);
+                Assert.That(trackedData.cameraLayerMask, Is.EqualTo(1u << 12));
+                database.ConsumePrimitiveChanges(changes, out _);
+                Assert.That(changes, Has.Count.EqualTo(1));
+                Assert.That((changes[0].Flags & VividMeshletRendererChangeFlags.RenderState) != 0, Is.True);
+                Assert.That((changes[0].Flags & VividMeshletRendererChangeFlags.Resources) != 0, Is.False);
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, material, mesh);
+            }
+        }
+
+        [Test]
         public void LateUpdate_RefreshesTrackedResources_WhenBindingsChangeThroughMeshletRenderer()
         {
             Material material = null;
@@ -408,6 +509,7 @@ namespace VividRP.Editor.Tests
             {
                 gameObject = CreateMeshRendererObject("MeshletRenderer_Disable", out mesh, out material);
                 var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.NotifyPrimitiveHandleAssigned(new VividPrimitiveHandle(3, 5u, 7u));
 
                 Assert.That(VividMeshletRendererDatabase.instance.rendererCount, Is.EqualTo(1));
 
@@ -415,6 +517,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(VividMeshletRendererDatabase.instance.rendererCount, Is.Zero);
                 Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererData(meshletRenderer, out _), Is.False);
+                Assert.That(meshletRenderer.primitiveHandle.IsValid, Is.False);
             }
             finally
             {
@@ -520,6 +623,11 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(VividMeshletRendererDatabase.instance.TryGetTerrainData(terrain, out trackedData), Is.True);
                 Assert.That(trackedData.worldBounds.center, Is.EqualTo(chunkBounds.center + gameObject.transform.position));
+
+                gameObject.layer = 10;
+                InvokeTerrainLateUpdate(terrain);
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetTerrainData(terrain, out trackedData), Is.True);
+                Assert.That(trackedData.cameraLayerMask, Is.EqualTo(1u << 10));
 
                 terrain.enabled = false;
                 Assert.That(VividMeshletRendererDatabase.instance.rendererCount, Is.Zero);

@@ -6,6 +6,31 @@ using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.GPUDriven
 {
+    internal readonly struct GPUDrivenMaterialProxySourceTextures
+    {
+        internal GPUDrivenMaterialProxySourceTextures(
+            Texture2D baseMap,
+            Texture2D bumpMap,
+            Texture2D maskMap,
+            GPUDrivenMaterialMaskMode maskMode)
+        {
+            BaseMap = baseMap;
+            BumpMap = bumpMap;
+            MaskMap = maskMap;
+            MaskMode = maskMode;
+        }
+
+        internal Texture2D BaseMap { get; }
+
+        internal Texture2D BumpMap { get; }
+
+        internal Texture2D MaskMap { get; }
+
+        internal GPUDrivenMaterialMaskMode MaskMode { get; }
+
+        internal bool HasAnyTexture => BaseMap != null || BumpMap != null || MaskMap != null;
+    }
+
     internal readonly struct GPUDrivenMaterialProxySyncResult
     {
         public GPUDrivenMaterialProxySyncResult(bool success, bool changed, string errorMessage, string[] warnings)
@@ -39,11 +64,18 @@ namespace VividRP.Editor.GPUDriven
         private static readonly int s_BumpScaleId = Shader.PropertyToID("_BumpScale");
         private static readonly int s_MetallicId = Shader.PropertyToID("_Metallic");
         private static readonly int s_SmoothnessId = Shader.PropertyToID("_Smoothness");
+        private static readonly int s_MetallicRemapMinId = Shader.PropertyToID("_MetallicRemapMin");
+        private static readonly int s_MetallicRemapMaxId = Shader.PropertyToID("_MetallicRemapMax");
+        private static readonly int s_SmoothnessRemapMinId = Shader.PropertyToID("_SmoothnessRemapMin");
+        private static readonly int s_SmoothnessRemapMaxId = Shader.PropertyToID("_SmoothnessRemapMax");
+        private static readonly int s_AORemapMinId = Shader.PropertyToID("_AORemapMin");
+        private static readonly int s_AORemapMaxId = Shader.PropertyToID("_AORemapMax");
         private static readonly int s_EmissionColorId = Shader.PropertyToID("_EmissionColor");
         private static readonly int s_AlphaClipId = Shader.PropertyToID("_AlphaClip");
         private static readonly int s_CutoffId = Shader.PropertyToID("_Cutoff");
         private static readonly int s_CullId = Shader.PropertyToID("_Cull");
         private static readonly int s_OpacityMapId = Shader.PropertyToID("_OpacityMap");
+        private static readonly int s_RMOMapId = Shader.PropertyToID("_RMOMap");
         private static readonly int s_MetallicGlossMapId = Shader.PropertyToID("_MetallicGlossMap");
         private static readonly int s_RoughnessMapId = Shader.PropertyToID("_RoughnessMap");
         private static readonly int s_EmissionMapId = Shader.PropertyToID("_EmissionMap");
@@ -58,12 +90,31 @@ namespace VividRP.Editor.GPUDriven
                 return new GPUDrivenMaterialProxySyncResult(false, false, "GPUDriven material proxy is null.", null);
             }
 
-            return SyncFromSourceMaterial(materialProxy, materialProxy.SourceMaterial);
+            return SyncFromSourceMaterial(
+                materialProxy,
+                materialProxy.SourceMaterial,
+                materialProxy.TextureMode);
         }
 
         public static GPUDrivenMaterialProxySyncResult SyncFromSourceMaterial(
             this GPUDrivenMaterialProxy materialProxy,
             Material sourceMaterial
+        )
+        {
+            return SyncFromSourceMaterial(
+                materialProxy,
+                sourceMaterial,
+                materialProxy != null
+                    ? materialProxy.TextureMode
+                    : GPUDrivenMaterialProxyTextureMode.Bindless);
+        }
+
+        internal static GPUDrivenMaterialProxySyncResult SyncFromSourceMaterial(
+            this GPUDrivenMaterialProxy materialProxy,
+            Material sourceMaterial,
+            GPUDrivenMaterialProxyTextureMode textureMode,
+            bool recordUndo = true,
+            bool saveAsset = true
         )
         {
             if (materialProxy == null)
@@ -80,46 +131,106 @@ namespace VividRP.Editor.GPUDriven
             CollectUnsupportedWarnings(sourceMaterial, warnings);
 
             int baseTexturePropertyId = sourceMaterial.HasProperty(s_BaseMapId) ? s_BaseMapId : s_MainTexId;
-            Texture2D baseMap = GetTexture2D(sourceMaterial, baseTexturePropertyId, "_BaseMap", warnings);
-            Texture2D bumpMap = GetTexture2D(sourceMaterial, s_BumpMapId, "_BumpMap", warnings);
-            Texture2D metallicMap = GetTexture2D(sourceMaterial, s_MetallicGlossMapId, "_MetallicGlossMap", warnings);
-            Texture2D roughnessMap = GetTexture2D(sourceMaterial, s_RoughnessMapId, "_RoughnessMap", warnings);
-            Texture2D maskMap = metallicMap != null ? metallicMap : roughnessMap;
-            GPUDrivenMaterialMaskMode maskMode = metallicMap != null
-                ? GPUDrivenMaterialMaskMode.MetallicSmoothness
-                : roughnessMap != null
-                    ? GPUDrivenMaterialMaskMode.Roughness
-                    : GPUDrivenMaterialMaskMode.None;
+            GPUDrivenMaterialProxySourceTextures sourceTextures =
+                ExtractSourceTextures(sourceMaterial, warnings);
             uint initialRevision = materialProxy.Revision;
 
-            Undo.RecordObject(materialProxy, "Sync GPUDriven Material Proxy");
+            if (recordUndo)
+            {
+                Undo.RecordObject(materialProxy, "Sync GPUDriven Material Proxy");
+            }
 
             materialProxy.SourceMaterial = sourceMaterial;
             materialProxy.Model = GPUDrivenMaterialProxyModel.StandardLit;
-            materialProxy.BaseMap = baseMap;
+            materialProxy.TextureMode = textureMode;
+            if (textureMode == GPUDrivenMaterialProxyTextureMode.Bindless)
+            {
+                materialProxy.BaseMap = sourceTextures.BaseMap;
+                materialProxy.BumpMap = sourceTextures.BumpMap;
+                materialProxy.MaskMap = sourceTextures.MaskMap;
+            }
             materialProxy.BaseColor = GetColor(sourceMaterial, s_BaseColorId, sourceMaterial.HasProperty(s_ColorId) ? sourceMaterial.GetColor(s_ColorId) : Color.white);
             materialProxy.TextureTilingOffset = GetTilingOffset(sourceMaterial, baseTexturePropertyId);
-            materialProxy.BumpMap = bumpMap;
             materialProxy.BumpScale = GetFloat(sourceMaterial, s_BumpScaleId, 1.0f);
-            materialProxy.MaskMap = maskMap;
-            materialProxy.MaskMode = maskMode;
+            materialProxy.MaskMode = sourceTextures.MaskMode;
             materialProxy.Metallic = GetFloat(sourceMaterial, s_MetallicId, 0.0f);
             materialProxy.Roughness = 1.0f - Mathf.Clamp01(GetFloat(sourceMaterial, s_SmoothnessId, 0.5f));
+            materialProxy.MetallicRemap = GetRemap(
+                sourceMaterial,
+                s_MetallicRemapMinId,
+                s_MetallicRemapMaxId);
+            materialProxy.SmoothnessRemap = GetRemap(
+                sourceMaterial,
+                s_SmoothnessRemapMinId,
+                s_SmoothnessRemapMaxId);
+            materialProxy.AmbientOcclusionRemap = GetRemap(
+                sourceMaterial,
+                s_AORemapMinId,
+                s_AORemapMaxId);
             materialProxy.EmissionColor = GetColor(sourceMaterial, s_EmissionColorId, Color.black);
             materialProxy.AlphaClip = IsAlphaClipEnabled(sourceMaterial);
             materialProxy.Cutoff = GetFloat(sourceMaterial, s_CutoffId, 0.5f);
             materialProxy.CullMode = (CullMode) Mathf.RoundToInt(GetFloat(sourceMaterial, s_CullId, (float) CullMode.Back));
             materialProxy.DisableLighting = false;
 
-            EditorUtility.SetDirty(materialProxy);
-            AssetDatabase.SaveAssetIfDirty(materialProxy);
+            bool changed = materialProxy.Revision != initialRevision;
+            if (changed)
+            {
+                EditorUtility.SetDirty(materialProxy);
+                if (saveAsset)
+                {
+                    AssetDatabase.SaveAssetIfDirty(materialProxy);
+                }
+            }
 
             return new GPUDrivenMaterialProxySyncResult(
                 true,
-                materialProxy.Revision != initialRevision,
+                changed,
                 string.Empty,
                 warnings.ToArray()
             );
+        }
+
+        internal static GPUDrivenMaterialProxySourceTextures ExtractSourceTextures(
+            Material sourceMaterial,
+            List<string> warnings = null)
+        {
+            if (sourceMaterial == null)
+            {
+                return default;
+            }
+
+            int baseTexturePropertyId = sourceMaterial.HasProperty(s_BaseMapId) ? s_BaseMapId : s_MainTexId;
+            Texture2D baseMap = GetTexture2D(sourceMaterial, baseTexturePropertyId, "_BaseMap", warnings);
+            Texture2D bumpMap = GetTexture2D(sourceMaterial, s_BumpMapId, "_BumpMap", warnings);
+            Texture2D rmoMap = GetTexture2D(
+                sourceMaterial,
+                s_RMOMapId,
+                "_RMOMap",
+                warnings);
+            Texture2D metallicMap = GetTexture2D(
+                sourceMaterial,
+                s_MetallicGlossMapId,
+                "_MetallicGlossMap",
+                warnings);
+            Texture2D roughnessMap = GetTexture2D(
+                sourceMaterial,
+                s_RoughnessMapId,
+                "_RoughnessMap",
+                warnings);
+            Texture2D maskMap = rmoMap != null
+                ? rmoMap
+                : metallicMap != null
+                    ? metallicMap
+                    : roughnessMap;
+            GPUDrivenMaterialMaskMode maskMode = rmoMap != null
+                ? GPUDrivenMaterialMaskMode.RoughnessMetallicOcclusion
+                : metallicMap != null
+                    ? GPUDrivenMaterialMaskMode.MetallicSmoothness
+                    : roughnessMap != null
+                        ? GPUDrivenMaterialMaskMode.Roughness
+                        : GPUDrivenMaterialMaskMode.None;
+            return new GPUDrivenMaterialProxySourceTextures(baseMap, bumpMap, maskMap, maskMode);
         }
 
         public static string[] CollectUnsupportedWarnings(this Material sourceMaterial)
@@ -214,6 +325,13 @@ namespace VividRP.Editor.GPUDriven
             return sourceMaterial != null && sourceMaterial.HasProperty(propertyId)
                 ? sourceMaterial.GetFloat(propertyId)
                 : fallback;
+        }
+
+        private static Vector2 GetRemap(Material sourceMaterial, int minPropertyId, int maxPropertyId)
+        {
+            return new Vector2(
+                GetFloat(sourceMaterial, minPropertyId, 0.0f),
+                GetFloat(sourceMaterial, maxPropertyId, 1.0f));
         }
 
         private static Vector4 GetTilingOffset(Material sourceMaterial, int baseTexturePropertyId)

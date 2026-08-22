@@ -26,6 +26,10 @@ namespace VividRP.Editor
             bool relevant = false;
             foreach (var path in importedAssets)
             {
+                if (path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+                    && StandardLitRMOTexturePacker.IsRMOOutputAsset(path))
+                    continue;
+
                 if (path.EndsWith(".shader", StringComparison.OrdinalIgnoreCase) ||
                     path.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase) ||
                     path.EndsWith(".raytrace", StringComparison.OrdinalIgnoreCase) ||

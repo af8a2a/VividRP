@@ -1,0 +1,948 @@
+#pragma use_dxc
+#pragma kernel ExperimentalClosureLit_Fast
+#pragma kernel ExperimentalClosureLit_Single
+#pragma kernel ExperimentalClosureLit_Complex
+
+#define VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE 8
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LightingLoop.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/PunctualLightCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LTCAreaLight.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBuffer.hlsl"
+
+Texture2D<float4> _ExperimentalClosureBuffer0;
+Texture2D<float4> _ExperimentalClosureBuffer1;
+Texture2D<float4> _ExperimentalClosureBuffer2;
+Texture2D<float4> _ExperimentalClosureBuffer3;
+Texture2D<float4> _ExperimentalClosureBuffer4;
+Texture2D<float4> _ExperimentalClosureBuffer5;
+Texture2D<float4> _ExperimentalClosureBuffer6;
+Texture2D<float4> _ExperimentalClosureBuffer7;
+Texture2D<float> _DepthTexture;
+Texture2D<float> _DirectionalShadowTexture;
+Texture2D<float> _GTAOTexture;
+Texture2D<float4> _ScreenSpaceReflectionTexture;
+StructuredBuffer<uint> _ExperimentalClosureTileList;
+
+RWTexture2D<float4> _ExperimentalClosureLightingTexture;
+RWTexture2D<float4> _ExperimentalClosureDebugTexture;
+
+uint _ExperimentalClosureTileListOffset;
+uint _ScreenSpaceReflectionEnabled;
+
+TEXTURECUBE(_SkyTexture);
+SAMPLER(sampler_SkyTexture);
+float4 _SkyTextureTint;
+float4 _SkyTextureParams;
+
+static const float kVividExperimentalPi = 3.14159265359;
+
+struct VividExperimentalClosurePreLightData
+{
+    float nDotV;
+    float perceptualRoughness;
+    float clearCoatPerceptualRoughness;
+    float clearCoatFresnel;
+    float3 reflectionDirectionWS;
+    float3 specularFGD;
+    float3x3 orthoBasisViewNormal;
+};
+
+VividExperimentalClosureMaterial LoadExperimentalClosureMaterial(
+    uint2 pixelCoord)
+{
+    return VividUnpackExperimentalClosureBuffer(
+        _ExperimentalClosureBuffer0.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer1.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer2.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer3.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer4.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer5.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer6.Load(int3(pixelCoord, 0)),
+        _ExperimentalClosureBuffer7.Load(int3(pixelCoord, 0)));
+}
+
+float3 VividExperimentalFresnelSchlick(
+    float3 f0,
+    float3 f90,
+    float cosTheta)
+{
+    float fresnel = pow(1.0 - saturate(cosTheta), 5.0);
+    return lerp(f0, f90, fresnel);
+}
+
+float VividExperimentalD_GGX(float nDotH, float linearRoughness)
+{
+    float alpha = max(linearRoughness, 0.002);
+    float alphaSquared = alpha * alpha;
+    float denominator =
+        nDotH * nDotH * (alphaSquared - 1.0) + 1.0;
+    return alphaSquared
+        / max(kVividExperimentalPi * denominator * denominator, 1e-6);
+}
+
+float VividExperimentalV_SmithGGXCorrelated(
+    float nDotV,
+    float nDotL,
+    float linearRoughness)
+{
+    float alpha = max(linearRoughness, 0.002);
+    float alphaSquared = alpha * alpha;
+    float lambdaV = nDotL * sqrt(
+        nDotV * nDotV * (1.0 - alphaSquared) + alphaSquared);
+    float lambdaL = nDotV * sqrt(
+        nDotL * nDotL * (1.0 - alphaSquared) + alphaSquared);
+    return 0.5 / max(lambdaV + lambdaL, 1e-6);
+}
+
+float3 VividEvaluateExperimentalMicrofacet(
+    float3 f0,
+    float3 f90,
+    float linearRoughness,
+    float3 normalWS,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    float3 halfDirectionWS =
+        SafeNormalize(viewDirectionWS + lightDirectionWS);
+    float nDotV = saturate(dot(normalWS, viewDirectionWS));
+    float nDotL = saturate(dot(normalWS, lightDirectionWS));
+    float nDotH = saturate(dot(normalWS, halfDirectionWS));
+    float vDotH = saturate(dot(viewDirectionWS, halfDirectionWS));
+    float distribution =
+        VividExperimentalD_GGX(nDotH, linearRoughness);
+    float visibility = VividExperimentalV_SmithGGXCorrelated(
+        nDotV,
+        nDotL,
+        linearRoughness);
+    float3 fresnel = VividExperimentalFresnelSchlick(f0, f90, vDotH);
+    return distribution * visibility * fresnel * nDotL;
+}
+
+float3 VividEvaluateExperimentalSlabDirectional(
+    VividExperimentalSlabClosure slab,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    float rawNDotL = dot(slab.normalWS, lightDirectionWS);
+    float nDotL = saturate(rawNDotL);
+    float wrappedNDotL = saturate((rawNDotL + 0.5) / 1.5);
+    float diffuseNDotL = lerp(
+        nDotL,
+        wrappedNDotL,
+        saturate(slab.subsurfaceWeight));
+    float3 diffuse =
+        slab.diffuseAlbedo * (diffuseNDotL / kVividExperimentalPi);
+    float3 specular = VividEvaluateExperimentalMicrofacet(
+        slab.specularF0,
+        slab.specularF90,
+        slab.linearRoughness,
+        slab.normalWS,
+        viewDirectionWS,
+        lightDirectionWS);
+
+    if (slab.clearCoatWeight > 0.0)
+    {
+        float coatWeight = saturate(slab.clearCoatWeight);
+        float3 coatSpecular = VividEvaluateExperimentalMicrofacet(
+            0.04,
+            1.0,
+            slab.clearCoatLinearRoughness,
+            slab.normalWS,
+            viewDirectionWS,
+            lightDirectionWS);
+        float coatFresnelAtView = VividExperimentalFresnelSchlick(
+            0.04,
+            1.0,
+            saturate(dot(slab.normalWS, viewDirectionWS))).x;
+        float baseAttenuation = 1.0 - coatWeight * coatFresnelAtView;
+        diffuse *= baseAttenuation;
+        specular = specular * baseAttenuation + coatSpecular * coatWeight;
+    }
+
+    return max(diffuse + specular, 0.0);
+}
+
+bool VividExperimentalHasTopLayer(
+    VividExperimentalClosureMaterial material)
+{
+    return material.closureCount > 1u
+        && material.layerWeight >
+            VIVID_EXPERIMENTAL_CLOSURE_LAYER_WEIGHT_EPSILON;
+}
+
+float VividExperimentalTopLayerOpacity(
+    VividExperimentalClosureMaterial material)
+{
+    float diffuseOpacity = max(
+        material.topSlab.diffuseAlbedo.x,
+        max(
+            material.topSlab.diffuseAlbedo.y,
+            material.topSlab.diffuseAlbedo.z));
+    return saturate(diffuseOpacity + material.topSummary.metallic);
+}
+
+float3 VividExperimentalVerticalLayerDirectionalTransmittance(
+    VividExperimentalClosureMaterial material,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    float3 viewFresnel = VividExperimentalFresnelSchlick(
+        material.topSlab.specularF0,
+        material.topSlab.specularF90,
+        saturate(dot(material.topSlab.normalWS, viewDirectionWS)));
+    float3 lightFresnel = VividExperimentalFresnelSchlick(
+        material.topSlab.specularF0,
+        material.topSlab.specularF90,
+        saturate(dot(material.topSlab.normalWS, lightDirectionWS)));
+    return saturate((1.0 - viewFresnel) * (1.0 - lightFresnel))
+        * (1.0 - VividExperimentalTopLayerOpacity(material));
+}
+
+float3 VividEvaluateExperimentalMaterialDirectional(
+    VividExperimentalClosureMaterial material,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    float3 baseLighting = VividEvaluateExperimentalSlabDirectional(
+        material.slab,
+        viewDirectionWS,
+        lightDirectionWS);
+    if (!VividExperimentalHasTopLayer(material))
+        return baseLighting;
+
+    float layerWeight = saturate(material.layerWeight);
+    float3 topLighting = VividEvaluateExperimentalSlabDirectional(
+        material.topSlab,
+        viewDirectionWS,
+        lightDirectionWS);
+    if (material.layerOperator ==
+        VIVID_EXPERIMENTAL_CLOSURE_OPERATOR_HORIZONTAL_MIX)
+    {
+        return lerp(baseLighting, topLighting, layerWeight);
+    }
+
+    float3 bottomTransmittance =
+        VividExperimentalVerticalLayerDirectionalTransmittance(
+            material,
+            viewDirectionWS,
+            lightDirectionWS);
+    return topLighting * layerWeight
+        + baseLighting * lerp(1.0, bottomTransmittance, layerWeight);
+}
+
+float3 VividExperimentalEnvironmentBRDFApproximation(
+    float3 f0,
+    float3 f90,
+    float perceptualRoughness,
+    float nDotV)
+{
+    // Split-sum GGX approximation used only by the experimental Closure path.
+    float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
+    float4 r = saturate(perceptualRoughness) * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * saturate(nDotV)))
+        * r.x + r.y;
+    float2 ab = float2(-1.04, 1.04) * a004 + r.zw;
+    return max(f0 * ab.x + f90 * ab.y, 0.0);
+}
+
+VividExperimentalClosurePreLightData
+BuildVividExperimentalClosurePreLightData(
+    VividExperimentalSlabClosure slab,
+    float3 viewDirectionWS)
+{
+    VividExperimentalClosurePreLightData preLightData =
+        (VividExperimentalClosurePreLightData)0;
+    preLightData.nDotV = saturate(
+        dot(slab.normalWS, viewDirectionWS));
+    preLightData.perceptualRoughness = sqrt(
+        saturate(slab.linearRoughness));
+    preLightData.clearCoatPerceptualRoughness = sqrt(
+        saturate(slab.clearCoatLinearRoughness));
+    preLightData.reflectionDirectionWS = reflect(
+        -viewDirectionWS,
+        slab.normalWS);
+    preLightData.specularFGD =
+        VividExperimentalEnvironmentBRDFApproximation(
+            slab.specularF0,
+            slab.specularF90,
+            preLightData.perceptualRoughness,
+            preLightData.nDotV);
+    preLightData.clearCoatFresnel =
+        VividExperimentalFresnelSchlick(
+            0.04,
+            1.0,
+            preLightData.nDotV).x
+        * saturate(slab.clearCoatWeight);
+    preLightData.orthoBasisViewNormal = GetOrthoBasisViewNormal(
+        viewDirectionWS,
+        slab.normalWS,
+        preLightData.nDotV);
+    return preLightData;
+}
+
+float3 VividExperimentalVerticalLayerEnvironmentTransmittance(
+    VividExperimentalClosureMaterial material,
+    VividExperimentalClosurePreLightData topPreLightData)
+{
+    return saturate(1.0 - topPreLightData.specularFGD)
+        * (1.0 - VividExperimentalTopLayerOpacity(material));
+}
+
+float SampleVividExperimentalDirectionalShadow(uint2 pixelCoord)
+{
+    float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
+    return _DirectionalShadowTexture.SampleLevel(
+        sampler_PointClamp,
+        uv,
+        0).x;
+}
+
+float EvaluateVividExperimentalDirectionalShadowAttenuation(
+    uint2 pixelCoord,
+    uint lightIndex,
+    DirectionalLightData light)
+{
+    if ((int)lightIndex != _MainDirectionalLightIndex)
+        return 1.0;
+
+    return lerp(
+        1.0,
+        saturate(SampleVividExperimentalDirectionalShadow(pixelCoord)),
+        saturate(light.shadowStrength));
+}
+
+float3 EvaluateVividExperimentalPunctualLight(
+    VividExperimentalClosureMaterial material,
+    float3 positionWS,
+    float3 viewDirectionWS,
+    PunctualLightData light)
+{
+    float3 lightDirectionWS = 0.0;
+    float4 distances = 0.0;
+    GetVividPunctualLightVectors(
+        positionWS,
+        light,
+        lightDirectionWS,
+        distances);
+
+    if (distances.y <= 1e-6)
+        return 0.0;
+
+    float attenuation =
+        VividPunctualLightAttenuationWithDistanceModification(
+            light,
+            positionWS - light.positionWS,
+            distances);
+    if (attenuation <= 0.0)
+        return 0.0;
+
+    return VividEvaluateExperimentalMaterialDirectional(
+        material,
+        viewDirectionWS,
+        lightDirectionWS)
+        * max(light.color, 0.0)
+        * attenuation;
+}
+
+void ApplyVividExperimentalRectangularAreaLightBarnDoor(
+    inout AreaLightData light,
+    float3 positionWS)
+{
+    if (light.lightType != VIVID_AREA_LIGHT_TYPE_RECTANGLE)
+        return;
+
+    if (light.cosBarnDoorAngle <= 0.017
+        || light.barnDoorLength <= 0.05)
+    {
+        return;
+    }
+
+    float halfWidth = light.width * 0.5;
+    float halfHeight = light.height * 0.5;
+    float3 pointToLight = positionWS - light.positionWS;
+    float3 pointLS = float3(
+        dot(pointToLight, light.rightWS),
+        dot(pointToLight, light.upWS),
+        dot(pointToLight, light.forwardWS));
+    float maxDepth = light.cosBarnDoorAngle * light.barnDoorLength;
+    float pointDepth = min(pointLS.z, maxDepth);
+    float pointDepthRatio = pointDepth / max(maxDepth, 1e-5);
+    float sinTheta = sqrt(saturate(
+        1.0 - light.cosBarnDoorAngle * light.cosBarnDoorAngle));
+    float barnDoorProjection =
+        sinTheta * light.barnDoorLength * pointDepthRatio;
+    float2 pointSign = sign(pointLS.xy);
+    pointLS.xy = pointSign * max(
+        abs(pointLS.xy),
+        float2(halfWidth, halfHeight) + barnDoorProjection.xx);
+
+    float3 closestLightCorner = float3(
+        pointSign.x * (halfWidth + barnDoorProjection),
+        pointSign.y * (halfHeight + barnDoorProjection),
+        pointDepth);
+    float3 pointProjection = pointLS - closestLightCorner;
+    float cosPhi = max(0.0, pointProjection.z);
+    float2 tanPhi = cosPhi > 0.001
+        ? abs(pointProjection.xy) / cosPhi
+        : float2(99999.0, 99999.0);
+    float2 projectionDistance = pointDepth * tanPhi;
+
+    float2 horizontalBounds = float2(-halfWidth, halfWidth);
+    float2 verticalBounds = float2(-halfHeight, halfHeight);
+    horizontalBounds += (projectionDistance.x - barnDoorProjection)
+        * float2(max(0.0, -pointSign.x), -max(0.0, pointSign.x));
+    verticalBounds += (projectionDistance.y - barnDoorProjection)
+        * float2(max(0.0, -pointSign.y), -max(0.0, pointSign.y));
+    horizontalBounds = clamp(
+        horizontalBounds,
+        -halfWidth,
+        halfWidth);
+    verticalBounds = clamp(
+        verticalBounds,
+        -halfHeight,
+        halfHeight);
+
+    float2 lightCenterOffset = 0.5 * float2(
+        horizontalBounds.x + horizontalBounds.y,
+        verticalBounds.x + verticalBounds.y);
+    light.width = horizontalBounds.y - horizontalBounds.x;
+    light.height = verticalBounds.y - verticalBounds.x;
+    light.positionWS += light.rightWS * lightCenterOffset.x
+        + light.upWS * lightCenterOffset.y;
+}
+
+float EvaluateVividExperimentalAreaLightIntensity(
+    AreaLightData light,
+    float3 positionWS)
+{
+    float3 unL = light.positionWS - positionWS;
+    float intensity = PillowWindowing(
+        unL,
+        light.rightWS,
+        light.upWS,
+        light.width * 0.5,
+        light.height * 0.5,
+        light.rangeAttenuationScale,
+        light.rangeAttenuationBias);
+
+    if (light.lightType == VIVID_AREA_LIGHT_TYPE_RECTANGLE
+        && dot(unL, light.forwardWS) >= 0.0)
+    {
+        return 0.0;
+    }
+
+    return intensity;
+}
+
+float3 EvaluateVividExperimentalSlabAreaLight(
+    VividExperimentalSlabClosure slab,
+    VividExperimentalClosurePreLightData preLightData,
+    float3 positionWS,
+    AreaLightData light)
+{
+    ApplyVividExperimentalRectangularAreaLightBarnDoor(
+        light,
+        positionWS);
+    float intensity = EvaluateVividExperimentalAreaLightIntensity(
+        light,
+        positionWS);
+    if (intensity <= 0.0)
+        return 0.0;
+
+    bool isRectangle =
+        light.lightType == VIVID_AREA_LIGHT_TYPE_RECTANGLE;
+    float3 unL = light.positionWS - positionWS;
+    float3 center = mul(
+        preLightData.orthoBasisViewNormal,
+        unL);
+    float3 right = mul(
+        preLightData.orthoBasisViewNormal,
+        light.rightWS);
+    float3 up = mul(
+        preLightData.orthoBasisViewNormal,
+        light.upWS);
+    float halfWidth = light.width * 0.5;
+    float halfHeight = light.height * 0.5;
+
+    float4 diffuseLtc = EvaluateLTC_Area(
+        isRectangle,
+        center,
+        right,
+        up,
+        halfWidth,
+        halfHeight,
+        transpose(SampleLtcMatrix(
+            preLightData.perceptualRoughness,
+            preLightData.nDotV,
+            VIVID_LTC_LIGHTING_MODEL_DISNEY_DIFFUSE)));
+    float4 specularLtc = EvaluateLTC_Area(
+        isRectangle,
+        center,
+        right,
+        up,
+        halfWidth,
+        halfHeight,
+        transpose(SampleLtcMatrix(
+            preLightData.perceptualRoughness,
+            preLightData.nDotV,
+            VIVID_LTC_LIGHTING_MODEL_GGX)));
+
+    float baseAttenuation = 1.0 - preLightData.clearCoatFresnel;
+    float3 diffuse = slab.diffuseAlbedo
+        * diffuseLtc.rgb
+        * diffuseLtc.a
+        * baseAttenuation;
+    float3 specular = preLightData.specularFGD
+        * specularLtc.rgb
+        * specularLtc.a
+        * baseAttenuation;
+
+    if (slab.clearCoatWeight > 0.0)
+    {
+        float4 coatLtc = EvaluateLTC_Area(
+            isRectangle,
+            center,
+            right,
+            up,
+            halfWidth,
+            halfHeight,
+            transpose(SampleLtcMatrix(
+                preLightData.clearCoatPerceptualRoughness,
+                preLightData.nDotV,
+                VIVID_LTC_LIGHTING_MODEL_GGX)));
+        specular += coatLtc.rgb
+            * coatLtc.a
+            * preLightData.clearCoatFresnel;
+    }
+
+    return max(diffuse + specular, 0.0)
+        * max(light.color, 0.0)
+        * intensity;
+}
+
+float3 EvaluateVividExperimentalAreaLight(
+    VividExperimentalClosureMaterial material,
+    VividExperimentalClosurePreLightData basePreLightData,
+    VividExperimentalClosurePreLightData topPreLightData,
+    float3 positionWS,
+    AreaLightData light)
+{
+    float3 baseLighting = EvaluateVividExperimentalSlabAreaLight(
+        material.slab,
+        basePreLightData,
+        positionWS,
+        light);
+    if (!VividExperimentalHasTopLayer(material))
+        return baseLighting;
+
+    float layerWeight = saturate(material.layerWeight);
+    float3 topLighting = EvaluateVividExperimentalSlabAreaLight(
+        material.topSlab,
+        topPreLightData,
+        positionWS,
+        light);
+    if (material.layerOperator ==
+        VIVID_EXPERIMENTAL_CLOSURE_OPERATOR_HORIZONTAL_MIX)
+    {
+        return lerp(baseLighting, topLighting, layerWeight);
+    }
+
+    float3 bottomTransmittance =
+        VividExperimentalVerticalLayerEnvironmentTransmittance(
+            material,
+            topPreLightData);
+    return topLighting * layerWeight
+        + baseLighting * lerp(1.0, bottomTransmittance, layerWeight);
+}
+
+float3 VividExperimentalRotateAroundYAxis(
+    float3 directionWS,
+    float rotationDegrees)
+{
+    float rotationRadians = radians(rotationDegrees);
+    float s;
+    float c;
+    sincos(rotationRadians, s, c);
+    return float3(
+        c * directionWS.x - s * directionWS.z,
+        directionWS.y,
+        s * directionWS.x + c * directionWS.z);
+}
+
+float3 SampleVividExperimentalSkyRadiance(
+    float3 directionWS,
+    float perceptualRoughness)
+{
+    if (_SkyTextureParams.w <= 0.5)
+        return 0.0;
+
+    uint maxMip = (uint)max(_SkyTextureParams.z, 0.0);
+    float mipLevel = PerceptualRoughnessToMipmapLevel(
+        saturate(perceptualRoughness),
+        maxMip);
+    float3 rotatedDirectionWS = VividExperimentalRotateAroundYAxis(
+        directionWS,
+        _SkyTextureParams.y);
+    float3 radiance = SAMPLE_TEXTURECUBE_LOD(
+        _SkyTexture,
+        sampler_SkyTexture,
+        rotatedDirectionWS,
+        mipLevel).rgb;
+    return max(radiance, 0.0)
+        * _SkyTextureTint.rgb
+        * max(_SkyTextureParams.x, 0.0);
+}
+
+float3 EvaluateVividExperimentalEnvironmentRadiance(
+    VividLightingLoopContext lightLoop,
+    float3 positionWS,
+    float3 normalWS,
+    float3 reflectionDirectionWS,
+    float perceptualRoughness,
+    out float reflectionProbeWeight)
+{
+    float3 probeRadiance = 0.0;
+    reflectionProbeWeight = 0.0;
+    VividLightingLoop::TryEvaluateReflectionProbes(
+        lightLoop,
+        positionWS,
+        normalWS,
+        reflectionDirectionWS,
+        perceptualRoughness,
+        probeRadiance,
+        reflectionProbeWeight);
+
+    float3 skyRadiance = SampleVividExperimentalSkyRadiance(
+        reflectionDirectionWS,
+        perceptualRoughness);
+    return probeRadiance
+        + skyRadiance * (1.0 - saturate(reflectionProbeWeight));
+}
+
+float4 LoadVividExperimentalScreenSpaceReflection(uint2 pixelCoord)
+{
+    if (_ScreenSpaceReflectionEnabled == 0u)
+        return 0.0;
+
+    float4 reflection = _ScreenSpaceReflectionTexture.Load(
+        int3(pixelCoord, 0));
+    return float4(max(reflection.rgb, 0.0), saturate(reflection.a));
+}
+
+float3 EvaluateVividExperimentalSlabIndirectSpecular(
+    VividExperimentalSlabClosure slab,
+    VividExperimentalClosurePreLightData preLightData,
+    VividLightingLoopContext lightLoop,
+    uint2 pixelCoord,
+    float3 positionWS,
+    out float reflectionProbeWeight,
+    out float screenSpaceReflectionWeight)
+{
+    float3 baseRadiance = EvaluateVividExperimentalEnvironmentRadiance(
+        lightLoop,
+        positionWS,
+        slab.normalWS,
+        preLightData.reflectionDirectionWS,
+        preLightData.perceptualRoughness,
+        reflectionProbeWeight);
+    float baseAttenuation = 1.0 - preLightData.clearCoatFresnel;
+    float3 indirectSpecular = baseRadiance
+        * preLightData.specularFGD
+        * baseAttenuation;
+
+    float3 combinedFGD = preLightData.specularFGD * baseAttenuation;
+    if (slab.clearCoatWeight > 0.0)
+    {
+        float coatProbeWeight;
+        float3 coatRadiance = EvaluateVividExperimentalEnvironmentRadiance(
+            lightLoop,
+            positionWS,
+            slab.normalWS,
+            preLightData.reflectionDirectionWS,
+            preLightData.clearCoatPerceptualRoughness,
+            coatProbeWeight);
+        indirectSpecular += coatRadiance
+            * preLightData.clearCoatFresnel;
+        combinedFGD += preLightData.clearCoatFresnel;
+        reflectionProbeWeight = max(
+            reflectionProbeWeight,
+            coatProbeWeight);
+    }
+
+    float4 screenSpaceReflection =
+        LoadVividExperimentalScreenSpaceReflection(pixelCoord);
+    screenSpaceReflectionWeight = screenSpaceReflection.a;
+    indirectSpecular = lerp(
+        indirectSpecular,
+        screenSpaceReflection.rgb * combinedFGD,
+        screenSpaceReflectionWeight);
+    return max(indirectSpecular, 0.0);
+}
+
+float3 EvaluateVividExperimentalIndirectSpecular(
+    VividExperimentalClosureMaterial material,
+    VividExperimentalClosurePreLightData basePreLightData,
+    VividExperimentalClosurePreLightData topPreLightData,
+    VividLightingLoopContext lightLoop,
+    uint2 pixelCoord,
+    float3 positionWS,
+    out float reflectionProbeWeight,
+    out float screenSpaceReflectionWeight)
+{
+    float baseProbeWeight;
+    float baseScreenSpaceReflectionWeight;
+    float3 baseSpecular = EvaluateVividExperimentalSlabIndirectSpecular(
+        material.slab,
+        basePreLightData,
+        lightLoop,
+        pixelCoord,
+        positionWS,
+        baseProbeWeight,
+        baseScreenSpaceReflectionWeight);
+    reflectionProbeWeight = baseProbeWeight;
+    screenSpaceReflectionWeight = baseScreenSpaceReflectionWeight;
+    if (!VividExperimentalHasTopLayer(material))
+        return baseSpecular;
+
+    float topProbeWeight;
+    float topScreenSpaceReflectionWeight;
+    float3 topSpecular = EvaluateVividExperimentalSlabIndirectSpecular(
+        material.topSlab,
+        topPreLightData,
+        lightLoop,
+        pixelCoord,
+        positionWS,
+        topProbeWeight,
+        topScreenSpaceReflectionWeight);
+    reflectionProbeWeight = max(baseProbeWeight, topProbeWeight);
+    screenSpaceReflectionWeight = max(
+        baseScreenSpaceReflectionWeight,
+        topScreenSpaceReflectionWeight);
+
+    float layerWeight = saturate(material.layerWeight);
+    if (material.layerOperator ==
+        VIVID_EXPERIMENTAL_CLOSURE_OPERATOR_HORIZONTAL_MIX)
+    {
+        return lerp(baseSpecular, topSpecular, layerWeight);
+    }
+
+    float3 bottomTransmittance =
+        VividExperimentalVerticalLayerEnvironmentTransmittance(
+            material,
+            topPreLightData);
+    return topSpecular * layerWeight
+        + baseSpecular * lerp(1.0, bottomTransmittance, layerWeight);
+}
+
+void EvaluateExperimentalClosureTile(
+    uint expectedComplexity,
+    uint3 groupId,
+    uint3 groupThreadId)
+{
+    uint tileListIndex = groupId.x;
+    uint2 tileCoord = TileClassifaction::UnpackTileCoord(
+        _ExperimentalClosureTileList[
+            _ExperimentalClosureTileListOffset + tileListIndex]);
+    uint2 pixelCoord =
+        tileCoord * VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE
+        + groupThreadId.xy;
+    if (pixelCoord.x >= (uint)_ScreenSize.x
+        || pixelCoord.y >= (uint)_ScreenSize.y)
+    {
+        return;
+    }
+
+    VividExperimentalClosureMaterial material =
+        LoadExperimentalClosureMaterial(pixelCoord);
+    if (material.closureCount == 0u)
+        return;
+
+    // A tile is scheduled at its maximum complexity. Simpler pixels inside a
+    // mixed tile remain valid and use the same general Slab evaluator.
+    if (material.complexity > expectedComplexity)
+        return;
+
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+    if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+        return;
+
+    float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
+    float3 positionWS = ComputeWorldSpacePosition(
+        uv,
+        deviceDepth,
+        UNITY_MATRIX_I_VP);
+    float3 viewDirectionWS =
+        SafeNormalize(_WorldSpaceCameraPos - positionWS);
+    VividExperimentalClosurePreLightData basePreLightData =
+        BuildVividExperimentalClosurePreLightData(
+            material.slab,
+            viewDirectionWS);
+    VividExperimentalClosurePreLightData topPreLightData =
+        (VividExperimentalClosurePreLightData)0;
+    if (VividExperimentalHasTopLayer(material))
+    {
+        topPreLightData = BuildVividExperimentalClosurePreLightData(
+            material.topSlab,
+            viewDirectionWS);
+    }
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(
+        pixelCoord,
+        positionWS);
+    float3 directLighting = 0.0;
+
+    [loop]
+    for (uint lightIndex = 0u; lightIndex < _DirectionalLightCount; lightIndex++)
+    {
+        DirectionalLightData directionalLight =
+            GetDirectionalLight((int)lightIndex);
+        directLighting += VividEvaluateExperimentalMaterialDirectional(
+            material,
+            viewDirectionWS,
+            SafeNormalize(directionalLight.directionWS))
+            * max(directionalLight.color, 0.0)
+            * EvaluateVividExperimentalDirectionalShadowAttenuation(
+                pixelCoord,
+                lightIndex,
+                directionalLight);
+    }
+
+    uint punctualLightCount =
+        VividLightingLoop::GetPunctualLightCount(lightLoop);
+    [loop]
+    for (uint localLightIndex = 0u;
+        localLightIndex < punctualLightCount;
+        localLightIndex++)
+    {
+        directLighting += EvaluateVividExperimentalPunctualLight(
+            material,
+            positionWS,
+            viewDirectionWS,
+            VividLightingLoop::LoadPunctualLight(
+                lightLoop,
+                localLightIndex));
+    }
+
+    uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+    [loop]
+    for (uint localAreaLightIndex = 0u;
+        localAreaLightIndex < areaLightCount;
+        localAreaLightIndex++)
+    {
+        directLighting += EvaluateVividExperimentalAreaLight(
+            material,
+            basePreLightData,
+            topPreLightData,
+            positionWS,
+            VividLightingLoop::LoadAreaLight(
+                lightLoop,
+                localAreaLightIndex));
+    }
+
+    float3 bakedIrradiance = material.builtinData.bakeDiffuseLighting
+        * material.builtinData.hasBakedGI;
+    float3 bakedLighting = material.slab.diffuseAlbedo
+        * bakedIrradiance
+        * (1.0 - basePreLightData.clearCoatFresnel);
+    if (VividExperimentalHasTopLayer(material))
+    {
+        float layerWeight = saturate(material.layerWeight);
+        float3 topBakedLighting = material.topSlab.diffuseAlbedo
+            * bakedIrradiance;
+        if (material.layerOperator ==
+            VIVID_EXPERIMENTAL_CLOSURE_OPERATOR_HORIZONTAL_MIX)
+        {
+            bakedLighting = lerp(
+                bakedLighting,
+                topBakedLighting,
+                layerWeight);
+        }
+        else
+        {
+            float3 bottomTransmittance =
+                VividExperimentalVerticalLayerEnvironmentTransmittance(
+                    material,
+                    topPreLightData);
+            bakedLighting = topBakedLighting * layerWeight
+                + bakedLighting * lerp(
+                    1.0,
+                    bottomTransmittance,
+                    layerWeight);
+        }
+    }
+    float gtao = saturate(
+        _GTAOTexture.Load(int3(pixelCoord, 0)).x);
+    float ambientOcclusion = saturate(
+        material.summary.ambientOcclusion * gtao);
+    float reflectionProbeWeight;
+    float screenSpaceReflectionWeight;
+    float3 indirectSpecular = EvaluateVividExperimentalIndirectSpecular(
+        material,
+        basePreLightData,
+        topPreLightData,
+        lightLoop,
+        pixelCoord,
+        positionWS,
+        reflectionProbeWeight,
+        screenSpaceReflectionWeight);
+    float3 lighting = directLighting
+        + bakedLighting * ambientOcclusion
+        + indirectSpecular * sqrt(ambientOcclusion)
+        + material.emissive;
+    lighting *= saturate(material.slab.coverage);
+
+    _ExperimentalClosureLightingTexture[pixelCoord] =
+        float4(VividApplyPreExposure(max(lighting, 0.0)), 1.0);
+    _ExperimentalClosureDebugTexture[pixelCoord] = float4(
+        material.complexity * 0.5,
+        saturate(reflectionProbeWeight),
+        screenSpaceReflectionWeight,
+        ambientOcclusion);
+}
+
+[numthreads(
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    1)]
+void ExperimentalClosureLit_Fast(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    EvaluateExperimentalClosureTile(
+        VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_FAST,
+        groupId,
+        groupThreadId);
+}
+
+[numthreads(
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    1)]
+void ExperimentalClosureLit_Single(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    EvaluateExperimentalClosureTile(
+        VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_SINGLE,
+        groupId,
+        groupThreadId);
+}
+
+[numthreads(
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    VIVID_EXPERIMENTAL_CLOSURE_TILE_SIZE,
+    1)]
+void ExperimentalClosureLit_Complex(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    EvaluateExperimentalClosureTile(
+        VIVID_EXPERIMENTAL_CLOSURE_COMPLEXITY_COMPLEX,
+        groupId,
+        groupThreadId);
+}

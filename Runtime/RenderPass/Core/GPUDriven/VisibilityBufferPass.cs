@@ -6,6 +6,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -83,6 +84,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
         private readonly Vector4[] m_VirtualTextureLayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
+        private VividPrimitiveDrawSet m_PrimitiveDrawSet;
         private ComputeShader m_MeshletCullingCompute;
         private CameraHistoryTexture m_OccluderDepthPyramidHistory;
         private RTHandle m_CurrentOccluderDepthPyramid;
@@ -205,6 +207,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizePassOwnedTexture(m_Depth, m_DefaultDepth, width, height);
 
             var gpuDrivenFrameData = frameData.GetOrCreate<VividGPUDrivenFrameData>();
+            m_PrimitiveDrawSet = gpuDrivenFrameData.primitiveDrawSet;
             GraphicsBuffer visibleMeshletRenderRequestsBuffer = gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer;
             GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer = gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer;
 
@@ -239,7 +242,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var nativeCmd = context.GetNativeCommandBuffer();
-            BindVisibilityTargets(nativeCmd, clearTargets: true);
+            BindVisibilityTargets(nativeCmd, false);
 
             GraphicsBuffer visibleMeshletRenderRequestsBuffer = m_VisibleMeshletRenderRequests?.ImportedGraphicsBuffer;
             GraphicsBuffer visibleMeshletIndirectArgsBuffer = m_VisibleMeshletIndirectArgs?.ImportedGraphicsBuffer;
@@ -312,6 +315,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
             m_VirtualTextureFrameData = null;
+            m_PrimitiveDrawSet = null;
             m_MeshletCullingCompute = null;
             m_CopyOccluderDepthKernel = -1;
             m_DownsampleOccluderDepthKernel = -1;
@@ -602,8 +606,18 @@ namespace VividRP.Runtime.RenderPass.Core
             for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
             {
                 VividRendererListID batchKey = (VividRendererListID) rendererListIndex;
-                if (system != null && !system.IsMainViewRendererBatchActive(batchKey))
+                if (m_PrimitiveDrawSet?.IsBuilt == true)
+                {
+                    if (!m_PrimitiveDrawSet.TryGetBucket(batchKey, out VividPrimitiveDrawBucket bucket)
+                        || bucket.DrawCount == 0u)
+                    {
+                        continue;
+                    }
+                }
+                else if (system != null && !system.IsMainViewRendererBatchActive(batchKey))
+                {
                     continue;
+                }
 
                 Material material = m_Materials[rendererListIndex];
                 if (material == null)

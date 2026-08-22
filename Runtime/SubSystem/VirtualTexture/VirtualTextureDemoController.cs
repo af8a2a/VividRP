@@ -114,6 +114,7 @@ namespace VividRP.Runtime
 
             if (!VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(
                     m_VirtualTextureAsset,
+                    VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality(),
                     out validationMessage))
             {
                 return false;

@@ -125,7 +125,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
 
                 return output;
             }
-
+            // [earlydepthstencil]
             uint2 Frag(Varyings input) : SV_Target
             {
                 #ifdef _ALPHATEST_ON

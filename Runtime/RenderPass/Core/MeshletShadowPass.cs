@@ -3,6 +3,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -40,6 +41,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private VividShadowData m_ShadowData;
         private Camera m_LODCamera;
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
+        private VividPrimitiveDrawSet m_PrimitiveShadowDrawSet;
         private int m_FrameIndex;
 
         public MeshletShadowPass()
@@ -49,6 +51,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Create()
         {
+            PassRecorder.RegisterMeshletShadowPass();
             Shader shader = Shader.Find(ShadowCasterShaderName);
             if (shader == null)
             {
@@ -75,10 +78,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CameraShaderGlobals = default;
             m_ShadowData = null;
             m_LODCamera = null;
+            m_PrimitiveShadowDrawSet = null;
             m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
             VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             var frameCameraData = frameData.GetOrCreate<VividCameraData>();
             m_FrameIndex = frameCameraData.frameIndex >= 0 ? frameCameraData.frameIndex : Time.frameCount;
+            m_PrimitiveShadowDrawSet = frameData
+                .GetOrCreate<VividGPUDrivenFrameData>()
+                .primitiveShadowDrawSet;
 
             if (m_Materials[0] == null)
                 return;
@@ -159,6 +166,10 @@ namespace VividRP.Runtime.RenderPass.Core
                         cascadeIndex,
                         out m_ShadowCullingContexts[cascadeIndex]);
                 }
+                VividPrimitiveDrawSet shadowDrawSet = system.CompleteShadowDrawSet(
+                    m_PrimitiveShadowDrawSet,
+                    m_LODCamera,
+                    m_FrameIndex);
                 system.CullShadowCascades(
                     nativeCmd,
                     m_ShadowCullingContexts,
@@ -167,7 +178,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     resources.GPUInstanceCullingCompute,
                     resources.MeshletListBuildCompute,
                     resources.GPUMeshletCullingCompute,
-                    resources.FixupVisibleMeshletIndirectDrawArgsCompute);
+                    resources.FixupVisibleMeshletIndirectDrawArgsCompute,
+                    shadowDrawSet);
 
                 var requestsBuffer = system.GetShadowVisibleMeshletRenderRequestsBuffer(0);
                 var argsBuffer = system.GetShadowVisibleMeshletIndirectDrawArgsBuffer(0);
@@ -260,6 +272,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = false;
             m_ShadowData = null;
             m_LODCamera = null;
+            m_PrimitiveShadowDrawSet = null;
             m_ShadowCasterState = Vector4.zero;
         }
 

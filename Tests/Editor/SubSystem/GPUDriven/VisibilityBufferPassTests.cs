@@ -1,3 +1,4 @@
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -8,6 +9,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Editor.Tests
 {
@@ -116,6 +118,74 @@ namespace VividRP.Editor.Tests
             Assert.That(externalVisibility.desc.Height, Is.EqualTo(240));
             Assert.That(externalDepth.desc.Width, Is.EqualTo(640));
             Assert.That(externalDepth.desc.Height, Is.EqualTo(360));
+        }
+
+        [Test]
+        public void Prepare_ConsumesPrimitiveDrawSetFromFrameData()
+        {
+            VividGPUDrivenSystem.Shutdown();
+            var drawSet = new VividPrimitiveDrawSet();
+            var pass = new VisibilityBufferPass();
+            try
+            {
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.actualWidth = 16;
+                cameraData.actualHeight = 16;
+                VividGPUDrivenFrameData frameGPUDrivenData =
+                    frameData.GetOrCreate<VividGPUDrivenFrameData>();
+                frameGPUDrivenData.primitiveDrawSet = drawSet;
+                frameGPUDrivenData.primitiveShadowDrawSet = drawSet;
+
+                pass.Prepare(frameData);
+
+                FieldInfo field = typeof(VisibilityBufferPass).GetField(
+                    "m_PrimitiveDrawSet",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(field, Is.Not.Null);
+                Assert.That(field.GetValue(pass), Is.SameAs(drawSet));
+
+                VividGPUDrivenFrameData gpuDrivenFrameData =
+                    frameData.GetOrCreate<VividGPUDrivenFrameData>();
+                gpuDrivenFrameData.Reset();
+                Assert.That(gpuDrivenFrameData.primitiveDrawSet, Is.Null);
+                Assert.That(gpuDrivenFrameData.primitiveShadowDrawSet, Is.Null);
+            }
+            finally
+            {
+                pass.Dispose();
+                drawSet.Dispose();
+                VividGPUDrivenSystem.Shutdown();
+            }
+        }
+
+        [Test]
+        public void DrawRendererLists_FiltersByDrawSetBucketBeforeLegacyBatchMask()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VisibilityBufferPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "GPUDriven",
+                "VisibilityBufferPass.cs");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+            int drawSetBranch = source.IndexOf("if (m_PrimitiveDrawSet?.IsBuilt == true)");
+            int bucketFilter = source.IndexOf("m_PrimitiveDrawSet.TryGetBucket(batchKey", drawSetBranch);
+            int zeroBucketFilter = source.IndexOf("bucket.DrawCount == 0u", bucketFilter);
+            int legacyFallback = source.IndexOf(
+                "else if (system != null && !system.IsMainViewRendererBatchActive(batchKey))",
+                zeroBucketFilter);
+
+            Assert.That(drawSetBranch, Is.GreaterThanOrEqualTo(0));
+            Assert.That(bucketFilter, Is.GreaterThan(drawSetBranch));
+            Assert.That(zeroBucketFilter, Is.GreaterThan(bucketFilter));
+            Assert.That(legacyFallback, Is.GreaterThan(zeroBucketFilter));
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferPass pass, string fieldName)

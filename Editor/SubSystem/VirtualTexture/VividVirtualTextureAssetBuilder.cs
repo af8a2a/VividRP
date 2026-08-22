@@ -11,10 +11,12 @@ namespace VividRP.Editor
     internal static class VividVirtualTextureAssetBuilder
     {
         private const int GPUDrivenPageSize = 128;
-        private const int GPUDrivenBorderSize = 4;
+        private const int GPUDrivenDefaultBorderSize = 4;
+        private const int GPUDrivenHighQualityBorderSize = 8;
         private const int GPUDrivenMaxPageCount = 64;
         private const int StreamAlignment = 4096;
         private const int StreamHeaderByteSize = 32;
+        private const string DesktopContentEncodingVersion = "DesktopContent-NormalRG-LinearCopy-v3";
         private static readonly byte[] s_StreamMagic = Encoding.ASCII.GetBytes("VIVIDVT2");
         private static IVTGpuStorageEncoder s_GpuStorageEncoder = new VTUnityBCnStorageEncoder();
 
@@ -68,7 +70,9 @@ namespace VividRP.Editor
 
             bool gpuDrivenSurface = parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface;
             int pageSize = gpuDrivenSurface ? GPUDrivenPageSize : Mathf.Max(1, parameters.PageSize);
-            int borderSize = gpuDrivenSurface ? GPUDrivenBorderSize : Mathf.Max(0, parameters.BorderSize);
+            int borderSize = gpuDrivenSurface
+                ? ResolveGPUDrivenBorderSize(parameters.BorderSize)
+                : Mathf.Max(0, parameters.BorderSize);
             ResolveVirtualPageCounts(
                 parameters,
                 primaryTexture,
@@ -284,7 +288,9 @@ namespace VividRP.Editor
 
             bool gpuDrivenSurface = parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface;
             int pageSize = gpuDrivenSurface ? GPUDrivenPageSize : Mathf.Max(1, parameters.PageSize);
-            int borderSize = gpuDrivenSurface ? GPUDrivenBorderSize : Mathf.Max(0, parameters.BorderSize);
+            int borderSize = gpuDrivenSurface
+                ? ResolveGPUDrivenBorderSize(parameters.BorderSize)
+                : Mathf.Max(0, parameters.BorderSize);
             int physicalPageSize = checked(pageSize + borderSize * 2);
             if ((physicalPageSize & 3) != 0)
                 throw new ArgumentException("DesktopBCn physical page size must be 4x4 block aligned.", nameof(parameters));
@@ -631,13 +637,12 @@ namespace VividRP.Editor
                             pixels,
                             repeat,
                             sourceMipOffsets[layerIndex]);
+                        ConvertLayerEncoding(pixels, layers[layerIndex].Encoding);
                     }
                     else
                     {
                         Fill(pixels, layers[layerIndex].FallbackColor);
                     }
-
-                    ConvertLayerEncoding(pixels, layers[layerIndex].Encoding);
                     pages.Add(pixels);
                 }
 
@@ -689,10 +694,7 @@ namespace VividRP.Editor
             if (encoding == VTLayerDataEncoding.NormalRG)
             {
                 for (int pixelIndex = 0; pixelIndex < pixels.Length; pixelIndex++)
-                {
-                    Color32 source = pixels[pixelIndex];
-                    pixels[pixelIndex] = new Color32(source.a, source.g, 0, 255);
-                }
+                    pixels[pixelIndex] = ConvertNormalToCanonicalRG(pixels[pixelIndex]);
             }
             else if (encoding == VTLayerDataEncoding.SingleChannelR)
             {
@@ -702,6 +704,14 @@ namespace VividRP.Editor
                     pixels[pixelIndex] = new Color32(value, value, value, 255);
                 }
             }
+        }
+
+        internal static Color32 ConvertNormalToCanonicalRG(Color32 source)
+        {
+            // Match Unity's UnpackNormalmapRGorAG contract: BC5 stores X in R
+            // with A=1, while legacy DXT5nm stores X in A with R=1.
+            byte normalX = (byte)((source.r * source.a + 127) / 255);
+            return new Color32(normalX, source.g, 0, 255);
         }
 
         private static int GetEncodedTileByteSize(
@@ -999,6 +1009,13 @@ namespace VividRP.Editor
             return parameters.MaskTexture != null ? parameters.MaskTexture : null;
         }
 
+        private static int ResolveGPUDrivenBorderSize(int requestedBorderSize)
+        {
+            return requestedBorderSize >= GPUDrivenHighQualityBorderSize
+                ? GPUDrivenHighQualityBorderSize
+                : GPUDrivenDefaultBorderSize;
+        }
+
         private static void ResolveVirtualPageCounts(
             in Parameters parameters,
             Texture2D primaryTexture,
@@ -1071,6 +1088,7 @@ namespace VividRP.Editor
                 hash = AppendHash(hash, Mathf.Clamp(parameters.ChunkTargetKiB > 0 ? parameters.ChunkTargetKiB : 256, 128, 256));
                 if (parameters.StorageProfile == VividVirtualTextureStorageProfile.DesktopBCn)
                 {
+                    hash = AppendStringHash(hash, DesktopContentEncodingVersion);
                     VividVirtualTextureLayerDescriptor[] contentLayers = CreateDesktopLayerDescriptors(parameters);
                     hash = AppendHash(hash, contentLayers.Length);
                     for (int layerIndex = 0; layerIndex < contentLayers.Length; layerIndex++)

@@ -1,3 +1,4 @@
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -19,6 +20,96 @@ namespace VividRP.Editor
         {
             base.ValidateMaterial(material);
             StandardLitMaterialUtility.SetupMaterial(material, null, true);
+            GPUDriven.GPUDrivenMaterialProxyAutoSyncService.QueueMaterial(material);
+        }
+
+        public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] properties)
+        {
+            base.OnGUI(materialEditor, properties);
+            DrawRMOConversion(materialEditor);
+        }
+
+        private static void DrawRMOConversion(MaterialEditor materialEditor)
+        {
+            if (materialEditor == null || materialEditor.targets == null)
+            {
+                return;
+            }
+
+            Material material = materialEditor.targets.Length == 1
+                ? materialEditor.target as Material
+                : null;
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("RMO Conversion", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Packs the material's legacy Roughness, Metallic, and AO inputs into an RMO texture.",
+                MessageType.Info);
+
+            using (new EditorGUI.DisabledScope(
+                material == null || !StandardLitRMOTexturePacker.CanPackMaterial(material)))
+            {
+                if (GUILayout.Button("Convert Legacy Maps to RMO"))
+                {
+                    ConvertLegacyMapsToRMO(materialEditor, material);
+                }
+            }
+        }
+
+        private static void ConvertLegacyMapsToRMO(MaterialEditor materialEditor, Material material)
+        {
+            string materialPath = AssetDatabase.GetAssetPath(material);
+            string directory = materialPath.StartsWith("Assets/")
+                ? Path.GetDirectoryName(materialPath)?.Replace('\\', '/')
+                : "Assets";
+            string fileName = SanitizeFileName(material.name) + "_RMO";
+            string assetPath = EditorUtility.SaveFilePanelInProject(
+                "Save Material RMO Texture",
+                fileName,
+                "png",
+                "Choose where to save the packed RMO texture.",
+                directory);
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                return;
+            }
+
+            if (!StandardLitRMOTexturePacker.TryPackMaterialToAsset(
+                assetPath,
+                material,
+                out Texture2D packedTexture,
+                out string errorMessage))
+            {
+                EditorUtility.DisplayDialog("RMO Conversion", errorMessage, "OK");
+                return;
+            }
+
+            Undo.RecordObject(material, "Convert Material Maps to RMO");
+            material.SetTexture("_RMOMap", packedTexture);
+            material.SetTexture("_MetallicGlossMap", null);
+            material.SetTexture("_RoughnessMap", null);
+            material.SetTexture("_OcclusionMap", null);
+            material.SetFloat("_SmoothnessTextureChannel", 0.0f);
+            StandardLitMaterialUtility.SetupMaterial(material, null, false);
+            EditorUtility.SetDirty(material);
+            if (EditorUtility.IsPersistent(material))
+            {
+                AssetDatabase.SaveAssetIfDirty(material);
+            }
+
+            materialEditor.PropertiesChanged();
+            EditorGUIUtility.PingObject(packedTexture);
+        }
+
+        private static string SanitizeFileName(string value)
+        {
+            string sanitized = string.IsNullOrWhiteSpace(value) ? "Material" : value.Trim();
+            foreach (char invalidCharacter in Path.GetInvalidFileNameChars())
+            {
+                sanitized = sanitized.Replace(invalidCharacter, '_');
+            }
+
+            return sanitized;
         }
     }
 
@@ -150,6 +241,7 @@ namespace VividRP.Editor
         private const string OpacityMapKeyword = "_OPACITYMAP";
         private const string TransmissionMapKeyword = "_TRANSMISSIONMAP";
         private const string NormalMapKeyword = "_NORMALMAP";
+        private const string RMOMapKeyword = "_RMOMAP";
         private const string MetallicGlossMapKeyword = "_METALLICSPECGLOSSMAP";
         private const string RoughnessMapKeyword = "_ROUGHNESSMAP";
         private const string OcclusionMapKeyword = "_OCCLUSIONMAP";
@@ -272,13 +364,15 @@ namespace VividRP.Editor
 
         private static void SyncKeywords(Material material)
         {
+            bool hasRMOMap = material.HasProperty("_RMOMap") && material.GetTexture("_RMOMap") != null;
             CoreUtils.SetKeyword(material, AlphaTestKeyword, GetFloat(material, "_AlphaClip") > AlphaClipThreshold);
             CoreUtils.SetKeyword(material, OpacityMapKeyword, material.GetTexture("_OpacityMap") != null);
             CoreUtils.SetKeyword(material, TransmissionMapKeyword, material.GetTexture("_TransmissionMap") != null);
             CoreUtils.SetKeyword(material, NormalMapKeyword, material.GetTexture("_BumpMap") != null);
-            CoreUtils.SetKeyword(material, MetallicGlossMapKeyword, material.GetTexture("_MetallicGlossMap") != null);
-            CoreUtils.SetKeyword(material, RoughnessMapKeyword, material.GetTexture("_RoughnessMap") != null);
-            CoreUtils.SetKeyword(material, OcclusionMapKeyword, material.GetTexture("_OcclusionMap") != null);
+            CoreUtils.SetKeyword(material, RMOMapKeyword, hasRMOMap);
+            CoreUtils.SetKeyword(material, MetallicGlossMapKeyword, !hasRMOMap && material.GetTexture("_MetallicGlossMap") != null);
+            CoreUtils.SetKeyword(material, RoughnessMapKeyword, !hasRMOMap && material.GetTexture("_RoughnessMap") != null);
+            CoreUtils.SetKeyword(material, OcclusionMapKeyword, !hasRMOMap && material.GetTexture("_OcclusionMap") != null);
             CoreUtils.SetKeyword(material, EmissionKeyword, HasEmission(material));
             CoreUtils.SetKeyword(material, ClearCoatKeyword, GetFloat(material, "_ClearCoatMask") > EnabledThreshold);
             CoreUtils.SetKeyword(material, SmoothnessFromAlbedoKeyword, GetFloat(material, "_SmoothnessTextureChannel") > AlphaClipThreshold);

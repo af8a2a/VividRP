@@ -148,8 +148,10 @@ float4 VividSampleVirtualTextureLayer(
     if (resource == 0xFFFFFFFFu)
         return fallback;
 
-    return VTSamplePhysicalCacheTrilinearLayer(
+    return VTSamplePhysicalCacheTrilinearLayerGrad(
         context.virtualUv,
+        context.virtualUvDdx,
+        context.virtualUvDdy,
         context.lowerResolved,
         context.upperResolved,
         context.requestedMips.blend,
@@ -173,12 +175,17 @@ float4 VividSampleNormalGrad(
     const VividSurfaceBindingData bindingData,
     const VividSurfaceSampleContext context)
 {
-    return VividSurfaceHasNormal(bindingData)
+    float4 normalRG = VividSurfaceHasNormal(bindingData)
         ? VividSampleVirtualTextureLayer(
             bindingData.NormalResource,
             context,
             float4(0.5f, 0.5f, 1.0f, 0.5f))
         : float4(0.5f, 0.5f, 1.0f, 0.5f);
+
+    // The VT cache stores normals as NormalRG/BC5. Preserve the surface
+    // sampling contract used by bindless textures, where X is read from A
+    // and Y from G by the shared StandardLit normal unpack path.
+    return float4(1.0f, normalRG.g, normalRG.b, normalRG.r);
 }
 
 float4 VividSampleMaskGrad(

@@ -1666,6 +1666,13 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Adaptive Measured Fallback (Global)", () => VirtualTextureSystem.AdaptiveMeasuredFallbackSampleCount));
                 foldout.children.Add(CreateStatsValue("Adaptive Fallback Input (Global)", () => VirtualTextureSystem.AdaptiveFallbackSampleInputCount));
                 foldout.children.Add(CreateStatsValue("Adaptive Fallback Coverage (Global)", () => VirtualTextureSystem.AdaptiveFallbackCoverage));
+                foldout.children.Add(CreateStatsValue("Adaptive Recent Visible Pages (Worst Pool)", () => VirtualTextureSystem.AdaptiveRecentVisiblePhysicalPageCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Predicted Pages (Worst Pool)", () => VirtualTextureSystem.AdaptivePredictedPhysicalPageCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Pool Pages (Worst Pool)", () => VirtualTextureSystem.AdaptiveProspectivePhysicalPoolPageCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Locked Pages (Worst Pool)", () => VirtualTextureSystem.AdaptiveLockedPhysicalPageCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Locked Residency (Worst Pool)", () => VirtualTextureSystem.AdaptiveLockedPhysicalPageResidency));
+                foldout.children.Add(CreateStatsValue("Adaptive Projected Residency (Worst Pool)", () => VirtualTextureSystem.AdaptiveProspectiveResidency));
+                foldout.children.Add(CreateStatsValue("Adaptive Prospective Pressure (Worst Pool)", () => VirtualTextureSystem.AdaptiveProspectiveResidencyPressure));
                 foldout.children.Add(CreateStatsValue("Adaptive Total Pressure (Global)", () => VirtualTextureSystem.AdaptiveTotalPressure));
                 foldout.children.Add(CreateStatsValue("Adaptive Target Mip Bias (Global)", () => VirtualTextureSystem.AdaptiveTargetMipBias));
                 foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Frame (Global)", () => FormatFrameIndex(VirtualTextureSystem.AdaptiveLastFreshFeedbackFrameIndex)));

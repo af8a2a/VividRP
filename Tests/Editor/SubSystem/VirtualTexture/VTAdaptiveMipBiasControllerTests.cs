@@ -109,6 +109,97 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ComputePredictedPhysicalPageCount_LooksAheadTwoBudgetedFrames()
+        {
+            Assert.That(
+                VTAdaptiveMipBiasController.ComputePredictedPhysicalPageCount(
+                    pendingDataCount: 200,
+                    uploadBudget: 32),
+                Is.EqualTo(64));
+            Assert.That(
+                VTAdaptiveMipBiasController.ComputePredictedPhysicalPageCount(
+                    pendingDataCount: 12,
+                    uploadBudget: int.MaxValue),
+                Is.EqualTo(12));
+        }
+
+        [Test]
+        public void Update_ProspectiveResidencyAdjustsBeforeThePoolIsFull()
+        {
+            var controller = new VTAdaptiveMipBiasController();
+            var prospectivePressure = new VTAdaptiveMipBiasInputs(
+                uploadBudget: 32,
+                pendingUploadCount: 0,
+                blockedUploadCount: 0,
+                streamSaturatedRequestCount: 0,
+                feedbackOverflowCount: 0,
+                fallbackSampleCount: 0,
+                physicalPoolFreePageCount: 40,
+                evictionCount: 0,
+                hasFreshFeedbackMeasurement: false,
+                physicalPoolPageCount: 1000,
+                recentVisiblePhysicalPageCount: 900,
+                predictedPhysicalPageCount: 60);
+
+            float mipBias = controller.Update(1, prospectivePressure);
+
+            Assert.That(controller.LastProspectiveResidency, Is.EqualTo(0.96f).Within(0.0001f));
+            Assert.That(
+                controller.LastProspectiveResidencyPressure,
+                Is.EqualTo(0.2f).Within(0.0001f));
+            Assert.That(mipBias, Is.EqualTo(0.002f).Within(0.0001f));
+            Assert.That(controller.LastTargetMipBias, Is.EqualTo(VTAdaptiveMipBiasController.MaxMipBias));
+        }
+
+        [Test]
+        public void Update_ProspectiveResidencyRecoversProportionallyWhenWorkingSetShrinks()
+        {
+            var controller = new VTAdaptiveMipBiasController();
+            var oversubscribed = new VTAdaptiveMipBiasInputs(
+                32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                physicalPoolPageCount: 1000,
+                recentVisiblePhysicalPageCount: 1000);
+            var calm = new VTAdaptiveMipBiasInputs(
+                32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                physicalPoolFreePageCount: 100,
+                physicalPoolPageCount: 1000,
+                recentVisiblePhysicalPageCount: 900);
+
+            Assert.That(controller.Update(1, oversubscribed), Is.EqualTo(0.01f).Within(0.0001f));
+            Assert.That(controller.Update(2, calm), Is.Zero.Within(0.0001f));
+        }
+
+        [Test]
+        public void Update_ProspectiveResidencyDoesNotBiasWhenLockedPagesDominate()
+        {
+            var controller = new VTAdaptiveMipBiasController();
+            var lockedPressure = new VTAdaptiveMipBiasInputs(
+                32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                physicalPoolPageCount: 1000,
+                recentVisiblePhysicalPageCount: 1000,
+                lockedPhysicalPageCount: 651);
+
+            Assert.That(controller.Update(1, lockedPressure), Is.Zero);
+            Assert.That(controller.LastProspectiveResidency, Is.EqualTo(1f));
+            Assert.That(controller.LastProspectiveResidencyPressure, Is.Zero);
+        }
+
+        [Test]
         public void Update_ReportsFeedbackPressureBreakdownAndMeasurementFreshness()
         {
             var controller = new VTAdaptiveMipBiasController();

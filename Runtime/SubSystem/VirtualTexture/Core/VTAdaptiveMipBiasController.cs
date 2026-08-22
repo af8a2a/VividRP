@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace VividRP.Runtime
@@ -26,7 +27,11 @@ namespace VividRP.Runtime
             int acceptedFaultRequestCount = 0,
             int acceptedResidentRequestCount = 0,
             bool feedbackOverflowOverrideActive = false,
-            bool fallbackSampleOverrideActive = false)
+            bool fallbackSampleOverrideActive = false,
+            int physicalPoolPageCount = 0,
+            int recentVisiblePhysicalPageCount = 0,
+            int predictedPhysicalPageCount = 0,
+            int lockedPhysicalPageCount = 0)
         {
             UploadBudget = uploadBudget;
             PendingUploadCount = Mathf.Max(0, pendingUploadCount);
@@ -60,6 +65,19 @@ namespace VividRP.Runtime
             AcceptedResidentRequestCount = Mathf.Max(0, acceptedResidentRequestCount);
             FeedbackOverflowOverrideActive = feedbackOverflowOverrideActive;
             FallbackSampleOverrideActive = fallbackSampleOverrideActive;
+            PhysicalPoolPageCount = Mathf.Max(0, physicalPoolPageCount);
+            RecentVisiblePhysicalPageCount = Mathf.Clamp(
+                recentVisiblePhysicalPageCount,
+                0,
+                PhysicalPoolPageCount);
+            PredictedPhysicalPageCount = Mathf.Clamp(
+                predictedPhysicalPageCount,
+                0,
+                PhysicalPoolPageCount - RecentVisiblePhysicalPageCount);
+            LockedPhysicalPageCount = Mathf.Clamp(
+                lockedPhysicalPageCount,
+                0,
+                PhysicalPoolPageCount);
         }
 
         internal int UploadBudget { get; }
@@ -106,6 +124,20 @@ namespace VividRP.Runtime
 
         internal bool FallbackSampleOverrideActive { get; }
 
+        internal int PhysicalPoolPageCount { get; }
+
+        internal int RecentVisiblePhysicalPageCount { get; }
+
+        internal int PredictedPhysicalPageCount { get; }
+
+        internal int LockedPhysicalPageCount { get; }
+
+        internal bool HasProspectiveResidencyMeasurement => PhysicalPoolPageCount > 0;
+
+        internal float LockedPhysicalPageResidency => HasProspectiveResidencyMeasurement
+            ? LockedPhysicalPageCount / (float)PhysicalPoolPageCount
+            : 0f;
+
     }
 
     internal sealed class VTAdaptiveMipBiasController
@@ -116,6 +148,11 @@ namespace VividRP.Runtime
         internal const float HighPressureThreshold = 0.5f;
         internal const float LowPressureThreshold = 0.125f;
         internal const int RecoveryDelayFrames = 4;
+        internal const int PredictionHorizonFrames = 2;
+        internal const float ResidencyUpperBound = 0.95f;
+        internal const float ResidencyLowerBound = 0.95f;
+        internal const float ResidencyLockedUpperBound = 0.65f;
+        internal const float ResidencyAdjustmentRate = 0.2f;
 
         private const int k_UnlimitedBudgetPressureScale = 64;
 
@@ -160,6 +197,20 @@ namespace VividRP.Runtime
         internal float LastFallbackPressure { get; private set; }
 
         internal float LastFallbackCoverage => LastFallbackPressure;
+
+        internal float LastProspectiveResidency { get; private set; }
+
+        internal float LastProspectiveResidencyPressure { get; private set; }
+
+        internal int LastRecentVisiblePhysicalPageCount { get; private set; }
+
+        internal int LastPredictedPhysicalPageCount { get; private set; }
+
+        internal int LastProspectivePhysicalPoolPageCount { get; private set; }
+
+        internal int LastLockedPhysicalPageCount { get; private set; }
+
+        internal float LastLockedPhysicalPageResidency { get; private set; }
 
         internal bool LastUpdateHadFreshFeedbackMeasurement { get; private set; }
 
@@ -211,6 +262,13 @@ namespace VividRP.Runtime
             LastMeasuredWeightedAccessSampleCount = inputs.MeasuredWeightedAccessSampleCount;
             LastMeasuredAcceptedFaultRequestCount = inputs.AcceptedFaultRequestCount;
             LastMeasuredAcceptedResidentRequestCount = inputs.AcceptedResidentRequestCount;
+            LastRecentVisiblePhysicalPageCount = inputs.RecentVisiblePhysicalPageCount;
+            LastPredictedPhysicalPageCount = inputs.PredictedPhysicalPageCount;
+            LastProspectivePhysicalPoolPageCount = inputs.PhysicalPoolPageCount;
+            LastLockedPhysicalPageCount = inputs.LockedPhysicalPageCount;
+            LastLockedPhysicalPageResidency = inputs.LockedPhysicalPageResidency;
+            LastProspectiveResidency = ComputeProspectiveResidency(inputs);
+            LastProspectiveResidencyPressure = ComputeProspectiveResidencyPressure(inputs);
             LastUpdateHadFreshFeedbackMeasurement = inputs.HasFreshFeedbackMeasurement;
             if (inputs.HasFreshFeedbackMeasurement)
             {
@@ -252,11 +310,18 @@ namespace VividRP.Runtime
                 LastFreshFeedbackOverflowPressure = LastFeedbackOverflowPressure;
                 LastFreshFallbackPressure = LastFallbackPressure;
             }
-            float livePressure = ComputeLivePressure(inputs);
+            float operationalPressure = ComputeOperationalPressure(inputs);
+            float livePressure = Mathf.Max(
+                operationalPressure,
+                LastProspectiveResidencyPressure);
             LastPressure = Mathf.Max(
                 livePressure,
                 Mathf.Max(LastFeedbackOverflowPressure, LastFallbackPressure));
-            LastTargetMipBias = LastPressure >= HighPressureThreshold
+            bool prospectiveResidencyBiasEnabled = IsProspectiveResidencyBiasEnabled(inputs);
+            LastTargetMipBias = prospectiveResidencyBiasEnabled
+                                && LastProspectiveResidency > ResidencyUpperBound
+                ? MaxMipBias
+                : LastPressure >= HighPressureThreshold
                 ? Mathf.Lerp(1f, MaxMipBias, LastPressure)
                 : LastPressure <= LowPressureThreshold
                     ? 0f
@@ -272,7 +337,9 @@ namespace VividRP.Runtime
                     LastFallbackPressure);
             }
 
-            float actionablePressure = Mathf.Max(livePressure, actionableFeedbackPressure);
+            float actionablePressure = Mathf.Max(
+                operationalPressure,
+                actionableFeedbackPressure);
             bool hasFeedbackEvidence = inputs.HasFreshFeedbackMeasurement
                 || inputs.FeedbackOverflowOverrideActive
                 || inputs.FallbackSampleOverrideActive;
@@ -287,6 +354,33 @@ namespace VividRP.Runtime
                     CurrentMipBias,
                     Mathf.Max(CurrentMipBias, actionableTargetMipBias),
                     AttackStep);
+            }
+            else if (inputs.HasProspectiveResidencyMeasurement)
+            {
+                m_CalmFrameCount = 0;
+                if (!prospectiveResidencyBiasEnabled)
+                {
+                    if (operationalPressure <= LowPressureThreshold
+                        && LastFeedbackOverflowPressure <= LowPressureThreshold
+                        && LastFallbackPressure <= LowPressureThreshold)
+                    {
+                        CurrentMipBias = 0f;
+                    }
+                }
+                else if (LastProspectiveResidency > ResidencyUpperBound)
+                {
+                    CurrentMipBias += ResidencyAdjustmentRate
+                                      * (LastProspectiveResidency - ResidencyUpperBound);
+                }
+                else if (CurrentMipBias > 0f
+                         && LastProspectiveResidency < ResidencyLowerBound
+                         && operationalPressure <= LowPressureThreshold
+                         && LastFeedbackOverflowPressure <= LowPressureThreshold
+                         && LastFallbackPressure <= LowPressureThreshold)
+                {
+                    CurrentMipBias -= ResidencyAdjustmentRate
+                                      * (ResidencyLowerBound - LastProspectiveResidency);
+                }
             }
             else if (LastPressure <= LowPressureThreshold && hasFeedbackEvidence)
             {
@@ -331,6 +425,13 @@ namespace VividRP.Runtime
             LastMeasuredAcceptedResidentRequestCount = 0;
             LastFeedbackOverflowPressure = 0f;
             LastFallbackPressure = 0f;
+            LastProspectiveResidency = 0f;
+            LastProspectiveResidencyPressure = 0f;
+            LastRecentVisiblePhysicalPageCount = 0;
+            LastPredictedPhysicalPageCount = 0;
+            LastProspectivePhysicalPoolPageCount = 0;
+            LastLockedPhysicalPageCount = 0;
+            LastLockedPhysicalPageResidency = 0f;
             LastUpdateHadFreshFeedbackMeasurement = false;
             LastTargetMipBias = 0f;
             LastFreshFeedbackFrameIndex = -1;
@@ -355,6 +456,63 @@ namespace VividRP.Runtime
         }
 
         internal static float ComputeLivePressure(in VTAdaptiveMipBiasInputs inputs)
+        {
+            return Mathf.Max(
+                ComputeOperationalPressure(inputs),
+                ComputeProspectiveResidencyPressure(inputs));
+        }
+
+        internal static float ComputeProspectiveResidency(
+            in VTAdaptiveMipBiasInputs inputs)
+        {
+            if (!inputs.HasProspectiveResidencyMeasurement)
+                return 0f;
+
+            int projectedPageCount = Mathf.Min(
+                inputs.PhysicalPoolPageCount,
+                inputs.RecentVisiblePhysicalPageCount + inputs.PredictedPhysicalPageCount);
+            return Mathf.Clamp01(projectedPageCount / (float)inputs.PhysicalPoolPageCount);
+        }
+
+        internal static float ComputeProspectiveResidencyPressure(
+            in VTAdaptiveMipBiasInputs inputs)
+        {
+            if (!IsProspectiveResidencyBiasEnabled(inputs))
+                return 0f;
+
+            float projectedResidency = ComputeProspectiveResidency(inputs);
+            if (projectedResidency <= ResidencyLowerBound)
+                return 0f;
+
+            return Mathf.Clamp01(
+                (projectedResidency - ResidencyLowerBound)
+                / Mathf.Max(0.0001f, 1f - ResidencyLowerBound));
+        }
+
+        internal static int ComputePredictedPhysicalPageCount(
+            int pendingDataCount,
+            int uploadBudget,
+            int horizonFrames = PredictionHorizonFrames)
+        {
+            int pendingCount = Mathf.Max(0, pendingDataCount);
+            if (pendingCount == 0 || horizonFrames <= 0)
+                return 0;
+
+            if (uploadBudget == int.MaxValue)
+                return pendingCount;
+
+            long horizonBudget = (long)Mathf.Max(0, uploadBudget) * horizonFrames;
+            return (int)Math.Min(pendingCount, Math.Min(int.MaxValue, horizonBudget));
+        }
+
+        private static bool IsProspectiveResidencyBiasEnabled(
+            in VTAdaptiveMipBiasInputs inputs)
+        {
+            return inputs.HasProspectiveResidencyMeasurement
+                   && inputs.LockedPhysicalPageResidency <= ResidencyLockedUpperBound;
+        }
+
+        private static float ComputeOperationalPressure(in VTAdaptiveMipBiasInputs inputs)
         {
             int pressureScale = ResolvePressureScale(inputs.UploadBudget);
             float blockedUploadPressure = NormalizeCount(inputs.BlockedUploadCount, pressureScale);

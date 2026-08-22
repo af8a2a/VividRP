@@ -21,6 +21,52 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLit.shader";
 
         [Test]
+        public void ExperimentalStandardLitShader_ExposesPackedRMOMap()
+        {
+            var material = new Material(LoadShader());
+            try
+            {
+                Assert.That(material.HasProperty("_RMOMap"), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void SetupMaterial_PrioritizesRMOMapOverLegacyPBRMaps()
+        {
+            var material = new Material(LoadShader());
+            var rmoMap = new Texture2D(1, 1);
+            var metallicMap = new Texture2D(1, 1);
+            var roughnessMap = new Texture2D(1, 1);
+            var occlusionMap = new Texture2D(1, 1);
+            try
+            {
+                material.SetTexture("_RMOMap", rmoMap);
+                material.SetTexture("_MetallicGlossMap", metallicMap);
+                material.SetTexture("_RoughnessMap", roughnessMap);
+                material.SetTexture("_OcclusionMap", occlusionMap);
+
+                StandardLitMaterialUtility.SetupMaterial(material, null, false);
+
+                Assert.That(material.IsKeywordEnabled("_RMOMAP"), Is.True);
+                Assert.That(material.IsKeywordEnabled("_METALLICSPECGLOSSMAP"), Is.False);
+                Assert.That(material.IsKeywordEnabled("_ROUGHNESSMAP"), Is.False);
+                Assert.That(material.IsKeywordEnabled("_OCCLUSIONMAP"), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(rmoMap);
+                Object.DestroyImmediate(metallicMap);
+                Object.DestroyImmediate(roughnessMap);
+                Object.DestroyImmediate(occlusionMap);
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
         public void ExperimentalStandardLitShader_ImportsWithoutCompilerErrors()
         {
             Shader shader = LoadShader();

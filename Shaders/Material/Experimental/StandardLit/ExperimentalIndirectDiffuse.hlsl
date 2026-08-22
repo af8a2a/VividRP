@@ -10,15 +10,23 @@ VividExperimentalStandardSurfaceParameters SampleExperimentalStandardLitSurface(
     out float4 baseSample)
 {
     baseSample = SampleBase(geometry.uv);
-    float2 metallicSmoothness =
-        SampleMetallicSmoothness(geometry.uv, baseSample.a);
+    float metallic;
+    float smoothness;
+    float ambientOcclusion;
+    SampleStandardLitPBR(
+        geometry.uv,
+        baseSample.a,
+        0.0,
+        metallic,
+        smoothness,
+        ambientOcclusion);
 
     VividExperimentalStandardSurfaceParameters parameters;
     parameters.baseColor = baseSample.rgb;
     parameters.normalWS = VividIndirectDiffuseSampleNormalWS(geometry);
-    parameters.perceptualRoughness = 1.0 - metallicSmoothness.y;
-    parameters.metallic = metallicSmoothness.x;
-    parameters.ambientOcclusion = SampleAmbientOcclusion(geometry.uv);
+    parameters.perceptualRoughness = 1.0 - smoothness;
+    parameters.metallic = metallic;
+    parameters.ambientOcclusion = ambientOcclusion;
     parameters.coverage = 1.0;
     parameters.specularIor = _SpecularIOR;
     parameters.transmissionWeight = saturate(_TransmissionWeight);

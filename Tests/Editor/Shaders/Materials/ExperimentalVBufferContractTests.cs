@@ -23,6 +23,9 @@ namespace VividRP.Editor.Tests
             Assert.That(ExperimentalVBufferContract.MaterialValueOffset, Is.EqualTo(1u));
             Assert.That(ExperimentalVBufferContract.BytesPerPixel, Is.EqualTo(8 + 8 + 8));
             Assert.That(
+                (uint)ExperimentalVBufferMaterialFeatureFlags.RMOMap,
+                Is.EqualTo(1u << 9));
+            Assert.That(
                 Marshal.SizeOf<ExperimentalVBufferMaterialData>(),
                 Is.EqualTo(ExperimentalVBufferContract.MaterialRecordStride));
 
@@ -56,6 +59,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VividSampleBaseColorGrad", source);
             StringAssert.Contains("VividSampleNormalGrad", source);
             StringAssert.Contains("VividSampleMaskGrad", source);
+            StringAssert.Contains("VIVID_EXPERIMENTAL_FEATURE_RMO_MAP", source);
             StringAssert.Contains("ComputeWorldSpacePosition", source);
             StringAssert.Contains("ReconstructTangentToWorld", source);
             StringAssert.Contains("VividCompileExperimentalStandardSurface", source);

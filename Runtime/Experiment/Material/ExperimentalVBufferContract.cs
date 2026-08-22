@@ -27,6 +27,7 @@ namespace VividRP.Runtime.Experimental.Material
         ClearCoat = 1 << 6,
         ReceiveSSR = 1 << 7,
         ReceiveDecals = 1 << 8,
+        RMOMap = 1 << 9,
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -420,9 +420,10 @@ namespace VividRP.Runtime.Experimental.Material
         {
             data = CreateErrorRecord();
             bool normalEnabled = material.IsKeywordEnabled("_NORMALMAP");
-            bool metallicEnabled = material.IsKeywordEnabled("_METALLICSPECGLOSSMAP");
-            bool roughnessEnabled = material.IsKeywordEnabled("_ROUGHNESSMAP");
-            bool occlusionEnabled = material.IsKeywordEnabled("_OCCLUSIONMAP");
+            bool rmoEnabled = material.IsKeywordEnabled("_RMOMAP");
+            bool metallicEnabled = !rmoEnabled && material.IsKeywordEnabled("_METALLICSPECGLOSSMAP");
+            bool roughnessEnabled = !rmoEnabled && material.IsKeywordEnabled("_ROUGHNESSMAP");
+            bool occlusionEnabled = !rmoEnabled && material.IsKeywordEnabled("_OCCLUSIONMAP");
             bool emissionEnabled = material.IsKeywordEnabled("_EMISSION");
             if (metallicEnabled && roughnessEnabled)
             {
@@ -432,21 +433,25 @@ namespace VividRP.Runtime.Experimental.Material
 
             Texture baseMap = material.GetTexture("_BaseMap");
             Texture normalMap = normalEnabled ? material.GetTexture("_BumpMap") : null;
-            Texture maskMap = metallicEnabled
-                ? material.GetTexture("_MetallicGlossMap")
-                : roughnessEnabled
-                    ? material.GetTexture("_RoughnessMap")
-                    : null;
+            Texture maskMap = rmoEnabled
+                ? material.GetTexture("_RMOMap")
+                : metallicEnabled
+                    ? material.GetTexture("_MetallicGlossMap")
+                    : roughnessEnabled
+                        ? material.GetTexture("_RoughnessMap")
+                        : null;
             var baseTextures = new GPUDrivenSurfaceTextureSet(
                 null,
                 baseMap,
                 normalMap,
                 maskMap,
-                metallicEnabled
-                    ? GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness
-                    : roughnessEnabled
-                        ? GPUDrivenMaterialMaskMode.Roughness
-                        : GPUDrivenMaterialMaskMode.None);
+                rmoEnabled
+                    ? GPUDrivenMaterialMaskMode.RoughnessMetallicOcclusion
+                    : metallicEnabled
+                        ? GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness
+                        : roughnessEnabled
+                            ? GPUDrivenMaterialMaskMode.Roughness
+                            : GPUDrivenMaterialMaskMode.None);
             if (!system.TryAcquireExternalSurfaceBinding(baseTextures, out var baseLease, out reason))
                 return false;
 
@@ -479,7 +484,9 @@ namespace VividRP.Runtime.Experimental.Material
                     ExperimentalVBufferMaterialFeatureFlags.None;
                 if (normalEnabled)
                     featureFlags |= ExperimentalVBufferMaterialFeatureFlags.NormalMap;
-                if (metallicEnabled)
+                if (rmoEnabled)
+                    featureFlags |= ExperimentalVBufferMaterialFeatureFlags.RMOMap;
+                else if (metallicEnabled)
                     featureFlags |= ExperimentalVBufferMaterialFeatureFlags.MetallicMap;
                 else if (roughnessEnabled)
                     featureFlags |= ExperimentalVBufferMaterialFeatureFlags.RoughnessMap;
@@ -608,7 +615,7 @@ namespace VividRP.Runtime.Experimental.Material
             var hash = new HashCode();
             string[] textures =
             {
-                "_BaseMap", "_BumpMap", "_MetallicGlossMap", "_RoughnessMap",
+                "_BaseMap", "_BumpMap", "_RMOMap", "_MetallicGlossMap", "_RoughnessMap",
                 "_EmissionMap", "_OcclusionMap",
             };
             for (int index = 0; index < textures.Length; index++)
@@ -636,7 +643,7 @@ namespace VividRP.Runtime.Experimental.Material
 
             string[] keywords =
             {
-                "_NORMALMAP", "_METALLICSPECGLOSSMAP", "_ROUGHNESSMAP", "_OCCLUSIONMAP",
+                "_NORMALMAP", "_RMOMAP", "_METALLICSPECGLOSSMAP", "_ROUGHNESSMAP", "_OCCLUSIONMAP",
                 "_EMISSION", "_CLEARCOAT", "_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A",
             };
             for (int index = 0; index < keywords.Length; index++)

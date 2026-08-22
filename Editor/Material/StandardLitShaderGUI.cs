@@ -29,7 +29,7 @@ namespace VividRP.Editor
             DrawRMOConversion(materialEditor);
         }
 
-        private static void DrawRMOConversion(MaterialEditor materialEditor)
+        internal static void DrawRMOConversion(MaterialEditor materialEditor)
         {
             if (materialEditor == null || materialEditor.targets == null)
             {

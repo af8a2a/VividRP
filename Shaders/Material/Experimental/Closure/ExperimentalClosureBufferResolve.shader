@@ -41,6 +41,7 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             #define VIVID_EXPERIMENTAL_FEATURE_CLEAR_COAT (1u << 6)
             #define VIVID_EXPERIMENTAL_FEATURE_RECEIVE_SSR (1u << 7)
             #define VIVID_EXPERIMENTAL_FEATURE_RECEIVE_DECALS (1u << 8)
+            #define VIVID_EXPERIMENTAL_FEATURE_RMO_MAP (1u << 9)
 
             TYPED_TEXTURE2D(float2, _ExperimentalVisibilityBuffer);
             TEXTURE2D(_ExperimentalVisibilityAttributes0);
@@ -249,7 +250,23 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 uint featureFlags = materialData.FeatureFlags.x;
                 float metallic = saturate(materialData.BaseSurface.x);
                 float smoothness = saturate(materialData.BaseSurface.y);
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_METALLIC_MAP) != 0u)
+                float ambientOcclusion = 1.0;
+                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_RMO_MAP) != 0u)
+                {
+                    smoothness = lerp(
+                        materialData.BaseRemap0.z,
+                        materialData.BaseRemap0.w,
+                        saturate(1.0 - baseMask.r));
+                    metallic = lerp(
+                        materialData.BaseRemap0.x,
+                        materialData.BaseRemap0.y,
+                        saturate(baseMask.g));
+                    ambientOcclusion = saturate(lerp(
+                        materialData.BaseRemap1.x,
+                        materialData.BaseRemap1.y,
+                        baseMask.b));
+                }
+                else if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_METALLIC_MAP) != 0u)
                 {
                     metallic = lerp(
                         materialData.BaseRemap0.x,
@@ -279,7 +296,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                         saturate(baseSample.a));
                 }
 
-                float ambientOcclusion = 1.0;
                 float3 emissive = 0.0;
                 if (materialData.AuxiliaryBinding.Flags != 0u)
                 {

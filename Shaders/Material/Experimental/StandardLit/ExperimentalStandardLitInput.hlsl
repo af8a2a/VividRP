@@ -17,14 +17,22 @@ VividExperimentalStandardSurfaceParameters SampleExperimentalStandardLitSurface(
     float4 baseSample = SampleBase(uv, input.positionSS);
     ApplyAlphaClip(baseSample.a);
 
-    float2 metallicSmoothness = SampleMetallicSmoothness(uv, baseSample.a);
+    float metallic;
+    float smoothness;
+    float ambientOcclusion;
+    SampleStandardLitPBR(
+        uv,
+        baseSample.a,
+        metallic,
+        smoothness,
+        ambientOcclusion);
 
     VividExperimentalStandardSurfaceParameters parameters;
     parameters.baseColor = baseSample.rgb;
     parameters.normalWS = SampleNormalWS(input, uv);
-    parameters.perceptualRoughness = 1.0 - metallicSmoothness.y;
-    parameters.metallic = metallicSmoothness.x;
-    parameters.ambientOcclusion = SampleAmbientOcclusion(uv);
+    parameters.perceptualRoughness = 1.0 - smoothness;
+    parameters.metallic = metallic;
+    parameters.ambientOcclusion = ambientOcclusion;
     parameters.coverage = 1.0;
     parameters.specularIor = _SpecularIOR;
     parameters.transmissionWeight = saturate(_TransmissionWeight);

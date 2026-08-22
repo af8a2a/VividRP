@@ -1033,7 +1033,19 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DesktopBcnNormal_ReordersLegacyAgIntoCanonicalRgBeforeEncoding()
+        public void NormalEncoding_MatchesUnityRgOrAgContract()
+        {
+            Color32 canonicalRg = VividVirtualTextureAssetBuilder.ConvertNormalToCanonicalRG(
+                new Color32(64, 192, 255, 255));
+            Color32 legacyAg = VividVirtualTextureAssetBuilder.ConvertNormalToCanonicalRG(
+                new Color32(255, 192, 255, 64));
+
+            Assert.That(canonicalRg, Is.EqualTo(new Color32(64, 192, 0, 255)));
+            Assert.That(legacyAg, Is.EqualTo(canonicalRg));
+        }
+
+        [Test]
+        public void DesktopBcnNormal_ConvertsUnityRgOrAgIntoCanonicalRgBeforeEncoding()
         {
             Texture2D baseColor = CreateTexture(128, 128, normal: false);
             Texture2D normal = CreateTexture(128, 128, normal: true);
@@ -1075,6 +1087,41 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void DesktopBcnMissingNormal_KeepsCanonicalFallbackRg()
+        {
+            Texture2D baseColor = CreateTexture(128, 128, normal: false);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamPath = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
+            var encoder = new CapturingStorageEncoder();
+            VividVirtualTextureAssetBuilder.SetGpuStorageEncoderForTesting(encoder);
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = baseColor,
+                    StreamDataPath = streamPath,
+                    BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                    StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn,
+                    StreamCompression = VividVirtualTextureStreamCompression.None,
+                    ChunkTargetKiB = 256,
+                });
+
+                Assert.That(encoder.NormalPage, Is.Not.Null);
+                Assert.That(encoder.NormalPage, Has.All.Matches<Color32>(pixel => pixel.r == 128 && pixel.g == 128));
+            }
+            finally
+            {
+                VividVirtualTextureAssetBuilder.ResetGpuStorageEncoderForTesting();
+                Object.DestroyImmediate(baseColor);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+                if (File.Exists(streamPath))
+                    File.Delete(streamPath);
+            }
+        }
+
         private static VividVirtualTextureTilePayloadLocation CreateRawLocation(
             int chunkIndex,
             long fileOffset)
@@ -1098,7 +1145,7 @@ namespace VividRP.Editor.Tests
             for (int pixelIndex = 0; pixelIndex < pixels.Length; pixelIndex++)
             {
                 pixels[pixelIndex] = normal
-                    ? new Color32(128, 128, 255, (byte)(64 + pixelIndex % 128))
+                    ? new Color32(255, 128, 255, (byte)(64 + pixelIndex % 128))
                     : new Color32((byte)pixelIndex, (byte)(pixelIndex >> 3), (byte)(pixelIndex >> 7), 255);
             }
 

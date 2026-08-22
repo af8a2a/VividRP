@@ -13,7 +13,7 @@ using Object = UnityEngine.Object;
 
 namespace VividRP.Editor
 {
-    [ScriptedImporter(4, Extension)]
+    [ScriptedImporter(6, Extension)]
     internal sealed class VividVirtualTextureAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vividvt";

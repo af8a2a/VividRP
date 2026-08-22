@@ -83,25 +83,35 @@ namespace VividRP.Editor.GPUDriven
                 );
             }
 
-            string proxyAssetPath = ResolveProxyAssetPath(sourceMaterial, sourceMesh, subMeshIndex);
-            if (string.IsNullOrEmpty(proxyAssetPath))
+            var createdAssetPaths = new List<string>();
+            var warnings = new List<string>();
+            GPUDrivenMaterialProxy materialProxy = ResolveReusableBoundProxy(
+                meshletRenderer,
+                subMeshIndex,
+                sourceMaterial);
+            bool wasCreated = false;
+            string proxyAssetPath = string.Empty;
+            if (materialProxy == null)
             {
-                return new GPUDrivenMaterialProxyBindingResult(
-                    false,
-                    $"Could not determine asset path for GPUDriven material proxy on submesh {subMeshIndex}.",
-                    null,
-                    null
+                proxyAssetPath = ResolveProxyAssetPath(sourceMaterial, sourceMesh, subMeshIndex);
+                if (string.IsNullOrEmpty(proxyAssetPath))
+                {
+                    return new GPUDrivenMaterialProxyBindingResult(
+                        false,
+                        $"Could not determine asset path for GPUDriven material proxy on submesh {subMeshIndex}.",
+                        null,
+                        null
+                    );
+                }
+
+                materialProxy = LoadOrCreateProxyAsset(
+                    proxyAssetPath,
+                    sourceMaterial,
+                    createdAssetPaths,
+                    out wasCreated
                 );
             }
 
-            var createdAssetPaths = new List<string>();
-            var warnings = new List<string>();
-            GPUDrivenMaterialProxy materialProxy = LoadOrCreateProxyAsset(
-                proxyAssetPath,
-                sourceMaterial,
-                createdAssetPaths,
-                out bool wasCreated
-            );
             if (materialProxy == null)
             {
                 return new GPUDrivenMaterialProxyBindingResult(
@@ -209,21 +219,31 @@ namespace VividRP.Editor.GPUDriven
                     continue;
                 }
 
-                string proxyAssetPath = ResolveProxyAssetPath(sourceMaterial, sourceMesh, subMeshIndex);
-                if (string.IsNullOrEmpty(proxyAssetPath))
+                GPUDrivenMaterialProxy materialProxy = ResolveReusableBoundProxy(
+                    meshletRenderer,
+                    subMeshIndex,
+                    sourceMaterial);
+                bool wasCreated = false;
+                string proxyAssetPath = string.Empty;
+                if (materialProxy == null)
                 {
-                    warnings.Add(
-                        $"Could not determine asset path for GPUDriven material proxy on submesh {subMeshIndex}. Make the source Material or Mesh persistent first."
+                    proxyAssetPath = ResolveProxyAssetPath(sourceMaterial, sourceMesh, subMeshIndex);
+                    if (string.IsNullOrEmpty(proxyAssetPath))
+                    {
+                        warnings.Add(
+                            $"Could not determine asset path for GPUDriven material proxy on submesh {subMeshIndex}. Make the source Material or Mesh persistent first."
+                        );
+                        continue;
+                    }
+
+                    materialProxy = LoadOrCreateProxyAsset(
+                        proxyAssetPath,
+                        sourceMaterial,
+                        createdAssetPaths,
+                        out wasCreated
                     );
-                    continue;
                 }
 
-                GPUDrivenMaterialProxy materialProxy = LoadOrCreateProxyAsset(
-                    proxyAssetPath,
-                    sourceMaterial,
-                    createdAssetPaths,
-                    out bool wasCreated
-                );
                 if (materialProxy == null)
                 {
                     warnings.Add($"Failed to create GPUDriven material proxy asset at '{proxyAssetPath}'.");
@@ -473,7 +493,8 @@ namespace VividRP.Editor.GPUDriven
                 return false;
             }
 
-            string directory = Path.GetDirectoryName(proxyAssetPath)?.Replace('\\', '/') ?? "Assets";
+            string directory = GPUDrivenGeneratedAssetPathUtility
+                .ResolveStreamedVirtualTextureFolderForProxy(proxyAssetPath);
             string assetName = Path.GetFileNameWithoutExtension(proxyAssetPath) + "_Surface." + VividVirtualTextureAssetImporter.Extension;
             assetPath = Path.Combine(directory, assetName).Replace('\\', '/');
 
@@ -741,22 +762,68 @@ namespace VividRP.Editor.GPUDriven
         internal static string ResolveProxyAssetPath(Material sourceMaterial, Mesh sourceMesh, int subMeshIndex)
         {
             string materialPath = sourceMaterial != null ? AssetDatabase.GetAssetPath(sourceMaterial) : string.Empty;
-            if (sourceMaterial != null
-                && !string.IsNullOrEmpty(materialPath)
-                && string.Equals(Path.GetExtension(materialPath), ".mat", StringComparison.OrdinalIgnoreCase))
-            {
-                string directory = Path.GetDirectoryName(materialPath)?.Replace('\\', '/') ?? "Assets";
-                return $"{directory}/{sourceMaterial.name}_GPUDriven.asset";
-            }
-
+            bool hasPersistentMaterial = sourceMaterial != null
+                                         && !string.IsNullOrEmpty(materialPath)
+                                         && string.Equals(
+                                             Path.GetExtension(materialPath),
+                                             ".mat",
+                                             StringComparison.OrdinalIgnoreCase);
             string meshPath = sourceMesh != null ? AssetDatabase.GetAssetPath(sourceMesh) : string.Empty;
             if (!string.IsNullOrEmpty(meshPath))
             {
                 string directory = Path.GetDirectoryName(meshPath)?.Replace('\\', '/') ?? "Assets";
-                return $"{directory}/{sourceMesh.name}_SubMesh{subMeshIndex}_GPUDriven.asset";
+                string generatedFolder = GPUDrivenGeneratedAssetPathUtility
+                    .EnsureMaterialProxyFolder(directory);
+                string assetName = hasPersistentMaterial
+                    ? $"{sourceMaterial.name}_{GetStableAssetIdentifier(sourceMaterial, materialPath)}"
+                    : $"{sourceMesh.name}_{GetStableAssetIdentifier(sourceMesh, meshPath)}_SubMesh{subMeshIndex}";
+                return $"{generatedFolder}/{assetName}_GPUDriven.asset";
+            }
+
+            if (hasPersistentMaterial)
+            {
+                string directory = Path.GetDirectoryName(materialPath)?.Replace('\\', '/') ?? "Assets";
+                string generatedFolder = GPUDrivenGeneratedAssetPathUtility
+                    .EnsureMaterialProxyFolder(directory);
+                return $"{generatedFolder}/{sourceMaterial.name}_{GetStableAssetIdentifier(sourceMaterial, materialPath)}_GPUDriven.asset";
             }
 
             return string.Empty;
+        }
+
+        private static string GetStableAssetIdentifier(UnityEngine.Object asset, string assetPath)
+        {
+            string assetGuid = AssetDatabase.AssetPathToGUID(assetPath);
+            long localFileId = 0L;
+            if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                    asset,
+                    out string resolvedGuid,
+                    out long resolvedLocalFileId))
+            {
+                if (!string.IsNullOrEmpty(resolvedGuid))
+                {
+                    assetGuid = resolvedGuid;
+                }
+
+                localFileId = resolvedLocalFileId;
+            }
+
+            return localFileId != 0L
+                ? $"{assetGuid}_{unchecked((ulong)localFileId):X16}"
+                : assetGuid;
+        }
+
+        private static GPUDrivenMaterialProxy ResolveReusableBoundProxy(
+            MeshletRenderer meshletRenderer,
+            int subMeshIndex,
+            Material sourceMaterial)
+        {
+            GPUDrivenMaterialProxy materialProxy = meshletRenderer.GetMaterialProxy(subMeshIndex);
+            return materialProxy != null
+                   && AssetDatabase.Contains(materialProxy)
+                   && materialProxy.SourceMaterial == sourceMaterial
+                ? materialProxy
+                : null;
         }
 
         private static GPUDrivenMaterialProxy LoadOrCreateProxyAsset(

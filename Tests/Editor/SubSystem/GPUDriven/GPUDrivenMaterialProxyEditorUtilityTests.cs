@@ -13,6 +13,10 @@ namespace VividRP.Editor.Tests
     public class GPUDrivenMaterialProxyEditorUtilityTests
     {
         private const string TempFolder = "Assets/VividRP_Temp_GPUDrivenMaterialProxyEditorUtilityTests";
+        private const string GeneratedRoot = TempFolder + "/GPUDrivenGenerated";
+        private const string MaterialProxyFolder = GeneratedRoot + "/MaterialProxy";
+        private const string StreamedVirtualTextureFolder = GeneratedRoot + "/SVT";
+        private const string StreamedVirtualTextureBinaryFolder = StreamedVirtualTextureFolder + "/Bin";
 
         [SetUp]
         public void SetUp()
@@ -30,13 +34,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CreateOrBindMaterialProxies_CreatesAssetNextToPersistentMaterial_WhenMaterialAssetExists()
+        public void CreateOrBindMaterialProxies_CreatesAssetInGeneratedFolder_WhenMaterialAssetExists()
         {
             Shader shader = Shader.Find("Hidden/InternalErrorShader");
             Assert.That(shader, Is.Not.Null);
 
-            string meshPath = TempFolder + "/PersistentMesh.asset";
-            string materialPath = TempFolder + "/PersistentMaterial.mat";
+            AssetDatabase.CreateFolder(TempFolder, "Meshes");
+            AssetDatabase.CreateFolder(TempFolder, "Materials");
+            string meshPath = TempFolder + "/Meshes/PersistentMesh.asset";
+            string materialPath = TempFolder + "/Materials/PersistentMaterial.mat";
+            string meshGeneratedRoot = TempFolder + "/Meshes/GPUDrivenGenerated";
+            string meshGeneratedProxyFolder = meshGeneratedRoot + "/MaterialProxy";
 
             Mesh mesh = CreateSingleSubMeshMesh("PersistentMesh");
             AssetDatabase.CreateAsset(mesh, meshPath);
@@ -45,6 +53,15 @@ namespace VividRP.Editor.Tests
             var persistentMaterial = new Material(shader);
             AssetDatabase.CreateAsset(persistentMaterial, materialPath);
             persistentMaterial = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+            Assert.That(
+                AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                    persistentMaterial,
+                    out string materialGuid,
+                    out long materialLocalFileId),
+                Is.True);
+            string materialIdentifier = materialLocalFileId != 0L
+                ? $"{materialGuid}_{unchecked((ulong)materialLocalFileId):X16}"
+                : materialGuid;
 
             GameObject gameObject = CreateMeshletRendererObject("PersistentMaterialRenderer", mesh, persistentMaterial, out MeshletRenderer meshletRenderer);
 
@@ -56,8 +73,17 @@ namespace VividRP.Editor.Tests
                 Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Not.Null);
                 Assert.That(
                     AssetDatabase.GetAssetPath(meshletRenderer.GetMaterialProxy(0)),
-                    Is.EqualTo($"{TempFolder}/PersistentMaterial_GPUDriven.asset")
+                    Is.EqualTo(
+                        $"{meshGeneratedProxyFolder}/PersistentMaterial_{materialIdentifier}_GPUDriven.asset")
                 );
+                Assert.That(AssetDatabase.IsValidFolder(meshGeneratedRoot), Is.True);
+                Assert.That(AssetDatabase.IsValidFolder(meshGeneratedProxyFolder), Is.True);
+                Assert.That(AssetDatabase.IsValidFolder(meshGeneratedRoot + "/MeshletAsset"), Is.True);
+                Assert.That(AssetDatabase.IsValidFolder(meshGeneratedRoot + "/SVT"), Is.True);
+                Assert.That(AssetDatabase.IsValidFolder(meshGeneratedRoot + "/SVT/Bin"), Is.True);
+                Assert.That(
+                    AssetDatabase.IsValidFolder(TempFolder + "/Materials/GPUDrivenGenerated"),
+                    Is.False);
             }
             finally
             {
@@ -204,7 +230,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CreateOrBindMaterialProxies_CreatesAssetNextToPersistentMesh_WhenMaterialIsNonPersistent()
+        public void CreateOrBindMaterialProxies_CreatesAssetInGeneratedFolder_WhenMaterialIsNonPersistent()
         {
             Shader shader = Shader.Find("Hidden/InternalErrorShader");
             Assert.That(shader, Is.Not.Null);
@@ -214,6 +240,15 @@ namespace VividRP.Editor.Tests
             Mesh mesh = CreateSingleSubMeshMesh("FallbackMesh");
             AssetDatabase.CreateAsset(mesh, meshPath);
             mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            Assert.That(
+                AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                    mesh,
+                    out string meshGuid,
+                    out long meshLocalFileId),
+                Is.True);
+            string meshIdentifier = meshLocalFileId != 0L
+                ? $"{meshGuid}_{unchecked((ulong)meshLocalFileId):X16}"
+                : meshGuid;
 
             Material nonPersistentMaterial = new Material(shader);
             GameObject gameObject = CreateMeshletRendererObject("FallbackMaterialRenderer", mesh, nonPersistentMaterial, out MeshletRenderer meshletRenderer);
@@ -226,7 +261,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Not.Null);
                 Assert.That(
                     AssetDatabase.GetAssetPath(meshletRenderer.GetMaterialProxy(0)),
-                    Is.EqualTo($"{TempFolder}/FallbackMesh_SubMesh0_GPUDriven.asset")
+                    Is.EqualTo(
+                        $"{MaterialProxyFolder}/FallbackMesh_{meshIdentifier}_SubMesh0_GPUDriven.asset")
                 );
             }
             finally
@@ -281,11 +317,106 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateOrBindMaterialProxies_PreservesMatchingLegacyBoundProxy()
+        {
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            string meshPath = TempFolder + "/LegacyProxyMesh.asset";
+            string materialPath = TempFolder + "/LegacyProxyMaterial.mat";
+            string proxyPath = TempFolder + "/LegacyProxyMaterial_GPUDriven.asset";
+            Mesh mesh = CreateSingleSubMeshMesh("LegacyProxyMesh");
+            AssetDatabase.CreateAsset(mesh, meshPath);
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            var material = new Material(shader);
+            AssetDatabase.CreateAsset(material, materialPath);
+            material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+            var legacyProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            legacyProxy.SourceMaterial = material;
+            AssetDatabase.CreateAsset(legacyProxy, proxyPath);
+            GameObject gameObject = CreateMeshletRendererObject(
+                "LegacyProxyRenderer",
+                mesh,
+                material,
+                out MeshletRenderer meshletRenderer);
+            meshletRenderer.SetMaterialProxies(new[] { legacyProxy });
+
+            try
+            {
+                GPUDrivenMaterialProxyBindingResult result =
+                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+
+                Assert.That(result.Success, Is.True, result.ErrorMessage);
+                Assert.That(meshletRenderer.GetMaterialProxy(0), Is.SameAs(legacyProxy));
+                Assert.That(AssetDatabase.GetAssetPath(legacyProxy), Is.EqualTo(proxyPath));
+                Assert.That(AssetDatabase.IsValidFolder(GeneratedRoot), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void CreateOrBindMaterialProxies_SeparatesSameNameMaterialsFromDifferentAssets()
+        {
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            AssetDatabase.CreateFolder(TempFolder, "MaterialA");
+            AssetDatabase.CreateFolder(TempFolder, "MaterialB");
+            string meshPath = TempFolder + "/SameNameMaterialMesh.asset";
+            Mesh mesh = CreateTwoSubMeshMesh("SameNameMaterialMesh");
+            AssetDatabase.CreateAsset(mesh, meshPath);
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            var materialA = new Material(shader) { name = "SharedName" };
+            var materialB = new Material(shader) { name = "SharedName" };
+            AssetDatabase.CreateAsset(materialA, TempFolder + "/MaterialA/SharedName.mat");
+            AssetDatabase.CreateAsset(materialB, TempFolder + "/MaterialB/SharedName.mat");
+            materialA = AssetDatabase.LoadAssetAtPath<Material>(
+                TempFolder + "/MaterialA/SharedName.mat");
+            materialB = AssetDatabase.LoadAssetAtPath<Material>(
+                TempFolder + "/MaterialB/SharedName.mat");
+            GameObject gameObject = CreateMeshletRendererObject(
+                "SameNameMaterialRenderer",
+                mesh,
+                new[] { materialA, materialB },
+                out MeshletRenderer meshletRenderer);
+
+            try
+            {
+                GPUDrivenMaterialProxyBindingResult firstResult =
+                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+                GPUDrivenMaterialProxy proxyA = meshletRenderer.GetMaterialProxy(0);
+                GPUDrivenMaterialProxy proxyB = meshletRenderer.GetMaterialProxy(1);
+
+                Assert.That(firstResult.Success, Is.True, firstResult.ErrorMessage);
+                Assert.That(proxyA, Is.Not.Null);
+                Assert.That(proxyB, Is.Not.Null);
+                Assert.That(proxyA, Is.Not.SameAs(proxyB));
+                Assert.That(proxyA.SourceMaterial, Is.SameAs(materialA));
+                Assert.That(proxyB.SourceMaterial, Is.SameAs(materialB));
+                Assert.That(AssetDatabase.GetAssetPath(proxyA), Does.StartWith(MaterialProxyFolder + "/"));
+                Assert.That(AssetDatabase.GetAssetPath(proxyB), Does.StartWith(MaterialProxyFolder + "/"));
+
+                GPUDrivenMaterialProxyBindingResult secondResult =
+                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+                Assert.That(secondResult.Success, Is.True, secondResult.ErrorMessage);
+                Assert.That(meshletRenderer.GetMaterialProxy(0), Is.SameAs(proxyA));
+                Assert.That(meshletRenderer.GetMaterialProxy(1), Is.SameAs(proxyB));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
         public void BuildOrRefreshStreamedVirtualTexture_CreatesGpuSurfaceAssetAndBindsProxy()
         {
             string texturePath = TempFolder + "/SurfaceTexture.asset";
             string sourceMaterialPath = TempFolder + "/SurfaceSource.mat";
-            string proxyPath = TempFolder + "/SurfaceProxy.asset";
+            string proxyPath = MaterialProxyFolder + "/SurfaceProxy.asset";
             var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true)
             {
                 name = "SurfaceTexture",
@@ -309,6 +440,7 @@ namespace VividRP.Editor.Tests
             var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
             materialProxy.BaseMap = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
             materialProxy.SourceMaterial = AssetDatabase.LoadAssetAtPath<Material>(sourceMaterialPath);
+            GPUDrivenGeneratedAssetPathUtility.EnsureMaterialProxyFolder(TempFolder);
             AssetDatabase.CreateAsset(materialProxy, proxyPath);
 
             bool success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
@@ -319,7 +451,9 @@ namespace VividRP.Editor.Tests
 
             Assert.That(success, Is.True, errorMessage);
             Assert.That(wasCreated, Is.True);
-            Assert.That(assetPath, Is.EqualTo(TempFolder + "/SurfaceProxy_Surface.vividvt"));
+            Assert.That(
+                assetPath,
+                Is.EqualTo(StreamedVirtualTextureFolder + "/SurfaceProxy_Surface.vividvt"));
             Assert.That(materialProxy.TextureMode, Is.EqualTo(GPUDrivenMaterialProxyTextureMode.VirtualTexture));
             Assert.That(materialProxy.StreamedVirtualTexture, Is.Not.Null);
             Assert.That(materialProxy.BaseMap, Is.Null);
@@ -340,6 +474,11 @@ namespace VividRP.Editor.Tests
             materialProxy.SourceMaterial = null;
             VividVirtualTextureAsset initialStreamedAsset = materialProxy.StreamedVirtualTexture;
             string streamDataPath = initialStreamedAsset.BuiltData.StreamDataPath;
+            Assert.That(
+                streamDataPath.Replace('\\', '/'),
+                Is.EqualTo(
+                    StreamedVirtualTextureBinaryFolder
+                    + "/SurfaceProxy_Surface.vividvt.stream"));
             var sentinelWriteTime = new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             File.SetLastWriteTimeUtc(streamDataPath, sentinelWriteTime);
 
@@ -445,6 +584,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveStreamedVirtualTextureFolderForProxy_ManualProxyKeepsAdjacentFolder()
+        {
+            string proxyPath = TempFolder + "/ManualProxy.asset";
+
+            string streamedVirtualTextureFolder = GPUDrivenGeneratedAssetPathUtility
+                .ResolveStreamedVirtualTextureFolderForProxy(proxyPath);
+
+            Assert.That(streamedVirtualTextureFolder, Is.EqualTo(TempFolder));
+            Assert.That(AssetDatabase.IsValidFolder(GeneratedRoot), Is.False);
+        }
+
+        [Test]
+        public void EnsureGeneratedFolder_FromGeneratedSubfolderDoesNotNestAnotherRoot()
+        {
+            string meshletFolder = GPUDrivenGeneratedAssetPathUtility
+                .EnsureMeshletAssetFolder(TempFolder);
+
+            string materialProxyFolder = GPUDrivenGeneratedAssetPathUtility
+                .EnsureMaterialProxyFolder(meshletFolder);
+
+            Assert.That(materialProxyFolder, Is.EqualTo(MaterialProxyFolder));
+            Assert.That(
+                AssetDatabase.IsValidFolder(meshletFolder + "/GPUDrivenGenerated"),
+                Is.False);
+        }
+
+        [Test]
         public void BuildOrRefreshStreamedVirtualTexture_BuildsMaskOnlyTerrainControlAsset()
         {
             string texturePath = TempFolder + "/TerrainControl.asset";
@@ -482,6 +648,10 @@ namespace VividRP.Editor.Tests
             Assert.That(streamedAsset, Is.Not.Null);
             Assert.That(streamedAsset.ContentLayerMask, Is.EqualTo(4));
             Assert.That(streamedAsset.StorageProfile, Is.EqualTo(VividVirtualTextureStorageProfile.DesktopBCn));
+            Assert.That(
+                streamedAsset.BuiltData.StreamDataPath.Replace('\\', '/'),
+                Is.EqualTo(virtualTexturePath + ".stream"));
+            Assert.That(File.Exists(streamedAsset.BuiltData.StreamDataPath), Is.True);
             var importer = (VividVirtualTextureAssetImporter)AssetImporter.GetAtPath(virtualTexturePath);
             Assert.That(importer.SourceTexture, Is.Null);
             Assert.That(importer.NormalTexture, Is.Null);

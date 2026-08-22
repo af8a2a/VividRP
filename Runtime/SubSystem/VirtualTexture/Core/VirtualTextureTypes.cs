@@ -719,6 +719,10 @@ namespace VividRP.Runtime
 
         internal int PendingUploadCount => m_Stats.PendingUploadCount;
 
+        internal int PendingDataCount => m_Stats.PendingDataCount;
+
+        internal int PhysicalPendingUploadCount => m_Stats.PhysicalPendingUploadCount;
+
         internal int EvictionCount => m_Stats.EvictionCount;
 
         internal int FaultCount => m_Stats.FaultCount;

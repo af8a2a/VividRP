@@ -1259,7 +1259,7 @@ namespace VividRP.Editor.Tests
             VirtualTextureSpaceDesc desc = CreateDesc(
                 "PendingRequestIndex",
                 maxUploadsPerFrame: 3);
-            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Pending);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
             int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
             var firstCoord = new VirtualTexturePageCoord(0, 0, 0);
             var removedCoord = new VirtualTexturePageCoord(1, 0, 0);
@@ -1376,6 +1376,9 @@ namespace VividRP.Editor.Tests
             int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
             var pageCoord = new VirtualTexturePageCoord(0, 0, 0);
             producer.ResetCounters();
+            int freePageCountBeforeFeedback = VirtualTextureSystem.GetFreePageCountForTesting(spaceId);
+            int evictionCountBeforeFeedback =
+                VirtualTextureSystem.GetPhysicalPoolStatsForTesting().EvictedPageCount;
 
             IssueFeedback(spaceId, pageCoord);
 
@@ -1386,6 +1389,14 @@ namespace VividRP.Editor.Tests
             Assert.That(producer.CancelCount, Is.EqualTo(0));
             Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(1));
             Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPendingDataCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPhysicalPendingUploadCountForTesting(spaceId), Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
+                Is.EqualTo(freePageCountBeforeFeedback));
+            Assert.That(
+                VirtualTextureSystem.GetPhysicalPoolStatsForTesting().EvictedPageCount,
+                Is.EqualTo(evictionCountBeforeFeedback));
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 pageCoord,
@@ -1401,6 +1412,11 @@ namespace VividRP.Editor.Tests
             Assert.That(producer.ProduceCount, Is.EqualTo(1));
             Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(1));
             Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPendingDataCountForTesting(spaceId), Is.Zero);
+            Assert.That(VirtualTextureSystem.GetPhysicalPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
+                Is.EqualTo(freePageCountBeforeFeedback - 1));
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 pageCoord,
@@ -1419,6 +1435,49 @@ namespace VividRP.Editor.Tests
                 out VirtualTexturePageTableEntry residentEntry), Is.True);
             Assert.That(residentEntry.Resident, Is.True);
             Assert.That(residentEntry.PendingUpload, Is.False);
+        }
+
+        [Test]
+        public void PendingData_DoesNotEvictResidentPage_UntilProducerDataIsAvailable()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "PendingDataFullPool",
+                cachePageCount: 2);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            var residentCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var deferredCoord = new VirtualTexturePageCoord(1, 0, 0);
+
+            IssueFeedback(spaceId, residentCoord);
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            m_FenceFactory.Handles[0].IsPassed = true;
+            UpdateOnce();
+            for (int frame = 0; frame < VTPhysicalPool.FeedbackEvictionProtectionFrames; frame++)
+                UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetFreePageCountForTesting(spaceId), Is.Zero);
+            int residentPageCount = VirtualTextureSystem.GetResidentPageCountForTesting(spaceId);
+            int evictionCount = VirtualTextureSystem.GetPhysicalPoolStatsForTesting().EvictedPageCount;
+            producer.Status = VTPageRequestStatus.Pending;
+
+            IssueFeedback(spaceId, deferredCoord);
+
+            Assert.That(VirtualTextureSystem.GetPendingDataCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPhysicalPendingUploadCountForTesting(spaceId), Is.Zero);
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(residentPageCount));
+            Assert.That(VirtualTextureSystem.GetFreePageCountForTesting(spaceId), Is.Zero);
+            Assert.That(
+                VirtualTextureSystem.GetPhysicalPoolStatsForTesting().EvictedPageCount,
+                Is.EqualTo(evictionCount));
+
+            producer.Status = VTPageRequestStatus.Available;
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetPendingDataCountForTesting(spaceId), Is.Zero);
+            Assert.That(VirtualTextureSystem.GetPhysicalPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.GetPhysicalPoolStatsForTesting().EvictedPageCount,
+                Is.EqualTo(evictionCount + 1));
         }
 
         private static VirtualTextureSpaceDesc CreateDesc(

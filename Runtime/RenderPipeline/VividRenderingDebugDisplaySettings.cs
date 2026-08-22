@@ -1631,7 +1631,9 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Pool Evicted Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolEvictedPageCount));
                 foldout.children.Add(CreateStatsValue("Resident Pages", () => GetVirtualTextureDisplayStats(data).ResidentPageCount));
                 foldout.children.Add(CreateStatsValue("Free Pages", () => GetVirtualTextureDisplayStats(data).FreePageCount));
-                foldout.children.Add(CreateStatsValue("Pending Uploads", () => GetVirtualTextureDisplayStats(data).PendingUploadCount));
+                foldout.children.Add(CreateStatsValue("Pending Requests", () => GetVirtualTextureDisplayStats(data).PendingUploadCount));
+                foldout.children.Add(CreateStatsValue("Pending Data", () => GetVirtualTextureDisplayStats(data).PendingDataCount));
+                foldout.children.Add(CreateStatsValue("Pending Uploads", () => GetVirtualTextureDisplayStats(data).PhysicalPendingUploadCount));
                 foldout.children.Add(CreateStatsValue("Evictions", () => GetVirtualTextureDisplayStats(data).EvictionCount));
                 foldout.children.Add(CreateStatsValue("Faults", () => GetVirtualTextureDisplayStats(data).FaultCount));
                 foldout.children.Add(CreateStatsValue("Deduplicated Requests", () => GetVirtualTextureDisplayStats(data).DeduplicatedRequestCount));

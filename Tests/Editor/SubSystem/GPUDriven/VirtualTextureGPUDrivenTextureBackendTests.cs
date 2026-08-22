@@ -294,16 +294,28 @@ namespace VividRP.Editor.Tests
 
             Assert.That(VirtualTextureSystem.RefreshPageTableBufferImmediatelyForTesting(spaceId), Is.True);
             Assert.That(level.TryPreparePageUpload(spaceId, targetRequest), Is.True);
+            Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
+
+            var physicalTargetRequest = new VTRequest(
+                targetRequest.SpaceId,
+                targetRequest.PageCoord,
+                physicalPageId: 3,
+                generation: 7,
+                targetRequest.Priority,
+                targetRequest.RequestFrame,
+                targetRequest.CameraPriority,
+                targetRequest.IsActiveView);
+            Assert.That(level.TryPreparePageUpload(spaceId, physicalTargetRequest), Is.True);
             Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.EqualTo(1));
 
-            level.CancelPageUpload(targetRequest);
+            level.CancelPageUpload(physicalTargetRequest);
             Assert.That(level.IsPageApproved(targetRequest.PageCoord), Is.False);
             Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
 
             Assert.That(level.TryApproveAndQueue(spaceId, frameIndex: 3, cellIndex: 0), Is.True);
-            Assert.That(level.TryPreparePageUpload(spaceId, targetRequest), Is.True);
+            Assert.That(level.TryPreparePageUpload(spaceId, physicalTargetRequest), Is.True);
             Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.EqualTo(1));
-            level.ReleasePageUploadDependencies(targetRequest);
+            level.ReleasePageUploadDependencies(physicalTargetRequest);
             Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
         }
 

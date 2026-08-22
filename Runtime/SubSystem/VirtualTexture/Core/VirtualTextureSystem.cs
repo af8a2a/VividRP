@@ -1249,7 +1249,7 @@ namespace VividRP.Runtime
                 0,
                 s_RemainingDemandEvictionBudget - evictionCount);
 
-            CollectAndSchedulePendingUploads(frameIndex, cmd);
+            evictionCount += CollectAndSchedulePendingUploads(frameIndex, cmd);
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamSubmitReadsMarker.Auto())
                 VTStreamChunkManager.Shared.SubmitPendingReads();
 
@@ -1265,7 +1265,10 @@ namespace VividRP.Runtime
             int cpuProducedPageCount = s_UploadScheduler.LastCpuProducedPageCount;
             int gpuProducedPageCount = s_UploadScheduler.LastGpuProducedPageCount;
             int gpuDispatchCount = s_UploadScheduler.LastGpuDispatchCount;
-            int pendingUploadCount = CollectPendingUploadCount();
+            CollectPendingRequestCounts(
+                out int pendingDataCount,
+                out int physicalPendingUploadCount);
+            int pendingUploadCount = pendingDataCount + physicalPendingUploadCount;
             VTPhysicalPoolStats physicalPoolStats;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsPhysicalPoolsMarker.Auto())
                 physicalPoolStats = CollectPhysicalPoolStats();
@@ -1536,7 +1539,9 @@ namespace VividRP.Runtime
                     physicalPoolStats.ResidentByteCount,
                     pageTableByteCount,
                     VTStreamChunkManager.SharedReadyByteCount,
-                    VTStreamChunkManager.SharedDecodedCacheBudget);
+                    VTStreamChunkManager.SharedDecodedCacheBudget,
+                    pendingDataCount,
+                    physicalPendingUploadCount);
                 VirtualTextureStatsRegistry.Report(globalStats);
             }
 
@@ -1589,7 +1594,9 @@ namespace VividRP.Runtime
                         physicalPoolStats.ResidentByteCount,
                         pageTableByteCount,
                         VTStreamChunkManager.SharedReadyByteCount,
-                        VTStreamChunkManager.SharedDecodedCacheBudget);
+                        VTStreamChunkManager.SharedDecodedCacheBudget,
+                        pendingDataCount,
+                        physicalPendingUploadCount);
                     VirtualTextureStatsRegistry.ReportView(viewStats);
                 }
             }
@@ -1723,6 +1730,12 @@ namespace VividRP.Runtime
             }
 
             int flushedCount = 0;
+            foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
+            {
+                if (producerHandles.Contains(pair.Value.ProducerHandle))
+                    flushedCount += pair.Value.FlushPendingDataRequests();
+            }
+
             foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
             {
                 foreach (VTProducerHandle producerHandle in producerHandles)
@@ -2052,6 +2065,20 @@ namespace VividRP.Runtime
                 : 0;
         }
 
+        internal static int GetPendingDataCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PendingDataRequestCount
+                : 0;
+        }
+
+        internal static int GetPhysicalPendingUploadCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PendingUploadRequestCount
+                : 0;
+        }
+
         internal static int GetPageTableRebuildCountForTesting(int spaceId)
         {
             return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
@@ -2287,6 +2314,7 @@ namespace VividRP.Runtime
         {
             return s_UploadSpaceSortCount;
         }
+
 #endif
 
         internal static bool TryGetPhysicalCacheForTesting(int spaceId, out Texture2D physicalCache)
@@ -2784,13 +2812,17 @@ namespace VividRP.Runtime
                 streamState.CollectCompletedReadbacks(s_CompletedReadbacks, ref lastReadbackFrame);
         }
 
-        private static int CollectPendingUploadCount()
+        private static void CollectPendingRequestCounts(
+            out int pendingDataCount,
+            out int physicalPendingUploadCount)
         {
-            int pendingUploadCount = 0;
+            pendingDataCount = 0;
+            physicalPendingUploadCount = 0;
             foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
-                pendingUploadCount += addressSpace.PendingRequestCount;
-
-            return pendingUploadCount;
+            {
+                pendingDataCount += addressSpace.PendingDataRequestCount;
+                physicalPendingUploadCount += addressSpace.PendingUploadRequestCount;
+            }
         }
 
         private static void AccumulateResidencyStats(
@@ -2857,13 +2889,13 @@ namespace VividRP.Runtime
             s_ScheduledUploadsBySpace[spaceId] = GetScheduledUploadCount(spaceId) + 1;
         }
 
-        private static void CollectAndSchedulePendingUploads(int frameIndex, CommandBuffer cmd)
+        private static int CollectAndSchedulePendingUploads(int frameIndex, CommandBuffer cmd)
         {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingMarker.Auto())
-                CollectAndSchedulePendingUploadsCore(frameIndex, cmd);
+                return CollectAndSchedulePendingUploadsCore(frameIndex, cmd);
         }
 
-        private static void CollectAndSchedulePendingUploadsCore(int frameIndex, CommandBuffer cmd)
+        private static int CollectAndSchedulePendingUploadsCore(int frameIndex, CommandBuffer cmd)
         {
             bool hasPendingUploadWork = false;
             foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
@@ -2876,7 +2908,7 @@ namespace VividRP.Runtime
             {
                 s_PendingUploadCandidates.Clear();
                 s_UploadSpaceOrder.Clear();
-                return;
+                return 0;
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingBuildSpaceOrderMarker.Auto())
@@ -2890,9 +2922,9 @@ namespace VividRP.Runtime
                 s_UploadSpaceOrder.Sort(CompareAddressSpacesById);
             }
 
-            s_PendingUploadCandidates.Clear();
             int spaceCount = s_UploadSpaceOrder.Count;
             int rotation = spaceCount > 0 ? (int)((uint)frameIndex % (uint)spaceCount) : 0;
+            s_PendingUploadCandidates.Clear();
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingGatherCandidatesMarker.Auto())
             {
                 for (int spaceIndex = 0; spaceIndex < spaceCount; spaceIndex++)
@@ -2912,6 +2944,7 @@ namespace VividRP.Runtime
             }
 
             int skippedUploadCount = 0;
+            int evictionCount = 0;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingScheduleCandidatesMarker.Auto())
             {
                 for (int candidateIndex = 0; candidateIndex < s_PendingUploadCandidates.Count; candidateIndex++)
@@ -2925,14 +2958,30 @@ namespace VividRP.Runtime
                         continue;
                     }
 
-                    if (!candidate.AddressSpace.TrySchedulePendingUpload(
+                    VTPendingUploadScheduleResult scheduleResult =
+                        candidate.AddressSpace.TrySchedulePendingUpload(
                             s_UploadScheduler,
                             cmd,
-                            candidate))
+                            candidate,
+                            frameIndex,
+                            s_RemainingDemandEvictionBudget > 0,
+                            out bool evicted);
+                    if (evicted)
+                    {
+                        evictionCount += 1;
+                        s_RemainingDemandEvictionBudget = Mathf.Max(
+                            0,
+                            s_RemainingDemandEvictionBudget - 1);
+                    }
+
+                    if (scheduleResult == VTPendingUploadScheduleResult.Deferred)
                     {
                         skippedUploadCount += 1;
                         continue;
                     }
+
+                    if (scheduleResult == VTPendingUploadScheduleResult.ResolvedResident)
+                        continue;
 
                     RecordScheduledUpload(spaceId);
                 }
@@ -2941,6 +2990,7 @@ namespace VividRP.Runtime
             s_UploadScheduler.AddSkippedUploadCount(skippedUploadCount);
             s_PendingUploadCandidates.Clear();
             s_UploadSpaceOrder.Clear();
+            return evictionCount;
         }
 
         private static int CompareAddressSpacesById(VTPageTableSpace left, VTPageTableSpace right)

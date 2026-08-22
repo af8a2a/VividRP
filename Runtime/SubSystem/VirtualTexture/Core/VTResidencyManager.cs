@@ -304,6 +304,7 @@ namespace VividRP.Runtime
             int generation,
             int lastAllocationFrame,
             bool resident,
+            bool pendingData,
             bool pendingUpload,
             bool transitionQueued,
             int transitionAncestorPageIndex,
@@ -314,6 +315,7 @@ namespace VividRP.Runtime
             Generation = generation;
             LastAllocationFrame = lastAllocationFrame;
             Resident = resident;
+            PendingData = pendingData;
             PendingUpload = pendingUpload;
             TransitionQueued = transitionQueued;
             TransitionAncestorPageIndex = transitionAncestorPageIndex;
@@ -329,7 +331,11 @@ namespace VividRP.Runtime
 
         internal bool Resident { get; }
 
+        internal bool PendingData { get; }
+
         internal bool PendingUpload { get; }
+
+        internal bool HasPendingWork => PendingData || PendingUpload;
 
         internal bool TransitionQueued { get; }
 
@@ -373,6 +379,13 @@ namespace VividRP.Runtime
         internal int PrefetchRequestCount { get; }
 
         internal int AllocatedRequestCount { get; }
+    }
+
+    internal enum VTPendingDataTransition : byte
+    {
+        Failed,
+        ResolvedResident,
+        PendingUpload,
     }
 
     internal readonly struct VTPrefetchCandidate
@@ -469,6 +482,7 @@ namespace VividRP.Runtime
             public int Generation;
             public int LastAllocationFrame;
             public bool Resident;
+            public bool PendingData;
             public bool PendingUpload;
             public bool Locked;
             public byte TransitionPhase;
@@ -494,6 +508,13 @@ namespace VividRP.Runtime
         private NativeParallelHashMap<VTRequestPreparationCandidateKey, int>
             m_PreparedCandidateIndices;
         private readonly int[] m_PendingRequestIndices;
+        private readonly VirtualTextureViewId[] m_PendingEvictionViewIds;
+        private readonly VirtualTextureViewId[] m_PendingAllocationViewIds;
+        private readonly bool[] m_PendingUpdateAffinity;
+        private readonly bool[] m_PendingAllowEviction;
+#if VT_DEBUG
+        private readonly VTPageRequestDebugInfo[] m_PendingRequestDebugInfos;
+#endif
         private readonly List<int> m_DirtyPageTableUpdates = new();
         private readonly List<int> m_TransitioningPageIndices = new();
         private readonly List<int> m_QueuedTransitionPageIndices = new();
@@ -504,6 +525,8 @@ namespace VividRP.Runtime
         private int m_PreparedRequestCount = -1;
 
         private int m_ResidentPageCount;
+        private int m_PendingDataRequestCount;
+        private int m_PendingUploadRequestCount;
         private uint m_PendingRequestRevision;
         private bool m_PageTableDirty;
         private bool m_LastRequestPreparationUsedParallelJob;
@@ -544,11 +567,20 @@ namespace VividRP.Runtime
                     1,
                     Allocator.Persistent);
             m_PendingRequestIndices = new int[totalPageCount];
+            m_PendingEvictionViewIds = new VirtualTextureViewId[totalPageCount];
+            m_PendingAllocationViewIds = new VirtualTextureViewId[totalPageCount];
+            m_PendingUpdateAffinity = new bool[totalPageCount];
+            m_PendingAllowEviction = new bool[totalPageCount];
+#if VT_DEBUG
+            m_PendingRequestDebugInfos = new VTPageRequestDebugInfo[totalPageCount];
+#endif
             for (int pageIndex = 0; pageIndex < m_PageStates.Length; pageIndex++)
             {
                 m_PageStates[pageIndex].PhysicalPageId = -1;
                 m_PageStates[pageIndex].TransitionAncestorPageIndex = -1;
                 m_PendingRequestIndices[pageIndex] = -1;
+                m_PendingEvictionViewIds[pageIndex] = VirtualTextureViewId.Invalid;
+                m_PendingAllocationViewIds[pageIndex] = VirtualTextureViewId.Invalid;
             }
 
             m_PageMips = BuildPageMipTable(desc, mipOffsets, totalPageCount);
@@ -561,6 +593,10 @@ namespace VividRP.Runtime
         internal int FreePageCount => m_PhysicalPool.FreePageCount;
 
         internal int PendingRequestCount => m_PendingRequests.Count;
+
+        internal int PendingDataRequestCount => m_PendingDataRequestCount;
+
+        internal int PendingUploadRequestCount => m_PendingUploadRequestCount;
 
         internal uint PendingRequestRevision => m_PendingRequestRevision;
 
@@ -639,7 +675,7 @@ namespace VividRP.Runtime
                 return true;
             }
 
-            if (pageState.PendingUpload)
+            if (pageState.PendingData || pageState.PendingUpload)
                 return false;
 
             if (m_PhysicalPool.TryAttachResidentPage(
@@ -749,7 +785,7 @@ namespace VividRP.Runtime
                 return true;
             }
 
-            if (pageState.PendingUpload)
+            if (pageState.PendingData || pageState.PendingUpload)
             {
                 TrySetPageLocked(desc, mipOffsets, coord, locked);
                 PromotePendingRequestToLocked(pageIndex, frameIndex);
@@ -781,53 +817,37 @@ namespace VividRP.Runtime
                 return true;
             }
 
-#if VT_DEBUG
-            var requestDebugInfo = new VTPageRequestDebugInfo(
-                VTPageRequestKind.Locked,
-                coord,
-                coord,
-                mipGap: 0,
-                VTRequestPriorityUtility.ComputeMipWeightedScore(int.MaxValue, coord.Mip));
-#endif
-            if (!m_PhysicalPool.TryAllocatePage(
-                    this,
-                    m_ProducerHandle,
-                    m_ProducerName,
-                    pageIndex,
-                    m_PageMips[pageIndex],
-                    coord,
-                    VirtualTextureViewId.Invalid,
-                    VirtualTextureViewId.Invalid,
-                    updateAffinity: false,
-                    frameIndex,
-                    locked,
-                    pendingUpload: true,
-#if VT_DEBUG
-                    requestDebugInfo,
-#endif
-                    out int physicalPageId,
-                    out int generation,
-                    out _))
-            {
-                return false;
-            }
-
-            pageState.PhysicalPageId = physicalPageId;
-            pageState.Generation = generation;
-            pageState.LastAllocationFrame = frameIndex;
-            pageState.PendingUpload = true;
+            pageState.PhysicalPageId = -1;
+            pageState.Generation = 0;
+            pageState.PendingData = true;
+            pageState.PendingUpload = false;
             pageState.Resident = false;
             pageState.Locked = locked;
             SetPageState(pageIndex, pageState);
             AddPendingRequest(pageIndex, new VTRequest(
                 spaceId,
                 coord,
-                physicalPageId,
-                generation,
+                -1,
+                0,
                 int.MaxValue,
                 frameIndex,
                 int.MinValue,
                 isActiveView: false));
+            SetPendingAllocationMetadata(
+                pageIndex,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                updateAffinity: false,
+                allowEviction: true
+#if VT_DEBUG
+                , new VTPageRequestDebugInfo(
+                    VTPageRequestKind.Locked,
+                    coord,
+                    coord,
+                    mipGap: 0,
+                    VTRequestPriorityUtility.ComputeMipWeightedScore(int.MaxValue, coord.Mip))
+#endif
+                );
             MarkPageTableDirty(pageIndex);
             return true;
         }
@@ -852,7 +872,7 @@ namespace VividRP.Runtime
 
             int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, coord);
             VTPageRuntimeState pageState = m_PageStates[pageIndex];
-            if (!pageState.Resident || pageState.PendingUpload)
+            if (!pageState.Resident || pageState.PendingData || pageState.PendingUpload)
                 return false;
 
             oldPhysicalPageId = pageState.PhysicalPageId;
@@ -976,6 +996,7 @@ namespace VividRP.Runtime
                 ? commitFrameIndex
                 : request.RequestFrame;
             pageState.PendingUpload = false;
+            pageState.PendingData = false;
             pageState.Resident = true;
             pageState.Locked = oldLocked;
             pageState.TransitionPhase = VirtualTexturePageTableEntry.MaxTransitionPhase;
@@ -1439,6 +1460,7 @@ namespace VividRP.Runtime
                     commitFrameIndex))
                 return false;
 
+            pageState.PendingData = false;
             pageState.PendingUpload = false;
             pageState.Resident = true;
             int residencyFrameIndex = commitFrameIndex >= 0
@@ -1496,7 +1518,7 @@ namespace VividRP.Runtime
                 pageState.TransitionTracked = false;
             }
             SetPageState(pageIndex, pageState);
-            if (pageState.PendingUpload)
+            if (pageState.PendingData || pageState.PendingUpload)
                 IncrementPendingRequestRevision();
             if (pageState.PhysicalPageId >= 0)
             {
@@ -1532,6 +1554,7 @@ namespace VividRP.Runtime
                 pageState.Generation,
                 pageState.LastAllocationFrame,
                 pageState.Resident,
+                pageState.PendingData,
                 pageState.PendingUpload,
                 pageState.TransitionQueued,
                 pageState.TransitionAncestorPageIndex,
@@ -1699,7 +1722,68 @@ namespace VividRP.Runtime
 
         internal int FlushRegion(int mip, RectInt pageRegion)
         {
-            return m_PhysicalPool.FlushRegion(m_SpaceId, mip, pageRegion);
+            int flushedCount = FlushPendingDataRequests(mip, pageRegion);
+            return flushedCount + m_PhysicalPool.FlushRegion(m_SpaceId, mip, pageRegion);
+        }
+
+        internal int FlushPendingDataRequests()
+        {
+            int flushedCount = 0;
+            for (int mip = 0; mip < m_Desc.MipCount; mip++)
+            {
+                int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(
+                    m_Desc.VirtualPageCountX,
+                    mip);
+                int pageCountY = VirtualTextureSpaceUtility.GetPageCountY(
+                    m_Desc.VirtualPageCountY,
+                    mip);
+                flushedCount += FlushPendingDataRequests(
+                    mip,
+                    new RectInt(0, 0, pageCountX, pageCountY));
+            }
+
+            return flushedCount;
+        }
+
+        private int FlushPendingDataRequests(int mip, RectInt pageRegion)
+        {
+            if (mip < 0 || mip >= m_Desc.MipCount)
+                return 0;
+
+            int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(
+                m_Desc.VirtualPageCountX,
+                mip);
+            int pageCountY = VirtualTextureSpaceUtility.GetPageCountY(
+                m_Desc.VirtualPageCountY,
+                mip);
+            int minX = Mathf.Clamp(pageRegion.xMin, 0, pageCountX);
+            int minY = Mathf.Clamp(pageRegion.yMin, 0, pageCountY);
+            int maxX = Mathf.Clamp(pageRegion.xMax, 0, pageCountX);
+            int maxY = Mathf.Clamp(pageRegion.yMax, 0, pageCountY);
+            int flushedCount = 0;
+            for (int y = minY; y < maxY; y++)
+            {
+                for (int x = minX; x < maxX; x++)
+                {
+                    int pageIndex = GetPageIndex(x, y, mip);
+                    VTPageRuntimeState pageState = m_PageStates[pageIndex];
+                    if (!pageState.PendingData)
+                        continue;
+
+                    RemovePendingRequest(pageIndex, generation: 0);
+                    pageState.PendingData = false;
+                    pageState.PendingUpload = false;
+                    pageState.Resident = false;
+                    pageState.Locked = false;
+                    pageState.PhysicalPageId = -1;
+                    pageState.Generation = 0;
+                    SetPageState(pageIndex, pageState);
+                    MarkPageTableDirty(pageIndex);
+                    flushedCount += 1;
+                }
+            }
+
+            return flushedCount;
         }
 
         public bool OnPhysicalPageInvalidated(int pageIndex, int generation)
@@ -1715,6 +1799,7 @@ namespace VividRP.Runtime
                 m_ResidentPageCount -= 1;
 
             pageState.Resident = false;
+            pageState.PendingData = false;
             pageState.PendingUpload = false;
             pageState.Locked = false;
             pageState.PhysicalPageId = -1;
@@ -1734,6 +1819,8 @@ namespace VividRP.Runtime
             DiscardRequestPreparation();
             m_PhysicalPool.FlushOwner(this);
             m_PendingRequests.Clear();
+            m_PendingDataRequestCount = 0;
+            m_PendingUploadRequestCount = 0;
             m_DirtyPageTableUpdates.Clear();
             m_TransitioningPageIndices.Clear();
             m_QueuedTransitionPageIndices.Clear();
@@ -1932,6 +2019,7 @@ namespace VividRP.Runtime
                 pageState.PhysicalPageId = sharedPhysicalPageId;
                 pageState.Generation = sharedGeneration;
                 pageState.LastAllocationFrame = frameIndex;
+                pageState.PendingData = false;
                 pageState.PendingUpload = false;
                 pageState.Resident = true;
                 pageState.Locked = false;
@@ -1943,11 +2031,6 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            // Speculative work may attach an existing shared page, but it must never
-            // displace a visible resident page once the pool is full.
-            if (!allowEviction && m_PhysicalPool.FreePageCount <= 0)
-                return false;
-
             VirtualTextureViewId evictionViewId = isPrefetch
                 ? activeViewId
                 : ResolveEvictionViewId(activeViewId, request);
@@ -1955,57 +2038,32 @@ namespace VividRP.Runtime
                 ? VirtualTextureViewId.Invalid
                 : request.ViewId;
             bool updateAffinity = !isPrefetch && HasViewAffinity(request.ViewId);
-            bool allocated;
-            int physicalPageId;
-            int generation;
-            bool evicted;
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyAllocateEvictMarker.Auto())
-            {
-                allocated = m_PhysicalPool.TryAllocatePage(
-                    this,
-                    m_ProducerHandle,
-                    m_ProducerName,
-                    pageIndex,
-                    m_PageMips[pageIndex],
-                    request.PageCoord,
-                    evictionViewId,
-                    allocationViewId,
-                    updateAffinity,
-                    frameIndex,
-                    locked: false,
-                    pendingUpload: true,
-#if VT_DEBUG
-                    requestDebugInfo,
-#endif
-                    out physicalPageId,
-                    out generation,
-                    out evicted);
-            }
-
-            if (!allocated)
-            {
-                return false;
-            }
-
-            if (evicted)
-                evictionCount += 1;
-
-            pageState.PhysicalPageId = physicalPageId;
-            pageState.Generation = generation;
-            pageState.LastAllocationFrame = frameIndex;
-            pageState.PendingUpload = true;
+            pageState.PhysicalPageId = -1;
+            pageState.Generation = 0;
+            pageState.PendingData = true;
+            pageState.PendingUpload = false;
             pageState.Resident = false;
             SetPageState(pageIndex, pageState);
             MarkPageTableDirty(pageIndex);
             AddPendingRequest(pageIndex, new VTRequest(
                 spaceId,
                 request.PageCoord,
-                physicalPageId,
-                generation,
+                -1,
+                0,
                 request.HitCount,
                 frameIndex,
                 request.CameraPriority,
                 !isPrefetch && request.IsActiveView));
+            SetPendingAllocationMetadata(
+                pageIndex,
+                evictionViewId,
+                allocationViewId,
+                updateAffinity,
+                allowEviction
+#if VT_DEBUG
+                , requestDebugInfo
+#endif
+                );
             allocatedThisFrame += 1;
             pageTableChanged = true;
             return isPrefetch;
@@ -2166,7 +2224,19 @@ namespace VividRP.Runtime
             if (!TryGetPendingRequest(pageIndex, out int requestIndex, out VTRequest request))
                 return;
 
-            m_PhysicalPool.Touch(request.PhysicalPageId, viewId, frameIndex, updateAffinity);
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            if (pageState.PendingData)
+            {
+                m_PendingEvictionViewIds[pageIndex] = viewId;
+                m_PendingAllocationViewIds[pageIndex] = viewId;
+                m_PendingUpdateAffinity[pageIndex] = updateAffinity;
+                m_PendingAllowEviction[pageIndex] = true;
+            }
+            else if (request.PhysicalPageId >= 0)
+            {
+                m_PhysicalPool.Touch(request.PhysicalPageId, viewId, frameIndex, updateAffinity);
+            }
+
             if (!IsPendingRequestPriorityImproved(request, priority, cameraPriority, isActiveView))
                 return;
 
@@ -2189,11 +2259,21 @@ namespace VividRP.Runtime
             if (!TryGetPendingRequest(pageIndex, out int requestIndex, out VTRequest request))
                 return;
 
-            m_PhysicalPool.Touch(
-                request.PhysicalPageId,
-                VirtualTextureViewId.Invalid,
-                frameIndex,
-                updateAffinity: false);
+            if (request.PhysicalPageId >= 0)
+            {
+                m_PhysicalPool.Touch(
+                    request.PhysicalPageId,
+                    VirtualTextureViewId.Invalid,
+                    frameIndex,
+                    updateAffinity: false);
+            }
+            else
+            {
+                m_PendingEvictionViewIds[pageIndex] = VirtualTextureViewId.Invalid;
+                m_PendingAllocationViewIds[pageIndex] = VirtualTextureViewId.Invalid;
+                m_PendingUpdateAffinity[pageIndex] = false;
+                m_PendingAllowEviction[pageIndex] = true;
+            }
             var promotedRequest = new VTRequest(
                 request.SpaceId,
                 request.PageCoord,
@@ -2208,6 +2288,194 @@ namespace VividRP.Runtime
 
             m_PendingRequests[requestIndex] = promotedRequest;
             IncrementPendingRequestRevision();
+        }
+
+        internal VTPendingDataTransition TryPromotePendingDataToUpload(
+            in VTRequest candidateRequest,
+            int frameIndex,
+            bool allowEviction,
+            out VTRequest uploadRequest,
+            out bool evicted)
+        {
+            uploadRequest = default;
+            evicted = false;
+            if (!VirtualTextureSpaceUtility.IsCoordValid(m_Desc, candidateRequest.PageCoord))
+                return VTPendingDataTransition.Failed;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
+                m_Desc,
+                m_MipOffsets,
+                candidateRequest.PageCoord);
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            if (!TryGetPendingRequest(pageIndex, out int requestIndex, out VTRequest pendingRequest))
+                return VTPendingDataTransition.Failed;
+
+            if (!pendingRequest.PageCoord.Equals(candidateRequest.PageCoord)
+                || pendingRequest.PhysicalPageId >= 0)
+                return VTPendingDataTransition.Failed;
+
+            if (!pageState.PendingData)
+                return VTPendingDataTransition.Failed;
+
+            if (m_PhysicalPool.TryAttachResidentPage(
+                    this,
+                    m_ProducerHandle,
+                    m_ProducerName,
+                    pageIndex,
+                    pendingRequest.PageCoord,
+                    m_PendingAllocationViewIds[pageIndex],
+                    frameIndex,
+                    pageState.Locked,
+                    out int sharedPhysicalPageId,
+                    out int sharedGeneration))
+            {
+                pageState.PhysicalPageId = sharedPhysicalPageId;
+                pageState.Generation = sharedGeneration;
+                pageState.LastAllocationFrame = frameIndex;
+                pageState.PendingData = false;
+                pageState.PendingUpload = false;
+                pageState.Resident = true;
+                SchedulePageTransition(pageIndex, ref pageState, frameIndex);
+                SetPageState(pageIndex, pageState);
+                m_ResidentPageCount += 1;
+                RemovePendingRequest(pageIndex, pendingRequest.Generation);
+                ClearPendingAllocationMetadata(pageIndex);
+                MarkPageTableDirty(pageIndex);
+                return VTPendingDataTransition.ResolvedResident;
+            }
+
+            bool mayEvict = pageState.Locked || (allowEviction && m_PendingAllowEviction[pageIndex]);
+            if (!mayEvict && m_PhysicalPool.FreePageCount <= 0)
+                return VTPendingDataTransition.Failed;
+
+            bool allocated;
+            int physicalPageId;
+            int generation;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyAllocateEvictMarker.Auto())
+            {
+                allocated = m_PhysicalPool.TryAllocatePage(
+                    this,
+                    m_ProducerHandle,
+                    m_ProducerName,
+                    pageIndex,
+                    m_PageMips[pageIndex],
+                    pendingRequest.PageCoord,
+                    m_PendingEvictionViewIds[pageIndex],
+                    m_PendingAllocationViewIds[pageIndex],
+                    m_PendingUpdateAffinity[pageIndex],
+                    frameIndex,
+                    pageState.Locked,
+                    pendingUpload: true,
+#if VT_DEBUG
+                    m_PendingRequestDebugInfos[pageIndex],
+#endif
+                    out physicalPageId,
+                    out generation,
+                    out evicted);
+            }
+
+            if (!allocated)
+                return VTPendingDataTransition.Failed;
+
+            uploadRequest = new VTRequest(
+                pendingRequest.SpaceId,
+                pendingRequest.PageCoord,
+                physicalPageId,
+                generation,
+                pendingRequest.Priority,
+                pendingRequest.RequestFrame,
+                pendingRequest.CameraPriority,
+                pendingRequest.IsActiveView);
+            pageState.PhysicalPageId = physicalPageId;
+            pageState.Generation = generation;
+            pageState.LastAllocationFrame = frameIndex;
+            pageState.PendingData = false;
+            pageState.PendingUpload = true;
+            pageState.Resident = false;
+            SetPageState(pageIndex, pageState);
+            m_PendingRequests[requestIndex] = uploadRequest;
+            m_PendingDataRequestCount -= 1;
+            m_PendingUploadRequestCount += 1;
+            IncrementPendingRequestRevision();
+            MarkPageTableDirty(pageIndex);
+            return VTPendingDataTransition.PendingUpload;
+        }
+
+        internal bool RollbackPendingUploadToData(in VTRequest request)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(m_Desc, request.PageCoord))
+                return false;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
+                m_Desc,
+                m_MipOffsets,
+                request.PageCoord);
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            if (!pageState.PendingUpload
+                || pageState.PhysicalPageId != request.PhysicalPageId
+                || pageState.Generation != request.Generation
+                || !TryGetPendingRequest(pageIndex, out int requestIndex, out VTRequest pendingRequest)
+                || !m_PhysicalPool.TryReleasePageBinding(
+                    request.PhysicalPageId,
+                    request.Generation,
+                    this,
+                    pageIndex))
+            {
+                return false;
+            }
+
+            var dataRequest = new VTRequest(
+                pendingRequest.SpaceId,
+                pendingRequest.PageCoord,
+                -1,
+                0,
+                pendingRequest.Priority,
+                pendingRequest.RequestFrame,
+                pendingRequest.CameraPriority,
+                pendingRequest.IsActiveView);
+            pageState.PhysicalPageId = -1;
+            pageState.Generation = 0;
+            pageState.PendingData = true;
+            pageState.PendingUpload = false;
+            pageState.Resident = false;
+            SetPageState(pageIndex, pageState);
+            m_PendingRequests[requestIndex] = dataRequest;
+            m_PendingUploadRequestCount -= 1;
+            m_PendingDataRequestCount += 1;
+            IncrementPendingRequestRevision();
+            MarkPageTableDirty(pageIndex);
+            return true;
+        }
+
+        private void SetPendingAllocationMetadata(
+            int pageIndex,
+            VirtualTextureViewId evictionViewId,
+            VirtualTextureViewId allocationViewId,
+            bool updateAffinity,
+            bool allowEviction
+#if VT_DEBUG
+            , in VTPageRequestDebugInfo requestDebugInfo
+#endif
+            )
+        {
+            m_PendingEvictionViewIds[pageIndex] = evictionViewId;
+            m_PendingAllocationViewIds[pageIndex] = allocationViewId;
+            m_PendingUpdateAffinity[pageIndex] = updateAffinity;
+            m_PendingAllowEviction[pageIndex] = allowEviction;
+#if VT_DEBUG
+            m_PendingRequestDebugInfos[pageIndex] = requestDebugInfo;
+#endif
+        }
+
+        private void ClearPendingAllocationMetadata(int pageIndex)
+        {
+            m_PendingEvictionViewIds[pageIndex] = VirtualTextureViewId.Invalid;
+            m_PendingAllocationViewIds[pageIndex] = VirtualTextureViewId.Invalid;
+            m_PendingUpdateAffinity[pageIndex] = false;
+            m_PendingAllowEviction[pageIndex] = false;
+#if VT_DEBUG
+            m_PendingRequestDebugInfos[pageIndex] = default;
+#endif
         }
 
         private static bool IsPendingRequestPriorityImproved(
@@ -2229,7 +2497,7 @@ namespace VividRP.Runtime
         {
             if (pageState.Resident)
                 return VTResidencyRequestClassification.Resident;
-            if (pageState.PendingUpload)
+            if (pageState.PendingData || pageState.PendingUpload)
                 return VTResidencyRequestClassification.Pending;
 
             return VTResidencyRequestClassification.Missing;
@@ -2241,7 +2509,7 @@ namespace VividRP.Runtime
             byte flags = 0;
             if (pageState.Resident)
                 flags |= VTRequestPreparationJob.ResidentFlag;
-            if (pageState.PendingUpload)
+            if (pageState.PendingData || pageState.PendingUpload)
                 flags |= VTRequestPreparationJob.PendingFlag;
             m_PageStateFlags[pageIndex] = flags;
         }
@@ -2520,14 +2788,23 @@ namespace VividRP.Runtime
             int requestIndex = m_PendingRequests.Count;
             m_PendingRequests.Add(request);
             m_PendingRequestIndices[pageIndex] = requestIndex;
+            if (request.PhysicalPageId >= 0)
+                m_PendingUploadRequestCount += 1;
+            else
+                m_PendingDataRequestCount += 1;
             IncrementPendingRequestRevision();
         }
 
         private bool TryGetPendingRequest(int pageIndex, out int requestIndex, out VTRequest request)
         {
-            requestIndex = pageIndex >= 0 && pageIndex < m_PendingRequestIndices.Length
-                ? m_PendingRequestIndices[pageIndex]
-                : -1;
+            if (pageIndex < 0 || pageIndex >= m_PendingRequestIndices.Length)
+            {
+                requestIndex = -1;
+                request = default;
+                return false;
+            }
+
+            requestIndex = m_PendingRequestIndices[pageIndex];
             if (requestIndex < 0 || requestIndex >= m_PendingRequests.Count)
             {
                 request = default;
@@ -2542,9 +2819,7 @@ namespace VividRP.Runtime
         {
             if (!TryGetPendingRequest(pageIndex, out int requestIndex, out VTRequest request)
                 || request.Generation != generation)
-            {
                 return;
-            }
 
             int lastRequestIndex = m_PendingRequests.Count - 1;
             if (requestIndex != lastRequestIndex)
@@ -2560,6 +2835,11 @@ namespace VividRP.Runtime
 
             m_PendingRequests.RemoveAt(lastRequestIndex);
             m_PendingRequestIndices[pageIndex] = -1;
+            if (request.PhysicalPageId >= 0)
+                m_PendingUploadRequestCount -= 1;
+            else
+                m_PendingDataRequestCount -= 1;
+            ClearPendingAllocationMetadata(pageIndex);
             IncrementPendingRequestRevision();
         }
 

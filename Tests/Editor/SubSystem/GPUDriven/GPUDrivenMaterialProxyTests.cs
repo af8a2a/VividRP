@@ -54,6 +54,9 @@ namespace VividRP.Editor.Tests
                 materialProxy.MaskMode = GPUDrivenMaterialMaskMode.Roughness;
                 materialProxy.Metallic = 0.75f;
                 materialProxy.Roughness = 0.35f;
+                materialProxy.MetallicRemap = new Vector2(0.1f, 0.8f);
+                materialProxy.SmoothnessRemap = new Vector2(0.2f, 0.9f);
+                materialProxy.AmbientOcclusionRemap = new Vector2(0.3f, 0.7f);
                 materialProxy.EmissionColor = emissionColor;
                 materialProxy.AlphaClip = true;
                 materialProxy.Cutoff = 0.33f;
@@ -73,6 +76,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialProxy.MaskMode, Is.EqualTo(GPUDrivenMaterialMaskMode.Roughness));
                 Assert.That(materialProxy.Metallic, Is.EqualTo(0.75f));
                 Assert.That(materialProxy.Roughness, Is.EqualTo(0.35f));
+                Assert.That(materialProxy.MetallicRemap, Is.EqualTo(new Vector2(0.1f, 0.8f)));
+                Assert.That(materialProxy.SmoothnessRemap, Is.EqualTo(new Vector2(0.2f, 0.9f)));
+                Assert.That(materialProxy.AmbientOcclusionRemap, Is.EqualTo(new Vector2(0.3f, 0.7f)));
                 Assert.That(materialProxy.EmissionColor, Is.EqualTo(emissionColor));
                 Assert.That(materialProxy.AlphaClip, Is.True);
                 Assert.That(materialProxy.Cutoff, Is.EqualTo(0.33f));

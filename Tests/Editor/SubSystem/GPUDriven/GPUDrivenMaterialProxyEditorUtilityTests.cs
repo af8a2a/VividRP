@@ -169,6 +169,12 @@ namespace VividRP.Editor.Tests
                 sourceMaterial.SetColor("_BaseColor", new Color(0.15f, 0.35f, 0.55f, 1.0f));
                 sourceMaterial.SetFloat("_Metallic", 0.65f);
                 sourceMaterial.SetFloat("_Smoothness", 0.2f);
+                sourceMaterial.SetFloat("_MetallicRemapMin", 0.1f);
+                sourceMaterial.SetFloat("_MetallicRemapMax", 0.8f);
+                sourceMaterial.SetFloat("_SmoothnessRemapMin", 0.2f);
+                sourceMaterial.SetFloat("_SmoothnessRemapMax", 0.9f);
+                sourceMaterial.SetFloat("_AORemapMin", 0.3f);
+                sourceMaterial.SetFloat("_AORemapMax", 0.7f);
 
                 int changedProxyCount = GPUDrivenMaterialProxyAutoSyncService.SynchronizeMaterialNowForTests(
                     sourceMaterial,
@@ -179,6 +185,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialProxy.BaseColor.r, Is.EqualTo(0.15f).Within(0.0001f));
                 Assert.That(materialProxy.Metallic, Is.EqualTo(0.65f).Within(0.0001f));
                 Assert.That(materialProxy.Roughness, Is.EqualTo(0.8f).Within(0.0001f));
+                Assert.That(materialProxy.MetallicRemap, Is.EqualTo(new Vector2(0.1f, 0.8f)));
+                Assert.That(materialProxy.SmoothnessRemap, Is.EqualTo(new Vector2(0.2f, 0.9f)));
+                Assert.That(materialProxy.AmbientOcclusionRemap, Is.EqualTo(new Vector2(0.3f, 0.7f)));
                 Assert.That(EditorUtility.IsDirty(materialProxy), Is.True);
 
                 changedProxyCount = GPUDrivenMaterialProxyAutoSyncService.SynchronizeMaterialNowForTests(

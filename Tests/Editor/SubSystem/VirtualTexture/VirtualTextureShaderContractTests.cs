@@ -11,6 +11,8 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/GPUDrivenVirtualTexturePageProducer.compute";
         private const string SurfaceSamplingAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VirtualTextureSurfaceSampling.hlsl";
+        private const string GBufferResolveAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/VisibilityBufferGBufferResolve.shader";
 
         [Test]
         public void VirtualTextureShaderIds_MatchExpectedPropertyNames()
@@ -57,6 +59,20 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "float4(1.0f, normalRG.g, normalRG.b, normalRG.r)",
                 samplingSource);
+        }
+
+        [Test]
+        public void GBufferResolve_AppliesMaterialPbrRemapsAfterMaskSampling()
+        {
+            string resolveSource = File.ReadAllText(GBufferResolveAssetPath);
+
+            StringAssert.Contains("RemapPBRChannel", resolveSource);
+            StringAssert.Contains(
+                "triangleData.materialData.MetallicSmoothnessRemap",
+                resolveSource);
+            StringAssert.Contains(
+                "triangleData.materialData.AmbientOcclusionRemap.xy",
+                resolveSource);
         }
     }
 }

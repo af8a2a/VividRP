@@ -90,6 +90,8 @@ namespace VividRP.Runtime.GPUDriven
         public float4 AlbedoColor;
         public float4 TextureTilingOffset;
         public float4 Emission;
+        public float4 MetallicSmoothnessRemap;
+        public float4 AmbientOcclusionRemap;
 
         public uint SurfaceBindingIndex;
         public float NormalsStrength;

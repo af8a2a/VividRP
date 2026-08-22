@@ -965,6 +965,9 @@ namespace VividRP.Editor.Tests
                 materialProxy.BumpScale = 0.4f;
                 materialProxy.Metallic = 0.75f;
                 materialProxy.Roughness = 0.35f;
+                materialProxy.MetallicRemap = new Vector2(0.1f, 0.8f);
+                materialProxy.SmoothnessRemap = new Vector2(0.2f, 0.9f);
+                materialProxy.AmbientOcclusionRemap = new Vector2(0.3f, 0.7f);
                 materialProxy.EmissionColor = new Color(0.1f, 0.2f, 0.3f, 1.0f);
                 materialProxy.AlphaClip = true;
                 materialProxy.Cutoff = 0.4f;
@@ -1007,6 +1010,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialData.NormalsStrength, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialData.Metallic, Is.EqualTo(0.75f).Within(0.0001f));
                 Assert.That(materialData.Roughness, Is.EqualTo(0.35f).Within(0.0001f));
+                Assert.That(materialData.MetallicSmoothnessRemap.x, Is.EqualTo(0.1f).Within(0.0001f));
+                Assert.That(materialData.MetallicSmoothnessRemap.y, Is.EqualTo(0.8f).Within(0.0001f));
+                Assert.That(materialData.MetallicSmoothnessRemap.z, Is.EqualTo(0.2f).Within(0.0001f));
+                Assert.That(materialData.MetallicSmoothnessRemap.w, Is.EqualTo(0.9f).Within(0.0001f));
+                Assert.That(materialData.AmbientOcclusionRemap.x, Is.EqualTo(0.3f).Within(0.0001f));
+                Assert.That(materialData.AmbientOcclusionRemap.y, Is.EqualTo(0.7f).Within(0.0001f));
                 Assert.That(materialData.MaterialFlags, Is.EqualTo(VividMaterialFlags.Unlit));
                 Assert.That(materialData.RendererListID, Is.EqualTo(VividRendererListID.CullOff | VividRendererListID.AlphaTest));
                 Assert.That(materialData.AlphaClipThreshold, Is.EqualTo(0.4f).Within(0.0001f));

@@ -69,6 +69,15 @@ namespace VividRP.Runtime.GPUDriven
         private float m_Roughness = 0.5f;
 
         [SerializeField]
+        private Vector2 m_MetallicRemap = new(0.0f, 1.0f);
+
+        [SerializeField]
+        private Vector2 m_SmoothnessRemap = new(0.0f, 1.0f);
+
+        [SerializeField]
+        private Vector2 m_AmbientOcclusionRemap = new(0.0f, 1.0f);
+
+        [SerializeField]
         private Color m_EmissionColor = Color.black;
 
         [SerializeField]
@@ -171,6 +180,24 @@ namespace VividRP.Runtime.GPUDriven
         {
             get => m_Roughness;
             set => SetValue(ref m_Roughness, value);
+        }
+
+        public Vector2 MetallicRemap
+        {
+            get => m_MetallicRemap;
+            set => SetValue(ref m_MetallicRemap, value);
+        }
+
+        public Vector2 SmoothnessRemap
+        {
+            get => m_SmoothnessRemap;
+            set => SetValue(ref m_SmoothnessRemap, value);
+        }
+
+        public Vector2 AmbientOcclusionRemap
+        {
+            get => m_AmbientOcclusionRemap;
+            set => SetValue(ref m_AmbientOcclusionRemap, value);
         }
 
         public Color EmissionColor

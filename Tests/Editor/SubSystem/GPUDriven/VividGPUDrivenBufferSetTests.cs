@@ -13,7 +13,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GPUDataLayouts_HaveExpectedStrides()
         {
-            Assert.That(UnsafeUtility.SizeOf<VividMaterialData>(), Is.EqualTo(96));
+            Assert.That(UnsafeUtility.SizeOf<VividMaterialData>(), Is.EqualTo(128));
             Assert.That(UnsafeUtility.SizeOf<VividSurfaceBindingData>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));

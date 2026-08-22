@@ -16,6 +16,12 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_BumpScalePropertyId = Shader.PropertyToID("_BumpScale");
         private static readonly int s_MetallicPropertyId = Shader.PropertyToID("_Metallic");
         private static readonly int s_SmoothnessPropertyId = Shader.PropertyToID("_Smoothness");
+        private static readonly int s_MetallicRemapMinPropertyId = Shader.PropertyToID("_MetallicRemapMin");
+        private static readonly int s_MetallicRemapMaxPropertyId = Shader.PropertyToID("_MetallicRemapMax");
+        private static readonly int s_SmoothnessRemapMinPropertyId = Shader.PropertyToID("_SmoothnessRemapMin");
+        private static readonly int s_SmoothnessRemapMaxPropertyId = Shader.PropertyToID("_SmoothnessRemapMax");
+        private static readonly int s_AORemapMinPropertyId = Shader.PropertyToID("_AORemapMin");
+        private static readonly int s_AORemapMaxPropertyId = Shader.PropertyToID("_AORemapMax");
         private static readonly int s_RMOMapPropertyId = Shader.PropertyToID("_RMOMap");
         private static readonly int s_MetallicGlossMapPropertyId = Shader.PropertyToID("_MetallicGlossMap");
         private static readonly int s_RoughnessMapPropertyId = Shader.PropertyToID("_RoughnessMap");
@@ -1146,6 +1152,20 @@ namespace VividRP.Runtime.GPUDriven
                 AlbedoColor = ToFloat4(materialProxy != null ? materialProxy.BaseColor : Color.white),
                 TextureTilingOffset = ToFloat4(materialProxy != null ? materialProxy.TextureTilingOffset : new Vector4(1.0f, 1.0f, 0.0f, 0.0f)),
                 Emission = ToFloat4(materialProxy != null ? materialProxy.EmissionColor : Color.black),
+                MetallicSmoothnessRemap = materialProxy != null
+                    ? new float4(
+                        materialProxy.MetallicRemap.x,
+                        materialProxy.MetallicRemap.y,
+                        materialProxy.SmoothnessRemap.x,
+                        materialProxy.SmoothnessRemap.y)
+                    : new float4(0.0f, 1.0f, 0.0f, 1.0f),
+                AmbientOcclusionRemap = materialProxy != null
+                    ? new float4(
+                        materialProxy.AmbientOcclusionRemap.x,
+                        materialProxy.AmbientOcclusionRemap.y,
+                        0.0f,
+                        0.0f)
+                    : new float4(0.0f, 1.0f, 0.0f, 0.0f),
                 SurfaceBindingIndex = surfaceBindingIndex,
                 NormalsStrength = materialProxy != null ? materialProxy.BumpScale : 1.0f,
                 Roughness = materialProxy != null ? materialProxy.Roughness : 1.0f,
@@ -1171,6 +1191,16 @@ namespace VividRP.Runtime.GPUDriven
                 AlbedoColor = GetColor(material, s_BaseColorPropertyId, Color.white),
                 TextureTilingOffset = GetTilingOffset(material),
                 Emission = GetColor(material, s_EmissionColorPropertyId, Color.black),
+                MetallicSmoothnessRemap = new float4(
+                    GetFloat(material, s_MetallicRemapMinPropertyId, 0.0f),
+                    GetFloat(material, s_MetallicRemapMaxPropertyId, 1.0f),
+                    GetFloat(material, s_SmoothnessRemapMinPropertyId, 0.0f),
+                    GetFloat(material, s_SmoothnessRemapMaxPropertyId, 1.0f)),
+                AmbientOcclusionRemap = new float4(
+                    GetFloat(material, s_AORemapMinPropertyId, 0.0f),
+                    GetFloat(material, s_AORemapMaxPropertyId, 1.0f),
+                    0.0f,
+                    0.0f),
                 SurfaceBindingIndex = surfaceBindingIndex,
                 NormalsStrength = GetFloat(material, s_BumpScalePropertyId, 1.0f),
                 Roughness = GetRoughness(material),
@@ -1201,6 +1231,8 @@ namespace VividRP.Runtime.GPUDriven
                 AlbedoColor = new float4(1.0f),
                 TextureTilingOffset = textureTilingOffset,
                 Emission = new float4(0.0f),
+                MetallicSmoothnessRemap = new float4(0.0f, 1.0f, 0.0f, 1.0f),
+                AmbientOcclusionRemap = new float4(0.0f, 1.0f, 0.0f, 0.0f),
                 SurfaceBindingIndex = surfaceBindingIndex,
                 NormalsStrength = layer.NormalScale,
                 Roughness = 1.0f - Mathf.Clamp01(layer.Smoothness),
@@ -1228,6 +1260,8 @@ namespace VividRP.Runtime.GPUDriven
                 AlbedoColor = new float4(1.0f),
                 TextureTilingOffset = new float4(1.0f, 1.0f, 0.0f, 0.0f),
                 Emission = new float4(0.0f),
+                MetallicSmoothnessRemap = new float4(0.0f, 1.0f, 0.0f, 1.0f),
+                AmbientOcclusionRemap = new float4(0.0f, 1.0f, 0.0f, 0.0f),
                 SurfaceBindingIndex = surfaceBindingIndex,
                 NormalsStrength = 1.0f,
                 Roughness = 1.0f,

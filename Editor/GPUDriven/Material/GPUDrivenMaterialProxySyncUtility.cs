@@ -64,6 +64,12 @@ namespace VividRP.Editor.GPUDriven
         private static readonly int s_BumpScaleId = Shader.PropertyToID("_BumpScale");
         private static readonly int s_MetallicId = Shader.PropertyToID("_Metallic");
         private static readonly int s_SmoothnessId = Shader.PropertyToID("_Smoothness");
+        private static readonly int s_MetallicRemapMinId = Shader.PropertyToID("_MetallicRemapMin");
+        private static readonly int s_MetallicRemapMaxId = Shader.PropertyToID("_MetallicRemapMax");
+        private static readonly int s_SmoothnessRemapMinId = Shader.PropertyToID("_SmoothnessRemapMin");
+        private static readonly int s_SmoothnessRemapMaxId = Shader.PropertyToID("_SmoothnessRemapMax");
+        private static readonly int s_AORemapMinId = Shader.PropertyToID("_AORemapMin");
+        private static readonly int s_AORemapMaxId = Shader.PropertyToID("_AORemapMax");
         private static readonly int s_EmissionColorId = Shader.PropertyToID("_EmissionColor");
         private static readonly int s_AlphaClipId = Shader.PropertyToID("_AlphaClip");
         private static readonly int s_CutoffId = Shader.PropertyToID("_Cutoff");
@@ -149,6 +155,18 @@ namespace VividRP.Editor.GPUDriven
             materialProxy.MaskMode = sourceTextures.MaskMode;
             materialProxy.Metallic = GetFloat(sourceMaterial, s_MetallicId, 0.0f);
             materialProxy.Roughness = 1.0f - Mathf.Clamp01(GetFloat(sourceMaterial, s_SmoothnessId, 0.5f));
+            materialProxy.MetallicRemap = GetRemap(
+                sourceMaterial,
+                s_MetallicRemapMinId,
+                s_MetallicRemapMaxId);
+            materialProxy.SmoothnessRemap = GetRemap(
+                sourceMaterial,
+                s_SmoothnessRemapMinId,
+                s_SmoothnessRemapMaxId);
+            materialProxy.AmbientOcclusionRemap = GetRemap(
+                sourceMaterial,
+                s_AORemapMinId,
+                s_AORemapMaxId);
             materialProxy.EmissionColor = GetColor(sourceMaterial, s_EmissionColorId, Color.black);
             materialProxy.AlphaClip = IsAlphaClipEnabled(sourceMaterial);
             materialProxy.Cutoff = GetFloat(sourceMaterial, s_CutoffId, 0.5f);
@@ -307,6 +325,13 @@ namespace VividRP.Editor.GPUDriven
             return sourceMaterial != null && sourceMaterial.HasProperty(propertyId)
                 ? sourceMaterial.GetFloat(propertyId)
                 : fallback;
+        }
+
+        private static Vector2 GetRemap(Material sourceMaterial, int minPropertyId, int maxPropertyId)
+        {
+            return new Vector2(
+                GetFloat(sourceMaterial, minPropertyId, 0.0f),
+                GetFloat(sourceMaterial, maxPropertyId, 1.0f));
         }
 
         private static Vector4 GetTilingOffset(Material sourceMaterial, int baseTexturePropertyId)

@@ -273,33 +273,44 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             #define VIVID_MAX_TERRAIN_LAYERS 8u
 
+            float RemapPBRChannel(const float sampleValue, const float2 remap)
+            {
+                return saturate(lerp(remap.x, remap.y, saturate(sampleValue)));
+            }
+
             void ApplyMaskSample(
                 const uint maskMode,
                 const float4 maskSample,
+                const float4 metallicSmoothnessRemap,
+                const float2 ambientOcclusionRemap,
                 inout float perceptualRoughness,
                 inout float metallic,
                 inout float ambientOcclusion)
             {
                 if (maskMode == 1u)
                 {
-                    metallic = maskSample.r;
-                    perceptualRoughness = 1.0f - maskSample.a;
+                    metallic = RemapPBRChannel(maskSample.r, metallicSmoothnessRemap.xy);
+                    perceptualRoughness = 1.0f
+                        - RemapPBRChannel(maskSample.a, metallicSmoothnessRemap.zw);
                 }
                 else if (maskMode == 2u)
                 {
-                    perceptualRoughness = maskSample.r;
+                    perceptualRoughness = 1.0f
+                        - RemapPBRChannel(1.0f - maskSample.r, metallicSmoothnessRemap.zw);
                 }
                 else if (maskMode == 3u)
                 {
-                    metallic = maskSample.r;
-                    ambientOcclusion = maskSample.g;
-                    perceptualRoughness = 1.0f - maskSample.a;
+                    metallic = RemapPBRChannel(maskSample.r, metallicSmoothnessRemap.xy);
+                    ambientOcclusion = RemapPBRChannel(maskSample.g, ambientOcclusionRemap);
+                    perceptualRoughness = 1.0f
+                        - RemapPBRChannel(maskSample.a, metallicSmoothnessRemap.zw);
                 }
                 else if (maskMode == 4u)
                 {
-                    perceptualRoughness = maskSample.r;
-                    metallic = maskSample.g;
-                    ambientOcclusion = maskSample.b;
+                    perceptualRoughness = 1.0f
+                        - RemapPBRChannel(1.0f - maskSample.r, metallicSmoothnessRemap.zw);
+                    metallic = RemapPBRChannel(maskSample.g, metallicSmoothnessRemap.xy);
+                    ambientOcclusion = RemapPBRChannel(maskSample.b, ambientOcclusionRemap);
                 }
             }
 
@@ -426,6 +437,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         ApplyMaskSample(
                             layerData.MaskMode,
                             VividSampleMaskGrad(layerBinding, layerSampleContext),
+                            float4(0.0f, 1.0f, 0.0f, 1.0f),
+                            float2(0.0f, 1.0f),
                             layerPerceptualRoughness,
                             layerMetallic,
                             layerAmbientOcclusion);
@@ -536,6 +549,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         ApplyMaskSample(
                             triangleData.materialData.Padding0,
                             maskSample,
+                            triangleData.materialData.MetallicSmoothnessRemap,
+                            triangleData.materialData.AmbientOcclusionRemap.xy,
                             perceptualRoughness,
                             metallic,
                             ambientOcclusion);

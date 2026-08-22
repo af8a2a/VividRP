@@ -8,12 +8,13 @@ using UnityEditor.Build;
 using UnityEngine;
 using VividRP.Editor.TerrainTools;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 using Debug = UnityEngine.Debug;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor
 {
-    [ScriptedImporter(6, Extension)]
+    [ScriptedImporter(8, Extension)]
     internal sealed class VividVirtualTextureAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vividvt";
@@ -100,6 +101,7 @@ namespace VividRP.Editor
             bool useVersion3Defaults = BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
                                        || m_StorageSettingsInitialized
                                        || HasVersion3Marker(ctx.assetPath);
+            int buildBorderSize = ResolveBuildBorderSize(ctx);
             VividTerrainCompositeTextureSet generatedTextures = null;
             try
             {
@@ -133,7 +135,7 @@ namespace VividRP.Editor
                     SourceTextureGUID = sourceTextureGUID,
                     SourceTexturePath = sourceTexturePath,
                     PageSize = PageSize,
-                    BorderSize = BorderSize,
+                    BorderSize = buildBorderSize,
                     MipCount = MipCount,
                     FallbackColor = (Color32)FallbackColor,
                     NormalFallbackColor = (Color32)NormalFallbackColor,
@@ -169,6 +171,22 @@ namespace VividRP.Editor
             Debug.Log($"Building virtual texture for {ctx.assetPath} took {timer.Elapsed.TotalMilliseconds:F3} ms.", asset);
         }
 
+        private int ResolveBuildBorderSize(AssetImportContext ctx)
+        {
+            if (BuildProfile != VividVirtualTextureBuildProfile.GPUDrivenSurface)
+                return BorderSize;
+
+            VividRenderPipelineAsset activeAsset = VividRenderPipelineAsset.GetActiveAsset();
+            string activeAssetPath = AssetDatabase.GetAssetPath(activeAsset);
+            if (!string.IsNullOrEmpty(activeAssetPath))
+                ctx.DependsOnSourceAsset(activeAssetPath);
+
+            return VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    activeAsset?.GPUDrivenVirtualTexturePhysicalPoolQuality
+                    ?? GPUDrivenVirtualTexturePhysicalPoolQuality.Medium)
+                .BorderSize;
+        }
+
         internal void ConfigureTerrainCompositeSource(in VividTerrainCompositeSource source)
         {
             m_SourceKind = VividVirtualTextureImportSourceKind.TerrainComposite;
@@ -185,7 +203,9 @@ namespace VividRP.Editor
             ZstdLevel = 3;
             ChunkTargetKiB = 256;
             PageSize = 128;
-            BorderSize = 4;
+            BorderSize = VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality())
+                .BorderSize;
             MipCount = 0;
             FallbackColor = Color.white;
             NormalFallbackColor = new Color(0.5f, 0.5f, 1.0f, 0.5f);
@@ -355,7 +375,9 @@ namespace VividRP.Editor
             ZstdLevel = 3;
             ChunkTargetKiB = 256;
             PageSize = 128;
-            BorderSize = 4;
+            BorderSize = VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality())
+                .BorderSize;
             MipCount = 0;
             FallbackColor = Color.white;
             NormalFallbackColor = new Color(0.5f, 0.5f, 1.0f, 0.5f);

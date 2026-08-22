@@ -559,6 +559,11 @@ namespace VividRP.Editor.GPUDriven
                 VividVirtualTextureMaskStorage maskStorage = maskMode == GPUDrivenMaterialMaskMode.Roughness
                     ? VividVirtualTextureMaskStorage.SingleChannelR
                     : VividVirtualTextureMaskStorage.PackedRGBA;
+                GPUDrivenVirtualTexturePhysicalPoolQuality poolQuality =
+                    VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality();
+                int borderSize = VirtualTextureGPUDrivenTextureBackend
+                    .ResolveDescriptorProfile(poolQuality)
+                    .BorderSize;
                 bool importerChanged = importer.SourceTexture != baseMap
                                        || importer.NormalTexture != normalMap
                                        || importer.MaskTexture != maskMap
@@ -571,7 +576,7 @@ namespace VividRP.Editor.GPUDriven
                                        || importer.ZstdLevel != 3
                                        || importer.ChunkTargetKiB != 256
                                        || importer.PageSize != 128
-                                       || importer.BorderSize != 4
+                                       || importer.BorderSize != borderSize
                                        || importer.MipCount != 0
                                        || importer.FallbackColor != Color.white
                                        || importer.NormalFallbackColor != new Color(0.5f, 0.5f, 1.0f, 0.5f)
@@ -604,7 +609,7 @@ namespace VividRP.Editor.GPUDriven
                     importer.ZstdLevel = 3;
                     importer.ChunkTargetKiB = 256;
                     importer.PageSize = 128;
-                    importer.BorderSize = 4;
+                    importer.BorderSize = borderSize;
                     importer.MipCount = 0;
                     importer.FallbackColor = Color.white;
                     importer.NormalFallbackColor = new Color(0.5f, 0.5f, 1.0f, 0.5f);
@@ -691,7 +696,10 @@ namespace VividRP.Editor.GPUDriven
 
         private static bool IsReusableStreamedVirtualTexture(VividVirtualTextureAsset streamedAsset)
         {
-            if (!VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(streamedAsset, out _))
+            if (!VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(
+                    streamedAsset,
+                    VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality(),
+                    out _))
             {
                 return false;
             }

@@ -80,7 +80,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             properties.SetVector(VirtualTextureShaderIDs._VTFeedbackViewParams, Vector4.zero);
             properties.SetFloat(
                 VirtualTextureShaderIDs._VTAdaptiveMipBias,
-                Mathf.Max(0f, adaptiveMipBias));
+                VirtualTextureSystem.ResolveAdaptiveMipBias(
+                    binding.SpaceId,
+                    adaptiveMipBias));
             properties.SetInt(VirtualTextureShaderIDs._VTDebugMode, (int) VirtualTextureDebugMode.None);
         }
 

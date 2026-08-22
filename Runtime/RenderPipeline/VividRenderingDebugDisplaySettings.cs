@@ -1685,7 +1685,7 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Resident Fallback (Global)", () => VirtualTextureSystem.AdaptiveLastFreshResidentFallbackSampleCount));
                 foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Resolved VT Samples (Global)", () => VirtualTextureSystem.AdaptiveLastFreshWeightedResolvedSampleCount));
                 foldout.children.Add(CreateStatsValue("Adaptive Last Fresh Effective Fallback Pressure (Global)", () => VirtualTextureSystem.AdaptiveLastFreshFallbackPressure));
-                foldout.children.Add(CreateStatsValue("Adaptive Mip Bias", () => GetVirtualTextureDisplayStats(data).AdaptiveMipBias));
+                foldout.children.Add(CreateStatsValue("Adaptive Mip Bias (Worst Pool)", () => GetVirtualTextureDisplayStats(data).AdaptiveMipBias));
                 foldout.children.Add(new DebugUI.Value
                 {
                     displayName = "Status",

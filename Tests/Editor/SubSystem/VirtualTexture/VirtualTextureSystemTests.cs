@@ -939,6 +939,81 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_AppliesFeedbackPressureOnlyToItsPhysicalPool()
+        {
+            int pressuredSpaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "PressuredAdaptivePool",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            int stableSpaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "StableAdaptivePool",
+                cachePageCount: 3,
+                maxUploadsPerFrame: 1));
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                pressuredSpaceId,
+                new VirtualTexturePageCoord(0, 0, 0));
+            var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    feedbackOverflowCount: 3,
+                    fallbackSampleCount: 11,
+                    requestKey);
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                float fallbackMipBias = frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias;
+                Assert.That(
+                    VirtualTextureSystem.ResolveAdaptiveMipBias(pressuredSpaceId, fallbackMipBias),
+                    Is.EqualTo(0.5f));
+                Assert.That(
+                    VirtualTextureSystem.ResolveAdaptiveMipBias(stableSpaceId, fallbackMipBias),
+                    Is.Zero);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_EqualQualitySpaceKeepsZeroBiasUnderFeedbackPressure()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "EqualQualityAdaptivePool",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            VirtualTextureSystem.SetAdaptiveMipBiasEnabled(spaceId, false);
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0));
+            var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    feedbackOverflowCount: 3,
+                    fallbackSampleCount: 11,
+                    requestKey);
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                float fallbackMipBias = frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias;
+                Assert.That(fallbackMipBias, Is.Zero);
+                Assert.That(
+                    VirtualTextureSystem.ResolveAdaptiveMipBias(spaceId, fallbackMipBias),
+                    Is.Zero);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
         public void Update_AppliesDebugMipBiasOverride_WithoutFreezingAdaptiveController()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(

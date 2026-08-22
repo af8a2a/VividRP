@@ -742,6 +742,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Generate_GPUDrivenSurfaceProfile_UsesEightTexelHighQualityBorder()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(128, 128, readable: true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = CreateTempStreamDataPath();
+
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    BorderSize = 8,
+                    StreamDataPath = streamDataPath,
+                    BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                });
+
+                Assert.That(asset.BorderSize, Is.EqualTo(8));
+                Assert.That(builtData.PhysicalPageSize, Is.EqualTo(144));
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+            }
+        }
+
+        [Test]
         public void Importer_GPUDrivenSurfaceProfile_UsesDesktopBCnWithoutVersion3Marker()
         {
             Directory.CreateDirectory(TempFolder);
@@ -772,7 +801,12 @@ namespace VividRP.Editor.Tests
             Assert.That(vtAsset.BuildProfile, Is.EqualTo(VividVirtualTextureBuildProfile.GPUDrivenSurface));
             Assert.That(vtAsset.StorageProfile, Is.EqualTo(VividVirtualTextureStorageProfile.DesktopBCn));
             Assert.That(vtAsset.PageSize, Is.EqualTo(128));
-            Assert.That(vtAsset.BorderSize, Is.EqualTo(4));
+            Assert.That(
+                vtAsset.BorderSize,
+                Is.EqualTo(VirtualTextureGPUDrivenTextureBackend
+                    .ResolveDescriptorProfile(
+                        VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality())
+                    .BorderSize));
             Assert.That(vtAsset.BuiltData.LayerCount, Is.EqualTo(4));
             Assert.That(vtAsset.AddressMode, Is.EqualTo(VividVirtualTextureAddressMode.Repeat));
             Assert.That(

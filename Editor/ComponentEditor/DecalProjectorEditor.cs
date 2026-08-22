@@ -93,6 +93,7 @@ namespace VividRP.Editor
 
             if (VirtualTextureGPUDrivenTextureBackend.IsCompatibleStreamedAsset(
                     asset,
+                    VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality(),
                     out string validationMessage))
             {
                 return;

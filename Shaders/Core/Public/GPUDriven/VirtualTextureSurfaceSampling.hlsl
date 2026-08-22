@@ -148,8 +148,10 @@ float4 VividSampleVirtualTextureLayer(
     if (resource == 0xFFFFFFFFu)
         return fallback;
 
-    return VTSamplePhysicalCacheTrilinearLayer(
+    return VTSamplePhysicalCacheTrilinearLayerGrad(
         context.virtualUv,
+        context.virtualUvDdx,
+        context.virtualUvDdy,
         context.lowerResolved,
         context.upperResolved,
         context.requestedMips.blend,

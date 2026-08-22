@@ -430,9 +430,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     new[]
                     {
                         VirtualTextureGPUDrivenTextureBackend.PageSize,
-                        VirtualTextureGPUDrivenTextureBackend.BorderSize,
+                        m_Owner.m_Backend.VirtualTextureSpaceDesc.StackDesc.BorderSize,
                         VirtualTextureGPUDrivenTextureBackend.PageSize
-                        + VirtualTextureGPUDrivenTextureBackend.BorderSize * 2,
+                        + m_Owner.m_Backend.VirtualTextureSpaceDesc.StackDesc.BorderSize * 2,
                         m_Owner.m_ControlCount,
                     });
                 cmd.SetComputeVectorParam(
@@ -447,7 +447,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 m_Owner.BindSourceVirtualTextureResources(cmd, shader, kernel);
 
                 int physicalPageSize = VirtualTextureGPUDrivenTextureBackend.PageSize
-                                       + VirtualTextureGPUDrivenTextureBackend.BorderSize * 2;
+                                       + m_Owner.m_Backend.VirtualTextureSpaceDesc.StackDesc.BorderSize * 2;
                 int groupCount = Mathf.CeilToInt(physicalPageSize / (float)ThreadGroupSize);
                 cmd.DispatchCompute(shader, kernel, groupCount, groupCount, 1);
             }

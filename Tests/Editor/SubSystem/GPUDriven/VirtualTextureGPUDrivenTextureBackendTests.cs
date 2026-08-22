@@ -319,17 +319,22 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureSystem.GetPagePinCountForTesting(spaceId, sourceCoord), Is.Zero);
         }
 
-        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Low, 256)]
-        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium, 512)]
-        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.High, 1024)]
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Low, 256, 4, true)]
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium, 512, 4, true)]
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.High, 1024, 8, true)]
+        [TestCase(GPUDrivenVirtualTexturePhysicalPoolQuality.EqualQuality, 2048, 8, false)]
         public void DescriptorProfile_MapsPhysicalPoolQualityWithoutChangingStreamingBudgets(
             GPUDrivenVirtualTexturePhysicalPoolQuality quality,
-            int expectedCachePageCount)
+            int expectedCachePageCount,
+            int expectedBorderSize,
+            bool expectedAdaptiveMipBiasEnabled)
         {
             GPUDrivenVirtualTextureDescriptorProfile profile =
                 VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(quality);
 
             Assert.That(profile.CachePageCount, Is.EqualTo(expectedCachePageCount));
+            Assert.That(profile.BorderSize, Is.EqualTo(expectedBorderSize));
+            Assert.That(profile.AdaptiveMipBiasEnabled, Is.EqualTo(expectedAdaptiveMipBiasEnabled));
         }
 
         private static TerrainRuntimeVirtualTextureClipmap.Level CreateTerrainRVTLevel()
@@ -354,6 +359,8 @@ namespace VividRP.Editor.Tests
                     (GPUDrivenVirtualTexturePhysicalPoolQuality)99);
 
             Assert.That(profile.CachePageCount, Is.EqualTo(512));
+            Assert.That(profile.BorderSize, Is.EqualTo(4));
+            Assert.That(profile.AdaptiveMipBiasEnabled, Is.True);
         }
 
         [TestCase(3000, 256)]
@@ -373,6 +380,23 @@ namespace VividRP.Editor.Tests
                     maxTextureSize);
 
             Assert.That(supportedProfile.CachePageCount, Is.EqualTo(expectedCachePageCount));
+            Assert.That(supportedProfile.BorderSize, Is.EqualTo(8));
+        }
+
+        [Test]
+        public void SupportedDescriptorProfile_DoesNotSilentlyDowngradeEqualQuality()
+        {
+            GPUDrivenVirtualTextureDescriptorProfile requestedProfile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.EqualQuality);
+
+            GPUDrivenVirtualTextureDescriptorProfile supportedProfile =
+                VirtualTextureGPUDrivenTextureBackend.ResolveSupportedDescriptorProfile(
+                    requestedProfile,
+                    maxTextureSize: 4096);
+
+            Assert.That(supportedProfile, Is.EqualTo(requestedProfile));
+            Assert.That(supportedProfile.AdaptiveMipBiasEnabled, Is.False);
         }
 
         [Test]
@@ -382,7 +406,8 @@ namespace VividRP.Editor.Tests
                 "GPUDriven VT page producer compute shader resource is missing.";
             LogAssert.Expect(
                 LogType.Warning,
-                "[VividRP] GPUDriven virtual texture physical pool was reduced from 1024 to 512 pages "
+                "[VividRP] GPUDriven virtual texture physical pool profile was reduced from "
+                + "1024 pages/8px border to 512 pages/8px border "
                 + "because the active device supports at most 4096x4096 2D textures.");
             LogAssert.Expect(
                 LogType.Warning,
@@ -399,6 +424,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(backend.DescriptorProfile.CachePageCount, Is.EqualTo(512));
             Assert.That(backend.VirtualTextureSpaceDesc.CachePageCount, Is.EqualTo(512));
+            Assert.That(backend.VirtualTextureSpaceDesc.BorderSize, Is.EqualTo(8));
         }
 
         [Test]

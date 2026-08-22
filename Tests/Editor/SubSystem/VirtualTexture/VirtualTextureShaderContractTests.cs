@@ -11,6 +11,8 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/GPUDrivenVirtualTexturePageProducer.compute";
         private const string SurfaceSamplingAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VirtualTextureSurfaceSampling.hlsl";
+        private const string VirtualTextureAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl";
         private const string GBufferResolveAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/VisibilityBufferGBufferResolve.shader";
 
@@ -59,6 +61,22 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "float4(1.0f, normalRG.g, normalRG.b, normalRG.r)",
                 samplingSource);
+        }
+
+        [Test]
+        public void PhysicalCacheSampling_UsesAnisotropicMipFootprintAndScaledGradients()
+        {
+            string virtualTextureSource = File.ReadAllText(VirtualTextureAssetPath);
+            string samplingSource = File.ReadAllText(SurfaceSamplingAssetPath);
+
+            StringAssert.Contains("VTMipLevelAniso2D", virtualTextureSource);
+            StringAssert.Contains("VIVID_VT_MAX_ANISOTROPY 8.0", virtualTextureSource);
+            StringAssert.Contains("max((float)VT_BORDER_SIZE, 1.0)", virtualTextureSource);
+            StringAssert.Contains("VTComputePhysicalAtlasGradient", virtualTextureSource);
+            StringAssert.Contains(".SampleGrad(sampler_VTPhysicalCache", virtualTextureSource);
+            StringAssert.Contains("VTSamplePhysicalCacheTrilinearLayerGrad", samplingSource);
+            StringAssert.Contains("context.virtualUvDdx", samplingSource);
+            StringAssert.Contains("context.virtualUvDdy", samplingSource);
         }
 
         [Test]

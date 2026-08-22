@@ -98,6 +98,13 @@ namespace VividRP.Runtime
                 <= VTAdaptiveMipBiasController.ResidencyLockedUpperBound;
         }
 
+        private sealed class PhysicalPoolAdaptiveMipBiasState
+        {
+            internal readonly VTAdaptiveMipBiasController Controller = new();
+
+            internal int LastEvictedPageCount;
+        }
+
         private static readonly Dictionary<int, VTPageTableSpace> s_PageTableSpaces = new();
         private static readonly Dictionary<string, int> s_SpaceIdsByName = new(StringComparer.Ordinal);
         private static readonly Dictionary<int, VTAllocatedVirtualTexture> s_Allocations = new();
@@ -116,6 +123,15 @@ namespace VividRP.Runtime
         private static readonly Dictionary<int, int> s_AllocatedPrefetchRequestsBySpace = new();
         private static readonly Dictionary<int, int> s_ScheduledUploadsBySpace = new();
         private static readonly Dictionary<VTPhysicalPool, int> s_PendingDataByPhysicalPool = new();
+        private static readonly Dictionary<VTPhysicalPool, int> s_PendingUploadByPhysicalPool = new();
+        private static readonly Dictionary<VTPhysicalPool, int> s_ResidencyBudgetByPhysicalPool = new();
+        private static readonly Dictionary<VTPhysicalPool, VTPhysicalPoolStats> s_PhysicalPoolStatsByPool = new();
+        private static readonly Dictionary<VTPhysicalPool, PhysicalPoolAdaptiveMipBiasState>
+            s_AdaptiveMipBiasStateByPhysicalPool = new();
+        private static readonly Dictionary<VTPhysicalPool, int> s_FeedbackFaultHitsByPhysicalPool = new();
+        private static readonly Dictionary<int, bool> s_AdaptiveMipBiasEnabledBySpace = new();
+        private static readonly Dictionary<VTPhysicalPool, float> s_AdaptiveMipBiasByPhysicalPool = new();
+        private static readonly Dictionary<int, float> s_AdaptiveMipBiasBySpace = new();
         private static readonly Dictionary<PagePinKey, PagePinState> s_PagePins = new();
         private static readonly List<PagePinKey> s_PagePinKeysToRemove = new();
         private static readonly List<FeedbackMotionKey> s_FeedbackMotionKeysToRemove = new();
@@ -142,6 +158,8 @@ namespace VividRP.Runtime
         private static int s_LastResidencyCandidateCount;
         private static int s_LastDemandPrefetchCandidateCount;
         private static int s_LastPrefetchCandidateProcessCount;
+        private static float s_MaxAdaptiveMipBias;
+        private static float s_MaxAdaptiveControllerMipBias;
 #if UNITY_INCLUDE_TESTS
         private static int s_PhysicalPoolFreePageCollectionCount;
         private static int s_PhysicalPoolStatsCollectionCount;
@@ -406,6 +424,14 @@ namespace VividRP.Runtime
             s_AllocatedPrefetchRequestsBySpace.Clear();
             s_ScheduledUploadsBySpace.Clear();
             s_PendingDataByPhysicalPool.Clear();
+            s_PendingUploadByPhysicalPool.Clear();
+            s_ResidencyBudgetByPhysicalPool.Clear();
+            s_PhysicalPoolStatsByPool.Clear();
+            s_AdaptiveMipBiasStateByPhysicalPool.Clear();
+            s_FeedbackFaultHitsByPhysicalPool.Clear();
+            s_AdaptiveMipBiasEnabledBySpace.Clear();
+            s_AdaptiveMipBiasByPhysicalPool.Clear();
+            s_AdaptiveMipBiasBySpace.Clear();
             s_PagePins.Clear();
             s_PagePinKeysToRemove.Clear();
             s_FeedbackMotionKeysToRemove.Clear();
@@ -426,6 +452,8 @@ namespace VividRP.Runtime
             s_LastResidencyCandidateCount = 0;
             s_LastDemandPrefetchCandidateCount = 0;
             s_LastPrefetchCandidateProcessCount = 0;
+            s_MaxAdaptiveMipBias = 0f;
+            s_MaxAdaptiveControllerMipBias = 0f;
 #if UNITY_INCLUDE_TESTS
             s_PhysicalPoolFreePageCollectionCount = 0;
             s_PhysicalPoolStatsCollectionCount = 0;
@@ -456,6 +484,30 @@ namespace VividRP.Runtime
         internal static int RegisterSpace(in VirtualTextureSpaceDesc desc)
         {
             return RegisterAddressSpace(desc, null);
+        }
+
+        internal static void SetAdaptiveMipBiasEnabled(int spaceId, bool enabled)
+        {
+            Initialize();
+            if (!s_PageTableSpaces.ContainsKey(spaceId))
+                return;
+
+            s_AdaptiveMipBiasEnabledBySpace[spaceId] = enabled;
+            if (!enabled)
+                s_AdaptiveMipBiasBySpace[spaceId] = 0f;
+        }
+
+        internal static float ResolveAdaptiveMipBias(int spaceId, float fallbackMipBias)
+        {
+            if (s_AdaptiveMipBiasEnabledBySpace.TryGetValue(spaceId, out bool enabled)
+                && !enabled)
+            {
+                return 0f;
+            }
+
+            return s_AdaptiveMipBiasBySpace.TryGetValue(spaceId, out float mipBias)
+                ? mipBias
+                : Mathf.Max(0f, fallbackMipBias);
         }
 
         internal static VTProducerHandle RegisterProducer(in VirtualTextureSpaceDesc desc, VTProducer producer)
@@ -623,6 +675,17 @@ namespace VividRP.Runtime
             s_AllocatedPrefetchRequestsBySpace.Clear();
             s_ScheduledUploadsBySpace.Clear();
             s_PendingDataByPhysicalPool.Clear();
+            s_PendingUploadByPhysicalPool.Clear();
+            s_ResidencyBudgetByPhysicalPool.Clear();
+            s_PhysicalPoolStatsByPool.Clear();
+            foreach (PhysicalPoolAdaptiveMipBiasState state in s_AdaptiveMipBiasStateByPhysicalPool.Values)
+            {
+                state.Controller.Reset();
+                state.LastEvictedPageCount = 0;
+            }
+            s_FeedbackFaultHitsByPhysicalPool.Clear();
+            s_AdaptiveMipBiasByPhysicalPool.Clear();
+            s_AdaptiveMipBiasBySpace.Clear();
             s_FeedbackMotionKeysToRemove.Clear();
             s_UploadSpaceOrder.Clear();
             s_PendingUploadCandidates.Clear();
@@ -637,6 +700,8 @@ namespace VividRP.Runtime
             s_LastResidencyCandidateCount = 0;
             s_LastDemandPrefetchCandidateCount = 0;
             s_LastPrefetchCandidateProcessCount = 0;
+            s_MaxAdaptiveMipBias = 0f;
+            s_MaxAdaptiveControllerMipBias = 0f;
 #if UNITY_INCLUDE_TESTS
             s_PhysicalPoolFreePageCollectionCount = 0;
             s_PhysicalPoolStatsCollectionCount = 0;
@@ -862,11 +927,13 @@ namespace VividRP.Runtime
             int activeViewFeedbackOverflowCount = 0;
             int activeViewFallbackSampleCount = 0;
             int activeViewLastReadbackFrame = -1;
+            s_FeedbackFaultHitsByPhysicalPool.Clear();
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackStatsMarker.Auto())
             {
                 for (int batchIndex = 0; batchIndex < s_CompletedReadbacks.Count; batchIndex++)
                 {
                     VirtualTextureFeedbackBatch batch = s_CompletedReadbacks[batchIndex];
+                    AccumulateFeedbackFaultHitsByPhysicalPool(batch);
                     faultCount = SaturatingAddFeedbackCount(
                         faultCount,
                         batch.AcceptedFaultRequestCount);
@@ -1314,12 +1381,14 @@ namespace VividRP.Runtime
             int pendingUploadCount = pendingDataCount + physicalPendingUploadCount;
             VTPhysicalPoolStats physicalPoolStats;
             ProspectivePhysicalPoolStats prospectivePhysicalPoolStats;
+            VTPhysicalPool prospectivePhysicalPool;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsPhysicalPoolsMarker.Auto())
             {
                 physicalPoolStats = CollectPhysicalPoolStats(
                     frameIndex,
                     globalResidencyRequestBudget,
-                    out prospectivePhysicalPoolStats);
+                    out prospectivePhysicalPoolStats,
+                    out prospectivePhysicalPool);
             }
             float adaptiveMipBias;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsAdaptiveMipBiasMarker.Auto())
@@ -1430,6 +1499,15 @@ namespace VividRP.Runtime
                 float adaptiveMipBiasOverride = debugSettings.virtualTextureAdaptiveMipBiasOverride;
                 if (adaptiveMipBiasOverride >= 0f)
                     adaptiveMipBias = adaptiveMipBiasOverride;
+
+                adaptiveMipBias = UpdateAdaptiveMipBiasByPhysicalPool(
+                    frameIndex,
+                    globalResidencyRequestBudget,
+                    blockedUploadCount,
+                    streamSaturatedRequestCount,
+                    prospectivePhysicalPool,
+                    debugSettings,
+                    adaptiveMipBias);
             }
             if (virtualTextureFrameData != null)
                 virtualTextureFrameData.AdaptiveMipBias = adaptiveMipBias;
@@ -2474,7 +2552,7 @@ namespace VividRP.Runtime
 
         internal static float GetAdaptiveMipBiasForTesting()
         {
-            return s_AdaptiveMipBiasController.CurrentMipBias;
+            return s_MaxAdaptiveControllerMipBias;
         }
 
         internal static int AdaptiveFeedbackOverflowInputCount =>
@@ -2681,6 +2759,13 @@ namespace VividRP.Runtime
                 return;
 
             s_PhysicalPools.Remove(pool.Desc);
+            s_PendingDataByPhysicalPool.Remove(pool);
+            s_PendingUploadByPhysicalPool.Remove(pool);
+            s_ResidencyBudgetByPhysicalPool.Remove(pool);
+            s_PhysicalPoolStatsByPool.Remove(pool);
+            s_AdaptiveMipBiasStateByPhysicalPool.Remove(pool);
+            s_FeedbackFaultHitsByPhysicalPool.Remove(pool);
+            s_AdaptiveMipBiasByPhysicalPool.Remove(pool);
             pool.Dispose();
         }
 
@@ -2707,13 +2792,15 @@ namespace VividRP.Runtime
             return CollectPhysicalPoolStats(
                 -1,
                 0,
+                out _,
                 out _);
         }
 
         private static VTPhysicalPoolStats CollectPhysicalPoolStats(
             int frameIndex,
             int uploadBudget,
-            out ProspectivePhysicalPoolStats prospectiveStats)
+            out ProspectivePhysicalPoolStats prospectiveStats,
+            out VTPhysicalPool prospectivePool)
         {
 #if UNITY_INCLUDE_TESTS
             s_PhysicalPoolStatsCollectionCount += 1;
@@ -2727,11 +2814,14 @@ namespace VividRP.Runtime
             long allocatedByteCount = 0;
             long residentByteCount = 0;
             prospectiveStats = default;
+            prospectivePool = null;
+            s_PhysicalPoolStatsByPool.Clear();
             foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
             {
                 VTPhysicalPoolStats poolStats = pool.CollectStats(
                     frameIndex,
                     VTPhysicalPool.FeedbackEvictionProtectionFrames);
+                s_PhysicalPoolStatsByPool[pool] = poolStats;
                 residentPageCount += poolStats.ResidentPageCount;
                 freePageCount += poolStats.FreePageCount;
                 lockedPageCount += poolStats.LockedPageCount;
@@ -2746,10 +2836,14 @@ namespace VividRP.Runtime
                 s_PendingDataByPhysicalPool.TryGetValue(
                     pool,
                     out int pendingDataCount);
+                s_ResidencyBudgetByPhysicalPool.TryGetValue(
+                    pool,
+                    out int poolResidencyBudget);
+                poolResidencyBudget = Mathf.Min(uploadBudget, poolResidencyBudget);
                 int predictedPageCount = VTAdaptiveMipBiasController
                     .ComputePredictedPhysicalPageCount(
                         pendingDataCount,
-                        uploadBudget);
+                        poolResidencyBudget);
                 var poolProspectiveStats = new ProspectivePhysicalPoolStats(
                     poolStats.TotalPageCount,
                     poolStats.RecentVisiblePageCount,
@@ -2764,6 +2858,7 @@ namespace VividRP.Runtime
                         > prospectiveStats.ProjectedResidency))
                 {
                     prospectiveStats = poolProspectiveStats;
+                    prospectivePool = pool;
                 }
             }
 
@@ -2777,6 +2872,238 @@ namespace VividRP.Runtime
                 residentByteCount,
                 totalPageCount,
                 recentVisiblePageCount);
+        }
+
+        private static float UpdateAdaptiveMipBiasByPhysicalPool(
+            int frameIndex,
+            int uploadBudget,
+            int blockedUploadCount,
+            int streamSaturatedRequestCount,
+            VTPhysicalPool prospectivePhysicalPool,
+            VividRenderingDebugSettingsData debugSettings,
+            float fallbackMipBias)
+        {
+            VTPhysicalPool fallbackFeedbackPhysicalPool = ResolveFeedbackPhysicalPool(
+                prospectivePhysicalPool);
+            long totalFeedbackFaultHitCount = 0;
+            foreach (int faultHitCount in s_FeedbackFaultHitsByPhysicalPool.Values)
+                totalFeedbackFaultHitCount += Mathf.Max(0, faultHitCount);
+            float adaptiveMipBiasOverride = debugSettings.virtualTextureAdaptiveMipBiasOverride;
+            s_AdaptiveMipBiasByPhysicalPool.Clear();
+            s_AdaptiveMipBiasBySpace.Clear();
+            float maxMipBias = 0f;
+            float maxControllerMipBias = 0f;
+
+            foreach (KeyValuePair<VTPhysicalPool, VTPhysicalPoolStats> pair in s_PhysicalPoolStatsByPool)
+            {
+                VTPhysicalPool pool = pair.Key;
+                VTPhysicalPoolStats poolStats = pair.Value;
+                if (!s_AdaptiveMipBiasStateByPhysicalPool.TryGetValue(
+                        pool,
+                        out PhysicalPoolAdaptiveMipBiasState state))
+                {
+                    state = new PhysicalPoolAdaptiveMipBiasState
+                    {
+                        LastEvictedPageCount = poolStats.EvictedPageCount,
+                    };
+                    s_AdaptiveMipBiasStateByPhysicalPool.Add(pool, state);
+                }
+
+                int evictionCount = Mathf.Max(
+                    0,
+                    poolStats.EvictedPageCount - state.LastEvictedPageCount);
+                state.LastEvictedPageCount = poolStats.EvictedPageCount;
+                bool adaptiveMipBiasEnabled = IsAdaptiveMipBiasEnabledForPool(pool);
+                float poolMipBias = 0f;
+                if (adaptiveMipBiasEnabled)
+                {
+                    s_PendingDataByPhysicalPool.TryGetValue(pool, out int pendingDataCount);
+                    s_PendingUploadByPhysicalPool.TryGetValue(pool, out int pendingUploadCount);
+                    s_ResidencyBudgetByPhysicalPool.TryGetValue(
+                        pool,
+                        out int poolResidencyBudget);
+                    poolResidencyBudget = Mathf.Min(uploadBudget, poolResidencyBudget);
+                    int predictedPageCount = VTAdaptiveMipBiasController
+                        .ComputePredictedPhysicalPageCount(
+                            pendingDataCount,
+                            poolResidencyBudget);
+                    VTAdaptiveMipBiasController globalController = s_AdaptiveMipBiasController;
+                    float feedbackWeight = ResolveFeedbackWeight(
+                        pool,
+                        fallbackFeedbackPhysicalPool,
+                        totalFeedbackFaultHitCount);
+                    bool hasFreshFeedback = globalController.LastUpdateHadFreshFeedbackMeasurement;
+                    poolMipBias = state.Controller.Update(
+                        frameIndex,
+                        new VTAdaptiveMipBiasInputs(
+                            poolResidencyBudget,
+                            SaturatingAddFeedbackCount(pendingDataCount, pendingUploadCount),
+                            ScaleFeedbackCount(blockedUploadCount, feedbackWeight),
+                            ScaleFeedbackCount(streamSaturatedRequestCount, feedbackWeight),
+                            ScaleFeedbackCount(
+                                globalController.LastFeedbackOverflowCount,
+                                feedbackWeight),
+                            ScaleFeedbackCount(
+                                globalController.LastFallbackSampleCount,
+                                feedbackWeight),
+                            poolStats.FreePageCount,
+                            evictionCount,
+                            hasFreshFeedbackMeasurement: hasFreshFeedback,
+                            measuredFeedbackOverflowCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredFeedbackOverflowCount,
+                                    feedbackWeight),
+                            measuredFallbackSampleCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredFallbackSampleCount,
+                                    feedbackWeight),
+                            measuredFaultOverflowCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredFaultOverflowCount,
+                                    feedbackWeight),
+                            measuredResidentOverflowCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredResidentOverflowCount,
+                                    feedbackWeight),
+                            measuredNonResidentFallbackSampleCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredNonResidentFallbackSampleCount,
+                                    feedbackWeight),
+                            measuredResidentFallbackSampleCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredResidentFallbackSampleCount,
+                                    feedbackWeight),
+                            feedbackMeasurementFrameIndex:
+                                hasFreshFeedback
+                                    ? globalController.LastFreshFeedbackFrameIndex
+                                    : -1,
+                            weightedAccessSampleCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastWeightedAccessSampleCount,
+                                    feedbackWeight),
+                            measuredWeightedAccessSampleCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredWeightedAccessSampleCount,
+                                    feedbackWeight),
+                            acceptedFaultRequestCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredAcceptedFaultRequestCount,
+                                    feedbackWeight),
+                            acceptedResidentRequestCount:
+                                ScaleFeedbackCount(
+                                    globalController.LastMeasuredAcceptedResidentRequestCount,
+                                    feedbackWeight),
+                            feedbackOverflowOverrideActive:
+                                feedbackWeight > 0f
+                                && debugSettings.virtualTextureFeedbackOverflowCountOverride >= 0,
+                            fallbackSampleOverrideActive:
+                                feedbackWeight > 0f
+                                && debugSettings.virtualTextureFallbackSampleCountOverride >= 0,
+                            physicalPoolPageCount: poolStats.TotalPageCount,
+                            recentVisiblePhysicalPageCount: poolStats.RecentVisiblePageCount,
+                            predictedPhysicalPageCount: predictedPageCount,
+                            lockedPhysicalPageCount: poolStats.LockedPageCount));
+                }
+
+                maxControllerMipBias = Mathf.Max(
+                    maxControllerMipBias,
+                    adaptiveMipBiasEnabled ? state.Controller.CurrentMipBias : 0f);
+                if (adaptiveMipBiasEnabled && adaptiveMipBiasOverride >= 0f)
+                    poolMipBias = adaptiveMipBiasOverride;
+                poolMipBias = Mathf.Clamp(
+                    poolMipBias,
+                    0f,
+                    VTAdaptiveMipBiasController.MaxMipBias);
+                s_AdaptiveMipBiasByPhysicalPool[pool] = poolMipBias;
+                maxMipBias = Mathf.Max(maxMipBias, poolMipBias);
+            }
+
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+            {
+                float spaceMipBias = s_AdaptiveMipBiasByPhysicalPool.TryGetValue(
+                    addressSpace.PhysicalPool,
+                    out float poolMipBias)
+                    ? poolMipBias
+                    : Mathf.Max(0f, fallbackMipBias);
+                if (s_AdaptiveMipBiasEnabledBySpace.TryGetValue(
+                        addressSpace.SpaceId,
+                        out bool enabled)
+                    && !enabled
+                    && adaptiveMipBiasOverride < 0f)
+                {
+                    spaceMipBias = 0f;
+                }
+
+                s_AdaptiveMipBiasBySpace[addressSpace.SpaceId] = spaceMipBias;
+            }
+
+            s_MaxAdaptiveMipBias = s_PhysicalPoolStatsByPool.Count > 0
+                ? maxMipBias
+                : Mathf.Max(0f, fallbackMipBias);
+            s_MaxAdaptiveControllerMipBias = s_PhysicalPoolStatsByPool.Count > 0
+                ? maxControllerMipBias
+                : s_AdaptiveMipBiasController.CurrentMipBias;
+            return s_MaxAdaptiveMipBias;
+        }
+
+        private static VTPhysicalPool ResolveFeedbackPhysicalPool(
+            VTPhysicalPool prospectivePhysicalPool)
+        {
+            VTPhysicalPool feedbackPhysicalPool = null;
+            int maxFaultHitCount = 0;
+            foreach (KeyValuePair<VTPhysicalPool, int> pair in s_FeedbackFaultHitsByPhysicalPool)
+            {
+                if (feedbackPhysicalPool != null && pair.Value <= maxFaultHitCount)
+                    continue;
+
+                feedbackPhysicalPool = pair.Key;
+                maxFaultHitCount = pair.Value;
+            }
+
+            return feedbackPhysicalPool ?? prospectivePhysicalPool;
+        }
+
+        private static float ResolveFeedbackWeight(
+            VTPhysicalPool pool,
+            VTPhysicalPool fallbackFeedbackPhysicalPool,
+            long totalFaultHitCount)
+        {
+            // Overflow/fallback counters are shared by the compacted feedback stream.
+            // Exact request hit counts provide the best available pool attribution;
+            // a counter-only batch falls back to the pool with the highest projected pressure.
+            if (totalFaultHitCount <= 0)
+                return ReferenceEquals(pool, fallbackFeedbackPhysicalPool) ? 1f : 0f;
+
+            return s_FeedbackFaultHitsByPhysicalPool.TryGetValue(pool, out int poolFaultHitCount)
+                ? Mathf.Clamp01((float)((double)poolFaultHitCount / totalFaultHitCount))
+                : 0f;
+        }
+
+        private static int ScaleFeedbackCount(int count, float weight)
+        {
+            if (count <= 0 || weight <= 0f)
+                return 0;
+
+            return Mathf.Max(1, Mathf.RoundToInt(count * weight));
+        }
+
+        private static bool IsAdaptiveMipBiasEnabledForPool(VTPhysicalPool pool)
+        {
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+            {
+                if (!ReferenceEquals(addressSpace.PhysicalPool, pool))
+                    continue;
+
+                if (s_AdaptiveMipBiasEnabledBySpace.TryGetValue(
+                        addressSpace.SpaceId,
+                        out bool enabled)
+                    && !enabled)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static void ReplacePageTableSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer)
@@ -2841,6 +3168,8 @@ namespace VividRP.Runtime
             }
 
             s_UploadScheduler.CancelUploadsForSpace(spaceId);
+            s_AdaptiveMipBiasEnabledBySpace.Remove(spaceId);
+            s_AdaptiveMipBiasBySpace.Remove(spaceId);
             RemovePagePinsForSpace(spaceId);
             VTPhysicalPool physicalPool = addressSpace.PhysicalPool;
             VTProducerHandle producerHandle = addressSpace.ProducerHandle;
@@ -2936,6 +3265,35 @@ namespace VividRP.Runtime
                 streamState.CollectCompletedReadbacks(s_CompletedReadbacks, ref lastReadbackFrame);
         }
 
+        private static void AccumulateFeedbackFaultHitsByPhysicalPool(
+            in VirtualTextureFeedbackBatch batch)
+        {
+            if (!batch.RequestsReadbackValid)
+                return;
+
+            for (int requestIndex = 0; requestIndex < batch.RequestCount; requestIndex++)
+            {
+                int faultHitCount = batch.GetRequestHitCount(requestIndex);
+                if (faultHitCount <= 0)
+                    continue;
+
+                VirtualTextureFeedbackProcessor.DecodeKey(
+                    batch.GetRequest(requestIndex),
+                    out int spaceId,
+                    out _);
+                if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
+                    continue;
+
+                VTPhysicalPool physicalPool = addressSpace.PhysicalPool;
+                s_FeedbackFaultHitsByPhysicalPool.TryGetValue(
+                    physicalPool,
+                    out int accumulatedHitCount);
+                s_FeedbackFaultHitsByPhysicalPool[physicalPool] = SaturatingAddFeedbackCount(
+                    accumulatedHitCount,
+                    faultHitCount);
+            }
+        }
+
         private static void CollectPendingRequestCounts(
             out int pendingDataCount,
             out int physicalPendingUploadCount)
@@ -2943,15 +3301,18 @@ namespace VividRP.Runtime
             pendingDataCount = 0;
             physicalPendingUploadCount = 0;
             s_PendingDataByPhysicalPool.Clear();
+            s_PendingUploadByPhysicalPool.Clear();
+            s_ResidencyBudgetByPhysicalPool.Clear();
             foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
             {
                 int spacePendingDataCount = addressSpace.PendingDataRequestCount;
+                int spacePendingUploadCount = addressSpace.PendingUploadRequestCount;
                 pendingDataCount = SaturatingAddFeedbackCount(
                     pendingDataCount,
                     spacePendingDataCount);
                 physicalPendingUploadCount = SaturatingAddFeedbackCount(
                     physicalPendingUploadCount,
-                    addressSpace.PendingUploadRequestCount);
+                    spacePendingUploadCount);
                 VTPhysicalPool physicalPool = addressSpace.PhysicalPool;
                 s_PendingDataByPhysicalPool.TryGetValue(
                     physicalPool,
@@ -2959,6 +3320,18 @@ namespace VividRP.Runtime
                 s_PendingDataByPhysicalPool[physicalPool] = SaturatingAddFeedbackCount(
                     poolPendingDataCount,
                     spacePendingDataCount);
+                s_PendingUploadByPhysicalPool.TryGetValue(
+                    physicalPool,
+                    out int poolPendingUploadCount);
+                s_PendingUploadByPhysicalPool[physicalPool] = SaturatingAddFeedbackCount(
+                    poolPendingUploadCount,
+                    spacePendingUploadCount);
+                s_ResidencyBudgetByPhysicalPool.TryGetValue(
+                    physicalPool,
+                    out int poolResidencyBudget);
+                s_ResidencyBudgetByPhysicalPool[physicalPool] = SaturatingAddFeedbackCount(
+                    poolResidencyBudget,
+                    addressSpace.Descriptor.MaxResidencyAllocationsPerFrame);
             }
         }
 

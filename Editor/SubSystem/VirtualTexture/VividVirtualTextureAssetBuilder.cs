@@ -11,7 +11,8 @@ namespace VividRP.Editor
     internal static class VividVirtualTextureAssetBuilder
     {
         private const int GPUDrivenPageSize = 128;
-        private const int GPUDrivenBorderSize = 4;
+        private const int GPUDrivenDefaultBorderSize = 4;
+        private const int GPUDrivenHighQualityBorderSize = 8;
         private const int GPUDrivenMaxPageCount = 64;
         private const int StreamAlignment = 4096;
         private const int StreamHeaderByteSize = 32;
@@ -69,7 +70,9 @@ namespace VividRP.Editor
 
             bool gpuDrivenSurface = parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface;
             int pageSize = gpuDrivenSurface ? GPUDrivenPageSize : Mathf.Max(1, parameters.PageSize);
-            int borderSize = gpuDrivenSurface ? GPUDrivenBorderSize : Mathf.Max(0, parameters.BorderSize);
+            int borderSize = gpuDrivenSurface
+                ? ResolveGPUDrivenBorderSize(parameters.BorderSize)
+                : Mathf.Max(0, parameters.BorderSize);
             ResolveVirtualPageCounts(
                 parameters,
                 primaryTexture,
@@ -285,7 +288,9 @@ namespace VividRP.Editor
 
             bool gpuDrivenSurface = parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface;
             int pageSize = gpuDrivenSurface ? GPUDrivenPageSize : Mathf.Max(1, parameters.PageSize);
-            int borderSize = gpuDrivenSurface ? GPUDrivenBorderSize : Mathf.Max(0, parameters.BorderSize);
+            int borderSize = gpuDrivenSurface
+                ? ResolveGPUDrivenBorderSize(parameters.BorderSize)
+                : Mathf.Max(0, parameters.BorderSize);
             int physicalPageSize = checked(pageSize + borderSize * 2);
             if ((physicalPageSize & 3) != 0)
                 throw new ArgumentException("DesktopBCn physical page size must be 4x4 block aligned.", nameof(parameters));
@@ -1002,6 +1007,13 @@ namespace VividRP.Editor
             if (parameters.NormalTexture != null)
                 return parameters.NormalTexture;
             return parameters.MaskTexture != null ? parameters.MaskTexture : null;
+        }
+
+        private static int ResolveGPUDrivenBorderSize(int requestedBorderSize)
+        {
+            return requestedBorderSize >= GPUDrivenHighQualityBorderSize
+                ? GPUDrivenHighQualityBorderSize
+                : GPUDrivenDefaultBorderSize;
         }
 
         private static void ResolveVirtualPageCounts(

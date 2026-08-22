@@ -1875,6 +1875,7 @@ namespace VividRP.Runtime
 
     internal sealed class VTPhysicalPool : IDisposable
     {
+        internal const int MaxPhysicalAnisotropy = 8;
         internal const int AsyncCommitEvictionProtectionFrames = 3;
         internal const int FeedbackEvictionProtectionFrames = 16;
 
@@ -2792,7 +2793,8 @@ namespace VividRP.Runtime
                     : $"VividVT_{poolName}_PhysicalAtlas_Group{physicalGroup}",
                 hideFlags = HideFlags.HideAndDontSave,
                 wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = ResolvePhysicalAnisotropy(desc.BorderSize),
             };
             NativeArray<byte> rawTextureData = texture.GetRawTextureData<byte>();
             unsafe
@@ -2801,6 +2803,11 @@ namespace VividRP.Runtime
             }
             texture.Apply(false, true);
             return texture;
+        }
+
+        internal static int ResolvePhysicalAnisotropy(int borderSize)
+        {
+            return Mathf.Clamp(borderSize, 1, MaxPhysicalAnisotropy);
         }
 
         private bool TryGetSlot(int physicalPageId, int generation, out PhysicalPageSlotState slotState)

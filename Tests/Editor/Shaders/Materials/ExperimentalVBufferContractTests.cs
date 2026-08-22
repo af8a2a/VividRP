@@ -6,6 +6,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.Experimental.Material;
+using VividRP.Runtime.RenderPass.Core;
 using VividRP.Runtime.RenderPass.Experimental.Material;
 
 namespace VividRP.Editor.Tests
@@ -29,18 +30,18 @@ namespace VividRP.Editor.Tests
                 Marshal.SizeOf<ExperimentalVBufferMaterialData>(),
                 Is.EqualTo(ExperimentalVBufferContract.MaterialRecordStride));
 
-            var pass = new ExperimentalVisibilityBufferPass();
+            var pass = new VisibilityBufferPass();
             var resources = ((IRenderPass)pass).Initialize();
             Assert.That(
-                resources.Textures.Single(entry => entry.Name == "ExperimentalVisibilityBuffer")
+                resources.Textures.Single(entry => entry.Name == "VisibilityBuffer")
                     .Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R32G32_UInt));
             Assert.That(
-                resources.Textures.Single(entry => entry.Name == "ExperimentalVisibilityAttributes0")
+                resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes0")
                     .Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(
-                resources.Textures.Single(entry => entry.Name == "ExperimentalVisibilityAttributes1")
+                resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes1")
                     .Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
         }

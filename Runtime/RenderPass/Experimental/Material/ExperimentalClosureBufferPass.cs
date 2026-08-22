@@ -25,13 +25,13 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
         private static readonly int s_MaterialCountId = Shader.PropertyToID("_VividExperimentalVBufferMaterialCount");
         private static readonly int s_VirtualTextureAvailableId = Shader.PropertyToID("_VividExperimentalVBufferVTAvailable");
 
-        [RenderGraphResource(Name = "ExperimentalVisibilityBuffer", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "VisibilityBuffer", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VisibilityBuffer;
 
-        [RenderGraphResource(Name = "ExperimentalVisibilityAttributes0", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "VisibilityBufferAttributes0", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Attributes0;
 
-        [RenderGraphResource(Name = "ExperimentalVisibilityAttributes1", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "VisibilityBufferAttributes1", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Attributes1;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
@@ -80,9 +80,9 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
         public ExperimentalClosureBufferPass()
         {
             profilingSampler = new ProfilingSampler(nameof(ExperimentalClosureBufferPass));
-            m_VisibilityBuffer = CreateInput("ExperimentalVisibilityBuffer", GraphicsFormat.R32G32_UInt);
-            m_Attributes0 = CreateInput("ExperimentalVisibilityAttributes0", GraphicsFormat.R16G16B16A16_SFloat);
-            m_Attributes1 = CreateInput("ExperimentalVisibilityAttributes1", GraphicsFormat.R16G16B16A16_SFloat);
+            m_VisibilityBuffer = CreateInput("VisibilityBuffer", GraphicsFormat.R32G32_UInt);
+            m_Attributes0 = CreateInput("VisibilityBufferAttributes0", GraphicsFormat.R16G16B16A16_SFloat);
+            m_Attributes1 = CreateInput("VisibilityBufferAttributes1", GraphicsFormat.R16G16B16A16_SFloat);
             m_Depth = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_MaterialTable = RenderGraphBuffer.CreateStructured(
                 "ExperimentalVBufferMaterialTable",

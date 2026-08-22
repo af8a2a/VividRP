@@ -10,9 +10,10 @@ using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class VisibilityBufferPass : UnsafePass
+    public class VisibilityBufferPass : UnsafePass
     {
         internal const string VisibilityBufferShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferPass";
+        internal const string ShaderTagName = "VisibilityBuffer";
 
         private const int IndirectDrawArgsByteStride = sizeof(uint) * 4;
         private const int SpdTileSize = 64;
@@ -57,6 +58,9 @@ namespace VividRP.Runtime.RenderPass.Core
             public uint Counter5;
         }
 
+        [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
+        private RenderGraphRenderList m_RenderList;
+
         [RenderGraphResource(Name = "VisibleMeshletRenderRequests", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_VisibleMeshletRenderRequests;
 
@@ -71,13 +75,30 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_VisibilityBuffer;
 
         [RenderGraphResource(
+            Name = "VisibilityBufferAttributes0",
+            Access = AccessFlags.ReadWrite,
+            AttachmentIndex = 1,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_Attributes0;
+
+        [RenderGraphResource(
+            Name = "VisibilityBufferAttributes1",
+            Access = AccessFlags.ReadWrite,
+            AttachmentIndex = 2,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_Attributes1;
+
+        [RenderGraphResource(
             Name = "Depth",
             Access = AccessFlags.ReadWrite,
             IsDepthAttachment = true)]
         private RenderGraphTexture m_Depth;
 
         private readonly RenderGraphTexture m_DefaultVisibilityBuffer;
+        private readonly RenderGraphTexture m_DefaultAttributes0;
+        private readonly RenderGraphTexture m_DefaultAttributes1;
         private readonly RenderGraphTexture m_DefaultDepth;
+        private readonly RenderTargetIdentifier[] m_ColorTargets = new RenderTargetIdentifier[3];
         private readonly Material[] m_Materials = new Material[(int)VividRendererListID.Count];
         private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
         private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
@@ -113,6 +134,11 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(VisibilityBufferPass));
 
+            m_RenderList = new RenderGraphRenderList
+            {
+                desc = RenderGraphRenderListDesc.CreateOpaque(ShaderTagName),
+            };
+
             m_VisibleMeshletRenderRequests = RenderGraphBuffer.CreateStructured(
                 "VisibleMeshletRenderRequests",
                 1,
@@ -139,6 +165,38 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VisibilityBuffer.desc.AutoGenerateMips = false;
             m_VisibilityBuffer.desc.MipCount = 1;
 
+            m_Attributes0 = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(
+                    1,
+                    1,
+                    GraphicsFormat.R16G16B16A16_SFloat)
+            };
+            m_Attributes0.desc.Name = "VisibilityBufferAttributes0";
+            m_Attributes0.desc.FilterMode = FilterMode.Point;
+            m_Attributes0.desc.WrapMode = TextureWrapMode.Clamp;
+            m_Attributes0.desc.ClearBuffer = true;
+            m_Attributes0.desc.ClearColor = Color.clear;
+            m_Attributes0.desc.UseMipMap = false;
+            m_Attributes0.desc.AutoGenerateMips = false;
+            m_Attributes0.desc.MipCount = 1;
+
+            m_Attributes1 = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(
+                    1,
+                    1,
+                    GraphicsFormat.R16G16B16A16_SFloat)
+            };
+            m_Attributes1.desc.Name = "VisibilityBufferAttributes1";
+            m_Attributes1.desc.FilterMode = FilterMode.Point;
+            m_Attributes1.desc.WrapMode = TextureWrapMode.Clamp;
+            m_Attributes1.desc.ClearBuffer = true;
+            m_Attributes1.desc.ClearColor = Color.clear;
+            m_Attributes1.desc.UseMipMap = false;
+            m_Attributes1.desc.AutoGenerateMips = false;
+            m_Attributes1.desc.MipCount = 1;
+
             m_Depth = new RenderGraphTexture
             {
                 desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
@@ -146,6 +204,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Depth.desc.Name = "Depth";
             m_Depth.desc.ClearBuffer = false;
             m_DefaultVisibilityBuffer = m_VisibilityBuffer;
+            m_DefaultAttributes0 = m_Attributes0;
+            m_DefaultAttributes1 = m_Attributes1;
             m_DefaultDepth = m_Depth;
         }
 
@@ -204,6 +264,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 height = Mathf.Max(1, Screen.height);
 
             ResizePassOwnedTexture(m_VisibilityBuffer, m_DefaultVisibilityBuffer, width, height);
+            ResizePassOwnedTexture(m_Attributes0, m_DefaultAttributes0, width, height);
+            ResizePassOwnedTexture(m_Attributes1, m_DefaultAttributes1, width, height);
             ResizePassOwnedTexture(m_Depth, m_DefaultDepth, width, height);
 
             var gpuDrivenFrameData = frameData.GetOrCreate<VividGPUDrivenFrameData>();
@@ -238,7 +300,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(UnsafePassContext context)
         {
-            if (m_VisibilityBuffer?.IsValid() != true || m_Depth?.IsValid() != true)
+            if (m_VisibilityBuffer?.IsValid() != true
+                || m_Attributes0?.IsValid() != true
+                || m_Attributes1?.IsValid() != true
+                || m_Depth?.IsValid() != true)
                 return;
 
             var nativeCmd = context.GetNativeCommandBuffer();
@@ -246,8 +311,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             GraphicsBuffer visibleMeshletRenderRequestsBuffer = m_VisibleMeshletRenderRequests?.ImportedGraphicsBuffer;
             GraphicsBuffer visibleMeshletIndirectArgsBuffer = m_VisibleMeshletIndirectArgs?.ImportedGraphicsBuffer;
-            if (visibleMeshletRenderRequestsBuffer == null || visibleMeshletIndirectArgsBuffer == null)
-                return;
+            bool hasGPUDrivenDraws = visibleMeshletRenderRequestsBuffer != null
+                                     && visibleMeshletIndirectArgsBuffer != null;
 
             VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance
                 ? VividGPUDrivenSystem.instance
@@ -269,13 +334,22 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
-                DrawRendererLists(
-                    nativeCmd,
-                    visibleMeshletRenderRequestsBuffer,
-                    visibleMeshletIndirectArgsBuffer,
-                    system,
-                    virtualTextureReady,
-                    virtualTextureBinding);
+                if (hasGPUDrivenDraws)
+                {
+                    DrawRendererLists(
+                        nativeCmd,
+                        visibleMeshletRenderRequestsBuffer,
+                        visibleMeshletIndirectArgsBuffer,
+                        system,
+                        virtualTextureReady,
+                        virtualTextureBinding);
+                }
+
+                if (m_RenderList?.IsValid == true)
+                    nativeCmd.DrawRendererList(m_RenderList);
+
+                if (!hasGPUDrivenDraws)
+                    return;
 
                 if (m_OcclusionObservationMode)
                 {
@@ -657,7 +731,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void BindVisibilityTargets(CommandBuffer cmd, bool clearTargets)
         {
-            cmd.SetRenderTarget(m_VisibilityBuffer, m_Depth);
+            m_ColorTargets[0] = m_VisibilityBuffer;
+            m_ColorTargets[1] = m_Attributes0;
+            m_ColorTargets[2] = m_Attributes1;
+            cmd.SetRenderTarget(m_ColorTargets, m_Depth);
             if (!clearTargets)
                 return;
 

@@ -53,9 +53,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
             {
                 float4 positionCS : SV_POSITION;
                 nointerpolation uint2 visibilityValue : TEXCOORD0;
-                #ifdef _ALPHATEST_ON
                 float2 uv0 : TEXCOORD1;
-                #endif
+                float3 geometricNormalWS : TEXCOORD2;
             };
 
             uint PullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
@@ -71,9 +70,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
             }
 
-            float2 GetUV0(const VividDecodedMeshletVertex vertex, const VividMaterialData materialData)
+            float2 GetUV0(const float2 uv0, const VividMaterialData materialData)
             {
-                return vertex.UV.xy * materialData.TextureTilingOffset.xy + materialData.TextureTilingOffset.zw;
+                return uv0 * materialData.TextureTilingOffset.xy + materialData.TextureTilingOffset.zw;
             }
 
             float4 SampleAlbedo(
@@ -91,9 +90,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 Varyings output;
                 output.positionCS = float4(-2.0, -2.0, 0.0, 1.0);
                 output.visibilityValue = 0u;
-                #ifdef _ALPHATEST_ON
                 output.uv0 = 0.0;
-                #endif
+                output.geometricNormalWS = float3(0.0, 0.0, 1.0);
 
                 const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
                 const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
@@ -118,26 +116,31 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 visibilityBufferValue.MeshletID = renderRequest.MeshletID;
                 visibilityBufferValue.IndexID = vertexID;
                 output.visibilityValue = PackVisibilityBufferValue(visibilityBufferValue);
-
-                #ifdef _ALPHATEST_ON
-                output.uv0 = GetUV0(vertex, materialData);
-                #endif
+                output.uv0 = vertex.UV.xy;
+                output.geometricNormalWS = SafeNormalize(
+                    mul(vertex.Normal.xyz, (float3x3)instanceData.WorldToObjectMatrix));
 
                 return output;
             }
             // [earlydepthstencil]
-            uint2 Frag(Varyings input) : SV_Target
+            VividVisibilityBufferFragmentOutput Frag(Varyings input)
             {
                 #ifdef _ALPHATEST_ON
                 const VividVisibilityBufferValue visibilityBufferValue = UnpackVisibilityBufferValue(input.visibilityValue);
                 const VividInstanceData instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
                 const VividSurfaceBindingData surfaceBindingData = PullSurfaceBindingData(materialData.SurfaceBindingIndex);
-                const float4 albedo = SampleAlbedo(input.uv0, materialData, surfaceBindingData);
+                const float4 albedo = SampleAlbedo(
+                    GetUV0(input.uv0, materialData),
+                    materialData,
+                    surfaceBindingData);
                 clip(albedo.a - materialData.AlphaClipThreshold);
                 #endif
 
-                return input.visibilityValue;
+                return PackVividVisibilityBufferFragmentOutput(
+                    input.visibilityValue,
+                    input.uv0,
+                    input.geometricNormalWS);
             }
             ENDHLSL
         }

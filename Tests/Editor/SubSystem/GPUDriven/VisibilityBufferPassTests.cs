@@ -16,23 +16,39 @@ namespace VividRP.Editor.Tests
     public class VisibilityBufferPassTests
     {
         [Test]
-        public void Initialize_RegistersVisibleMeshletBuffersVisibilityTargetAndDepth()
+        public void Initialize_RegistersRendererListMeshletBuffersThreeVisibilityTargetsAndDepth()
         {
             IRenderPass renderPass = new VisibilityBufferPass();
 
             var resources = renderPass.Initialize();
             var visibilityEntry = resources.Textures.Single(entry => entry.Name == "VisibilityBuffer");
+            var attributes0Entry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes0");
+            var attributes1Entry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes1");
             var depthEntry = resources.Textures.Single(entry => entry.Name == "Depth");
             var visibleMeshletRequestsEntry = resources.Buffers.Single(entry => entry.Name == "VisibleMeshletRenderRequests");
             var indirectArgsEntry = resources.Buffers.Single(entry => entry.Name == "VisibleMeshletIndirectArgs");
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(2));
+            Assert.That(resources.Textures, Has.Length.EqualTo(4));
             Assert.That(resources.Buffers, Has.Length.EqualTo(2));
+            Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
+            Assert.That(
+                resources.RenderLists[0].RenderList.desc.ShaderTagNames,
+                Is.EqualTo(new[] { "VisibilityBuffer" }));
             Assert.That(renderPass, Is.InstanceOf<UnsafePass>());
 
             Assert.That(visibilityEntry.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(visibilityEntry.AttachmentIndex, Is.EqualTo(0));
             Assert.That(visibilityEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32_UInt));
+            Assert.That(attributes0Entry.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(attributes0Entry.AttachmentIndex, Is.EqualTo(1));
+            Assert.That(
+                attributes0Entry.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(attributes1Entry.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(attributes1Entry.AttachmentIndex, Is.EqualTo(2));
+            Assert.That(
+                attributes1Entry.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
 
             Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(depthEntry.IsDepthAttachment, Is.True);
@@ -63,12 +79,18 @@ namespace VividRP.Editor.Tests
                 pass.Prepare(frameData);
 
                 var visibilityTexture = GetTextureField(pass, "m_VisibilityBuffer");
+                var attributes0Texture = GetTextureField(pass, "m_Attributes0");
+                var attributes1Texture = GetTextureField(pass, "m_Attributes1");
                 var depthTexture = GetTextureField(pass, "m_Depth");
                 var renderRequestsBuffer = GetBufferField(pass, "m_VisibleMeshletRenderRequests");
                 var indirectArgsBuffer = GetBufferField(pass, "m_VisibleMeshletIndirectArgs");
 
                 Assert.That(visibilityTexture.desc.Width, Is.EqualTo(1024));
                 Assert.That(visibilityTexture.desc.Height, Is.EqualTo(576));
+                Assert.That(attributes0Texture.desc.Width, Is.EqualTo(1024));
+                Assert.That(attributes0Texture.desc.Height, Is.EqualTo(576));
+                Assert.That(attributes1Texture.desc.Width, Is.EqualTo(1024));
+                Assert.That(attributes1Texture.desc.Height, Is.EqualTo(576));
                 Assert.That(depthTexture.desc.Width, Is.EqualTo(1024));
                 Assert.That(depthTexture.desc.Height, Is.EqualTo(576));
                 Assert.That(renderRequestsBuffer.HasImportedBuffer, Is.False);
@@ -186,6 +208,29 @@ namespace VividRP.Editor.Tests
             Assert.That(bucketFilter, Is.GreaterThan(drawSetBranch));
             Assert.That(zeroBucketFilter, Is.GreaterThan(bucketFilter));
             Assert.That(legacyFallback, Is.GreaterThan(zeroBucketFilter));
+        }
+
+        [Test]
+        public void VisibilityShader_WritesSharedVisibilityAttributeAbi()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VisibilityBufferPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferPass.shader");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+
+            StringAssert.Contains("VividVisibilityBufferFragmentOutput Frag", source);
+            StringAssert.Contains("PackVividVisibilityBufferFragmentOutput", source);
+            StringAssert.Contains("output.uv0 = vertex.UV.xy", source);
+            StringAssert.Contains("output.geometricNormalWS", source);
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferPass pass, string fieldName)

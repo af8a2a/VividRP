@@ -142,8 +142,8 @@ Shader "VividRP/Experimental/Material/StandardLit"
 
         Pass
         {
-            Name "ExperimentalVisibilityBuffer"
-            Tags { "LightMode" = "ExperimentalVisibilityBuffer" }
+            Name "VisibilityBuffer"
+            Tags { "LightMode" = "VisibilityBuffer" }
 
             Blend One Zero
             ZWrite Off

@@ -355,7 +355,9 @@ namespace VividRP.Editor.GPUDriven
                                 ApplyMaterialChanges(meshletRenderer);
 
                                 GPUDrivenMaterialProxySyncResult syncResult =
-                                    GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(meshletRenderer);
+                                    GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(
+                                        meshletRenderer,
+                                        skipStreamedVirtualTextureRebuildIfUpToDate: true);
 
                                 if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
                                 {

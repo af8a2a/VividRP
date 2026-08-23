@@ -200,6 +200,42 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void LayoutLowering_MapsProgram0AndProgram1RequirementsToStableAbi()
+        {
+            CompiledMaterialProgram standard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram dualSlab =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.VerticalLayer);
+
+            AssertStandardMaterialLayout(standard);
+            AssertDualSlabMaterialLayout(dualSlab);
+        }
+
+        [Test]
+        public void LayoutLowering_RejectsRequirementsFromDifferentSurfaceAbi()
+        {
+            CompiledMaterialProgram standard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram dualSlab =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.HorizontalMix);
+            var mismatchedSurfaceProgram = new CompiledSurfaceProgram(
+                VividMaterialSurfaceProgramID.StandardSingleSlab,
+                dualSlab.SurfaceProgram.ValueSlice,
+                dualSlab.SurfaceProgram.Requirements);
+
+            Assert.Throws<NotSupportedException>(() =>
+                MaterialLayoutLowerer.Compile(
+                    standard.CoverageProgram,
+                    mismatchedSurfaceProgram));
+        }
+
+        [Test]
         public void CompileStandardSingleSlab_ProducesSingleClosureProgramPrototype()
         {
             var firstProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -418,6 +454,199 @@ namespace VividRP.Editor.Tests
                     MaterialExternalInput.GeometryTangentWS,
                 },
                 surface.RequiredExternalInputs);
+        }
+
+        private static void AssertStandardMaterialLayout(CompiledMaterialProgram program)
+        {
+            CompiledMaterialLayout layout = program.MaterialLayout;
+            Assert.That(
+                layout.ParameterLayout.LayoutID,
+                Is.EqualTo(VividMaterialParameterLayoutID.LegacyMaterialData));
+            Assert.That(
+                layout.ResourceLayout.LayoutID,
+                Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
+            Assert.That(
+                program.RuntimeData.ParameterLayoutID,
+                Is.EqualTo(layout.ParameterLayout.LayoutID));
+            Assert.That(
+                program.RuntimeData.ResourceLayoutID,
+                Is.EqualTo(layout.ResourceLayout.LayoutID));
+            Assert.That(layout.ParameterLayout.Stride, Is.EqualTo(128));
+            Assert.That(layout.ResourceLayout.RecordStride, Is.EqualTo(32));
+            Assert.That(layout.ResourceLayout.RecordCount, Is.EqualTo(1));
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialParameter.BaseColor,
+                    MaterialParameter.Roughness,
+                    MaterialParameter.Metallic,
+                    MaterialParameter.AlphaClipThreshold,
+                },
+                layout.Requirements.Parameters);
+            CollectionAssert.AreEqual(
+                new[] { MaterialTextureResource.BaseColor },
+                layout.Requirements.TextureResources);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialExternalInput.UV0,
+                    MaterialExternalInput.GeometryNormalWS,
+                    MaterialExternalInput.GeometryTangentWS,
+                },
+                layout.Requirements.ExternalInputs);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.BaseColor,
+                MaterialValueType.Float4,
+                byteOffset: 0);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.Roughness,
+                MaterialValueType.Float,
+                byteOffset: 88);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.Metallic,
+                MaterialValueType.Float,
+                byteOffset: 92);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.AlphaClipThreshold,
+                MaterialValueType.Float,
+                byteOffset: 116);
+            AssertResourceBinding(
+                layout.ResourceLayout,
+                MaterialTextureResource.BaseColor,
+                recordOffset: 0,
+                byteOffset: 0);
+        }
+
+        private static void AssertDualSlabMaterialLayout(CompiledMaterialProgram program)
+        {
+            CompiledMaterialLayout layout = program.MaterialLayout;
+            Assert.That(
+                layout.ParameterLayout.LayoutID,
+                Is.EqualTo(VividMaterialParameterLayoutID.DualSlabMaterialData));
+            Assert.That(
+                layout.ResourceLayout.LayoutID,
+                Is.EqualTo(VividMaterialResourceLayoutID.DualSurfaceBinding));
+            Assert.That(
+                program.RuntimeData.ParameterLayoutID,
+                Is.EqualTo(layout.ParameterLayout.LayoutID));
+            Assert.That(
+                program.RuntimeData.ResourceLayoutID,
+                Is.EqualTo(layout.ResourceLayout.LayoutID));
+            Assert.That(layout.ParameterLayout.Stride, Is.EqualTo(192));
+            Assert.That(layout.ResourceLayout.RecordStride, Is.EqualTo(32));
+            Assert.That(layout.ResourceLayout.RecordCount, Is.EqualTo(2));
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialParameter.BaseColor,
+                    MaterialParameter.TopBaseColor,
+                    MaterialParameter.Roughness,
+                    MaterialParameter.TopRoughness,
+                    MaterialParameter.Metallic,
+                    MaterialParameter.TopMetallic,
+                    MaterialParameter.LayerWeight,
+                    MaterialParameter.AlphaClipThreshold,
+                },
+                layout.Requirements.Parameters);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialTextureResource.BaseColor,
+                    MaterialTextureResource.TopBaseColor,
+                },
+                layout.Requirements.TextureResources);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialExternalInput.UV0,
+                    MaterialExternalInput.GeometryNormalWS,
+                    MaterialExternalInput.GeometryTangentWS,
+                },
+                layout.Requirements.ExternalInputs);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.BaseColor,
+                MaterialValueType.Float4,
+                byteOffset: 0);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.TopBaseColor,
+                MaterialValueType.Float4,
+                byteOffset: 80);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.Roughness,
+                MaterialValueType.Float,
+                byteOffset: 68);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.TopRoughness,
+                MaterialValueType.Float,
+                byteOffset: 148);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.Metallic,
+                MaterialValueType.Float,
+                byteOffset: 72);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.TopMetallic,
+                MaterialValueType.Float,
+                byteOffset: 152);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.LayerWeight,
+                MaterialValueType.Float,
+                byteOffset: 180);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialParameter.AlphaClipThreshold,
+                MaterialValueType.Float,
+                byteOffset: 184);
+            AssertResourceBinding(
+                layout.ResourceLayout,
+                MaterialTextureResource.BaseColor,
+                recordOffset: 0,
+                byteOffset: 0);
+            AssertResourceBinding(
+                layout.ResourceLayout,
+                MaterialTextureResource.TopBaseColor,
+                recordOffset: 1,
+                byteOffset: 0);
+        }
+
+        private static void AssertParameterBinding(
+            CompiledParameterLayout layout,
+            MaterialParameter parameter,
+            MaterialValueType type,
+            int byteOffset)
+        {
+            Assert.That(
+                layout.TryGetBinding(
+                    parameter,
+                    out MaterialParameterLayoutBinding binding),
+                Is.True);
+            Assert.That(binding.Type, Is.EqualTo(type));
+            Assert.That(binding.ByteOffset, Is.EqualTo(byteOffset));
+        }
+
+        private static void AssertResourceBinding(
+            CompiledResourceLayout layout,
+            MaterialTextureResource resource,
+            int recordOffset,
+            int byteOffset)
+        {
+            Assert.That(
+                layout.TryGetBinding(
+                    resource,
+                    out MaterialResourceLayoutBinding binding),
+                Is.True);
+            Assert.That(binding.RecordOffset, Is.EqualTo(recordOffset));
+            Assert.That(binding.ByteOffset, Is.EqualTo(byteOffset));
         }
 
         private static string[] GetValueSliceSignature(MaterialValueSlice valueSlice)

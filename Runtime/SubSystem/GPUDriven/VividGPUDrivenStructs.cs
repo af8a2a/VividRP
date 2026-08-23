@@ -83,6 +83,105 @@ namespace VividRP.Runtime.GPUDriven
         Count = (CullFront | CullOff | AlphaTest) + 1,
     }
 
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialProgramID : uint
+    {
+        StandardSingleSlab = 0,
+        DualSlabHorizontalMix = 1,
+        DualSlabVerticalLayer = 2,
+        Invalid = uint.MaxValue,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialCoverageProgramID : uint
+    {
+        BaseColorAlpha = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialSurfaceProgramID : uint
+    {
+        StandardSingleSlab = 0,
+        DualSlab = 1,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialTransportProgramID : uint
+    {
+        None = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialParameterLayoutID : uint
+    {
+        LegacyMaterialData = 0,
+        DualSlabMaterialData = 1,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialResourceLayoutID : uint
+    {
+        LegacySurfaceBinding = 0,
+        DualSurfaceBinding = 1,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividDualSlabOperator : uint
+    {
+        HorizontalMix = 0,
+        VerticalLayer = 1,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialExecutionClass : uint
+    {
+        VisibilityDeferred = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    [Flags]
+    public enum VividMaterialRuntimeFlags : uint
+    {
+        None = 0,
+        AlphaClip = 1 << 0,
+        Unlit = 1 << 1,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    [Flags]
+    public enum VividMaterialProgramCapabilities : uint
+    {
+        None = 0,
+        LegacyGBufferExport = 1 << 0,
+        AlphaClip = 1 << 1,
+        Unlit = 1 << 2,
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMaterialRuntimeHeader
+    {
+        public VividMaterialProgramID ProgramID;
+        public uint ParameterAddress;
+        public uint ResourceBindingAddress;
+        public VividMaterialRuntimeFlags Flags;
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMaterialProgramData
+    {
+        public uint Version;
+        public VividMaterialCoverageProgramID CoverageProgramID;
+        public VividMaterialSurfaceProgramID SurfaceProgramID;
+        public VividMaterialTransportProgramID TransportProgramID;
+
+        public VividMaterialParameterLayoutID ParameterLayoutID;
+        public VividMaterialResourceLayoutID ResourceLayoutID;
+        public VividMaterialProgramCapabilities CapabilityFlags;
+        public VividMaterialExecutionClass ExecutionClass;
+    }
+
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
     [StructLayout(LayoutKind.Sequential)]
     public struct VividMaterialData
@@ -107,6 +206,53 @@ namespace VividRP.Runtime.GPUDriven
         public float AlphaClipThreshold;
         public uint Padding0;
         public uint Padding1;
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividSlabMaterialData
+    {
+        public float4 AlbedoColor;
+        public float4 TextureTilingOffset;
+        public float4 MetallicSmoothnessRemap;
+        public float4 AmbientOcclusionRemap;
+
+        public float NormalsStrength;
+        public float Roughness;
+        public float Metallic;
+        public uint MaskMode;
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividDualSlabMaterialData
+    {
+        public float4 BaseAlbedoColor;
+        public float4 BaseTextureTilingOffset;
+        public float4 BaseMetallicSmoothnessRemap;
+        public float4 BaseAmbientOcclusionRemap;
+
+        public float BaseNormalsStrength;
+        public float BaseRoughness;
+        public float BaseMetallic;
+        public uint BaseMaskMode;
+
+        public float4 TopAlbedoColor;
+        public float4 TopTextureTilingOffset;
+        public float4 TopMetallicSmoothnessRemap;
+        public float4 TopAmbientOcclusionRemap;
+
+        public float TopNormalsStrength;
+        public float TopRoughness;
+        public float TopMetallic;
+        public uint TopMaskMode;
+
+        public float4 Emission;
+
+        public VividDualSlabOperator LayerOperator;
+        public float LayerWeight;
+        public float AlphaClipThreshold;
+        public uint Padding0;
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]

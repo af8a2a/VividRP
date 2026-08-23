@@ -6,6 +6,8 @@ using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.RenderPass.Core;
 using VividRP.Runtime.RenderPass.Experimental.Material;
 
 namespace VividRP.Editor.Tests
@@ -13,27 +15,25 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalClosureRenderPassTests
     {
         [Test]
-        public void VisibilityBufferPass_RegistersThreeAttachmentsAndSharedDepth()
+        public void SharedVisibilityBufferPass_UsesGpuDrivenDrawsAndFourAttachments()
         {
-            IRenderPass pass = new ExperimentalVisibilityBufferPass();
+            IRenderPass pass = new VisibilityBufferPass();
             var resources = pass.Initialize();
             var colorEntries = resources.Textures
                 .Where(entry => !entry.IsDepthAttachment)
                 .OrderBy(entry => entry.AttachmentIndex)
                 .ToArray();
 
-            Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
-            Assert.That(
-                resources.RenderLists[0].RenderList.desc.ShaderTagNames,
-                Is.EqualTo(new[] { "ExperimentalVisibilityBuffer" }));
-            Assert.That(colorEntries, Has.Length.EqualTo(3));
+            Assert.That(resources.RenderLists, Is.Empty);
+            Assert.That(colorEntries, Has.Length.EqualTo(4));
             Assert.That(
                 colorEntries.Select(entry => entry.Name),
                 Is.EqualTo(new[]
                 {
-                    "ExperimentalVisibilityBuffer",
-                    "ExperimentalVisibilityAttributes0",
-                    "ExperimentalVisibilityAttributes1",
+                    "VisibilityBuffer",
+                    "VisibilityBufferAttributes0",
+                    "VisibilityBufferAttributes1",
+                    "VisibilityBufferBarycentrics",
                 }));
             Assert.That(
                 resources.Textures.Single(entry => entry.IsDepthAttachment).Name,
@@ -41,20 +41,29 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VisibilityBufferPass_ResizesAttachmentsWhenCameraSizeChanges()
+        public void SharedVisibilityBufferPass_ResizesAttachmentsWhenCameraSizeChanges()
         {
-            var pass = new ExperimentalVisibilityBufferPass();
+            VividGPUDrivenSystem.Shutdown();
+            var pass = new VisibilityBufferPass();
+            try
+            {
+                var frameData = CreateFrameData(1506, 674);
+                pass.Prepare(frameData);
 
-            pass.Resize(1920, 1080);
-            pass.Resize(1506, 674);
-
-            AssertTexture(pass, "m_VisibilityBuffer", 1506, 674);
-            AssertTexture(pass, "m_Attributes0", 1506, 674);
-            AssertTexture(pass, "m_Attributes1", 1506, 674);
+                AssertTexture(pass, "m_VisibilityBuffer", 1506, 674);
+                AssertTexture(pass, "m_Attributes0", 1506, 674);
+                AssertTexture(pass, "m_Attributes1", 1506, 674);
+                AssertTexture(pass, "m_Barycentrics", 1506, 674);
+            }
+            finally
+            {
+                pass.Dispose();
+                VividGPUDrivenSystem.Shutdown();
+            }
         }
 
         [Test]
-        public void ClosureBufferPass_IsFullscreenResolveWithVBufferAndMaterialTableInputs()
+        public void ClosureBufferPass_IsFullscreenResolveUsingGpuDrivenMaterialGlobals()
         {
             IRenderPass pass = new ExperimentalClosureBufferPass();
             var resources = pass.Initialize();
@@ -64,9 +73,9 @@ namespace VividRP.Editor.Tests
                 resources.Textures.Select(entry => entry.Name),
                 Is.SupersetOf(new[]
                 {
-                    "ExperimentalVisibilityBuffer",
-                    "ExperimentalVisibilityAttributes0",
-                    "ExperimentalVisibilityAttributes1",
+                    "VisibilityBuffer",
+                    "VisibilityBufferAttributes0",
+                    "VisibilityBufferAttributes1",
                     "Depth",
                     "ExperimentalClosureBuffer0",
                     "ExperimentalClosureBuffer1",
@@ -77,9 +86,7 @@ namespace VividRP.Editor.Tests
                     "ExperimentalClosureBuffer6",
                     "ExperimentalClosureBuffer7",
                 }));
-            Assert.That(
-                resources.Buffers.Select(entry => entry.Name),
-                Does.Contain("ExperimentalVBufferMaterialTable"));
+            Assert.That(resources.Buffers, Is.Empty);
             Assert.That(pass, Is.InstanceOf<IAllowGlobalStateModificationPass>());
         }
 

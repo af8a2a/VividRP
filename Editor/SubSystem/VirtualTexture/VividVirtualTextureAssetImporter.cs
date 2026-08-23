@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEditor.AssetImporters;
 using UnityEditor.Build;
 using UnityEngine;
+using VividRP.Editor.GPUDriven;
 using VividRP.Editor.TerrainTools;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
@@ -140,7 +141,8 @@ namespace VividRP.Editor
                     FallbackColor = (Color32)FallbackColor,
                     NormalFallbackColor = (Color32)NormalFallbackColor,
                     MaskFallbackColor = (Color32)MaskFallbackColor,
-                    StreamDataPath = ctx.assetPath + ".stream",
+                    StreamDataPath = GPUDrivenGeneratedAssetPathUtility.ResolveStreamDataPath(
+                        ctx.assetPath),
                     LogErrorHandler = message => ctx.LogImportError(message),
                     BuildProfile = BuildProfile,
                     AddressMode = AddressMode,

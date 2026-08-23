@@ -980,8 +980,7 @@ namespace VividRP.Runtime.GPUDriven
                 sceneData.MutableSurfaceBindings.Add(textureBackend.CreateSurfaceBinding(surfaceTextures));
             }
 
-            materialIndex = sceneData.MaterialCount;
-            sceneData.MutableMaterials.Add(materialData);
+            materialIndex = sceneData.AddLegacyMaterial(materialData);
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
             if (terrainData != null)
             {
@@ -1091,24 +1090,66 @@ namespace VividRP.Runtime.GPUDriven
                 return materialIndex;
             }
 
-            GPUDrivenSurfaceTextureSet surfaceTextures;
             VividMaterialData materialData;
+            VividMaterialRuntimeHeader runtimeHeader;
             uint surfaceBindingIndex = (uint) sceneData.SurfaceBindingCount;
             if (materialProxy != null)
             {
-                surfaceTextures = ExtractSurfaceTextures(materialProxy, textureBackend);
-                materialData = CreateMaterialData(materialProxy, surfaceBindingIndex);
+                GPUDrivenCompiledMaterialInstance compiledMaterial;
+                if (materialProxy.Model == GPUDrivenMaterialProxyModel.DualSlab)
+                {
+                    GPUDrivenDualSlabMaterialDefinition definition =
+                        materialProxy.DualSlabDefinition;
+                    GPUDrivenMaterialProxy topSlab = definition != null
+                        ? definition.TopSlab
+                        : null;
+                    compiledMaterial = GPUDrivenMaterialCompiler.CompileDualSlab(
+                        materialProxy,
+                        (uint) sceneData.DualSlabMaterialCount,
+                        surfaceBindingIndex);
+                    sceneData.MutableSurfaceBindings.Add(
+                        textureBackend.CreateSurfaceBinding(
+                            ExtractSurfaceTextures(materialProxy, textureBackend)));
+                    sceneData.MutableSurfaceBindings.Add(
+                        textureBackend.CreateSurfaceBinding(
+                            ExtractSurfaceTextures(topSlab, textureBackend)));
+                    sceneData.MutableDualSlabMaterials.Add(
+                        compiledMaterial.DualSlabMaterialData);
+                }
+                else
+                {
+                    compiledMaterial = GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        materialProxy,
+                        (uint) sceneData.MaterialCount,
+                        surfaceBindingIndex);
+                    sceneData.MutableSurfaceBindings.Add(
+                        textureBackend.CreateSurfaceBinding(
+                            ExtractSurfaceTextures(materialProxy, textureBackend)));
+                }
+                int appendedResourceRecordCount =
+                    sceneData.SurfaceBindingCount - (int) surfaceBindingIndex;
+                int requiredResourceRecordCount = compiledMaterial.MaterialProgram
+                    .MaterialLayout.ResourceLayout.RecordCount;
+                if (appendedResourceRecordCount != requiredResourceRecordCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Material program '{compiledMaterial.MaterialProgram.ProgramID}' requires {requiredResourceRecordCount} resource records, but the material compiler appended {appendedResourceRecordCount}.");
+                }
+                materialData = compiledMaterial.LegacyMaterialData;
+                runtimeHeader = compiledMaterial.RuntimeHeader;
             }
             else
             {
                 WarnMissingMaterialProxy(meshletRenderer, material, subMeshIndex);
-                surfaceTextures = ExtractSurfaceTextures(material);
                 materialData = CreateMaterialData(material, surfaceBindingIndex);
+                runtimeHeader = GPUDrivenMaterialCompiler.CreateLegacyFallbackHeader(
+                    (uint) sceneData.MaterialCount,
+                    surfaceBindingIndex);
+                sceneData.MutableSurfaceBindings.Add(
+                    textureBackend.CreateSurfaceBinding(ExtractSurfaceTextures(material)));
             }
 
-            materialIndex = sceneData.MaterialCount;
-            sceneData.MutableSurfaceBindings.Add(textureBackend.CreateSurfaceBinding(surfaceTextures));
-            sceneData.MutableMaterials.Add(materialData);
+            materialIndex = sceneData.AddMaterial(materialData, runtimeHeader);
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
             if (materialProxy != null)
             {
@@ -1140,45 +1181,6 @@ namespace VividRP.Runtime.GPUDriven
                 $"[VividRP] MeshletRenderer '{rendererName}' submesh {subMeshIndex} is missing a GPUDriven material proxy. Falling back to source Material '{materialName}'.",
                 meshletRenderer
             );
-        }
-
-        private static VividMaterialData CreateMaterialData(
-            GPUDrivenMaterialProxy materialProxy,
-            uint surfaceBindingIndex
-        )
-        {
-            return new VividMaterialData
-            {
-                AlbedoColor = ToFloat4(materialProxy != null ? materialProxy.BaseColor : Color.white),
-                TextureTilingOffset = ToFloat4(materialProxy != null ? materialProxy.TextureTilingOffset : new Vector4(1.0f, 1.0f, 0.0f, 0.0f)),
-                Emission = ToFloat4(materialProxy != null ? materialProxy.EmissionColor : Color.black),
-                MetallicSmoothnessRemap = materialProxy != null
-                    ? new float4(
-                        materialProxy.MetallicRemap.x,
-                        materialProxy.MetallicRemap.y,
-                        materialProxy.SmoothnessRemap.x,
-                        materialProxy.SmoothnessRemap.y)
-                    : new float4(0.0f, 1.0f, 0.0f, 1.0f),
-                AmbientOcclusionRemap = materialProxy != null
-                    ? new float4(
-                        materialProxy.AmbientOcclusionRemap.x,
-                        materialProxy.AmbientOcclusionRemap.y,
-                        0.0f,
-                        0.0f)
-                    : new float4(0.0f, 1.0f, 0.0f, 0.0f),
-                SurfaceBindingIndex = surfaceBindingIndex,
-                NormalsStrength = materialProxy != null ? materialProxy.BumpScale : 1.0f,
-                Roughness = materialProxy != null ? materialProxy.Roughness : 1.0f,
-                Metallic = materialProxy != null ? materialProxy.Metallic : 0.0f,
-                SpecularAAScreenSpaceVariance = 0.0f,
-                SpecularAAThreshold = 0.0f,
-                GeometryFlags = VividGeometryFlags.None,
-                MaterialFlags = GetMaterialFlags(materialProxy),
-                RendererListID = GetRendererListId(materialProxy),
-                AlphaClipThreshold = GetAlphaClipThreshold(materialProxy),
-                Padding0 = (uint) (materialProxy != null ? materialProxy.MaskMode : GPUDrivenMaterialMaskMode.None),
-                Padding1 = 0,
-            };
         }
 
         private static VividMaterialData CreateMaterialData(
@@ -1402,6 +1404,21 @@ namespace VividRP.Runtime.GPUDriven
                     hash = (hash ^ GetObjectRevisionId(fallbackTextures.Normal)) * 16777619u;
                     hash = (hash ^ GetObjectRevisionId(fallbackTextures.Mask)) * 16777619u;
                 }
+                if (materialProxy.Model == GPUDrivenMaterialProxyModel.DualSlab)
+                {
+                    GPUDrivenDualSlabMaterialDefinition definition =
+                        materialProxy.DualSlabDefinition;
+                    hash = (hash ^ GetObjectRevisionId(definition)) * 16777619u;
+                    hash = (hash ^ (definition != null ? definition.Revision : 0u)) * 16777619u;
+                    GPUDrivenMaterialProxy topSlab = definition != null
+                        ? definition.TopSlab
+                        : null;
+                    if (topSlab != null && !ReferenceEquals(topSlab, materialProxy))
+                    {
+                        hash = (hash ^ ComputeMaterialProxyRevision(topSlab, textureBackend))
+                               * 16777619u;
+                    }
+                }
                 return hash;
             }
         }
@@ -1535,7 +1552,12 @@ namespace VividRP.Runtime.GPUDriven
             Color color = material != null && material.HasProperty(propertyId)
                 ? material.GetColor(propertyId)
                 : fallback;
-            return new float4(color.r, color.g, color.b, color.a);
+            return ConvertMaterialColorForGPU(color);
+        }
+
+        internal static float4 ConvertMaterialColorForGPU(Color color)
+        {
+            return GPUDrivenMaterialCompiler.ConvertMaterialColorForGPU(color);
         }
 
         private static float4 GetTilingOffset(Material material)
@@ -1574,13 +1596,6 @@ namespace VividRP.Runtime.GPUDriven
             return 1.0f;
         }
 
-        private static VividMaterialFlags GetMaterialFlags(GPUDrivenMaterialProxy materialProxy)
-        {
-            return materialProxy is { DisableLighting: true }
-                ? VividMaterialFlags.Unlit
-                : VividMaterialFlags.None;
-        }
-
         private static VividMaterialFlags GetMaterialFlags(Material material)
         {
             if (IsSimpleForwardShader(material != null ? material.shader : null))
@@ -1617,32 +1632,6 @@ namespace VividRP.Runtime.GPUDriven
             isSimpleForwardShader = string.Equals(shader.name, SimpleForwardShaderName, StringComparison.Ordinal);
             s_SimpleForwardShaderMatchCache.Add(shader, isSimpleForwardShader);
             return isSimpleForwardShader;
-        }
-
-        private static VividRendererListID GetRendererListId(GPUDrivenMaterialProxy materialProxy)
-        {
-            VividRendererListID rendererListId = VividRendererListID.Default;
-
-            if (materialProxy == null)
-            {
-                return rendererListId;
-            }
-
-            if (materialProxy.CullMode == CullMode.Front)
-            {
-                rendererListId |= VividRendererListID.CullFront;
-            }
-            else if (materialProxy.CullMode == CullMode.Off)
-            {
-                rendererListId |= VividRendererListID.CullOff;
-            }
-
-            if (materialProxy.AlphaClip)
-            {
-                rendererListId |= VividRendererListID.AlphaTest;
-            }
-
-            return rendererListId;
         }
 
         private static VividRendererListID GetRendererListId(Material material)
@@ -1687,24 +1676,9 @@ namespace VividRP.Runtime.GPUDriven
                 : 0.0f;
         }
 
-        private static float GetAlphaClipThreshold(GPUDrivenMaterialProxy materialProxy)
-        {
-            return materialProxy is { AlphaClip: true } ? materialProxy.Cutoff : 0.0f;
-        }
-
         private static float4 ToFloat4(Vector3 value)
         {
             return new float4(value.x, value.y, value.z, 0.0f);
-        }
-
-        private static float4 ToFloat4(Vector4 value)
-        {
-            return new float4(value.x, value.y, value.z, value.w);
-        }
-
-        private static float4 ToFloat4(Color value)
-        {
-            return new float4(value.r, value.g, value.b, value.a);
         }
 
         private static float4x4 ToFloat4x4(Matrix4x4 value)

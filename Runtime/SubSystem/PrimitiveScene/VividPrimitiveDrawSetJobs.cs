@@ -2,6 +2,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using UnityEngine;
 using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.PrimitiveScene

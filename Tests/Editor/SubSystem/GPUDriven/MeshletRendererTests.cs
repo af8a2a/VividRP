@@ -15,6 +15,9 @@ namespace VividRP.Editor.Tests
     public class MeshletRendererTests
     {
         private const string TempFolder = "Assets/VividRP_Temp_MeshletRendererTests";
+        private const string GeneratedRoot = TempFolder + "/GPUDrivenGenerated";
+        private const string MaterialProxyFolder = GeneratedRoot + "/MaterialProxy";
+        private const string MeshletAssetFolder = GeneratedRoot + "/MeshletAsset";
 
         [SetUp]
         public void SetUp()
@@ -315,7 +318,20 @@ namespace VividRP.Editor.Tests
             AssetDatabase.CreateAsset(mesh, meshPath);
             mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
 
+            AssetDatabase.CreateFolder(TempFolder, "Materials");
+            string materialPath = TempFolder + "/Materials/RepairMaterial.mat";
             Material material = new Material(shader);
+            AssetDatabase.CreateAsset(material, materialPath);
+            material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+            Assert.That(
+                AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                    material,
+                    out string materialGuid,
+                    out long materialLocalFileId),
+                Is.True);
+            string materialIdentifier = materialLocalFileId != 0L
+                ? $"{materialGuid}_{unchecked((ulong)materialLocalFileId):X16}"
+                : materialGuid;
             GameObject gameObject = null;
 
             try
@@ -339,14 +355,20 @@ namespace VividRP.Editor.Tests
                 Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Not.Null);
                 Assert.That(meshletRenderer.TryValidate(out string validationMessage), Is.True, validationMessage);
                 Assert.That(
+                    AssetDatabase.GetAssetPath(meshletRenderer.GetMeshletCollection(0)),
+                    Does.StartWith(MeshletAssetFolder + "/RepairMesh_Meshlets"));
+                Assert.That(
                     AssetDatabase.GetAssetPath(meshletRenderer.GetMaterialProxy(0)),
-                    Is.EqualTo($"{TempFolder}/RepairMesh_SubMesh0_GPUDriven.asset")
+                    Is.EqualTo(
+                        $"{MaterialProxyFolder}/RepairMaterial_{materialIdentifier}_GPUDriven.asset")
                 );
+                Assert.That(
+                    AssetDatabase.IsValidFolder(TempFolder + "/Materials/GPUDrivenGenerated"),
+                    Is.False);
             }
             finally
             {
                 Object.DestroyImmediate(gameObject);
-                Object.DestroyImmediate(material);
             }
         }
 
@@ -562,8 +584,29 @@ namespace VividRP.Editor.Tests
 
             Assert.That(firstGeneration, Has.Length.EqualTo(2));
             Assert.That(secondGeneration, Is.Empty);
+            Assert.That(firstGeneration.All(path => path.StartsWith(MeshletAssetFolder + "/")), Is.True);
             Assert.That(meshletCollections, Has.Length.EqualTo(2));
             Assert.That(meshletCollections.All(collection => collection != null), Is.True);
+        }
+
+        [Test]
+        public void GenerateMissingMeshletCollections_ReusesLegacyAdjacentAssets()
+        {
+            EnsureSupportedPlatform();
+
+            Mesh mesh = CreateSingleSubMeshMesh("LegacyMeshletAsset");
+            string meshPath = TempFolder + "/LegacyMeshletAsset.asset";
+            AssetDatabase.CreateAsset(mesh, meshPath);
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+
+            string[] legacyAssets = VividMeshletCollectionAssetImporter.CreateAssetsForSelection(
+                new Object[] { mesh });
+            string[] generatedAssets = MeshletRendererEditorUtility.GenerateMissingMeshletCollections(mesh);
+
+            Assert.That(legacyAssets, Has.Length.EqualTo(1));
+            Assert.That(legacyAssets[0], Does.StartWith(TempFolder + "/LegacyMeshletAsset_Meshlets"));
+            Assert.That(generatedAssets, Is.Empty);
+            Assert.That(AssetDatabase.IsValidFolder(GeneratedRoot), Is.False);
         }
 
         private static Mesh CreateSingleSubMeshMesh(string meshName)

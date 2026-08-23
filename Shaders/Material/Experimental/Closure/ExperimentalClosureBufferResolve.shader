@@ -16,6 +16,7 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             #pragma fragment Frag
             #pragma editor_sync_compilation
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+            #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
             #pragma target 5.0
             #pragma require randomwrite
             #pragma use_dxc
@@ -24,23 +25,14 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBuffer.hlsl"
-            #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE 1
-            #define VIVID_VT_ENABLE_FEEDBACK_RW 1
-            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VirtualTextureSurfaceSampling.hlsl"
-
-            #define VIVID_EXPERIMENTAL_VBUFFER_VERSION 2u
-            #define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_OFFSET 1u
-            #define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_STRIDE 192u
-
-            #define VIVID_EXPERIMENTAL_FEATURE_NORMAL_MAP (1u << 0)
-            #define VIVID_EXPERIMENTAL_FEATURE_METALLIC_MAP (1u << 1)
-            #define VIVID_EXPERIMENTAL_FEATURE_ROUGHNESS_MAP (1u << 2)
-            #define VIVID_EXPERIMENTAL_FEATURE_SMOOTHNESS_ALBEDO_ALPHA (1u << 3)
-            #define VIVID_EXPERIMENTAL_FEATURE_OCCLUSION_MAP (1u << 4)
-            #define VIVID_EXPERIMENTAL_FEATURE_EMISSION_MAP (1u << 5)
-            #define VIVID_EXPERIMENTAL_FEATURE_CLEAR_COAT (1u << 6)
-            #define VIVID_EXPERIMENTAL_FEATURE_RECEIVE_SSR (1u << 7)
-            #define VIVID_EXPERIMENTAL_FEATURE_RECEIVE_DECALS (1u << 8)
+            #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                #define VIVID_VT_ENABLE_FEEDBACK_RW 1
+            #else
+                #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #endif
+            #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
 
             TYPED_TEXTURE2D(float2, _ExperimentalVisibilityBuffer);
             TEXTURE2D(_ExperimentalVisibilityAttributes0);
@@ -51,25 +43,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             float4 _ExperimentalAttributes0ScaleBias;
             float4 _ExperimentalAttributes1ScaleBias;
             float4 _ExperimentalDepthScaleBias;
-            uint _VividExperimentalVBufferMaterialCount;
-            uint _VividExperimentalVBufferVTAvailable;
-
-            struct VividExperimentalVBufferMaterialData
-            {
-                VividSurfaceBindingData BaseBinding;
-                VividSurfaceBindingData AuxiliaryBinding;
-                float4 BaseColor;
-                float4 BaseMapST;
-                float4 EmissionColor;
-                float4 BaseSurface;
-                float4 BaseRemap0;
-                float4 BaseRemap1;
-                float4 BaseClosure;
-                uint4 FeatureFlags;
-            };
-
-            StructuredBuffer<VividExperimentalVBufferMaterialData>
-                _VividExperimentalVBufferMaterials;
 
             struct Attributes
             {
@@ -109,15 +82,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 return SafeNormalize(normal);
             }
 
-            float3 VividExperimentalUnpackNormalScale(float4 packedNormal, float scale)
-            {
-                float3 normalTS;
-                normalTS.xy = packedNormal.wy * 2.0 - 1.0;
-                normalTS.xy *= scale;
-                normalTS.z = sqrt(saturate(1.0 - dot(normalTS.xy, normalTS.xy)));
-                return normalTS;
-            }
-
             float3x3 ReconstructTangentToWorld(
                 float3 positionWS,
                 float3 geometricNormalWS,
@@ -153,18 +117,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 return float3x3(tangentWS, crossBitangent * handedness, normalWS);
             }
 
-            uint BuildMaterialFeatures(uint featureFlags, float clearCoatWeight)
-            {
-                uint materialFeatures = VIVID_MATERIALFEATURE_LIT;
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_RECEIVE_SSR) != 0u)
-                    materialFeatures |= VIVID_MATERIALFEATURE_SSR_RECEIVE;
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_RECEIVE_DECALS) != 0u)
-                    materialFeatures |= VIVID_MATERIALFEATURE_DECAL_RECEIVE;
-                if (clearCoatWeight > 0.0)
-                    materialFeatures |= VIVID_MATERIALFEATURE_CLEAR_COAT;
-                return materialFeatures;
-            }
-
             VividBuiltinData BuildProbeVolumeBuiltinData(
                 float3 positionWS,
                 float3 normalWS)
@@ -182,28 +134,112 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                     float4(1.0, 1.0, 1.0, 1.0));
             }
 
+            float3 ResolveSlabNormalWS(
+                const VividEvaluatedSlabSurface surface,
+                const VividSlabMaterialData slabData,
+                const float3 positionWS,
+                const float3 geometricNormalWS,
+                const float2 rawUVDdx,
+                const float2 rawUVDdy)
+            {
+                if (surface.HasNormal == 0u)
+                    return geometricNormalWS;
+
+                const float2 uvDdx = rawUVDdx * slabData.TextureTilingOffset.xy;
+                const float2 uvDdy = rawUVDdy * slabData.TextureTilingOffset.xy;
+                const float3x3 tangentToWorld = ReconstructTangentToWorld(
+                    positionWS,
+                    geometricNormalWS,
+                    uvDdx,
+                    uvDdy);
+                return SafeNormalize(
+                    surface.NormalTS.x * tangentToWorld[0]
+                    + surface.NormalTS.y * tangentToWorld[1]
+                    + surface.NormalTS.z * tangentToWorld[2]);
+            }
+
+            VividExperimentalStandardSurface BuildStandardSurface(
+                const VividEvaluatedSlabSurface surface,
+                const float3 normalWS,
+                const float3 emissive,
+                const uint materialFeatures,
+                const VividBuiltinData builtinData)
+            {
+                VividExperimentalStandardSurfaceParameters parameters;
+                parameters.baseColor = surface.BaseColor;
+                parameters.normalWS = normalWS;
+                parameters.perceptualRoughness =
+                    saturate(surface.PerceptualRoughness);
+                parameters.metallic = surface.Metallic;
+                parameters.ambientOcclusion = surface.AmbientOcclusion;
+                parameters.coverage = 1.0;
+                parameters.specularIor = 1.5;
+                parameters.clearCoatWeight = 0.0;
+                parameters.clearCoatPerceptualRoughness = 0.0;
+                parameters.transmissionWeight = 0.0;
+                parameters.subsurfaceWeight = 0.0;
+                parameters.emissive = max(emissive, 0.0);
+                parameters.materialFeatures = materialFeatures;
+                parameters.builtinData = builtinData;
+                return VividResolveExperimentalStandardSurface(parameters);
+            }
+
             VividExperimentalClosureBufferOutput Frag(Varyings input)
             {
                 float2 visibilityUV = ApplyScaleBias(
                     input.uv,
                     _ExperimentalVisibilityScaleBias);
-                uint2 visibility = asuint(SAMPLE_TEXTURE2D_LOD(
+                uint2 packedVisibility = asuint(SAMPLE_TEXTURE2D_LOD(
                     _ExperimentalVisibilityBuffer,
                     sampler_PointClamp,
                     visibilityUV,
                     0).xy);
-                if (visibility.x == 0u)
+                if (!IsPackedVisibilityBufferValueValid(packedVisibility))
                     discard;
 
-                uint materialSlot = visibility.x - VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_OFFSET;
-                if (_VividExperimentalVBufferVTAvailable == 0u
-                    || materialSlot >= _VividExperimentalVBufferMaterialCount)
+                const VividVisibilityBufferValue visibility =
+                    UnpackVisibilityBufferValue(packedVisibility);
+                if (visibility.InstanceID >= _InstanceDataCount)
+                    discard;
+
+                const VividInstanceData instanceData =
+                    PullInstanceData(visibility.InstanceID);
+                if (instanceData.MaterialIndex >= _MaterialDataCount)
+                    discard;
+
+                VividMaterialData materialData = (VividMaterialData) 0;
+                VividSurfaceBindingData surfaceBindingData;
+                VividSurfaceBindingData topSurfaceBindingData;
+                VividDualSlabMaterialData dualSlabMaterialData;
+                bool isDualSlab = VividTryLoadDualSlabSurfaceProgram(
+                    instanceData.MaterialIndex,
+                    0u,
+                    dualSlabMaterialData,
+                    surfaceBindingData,
+                    topSurfaceBindingData);
+                bool loadedMaterialProgram = isDualSlab;
+                if (!isDualSlab)
                 {
-                    materialSlot = 0u;
+                    loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
+                        instanceData.MaterialIndex,
+                        0u,
+                        materialData,
+                        surfaceBindingData);
+                }
+                if (!loadedMaterialProgram)
+                {
+                    materialData = PullMaterialData(instanceData.MaterialIndex);
+                    if (materialData.SurfaceBindingIndex >= _SurfaceBindingDataCount)
+                        discard;
+
+                    surfaceBindingData = PullSurfaceBindingData(
+                        materialData.SurfaceBindingIndex);
                 }
 
-                VividExperimentalVBufferMaterialData materialData =
-                    _VividExperimentalVBufferMaterials[materialSlot];
+                if (!loadedMaterialProgram
+                    && (materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u)
+                    discard;
+
                 float4 attributes0 = SAMPLE_TEXTURE2D_LOD(
                     _ExperimentalVisibilityAttributes0,
                     sampler_PointClamp,
@@ -228,136 +264,93 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 float2 rawUVDdx = attributes0.zw;
                 float2 rawUVDdy = attributes1.xy;
                 float3 geometricNormalWS = DecodeNormalOct(attributes1.zw);
-                float2 baseUV = rawUV * materialData.BaseMapST.xy
-                    + materialData.BaseMapST.zw;
-                float2 baseUVDdx = rawUVDdx * materialData.BaseMapST.xy;
-                float2 baseUVDdy = rawUVDdy * materialData.BaseMapST.xy;
-                VividSurfaceSampleContext baseContext =
-                    VividCreateSurfaceSampleContextGrad(
-                        materialData.BaseBinding,
-                        baseUV,
-                        baseUVDdx,
-                        baseUVDdy,
+                VividSlabMaterialData baseSlabData =
+                    VividCreateSlabMaterialData(materialData);
+                if (isDualSlab)
+                {
+                    baseSlabData =
+                        VividGetBaseSlabMaterialData(dualSlabMaterialData);
+                }
+                const VividEvaluatedSlabSurface baseEvaluation =
+                    VividEvaluateSlabSurfaceGrad(
+                        baseSlabData,
+                        surfaceBindingData,
+                        rawUV,
+                        rawUVDdx,
+                        rawUVDdy,
                         input.positionCS);
-                float4 baseSample = VividSampleBaseColorGrad(
-                    materialData.BaseBinding,
-                    baseContext) * materialData.BaseColor;
-                float4 baseMask = VividSampleMaskGrad(
-                    materialData.BaseBinding,
-                    baseContext);
+                const float3 normalWS = ResolveSlabNormalWS(
+                    baseEvaluation,
+                    baseSlabData,
+                    positionWS,
+                    geometricNormalWS,
+                    rawUVDdx,
+                    rawUVDdy);
 
-                uint featureFlags = materialData.FeatureFlags.x;
-                float metallic = saturate(materialData.BaseSurface.x);
-                float smoothness = saturate(materialData.BaseSurface.y);
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_METALLIC_MAP) != 0u)
-                {
-                    metallic = lerp(
-                        materialData.BaseRemap0.x,
-                        materialData.BaseRemap0.y,
-                        saturate(baseMask.r));
-                    float smoothnessSource =
-                        (featureFlags & VIVID_EXPERIMENTAL_FEATURE_SMOOTHNESS_ALBEDO_ALPHA) != 0u
-                            ? baseSample.a
-                            : baseMask.a;
-                    smoothness = lerp(
-                        materialData.BaseRemap0.z,
-                        materialData.BaseRemap0.w,
-                        saturate(smoothnessSource));
-                }
-                else if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_ROUGHNESS_MAP) != 0u)
-                {
-                    smoothness = lerp(
-                        materialData.BaseRemap0.z,
-                        materialData.BaseRemap0.w,
-                        saturate(1.0 - baseMask.r));
-                }
-                else if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_SMOOTHNESS_ALBEDO_ALPHA) != 0u)
-                {
-                    smoothness = lerp(
-                        materialData.BaseRemap0.z,
-                        materialData.BaseRemap0.w,
-                        saturate(baseSample.a));
-                }
-
-                float ambientOcclusion = 1.0;
-                float3 emissive = 0.0;
-                if (materialData.AuxiliaryBinding.Flags != 0u)
-                {
-                    VividSurfaceSampleContext auxiliaryContext =
-                        VividCreateSurfaceSampleContextGrad(
-                            materialData.AuxiliaryBinding,
-                            baseUV,
-                            baseUVDdx,
-                            baseUVDdy,
-                            input.positionCS);
-                    if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_OCCLUSION_MAP) != 0u)
-                    {
-                        float occlusion = VividSampleMaskGrad(
-                            materialData.AuxiliaryBinding,
-                            auxiliaryContext).g;
-                        ambientOcclusion = saturate(lerp(
-                            materialData.BaseRemap1.x,
-                            materialData.BaseRemap1.y,
-                            occlusion));
-                    }
-                    if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_EMISSION_MAP) != 0u)
-                    {
-                        emissive = max(
-                            VividSampleBaseColorGrad(
-                                materialData.AuxiliaryBinding,
-                                auxiliaryContext).rgb
-                            * materialData.EmissionColor.rgb,
-                            0.0);
-                    }
-                }
-
-                float3 normalWS = geometricNormalWS;
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_NORMAL_MAP) != 0u)
-                {
-                    float3 normalTS = VividExperimentalUnpackNormalScale(
-                        VividSampleNormalGrad(materialData.BaseBinding, baseContext),
-                        materialData.BaseSurface.z);
-                    float3x3 tangentToWorld = ReconstructTangentToWorld(
-                        positionWS,
-                        geometricNormalWS,
-                        baseUVDdx,
-                        baseUVDdy);
-                    normalWS = SafeNormalize(
-                        normalTS.x * tangentToWorld[0]
-                        + normalTS.y * tangentToWorld[1]
-                        + normalTS.z * tangentToWorld[2]);
-                }
-
-                float clearCoatWeight =
-                    (featureFlags & VIVID_EXPERIMENTAL_FEATURE_CLEAR_COAT) != 0u
-                        ? saturate(materialData.BaseRemap1.w)
-                        : 0.0;
                 VividBuiltinData builtinData = BuildProbeVolumeBuiltinData(
                     positionWS,
                     normalWS);
-                VividExperimentalStandardSurfaceParameters baseParameters;
-                baseParameters.baseColor = baseSample.rgb;
-                baseParameters.normalWS = normalWS;
-                baseParameters.perceptualRoughness = 1.0 - saturate(smoothness);
-                baseParameters.metallic = metallic;
-                baseParameters.ambientOcclusion = ambientOcclusion;
-                baseParameters.coverage = 1.0;
-                baseParameters.specularIor = materialData.BaseRemap1.z;
-                baseParameters.clearCoatWeight = clearCoatWeight;
-                baseParameters.clearCoatPerceptualRoughness =
-                    1.0 - saturate(materialData.BaseClosure.x);
-                baseParameters.transmissionWeight = materialData.BaseClosure.y;
-                baseParameters.subsurfaceWeight = materialData.BaseClosure.z;
-                baseParameters.emissive = emissive;
-                baseParameters.materialFeatures = BuildMaterialFeatures(
-                    featureFlags,
-                    clearCoatWeight);
-                baseParameters.builtinData = builtinData;
+                bool isUnlit = false;
+                if (loadedMaterialProgram)
+                {
+                    const VividMaterialRuntimeHeader runtimeHeader =
+                        PullMaterialRuntimeHeader(instanceData.MaterialIndex);
+                    const VividMaterialProgramData programData =
+                        PullMaterialProgramData(runtimeHeader.ProgramID);
+                    isUnlit =
+                        (programData.CapabilityFlags
+                            & VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT) != 0u
+                        && (runtimeHeader.Flags
+                            & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) != 0u;
+                }
+                else
+                {
+                    isUnlit =
+                        (materialData.MaterialFlags & VIVIDMATERIALFLAGS_UNLIT) != 0u;
+                }
+                const uint materialFeatures = isUnlit
+                        ? 0u
+                        : VIVID_MATERIALFEATURE_DEFAULT;
                 VividExperimentalStandardSurface baseSurface =
-                    VividResolveExperimentalStandardSurface(baseParameters);
+                    BuildStandardSurface(
+                        baseEvaluation,
+                        normalWS,
+                        isDualSlab
+                            ? dualSlabMaterialData.Emission.rgb
+                            : materialData.Emission.rgb,
+                        materialFeatures,
+                        builtinData);
 
-                VividExperimentalClosureMaterial closureMaterial =
-                    VividCompileExperimentalStandardSurface(baseSurface);
+                VividExperimentalClosureMaterial closureMaterial;
+                if (isDualSlab)
+                {
+                    const VividEvaluatedSlabSurface topEvaluation =
+                        VividEvaluateSlabSurfaceGrad(
+                            VividGetTopSlabMaterialData(dualSlabMaterialData),
+                            topSurfaceBindingData,
+                            rawUV,
+                            rawUVDdx,
+                            rawUVDdy,
+                            input.positionCS);
+                    // Closure Buffer ABI v2 intentionally shares the base normal.
+                    const VividExperimentalStandardSurface topSurface =
+                        BuildStandardSurface(
+                            topEvaluation,
+                            normalWS,
+                            0.0f,
+                            materialFeatures,
+                            builtinData);
+                    closureMaterial = VividCompileExperimentalLayeredSurface(
+                        baseSurface,
+                        topSurface,
+                        dualSlabMaterialData.LayerOperator,
+                        dualSlabMaterialData.LayerWeight);
+                }
+                else
+                {
+                    closureMaterial =
+                        VividCompileExperimentalStandardSurface(baseSurface);
+                }
 
                 return VividPackExperimentalClosureBuffer(closureMaterial);
             }

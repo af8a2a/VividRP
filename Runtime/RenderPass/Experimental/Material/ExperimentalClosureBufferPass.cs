@@ -2,7 +2,6 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-using VividRP.Runtime.Experimental.Material;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
 using UnityMaterial = UnityEngine.Material;
@@ -21,24 +20,18 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
         private static readonly int s_Attributes0ScaleBiasId = Shader.PropertyToID("_ExperimentalAttributes0ScaleBias");
         private static readonly int s_Attributes1ScaleBiasId = Shader.PropertyToID("_ExperimentalAttributes1ScaleBias");
         private static readonly int s_DepthScaleBiasId = Shader.PropertyToID("_ExperimentalDepthScaleBias");
-        private static readonly int s_MaterialTableId = Shader.PropertyToID("_VividExperimentalVBufferMaterials");
-        private static readonly int s_MaterialCountId = Shader.PropertyToID("_VividExperimentalVBufferMaterialCount");
-        private static readonly int s_VirtualTextureAvailableId = Shader.PropertyToID("_VividExperimentalVBufferVTAvailable");
 
-        [RenderGraphResource(Name = "ExperimentalVisibilityBuffer", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "VisibilityBuffer", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VisibilityBuffer;
 
-        [RenderGraphResource(Name = "ExperimentalVisibilityAttributes0", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "VisibilityBufferAttributes0", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Attributes0;
 
-        [RenderGraphResource(Name = "ExperimentalVisibilityAttributes1", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "VisibilityBufferAttributes1", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Attributes1;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Depth;
-
-        [RenderGraphResource(Name = "ExperimentalVBufferMaterialTable", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_MaterialTable;
 
         [RenderGraphResource(Name = "ExperimentalClosureBuffer0", Access = AccessFlags.Write, AttachmentIndex = 0, BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ClosureBuffer0;
@@ -80,14 +73,10 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
         public ExperimentalClosureBufferPass()
         {
             profilingSampler = new ProfilingSampler(nameof(ExperimentalClosureBufferPass));
-            m_VisibilityBuffer = CreateInput("ExperimentalVisibilityBuffer", GraphicsFormat.R32G32_UInt);
-            m_Attributes0 = CreateInput("ExperimentalVisibilityAttributes0", GraphicsFormat.R16G16B16A16_SFloat);
-            m_Attributes1 = CreateInput("ExperimentalVisibilityAttributes1", GraphicsFormat.R16G16B16A16_SFloat);
+            m_VisibilityBuffer = CreateInput("VisibilityBuffer", GraphicsFormat.R32G32_UInt);
+            m_Attributes0 = CreateInput("VisibilityBufferAttributes0", GraphicsFormat.R16G16B16A16_SFloat);
+            m_Attributes1 = CreateInput("VisibilityBufferAttributes1", GraphicsFormat.R16G16B16A16_SFloat);
             m_Depth = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_MaterialTable = RenderGraphBuffer.CreateStructured(
-                "ExperimentalVBufferMaterialTable",
-                1,
-                ExperimentalVBufferContract.MaterialRecordStride);
 
             m_ClosureBuffer0 = CreateOutput("ExperimentalClosureBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
             m_ClosureBuffer1 = CreateOutput("ExperimentalClosureBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
@@ -130,22 +119,6 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
             VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
-
-            VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance ? VividGPUDrivenSystem.instance : null;
-            ExperimentalStandardLitVBufferMaterialRegistry.Prepare(system, out _);
-            ExperimentalStandardLitVBufferMaterialRegistry.WarnAboutMissingBridges(m_FrameIndex);
-            GraphicsBuffer materialBuffer = ExperimentalStandardLitVBufferMaterialRegistry.MaterialBuffer;
-            if (materialBuffer != null)
-            {
-                m_MaterialTable.desc.Count = materialBuffer.count;
-                m_MaterialTable.desc.Stride = materialBuffer.stride;
-                m_MaterialTable.desc.Target = materialBuffer.target;
-                m_MaterialTable.SetImportedBuffer(materialBuffer);
-            }
-            else
-            {
-                m_MaterialTable.ClearImportedBuffer();
-            }
         }
 
         public override void Record(UnsafePassContext context)
@@ -155,7 +128,6 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
                 || m_Attributes0?.IsValid() != true
                 || m_Attributes1?.IsValid() != true
                 || m_Depth?.IsValid() != true
-                || m_MaterialTable?.ImportedGraphicsBuffer == null
                 || !OutputsAreValid())
             {
                 return;
@@ -170,20 +142,30 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
 
             CommandBuffer cmd = context.GetNativeCommandBuffer();
             VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance ? VividGPUDrivenSystem.instance : null;
-            VirtualTextureSpaceBinding binding = default;
-            bool virtualTextureAvailable = system?.UsesVirtualTexture == true
-                                           && system.IsAvailable
-                                           && GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
-                                               cmd,
-                                               m_VirtualTextureFrameData,
-                                               m_VirtualTextureSpaceParams,
-                                               m_VirtualTextureMipOffsets,
-                                               m_VirtualTextureLayerFallbacks,
-                                               m_FrameIndex,
-                                               Mathf.RoundToInt(m_VirtualTextureFeedbackSampleRate),
-                                               out binding);
-            bool hasFeedback = virtualTextureAvailable
-                               && VirtualTextureFeedbackBindingUtility.BindFeedbackTargets(cmd, binding);
+            if (system?.IsAvailable != true)
+                return;
+
+            system.ConfigureTextureBackendKeyword(m_Material);
+            system.BindGlobals(cmd);
+
+            bool hasFeedback = false;
+            if (system.UsesVirtualTexture)
+            {
+                if (!GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
+                        cmd,
+                        m_VirtualTextureFrameData,
+                        m_VirtualTextureSpaceParams,
+                        m_VirtualTextureMipOffsets,
+                        m_VirtualTextureLayerFallbacks,
+                        m_FrameIndex,
+                        Mathf.RoundToInt(m_VirtualTextureFeedbackSampleRate),
+                        out VirtualTextureSpaceBinding binding))
+                {
+                    return;
+                }
+
+                hasFeedback = VirtualTextureFeedbackBindingUtility.BindFeedbackTargets(cmd, binding);
+            }
 
             m_DrawProperties.Clear();
             m_DrawProperties.SetTexture(s_VisibilityBufferId, visibility);
@@ -194,9 +176,6 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
             m_DrawProperties.SetVector(s_Attributes0ScaleBiasId, m_Attributes0.innerHandle.GetScaleBias());
             m_DrawProperties.SetVector(s_Attributes1ScaleBiasId, m_Attributes1.innerHandle.GetScaleBias());
             m_DrawProperties.SetVector(s_DepthScaleBiasId, m_Depth.innerHandle.GetScaleBias());
-            m_DrawProperties.SetBuffer(s_MaterialTableId, m_MaterialTable.ImportedGraphicsBuffer);
-            m_DrawProperties.SetInt(s_MaterialCountId, ExperimentalStandardLitVBufferMaterialRegistry.MaterialCount);
-            m_DrawProperties.SetInt(s_VirtualTextureAvailableId, virtualTextureAvailable ? 1 : 0);
 
             BindClosureTargets(cmd);
             cmd.ClearRenderTarget(clearDepth: false, clearColor: true, Color.clear);
@@ -207,7 +186,6 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
 
         public override void Dispose()
         {
-            m_MaterialTable?.ClearImportedBuffer();
             m_VirtualTextureFrameData = null;
             m_FrameIndex = 0;
             if (m_Material != null)

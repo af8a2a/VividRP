@@ -15,10 +15,54 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLit.shader";
         private const string ExperimentalInputAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitInput.hlsl";
-        private const string ExperimentalVisibilityAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitVisibilityBufferPass.hlsl";
         private const string ExistingShaderAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLit.shader";
+
+        [Test]
+        public void ExperimentalStandardLitShader_ExposesPackedRMOMap()
+        {
+            var material = new Material(LoadShader());
+            try
+            {
+                Assert.That(material.HasProperty("_RMOMap"), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void SetupMaterial_PrioritizesRMOMapOverLegacyPBRMaps()
+        {
+            var material = new Material(LoadShader());
+            var rmoMap = new Texture2D(1, 1);
+            var metallicMap = new Texture2D(1, 1);
+            var roughnessMap = new Texture2D(1, 1);
+            var occlusionMap = new Texture2D(1, 1);
+            try
+            {
+                material.SetTexture("_RMOMap", rmoMap);
+                material.SetTexture("_MetallicGlossMap", metallicMap);
+                material.SetTexture("_RoughnessMap", roughnessMap);
+                material.SetTexture("_OcclusionMap", occlusionMap);
+
+                StandardLitMaterialUtility.SetupMaterial(material, null, false);
+
+                Assert.That(material.IsKeywordEnabled("_RMOMAP"), Is.True);
+                Assert.That(material.IsKeywordEnabled("_METALLICSPECGLOSSMAP"), Is.False);
+                Assert.That(material.IsKeywordEnabled("_ROUGHNESSMAP"), Is.False);
+                Assert.That(material.IsKeywordEnabled("_OCCLUSIONMAP"), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(rmoMap);
+                Object.DestroyImmediate(metallicMap);
+                Object.DestroyImmediate(roughnessMap);
+                Object.DestroyImmediate(occlusionMap);
+                Object.DestroyImmediate(material);
+            }
+        }
 
         [Test]
         public void ExperimentalStandardLitShader_ImportsWithoutCompilerErrors()
@@ -62,8 +106,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(material.HasProperty("_TopLayerMaskMap"), Is.False);
                 Assert.That(material.HasProperty("_TopLayerWeight"), Is.False);
                 Assert.That(material.HasProperty("_TopLayerOperator"), Is.False);
-                Assert.That(material.HasProperty("_VividExperimentalVBufferMaterialIndex"), Is.True);
-                Assert.That(material.GetFloat("_VividExperimentalVBufferMaterialIndex"), Is.Zero);
+                Assert.That(material.HasProperty("_VividExperimentalVBufferMaterialIndex"), Is.False);
             }
             finally
             {
@@ -72,17 +115,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ExperimentalStandardLitShader_ExposesVBufferAndAuxiliaryPassesOnly()
+        public void ExperimentalStandardLitShader_ExposesAuxiliaryPassesOnly()
         {
             Shader shader = LoadShader();
             var material = new Material(shader);
             try
             {
                 AssertPass(material, "VividPreDepth", "VividPreDepth");
-                AssertPass(
-                    material,
-                    "ExperimentalVisibilityBuffer",
-                    "ExperimentalVisibilityBuffer");
                 AssertPass(material, "Meta", "Meta");
                 AssertPass(material, "MotionVectors", "MotionVectors");
                 AssertPass(material, "IndirectDXR", "IndirectDXR");
@@ -94,6 +133,7 @@ namespace VividRP.Editor.Tests
                     material,
                     "RaytracingGBufferDXR",
                     "RaytracingGBufferDXR");
+                Assert.That(material.FindPass("VisibilityBuffer"), Is.EqualTo(-1));
                 Assert.That(material.FindPass("ExperimentalClosureBuffer"), Is.EqualTo(-1));
                 Assert.That(material.FindPass("VividGBuffer"), Is.EqualTo(-1));
                 Assert.That(material.FindPass("VividGBufferGPUDrivenDecal"), Is.EqualTo(-1));
@@ -105,24 +145,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ExperimentalVisibilityBuffer_UsesAttributeAbiWithoutMaterialSampling()
-        {
-            string source = File.ReadAllText(ExperimentalVisibilityAssetPath);
-
-            StringAssert.Contains("uint2 visibility : SV_Target0", source);
-            StringAssert.Contains("float4 attributes0 : SV_Target1", source);
-            StringAssert.Contains("float4 attributes1 : SV_Target2", source);
-            StringAssert.Contains("uint primitiveID : SV_PrimitiveID", source);
-            StringAssert.Contains("ddx(input.uv0)", source);
-            StringAssert.Contains("ddy(input.uv0)", source);
-            StringAssert.Contains("VividExperimentalEncodeNormalOct", source);
-            StringAssert.Contains("StandardLit/StandardLitInput.hlsl", source);
-            StringAssert.DoesNotContain("CBUFFER_START(UnityPerMaterial)", source);
-            StringAssert.DoesNotContain("SAMPLE_TEXTURE2D", source);
-            StringAssert.DoesNotContain("ExperimentalClosureBuffer", source);
-        }
-
-        [Test]
         public void ExperimentalStandardLitShader_IsSRPBatcherCompatible_ForRasterPasses()
         {
             var material = new Material(LoadShader());
@@ -130,7 +152,6 @@ namespace VividRP.Editor.Tests
             {
                 AssertNoSRPBatcherIssue(material, "VividPreDepth");
                 AssertNoSRPBatcherIssue(material, "ShadowCaster");
-                AssertNoSRPBatcherIssue(material, "ExperimentalVisibilityBuffer");
                 AssertNoSRPBatcherIssue(material, "Meta");
                 AssertNoSRPBatcherIssue(material, "MotionVectors");
             }

@@ -33,6 +33,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
             #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl"
             #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
                 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/TerrainRuntimeVirtualTextureSampling.hlsl"
             #endif
@@ -40,11 +41,17 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
 
             TYPED_TEXTURE2D(float2, _VisibilityBuffer);
+            TEXTURE2D(_VisibilityBufferAttributes0);
+            TEXTURE2D(_VisibilityBufferAttributes1);
+            TEXTURE2D(_VisibilityBufferBarycentrics);
 
             StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
             ByteAddressBuffer _SharedIndexBuffer;
 
             float4 _VisibilityBufferScaleBias;
+            float4 _VisibilityBufferAttributes0ScaleBias;
+            float4 _VisibilityBufferAttributes1ScaleBias;
+            float4 _VisibilityBufferBarycentricsScaleBias;
 
             struct Attributes
             {
@@ -68,16 +75,19 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 VividInstanceData instanceData;
                 VividMaterialData materialData;
+                VividDualSlabMaterialData dualSlabMaterialData;
                 VividSurfaceBindingData surfaceBindingData;
+                VividSurfaceBindingData topSurfaceBindingData;
+                uint isDualSlab;
+                uint isUnlit;
+                uint usesLegacyMaterial;
+                uint materialProgramID;
                 VividMeshletVertex vertex0;
                 VividMeshletVertex vertex1;
                 VividMeshletVertex vertex2;
                 float3 positionWS0;
                 float3 positionWS1;
                 float3 positionWS2;
-                float4 clipPosition0;
-                float4 clipPosition1;
-                float4 clipPosition2;
             };
 
             float2 ApplyScaleBias(float2 uv, float4 scaleBias)
@@ -130,11 +140,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         : 1.0f);
             }
 
-            float2 GetUV0(const VividMeshletVertex vertex)
-            {
-                return vertex.UV;
-            }
-
             float3 TransformInstanceObjectToWorldDir(float3 dirOS, float4x4 objectToWorldMatrix, bool doNormalize = true)
             {
                 float3 dirWS = mul((float3x3) objectToWorldMatrix, dirOS);
@@ -158,6 +163,35 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return float3x3(tangentWS, bitangentWS, normalWS);
             }
 
+            float3 EvaluateAOTSlabNormalWS(
+                const VividAOTSurfaceSlabValues slab,
+                const float3 fallbackNormalWS)
+            {
+                const float normalLengthSq = dot(slab.NormalWS, slab.NormalWS);
+                const float3 normalWS = normalLengthSq > 1e-8f
+                    ? slab.NormalWS * rsqrt(normalLengthSq)
+                    : fallbackNormalWS;
+                if (slab.HasNormal == 0u)
+                    return normalWS;
+
+                const float tangentLengthSq = dot(
+                    slab.TangentWS.xyz,
+                    slab.TangentWS.xyz);
+                if (tangentLengthSq <= 1e-8f)
+                    return normalWS;
+
+                const float3 tangentWS = slab.TangentWS.xyz
+                    * rsqrt(tangentLengthSq);
+                const float3x3 tangentToWorld = CreateInstanceTangentToWorld(
+                    normalWS,
+                    tangentWS,
+                    slab.TangentWS.w);
+                return TransformTangentToWorld(
+                    slab.NormalTS,
+                    tangentToWorld,
+                    true);
+            }
+
             float3 UnpackVividNormalScale(float4 packedNormal, float scale)
             {
                 float3 normalTS;
@@ -165,30 +199,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 normalTS.xy *= scale;
                 normalTS.z = sqrt(saturate(1.0 - dot(normalTS.xy, normalTS.xy)));
                 return normalTS;
-            }
-
-            InterpolatedUV InterpolateUV(
-                const VividBarycentricDerivatives barycentric,
-                const VividMeshletVertex vertex0,
-                const VividMeshletVertex vertex1,
-                const VividMeshletVertex vertex2)
-            {
-                const float3 u = InterpolateWithBarycentric(
-                    barycentric,
-                    GetUV0(vertex0).x,
-                    GetUV0(vertex1).x,
-                    GetUV0(vertex2).x);
-                const float3 v = InterpolateWithBarycentric(
-                    barycentric,
-                    GetUV0(vertex0).y,
-                    GetUV0(vertex1).y,
-                    GetUV0(vertex2).y);
-
-                InterpolatedUV result;
-                result.uv = float2(u.x, v.x);
-                result.ddx = float2(u.y, v.y);
-                result.ddy = float2(u.z, v.z);
-                return result;
             }
 
             void ApplyTilingOffset(inout InterpolatedUV uv, float4 tilingOffset)
@@ -227,10 +237,14 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return dot(autoNormalWS, viewForwardDirWS) < 0.0f ? -1.0f : 1.0f;
             }
 
-            bool TryLoadVisibilityValue(
+            bool TryLoadVisibilityData(
                 Varyings input,
-                out VividVisibilityBufferValue visibilityBufferValue)
+                out VividVisibilityBufferValue visibilityBufferValue,
+                out VividBarycentricDerivatives barycentric,
+                out InterpolatedUV interpolatedUV)
             {
+                barycentric = (VividBarycentricDerivatives) 0;
+                interpolatedUV = (InterpolatedUV) 0;
                 float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
                 uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
                 if (!IsPackedVisibilityBufferValueValid(packedValue))
@@ -240,6 +254,36 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 }
 
                 visibilityBufferValue = UnpackVisibilityBufferValue(packedValue);
+
+                float2 attributes0Uv = ApplyScaleBias(
+                    input.uv,
+                    _VisibilityBufferAttributes0ScaleBias);
+                float2 attributes1Uv = ApplyScaleBias(
+                    input.uv,
+                    _VisibilityBufferAttributes1ScaleBias);
+                float2 barycentricsUv = ApplyScaleBias(
+                    input.uv,
+                    _VisibilityBufferBarycentricsScaleBias);
+                float4 attributes0 = SAMPLE_TEXTURE2D_LOD(
+                    _VisibilityBufferAttributes0,
+                    sampler_PointClamp,
+                    attributes0Uv,
+                    0);
+                float4 attributes1 = SAMPLE_TEXTURE2D_LOD(
+                    _VisibilityBufferAttributes1,
+                    sampler_PointClamp,
+                    attributes1Uv,
+                    0);
+                float2 barycentrics = SAMPLE_TEXTURE2D_LOD(
+                    _VisibilityBufferBarycentrics,
+                    sampler_PointClamp,
+                    barycentricsUv,
+                    0).xy;
+
+                barycentric.lambda = DecodeVividVisibilityBufferBarycentrics(barycentrics);
+                interpolatedUV.uv = attributes0.xy;
+                interpolatedUV.ddx = attributes0.zw;
+                interpolatedUV.ddy = attributes1.xy;
                 return true;
             }
 
@@ -247,8 +291,60 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
-                result.materialData = PullMaterialData(result.instanceData.MaterialIndex);
-                result.surfaceBindingData = PullSurfaceBindingData(result.materialData.SurfaceBindingIndex);
+                result.materialProgramID = VIVIDMATERIALPROGRAMID_INVALID;
+                result.isDualSlab = VividTryLoadDualSlabSurfaceProgram(
+                    result.instanceData.MaterialIndex,
+                    VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
+                    result.dualSlabMaterialData,
+                    result.surfaceBindingData,
+                    result.topSurfaceBindingData)
+                        ? 1u
+                        : 0u;
+                bool loadedMaterialProgram = result.isDualSlab != 0u;
+                result.materialData = (VividMaterialData) 0;
+                if (result.isDualSlab != 0u)
+                {
+                    result.materialData = PullMaterialData(
+                        result.instanceData.MaterialIndex);
+                }
+                if (result.isDualSlab == 0u)
+                {
+                    loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
+                        result.instanceData.MaterialIndex,
+                        VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
+                        result.materialData,
+                        result.surfaceBindingData);
+                    if (!loadedMaterialProgram)
+                    {
+                        result.materialData = PullMaterialData(
+                            result.instanceData.MaterialIndex);
+                        result.surfaceBindingData = PullSurfaceBindingData(
+                            result.materialData.SurfaceBindingIndex);
+                    }
+                }
+
+                result.isUnlit = 0u;
+                if (loadedMaterialProgram)
+                {
+                    const VividMaterialRuntimeHeader runtimeHeader =
+                        PullMaterialRuntimeHeader(result.instanceData.MaterialIndex);
+                    result.materialProgramID = runtimeHeader.ProgramID;
+                    const VividMaterialProgramData programData =
+                        PullMaterialProgramData(runtimeHeader.ProgramID);
+                    result.isUnlit =
+                        (programData.CapabilityFlags
+                            & VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT) != 0u
+                        && (runtimeHeader.Flags
+                            & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) != 0u
+                            ? 1u
+                            : 0u;
+                }
+                else if ((result.materialData.MaterialFlags
+                        & VIVIDMATERIALFLAGS_UNLIT) != 0u)
+                {
+                    result.isUnlit = 1u;
+                }
+                result.usesLegacyMaterial = loadedMaterialProgram ? 0u : 1u;
                 const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
                 const uint3 indices = uint3(
@@ -264,10 +360,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 result.positionWS0 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex0));
                 result.positionWS1 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex1));
                 result.positionWS2 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex2));
-
-                result.clipPosition0 = TransformWorldToHClip(result.positionWS0);
-                result.clipPosition1 = TransformWorldToHClip(result.positionWS1);
-                result.clipPosition2 = TransformWorldToHClip(result.positionWS2);
                 return result;
             }
 
@@ -454,24 +546,103 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             VividGBufferSurfaceData ResolveSurfaceData(
                 const TriangleData triangleData,
                 const VividBarycentricDerivatives barycentric,
+                const InterpolatedUV visibilityUV,
                 const float4 positionCS)
             {
-                InterpolatedUV terrainUv = InterpolateUV(
+                InterpolatedUV terrainUv = visibilityUV;
+
+                const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
+                const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex0.PackedNormal)),
+                    triangleData.instanceData.WorldToObjectMatrix);
+                const float3 vertexNormalWS1 = normalFlipSign * TransformInstanceObjectToWorldNormal(
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex1.PackedNormal)),
+                    triangleData.instanceData.WorldToObjectMatrix);
+                const float3 vertexNormalWS2 = normalFlipSign * TransformInstanceObjectToWorldNormal(
+                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex2.PackedNormal)),
+                    triangleData.instanceData.WorldToObjectMatrix);
+                const VividBarycentricDerivatives barycentricVertexNormalWS =
+                    InterpolateWithBarycentric(
+                        barycentric,
+                        vertexNormalWS0,
+                        vertexNormalWS1,
+                        vertexNormalWS2);
+                const float3 geometryNormalWS = SafeNormalize(
+                    barycentricVertexNormalWS.lambda);
+                const float3 positionWS = InterpolateWithBarycentricNoDerivatives(
                     barycentric,
-                    triangleData.vertex0,
-                    triangleData.vertex1,
-                    triangleData.vertex2);
+                    triangleData.positionWS0,
+                    triangleData.positionWS1,
+                    triangleData.positionWS2);
+
+                const float4 tangentOS = InterpolateWithBarycentricNoDerivatives(
+                    barycentric,
+                    DecodeVertexTangentOS(triangleData.vertex0.PackedTangent),
+                    DecodeVertexTangentOS(triangleData.vertex1.PackedTangent),
+                    DecodeVertexTangentOS(triangleData.vertex2.PackedTangent));
+                float3 tangentWS = TransformInstanceObjectToWorldDir(
+                    tangentOS.xyz,
+                    triangleData.instanceData.ObjectToWorldMatrix,
+                    false);
+                const float tangentLengthSq = dot(tangentWS, tangentWS);
+                float4 geometryTangentWS = 0.0f;
+                if (tangentLengthSq > 1e-8f)
+                {
+                    tangentWS *= rsqrt(tangentLengthSq);
+                    geometryTangentWS = float4(
+                        tangentWS,
+                        tangentOS.w
+                            * GetInstanceOddNegativeScaleSign(triangleData.instanceData)
+                            * normalFlipSign);
+                }
+
+                VividAOTSurfaceContext aotContext;
+                aotContext.UV0 = visibilityUV.uv;
+                aotContext.UV0Ddx = visibilityUV.ddx;
+                aotContext.UV0Ddy = visibilityUV.ddy;
+                aotContext.GeometryNormalWS = geometryNormalWS;
+                aotContext.GeometryTangentWS = geometryTangentWS;
+                aotContext.PositionCS = positionCS;
+                VividAOTSurfaceProgramOutput aotSurfaceOutput =
+                    (VividAOTSurfaceProgramOutput) 0;
+                bool dispatchedAOTSurface = false;
+                if (triangleData.materialProgramID != VIVIDMATERIALPROGRAMID_INVALID)
+                {
+                    dispatchedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
+                        triangleData.materialProgramID,
+                        triangleData.materialData,
+                        triangleData.dualSlabMaterialData,
+                        triangleData.surfaceBindingData,
+                        triangleData.topSurfaceBindingData,
+                        aotContext,
+                        aotSurfaceOutput);
+                }
+                const bool evaluatedAOTSingleSurface = dispatchedAOTSurface
+                    && triangleData.isDualSlab == 0u
+                    && aotSurfaceOutput.ClosureCount == 1u
+                    && aotSurfaceOutput.LayerOperator == 0u;
+                const bool evaluatedAOTDualSurface = dispatchedAOTSurface
+                    && triangleData.isDualSlab != 0u
+                    && aotSurfaceOutput.ClosureCount == 2u
+                    && (aotSurfaceOutput.LayerOperator == 1u
+                        || aotSurfaceOutput.LayerOperator == 2u);
+                const bool evaluatedAOTSurface = evaluatedAOTSingleSurface
+                    || evaluatedAOTDualSurface;
 
                 float3 baseColor;
                 float3 sampledNormalTS = float3(0.0f, 0.0f, 1.0f);
                 bool hasSampledNormal = false;
+                float3 evaluatedAOTNormalWS = geometryNormalWS;
+                bool hasEvaluatedAOTNormalWS = false;
                 float perceptualRoughness;
                 float metallic;
                 float ambientOcclusion;
-                bool isTerrain = (triangleData.materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u
+                bool isTerrain = triangleData.usesLegacyMaterial != 0u
+                    && (triangleData.materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u
                     && triangleData.materialData.Padding1 < _TerrainMaterialDataCount;
                 bool isTerrainRVT =
-                    (triangleData.materialData.MaterialFlags
+                    triangleData.usesLegacyMaterial != 0u
+                    && (triangleData.materialData.MaterialFlags
                         & VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE) != 0u;
 #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
                 uint terrainRVTRecordFlags = 0u;
@@ -496,6 +667,102 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         perceptualRoughness,
                         metallic,
                         ambientOcclusion);
+                }
+                else if (evaluatedAOTDualSurface)
+                {
+                    const float layerWeight = saturate(
+                        aotSurfaceOutput.LayerWeight);
+
+                    // Legacy GBuffer cannot preserve the two-Closure topology. Both
+                    // validated operators deliberately degrade to the same blend.
+                    baseColor = lerp(
+                        aotSurfaceOutput.BaseSlab.BaseColor.rgb,
+                        aotSurfaceOutput.TopSlab.BaseColor.rgb,
+                        layerWeight);
+                    const float3 baseNormalWS = EvaluateAOTSlabNormalWS(
+                        aotSurfaceOutput.BaseSlab,
+                        geometryNormalWS);
+                    const float3 topNormalWS = EvaluateAOTSlabNormalWS(
+                        aotSurfaceOutput.TopSlab,
+                        geometryNormalWS);
+                    evaluatedAOTNormalWS = SafeNormalize(lerp(
+                        baseNormalWS,
+                        topNormalWS,
+                        layerWeight));
+                    hasEvaluatedAOTNormalWS = true;
+                    perceptualRoughness = lerp(
+                        aotSurfaceOutput.BaseSlab.PerceptualRoughness,
+                        aotSurfaceOutput.TopSlab.PerceptualRoughness,
+                        layerWeight);
+                    metallic = lerp(
+                        aotSurfaceOutput.BaseSlab.Metallic,
+                        aotSurfaceOutput.TopSlab.Metallic,
+                        layerWeight);
+                    ambientOcclusion = lerp(
+                        aotSurfaceOutput.BaseSlab.AmbientOcclusion,
+                        aotSurfaceOutput.TopSlab.AmbientOcclusion,
+                        layerWeight);
+                }
+                else if (evaluatedAOTSingleSurface)
+                {
+                    baseColor = aotSurfaceOutput.BaseSlab.BaseColor.rgb;
+                    evaluatedAOTNormalWS = EvaluateAOTSlabNormalWS(
+                        aotSurfaceOutput.BaseSlab,
+                        geometryNormalWS);
+                    hasEvaluatedAOTNormalWS = true;
+                    perceptualRoughness =
+                        aotSurfaceOutput.BaseSlab.PerceptualRoughness;
+                    metallic = aotSurfaceOutput.BaseSlab.Metallic;
+                    ambientOcclusion =
+                        aotSurfaceOutput.BaseSlab.AmbientOcclusion;
+                }
+                else if (triangleData.isDualSlab != 0u)
+                {
+                    const VividEvaluatedSlabSurface baseSlab =
+                        VividEvaluateSlabSurfaceGrad(
+                            VividGetBaseSlabMaterialData(
+                                triangleData.dualSlabMaterialData),
+                            triangleData.surfaceBindingData,
+                            visibilityUV.uv,
+                            visibilityUV.ddx,
+                            visibilityUV.ddy,
+                            positionCS);
+                    const VividEvaluatedSlabSurface topSlab =
+                        VividEvaluateSlabSurfaceGrad(
+                            VividGetTopSlabMaterialData(
+                                triangleData.dualSlabMaterialData),
+                            triangleData.topSurfaceBindingData,
+                            visibilityUV.uv,
+                            visibilityUV.ddx,
+                            visibilityUV.ddy,
+                            positionCS);
+                    const float layerWeight = saturate(
+                        triangleData.dualSlabMaterialData.LayerWeight);
+
+                    // Preserve the same legacy degradation when generated code is
+                    // unavailable for an otherwise compatible Dual-Slab program.
+                    baseColor = lerp(
+                        baseSlab.BaseColor,
+                        topSlab.BaseColor,
+                        layerWeight);
+                    sampledNormalTS = SafeNormalize(lerp(
+                        baseSlab.NormalTS,
+                        topSlab.NormalTS,
+                        layerWeight));
+                    hasSampledNormal =
+                        baseSlab.HasNormal != 0u || topSlab.HasNormal != 0u;
+                    perceptualRoughness = lerp(
+                        baseSlab.PerceptualRoughness,
+                        topSlab.PerceptualRoughness,
+                        layerWeight);
+                    metallic = lerp(
+                        baseSlab.Metallic,
+                        topSlab.Metallic,
+                        layerWeight);
+                    ambientOcclusion = lerp(
+                        baseSlab.AmbientOcclusion,
+                        topSlab.AmbientOcclusion,
+                        layerWeight);
                 }
                 else
                 {
@@ -557,51 +824,23 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     }
                 }
 
-                const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
-                const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex0.PackedNormal)),
-                    triangleData.instanceData.WorldToObjectMatrix);
-                const float3 vertexNormalWS1 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex1.PackedNormal)),
-                    triangleData.instanceData.WorldToObjectMatrix);
-                const float3 vertexNormalWS2 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex2.PackedNormal)),
-                    triangleData.instanceData.WorldToObjectMatrix);
-
-                VividBarycentricDerivatives barycentricVertexNormalWS = InterpolateWithBarycentric(
-                    barycentric,
-                    vertexNormalWS0,
-                    vertexNormalWS1,
-                    vertexNormalWS2);
-                float3 normalWS = SafeNormalize(barycentricVertexNormalWS.lambda);
-                float3 positionWS = InterpolateWithBarycentricNoDerivatives(
-                    barycentric,
-                    triangleData.positionWS0,
-                    triangleData.positionWS1,
-                    triangleData.positionWS2);
+                float3 normalWS = hasEvaluatedAOTNormalWS
+                    ? evaluatedAOTNormalWS
+                    : geometryNormalWS;
 
                 UNITY_BRANCH
-                if (hasSampledNormal)
+                if (!hasEvaluatedAOTNormalWS
+                    && hasSampledNormal
+                    && tangentLengthSq > 1e-8f)
                 {
-                    float4 tangentOS = InterpolateWithBarycentricNoDerivatives(
-                        barycentric,
-                        DecodeVertexTangentOS(triangleData.vertex0.PackedTangent),
-                        DecodeVertexTangentOS(triangleData.vertex1.PackedTangent),
-                        DecodeVertexTangentOS(triangleData.vertex2.PackedTangent));
-                    float3 tangentWS = TransformInstanceObjectToWorldDir(
-                        tangentOS.xyz,
-                        triangleData.instanceData.ObjectToWorldMatrix,
-                        false);
-                    float tangentLengthSq = dot(tangentWS, tangentWS);
-                    if (tangentLengthSq > 1e-8f)
-                    {
-                        tangentWS *= rsqrt(tangentLengthSq);
-                        float tangentSign = tangentOS.w
-                            * GetInstanceOddNegativeScaleSign(triangleData.instanceData)
-                            * normalFlipSign;
-                        float3x3 tangentToWorld = CreateInstanceTangentToWorld(normalWS, tangentWS, tangentSign);
-                        normalWS = TransformTangentToWorld(sampledNormalTS, tangentToWorld, true);
-                    }
+                    const float3x3 tangentToWorld = CreateInstanceTangentToWorld(
+                        normalWS,
+                        geometryTangentWS.xyz,
+                        geometryTangentWS.w);
+                    normalWS = TransformTangentToWorld(
+                        sampledNormalTS,
+                        tangentToWorld,
+                        true);
                 }
 
                 VividGBufferSurfaceData surfaceData;
@@ -612,7 +851,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.ambientOcclusion = ambientOcclusion;
                 surfaceData.customData = 0.0f;
                 surfaceData.customData1 = 0.0f;
-                surfaceData.materialFeatures = VIVID_MATERIALFEATURE_DEFAULT;
+                surfaceData.materialFeatures = triangleData.isUnlit != 0u
+                    ? 0u
+                    : VIVID_MATERIALFEATURE_DEFAULT;
 #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
                 if (isTerrainRVT
                     && (terrainRVTRecordFlags & VIVID_TERRAIN_RVT_RECEIVE_DECALS) == 0u)
@@ -620,7 +861,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     surfaceData.materialFeatures &= ~VIVID_MATERIALFEATURE_DECAL_RECEIVE;
                 }
 #endif
-                surfaceData.emissive = max(triangleData.materialData.Emission.rgb, 0.0f);
+                surfaceData.emissive = max(
+                    evaluatedAOTSurface
+                        ? aotSurfaceOutput.Emission
+                        : triangleData.isDualSlab != 0u
+                            ? triangleData.dualSlabMaterialData.Emission.rgb
+                            : triangleData.materialData.Emission.rgb,
+                    0.0f);
                 surfaceData.builtinData = CreateVividBuiltinData(
                     SampleVividProbeVolume(
                         positionWS,
@@ -636,24 +883,24 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             VividGBufferFragmentOutput Frag(Varyings input)
             {
                 VividVisibilityBufferValue visibilityBufferValue;
-                if (!TryLoadVisibilityValue(input, visibilityBufferValue))
+                VividBarycentricDerivatives barycentric;
+                InterpolatedUV interpolatedUV;
+                if (!TryLoadVisibilityData(
+                        input,
+                        visibilityBufferValue,
+                        barycentric,
+                        interpolatedUV))
                 {
                     discard;
                     return (VividGBufferFragmentOutput) 0;
                 }
 
                 TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
-
-                float2 pixelNdc = ScreenCoordsToNDC(input.positionCS);
-                VividBarycentricDerivatives barycentric = CalculateFullBarycentric(
-                    triangleData.clipPosition0,
-                    triangleData.clipPosition1,
-                    triangleData.clipPosition2,
-                    pixelNdc,
-                    _ScreenSize.zw
-                );
-
-                VividGBufferSurfaceData surfaceData = ResolveSurfaceData(triangleData, barycentric, input.positionCS);
+                VividGBufferSurfaceData surfaceData = ResolveSurfaceData(
+                    triangleData,
+                    barycentric,
+                    interpolatedUV,
+                    input.positionCS);
                 return PackVividGBufferSurfaceData(surfaceData);
             }
             ENDHLSL

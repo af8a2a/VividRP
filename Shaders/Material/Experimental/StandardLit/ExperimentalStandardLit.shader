@@ -18,11 +18,10 @@ Shader "VividRP/Experimental/Material/StandardLit"
         [Advanced] [HideInInspector] [MainColor] _BaseColor("Color", Color) = (1, 1, 1, 1)
         [Advanced] [TilingOffset(SurfaceInputs)] _BaseMap_ST("UV Tiling and Offset", Vector) = (1, 1, 0, 0)
         [Tex(SurfaceInputs)] _OpacityMap("Opacity Map", 2D) = "white" {}
-        [Tex(SurfaceInputs, _Metallic)] _MetallicGlossMap("Metallic Map", 2D) = "white" {}
-        [HideInInspector] _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
+        [Tex(SurfaceInputs)] _RMOMap("RMO Map (R: Roughness, G: Metallic, B: AO)", 2D) = "white" {}
+        [Sub(SurfaceInputs)] _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.5
         [SubEnum(SurfaceInputs, Metallic Alpha, 0, Albedo Alpha, 1)] _SmoothnessTextureChannel("Smoothness Source", Float) = 0.0
-        [Tex(SurfaceInputs)] _RoughnessMap("Roughness Map", 2D) = "white" {}
         [MinMaxSlider(SurfaceInputs, _MetallicRemapMin, _MetallicRemapMax)] _MetallicRemap("Metallic Remap", Range(0.0, 1.0)) = 1.0
         [HideInInspector] _MetallicRemapMin("Metallic Remap Min", Range(0.0, 1.0)) = 0.0
         [HideInInspector] _MetallicRemapMax("Metallic Remap Max", Range(0.0, 1.0)) = 1.0
@@ -31,7 +30,6 @@ Shader "VividRP/Experimental/Material/StandardLit"
         [HideInInspector] _SmoothnessRemapMax("Smoothness Remap Max", Range(0.0, 1.0)) = 1.0
         [Tex(SurfaceInputs, _BumpScale)] [Normal] _BumpMap("Normal Map", 2D) = "bump" {}
         [HideInInspector] _BumpScale("Normal Scale", Float) = 1.0
-        [Tex(SurfaceInputs, _OcclusionStrength)] _OcclusionMap("Occlusion Map", 2D) = "white" {}
         [HideInInspector] _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
         [MinMaxSlider(SurfaceInputs, _AORemapMin, _AORemapMax)] _AORemap("AO Remap", Range(0.0, 1.0)) = 1.0
         [HideInInspector] _AORemapMin("AO Remap Min", Range(0.0, 1.0)) = 0.0
@@ -60,7 +58,6 @@ Shader "VividRP/Experimental/Material/StandardLit"
         [HideInInspector] _SubsurfaceTransmissionWeight("Subsurface Transmission Weight", Range(0.0, 1.0)) = 0.0
 
         [HideInInspector] _VividExperimentalClosureVersion("Experimental Closure Version", Float) = 2.0
-        [HideInInspector] _VividExperimentalVBufferMaterialIndex("Experimental VBuffer Material Index", Float) = 0.0
         [HideInInspector] _Blend("__blend", Float) = 0.0
         [HideInInspector] _SrcBlend("__src", Float) = 1.0
         [HideInInspector] _DstBlend("__dst", Float) = 0.0
@@ -69,6 +66,9 @@ Shader "VividRP/Experimental/Material/StandardLit"
         [HideInInspector] _ZWrite("__zw", Float) = 1.0
         [HideInInspector] _MainTex("BaseMap", 2D) = "white" {}
         [HideInInspector] _Color("Base Color", Color) = (1, 1, 1, 1)
+        [HideInInspector] _MetallicGlossMap("Legacy Metallic Map", 2D) = "white" {}
+        [HideInInspector] _RoughnessMap("Legacy Roughness Map", 2D) = "white" {}
+        [HideInInspector] _OcclusionMap("Legacy Occlusion Map", 2D) = "white" {}
     }
 
     SubShader
@@ -80,10 +80,6 @@ Shader "VividRP/Experimental/Material/StandardLit"
             "RenderPipeline" = "VividRenderPipeline"
             "VividMaterialSystem" = "ExperimentalClosure"
         }
-
-        HLSLINCLUDE
-            #define VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION float _VividExperimentalVBufferMaterialIndex;
-        ENDHLSL
 
         Pass
         {
@@ -138,28 +134,6 @@ Shader "VividRP/Experimental/Material/StandardLit"
             ENDHLSL
         }
 
-
-        Pass
-        {
-            Name "ExperimentalVisibilityBuffer"
-            Tags { "LightMode" = "ExperimentalVisibilityBuffer" }
-
-            Blend One Zero
-            ZWrite Off
-            ZTest Equal
-            Cull [_Cull]
-
-            HLSLPROGRAM
-                #pragma use_dxc
-                #pragma multi_compile_instancing
-                #pragma instancing_options renderinglayer
-                #pragma vertex Vert
-                #pragma fragment FragVisibilityBuffer
-
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitVisibilityBufferPass.hlsl"
-            ENDHLSL
-        }
-
         Pass
         {
             Name "Meta"
@@ -173,6 +147,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #pragma shader_feature EDITOR_VISUALIZATION
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP
+                #pragma shader_feature_local_fragment _RMOMAP
                 #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
                 #pragma shader_feature_local_fragment _EMISSION
                 #pragma vertex Vert
@@ -236,6 +211,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #pragma shader_feature_local_raytracing _ALPHATEST_ON
                 #pragma shader_feature_local_raytracing _OPACITYMAP
                 #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _RMOMAP
                 #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
                 #pragma shader_feature_local_raytracing _ROUGHNESSMAP
                 #pragma shader_feature_local_raytracing _OCCLUSIONMAP
@@ -263,6 +239,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #pragma shader_feature_local_raytracing _TRANSMISSIONMAP
                 #pragma shader_feature_local_raytracing _SURFACE_TYPE_TRANSPARENT
                 #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _RMOMAP
                 #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
                 #pragma shader_feature_local_raytracing _ROUGHNESSMAP
                 #pragma shader_feature_local_raytracing _EMISSION
@@ -286,6 +263,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #pragma shader_feature_local_raytracing _OPACITYMAP
                 #pragma shader_feature_local_raytracing _TRANSMISSIONMAP
                 #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _RMOMAP
                 #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
                 #pragma shader_feature_local_raytracing _ROUGHNESSMAP
                 #pragma shader_feature_local_raytracing _EMISSION

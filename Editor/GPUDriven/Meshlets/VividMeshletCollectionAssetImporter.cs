@@ -5,6 +5,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEditor.AssetImporters;
 using UnityEngine;
+using VividRP.Editor.GPUDriven;
 using Debug = UnityEngine.Debug;
 using Object = UnityEngine.Object;
 using VividRP.Runtime.GPUDriven.Meshlets;
@@ -190,13 +191,15 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             string assetBaseName = mesh.subMeshCount > 1
                 ? $"{mesh.name}_SubMesh{clampedSubMeshIndex}"
                 : mesh.name;
+            string targetFolder = GPUDrivenGeneratedAssetPathUtility.EnsureMeshletAssetFolder(
+                GetTargetFolder(mesh));
 
             return CreateAssetForMesh(
                 new MeshSourceSelection(
                     mesh,
                     clampedSubMeshIndex,
                     assetBaseName,
-                    GetTargetFolder(mesh)
+                    targetFolder
                 )
             );
         }

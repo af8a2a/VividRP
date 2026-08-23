@@ -24,6 +24,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
             
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma use_dxc
+            #pragma require barycentrics
             #pragma shader_feature_local_fragment _ALPHATEST_ON
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
 
@@ -33,6 +35,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
             #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialCoverage.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
 
             #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawArgs
@@ -53,9 +56,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
             {
                 float4 positionCS : SV_POSITION;
                 nointerpolation uint2 visibilityValue : TEXCOORD0;
-                #ifdef _ALPHATEST_ON
                 float2 uv0 : TEXCOORD1;
-                #endif
+                float3 geometricNormalWS : TEXCOORD2;
             };
 
             uint PullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
@@ -71,19 +73,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
             }
 
-            float2 GetUV0(const VividDecodedMeshletVertex vertex, const VividMaterialData materialData)
-            {
-                return vertex.UV.xy * materialData.TextureTilingOffset.xy + materialData.TextureTilingOffset.zw;
-            }
-
-            float4 SampleAlbedo(
-                const float2 uv,
-                const VividMaterialData materialData,
-                const VividSurfaceBindingData surfaceBindingData)
-            {
-                return materialData.AlbedoColor * VividSampleBaseColor(surfaceBindingData, uv);
-            }
-
             Varyings Vert(Attributes input)
             {
                 InitIndirectDrawArgs(0);
@@ -91,15 +80,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 Varyings output;
                 output.positionCS = float4(-2.0, -2.0, 0.0, 1.0);
                 output.visibilityValue = 0u;
-                #ifdef _ALPHATEST_ON
                 output.uv0 = 0.0;
-                #endif
+                output.geometricNormalWS = float3(0.0, 0.0, 1.0);
 
                 const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
                 const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
                 const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
                 const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
-                const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
                 const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
                 const uint indexCount = meshlet.TriangleCount * 3u;
 
@@ -118,26 +105,51 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 visibilityBufferValue.MeshletID = renderRequest.MeshletID;
                 visibilityBufferValue.IndexID = vertexID;
                 output.visibilityValue = PackVisibilityBufferValue(visibilityBufferValue);
-
-                #ifdef _ALPHATEST_ON
-                output.uv0 = GetUV0(vertex, materialData);
-                #endif
+                output.uv0 = vertex.UV.xy;
+                output.geometricNormalWS = SafeNormalize(
+                    mul(vertex.Normal.xyz, (float3x3)instanceData.WorldToObjectMatrix));
 
                 return output;
             }
             // [earlydepthstencil]
-            uint2 Frag(Varyings input) : SV_Target
+            VividVisibilityBufferFragmentOutput Frag(
+                Varyings input,
+                linear float3 barycentrics : SV_Barycentrics)
             {
+                const float2 uv0Ddx = ddx(input.uv0);
+                const float2 uv0Ddy = ddy(input.uv0);
                 #ifdef _ALPHATEST_ON
                 const VividVisibilityBufferValue visibilityBufferValue = UnpackVisibilityBufferValue(input.visibilityValue);
                 const VividInstanceData instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
-                const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
-                const VividSurfaceBindingData surfaceBindingData = PullSurfaceBindingData(materialData.SurfaceBindingIndex);
-                const float4 albedo = SampleAlbedo(input.uv0, materialData, surfaceBindingData);
-                clip(albedo.a - materialData.AlphaClipThreshold);
+                VividMaterialCoverageEvaluation coverage;
+                if (!VividTryEvaluateCoverageProgram(
+                        instanceData.MaterialIndex,
+                        input.uv0,
+                        uv0Ddx,
+                        uv0Ddy,
+                        coverage))
+                {
+                    const VividMaterialData materialData =
+                        PullMaterialData(instanceData.MaterialIndex);
+                    const VividSurfaceBindingData surfaceBindingData =
+                        PullSurfaceBindingData(materialData.SurfaceBindingIndex);
+                    coverage = VividEvaluateBaseColorAlphaCoverage(
+                        materialData,
+                        surfaceBindingData,
+                        input.uv0,
+                        uv0Ddx,
+                        uv0Ddy);
+                }
+                clip(coverage.Coverage - coverage.AlphaClipThreshold);
                 #endif
 
-                return input.visibilityValue;
+                return PackVividVisibilityBufferFragmentOutput(
+                    input.visibilityValue,
+                    input.uv0,
+                    uv0Ddx,
+                    uv0Ddy,
+                    input.geometricNormalWS,
+                    barycentrics);
             }
             ENDHLSL
         }

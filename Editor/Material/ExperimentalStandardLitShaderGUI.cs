@@ -20,6 +20,7 @@ namespace VividRP.Editor
         {
             base.ValidateMaterial(material);
             StandardLitMaterialUtility.SetupMaterial(material, null, true);
+            GPUDriven.GPUDrivenMaterialProxyAutoSyncService.QueueMaterial(material);
         }
 
         public override void OnGUI(
@@ -30,6 +31,7 @@ namespace VividRP.Editor
                 "Experimental Closure material. Stage 4 supports a two-Slab top layer with Horizontal Mix and Vertical Layer operators. The compact top layer shares the base normal; arbitrary Closure trees, Closure-native SSR production, transmission refraction, and profile-based subsurface scattering are not implemented yet.",
                 MessageType.Info);
             base.OnGUI(materialEditor, properties);
+            StandardLitShaderGUI.DrawRMOConversion(materialEditor);
         }
     }
 }

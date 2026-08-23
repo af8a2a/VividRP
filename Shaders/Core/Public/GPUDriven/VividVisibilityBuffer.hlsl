@@ -12,6 +12,52 @@ struct VividVisibilityBufferValue
     uint IndexID;
 };
 
+struct VividVisibilityBufferFragmentOutput
+{
+    uint2 visibility : SV_Target0;
+    float4 attributes0 : SV_Target1;
+    float4 attributes1 : SV_Target2;
+    float2 barycentrics : SV_Target3;
+};
+
+float2 VividEncodeVisibilityBufferNormalOct(float3 normalWS)
+{
+    float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-12));
+    normal /= max(abs(normal.x) + abs(normal.y) + abs(normal.z), 1e-6);
+    float2 encoded = normal.xy;
+    if (normal.z < 0.0)
+    {
+        float2 signs = float2(
+            encoded.x >= 0.0 ? 1.0 : -1.0,
+            encoded.y >= 0.0 ? 1.0 : -1.0);
+        encoded = (1.0 - abs(encoded.yx)) * signs;
+    }
+    return encoded * 0.5 + 0.5;
+}
+
+VividVisibilityBufferFragmentOutput PackVividVisibilityBufferFragmentOutput(
+    uint2 visibility,
+    float2 uv0,
+    float2 uv0Ddx,
+    float2 uv0Ddy,
+    float3 geometricNormalWS,
+    float3 barycentrics)
+{
+    VividVisibilityBufferFragmentOutput output;
+    output.visibility = visibility;
+    output.attributes0 = float4(uv0, uv0Ddx);
+    output.attributes1 = float4(
+        uv0Ddy,
+        VividEncodeVisibilityBufferNormalOct(geometricNormalWS));
+    output.barycentrics = barycentrics.xy;
+    return output;
+}
+
+float3 DecodeVividVisibilityBufferBarycentrics(float2 barycentrics)
+{
+    return float3(barycentrics, 1.0 - barycentrics.x - barycentrics.y);
+}
+
 bool IsPackedVisibilityBufferValueValid(const uint2 packedValue)
 {
     return packedValue.x != 0u;

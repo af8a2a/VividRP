@@ -33,22 +33,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ConvertMaterialColorForGPU_MatchesShaderColorSpaceAndPreservesAlpha()
+        {
+            var source = new Color(0.25f, 0.5f, 0.75f, 0.35f);
+            float4 converted = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(source);
+            Color expected = QualitySettings.activeColorSpace == ColorSpace.Linear
+                ? source.linear
+                : source;
+
+            Assert.That(converted.x, Is.EqualTo(expected.r).Within(0.000001f));
+            Assert.That(converted.y, Is.EqualTo(expected.g).Within(0.000001f));
+            Assert.That(converted.z, Is.EqualTo(expected.b).Within(0.000001f));
+            Assert.That(converted.w, Is.EqualTo(source.a).Within(0.000001f));
+        }
+
+        [Test]
         public void AddInstance_ClassifiesActiveRendererBatchKeysByPass()
         {
             var sceneData = new VividGPUDrivenSceneData();
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 RendererListID = VividRendererListID.Default,
             });
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 RendererListID = VividRendererListID.CullOff | VividRendererListID.AlphaTest,
             });
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 RendererListID = VividRendererListID.AlphaTest,
             });
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 RendererListID = VividRendererListID.CullOff,
             });
@@ -172,6 +187,90 @@ namespace VividRP.Editor.Tests
             finally
             {
                 DestroyTestObjects(first, second, material, mesh, meshletCollection);
+            }
+        }
+
+        [Test]
+        public void Build_CompilesDualSlabIntoTwoSurfaceBindings()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy baseProxy = null;
+            GPUDrivenMaterialProxy topProxy = null;
+            GPUDrivenDualSlabMaterialDefinition definition = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("DualSlabMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "DualSlabCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 });
+                gameObject = CreateMeshletRendererObject(
+                    "DualSlabRenderer",
+                    mesh,
+                    new[] { material },
+                    out MeshletRenderer meshletRenderer);
+                baseProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                topProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                definition =
+                    ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                baseProxy.LayerWeight = 0.6f;
+                topProxy.Metallic = 0.9f;
+                definition.TopSlab = topProxy;
+                definition.Operator = VividDualSlabOperator.VerticalLayer;
+                baseProxy.DualSlabDefinition = definition;
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { baseProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new BindlessGPUDrivenTextureBackend(
+                    new FakeBindlessTextureDescriptorAllocator(16));
+                builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    textureBackend);
+
+                Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.DualSlabMaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(2));
+                Assert.That(
+                    sceneData.MaterialRuntimeHeaders[0].ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
+                Assert.That(sceneData.MaterialRuntimeHeaders[0].ParameterAddress, Is.Zero);
+                Assert.That(sceneData.MaterialRuntimeHeaders[0].ResourceBindingAddress, Is.Zero);
+                Assert.That(sceneData.DualSlabMaterials[0].TopMetallic, Is.EqualTo(0.9f));
+                Assert.That(
+                    sceneData.DualSlabMaterials[0].LayerOperator,
+                    Is.EqualTo(VividDualSlabOperator.VerticalLayer));
+                Assert.That(sceneData.DualSlabMaterials[0].LayerWeight, Is.EqualTo(0.6f));
+            }
+            finally
+            {
+                DestroyTestObjects(
+                    gameObject,
+                    null,
+                    material,
+                    mesh,
+                    meshletCollection,
+                    definition,
+                    topProxy,
+                    baseProxy);
             }
         }
 
@@ -638,9 +737,11 @@ namespace VividRP.Editor.Tests
                 );
                 Assert.That(staticDataChanged, Is.False);
                 Assert.That(materialDataChanged, Is.True);
-                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(0.8f).Within(0.0001f));
-                Assert.That(sceneData.Materials[0].AlbedoColor.y, Is.EqualTo(0.7f).Within(0.0001f));
-                Assert.That(sceneData.Materials[0].AlbedoColor.z, Is.EqualTo(0.6f).Within(0.0001f));
+                float4 expectedColor = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    new Color(0.8f, 0.7f, 0.6f, 1.0f));
+                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(expectedColor.x).Within(0.0001f));
+                Assert.That(sceneData.Materials[0].AlbedoColor.y, Is.EqualTo(expectedColor.y).Within(0.0001f));
+                Assert.That(sceneData.Materials[0].AlbedoColor.z, Is.EqualTo(expectedColor.z).Within(0.0001f));
             }
             finally
             {
@@ -996,10 +1097,20 @@ namespace VividRP.Editor.Tests
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
 
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 VividMaterialData materialData = sceneData.Materials[0];
+                VividMaterialRuntimeHeader runtimeHeader = sceneData.MaterialRuntimeHeaders[0];
                 VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
-                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(0.8f).Within(0.0001f));
+                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                Assert.That(runtimeHeader.ParameterAddress, Is.Zero);
+                Assert.That(runtimeHeader.ResourceBindingAddress, Is.EqualTo(materialData.SurfaceBindingIndex));
+                Assert.That(
+                    runtimeHeader.Flags,
+                    Is.EqualTo(VividMaterialRuntimeFlags.AlphaClip | VividMaterialRuntimeFlags.Unlit));
+                float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    materialProxy.BaseColor);
+                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.y, Is.EqualTo(5.0f).Within(0.0001f));
                 Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.BaseColor, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
                 Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.Normal, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
@@ -1238,7 +1349,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(gameObject.GetComponent<MeshRenderer>(), Is.Null);
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
-                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(syncedProxy.BaseColor.r).Within(0.0001f));
+                float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    syncedProxy.BaseColor);
+                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));
                 VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) sceneData.Materials[0].SurfaceBindingIndex];
                 Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.BaseColor, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
             }
@@ -1309,18 +1422,27 @@ namespace VividRP.Editor.Tests
                 system.PrepareFrame();
 
                 Assert.That(system.SceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(system.SceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.InstanceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MaterialProgramCount, Is.EqualTo(3));
                 Assert.That(system.BufferSet.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshletCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.SharedVertexCount, Is.EqualTo(3));
                 Assert.That(system.BufferSet.SharedIndexCount, Is.EqualTo(3));
                 VividMaterialData materialData = system.SceneData.Materials[0];
+                VividMaterialRuntimeHeader runtimeHeader = system.SceneData.MaterialRuntimeHeaders[0];
+                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(VividMaterialProgramID.Invalid));
+                Assert.That(runtimeHeader.ParameterAddress, Is.Zero);
+                Assert.That(runtimeHeader.ResourceBindingAddress, Is.EqualTo(materialData.SurfaceBindingIndex));
                 VividSurfaceBindingData surfaceBindingData = system.SceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
-                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(0.25f).Within(0.0001f));
-                Assert.That(materialData.AlbedoColor.y, Is.EqualTo(0.5f).Within(0.0001f));
-                Assert.That(materialData.AlbedoColor.z, Is.EqualTo(0.75f).Within(0.0001f));
+                float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    new Color(0.25f, 0.5f, 0.75f, 1.0f));
+                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));
+                Assert.That(materialData.AlbedoColor.y, Is.EqualTo(expectedAlbedo.y).Within(0.0001f));
+                Assert.That(materialData.AlbedoColor.z, Is.EqualTo(expectedAlbedo.z).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.x, Is.EqualTo(2.0f).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.y, Is.EqualTo(3.0f).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.z, Is.EqualTo(0.1f).Within(0.0001f));
@@ -1333,7 +1455,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialData.NormalsStrength, Is.EqualTo(0.75f).Within(0.0001f));
                 Assert.That(materialData.Metallic, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialData.Roughness, Is.EqualTo(0.8f).Within(0.0001f));
-                Assert.That(materialData.Emission.x, Is.EqualTo(1.0f).Within(0.0001f));
+                float4 expectedEmission = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
+                    new Color(1.0f, 0.5f, 0.0f, 0.25f));
+                Assert.That(materialData.Emission.x, Is.EqualTo(expectedEmission.x).Within(0.0001f));
+                Assert.That(materialData.Emission.y, Is.EqualTo(expectedEmission.y).Within(0.0001f));
+                Assert.That(materialData.Emission.w, Is.EqualTo(0.25f).Within(0.0001f));
                 Assert.That(materialData.RendererListID, Is.EqualTo(VividRendererListID.CullOff | VividRendererListID.AlphaTest));
                 Assert.That(materialData.AlphaClipThreshold, Is.EqualTo(0.33f).Within(0.0001f));
             }
@@ -1447,7 +1573,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(instanceDataChanged, Is.True);
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
+                Assert.That(
+                    sceneData.MaterialRuntimeHeaders[0].ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.Invalid));
+                Assert.That(sceneData.MaterialRuntimeHeaders[0].ParameterAddress, Is.Zero);
                 Assert.That(sceneData.MeshletCount, Is.EqualTo(2));
                 Assert.That(sceneData.Instances[0].MaterialIndex, Is.EqualTo(sceneData.Instances[1].MaterialIndex));
                 Assert.That(sceneData.Instances[0].AABBMin.x, Is.EqualTo(firstBounds.min.x).Within(0.0001f));

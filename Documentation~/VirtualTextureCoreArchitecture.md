@@ -351,6 +351,23 @@ SVT-only。旧的 dual-payload Proxy 在显式同步前仍可读取，VT runtime
 只提交 SVT，Bindless runtime 只提交普通贴图。`SourceMaterial` 目前仍作为 Editor provenance 和
 RTAS fallback 保留，不属于提交给 VT 后端的 surface texture payload。
 
+`MeshletRenderer` 转换工具不再把生成资产直接散落在源资产旁，而是在源 Mesh 所在目录下
+建立以下结构：
+
+```text
+GPUDrivenGenerated/
+├─ MaterialProxy/
+├─ MeshletAsset/
+└─ SVT/
+   └─ Bin/
+```
+
+一次转换以源 Mesh 所在目录作为生成根，因此 Mesh 与 Material 分处不同目录时，三类产物仍位于
+同一个 `GPUDrivenGenerated`。MeshletCollection 归入 `MeshletAsset`，MaterialProxy 归入
+`MaterialProxy`，`.vividvt` 序列化对象位于 `SVT`，其 `.stream` 二进制位于 `SVT/Bin`。
+Proxy 文件名携带稳定资源标识，避免同名 Material 或 Mesh 在统一目录中碰撞。该规则只用于转换
+生成的资产；手工 VT、Terrain VT 和 SourceMaterial 匹配且已经绑定的旧邻近 Proxy 保持原路径与引用。
+
 旧 Demo 场景迁移时：先通过 `MeshletRenderer` Inspector 的 takeover 流程捕获并移除源
 `MeshRenderer`，再通过 GPUDriven Material Proxy Editor 构建并绑定 `GPUDrivenSurface` VT asset，
 最后将这些已配置资源赋给 `VirtualTextureDemoController` 做一致性校验。RenderGraph 中旧

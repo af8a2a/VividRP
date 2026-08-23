@@ -1097,16 +1097,26 @@ namespace VividRP.Runtime.GPUDriven
             in MaterialStageCost coverage,
             in MaterialStageCost surface,
             in MaterialStageCost combined,
+            int worstCaseCoverageTextureSamples,
+            int worstCaseSurfaceTextureSamples,
+            int worstCaseTotalTextureSamples,
             int closureCount,
             int operatorCount,
+            int parameterBindingCount,
+            int resourceBindingCount,
             int parameterBytes,
             int resourceBindingRecords)
         {
             Coverage = coverage;
             Surface = surface;
             Combined = combined;
+            WorstCaseCoverageTextureSamples = worstCaseCoverageTextureSamples;
+            WorstCaseSurfaceTextureSamples = worstCaseSurfaceTextureSamples;
+            WorstCaseTotalTextureSamples = worstCaseTotalTextureSamples;
             ClosureCount = closureCount;
             OperatorCount = operatorCount;
+            ParameterBindingCount = parameterBindingCount;
+            ResourceBindingCount = resourceBindingCount;
             ParameterBytes = parameterBytes;
             ResourceBindingRecords = resourceBindingRecords;
         }
@@ -1117,9 +1127,19 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialStageCost Combined { get; }
 
+        internal int WorstCaseCoverageTextureSamples { get; }
+
+        internal int WorstCaseSurfaceTextureSamples { get; }
+
+        internal int WorstCaseTotalTextureSamples { get; }
+
         internal int ClosureCount { get; }
 
         internal int OperatorCount { get; }
+
+        internal int ParameterBindingCount { get; }
+
+        internal int ResourceBindingCount { get; }
 
         internal int ParameterBytes { get; }
 
@@ -1130,9 +1150,11 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal MaterialProgramCostBudget(
             int maxCombinedValueNodes,
-            int maxTextureSamples,
-            int maxParameters,
-            int maxTextureResources,
+            int maxCoverageTextureSamples,
+            int maxSurfaceTextureSamples,
+            int maxTotalTextureSamples,
+            int maxParameterBindings,
+            int maxResourceBindings,
             int maxClosures,
             int maxOperators,
             int maxParameterBytes,
@@ -1140,12 +1162,16 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (maxCombinedValueNodes < 0)
                 throw new ArgumentOutOfRangeException(nameof(maxCombinedValueNodes));
-            if (maxTextureSamples < 0)
-                throw new ArgumentOutOfRangeException(nameof(maxTextureSamples));
-            if (maxParameters < 0)
-                throw new ArgumentOutOfRangeException(nameof(maxParameters));
-            if (maxTextureResources < 0)
-                throw new ArgumentOutOfRangeException(nameof(maxTextureResources));
+            if (maxCoverageTextureSamples < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxCoverageTextureSamples));
+            if (maxSurfaceTextureSamples < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxSurfaceTextureSamples));
+            if (maxTotalTextureSamples < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxTotalTextureSamples));
+            if (maxParameterBindings < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxParameterBindings));
+            if (maxResourceBindings < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxResourceBindings));
             if (maxClosures < 0)
                 throw new ArgumentOutOfRangeException(nameof(maxClosures));
             if (maxOperators < 0)
@@ -1156,9 +1182,11 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentOutOfRangeException(nameof(maxResourceBindingRecords));
 
             MaxCombinedValueNodes = maxCombinedValueNodes;
-            MaxTextureSamples = maxTextureSamples;
-            MaxParameters = maxParameters;
-            MaxTextureResources = maxTextureResources;
+            MaxCoverageTextureSamples = maxCoverageTextureSamples;
+            MaxSurfaceTextureSamples = maxSurfaceTextureSamples;
+            MaxTotalTextureSamples = maxTotalTextureSamples;
+            MaxParameterBindings = maxParameterBindings;
+            MaxResourceBindings = maxResourceBindings;
             MaxClosures = maxClosures;
             MaxOperators = maxOperators;
             MaxParameterBytes = maxParameterBytes;
@@ -1168,9 +1196,11 @@ namespace VividRP.Runtime.GPUDriven
         internal static MaterialProgramCostBudget Prototype =>
             new MaterialProgramCostBudget(
                 maxCombinedValueNodes: 24,
-                maxTextureSamples: 2,
-                maxParameters: 8,
-                maxTextureResources: 2,
+                maxCoverageTextureSamples: 1,
+                maxSurfaceTextureSamples: 6,
+                maxTotalTextureSamples: 7,
+                maxParameterBindings: 20,
+                maxResourceBindings: 6,
                 maxClosures: 2,
                 maxOperators: 1,
                 maxParameterBytes: 192,
@@ -1178,11 +1208,15 @@ namespace VividRP.Runtime.GPUDriven
 
         internal int MaxCombinedValueNodes { get; }
 
-        internal int MaxTextureSamples { get; }
+        internal int MaxCoverageTextureSamples { get; }
 
-        internal int MaxParameters { get; }
+        internal int MaxSurfaceTextureSamples { get; }
 
-        internal int MaxTextureResources { get; }
+        internal int MaxTotalTextureSamples { get; }
+
+        internal int MaxParameterBindings { get; }
+
+        internal int MaxResourceBindings { get; }
 
         internal int MaxClosures { get; }
 
@@ -1265,19 +1299,31 @@ namespace VividRP.Runtime.GPUDriven
         {
             var builder = new StringBuilder();
             builder.AppendLine("material_program_diagnostics");
-            builder.AppendLine("cost_model=typed_ir_structural_v1");
+            builder.AppendLine("cost_model=lowered_program_worst_case_v2");
+            builder.AppendLine("typed_ir:");
             AppendStageCost(builder, "coverage", Cost.Coverage);
             AppendStageCost(builder, "surface", Cost.Surface);
             AppendStageCost(builder, "combined", Cost.Combined);
+            builder.Append("lowered texture_samples coverage=")
+                .Append(Cost.WorstCaseCoverageTextureSamples)
+                .Append(" surface=").Append(Cost.WorstCaseSurfaceTextureSamples)
+                .Append(" total=").Append(Cost.WorstCaseTotalTextureSamples)
+                .AppendLine();
             builder.Append("topology closures=").Append(Cost.ClosureCount)
                 .Append(" operators=").Append(Cost.OperatorCount).AppendLine();
-            builder.Append("layout parameter_bytes=").Append(Cost.ParameterBytes)
+            builder.Append("layout parameter_bindings=").Append(Cost.ParameterBindingCount)
+                .Append(" parameter_bytes=").Append(Cost.ParameterBytes)
+                .Append(" resource_bindings=").Append(Cost.ResourceBindingCount)
                 .Append(" resource_records=").Append(Cost.ResourceBindingRecords)
                 .AppendLine();
-            builder.Append("budget combined_nodes=").Append(Budget.MaxCombinedValueNodes)
-                .Append(" texture_samples=").Append(Budget.MaxTextureSamples)
-                .Append(" parameters=").Append(Budget.MaxParameters)
-                .Append(" texture_resources=").Append(Budget.MaxTextureResources)
+            builder.Append("budget combined_ir_nodes=").Append(Budget.MaxCombinedValueNodes)
+                .Append(" coverage_texture_samples=")
+                .Append(Budget.MaxCoverageTextureSamples)
+                .Append(" surface_texture_samples=")
+                .Append(Budget.MaxSurfaceTextureSamples)
+                .Append(" total_texture_samples=").Append(Budget.MaxTotalTextureSamples)
+                .Append(" parameter_bindings=").Append(Budget.MaxParameterBindings)
+                .Append(" resource_bindings=").Append(Budget.MaxResourceBindings)
                 .Append(" closures=").Append(Budget.MaxClosures)
                 .Append(" operators=").Append(Budget.MaxOperators)
                 .Append(" parameter_bytes=").Append(Budget.MaxParameterBytes)
@@ -1328,17 +1374,53 @@ namespace VividRP.Runtime.GPUDriven
             if (materialLayout == null)
                 throw new ArgumentNullException(nameof(materialLayout));
 
+            MaterialStageCost coverageCost = AnalyzeSlice(coverageProgram.ValueSlice);
+            MaterialStageCost surfaceCost = AnalyzeSlice(surfaceProgram.ValueSlice);
+            int worstCaseCoverageTextureSamples =
+                AnalyzeWorstCaseCoverageTextureSamples(module, coverageCost);
+            int worstCaseSurfaceTextureSamples =
+                AnalyzeWorstCaseSurfaceTextureSamples(module, surfaceCost);
             return new MaterialProgramCost(
-                AnalyzeSlice(coverageProgram.ValueSlice),
-                AnalyzeSlice(surfaceProgram.ValueSlice),
+                coverageCost,
+                surfaceCost,
                 AnalyzeCombined(
                     module.Values,
                     coverageProgram.ValueSlice,
                     surfaceProgram.ValueSlice),
+                worstCaseCoverageTextureSamples,
+                worstCaseSurfaceTextureSamples,
+                worstCaseCoverageTextureSamples + worstCaseSurfaceTextureSamples,
                 module.Topology.ClosureCount,
                 module.Topology.OperatorCount,
+                materialLayout.ParameterLayout.Bindings.Count,
+                materialLayout.ResourceLayout.Bindings.Count,
                 materialLayout.ParameterLayout.Stride,
                 materialLayout.ResourceLayout.RecordCount);
+        }
+
+        private static int AnalyzeWorstCaseCoverageTextureSamples(
+            MaterialIRModule module,
+            in MaterialStageCost coverageCost)
+        {
+            return (module.MaterialFeatures & MaterialFeatureMask.AlphaClip) != 0
+                ? coverageCost.TextureSampleCount
+                : 0;
+        }
+
+        private static int AnalyzeWorstCaseSurfaceTextureSamples(
+            MaterialIRModule module,
+            in MaterialStageCost surfaceCost)
+        {
+            int textureSamples = surfaceCost.TextureSampleCount;
+            for (int slabIndex = 0; slabIndex < module.Topology.Slabs.Count; slabIndex++)
+            {
+                ClosureFeatureMask features = module.Topology.Slabs[slabIndex].Features;
+                if ((features & ClosureFeatureMask.NormalTexture) != 0)
+                    textureSamples++;
+                if ((features & ClosureFeatureMask.MaskTexture) != 0)
+                    textureSamples++;
+            }
+            return textureSamples;
         }
 
         private static MaterialStageCost AnalyzeSlice(MaterialValueSlice slice)
@@ -1443,50 +1525,57 @@ namespace VividRP.Runtime.GPUDriven
             AddExceeded(
                 entries,
                 "MPC1002",
-                "combined texture samples",
-                cost.Combined.TextureSampleCount,
-                budget.MaxTextureSamples);
+                "coverage texture samples",
+                cost.WorstCaseCoverageTextureSamples,
+                budget.MaxCoverageTextureSamples);
             AddExceeded(
                 entries,
                 "MPC1003",
-                "combined parameters",
-                cost.Combined.ParameterCount,
-                budget.MaxParameters);
+                "surface texture samples",
+                cost.WorstCaseSurfaceTextureSamples,
+                budget.MaxSurfaceTextureSamples);
             AddExceeded(
                 entries,
                 "MPC1004",
-                "combined texture resources",
-                cost.Combined.TextureResourceCount,
-                budget.MaxTextureResources);
+                "total texture samples",
+                cost.WorstCaseTotalTextureSamples,
+                budget.MaxTotalTextureSamples);
             AddExceeded(
                 entries,
                 "MPC1005",
+                "parameter bindings",
+                cost.ParameterBindingCount,
+                budget.MaxParameterBindings);
+            AddExceeded(
+                entries,
+                "MPC1006",
+                "resource bindings",
+                cost.ResourceBindingCount,
+                budget.MaxResourceBindings);
+            AddExceeded(
+                entries,
+                "MPC1007",
                 "closures",
                 cost.ClosureCount,
                 budget.MaxClosures);
             AddExceeded(
                 entries,
-                "MPC1006",
+                "MPC1008",
                 "closure operators",
                 cost.OperatorCount,
                 budget.MaxOperators);
             AddExceeded(
                 entries,
-                "MPC1007",
+                "MPC1009",
                 "parameter bytes",
                 cost.ParameterBytes,
                 budget.MaxParameterBytes);
             AddExceeded(
                 entries,
-                "MPC1008",
+                "MPC1010",
                 "resource binding records",
                 cost.ResourceBindingRecords,
                 budget.MaxResourceBindingRecords);
-            entries.Add(new MaterialProgramDiagnostic(
-                MaterialProgramDiagnosticSeverity.Info,
-                "MPC0001",
-                "V1 counts typed MaterialValueIR structure and runtime ABI occupancy; "
-                + "layout-driven tiling/remap and optional Normal/Mask/Emission HLSL work are not represented."));
             return new MaterialProgramDiagnostics(cost, budget, entries.ToArray());
         }
 
@@ -1503,7 +1592,7 @@ namespace VividRP.Runtime.GPUDriven
             entries.Add(new MaterialProgramDiagnostic(
                 MaterialProgramDiagnosticSeverity.Error,
                 code,
-                $"{name} cost {actual} exceeds prototype budget {maximum}."));
+                $"{name} cost {actual} exceeds budget {maximum}."));
         }
     }
 

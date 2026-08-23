@@ -330,6 +330,11 @@ namespace VividRP.Editor.Tests
                 externalInputs: 3);
             Assert.That(standardCost.ClosureCount, Is.EqualTo(1));
             Assert.That(standardCost.OperatorCount, Is.Zero);
+            Assert.That(standardCost.WorstCaseCoverageTextureSamples, Is.EqualTo(1));
+            Assert.That(standardCost.WorstCaseSurfaceTextureSamples, Is.EqualTo(3));
+            Assert.That(standardCost.WorstCaseTotalTextureSamples, Is.EqualTo(4));
+            Assert.That(standardCost.ParameterBindingCount, Is.EqualTo(10));
+            Assert.That(standardCost.ResourceBindingCount, Is.EqualTo(3));
             Assert.That(standardCost.ParameterBytes, Is.EqualTo(128));
             Assert.That(standardCost.ResourceBindingRecords, Is.EqualTo(1));
 
@@ -363,6 +368,11 @@ namespace VividRP.Editor.Tests
                 externalInputs: 3);
             Assert.That(dualCost.ClosureCount, Is.EqualTo(2));
             Assert.That(dualCost.OperatorCount, Is.EqualTo(1));
+            Assert.That(dualCost.WorstCaseCoverageTextureSamples, Is.EqualTo(1));
+            Assert.That(dualCost.WorstCaseSurfaceTextureSamples, Is.EqualTo(6));
+            Assert.That(dualCost.WorstCaseTotalTextureSamples, Is.EqualTo(7));
+            Assert.That(dualCost.ParameterBindingCount, Is.EqualTo(20));
+            Assert.That(dualCost.ResourceBindingCount, Is.EqualTo(6));
             Assert.That(dualCost.ParameterBytes, Is.EqualTo(192));
             Assert.That(dualCost.ResourceBindingRecords, Is.EqualTo(2));
 
@@ -375,10 +385,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 horizontal.Diagnostics.GetDebugDump(),
                 Is.EqualTo(vertical.Diagnostics.GetDebugDump()));
-            Assert.That(standardDump, Does.Contain("cost_model=typed_ir_structural_v1"));
+            Assert.That(standardDump, Does.Contain("cost_model=lowered_program_worst_case_v2"));
+            Assert.That(
+                standardDump,
+                Does.Contain("lowered texture_samples coverage=1 surface=3 total=4"));
             Assert.That(standardDump, Does.Contain("status=ok"));
-            Assert.That(standardDump, Does.Contain("MPC0001"));
-            Assert.That(standardDump, Does.Contain("not represented"));
+            Assert.That(firstStandard.Diagnostics.Entries, Is.Empty);
         }
 
         [Test]
@@ -389,9 +401,11 @@ namespace VividRP.Editor.Tests
                     GPUDrivenMaterialCompiler.ProgramVersion);
             var budget = new MaterialProgramCostBudget(
                 maxCombinedValueNodes: 11,
-                maxTextureSamples: 2,
-                maxParameters: 8,
-                maxTextureResources: 2,
+                maxCoverageTextureSamples: 1,
+                maxSurfaceTextureSamples: 6,
+                maxTotalTextureSamples: 7,
+                maxParameterBindings: 20,
+                maxResourceBindings: 6,
                 maxClosures: 2,
                 maxOperators: 1,
                 maxParameterBytes: 192,
@@ -407,7 +421,45 @@ namespace VividRP.Editor.Tests
             Assert.That(exception.Message, Does.Contain("MPC1001"));
             Assert.That(
                 exception.Message,
-                Does.Contain("combined value nodes cost 12 exceeds prototype budget 11"));
+                Does.Contain("combined value nodes cost 12 exceeds budget 11"));
+        }
+
+        [Test]
+        public void CostBudget_RejectsProgramWhenLoweredLimitsAreExceeded()
+        {
+            CompiledMaterialProgram prototype =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            var budget = new MaterialProgramCostBudget(
+                maxCombinedValueNodes: 24,
+                maxCoverageTextureSamples: 1,
+                maxSurfaceTextureSamples: 2,
+                maxTotalTextureSamples: 7,
+                maxParameterBindings: 9,
+                maxResourceBindings: 2,
+                maxClosures: 2,
+                maxOperators: 1,
+                maxParameterBytes: 192,
+                maxResourceBindingRecords: 2);
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+                CompiledMaterialProgram.Compile(
+                    prototype.Module,
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    budget));
+
+            Assert.That(exception.Message, Does.Contain("MPC1003"));
+            Assert.That(exception.Message, Does.Contain("MPC1005"));
+            Assert.That(exception.Message, Does.Contain("MPC1006"));
+            Assert.That(
+                exception.Message,
+                Does.Contain("surface texture samples cost 3 exceeds budget 2"));
+            Assert.That(
+                exception.Message,
+                Does.Contain("parameter bindings cost 10 exceeds budget 9"));
+            Assert.That(
+                exception.Message,
+                Does.Contain("resource bindings cost 3 exceeds budget 2"));
         }
 
         [Test]

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using Unity.Mathematics;
@@ -18,6 +19,77 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialValue CoverageValue { get; }
 
         internal MaterialValue AlphaClipThreshold { get; }
+    }
+
+    internal sealed class MaterialValueSlice
+    {
+        private readonly IReadOnlyList<int> m_NodeIndices;
+
+        internal MaterialValueSlice(MaterialValueIR values, params MaterialValue[] roots)
+        {
+            Values = values ?? throw new ArgumentNullException(nameof(values));
+            if (!Values.IsFrozen)
+                throw new InvalidOperationException("Material value IR must be frozen before slicing.");
+            if (roots == null)
+                throw new ArgumentNullException(nameof(roots));
+
+            var reachable = new bool[Values.NodeCount];
+            var pending = new Stack<int>();
+            for (int i = 0; i < roots.Length; i++)
+            {
+                MaterialValue root = roots[i];
+                if (!Values.Owns(root))
+                    throw new ArgumentException("Material slice root is not owned by the value IR.", nameof(roots));
+                pending.Push(root.Index);
+            }
+
+            while (pending.Count > 0)
+            {
+                int nodeIndex = pending.Pop();
+                if (reachable[nodeIndex])
+                    continue;
+
+                reachable[nodeIndex] = true;
+                MaterialValueNode node = Values.Nodes[nodeIndex];
+                PushOperand(pending, node.Operand0);
+                PushOperand(pending, node.Operand1);
+                PushOperand(pending, node.Operand2);
+                PushOperand(pending, node.Operand3);
+            }
+
+            var nodeIndices = new List<int>();
+            for (int i = 0; i < reachable.Length; i++)
+            {
+                if (reachable[i])
+                    nodeIndices.Add(i);
+            }
+            m_NodeIndices = nodeIndices.AsReadOnly();
+        }
+
+        internal MaterialValueIR Values { get; }
+
+        internal IReadOnlyList<int> NodeIndices => m_NodeIndices;
+
+        internal int NodeCount => m_NodeIndices.Count;
+
+        internal bool Contains(MaterialValue value)
+        {
+            if (!Values.Owns(value))
+                return false;
+
+            for (int i = 0; i < m_NodeIndices.Count; i++)
+            {
+                if (m_NodeIndices[i] == value.Index)
+                    return true;
+            }
+            return false;
+        }
+
+        private static void PushOperand(Stack<int> pending, int operand)
+        {
+            if (operand >= 0)
+                pending.Push(operand);
+        }
     }
 
     internal sealed class MaterialIRModule
@@ -53,6 +125,11 @@ namespace VividRP.Runtime.GPUDriven
         internal string GetDebugDump()
         {
             return m_DebugDump;
+        }
+
+        internal MaterialValueSlice CreateValueSlice(params MaterialValue[] roots)
+        {
+            return new MaterialValueSlice(Values, roots);
         }
 
         private void Validate()

@@ -91,6 +91,52 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CoverageLowering_ConsumesOnlyCoverageRootsForProgram0AndProgram1()
+        {
+            CompiledMaterialProgram standard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram dualSlab =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.VerticalLayer);
+
+            AssertCoverageRequirements(standard);
+            AssertCoverageRequirements(dualSlab);
+            Assert.That(
+                standard.CoverageProgram.ValueSlice.Contains(
+                    standard.Module.Topology.Slabs[0].Roughness),
+                Is.False);
+            Assert.That(
+                standard.CoverageProgram.ValueSlice.Contains(
+                    standard.Module.Topology.Slabs[0].Metallic),
+                Is.False);
+            Assert.That(
+                dualSlab.CoverageProgram.ValueSlice.Contains(
+                    dualSlab.Module.Topology.Slabs[1].BaseColor),
+                Is.False);
+            Assert.That(
+                dualSlab.CoverageProgram.ValueSlice.Contains(
+                    dualSlab.Module.Topology.Operators[0].Weight),
+                Is.False);
+
+            CollectionAssert.AreEqual(
+                GetValueSliceSignature(standard.CoverageProgram.ValueSlice),
+                GetValueSliceSignature(dualSlab.CoverageProgram.ValueSlice));
+        }
+
+        [Test]
+        public void CoverageLowering_RejectsUnmappedCoverageValueIR()
+        {
+            MaterialIRModule module = BuildUnsupportedCoverageModule();
+
+            Assert.Throws<NotSupportedException>(() =>
+                CompiledMaterialProgram.Compile(
+                    module,
+                    GPUDrivenMaterialCompiler.ProgramVersion));
+        }
+
+        [Test]
         public void CompileStandardSingleSlab_ProducesSingleClosureProgramPrototype()
         {
             var firstProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -198,6 +244,78 @@ namespace VividRP.Editor.Tests
                 new[] { prototype.Module.Topology.Slabs[0], prototype.Module.Topology.Slabs[1] },
                 new[] { prototype.Module.Topology.Operators[0] },
                 budget));
+        }
+
+        private static void AssertCoverageRequirements(CompiledMaterialProgram program)
+        {
+            CompiledCoverageProgram coverage = program.CoverageProgram;
+            Assert.That(
+                coverage.ProgramID,
+                Is.EqualTo(VividMaterialCoverageProgramID.BaseColorAlpha));
+            Assert.That(program.RuntimeData.CoverageProgramID, Is.EqualTo(coverage.ProgramID));
+            Assert.That(coverage.ValueSlice.NodeCount, Is.EqualTo(8));
+            Assert.That(
+                coverage.ValueSlice.Contains(program.Module.Outputs.CoverageValue),
+                Is.True);
+            Assert.That(
+                coverage.ValueSlice.Contains(program.Module.Outputs.AlphaClipThreshold),
+                Is.True);
+            CollectionAssert.AreEqual(
+                new[] { MaterialParameter.BaseColor, MaterialParameter.AlphaClipThreshold },
+                coverage.RequiredParameters);
+            CollectionAssert.AreEqual(
+                new[] { MaterialTextureResource.BaseColor },
+                coverage.RequiredTextureResources);
+            CollectionAssert.AreEqual(
+                new[] { MaterialExternalInput.UV0 },
+                coverage.RequiredExternalInputs);
+        }
+
+        private static string[] GetValueSliceSignature(MaterialValueSlice valueSlice)
+        {
+            return valueSlice.NodeIndices.Select(index =>
+            {
+                MaterialValueNode node = valueSlice.Values.Nodes[index];
+                return $"{node.Opcode}:{node.Type}:{node.Semantic}";
+            }).ToArray();
+        }
+
+        private static MaterialIRModule BuildUnsupportedCoverageModule()
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue baseColor = valueIR.Parameter(MaterialParameter.BaseColor);
+            MaterialValue roughness = valueIR.Parameter(MaterialParameter.Roughness);
+            MaterialValue metallic = valueIR.Parameter(MaterialParameter.Metallic);
+            MaterialValue alphaClipThreshold =
+                valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+            MaterialValue coverageValue = valueIR.Constant(new float4(1.0f));
+            var normalBases = new[]
+            {
+                new ClosureNormalBasis(
+                    valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS),
+                    valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS)),
+            };
+            var slabs = new[]
+            {
+                new ClosureSlab(
+                    baseColor,
+                    roughness,
+                    metallic,
+                    normalBasisIndex: 0,
+                    features: ClosureFeatureMask.AlphaClip,
+                    isTop: true,
+                    isBottom: true),
+            };
+            var topology = new ClosureTopology(
+                valueIR,
+                normalBases,
+                slabs,
+                Array.Empty<ClosureOperator>(),
+                ClosureTopologyBudget.Prototype);
+            return new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(coverageValue, alphaClipThreshold),
+                topology);
         }
     }
 }

@@ -43,6 +43,11 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividInstanceData> m_Instances = new();
         private readonly List<VividGPUDrivenInstanceSourceData> m_InstanceSources = new();
         private readonly List<VividMaterialData> m_Materials = new();
+        private readonly List<VividMaterialRuntimeHeader> m_MaterialRuntimeHeaders = new();
+        private readonly List<VividMaterialProgramData> m_MaterialPrograms = new()
+        {
+            GPUDrivenMaterialCompiler.StandardSingleSlabProgram,
+        };
         private readonly List<VividSurfaceBindingData> m_SurfaceBindings = new();
         private readonly List<VividTerrainMaterialData> m_TerrainMaterials = new();
         private readonly List<VividTerrainLayerGPUData> m_TerrainLayers = new();
@@ -58,6 +63,11 @@ namespace VividRP.Runtime.GPUDriven
         public IReadOnlyList<VividInstanceData> Instances => m_Instances;
 
         public IReadOnlyList<VividMaterialData> Materials => m_Materials;
+
+        public IReadOnlyList<VividMaterialRuntimeHeader> MaterialRuntimeHeaders =>
+            m_MaterialRuntimeHeaders;
+
+        public IReadOnlyList<VividMaterialProgramData> MaterialPrograms => m_MaterialPrograms;
 
         public IReadOnlyList<VividSurfaceBindingData> SurfaceBindings => m_SurfaceBindings;
 
@@ -76,6 +86,10 @@ namespace VividRP.Runtime.GPUDriven
         public int InstanceCount => m_Instances.Count;
 
         public int MaterialCount => m_Materials.Count;
+
+        public int MaterialRuntimeHeaderCount => m_MaterialRuntimeHeaders.Count;
+
+        public int MaterialProgramCount => m_MaterialPrograms.Count;
 
         public int SurfaceBindingCount => m_SurfaceBindings.Count;
 
@@ -114,6 +128,11 @@ namespace VividRP.Runtime.GPUDriven
         internal IReadOnlyList<VividGPUDrivenInstanceSourceData> InstanceSources => m_InstanceSources;
 
         internal List<VividMaterialData> MutableMaterials => m_Materials;
+
+        internal List<VividMaterialRuntimeHeader> MutableMaterialRuntimeHeaders =>
+            m_MaterialRuntimeHeaders;
+
+        internal List<VividMaterialProgramData> MutableMaterialPrograms => m_MaterialPrograms;
 
         internal List<VividSurfaceBindingData> MutableSurfaceBindings => m_SurfaceBindings;
 
@@ -171,6 +190,40 @@ namespace VividRP.Runtime.GPUDriven
         internal void ClearMaterials()
         {
             m_Materials.Clear();
+            m_MaterialRuntimeHeaders.Clear();
+        }
+
+        internal int AddMaterial(
+            in VividMaterialData materialData,
+            in VividMaterialRuntimeHeader runtimeHeader)
+        {
+            if (m_MaterialRuntimeHeaders.Count != m_Materials.Count)
+            {
+                throw new InvalidOperationException(
+                    "Material runtime headers must remain index-aligned with material data.");
+            }
+
+            int materialIndex = m_Materials.Count;
+            if (runtimeHeader.ParameterAddress != (uint) materialIndex)
+            {
+                throw new ArgumentException(
+                    $"Material parameter address {runtimeHeader.ParameterAddress} does not match material index {materialIndex}.",
+                    nameof(runtimeHeader));
+            }
+
+            m_Materials.Add(materialData);
+            m_MaterialRuntimeHeaders.Add(runtimeHeader);
+            return materialIndex;
+        }
+
+        internal int AddLegacyMaterial(in VividMaterialData materialData)
+        {
+            uint parameterAddress = (uint) m_Materials.Count;
+            VividMaterialRuntimeHeader runtimeHeader =
+                GPUDrivenMaterialCompiler.CreateLegacyFallbackHeader(
+                    parameterAddress,
+                    materialData.SurfaceBindingIndex);
+            return AddMaterial(materialData, runtimeHeader);
         }
 
         internal void ClearSurfaceBindings()

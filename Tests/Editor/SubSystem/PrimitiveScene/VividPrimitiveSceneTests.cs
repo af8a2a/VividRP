@@ -432,7 +432,7 @@ namespace VividRP.Editor.Tests
                     }));
                 VividPrimitiveData primitive = scene.PrimitiveTable[handles[index].Index];
                 sections[index] = scene.DrawSectionTable[(int) primitive.DrawSectionOffset];
-                legacyScene.MutableMaterials.Add(new VividMaterialData
+                legacyScene.AddLegacyMaterial(new VividMaterialData
                 {
                     RendererListID = (VividRendererListID) index,
                 });

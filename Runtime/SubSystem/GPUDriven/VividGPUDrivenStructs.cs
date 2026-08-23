@@ -83,6 +83,93 @@ namespace VividRP.Runtime.GPUDriven
         Count = (CullFront | CullOff | AlphaTest) + 1,
     }
 
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialProgramID : uint
+    {
+        StandardSingleSlab = 0,
+        Invalid = uint.MaxValue,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialCoverageProgramID : uint
+    {
+        BaseColorAlpha = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialSurfaceProgramID : uint
+    {
+        StandardSingleSlab = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialTransportProgramID : uint
+    {
+        None = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialParameterLayoutID : uint
+    {
+        LegacyMaterialData = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialResourceLayoutID : uint
+    {
+        LegacySurfaceBinding = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    public enum VividMaterialExecutionClass : uint
+    {
+        VisibilityDeferred = 0,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    [Flags]
+    public enum VividMaterialRuntimeFlags : uint
+    {
+        None = 0,
+        AlphaClip = 1 << 0,
+        Unlit = 1 << 1,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    [Flags]
+    public enum VividMaterialProgramCapabilities : uint
+    {
+        None = 0,
+        LegacyGBufferExport = 1 << 0,
+        AlphaClip = 1 << 1,
+        Unlit = 1 << 2,
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMaterialRuntimeHeader
+    {
+        public VividMaterialProgramID ProgramID;
+        public uint ParameterAddress;
+        public uint ResourceBindingAddress;
+        public VividMaterialRuntimeFlags Flags;
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMaterialProgramData
+    {
+        public uint Version;
+        public VividMaterialCoverageProgramID CoverageProgramID;
+        public VividMaterialSurfaceProgramID SurfaceProgramID;
+        public VividMaterialTransportProgramID TransportProgramID;
+
+        public VividMaterialParameterLayoutID ParameterLayoutID;
+        public VividMaterialResourceLayoutID ResourceLayoutID;
+        public VividMaterialProgramCapabilities CapabilityFlags;
+        public VividMaterialExecutionClass ExecutionClass;
+    }
+
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
     [StructLayout(LayoutKind.Sequential)]
     public struct VividMaterialData

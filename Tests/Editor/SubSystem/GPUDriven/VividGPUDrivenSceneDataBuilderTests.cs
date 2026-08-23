@@ -51,19 +51,19 @@ namespace VividRP.Editor.Tests
         public void AddInstance_ClassifiesActiveRendererBatchKeysByPass()
         {
             var sceneData = new VividGPUDrivenSceneData();
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 RendererListID = VividRendererListID.Default,
             });
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 RendererListID = VividRendererListID.CullOff | VividRendererListID.AlphaTest,
             });
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 RendererListID = VividRendererListID.AlphaTest,
             });
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 RendererListID = VividRendererListID.CullOff,
             });
@@ -1013,9 +1013,17 @@ namespace VividRP.Editor.Tests
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
 
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 VividMaterialData materialData = sceneData.Materials[0];
+                VividMaterialRuntimeHeader runtimeHeader = sceneData.MaterialRuntimeHeaders[0];
                 VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
+                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                Assert.That(runtimeHeader.ParameterAddress, Is.Zero);
+                Assert.That(runtimeHeader.ResourceBindingAddress, Is.EqualTo(materialData.SurfaceBindingIndex));
+                Assert.That(
+                    runtimeHeader.Flags,
+                    Is.EqualTo(VividMaterialRuntimeFlags.AlphaClip | VividMaterialRuntimeFlags.Unlit));
                 float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
                     materialProxy.BaseColor);
                 Assert.That(materialData.AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));
@@ -1330,14 +1338,21 @@ namespace VividRP.Editor.Tests
                 system.PrepareFrame();
 
                 Assert.That(system.SceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(system.SceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.InstanceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MaterialProgramCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshletCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.SharedVertexCount, Is.EqualTo(3));
                 Assert.That(system.BufferSet.SharedIndexCount, Is.EqualTo(3));
                 VividMaterialData materialData = system.SceneData.Materials[0];
+                VividMaterialRuntimeHeader runtimeHeader = system.SceneData.MaterialRuntimeHeaders[0];
+                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(VividMaterialProgramID.Invalid));
+                Assert.That(runtimeHeader.ParameterAddress, Is.Zero);
+                Assert.That(runtimeHeader.ResourceBindingAddress, Is.EqualTo(materialData.SurfaceBindingIndex));
                 VividSurfaceBindingData surfaceBindingData = system.SceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
                 float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
                     new Color(0.25f, 0.5f, 0.75f, 1.0f));
@@ -1474,7 +1489,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(instanceDataChanged, Is.True);
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
+                Assert.That(
+                    sceneData.MaterialRuntimeHeaders[0].ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.Invalid));
+                Assert.That(sceneData.MaterialRuntimeHeaders[0].ParameterAddress, Is.Zero);
                 Assert.That(sceneData.MeshletCount, Is.EqualTo(2));
                 Assert.That(sceneData.Instances[0].MaterialIndex, Is.EqualTo(sceneData.Instances[1].MaterialIndex));
                 Assert.That(sceneData.Instances[0].AABBMin.x, Is.EqualTo(firstBounds.min.x).Within(0.0001f));

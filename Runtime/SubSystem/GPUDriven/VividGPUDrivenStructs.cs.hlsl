@@ -25,12 +25,63 @@
 #define VIVIDINSTANCEPASSMASK_SHADOWS (2)
 
 //
+// VividRP.Runtime.GPUDriven.VividMaterialCoverageProgramID:  static fields
+//
+#define VIVIDMATERIALCOVERAGEPROGRAMID_BASE_COLOR_ALPHA (0)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialExecutionClass:  static fields
+//
+#define VIVIDMATERIALEXECUTIONCLASS_VISIBILITY_DEFERRED (0)
+
+//
 // VividRP.Runtime.GPUDriven.VividMaterialFlags:  static fields
 //
 #define VIVIDMATERIALFLAGS_NONE (0)
 #define VIVIDMATERIALFLAGS_UNLIT (1)
 #define VIVIDMATERIALFLAGS_TERRAIN (2)
 #define VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE (4)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialParameterLayoutID:  static fields
+//
+#define VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA (0)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialProgramCapabilities:  static fields
+//
+#define VIVIDMATERIALPROGRAMCAPABILITIES_NONE (0)
+#define VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT (1)
+#define VIVIDMATERIALPROGRAMCAPABILITIES_ALPHA_CLIP (2)
+#define VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT (4)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialProgramID:  static fields
+//
+#define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB (0)
+#define VIVIDMATERIALPROGRAMID_INVALID (4294967295)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialResourceLayoutID:  static fields
+//
+#define VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING (0)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialRuntimeFlags:  static fields
+//
+#define VIVIDMATERIALRUNTIMEFLAGS_NONE (0)
+#define VIVIDMATERIALRUNTIMEFLAGS_ALPHA_CLIP (1)
+#define VIVIDMATERIALRUNTIMEFLAGS_UNLIT (2)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialSurfaceProgramID:  static fields
+//
+#define VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB (0)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialTransportProgramID:  static fields
+//
+#define VIVIDMATERIALTRANSPORTPROGRAMID_NONE (0)
 
 //
 // VividRP.Runtime.GPUDriven.VividRendererListID:  static fields
@@ -152,6 +203,30 @@ struct VividMaterialData
     float AlphaClipThreshold;
     uint Padding0;
     uint Padding1;
+};
+
+// Generated from VividRP.Runtime.GPUDriven.VividMaterialProgramData
+// PackingRules = Exact
+struct VividMaterialProgramData
+{
+    uint Version;
+    uint CoverageProgramID;
+    uint SurfaceProgramID;
+    uint TransportProgramID;
+    uint ParameterLayoutID;
+    uint ResourceLayoutID;
+    uint CapabilityFlags;
+    uint ExecutionClass;
+};
+
+// Generated from VividRP.Runtime.GPUDriven.VividMaterialRuntimeHeader
+// PackingRules = Exact
+struct VividMaterialRuntimeHeader
+{
+    uint ProgramID;
+    uint ParameterAddress;
+    uint ResourceBindingAddress;
+    uint Flags;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividMeshlet

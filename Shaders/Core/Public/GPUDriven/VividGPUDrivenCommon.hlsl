@@ -64,6 +64,26 @@ struct VividMaterialData
     uint Padding1;
 };
 
+struct VividMaterialRuntimeHeader
+{
+    uint ProgramID;
+    uint ParameterAddress;
+    uint ResourceBindingAddress;
+    uint Flags;
+};
+
+struct VividMaterialProgramData
+{
+    uint Version;
+    uint CoverageProgramID;
+    uint SurfaceProgramID;
+    uint TransportProgramID;
+    uint ParameterLayoutID;
+    uint ResourceLayoutID;
+    uint CapabilityFlags;
+    uint ExecutionClass;
+};
+
 struct VividSurfaceBindingData
 {
     uint BaseColorResource;
@@ -324,6 +344,10 @@ StructuredBuffer<VividInstanceData> _InstanceData;
 uint _InstanceDataCount;
 
 StructuredBuffer<VividMaterialData> _MaterialData;
+StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;
+uint _MaterialRuntimeHeaderCount;
+StructuredBuffer<VividMaterialProgramData> _MaterialPrograms;
+uint _MaterialProgramCount;
 StructuredBuffer<VividSurfaceBindingData> _SurfaceBindingData;
 uint _SurfaceBindingDataCount;
 StructuredBuffer<VividTerrainMaterialData> _TerrainMaterialData;

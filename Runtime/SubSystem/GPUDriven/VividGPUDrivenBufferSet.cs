@@ -12,6 +12,8 @@ namespace VividRP.Runtime.GPUDriven
 
         private GraphicsBuffer m_InstanceDataBuffer;
         private GraphicsBuffer m_MaterialDataBuffer;
+        private GraphicsBuffer m_MaterialRuntimeHeaderBuffer;
+        private GraphicsBuffer m_MaterialProgramBuffer;
         private GraphicsBuffer m_SurfaceBindingDataBuffer;
         private GraphicsBuffer m_TerrainMaterialDataBuffer;
         private GraphicsBuffer m_TerrainLayerDataBuffer;
@@ -21,6 +23,10 @@ namespace VividRP.Runtime.GPUDriven
         private GraphicsBuffer m_SharedIndexBuffer;
         private VividInstanceData[] m_InstanceUploadData = Array.Empty<VividInstanceData>();
         private VividMaterialData[] m_MaterialUploadData = Array.Empty<VividMaterialData>();
+        private VividMaterialRuntimeHeader[] m_MaterialRuntimeHeaderUploadData =
+            Array.Empty<VividMaterialRuntimeHeader>();
+        private VividMaterialProgramData[] m_MaterialProgramUploadData =
+            Array.Empty<VividMaterialProgramData>();
         private VividSurfaceBindingData[] m_SurfaceBindingUploadData = Array.Empty<VividSurfaceBindingData>();
         private VividTerrainMaterialData[] m_TerrainMaterialUploadData = Array.Empty<VividTerrainMaterialData>();
         private VividTerrainLayerGPUData[] m_TerrainLayerUploadData = Array.Empty<VividTerrainLayerGPUData>();
@@ -33,6 +39,10 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer InstanceDataBuffer => m_InstanceDataBuffer;
 
         public GraphicsBuffer MaterialDataBuffer => m_MaterialDataBuffer;
+
+        public GraphicsBuffer MaterialRuntimeHeaderBuffer => m_MaterialRuntimeHeaderBuffer;
+
+        public GraphicsBuffer MaterialProgramBuffer => m_MaterialProgramBuffer;
 
         public GraphicsBuffer SurfaceBindingDataBuffer => m_SurfaceBindingDataBuffer;
 
@@ -51,6 +61,10 @@ namespace VividRP.Runtime.GPUDriven
         public int InstanceCount { get; private set; }
 
         public int MaterialCount { get; private set; }
+
+        public int MaterialRuntimeHeaderCount { get; private set; }
+
+        public int MaterialProgramCount { get; private set; }
 
         public int SurfaceBindingCount { get; private set; }
 
@@ -82,6 +96,8 @@ namespace VividRP.Runtime.GPUDriven
 
             InstanceCount = sceneData.InstanceCount;
             MaterialCount = sceneData.MaterialCount;
+            MaterialRuntimeHeaderCount = sceneData.MaterialRuntimeHeaderCount;
+            MaterialProgramCount = sceneData.MaterialProgramCount;
             SurfaceBindingCount = sceneData.SurfaceBindingCount;
             TerrainMaterialCount = sceneData.TerrainMaterialCount;
             TerrainLayerCount = sceneData.TerrainLayerCount;
@@ -112,6 +128,20 @@ namespace VividRP.Runtime.GPUDriven
                     ref m_MaterialUploadData,
                     UnsafeUtility.SizeOf<VividMaterialData>(),
                     "VividGPUDriven_MaterialData"
+                );
+                UploadStructuredBuffer(
+                    ref m_MaterialRuntimeHeaderBuffer,
+                    sceneData.MutableMaterialRuntimeHeaders,
+                    ref m_MaterialRuntimeHeaderUploadData,
+                    UnsafeUtility.SizeOf<VividMaterialRuntimeHeader>(),
+                    "VividGPUDriven_MaterialRuntimeHeaders"
+                );
+                UploadStructuredBuffer(
+                    ref m_MaterialProgramBuffer,
+                    sceneData.MutableMaterialPrograms,
+                    ref m_MaterialProgramUploadData,
+                    UnsafeUtility.SizeOf<VividMaterialProgramData>(),
+                    "VividGPUDriven_MaterialPrograms"
                 );
                 UploadStructuredBuffer(
                     ref m_SurfaceBindingDataBuffer,
@@ -174,6 +204,10 @@ namespace VividRP.Runtime.GPUDriven
 
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._InstanceData, InstanceDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MaterialData, MaterialDataBuffer);
+            cmd.SetGlobalBuffer(
+                VividGPUDrivenShaderIDs._MaterialRuntimeHeaders,
+                MaterialRuntimeHeaderBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MaterialPrograms, MaterialProgramBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._SurfaceBindingData, SurfaceBindingDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._TerrainMaterialData, TerrainMaterialDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._TerrainLayerData, TerrainLayerDataBuffer);
@@ -184,6 +218,12 @@ namespace VividRP.Runtime.GPUDriven
 
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._InstanceDataCount, InstanceCount);
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._MaterialDataCount, MaterialCount);
+            cmd.SetGlobalInteger(
+                VividGPUDrivenShaderIDs._MaterialRuntimeHeaderCount,
+                MaterialRuntimeHeaderCount);
+            cmd.SetGlobalInteger(
+                VividGPUDrivenShaderIDs._MaterialProgramCount,
+                MaterialProgramCount);
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._SurfaceBindingDataCount, SurfaceBindingCount);
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._TerrainMaterialDataCount, TerrainMaterialCount);
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._TerrainLayerDataCount, TerrainLayerCount);
@@ -202,6 +242,8 @@ namespace VividRP.Runtime.GPUDriven
 
             m_InstanceDataBuffer?.Dispose();
             m_MaterialDataBuffer?.Dispose();
+            m_MaterialRuntimeHeaderBuffer?.Dispose();
+            m_MaterialProgramBuffer?.Dispose();
             m_SurfaceBindingDataBuffer?.Dispose();
             m_TerrainMaterialDataBuffer?.Dispose();
             m_TerrainLayerDataBuffer?.Dispose();
@@ -212,6 +254,8 @@ namespace VividRP.Runtime.GPUDriven
 
             m_InstanceDataBuffer = null;
             m_MaterialDataBuffer = null;
+            m_MaterialRuntimeHeaderBuffer = null;
+            m_MaterialProgramBuffer = null;
             m_SurfaceBindingDataBuffer = null;
             m_TerrainMaterialDataBuffer = null;
             m_TerrainLayerDataBuffer = null;
@@ -221,6 +265,8 @@ namespace VividRP.Runtime.GPUDriven
             m_SharedIndexBuffer = null;
             m_InstanceUploadData = Array.Empty<VividInstanceData>();
             m_MaterialUploadData = Array.Empty<VividMaterialData>();
+            m_MaterialRuntimeHeaderUploadData = Array.Empty<VividMaterialRuntimeHeader>();
+            m_MaterialProgramUploadData = Array.Empty<VividMaterialProgramData>();
             m_SurfaceBindingUploadData = Array.Empty<VividSurfaceBindingData>();
             m_TerrainMaterialUploadData = Array.Empty<VividTerrainMaterialData>();
             m_TerrainLayerUploadData = Array.Empty<VividTerrainLayerGPUData>();
@@ -343,6 +389,14 @@ namespace VividRP.Runtime.GPUDriven
         private bool RequiresMaterialBufferUpload(VividGPUDrivenSceneData sceneData)
         {
             return !IsStructuredBufferCompatible(m_MaterialDataBuffer, sceneData.MaterialCount, UnsafeUtility.SizeOf<VividMaterialData>()) ||
+                   !IsStructuredBufferCompatible(
+                       m_MaterialRuntimeHeaderBuffer,
+                       sceneData.MaterialRuntimeHeaderCount,
+                       UnsafeUtility.SizeOf<VividMaterialRuntimeHeader>()) ||
+                   !IsStructuredBufferCompatible(
+                       m_MaterialProgramBuffer,
+                       sceneData.MaterialProgramCount,
+                       UnsafeUtility.SizeOf<VividMaterialProgramData>()) ||
                    !IsStructuredBufferCompatible(
                        m_SurfaceBindingDataBuffer,
                        sceneData.SurfaceBindingCount,

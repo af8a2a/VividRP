@@ -14,6 +14,8 @@ namespace VividRP.Editor.Tests
         public void GPUDataLayouts_HaveExpectedStrides()
         {
             Assert.That(UnsafeUtility.SizeOf<VividMaterialData>(), Is.EqualTo(128));
+            Assert.That(UnsafeUtility.SizeOf<VividMaterialRuntimeHeader>(), Is.EqualTo(16));
+            Assert.That(UnsafeUtility.SizeOf<VividMaterialProgramData>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividSurfaceBindingData>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
@@ -182,7 +184,7 @@ namespace VividRP.Editor.Tests
                 ObjectToWorldMatrix = float4x4.identity,
                 WorldToObjectMatrix = float4x4.identity,
             });
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 AlbedoColor = new float4(1.0f, 1.0f, 1.0f, 1.0f),
             });
@@ -214,6 +216,8 @@ namespace VividRP.Editor.Tests
 
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialCount, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialProgramCount, Is.EqualTo(1));
             Assert.That(bufferSet.SurfaceBindingCount, Is.EqualTo(1));
             Assert.That(bufferSet.MeshLODNodeCount, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletCount, Is.EqualTo(1));
@@ -221,6 +225,8 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.SharedIndexCount, Is.EqualTo(3));
             Assert.That(bufferSet.InstanceDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MaterialRuntimeHeaderBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MaterialProgramBuffer, Is.Not.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MeshLODNodesBuffer, Is.Not.Null);
             Assert.That(bufferSet.MeshletsBuffer, Is.Not.Null);
@@ -228,6 +234,8 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.SharedIndexBuffer, Is.Not.Null);
             Assert.That(bufferSet.InstanceDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialRuntimeHeaderBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialProgramBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshLODNodesBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletsBuffer.count, Is.EqualTo(1));
@@ -243,17 +251,18 @@ namespace VividRP.Editor.Tests
             using var bufferSet = new VividGPUDrivenBufferSet();
 
             sceneData.MutableInstances.Add(default);
-            sceneData.MutableMaterials.Add(default);
+            sceneData.AddLegacyMaterial(default);
             sceneData.MutableSurfaceBindings.Add(default);
             bufferSet.Upload(sceneData);
 
             Assert.That(bufferSet.InstanceDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialRuntimeHeaderBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(1));
 
             sceneData.MutableInstances.Add(default);
-            sceneData.MutableMaterials.Add(default);
-            sceneData.MutableMaterials.Add(default);
+            sceneData.AddLegacyMaterial(default);
+            sceneData.AddLegacyMaterial(default);
             sceneData.MutableSurfaceBindings.Add(default);
             sceneData.MutableSurfaceBindings.Add(default);
             bufferSet.Upload(sceneData);
@@ -263,7 +272,49 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.SurfaceBindingCount, Is.EqualTo(3));
             Assert.That(bufferSet.InstanceDataBuffer.count, Is.EqualTo(2));
             Assert.That(bufferSet.MaterialDataBuffer.count, Is.EqualTo(3));
+            Assert.That(bufferSet.MaterialRuntimeHeaderBuffer.count, Is.EqualTo(3));
             Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void Upload_PreservesMaterialRuntimeAndProgramTableContents()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            var runtimeHeader = new VividMaterialRuntimeHeader
+            {
+                ProgramID = VividMaterialProgramID.StandardSingleSlab,
+                ParameterAddress = 0u,
+                ResourceBindingAddress = 5u,
+                Flags = VividMaterialRuntimeFlags.AlphaClip,
+            };
+            sceneData.AddMaterial(
+                new VividMaterialData { SurfaceBindingIndex = 5u },
+                runtimeHeader);
+
+            using var bufferSet = new VividGPUDrivenBufferSet();
+            bufferSet.Upload(sceneData);
+
+            var uploadedHeaders = new VividMaterialRuntimeHeader[1];
+            bufferSet.MaterialRuntimeHeaderBuffer.GetData(uploadedHeaders);
+            var uploadedPrograms = new VividMaterialProgramData[1];
+            bufferSet.MaterialProgramBuffer.GetData(uploadedPrograms);
+
+            Assert.That(uploadedHeaders[0].ProgramID, Is.EqualTo(runtimeHeader.ProgramID));
+            Assert.That(uploadedHeaders[0].ParameterAddress, Is.EqualTo(runtimeHeader.ParameterAddress));
+            Assert.That(
+                uploadedHeaders[0].ResourceBindingAddress,
+                Is.EqualTo(runtimeHeader.ResourceBindingAddress));
+            Assert.That(uploadedHeaders[0].Flags, Is.EqualTo(runtimeHeader.Flags));
+            Assert.That(uploadedPrograms[0].Version, Is.EqualTo(GPUDrivenMaterialCompiler.ProgramVersion));
+            Assert.That(
+                uploadedPrograms[0].SurfaceProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
+            Assert.That(
+                uploadedPrograms[0].ParameterLayoutID,
+                Is.EqualTo(VividMaterialParameterLayoutID.LegacyMaterialData));
+            Assert.That(
+                uploadedPrograms[0].ResourceLayoutID,
+                Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
         }
 
         [Test]
@@ -297,7 +348,7 @@ namespace VividRP.Editor.Tests
         {
             var sceneData = new VividGPUDrivenSceneData();
             sceneData.MutableInstances.Add(default);
-            sceneData.MutableMaterials.Add(default);
+            sceneData.AddLegacyMaterial(default);
             sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
             {
                 MeshletStartIndex = 0,
@@ -342,7 +393,7 @@ namespace VividRP.Editor.Tests
         {
             var sceneData = new VividGPUDrivenSceneData();
             sceneData.MutableInstances.Add(default);
-            sceneData.MutableMaterials.Add(new VividMaterialData
+            sceneData.AddLegacyMaterial(new VividMaterialData
             {
                 AlbedoColor = new float4(1.0f, 0.0f, 0.0f, 1.0f),
             });
@@ -379,17 +430,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Dispose_ReleasesSurfaceBindingBuffer()
+        public void Dispose_ReleasesMaterialSidecarAndSurfaceBindingBuffers()
         {
             var sceneData = new VividGPUDrivenSceneData();
+            sceneData.AddLegacyMaterial(default);
             sceneData.MutableSurfaceBindings.Add(default);
             var bufferSet = new VividGPUDrivenBufferSet();
             bufferSet.Upload(sceneData);
 
+            Assert.That(bufferSet.MaterialRuntimeHeaderBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MaterialProgramBuffer, Is.Not.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
 
             bufferSet.Dispose();
 
+            Assert.That(bufferSet.MaterialRuntimeHeaderBuffer, Is.Null);
+            Assert.That(bufferSet.MaterialProgramBuffer, Is.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Null);
         }
 

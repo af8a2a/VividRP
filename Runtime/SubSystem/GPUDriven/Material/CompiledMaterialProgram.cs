@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -869,6 +870,457 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
+    internal readonly struct MaterialStageCost
+    {
+        internal MaterialStageCost(
+            int valueNodeCount,
+            int textureSampleCount,
+            int derivativeCount,
+            int arithmeticNodeCount,
+            int parameterCount,
+            int textureResourceCount,
+            int externalInputCount)
+        {
+            ValueNodeCount = valueNodeCount;
+            TextureSampleCount = textureSampleCount;
+            DerivativeCount = derivativeCount;
+            ArithmeticNodeCount = arithmeticNodeCount;
+            ParameterCount = parameterCount;
+            TextureResourceCount = textureResourceCount;
+            ExternalInputCount = externalInputCount;
+        }
+
+        internal int ValueNodeCount { get; }
+
+        internal int TextureSampleCount { get; }
+
+        internal int DerivativeCount { get; }
+
+        internal int ArithmeticNodeCount { get; }
+
+        internal int ParameterCount { get; }
+
+        internal int TextureResourceCount { get; }
+
+        internal int ExternalInputCount { get; }
+    }
+
+    internal readonly struct MaterialProgramCost
+    {
+        internal MaterialProgramCost(
+            in MaterialStageCost coverage,
+            in MaterialStageCost surface,
+            in MaterialStageCost combined,
+            int closureCount,
+            int operatorCount,
+            int parameterBytes,
+            int resourceBindingRecords)
+        {
+            Coverage = coverage;
+            Surface = surface;
+            Combined = combined;
+            ClosureCount = closureCount;
+            OperatorCount = operatorCount;
+            ParameterBytes = parameterBytes;
+            ResourceBindingRecords = resourceBindingRecords;
+        }
+
+        internal MaterialStageCost Coverage { get; }
+
+        internal MaterialStageCost Surface { get; }
+
+        internal MaterialStageCost Combined { get; }
+
+        internal int ClosureCount { get; }
+
+        internal int OperatorCount { get; }
+
+        internal int ParameterBytes { get; }
+
+        internal int ResourceBindingRecords { get; }
+    }
+
+    internal readonly struct MaterialProgramCostBudget
+    {
+        internal MaterialProgramCostBudget(
+            int maxCombinedValueNodes,
+            int maxTextureSamples,
+            int maxParameters,
+            int maxTextureResources,
+            int maxClosures,
+            int maxOperators,
+            int maxParameterBytes,
+            int maxResourceBindingRecords)
+        {
+            if (maxCombinedValueNodes < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxCombinedValueNodes));
+            if (maxTextureSamples < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxTextureSamples));
+            if (maxParameters < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxParameters));
+            if (maxTextureResources < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxTextureResources));
+            if (maxClosures < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxClosures));
+            if (maxOperators < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxOperators));
+            if (maxParameterBytes < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxParameterBytes));
+            if (maxResourceBindingRecords < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxResourceBindingRecords));
+
+            MaxCombinedValueNodes = maxCombinedValueNodes;
+            MaxTextureSamples = maxTextureSamples;
+            MaxParameters = maxParameters;
+            MaxTextureResources = maxTextureResources;
+            MaxClosures = maxClosures;
+            MaxOperators = maxOperators;
+            MaxParameterBytes = maxParameterBytes;
+            MaxResourceBindingRecords = maxResourceBindingRecords;
+        }
+
+        internal static MaterialProgramCostBudget Prototype =>
+            new MaterialProgramCostBudget(
+                maxCombinedValueNodes: 24,
+                maxTextureSamples: 2,
+                maxParameters: 8,
+                maxTextureResources: 2,
+                maxClosures: 2,
+                maxOperators: 1,
+                maxParameterBytes: 192,
+                maxResourceBindingRecords: 2);
+
+        internal int MaxCombinedValueNodes { get; }
+
+        internal int MaxTextureSamples { get; }
+
+        internal int MaxParameters { get; }
+
+        internal int MaxTextureResources { get; }
+
+        internal int MaxClosures { get; }
+
+        internal int MaxOperators { get; }
+
+        internal int MaxParameterBytes { get; }
+
+        internal int MaxResourceBindingRecords { get; }
+    }
+
+    internal enum MaterialProgramDiagnosticSeverity
+    {
+        Info,
+        Warning,
+        Error,
+    }
+
+    internal readonly struct MaterialProgramDiagnostic
+    {
+        internal MaterialProgramDiagnostic(
+            MaterialProgramDiagnosticSeverity severity,
+            string code,
+            string message)
+        {
+            Severity = severity;
+            Code = code ?? throw new ArgumentNullException(nameof(code));
+            Message = message ?? throw new ArgumentNullException(nameof(message));
+        }
+
+        internal MaterialProgramDiagnosticSeverity Severity { get; }
+
+        internal string Code { get; }
+
+        internal string Message { get; }
+    }
+
+    internal sealed class MaterialProgramDiagnostics
+    {
+        private readonly IReadOnlyList<MaterialProgramDiagnostic> m_Entries;
+        private readonly string m_DebugDump;
+
+        internal MaterialProgramDiagnostics(
+            in MaterialProgramCost cost,
+            in MaterialProgramCostBudget budget,
+            MaterialProgramDiagnostic[] entries)
+        {
+            if (entries == null)
+                throw new ArgumentNullException(nameof(entries));
+
+            Cost = cost;
+            Budget = budget;
+            m_Entries = Array.AsReadOnly(
+                (MaterialProgramDiagnostic[]) entries.Clone());
+            IsWithinBudget = true;
+            for (int i = 0; i < m_Entries.Count; i++)
+            {
+                if (m_Entries[i].Severity != MaterialProgramDiagnosticSeverity.Error)
+                    continue;
+
+                IsWithinBudget = false;
+                break;
+            }
+            m_DebugDump = BuildDebugDump();
+        }
+
+        internal MaterialProgramCost Cost { get; }
+
+        internal MaterialProgramCostBudget Budget { get; }
+
+        internal IReadOnlyList<MaterialProgramDiagnostic> Entries => m_Entries;
+
+        internal bool IsWithinBudget { get; }
+
+        internal string GetDebugDump()
+        {
+            return m_DebugDump;
+        }
+
+        private string BuildDebugDump()
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine("material_program_diagnostics");
+            builder.AppendLine("cost_model=typed_ir_structural_v1");
+            AppendStageCost(builder, "coverage", Cost.Coverage);
+            AppendStageCost(builder, "surface", Cost.Surface);
+            AppendStageCost(builder, "combined", Cost.Combined);
+            builder.Append("topology closures=").Append(Cost.ClosureCount)
+                .Append(" operators=").Append(Cost.OperatorCount).AppendLine();
+            builder.Append("layout parameter_bytes=").Append(Cost.ParameterBytes)
+                .Append(" resource_records=").Append(Cost.ResourceBindingRecords)
+                .AppendLine();
+            builder.Append("budget combined_nodes=").Append(Budget.MaxCombinedValueNodes)
+                .Append(" texture_samples=").Append(Budget.MaxTextureSamples)
+                .Append(" parameters=").Append(Budget.MaxParameters)
+                .Append(" texture_resources=").Append(Budget.MaxTextureResources)
+                .Append(" closures=").Append(Budget.MaxClosures)
+                .Append(" operators=").Append(Budget.MaxOperators)
+                .Append(" parameter_bytes=").Append(Budget.MaxParameterBytes)
+                .Append(" resource_records=").Append(Budget.MaxResourceBindingRecords)
+                .AppendLine();
+            builder.Append("status=").AppendLine(IsWithinBudget ? "ok" : "over_budget");
+            builder.AppendLine("diagnostics:");
+            for (int i = 0; i < m_Entries.Count; i++)
+            {
+                MaterialProgramDiagnostic entry = m_Entries[i];
+                builder.Append("  ").Append(entry.Severity.ToString().ToLowerInvariant())
+                    .Append(' ').Append(entry.Code).Append(": ")
+                    .AppendLine(entry.Message);
+            }
+            return builder.ToString();
+        }
+
+        private static void AppendStageCost(
+            StringBuilder builder,
+            string stage,
+            in MaterialStageCost cost)
+        {
+            builder.Append(stage).Append(" nodes=").Append(cost.ValueNodeCount)
+                .Append(" texture_samples=").Append(cost.TextureSampleCount)
+                .Append(" derivatives=").Append(cost.DerivativeCount)
+                .Append(" arithmetic_nodes=").Append(cost.ArithmeticNodeCount)
+                .Append(" parameters=").Append(cost.ParameterCount)
+                .Append(" texture_resources=").Append(cost.TextureResourceCount)
+                .Append(" external_inputs=").Append(cost.ExternalInputCount)
+                .AppendLine();
+        }
+    }
+
+    internal static class MaterialProgramCostAnalyzer
+    {
+        internal static MaterialProgramCost Analyze(
+            MaterialIRModule module,
+            CompiledCoverageProgram coverageProgram,
+            CompiledSurfaceProgram surfaceProgram,
+            CompiledMaterialLayout materialLayout)
+        {
+            if (module == null)
+                throw new ArgumentNullException(nameof(module));
+            if (coverageProgram == null)
+                throw new ArgumentNullException(nameof(coverageProgram));
+            if (surfaceProgram == null)
+                throw new ArgumentNullException(nameof(surfaceProgram));
+            if (materialLayout == null)
+                throw new ArgumentNullException(nameof(materialLayout));
+
+            return new MaterialProgramCost(
+                AnalyzeSlice(coverageProgram.ValueSlice),
+                AnalyzeSlice(surfaceProgram.ValueSlice),
+                AnalyzeCombined(
+                    module.Values,
+                    coverageProgram.ValueSlice,
+                    surfaceProgram.ValueSlice),
+                module.Topology.ClosureCount,
+                module.Topology.OperatorCount,
+                materialLayout.ParameterLayout.Stride,
+                materialLayout.ResourceLayout.RecordCount);
+        }
+
+        private static MaterialStageCost AnalyzeSlice(MaterialValueSlice slice)
+        {
+            return AnalyzeNodes(slice.Values, slice.NodeIndices);
+        }
+
+        private static MaterialStageCost AnalyzeCombined(
+            MaterialValueIR values,
+            MaterialValueSlice coverage,
+            MaterialValueSlice surface)
+        {
+            var included = new bool[values.NodeCount];
+            Include(included, coverage.NodeIndices);
+            Include(included, surface.NodeIndices);
+            var nodeIndices = new List<int>();
+            for (int i = 0; i < included.Length; i++)
+            {
+                if (included[i])
+                    nodeIndices.Add(i);
+            }
+            return AnalyzeNodes(values, nodeIndices);
+        }
+
+        private static void Include(bool[] included, IReadOnlyList<int> nodeIndices)
+        {
+            for (int i = 0; i < nodeIndices.Count; i++)
+                included[nodeIndices[i]] = true;
+        }
+
+        private static MaterialStageCost AnalyzeNodes(
+            MaterialValueIR values,
+            IReadOnlyList<int> nodeIndices)
+        {
+            int textureSamples = 0;
+            int derivatives = 0;
+            int arithmeticNodes = 0;
+            int parameters = 0;
+            int textureResources = 0;
+            int externalInputs = 0;
+            for (int i = 0; i < nodeIndices.Count; i++)
+            {
+                switch (values.Nodes[nodeIndices[i]].Opcode)
+                {
+                    case MaterialValueOpcode.TextureSampleGrad:
+                        textureSamples++;
+                        break;
+                    case MaterialValueOpcode.Ddx:
+                    case MaterialValueOpcode.Ddy:
+                        derivatives++;
+                        break;
+                    case MaterialValueOpcode.Add:
+                    case MaterialValueOpcode.Multiply:
+                    case MaterialValueOpcode.Lerp:
+                    case MaterialValueOpcode.Select:
+                        arithmeticNodes++;
+                        break;
+                    case MaterialValueOpcode.Parameter:
+                        parameters++;
+                        break;
+                    case MaterialValueOpcode.TextureResource:
+                        textureResources++;
+                        break;
+                    case MaterialValueOpcode.ExternalInput:
+                        externalInputs++;
+                        break;
+                }
+            }
+
+            return new MaterialStageCost(
+                nodeIndices.Count,
+                textureSamples,
+                derivatives,
+                arithmeticNodes,
+                parameters,
+                textureResources,
+                externalInputs);
+        }
+    }
+
+    internal static class MaterialProgramDiagnosticsBuilder
+    {
+        internal static MaterialProgramDiagnostics Build(
+            MaterialIRModule module,
+            CompiledCoverageProgram coverageProgram,
+            CompiledSurfaceProgram surfaceProgram,
+            CompiledMaterialLayout materialLayout,
+            in MaterialProgramCostBudget budget)
+        {
+            MaterialProgramCost cost = MaterialProgramCostAnalyzer.Analyze(
+                module,
+                coverageProgram,
+                surfaceProgram,
+                materialLayout);
+            var entries = new List<MaterialProgramDiagnostic>();
+            AddExceeded(
+                entries,
+                "MPC1001",
+                "combined value nodes",
+                cost.Combined.ValueNodeCount,
+                budget.MaxCombinedValueNodes);
+            AddExceeded(
+                entries,
+                "MPC1002",
+                "combined texture samples",
+                cost.Combined.TextureSampleCount,
+                budget.MaxTextureSamples);
+            AddExceeded(
+                entries,
+                "MPC1003",
+                "combined parameters",
+                cost.Combined.ParameterCount,
+                budget.MaxParameters);
+            AddExceeded(
+                entries,
+                "MPC1004",
+                "combined texture resources",
+                cost.Combined.TextureResourceCount,
+                budget.MaxTextureResources);
+            AddExceeded(
+                entries,
+                "MPC1005",
+                "closures",
+                cost.ClosureCount,
+                budget.MaxClosures);
+            AddExceeded(
+                entries,
+                "MPC1006",
+                "closure operators",
+                cost.OperatorCount,
+                budget.MaxOperators);
+            AddExceeded(
+                entries,
+                "MPC1007",
+                "parameter bytes",
+                cost.ParameterBytes,
+                budget.MaxParameterBytes);
+            AddExceeded(
+                entries,
+                "MPC1008",
+                "resource binding records",
+                cost.ResourceBindingRecords,
+                budget.MaxResourceBindingRecords);
+            entries.Add(new MaterialProgramDiagnostic(
+                MaterialProgramDiagnosticSeverity.Info,
+                "MPC0001",
+                "V1 counts typed MaterialValueIR structure and runtime ABI occupancy; "
+                + "layout-driven tiling/remap and optional Normal/Mask/Emission HLSL work are not represented."));
+            return new MaterialProgramDiagnostics(cost, budget, entries.ToArray());
+        }
+
+        private static void AddExceeded(
+            List<MaterialProgramDiagnostic> entries,
+            string code,
+            string name,
+            int actual,
+            int maximum)
+        {
+            if (actual <= maximum)
+                return;
+
+            entries.Add(new MaterialProgramDiagnostic(
+                MaterialProgramDiagnosticSeverity.Error,
+                code,
+                $"{name} cost {actual} exceeds prototype budget {maximum}."));
+        }
+    }
+
     internal sealed class CompiledMaterialProgram
     {
         private CompiledMaterialProgram(
@@ -876,6 +1328,7 @@ namespace VividRP.Runtime.GPUDriven
             CompiledCoverageProgram coverageProgram,
             CompiledSurfaceProgram surfaceProgram,
             CompiledMaterialLayout materialLayout,
+            MaterialProgramDiagnostics diagnostics,
             VividMaterialProgramID programID,
             in VividMaterialProgramData runtimeData)
         {
@@ -883,6 +1336,7 @@ namespace VividRP.Runtime.GPUDriven
             CoverageProgram = coverageProgram;
             SurfaceProgram = surfaceProgram;
             MaterialLayout = materialLayout;
+            Diagnostics = diagnostics;
             ProgramID = programID;
             RuntimeData = runtimeData;
         }
@@ -895,6 +1349,8 @@ namespace VividRP.Runtime.GPUDriven
 
         internal CompiledMaterialLayout MaterialLayout { get; }
 
+        internal MaterialProgramDiagnostics Diagnostics { get; }
+
         internal VividMaterialProgramID ProgramID { get; }
 
         internal VividMaterialProgramData RuntimeData { get; }
@@ -902,6 +1358,15 @@ namespace VividRP.Runtime.GPUDriven
         internal static CompiledMaterialProgram Compile(
             MaterialIRModule module,
             uint programVersion)
+        {
+            MaterialProgramCostBudget budget = MaterialProgramCostBudget.Prototype;
+            return Compile(module, programVersion, budget);
+        }
+
+        internal static CompiledMaterialProgram Compile(
+            MaterialIRModule module,
+            uint programVersion,
+            in MaterialProgramCostBudget costBudget)
         {
             if (module == null)
                 throw new ArgumentNullException(nameof(module));
@@ -914,6 +1379,14 @@ namespace VividRP.Runtime.GPUDriven
             CompiledMaterialLayout materialLayout = MaterialLayoutLowerer.Compile(
                 coverageProgram,
                 surfaceProgram);
+            MaterialProgramDiagnostics diagnostics = MaterialProgramDiagnosticsBuilder.Build(
+                module,
+                coverageProgram,
+                surfaceProgram,
+                materialLayout,
+                costBudget);
+            if (!diagnostics.IsWithinBudget)
+                throw new InvalidOperationException(diagnostics.GetDebugDump());
 
             VividMaterialProgramID programID;
             switch (surfaceProgram.ProgramID)
@@ -953,6 +1426,7 @@ namespace VividRP.Runtime.GPUDriven
                 coverageProgram,
                 surfaceProgram,
                 materialLayout,
+                diagnostics,
                 programID,
                 runtimeData);
         }

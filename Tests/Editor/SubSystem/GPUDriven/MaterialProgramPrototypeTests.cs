@@ -236,6 +236,134 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CostModel_ReportsDeterministicProgram0AndProgram1StructuralCosts()
+        {
+            CompiledMaterialProgram firstStandard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram secondStandard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram horizontal =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.HorizontalMix);
+            CompiledMaterialProgram vertical =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.VerticalLayer);
+
+            MaterialProgramCost standardCost = firstStandard.Diagnostics.Cost;
+            AssertStageCost(
+                standardCost.Coverage,
+                nodes: 8,
+                textureSamples: 1,
+                derivatives: 2,
+                arithmeticNodes: 1,
+                parameters: 2,
+                textureResources: 1,
+                externalInputs: 1);
+            AssertStageCost(
+                standardCost.Surface,
+                nodes: 11,
+                textureSamples: 1,
+                derivatives: 2,
+                arithmeticNodes: 1,
+                parameters: 3,
+                textureResources: 1,
+                externalInputs: 3);
+            AssertStageCost(
+                standardCost.Combined,
+                nodes: 12,
+                textureSamples: 1,
+                derivatives: 2,
+                arithmeticNodes: 1,
+                parameters: 4,
+                textureResources: 1,
+                externalInputs: 3);
+            Assert.That(standardCost.ClosureCount, Is.EqualTo(1));
+            Assert.That(standardCost.OperatorCount, Is.Zero);
+            Assert.That(standardCost.ParameterBytes, Is.EqualTo(128));
+            Assert.That(standardCost.ResourceBindingRecords, Is.EqualTo(1));
+
+            MaterialProgramCost dualCost = vertical.Diagnostics.Cost;
+            AssertStageCost(
+                dualCost.Coverage,
+                nodes: 8,
+                textureSamples: 1,
+                derivatives: 2,
+                arithmeticNodes: 1,
+                parameters: 2,
+                textureResources: 1,
+                externalInputs: 1);
+            AssertStageCost(
+                dualCost.Surface,
+                nodes: 18,
+                textureSamples: 2,
+                derivatives: 2,
+                arithmeticNodes: 2,
+                parameters: 7,
+                textureResources: 2,
+                externalInputs: 3);
+            AssertStageCost(
+                dualCost.Combined,
+                nodes: 19,
+                textureSamples: 2,
+                derivatives: 2,
+                arithmeticNodes: 2,
+                parameters: 8,
+                textureResources: 2,
+                externalInputs: 3);
+            Assert.That(dualCost.ClosureCount, Is.EqualTo(2));
+            Assert.That(dualCost.OperatorCount, Is.EqualTo(1));
+            Assert.That(dualCost.ParameterBytes, Is.EqualTo(192));
+            Assert.That(dualCost.ResourceBindingRecords, Is.EqualTo(2));
+
+            string standardDump = firstStandard.Diagnostics.GetDebugDump();
+            Assert.That(firstStandard.Diagnostics.IsWithinBudget, Is.True);
+            Assert.That(vertical.Diagnostics.IsWithinBudget, Is.True);
+            Assert.That(
+                standardDump,
+                Is.EqualTo(secondStandard.Diagnostics.GetDebugDump()));
+            Assert.That(
+                horizontal.Diagnostics.GetDebugDump(),
+                Is.EqualTo(vertical.Diagnostics.GetDebugDump()));
+            Assert.That(standardDump, Does.Contain("cost_model=typed_ir_structural_v1"));
+            Assert.That(standardDump, Does.Contain("status=ok"));
+            Assert.That(standardDump, Does.Contain("MPC0001"));
+            Assert.That(standardDump, Does.Contain("not represented"));
+        }
+
+        [Test]
+        public void CostBudget_RejectsProgramWhenCombinedNodeLimitIsExceeded()
+        {
+            CompiledMaterialProgram prototype =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            var budget = new MaterialProgramCostBudget(
+                maxCombinedValueNodes: 11,
+                maxTextureSamples: 2,
+                maxParameters: 8,
+                maxTextureResources: 2,
+                maxClosures: 2,
+                maxOperators: 1,
+                maxParameterBytes: 192,
+                maxResourceBindingRecords: 2);
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+                CompiledMaterialProgram.Compile(
+                    prototype.Module,
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    budget));
+
+            Assert.That(exception.Message, Does.Contain("status=over_budget"));
+            Assert.That(exception.Message, Does.Contain("MPC1001"));
+            Assert.That(
+                exception.Message,
+                Does.Contain("combined value nodes cost 12 exceeds prototype budget 11"));
+        }
+
+        [Test]
         public void CompileStandardSingleSlab_ProducesSingleClosureProgramPrototype()
         {
             var firstProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -647,6 +775,25 @@ namespace VividRP.Editor.Tests
                 Is.True);
             Assert.That(binding.RecordOffset, Is.EqualTo(recordOffset));
             Assert.That(binding.ByteOffset, Is.EqualTo(byteOffset));
+        }
+
+        private static void AssertStageCost(
+            in MaterialStageCost cost,
+            int nodes,
+            int textureSamples,
+            int derivatives,
+            int arithmeticNodes,
+            int parameters,
+            int textureResources,
+            int externalInputs)
+        {
+            Assert.That(cost.ValueNodeCount, Is.EqualTo(nodes));
+            Assert.That(cost.TextureSampleCount, Is.EqualTo(textureSamples));
+            Assert.That(cost.DerivativeCount, Is.EqualTo(derivatives));
+            Assert.That(cost.ArithmeticNodeCount, Is.EqualTo(arithmeticNodes));
+            Assert.That(cost.ParameterCount, Is.EqualTo(parameters));
+            Assert.That(cost.TextureResourceCount, Is.EqualTo(textureResources));
+            Assert.That(cost.ExternalInputCount, Is.EqualTo(externalInputs));
         }
 
         private static string[] GetValueSliceSignature(MaterialValueSlice valueSlice)

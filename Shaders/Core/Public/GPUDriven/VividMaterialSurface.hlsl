@@ -198,32 +198,19 @@ VividSlabMaterialData VividCreateSlabMaterialData(
     return slabData;
 }
 
-VividEvaluatedSlabSurface VividEvaluateSlabSurfaceGrad(
+VividEvaluatedSlabSurface VividEvaluateSlabSurfaceDetail(
     const VividSlabMaterialData slabData,
     const VividSurfaceBindingData surfaceBindingData,
-    const float2 uv0,
-    const float2 uvDdx,
-    const float2 uvDdy,
-    const float4 positionCS)
+    const VividSurfaceSampleContext context,
+    const float3 baseColor,
+    const float perceptualRoughness,
+    const float metallic)
 {
-    const float2 uv = uv0 * slabData.TextureTilingOffset.xy
-        + slabData.TextureTilingOffset.zw;
-    const float2 tiledUVDdx = uvDdx * slabData.TextureTilingOffset.xy;
-    const float2 tiledUVDdy = uvDdy * slabData.TextureTilingOffset.xy;
-    const VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(
-        surfaceBindingData,
-        uv,
-        tiledUVDdx,
-        tiledUVDdy,
-        positionCS);
-
     VividEvaluatedSlabSurface surface;
-    surface.BaseColor = (
-        VividSampleBaseColorGrad(surfaceBindingData, context)
-        * slabData.AlbedoColor).rgb;
+    surface.BaseColor = baseColor;
     surface.NormalTS = float3(0.0f, 0.0f, 1.0f);
-    surface.PerceptualRoughness = slabData.Roughness;
-    surface.Metallic = slabData.Metallic;
+    surface.PerceptualRoughness = perceptualRoughness;
+    surface.Metallic = metallic;
     surface.AmbientOcclusion = 1.0f;
     surface.HasNormal = VividSurfaceHasNormal(surfaceBindingData) ? 1u : 0u;
     if (surface.HasNormal != 0u)
@@ -243,5 +230,67 @@ VividEvaluatedSlabSurface VividEvaluateSlabSurfaceGrad(
     }
     return surface;
 }
+
+VividEvaluatedSlabSurface VividEvaluateSlabSurfaceDetailGrad(
+    const VividSlabMaterialData slabData,
+    const VividSurfaceBindingData surfaceBindingData,
+    const float3 baseColor,
+    const float perceptualRoughness,
+    const float metallic,
+    const float2 uv0,
+    const float2 uvDdx,
+    const float2 uvDdy)
+{
+    const float2 uv = uv0 * slabData.TextureTilingOffset.xy
+        + slabData.TextureTilingOffset.zw;
+    const float2 tiledUVDdx = uvDdx * slabData.TextureTilingOffset.xy;
+    const float2 tiledUVDdy = uvDdy * slabData.TextureTilingOffset.xy;
+    const VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(
+        surfaceBindingData,
+        uv,
+        tiledUVDdx,
+        tiledUVDdy);
+
+    return VividEvaluateSlabSurfaceDetail(
+        slabData,
+        surfaceBindingData,
+        context,
+        baseColor,
+        perceptualRoughness,
+        metallic);
+}
+
+VividEvaluatedSlabSurface VividEvaluateSlabSurfaceGrad(
+    const VividSlabMaterialData slabData,
+    const VividSurfaceBindingData surfaceBindingData,
+    const float2 uv0,
+    const float2 uvDdx,
+    const float2 uvDdy,
+    const float4 positionCS)
+{
+    const float2 uv = uv0 * slabData.TextureTilingOffset.xy
+        + slabData.TextureTilingOffset.zw;
+    const float2 tiledUVDdx = uvDdx * slabData.TextureTilingOffset.xy;
+    const float2 tiledUVDdy = uvDdy * slabData.TextureTilingOffset.xy;
+    const VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(
+        surfaceBindingData,
+        uv,
+        tiledUVDdx,
+        tiledUVDdy,
+        positionCS);
+
+    const float3 baseColor = (
+        VividSampleBaseColorGrad(surfaceBindingData, context)
+        * slabData.AlbedoColor).rgb;
+    return VividEvaluateSlabSurfaceDetail(
+        slabData,
+        surfaceBindingData,
+        context,
+        baseColor,
+        slabData.Roughness,
+        slabData.Metallic);
+}
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurfaceAOT.generated.hlsl"
 
 #endif // VIVIDRP_GPU_DRIVEN_MATERIAL_SURFACE_INCLUDED

@@ -13,10 +13,12 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint ProgramLoweringVersion = 1u;
         internal const uint GenericLayoutVersion = 1u;
         internal const uint ProgramCatalogVersion = 1u;
+        internal const uint SurfaceHlslArtifactVersion = 1u;
+        internal const uint SurfaceHlslBackendVersion = 1u;
         internal const uint SemanticHashVersion = 4u;
-        internal const uint CompiledHashVersion = 2u;
-        internal const uint CompilerVersion = 6u;
-        internal const uint NativeTemplateBackendVersion = 3u;
+        internal const uint CompiledHashVersion = 3u;
+        internal const uint CompilerVersion = 7u;
+        internal const uint NativeTemplateBackendVersion = 4u;
         internal const uint VerifierVersion = 3u;
         internal const uint RuntimeAbiVersion = 1u;
 
@@ -217,10 +219,13 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal static CompiledMaterialProgramHash ComputeNativeTemplate(
             in MaterialSemanticHash semanticHash,
-            MaterialProgramLoweringResult lowering)
+            MaterialProgramLoweringResult lowering,
+            MaterialSurfaceHlslArtifact surfaceHlsl)
         {
             if (lowering == null)
                 throw new ArgumentNullException(nameof(lowering));
+            if (surfaceHlsl == null)
+                throw new ArgumentNullException(nameof(surfaceHlsl));
 
             ulong hash = MaterialProgramHashUtility.OffsetBasis;
             MaterialProgramHashUtility.Add(
@@ -249,9 +254,23 @@ namespace VividRP.Runtime.GPUDriven
             AddResourceLayout(
                 ref hash,
                 lowering.MaterialLayout.ResourceLayout);
+            AddSurfaceHlslArtifact(ref hash, surfaceHlsl);
             return new CompiledMaterialProgramHash(
                 MaterialProgramContract.CompiledHashVersion,
                 hash);
+        }
+
+        private static void AddSurfaceHlslArtifact(
+            ref ulong hash,
+            MaterialSurfaceHlslArtifact artifact)
+        {
+            MaterialProgramHashUtility.Add(ref hash, artifact.Version);
+            MaterialProgramHashUtility.Add(ref hash, artifact.BackendVersion);
+            MaterialProgramHashUtility.Add(ref hash, (int) artifact.Topology);
+            MaterialProgramHashUtility.Add(ref hash, (int) artifact.PhysicalContract);
+            MaterialProgramHashUtility.Add(ref hash, artifact.BindingHash);
+            MaterialProgramHashUtility.Add(ref hash, artifact.EntryPoint);
+            MaterialProgramHashUtility.Add(ref hash, artifact.Source);
         }
 
         private static void AddSelectionKey(

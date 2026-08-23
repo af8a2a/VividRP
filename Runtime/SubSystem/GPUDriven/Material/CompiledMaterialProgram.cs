@@ -1981,11 +1981,14 @@ namespace VividRP.Runtime.GPUDriven
         private CompiledMaterialProgram(
             MaterialIRModule module,
             MaterialProgramLoweringResult lowering,
+            MaterialSurfaceHlslArtifact surfaceHlsl,
             MaterialProgramDiagnostics diagnostics,
             in CompiledMaterialProgramHash compiledHash)
         {
             Module = module ?? throw new ArgumentNullException(nameof(module));
             Lowering = lowering ?? throw new ArgumentNullException(nameof(lowering));
+            SurfaceHlsl = surfaceHlsl
+                ?? throw new ArgumentNullException(nameof(surfaceHlsl));
             Diagnostics = diagnostics
                 ?? throw new ArgumentNullException(nameof(diagnostics));
             CompiledHash = compiledHash;
@@ -2006,6 +2009,8 @@ namespace VividRP.Runtime.GPUDriven
 
         internal CompiledMaterialLayout MaterialLayout =>
             Lowering.MaterialLayout;
+
+        internal MaterialSurfaceHlslArtifact SurfaceHlsl { get; }
 
         internal MaterialProgramDiagnostics Diagnostics { get; }
 
@@ -2085,13 +2090,18 @@ namespace VividRP.Runtime.GPUDriven
             if (!diagnostics.IsWithinBudget)
                 throw new InvalidOperationException(diagnostics.GetDebugDump());
 
+            MaterialSurfaceHlslArtifact surfaceHlsl =
+                MaterialSurfaceHlslBackend.Compile(module, lowering);
+
             CompiledMaterialProgramHash compiledHash =
                 CompiledMaterialProgramHashBuilder.ComputeNativeTemplate(
                     module.SemanticHash,
-                    lowering);
+                    lowering,
+                    surfaceHlsl);
             return new CompiledMaterialProgram(
                 module,
                 lowering,
+                surfaceHlsl,
                 diagnostics,
                 compiledHash);
         }

@@ -418,6 +418,8 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             if (!left.Module.CanonicalIR.PayloadEquals(right.Module.CanonicalIR))
                 return false;
+            if (!left.SurfaceHlsl.PayloadEquals(right.SurfaceHlsl))
+                return false;
             if (left.Lowering.SelectionKey != right.Lowering.SelectionKey)
                 return false;
             MaterialProgramCatalogEntry leftEntry = left.Lowering.CatalogEntry;

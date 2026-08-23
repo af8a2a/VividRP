@@ -189,6 +189,11 @@ namespace VividRP.Editor.Tests
                 source.Where(character => !char.IsWhiteSpace(character)));
 
             StringAssert.Contains("VividMaterialSurface.hlsl", source);
+            StringAssert.Contains("VividMaterialSurfaceAOT.generated.hlsl", surfaceProgramSource);
+            StringAssert.Contains("VividTryEvaluateAOTSurfaceProgram", source);
+            StringAssert.Contains("aotSurfaceOutput.BaseSlab.BaseColor.rgb", source);
+            StringAssert.Contains("aotSurfaceOutput.Emission", source);
+            StringAssert.Contains("VividEvaluateSlabSurfaceDetailGrad", source);
             StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
             StringAssert.Contains("VividTryLoadDualSlabSurfaceProgram", source);
             StringAssert.Contains("VividEvaluateSlabSurfaceGrad", source);

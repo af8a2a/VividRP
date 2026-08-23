@@ -33,6 +33,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
             #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl"
             #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
                 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/TerrainRuntimeVirtualTextureSampling.hlsl"
             #endif
@@ -251,63 +252,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return true;
             }
 
-            bool IsStandardSingleSlabSurfaceProgram(
-                const VividMaterialProgramData programData)
-            {
-                return programData.Version == VIVID_MATERIAL_PROGRAM_VERSION
-                    && programData.SurfaceProgramID
-                        == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
-                    && programData.TransportProgramID
-                        == VIVIDMATERIALTRANSPORTPROGRAMID_NONE
-                    && programData.ParameterLayoutID
-                        == VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA
-                    && programData.ResourceLayoutID
-                        == VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING
-                    && (programData.CapabilityFlags
-                        & VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT) != 0u
-                    && programData.ExecutionClass
-                        == VIVIDMATERIALEXECUTIONCLASS_VISIBILITY_DEFERRED;
-            }
-
-            bool TryResolveStandardSingleSlabSurfaceProgram(
-                const uint materialIndex,
-                out VividMaterialData materialData,
-                out VividSurfaceBindingData surfaceBindingData)
-            {
-                materialData = (VividMaterialData) 0;
-                surfaceBindingData = (VividSurfaceBindingData) 0;
-                if (materialIndex >= _MaterialRuntimeHeaderCount)
-                    return false;
-
-                const VividMaterialRuntimeHeader runtimeHeader =
-                    PullMaterialRuntimeHeader(materialIndex);
-                if (runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID
-                    || runtimeHeader.ProgramID >= _MaterialProgramCount)
-                {
-                    return false;
-                }
-
-                const VividMaterialProgramData programData =
-                    PullMaterialProgramData(runtimeHeader.ProgramID);
-                if (!IsStandardSingleSlabSurfaceProgram(programData)
-                    || runtimeHeader.ParameterAddress >= _MaterialDataCount
-                    || runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount)
-                {
-                    return false;
-                }
-
-                materialData = PullMaterialData(runtimeHeader.ParameterAddress);
-                surfaceBindingData = PullSurfaceBindingData(
-                    runtimeHeader.ResourceBindingAddress);
-                return true;
-            }
-
             TriangleData LoadTriangleData(VividVisibilityBufferValue visibilityBufferValue)
             {
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
-                if (!TryResolveStandardSingleSlabSurfaceProgram(
+                if (!VividTryLoadStandardSingleSlabSurfaceProgram(
                         result.instanceData.MaterialIndex,
+                        VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
                         result.materialData,
                         result.surfaceBindingData))
                 {

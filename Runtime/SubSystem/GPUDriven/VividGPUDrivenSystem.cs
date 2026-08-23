@@ -341,24 +341,6 @@ namespace VividRP.Runtime.GPUDriven
                 CoreUtils.SetKeyword(material, VirtualTextureBackendKeyword, UsesVirtualTexture);
         }
 
-        internal bool TryAcquireExternalSurfaceBinding(
-            in GPUDrivenSurfaceTextureSet textures,
-            out VirtualTextureGPUDrivenTextureBackend.ExternalSurfaceBindingLease lease,
-            out string reason)
-        {
-            if (m_TextureBackend is VirtualTextureGPUDrivenTextureBackend virtualTextureBackend)
-            {
-                return virtualTextureBackend.TryAcquireExternalSurfaceBinding(
-                    textures,
-                    out lease,
-                    out reason);
-            }
-
-            lease = null;
-            reason = "The active GPUDriven texture backend is not Virtual Texture.";
-            return false;
-        }
-
         internal static bool ScheduleCullForCamera(Camera camera, int frameIndex)
         {
             // A token belongs to exactly one beginCameraRendering invocation. Clear it

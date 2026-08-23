@@ -16,7 +16,7 @@ namespace VividRP.Editor.Tests
     public class VisibilityBufferPassTests
     {
         [Test]
-        public void Initialize_RegistersRendererListMeshletBuffersFourVisibilityTargetsAndDepth()
+        public void Initialize_RegistersMeshletBuffersFourVisibilityTargetsAndDepth()
         {
             IRenderPass renderPass = new VisibilityBufferPass();
 
@@ -31,10 +31,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(resources.Textures, Has.Length.EqualTo(5));
             Assert.That(resources.Buffers, Has.Length.EqualTo(2));
-            Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
-            Assert.That(
-                resources.RenderLists[0].RenderList.desc.ShaderTagNames,
-                Is.EqualTo(new[] { "VisibilityBuffer" }));
+            Assert.That(resources.RenderLists, Is.Empty);
             Assert.That(renderPass, Is.InstanceOf<UnsafePass>());
 
             Assert.That(visibilityEntry.Access, Is.EqualTo(AccessFlags.Write));

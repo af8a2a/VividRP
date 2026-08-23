@@ -157,7 +157,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveShader_ConsumesProgram0AddressesAndPreservesLegacyFallback()
+        public void ResolveShader_ConsumesSharedSurfaceProgramAndPreservesLegacyFallback()
         {
             UnityEditor.PackageManager.PackageInfo package =
                 UnityEditor.PackageManager.PackageInfo.FindForAssembly(
@@ -173,20 +173,40 @@ namespace VividRP.Editor.Tests
 
             Assert.That(File.Exists(path), Is.True, path);
             string source = File.ReadAllText(path);
+            string surfaceProgramPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividMaterialSurface.hlsl");
+            Assert.That(File.Exists(surfaceProgramPath), Is.True, surfaceProgramPath);
+            string surfaceProgramSource = File.ReadAllText(surfaceProgramPath);
 
-            StringAssert.Contains("TryResolveStandardSingleSlabSurfaceProgram", source);
-            StringAssert.Contains("PullMaterialRuntimeHeader(materialIndex)", source);
-            StringAssert.Contains("PullMaterialProgramData(runtimeHeader.ProgramID)", source);
-            StringAssert.Contains("programData.SurfaceProgramID", source);
-            StringAssert.DoesNotContain("programData.CoverageProgramID", source);
-            StringAssert.Contains("PullMaterialData(runtimeHeader.ParameterAddress)", source);
+            StringAssert.Contains("VividMaterialSurface.hlsl", source);
+            StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
+            StringAssert.Contains(
+                "VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT",
+                source);
+            StringAssert.Contains("PullMaterialRuntimeHeader(materialIndex)", surfaceProgramSource);
+            StringAssert.Contains(
+                "PullMaterialProgramData(runtimeHeader.ProgramID)",
+                surfaceProgramSource);
+            StringAssert.Contains("programData.SurfaceProgramID", surfaceProgramSource);
+            StringAssert.DoesNotContain("programData.CoverageProgramID", surfaceProgramSource);
+            StringAssert.DoesNotContain("programData.TransportProgramID", surfaceProgramSource);
+            StringAssert.Contains(
+                "PullMaterialData(runtimeHeader.ParameterAddress)",
+                surfaceProgramSource);
             StringAssert.Contains(
                 "runtimeHeader.ParameterAddress >= _MaterialDataCount",
-                source);
-            StringAssert.Contains("runtimeHeader.ResourceBindingAddress", source);
+                surfaceProgramSource);
+            StringAssert.Contains(
+                "runtimeHeader.ResourceBindingAddress",
+                surfaceProgramSource);
             StringAssert.Contains(
                 "runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount",
-                source);
+                surfaceProgramSource);
             StringAssert.Contains(
                 "result.materialData = PullMaterialData(result.instanceData.MaterialIndex)",
                 source);

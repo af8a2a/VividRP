@@ -58,7 +58,6 @@ Shader "VividRP/Experimental/Material/StandardLit"
         [HideInInspector] _SubsurfaceTransmissionWeight("Subsurface Transmission Weight", Range(0.0, 1.0)) = 0.0
 
         [HideInInspector] _VividExperimentalClosureVersion("Experimental Closure Version", Float) = 2.0
-        [HideInInspector] _VividExperimentalVBufferMaterialIndex("Experimental VBuffer Material Index", Float) = 0.0
         [HideInInspector] _Blend("__blend", Float) = 0.0
         [HideInInspector] _SrcBlend("__src", Float) = 1.0
         [HideInInspector] _DstBlend("__dst", Float) = 0.0
@@ -81,10 +80,6 @@ Shader "VividRP/Experimental/Material/StandardLit"
             "RenderPipeline" = "VividRenderPipeline"
             "VividMaterialSystem" = "ExperimentalClosure"
         }
-
-        HLSLINCLUDE
-            #define VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION float _VividExperimentalVBufferMaterialIndex;
-        ENDHLSL
 
         Pass
         {
@@ -136,29 +131,6 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitShadowCasterPass.hlsl"
-            ENDHLSL
-        }
-
-
-        Pass
-        {
-            Name "VisibilityBuffer"
-            Tags { "LightMode" = "VisibilityBuffer" }
-
-            Blend One Zero
-            ZWrite Off
-            ZTest Equal
-            Cull [_Cull]
-
-            HLSLPROGRAM
-                #pragma use_dxc
-                #pragma require barycentrics
-                #pragma multi_compile_instancing
-                #pragma instancing_options renderinglayer
-                #pragma vertex Vert
-                #pragma fragment FragVisibilityBuffer
-
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitVisibilityBufferPass.hlsl"
             ENDHLSL
         }
 

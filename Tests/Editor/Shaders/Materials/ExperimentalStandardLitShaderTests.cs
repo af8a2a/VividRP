@@ -15,10 +15,6 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLit.shader";
         private const string ExperimentalInputAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitInput.hlsl";
-        private const string ExperimentalVisibilityAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitVisibilityBufferPass.hlsl";
-        private const string VisibilityBufferCommonAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl";
         private const string ExistingShaderAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLit.shader";
 
@@ -110,8 +106,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(material.HasProperty("_TopLayerMaskMap"), Is.False);
                 Assert.That(material.HasProperty("_TopLayerWeight"), Is.False);
                 Assert.That(material.HasProperty("_TopLayerOperator"), Is.False);
-                Assert.That(material.HasProperty("_VividExperimentalVBufferMaterialIndex"), Is.True);
-                Assert.That(material.GetFloat("_VividExperimentalVBufferMaterialIndex"), Is.Zero);
+                Assert.That(material.HasProperty("_VividExperimentalVBufferMaterialIndex"), Is.False);
             }
             finally
             {
@@ -120,17 +115,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ExperimentalStandardLitShader_ExposesVBufferAndAuxiliaryPassesOnly()
+        public void ExperimentalStandardLitShader_ExposesAuxiliaryPassesOnly()
         {
             Shader shader = LoadShader();
             var material = new Material(shader);
             try
             {
                 AssertPass(material, "VividPreDepth", "VividPreDepth");
-                AssertPass(
-                    material,
-                    "VisibilityBuffer",
-                    "VisibilityBuffer");
                 AssertPass(material, "Meta", "Meta");
                 AssertPass(material, "MotionVectors", "MotionVectors");
                 AssertPass(material, "IndirectDXR", "IndirectDXR");
@@ -142,6 +133,7 @@ namespace VividRP.Editor.Tests
                     material,
                     "RaytracingGBufferDXR",
                     "RaytracingGBufferDXR");
+                Assert.That(material.FindPass("VisibilityBuffer"), Is.EqualTo(-1));
                 Assert.That(material.FindPass("ExperimentalClosureBuffer"), Is.EqualTo(-1));
                 Assert.That(material.FindPass("VividGBuffer"), Is.EqualTo(-1));
                 Assert.That(material.FindPass("VividGBufferGPUDrivenDecal"), Is.EqualTo(-1));
@@ -153,31 +145,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VisibilityBuffer_UsesSharedAttributeAbiWithoutMaterialSampling()
-        {
-            string shaderSource = File.ReadAllText(ExperimentalShaderAssetPath);
-            string source = File.ReadAllText(ExperimentalVisibilityAssetPath);
-            string commonSource = File.ReadAllText(VisibilityBufferCommonAssetPath);
-
-            StringAssert.Contains("#pragma require barycentrics", shaderSource);
-            StringAssert.Contains("VividVisibilityBuffer.hlsl", source);
-            StringAssert.Contains("PackVividVisibilityBufferFragmentOutput", source);
-            StringAssert.Contains("uint primitiveID : SV_PrimitiveID", source);
-            StringAssert.Contains("SV_Barycentrics", source);
-            StringAssert.Contains("StandardLit/StandardLitInput.hlsl", source);
-            StringAssert.DoesNotContain("CBUFFER_START(UnityPerMaterial)", source);
-            StringAssert.DoesNotContain("SAMPLE_TEXTURE2D", source);
-            StringAssert.DoesNotContain("ExperimentalClosureBuffer", source);
-            StringAssert.Contains("uint2 visibility : SV_Target0", commonSource);
-            StringAssert.Contains("float4 attributes0 : SV_Target1", commonSource);
-            StringAssert.Contains("float4 attributes1 : SV_Target2", commonSource);
-            StringAssert.Contains("float2 barycentrics : SV_Target3", commonSource);
-            StringAssert.Contains("ddx(uv0)", commonSource);
-            StringAssert.Contains("ddy(uv0)", commonSource);
-            StringAssert.Contains("VividEncodeVisibilityBufferNormalOct", commonSource);
-        }
-
-        [Test]
         public void ExperimentalStandardLitShader_IsSRPBatcherCompatible_ForRasterPasses()
         {
             var material = new Material(LoadShader());
@@ -185,7 +152,6 @@ namespace VividRP.Editor.Tests
             {
                 AssertNoSRPBatcherIssue(material, "VividPreDepth");
                 AssertNoSRPBatcherIssue(material, "ShadowCaster");
-                AssertNoSRPBatcherIssue(material, "VisibilityBuffer");
                 AssertNoSRPBatcherIssue(material, "Meta");
                 AssertNoSRPBatcherIssue(material, "MotionVectors");
             }

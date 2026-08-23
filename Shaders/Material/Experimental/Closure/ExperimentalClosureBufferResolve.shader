@@ -16,6 +16,7 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             #pragma fragment Frag
             #pragma editor_sync_compilation
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+            #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
             #pragma target 5.0
             #pragma require randomwrite
             #pragma use_dxc
@@ -24,24 +25,14 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBuffer.hlsl"
-            #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE 1
-            #define VIVID_VT_ENABLE_FEEDBACK_RW 1
-            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VirtualTextureSurfaceSampling.hlsl"
-
-            #define VIVID_EXPERIMENTAL_VBUFFER_VERSION 2u
-            #define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_OFFSET 1u
-            #define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_STRIDE 192u
-
-            #define VIVID_EXPERIMENTAL_FEATURE_NORMAL_MAP (1u << 0)
-            #define VIVID_EXPERIMENTAL_FEATURE_METALLIC_MAP (1u << 1)
-            #define VIVID_EXPERIMENTAL_FEATURE_ROUGHNESS_MAP (1u << 2)
-            #define VIVID_EXPERIMENTAL_FEATURE_SMOOTHNESS_ALBEDO_ALPHA (1u << 3)
-            #define VIVID_EXPERIMENTAL_FEATURE_OCCLUSION_MAP (1u << 4)
-            #define VIVID_EXPERIMENTAL_FEATURE_EMISSION_MAP (1u << 5)
-            #define VIVID_EXPERIMENTAL_FEATURE_CLEAR_COAT (1u << 6)
-            #define VIVID_EXPERIMENTAL_FEATURE_RECEIVE_SSR (1u << 7)
-            #define VIVID_EXPERIMENTAL_FEATURE_RECEIVE_DECALS (1u << 8)
-            #define VIVID_EXPERIMENTAL_FEATURE_RMO_MAP (1u << 9)
+            #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                #define VIVID_VT_ENABLE_FEEDBACK_RW 1
+            #else
+                #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #endif
+            #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
 
             TYPED_TEXTURE2D(float2, _ExperimentalVisibilityBuffer);
             TEXTURE2D(_ExperimentalVisibilityAttributes0);
@@ -52,25 +43,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             float4 _ExperimentalAttributes0ScaleBias;
             float4 _ExperimentalAttributes1ScaleBias;
             float4 _ExperimentalDepthScaleBias;
-            uint _VividExperimentalVBufferMaterialCount;
-            uint _VividExperimentalVBufferVTAvailable;
-
-            struct VividExperimentalVBufferMaterialData
-            {
-                VividSurfaceBindingData BaseBinding;
-                VividSurfaceBindingData AuxiliaryBinding;
-                float4 BaseColor;
-                float4 BaseMapST;
-                float4 EmissionColor;
-                float4 BaseSurface;
-                float4 BaseRemap0;
-                float4 BaseRemap1;
-                float4 BaseClosure;
-                uint4 FeatureFlags;
-            };
-
-            StructuredBuffer<VividExperimentalVBufferMaterialData>
-                _VividExperimentalVBufferMaterials;
 
             struct Attributes
             {
@@ -154,16 +126,49 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 return float3x3(tangentWS, crossBitangent * handedness, normalWS);
             }
 
-            uint BuildMaterialFeatures(uint featureFlags, float clearCoatWeight)
+            float RemapPBRChannel(const float sampleValue, const float2 remap)
             {
-                uint materialFeatures = VIVID_MATERIALFEATURE_LIT;
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_RECEIVE_SSR) != 0u)
-                    materialFeatures |= VIVID_MATERIALFEATURE_SSR_RECEIVE;
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_RECEIVE_DECALS) != 0u)
-                    materialFeatures |= VIVID_MATERIALFEATURE_DECAL_RECEIVE;
-                if (clearCoatWeight > 0.0)
-                    materialFeatures |= VIVID_MATERIALFEATURE_CLEAR_COAT;
-                return materialFeatures;
+                return saturate(lerp(remap.x, remap.y, saturate(sampleValue)));
+            }
+
+            void ApplyMaskSample(
+                const uint maskMode,
+                const float4 maskSample,
+                const float4 metallicSmoothnessRemap,
+                const float2 ambientOcclusionRemap,
+                inout float perceptualRoughness,
+                inout float metallic,
+                inout float ambientOcclusion)
+            {
+                if (maskMode == 1u)
+                {
+                    metallic = RemapPBRChannel(maskSample.r, metallicSmoothnessRemap.xy);
+                    perceptualRoughness = 1.0
+                        - RemapPBRChannel(maskSample.a, metallicSmoothnessRemap.zw);
+                }
+                else if (maskMode == 2u)
+                {
+                    perceptualRoughness = 1.0
+                        - RemapPBRChannel(1.0 - maskSample.r, metallicSmoothnessRemap.zw);
+                }
+                else if (maskMode == 3u)
+                {
+                    metallic = RemapPBRChannel(maskSample.r, metallicSmoothnessRemap.xy);
+                    ambientOcclusion = RemapPBRChannel(
+                        maskSample.g,
+                        ambientOcclusionRemap);
+                    perceptualRoughness = 1.0
+                        - RemapPBRChannel(maskSample.a, metallicSmoothnessRemap.zw);
+                }
+                else if (maskMode == 4u)
+                {
+                    perceptualRoughness = 1.0
+                        - RemapPBRChannel(1.0 - maskSample.r, metallicSmoothnessRemap.zw);
+                    metallic = RemapPBRChannel(maskSample.g, metallicSmoothnessRemap.xy);
+                    ambientOcclusion = RemapPBRChannel(
+                        maskSample.b,
+                        ambientOcclusionRemap);
+                }
             }
 
             VividBuiltinData BuildProbeVolumeBuiltinData(
@@ -188,23 +193,43 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 float2 visibilityUV = ApplyScaleBias(
                     input.uv,
                     _ExperimentalVisibilityScaleBias);
-                uint2 visibility = asuint(SAMPLE_TEXTURE2D_LOD(
+                uint2 packedVisibility = asuint(SAMPLE_TEXTURE2D_LOD(
                     _ExperimentalVisibilityBuffer,
                     sampler_PointClamp,
                     visibilityUV,
                     0).xy);
-                if (visibility.x == 0u)
+                if (!IsPackedVisibilityBufferValueValid(packedVisibility))
                     discard;
 
-                uint materialSlot = visibility.x - VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_OFFSET;
-                if (_VividExperimentalVBufferVTAvailable == 0u
-                    || materialSlot >= _VividExperimentalVBufferMaterialCount)
+                const VividVisibilityBufferValue visibility =
+                    UnpackVisibilityBufferValue(packedVisibility);
+                if (visibility.InstanceID >= _InstanceDataCount)
+                    discard;
+
+                const VividInstanceData instanceData =
+                    PullInstanceData(visibility.InstanceID);
+                VividMaterialData materialData;
+                VividSurfaceBindingData surfaceBindingData;
+                if (!VividTryLoadStandardSingleSlabSurfaceProgram(
+                        instanceData.MaterialIndex,
+                        0u,
+                        materialData,
+                        surfaceBindingData))
                 {
-                    materialSlot = 0u;
+                    if (instanceData.MaterialIndex >= _MaterialDataCount)
+                        discard;
+
+                    materialData = PullMaterialData(instanceData.MaterialIndex);
+                    if (materialData.SurfaceBindingIndex >= _SurfaceBindingDataCount)
+                        discard;
+
+                    surfaceBindingData = PullSurfaceBindingData(
+                        materialData.SurfaceBindingIndex);
                 }
 
-                VividExperimentalVBufferMaterialData materialData =
-                    _VividExperimentalVBufferMaterials[materialSlot];
+                if ((materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u)
+                    discard;
+
                 float4 attributes0 = SAMPLE_TEXTURE2D_LOD(
                     _ExperimentalVisibilityAttributes0,
                     sampler_PointClamp,
@@ -229,110 +254,41 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 float2 rawUVDdx = attributes0.zw;
                 float2 rawUVDdy = attributes1.xy;
                 float3 geometricNormalWS = DecodeNormalOct(attributes1.zw);
-                float2 baseUV = rawUV * materialData.BaseMapST.xy
-                    + materialData.BaseMapST.zw;
-                float2 baseUVDdx = rawUVDdx * materialData.BaseMapST.xy;
-                float2 baseUVDdy = rawUVDdy * materialData.BaseMapST.xy;
+                float2 baseUV = rawUV * materialData.TextureTilingOffset.xy
+                    + materialData.TextureTilingOffset.zw;
+                float2 baseUVDdx = rawUVDdx * materialData.TextureTilingOffset.xy;
+                float2 baseUVDdy = rawUVDdy * materialData.TextureTilingOffset.xy;
                 VividSurfaceSampleContext baseContext =
                     VividCreateSurfaceSampleContextGrad(
-                        materialData.BaseBinding,
+                        surfaceBindingData,
                         baseUV,
                         baseUVDdx,
                         baseUVDdy,
                         input.positionCS);
                 float4 baseSample = VividSampleBaseColorGrad(
-                    materialData.BaseBinding,
-                    baseContext) * materialData.BaseColor;
-                float4 baseMask = VividSampleMaskGrad(
-                    materialData.BaseBinding,
-                    baseContext);
-
-                uint featureFlags = materialData.FeatureFlags.x;
-                float metallic = saturate(materialData.BaseSurface.x);
-                float smoothness = saturate(materialData.BaseSurface.y);
+                    surfaceBindingData,
+                    baseContext) * materialData.AlbedoColor;
+                float perceptualRoughness = materialData.Roughness;
+                float metallic = materialData.Metallic;
                 float ambientOcclusion = 1.0;
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_RMO_MAP) != 0u)
+                if (VividSurfaceHasMask(surfaceBindingData))
                 {
-                    smoothness = lerp(
-                        materialData.BaseRemap0.z,
-                        materialData.BaseRemap0.w,
-                        saturate(1.0 - baseMask.r));
-                    metallic = lerp(
-                        materialData.BaseRemap0.x,
-                        materialData.BaseRemap0.y,
-                        saturate(baseMask.g));
-                    ambientOcclusion = saturate(lerp(
-                        materialData.BaseRemap1.x,
-                        materialData.BaseRemap1.y,
-                        baseMask.b));
-                }
-                else if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_METALLIC_MAP) != 0u)
-                {
-                    metallic = lerp(
-                        materialData.BaseRemap0.x,
-                        materialData.BaseRemap0.y,
-                        saturate(baseMask.r));
-                    float smoothnessSource =
-                        (featureFlags & VIVID_EXPERIMENTAL_FEATURE_SMOOTHNESS_ALBEDO_ALPHA) != 0u
-                            ? baseSample.a
-                            : baseMask.a;
-                    smoothness = lerp(
-                        materialData.BaseRemap0.z,
-                        materialData.BaseRemap0.w,
-                        saturate(smoothnessSource));
-                }
-                else if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_ROUGHNESS_MAP) != 0u)
-                {
-                    smoothness = lerp(
-                        materialData.BaseRemap0.z,
-                        materialData.BaseRemap0.w,
-                        saturate(1.0 - baseMask.r));
-                }
-                else if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_SMOOTHNESS_ALBEDO_ALPHA) != 0u)
-                {
-                    smoothness = lerp(
-                        materialData.BaseRemap0.z,
-                        materialData.BaseRemap0.w,
-                        saturate(baseSample.a));
-                }
-
-                float3 emissive = 0.0;
-                if (materialData.AuxiliaryBinding.Flags != 0u)
-                {
-                    VividSurfaceSampleContext auxiliaryContext =
-                        VividCreateSurfaceSampleContextGrad(
-                            materialData.AuxiliaryBinding,
-                            baseUV,
-                            baseUVDdx,
-                            baseUVDdy,
-                            input.positionCS);
-                    if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_OCCLUSION_MAP) != 0u)
-                    {
-                        float occlusion = VividSampleMaskGrad(
-                            materialData.AuxiliaryBinding,
-                            auxiliaryContext).g;
-                        ambientOcclusion = saturate(lerp(
-                            materialData.BaseRemap1.x,
-                            materialData.BaseRemap1.y,
-                            occlusion));
-                    }
-                    if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_EMISSION_MAP) != 0u)
-                    {
-                        emissive = max(
-                            VividSampleBaseColorGrad(
-                                materialData.AuxiliaryBinding,
-                                auxiliaryContext).rgb
-                            * materialData.EmissionColor.rgb,
-                            0.0);
-                    }
+                    ApplyMaskSample(
+                        materialData.Padding0,
+                        VividSampleMaskGrad(surfaceBindingData, baseContext),
+                        materialData.MetallicSmoothnessRemap,
+                        materialData.AmbientOcclusionRemap.xy,
+                        perceptualRoughness,
+                        metallic,
+                        ambientOcclusion);
                 }
 
                 float3 normalWS = geometricNormalWS;
-                if ((featureFlags & VIVID_EXPERIMENTAL_FEATURE_NORMAL_MAP) != 0u)
+                if (VividSurfaceHasNormal(surfaceBindingData))
                 {
                     float3 normalTS = VividExperimentalUnpackNormalScale(
-                        VividSampleNormalGrad(materialData.BaseBinding, baseContext),
-                        materialData.BaseSurface.z);
+                        VividSampleNormalGrad(surfaceBindingData, baseContext),
+                        materialData.NormalsStrength);
                     float3x3 tangentToWorld = ReconstructTangentToWorld(
                         positionWS,
                         geometricNormalWS,
@@ -344,30 +300,26 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                         + normalTS.z * tangentToWorld[2]);
                 }
 
-                float clearCoatWeight =
-                    (featureFlags & VIVID_EXPERIMENTAL_FEATURE_CLEAR_COAT) != 0u
-                        ? saturate(materialData.BaseRemap1.w)
-                        : 0.0;
                 VividBuiltinData builtinData = BuildProbeVolumeBuiltinData(
                     positionWS,
                     normalWS);
                 VividExperimentalStandardSurfaceParameters baseParameters;
                 baseParameters.baseColor = baseSample.rgb;
                 baseParameters.normalWS = normalWS;
-                baseParameters.perceptualRoughness = 1.0 - saturate(smoothness);
+                baseParameters.perceptualRoughness = saturate(perceptualRoughness);
                 baseParameters.metallic = metallic;
                 baseParameters.ambientOcclusion = ambientOcclusion;
                 baseParameters.coverage = 1.0;
-                baseParameters.specularIor = materialData.BaseRemap1.z;
-                baseParameters.clearCoatWeight = clearCoatWeight;
-                baseParameters.clearCoatPerceptualRoughness =
-                    1.0 - saturate(materialData.BaseClosure.x);
-                baseParameters.transmissionWeight = materialData.BaseClosure.y;
-                baseParameters.subsurfaceWeight = materialData.BaseClosure.z;
-                baseParameters.emissive = emissive;
-                baseParameters.materialFeatures = BuildMaterialFeatures(
-                    featureFlags,
-                    clearCoatWeight);
+                baseParameters.specularIor = 1.5;
+                baseParameters.clearCoatWeight = 0.0;
+                baseParameters.clearCoatPerceptualRoughness = 0.0;
+                baseParameters.transmissionWeight = 0.0;
+                baseParameters.subsurfaceWeight = 0.0;
+                baseParameters.emissive = max(materialData.Emission.rgb, 0.0);
+                baseParameters.materialFeatures =
+                    (materialData.MaterialFlags & VIVIDMATERIALFLAGS_UNLIT) != 0u
+                        ? 0u
+                        : VIVID_MATERIALFEATURE_DEFAULT;
                 baseParameters.builtinData = builtinData;
                 VividExperimentalStandardSurface baseSurface =
                     VividResolveExperimentalStandardSurface(baseParameters);

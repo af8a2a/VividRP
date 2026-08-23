@@ -15,7 +15,7 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalClosureRenderPassTests
     {
         [Test]
-        public void SharedVisibilityBufferPass_RegistersExperimentalRendererListAndFourAttachments()
+        public void SharedVisibilityBufferPass_UsesGpuDrivenDrawsAndFourAttachments()
         {
             IRenderPass pass = new VisibilityBufferPass();
             var resources = pass.Initialize();
@@ -24,10 +24,7 @@ namespace VividRP.Editor.Tests
                 .OrderBy(entry => entry.AttachmentIndex)
                 .ToArray();
 
-            Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
-            Assert.That(
-                resources.RenderLists[0].RenderList.desc.ShaderTagNames,
-                Is.EqualTo(new[] { "VisibilityBuffer" }));
+            Assert.That(resources.RenderLists, Is.Empty);
             Assert.That(colorEntries, Has.Length.EqualTo(4));
             Assert.That(
                 colorEntries.Select(entry => entry.Name),
@@ -66,7 +63,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ClosureBufferPass_IsFullscreenResolveWithVBufferAndMaterialTableInputs()
+        public void ClosureBufferPass_IsFullscreenResolveUsingGpuDrivenMaterialGlobals()
         {
             IRenderPass pass = new ExperimentalClosureBufferPass();
             var resources = pass.Initialize();
@@ -89,9 +86,7 @@ namespace VividRP.Editor.Tests
                     "ExperimentalClosureBuffer6",
                     "ExperimentalClosureBuffer7",
                 }));
-            Assert.That(
-                resources.Buffers.Select(entry => entry.Name),
-                Does.Contain("ExperimentalVBufferMaterialTable"));
+            Assert.That(resources.Buffers, Is.Empty);
             Assert.That(pass, Is.InstanceOf<IAllowGlobalStateModificationPass>());
         }
 

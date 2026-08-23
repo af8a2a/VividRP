@@ -13,7 +13,6 @@ namespace VividRP.Runtime.RenderPass.Core
     public class VisibilityBufferPass : UnsafePass
     {
         internal const string VisibilityBufferShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferPass";
-        internal const string ShaderTagName = "VisibilityBuffer";
 
         private const int IndirectDrawArgsByteStride = sizeof(uint) * 4;
         private const int SpdTileSize = 64;
@@ -57,9 +56,6 @@ namespace VividRP.Runtime.RenderPass.Core
             public uint Counter4;
             public uint Counter5;
         }
-
-        [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
-        private RenderGraphRenderList m_RenderList;
 
         [RenderGraphResource(Name = "VisibleMeshletRenderRequests", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_VisibleMeshletRenderRequests;
@@ -141,11 +137,6 @@ namespace VividRP.Runtime.RenderPass.Core
         public VisibilityBufferPass()
         {
             profilingSampler = new ProfilingSampler(nameof(VisibilityBufferPass));
-
-            m_RenderList = new RenderGraphRenderList
-            {
-                desc = RenderGraphRenderListDesc.CreateOpaque(ShaderTagName),
-            };
 
             m_VisibleMeshletRenderRequests = RenderGraphBuffer.CreateStructured(
                 "VisibleMeshletRenderRequests",
@@ -371,9 +362,6 @@ namespace VividRP.Runtime.RenderPass.Core
                         virtualTextureReady,
                         virtualTextureBinding);
                 }
-
-                if (m_RenderList?.IsValid == true)
-                    nativeCmd.DrawRendererList(m_RenderList);
 
                 if (!hasGPUDrivenDraws)
                     return;

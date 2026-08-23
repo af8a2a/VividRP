@@ -1,13 +1,9 @@
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using NUnit.Framework;
-using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
-using VividRP.Runtime.Experimental.Material;
 using VividRP.Runtime.RenderPass.Core;
-using VividRP.Runtime.RenderPass.Experimental.Material;
 
 namespace VividRP.Editor.Tests
 {
@@ -17,19 +13,8 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBufferResolve.shader";
 
         [Test]
-        public void VBufferAbi_UsesVersionedTwentyFourBytePayload()
+        public void ClosureBackend_UsesSharedVisibilityBufferAbi()
         {
-            Assert.That(ExperimentalVBufferContract.Version, Is.EqualTo(2u));
-            Assert.That(ExperimentalVBufferContract.InvalidMaterialValue, Is.Zero);
-            Assert.That(ExperimentalVBufferContract.MaterialValueOffset, Is.EqualTo(1u));
-            Assert.That(ExperimentalVBufferContract.BytesPerPixel, Is.EqualTo(8 + 8 + 8));
-            Assert.That(
-                (uint)ExperimentalVBufferMaterialFeatureFlags.RMOMap,
-                Is.EqualTo(1u << 9));
-            Assert.That(
-                Marshal.SizeOf<ExperimentalVBufferMaterialData>(),
-                Is.EqualTo(ExperimentalVBufferContract.MaterialRecordStride));
-
             var pass = new VisibilityBufferPass();
             var resources = ((IRenderPass)pass).Initialize();
             Assert.That(
@@ -51,26 +36,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ClosureResolve_ConsumesVBufferVtAndCompilesSingleStandardSurface()
+        public void ClosureResolve_ConsumesMaterialProgramWithoutExperimentalRegistry()
         {
             string source = File.ReadAllText(ResolveAssetPath);
 
-            StringAssert.Contains("#define VIVID_EXPERIMENTAL_VBUFFER_VERSION 2u", source);
-            StringAssert.Contains(
-                "#define VIVID_EXPERIMENTAL_VBUFFER_MATERIAL_STRIDE 192u",
-                source);
-            StringAssert.Contains("VividExperimentalVBufferMaterialData", source);
+            StringAssert.Contains("UnpackVisibilityBufferValue", source);
+            StringAssert.Contains("PullInstanceData(visibility.InstanceID)", source);
+            StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
+            StringAssert.Contains("VividMaterialData materialData", source);
+            StringAssert.Contains("VividSurfaceBindingData surfaceBindingData", source);
             StringAssert.Contains("VividCreateSurfaceSampleContextGrad", source);
             StringAssert.Contains("VividSampleBaseColorGrad", source);
             StringAssert.Contains("VividSampleNormalGrad", source);
             StringAssert.Contains("VividSampleMaskGrad", source);
-            StringAssert.Contains("VIVID_EXPERIMENTAL_FEATURE_RMO_MAP", source);
             StringAssert.Contains("ComputeWorldSpacePosition", source);
             StringAssert.Contains("ReconstructTangentToWorld", source);
             StringAssert.Contains("VividCompileExperimentalStandardSurface", source);
             StringAssert.DoesNotContain("VividCompileExperimentalLayeredSurface", source);
             StringAssert.DoesNotContain("TopBinding", source);
             StringAssert.Contains("VividPackExperimentalClosureBuffer", source);
+            StringAssert.DoesNotContain("VividExperimentalVBufferMaterialData", source);
+            StringAssert.DoesNotContain("_VividExperimentalVBufferMaterials", source);
+            StringAssert.DoesNotContain("VIVID_EXPERIMENTAL_FEATURE", source);
             StringAssert.DoesNotContain("RendererList", source);
         }
     }

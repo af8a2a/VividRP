@@ -27,6 +27,17 @@ namespace VividRP.Runtime.GPUDriven
         Multiply = 8,
         Lerp = 9,
         Select = 10,
+        Swizzle = 11,
+        Compose = 12,
+        Subtract = 13,
+        Divide = 14,
+        Min = 15,
+        Max = 16,
+        Saturate = 17,
+        OneMinus = 18,
+        Dot = 19,
+        Normalize = 20,
+        Compare = 21,
     }
 
     internal enum MaterialExternalInput
@@ -46,6 +57,7 @@ namespace VividRP.Runtime.GPUDriven
         TopMetallic = 5,
         LayerWeight = 6,
         AlphaClipThreshold = 7,
+        Emission = 8,
     }
 
     internal enum MaterialTextureResource
@@ -56,6 +68,129 @@ namespace VividRP.Runtime.GPUDriven
         BaseMask = 3,
         TopNormal = 4,
         TopMask = 5,
+    }
+
+    internal enum MaterialComparison
+    {
+        Equal = 0,
+        NotEqual = 1,
+        Less = 2,
+        LessOrEqual = 3,
+        Greater = 4,
+        GreaterOrEqual = 5,
+    }
+
+    internal readonly struct MaterialSwizzleMask : IEquatable<MaterialSwizzleMask>
+    {
+        private const int ComponentCountMask = 0x7;
+        private const int FirstComponentShift = 3;
+        private const int ComponentBitCount = 2;
+        private const int EncodedBitCount = FirstComponentShift + ComponentBitCount * 4;
+        private const int EncodedMask = (1 << EncodedBitCount) - 1;
+
+        private MaterialSwizzleMask(int packedValue)
+        {
+            PackedValue = packedValue;
+        }
+
+        internal static MaterialSwizzleMask X => Create(0);
+
+        internal static MaterialSwizzleMask Y => Create(1);
+
+        internal static MaterialSwizzleMask Z => Create(2);
+
+        internal static MaterialSwizzleMask W => Create(3);
+
+        internal static MaterialSwizzleMask XYZ => Create(0, 1, 2);
+
+        internal int PackedValue { get; }
+
+        internal int ComponentCount => PackedValue & ComponentCountMask;
+
+        internal MaterialValueType ResultType
+        {
+            get
+            {
+                switch (ComponentCount)
+                {
+                    case 1:
+                        return MaterialValueType.Float;
+                    case 2:
+                        return MaterialValueType.Float2;
+                    case 3:
+                        return MaterialValueType.Float3;
+                    case 4:
+                        return MaterialValueType.Float4;
+                    default:
+                        throw new InvalidOperationException("Invalid material swizzle mask.");
+                }
+            }
+        }
+
+        internal int GetComponent(int componentIndex)
+        {
+            if ((uint) componentIndex >= (uint) ComponentCount)
+                throw new ArgumentOutOfRangeException(nameof(componentIndex));
+            return (PackedValue >> (FirstComponentShift + componentIndex * ComponentBitCount)) & 0x3;
+        }
+
+        internal static MaterialSwizzleMask Create(params int[] components)
+        {
+            if (components == null)
+                throw new ArgumentNullException(nameof(components));
+            if (components.Length < 1 || components.Length > 4)
+                throw new ArgumentOutOfRangeException(nameof(components));
+
+            int packedValue = components.Length;
+            for (int i = 0; i < components.Length; i++)
+            {
+                if ((uint) components[i] > 3u)
+                    throw new ArgumentOutOfRangeException(nameof(components));
+                packedValue |= components[i]
+                    << (FirstComponentShift + i * ComponentBitCount);
+            }
+            return new MaterialSwizzleMask(packedValue);
+        }
+
+        internal static bool TryDecode(
+            int packedValue,
+            out MaterialSwizzleMask mask)
+        {
+            int componentCount = packedValue & ComponentCountMask;
+            if (componentCount < 1
+                || componentCount > 4
+                || (packedValue & ~EncodedMask) != 0)
+            {
+                mask = default;
+                return false;
+            }
+
+            int usedBitCount = FirstComponentShift + componentCount * ComponentBitCount;
+            int usedMask = (1 << usedBitCount) - 1;
+            if ((packedValue & ~usedMask) != 0)
+            {
+                mask = default;
+                return false;
+            }
+
+            mask = new MaterialSwizzleMask(packedValue);
+            return true;
+        }
+
+        public bool Equals(MaterialSwizzleMask other)
+        {
+            return PackedValue == other.PackedValue;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is MaterialSwizzleMask other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return PackedValue;
+        }
     }
 
     internal readonly struct MaterialValue : IEquatable<MaterialValue>
@@ -187,14 +322,26 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly List<MaterialValueNode> m_Nodes = new();
         private readonly Dictionary<MaterialValueNode, int> m_ValueSet = new();
+        private readonly List<MaterialParameterDeclaration> m_ParameterDeclarations = new();
+        private readonly List<MaterialResourceDeclaration> m_ResourceDeclarations = new();
         private readonly IReadOnlyList<MaterialValueNode> m_NodesView;
+        private readonly IReadOnlyList<MaterialParameterDeclaration> m_ParameterDeclarationsView;
+        private readonly IReadOnlyList<MaterialResourceDeclaration> m_ResourceDeclarationsView;
 
         internal MaterialValueIR()
         {
             m_NodesView = m_Nodes.AsReadOnly();
+            m_ParameterDeclarationsView = m_ParameterDeclarations.AsReadOnly();
+            m_ResourceDeclarationsView = m_ResourceDeclarations.AsReadOnly();
         }
 
         internal IReadOnlyList<MaterialValueNode> Nodes => m_NodesView;
+
+        internal IReadOnlyList<MaterialParameterDeclaration> ParameterDeclarations =>
+            m_ParameterDeclarationsView;
+
+        internal IReadOnlyList<MaterialResourceDeclaration> ResourceDeclarations =>
+            m_ResourceDeclarationsView;
 
         internal int NodeCount => m_Nodes.Count;
 
@@ -215,10 +362,17 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialValue Parameter(MaterialParameter parameter)
         {
+            return Parameter(
+                MaterialNativeTemplateDeclarationAdapter.GetParameter(parameter));
+        }
+
+        internal MaterialValue Parameter(in MaterialParameterDeclaration declaration)
+        {
+            int declarationIndex = GetOrAddParameterDeclaration(declaration);
             return Emit(new MaterialValueNode(
                 MaterialValueOpcode.Parameter,
-                GetParameterType(parameter),
-                (int) parameter,
+                declaration.Type,
+                declarationIndex,
                 default,
                 InvalidOperand,
                 InvalidOperand,
@@ -228,10 +382,17 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialValue TextureResource(MaterialTextureResource resource)
         {
+            return TextureResource(
+                MaterialNativeTemplateDeclarationAdapter.GetTexture(resource));
+        }
+
+        internal MaterialValue TextureResource(in MaterialResourceDeclaration declaration)
+        {
+            int declarationIndex = GetOrAddResourceDeclaration(declaration);
             return Emit(new MaterialValueNode(
                 MaterialValueOpcode.TextureResource,
-                MaterialValueType.Texture2D,
-                (int) resource,
+                declaration.Type,
+                declarationIndex,
                 default,
                 InvalidOperand,
                 InvalidOperand,
@@ -282,10 +443,10 @@ namespace VividRP.Runtime.GPUDriven
             MaterialValue ddx,
             MaterialValue ddy)
         {
-            RequireType(texture, MaterialValueType.Texture2D, nameof(texture));
-            RequireType(coordinates, MaterialValueType.Float2, nameof(coordinates));
-            RequireType(ddx, MaterialValueType.Float2, nameof(ddx));
-            RequireType(ddy, MaterialValueType.Float2, nameof(ddy));
+            ValidateValue(texture, nameof(texture));
+            ValidateValue(coordinates, nameof(coordinates));
+            ValidateValue(ddx, nameof(ddx));
+            ValidateValue(ddy, nameof(ddy));
             return Emit(new MaterialValueNode(
                 MaterialValueOpcode.TextureSampleGrad,
                 MaterialValueType.Float4,
@@ -299,26 +460,169 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialValue Ddx(MaterialValue value)
         {
-            RequireNumeric(value, nameof(value));
+            ValidateValue(value, nameof(value));
             return EmitUnary(MaterialValueOpcode.Ddx, value);
         }
 
         internal MaterialValue Ddy(MaterialValue value)
         {
-            RequireNumeric(value, nameof(value));
+            ValidateValue(value, nameof(value));
             return EmitUnary(MaterialValueOpcode.Ddy, value);
         }
 
         internal MaterialValue Add(MaterialValue left, MaterialValue right)
         {
-            RequireMatchingNumericTypes(left, right);
+            ValidateBinaryOperands(left, right);
             return EmitBinary(MaterialValueOpcode.Add, left, right);
         }
 
         internal MaterialValue Multiply(MaterialValue left, MaterialValue right)
         {
-            RequireMatchingNumericTypes(left, right);
+            ValidateBinaryOperands(left, right);
             return EmitBinary(MaterialValueOpcode.Multiply, left, right);
+        }
+
+        internal MaterialValue Subtract(MaterialValue left, MaterialValue right)
+        {
+            ValidateBinaryOperands(left, right);
+            return EmitBinary(MaterialValueOpcode.Subtract, left, right);
+        }
+
+        internal MaterialValue Divide(MaterialValue left, MaterialValue right)
+        {
+            ValidateBinaryOperands(left, right);
+            return EmitBinary(MaterialValueOpcode.Divide, left, right);
+        }
+
+        internal MaterialValue Min(MaterialValue left, MaterialValue right)
+        {
+            ValidateBinaryOperands(left, right);
+            return EmitBinary(MaterialValueOpcode.Min, left, right);
+        }
+
+        internal MaterialValue Max(MaterialValue left, MaterialValue right)
+        {
+            ValidateBinaryOperands(left, right);
+            return EmitBinary(MaterialValueOpcode.Max, left, right);
+        }
+
+        internal MaterialValue Saturate(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.Saturate, value);
+        }
+
+        internal MaterialValue OneMinus(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.OneMinus, value);
+        }
+
+        internal MaterialValue Normalize(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.Normalize, value);
+        }
+
+        internal MaterialValue Dot(MaterialValue left, MaterialValue right)
+        {
+            ValidateBinaryOperands(left, right);
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.Dot,
+                MaterialValueType.Float,
+                default,
+                default,
+                left.Index,
+                right.Index,
+                InvalidOperand,
+                InvalidOperand));
+        }
+
+        internal MaterialValue Compare(
+            MaterialValue left,
+            MaterialValue right,
+            MaterialComparison comparison)
+        {
+            ValidateBinaryOperands(left, right);
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.Compare,
+                MaterialValueType.Bool,
+                (int) comparison,
+                default,
+                left.Index,
+                right.Index,
+                InvalidOperand,
+                InvalidOperand));
+        }
+
+        internal MaterialValue Swizzle(
+            MaterialValue value,
+            in MaterialSwizzleMask mask)
+        {
+            ValidateValue(value, nameof(value));
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.Swizzle,
+                mask.ResultType,
+                mask.PackedValue,
+                default,
+                value.Index,
+                InvalidOperand,
+                InvalidOperand,
+                InvalidOperand));
+        }
+
+        internal MaterialValue Compose(MaterialValue x, MaterialValue y)
+        {
+            ValidateBinaryOperands(x, y);
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.Compose,
+                MaterialValueType.Float2,
+                default,
+                default,
+                x.Index,
+                y.Index,
+                InvalidOperand,
+                InvalidOperand));
+        }
+
+        internal MaterialValue Compose(
+            MaterialValue x,
+            MaterialValue y,
+            MaterialValue z)
+        {
+            ValidateValue(x, nameof(x));
+            ValidateValue(y, nameof(y));
+            ValidateValue(z, nameof(z));
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.Compose,
+                MaterialValueType.Float3,
+                default,
+                default,
+                x.Index,
+                y.Index,
+                z.Index,
+                InvalidOperand));
+        }
+
+        internal MaterialValue Compose(
+            MaterialValue x,
+            MaterialValue y,
+            MaterialValue z,
+            MaterialValue w)
+        {
+            ValidateValue(x, nameof(x));
+            ValidateValue(y, nameof(y));
+            ValidateValue(z, nameof(z));
+            ValidateValue(w, nameof(w));
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.Compose,
+                MaterialValueType.Float4,
+                default,
+                default,
+                x.Index,
+                y.Index,
+                z.Index,
+                w.Index));
         }
 
         internal MaterialValue Lerp(
@@ -326,8 +630,8 @@ namespace VividRP.Runtime.GPUDriven
             MaterialValue right,
             MaterialValue weight)
         {
-            RequireMatchingNumericTypes(left, right);
-            RequireType(weight, MaterialValueType.Float, nameof(weight));
+            ValidateBinaryOperands(left, right);
+            ValidateValue(weight, nameof(weight));
             return Emit(new MaterialValueNode(
                 MaterialValueOpcode.Lerp,
                 left.Type,
@@ -344,8 +648,9 @@ namespace VividRP.Runtime.GPUDriven
             MaterialValue whenTrue,
             MaterialValue whenFalse)
         {
-            RequireType(condition, MaterialValueType.Bool, nameof(condition));
-            RequireSameType(whenTrue, whenFalse);
+            ValidateValue(condition, nameof(condition));
+            ValidateValue(whenTrue, nameof(whenTrue));
+            ValidateValue(whenFalse, nameof(whenFalse));
             return Emit(new MaterialValueNode(
                 MaterialValueOpcode.Select,
                 whenTrue.Type,
@@ -372,6 +677,34 @@ namespace VividRP.Runtime.GPUDriven
                 && ReferenceEquals(value.Owner, this)
                 && value.Index < m_Nodes.Count
                 && m_Nodes[value.Index].Type == value.Type;
+        }
+
+        internal bool TryGetParameterDeclaration(
+            int declarationIndex,
+            out MaterialParameterDeclaration declaration)
+        {
+            if ((uint) declarationIndex < (uint) m_ParameterDeclarations.Count)
+            {
+                declaration = m_ParameterDeclarations[declarationIndex];
+                return true;
+            }
+
+            declaration = default;
+            return false;
+        }
+
+        internal bool TryGetResourceDeclaration(
+            int declarationIndex,
+            out MaterialResourceDeclaration declaration)
+        {
+            if ((uint) declarationIndex < (uint) m_ResourceDeclarations.Count)
+            {
+                declaration = m_ResourceDeclarations[declarationIndex];
+                return true;
+            }
+
+            declaration = default;
+            return false;
         }
 
         internal void Freeze()
@@ -426,6 +759,8 @@ namespace VividRP.Runtime.GPUDriven
             if (IsFrozen)
                 throw new InvalidOperationException("Cannot modify a frozen material value IR.");
 
+            MaterialIRVerifier.VerifyCandidateNode(this, node).ThrowIfInvalid();
+
             if (m_ValueSet.TryGetValue(node, out int existingIndex))
                 return new MaterialValue(this, existingIndex, node.Type);
 
@@ -435,53 +770,95 @@ namespace VividRP.Runtime.GPUDriven
             return new MaterialValue(this, index, node.Type);
         }
 
-        private void RequireMatchingNumericTypes(MaterialValue left, MaterialValue right)
+        private int GetOrAddParameterDeclaration(
+            in MaterialParameterDeclaration declaration)
         {
-            RequireNumeric(left, nameof(left));
-            RequireNumeric(right, nameof(right));
-            RequireSameType(left, right);
+            RequireMutable();
+            ValidateDeclaration(declaration.Symbol, declaration.Type, isResource: false);
+            for (int i = 0; i < m_ParameterDeclarations.Count; i++)
+            {
+                MaterialParameterDeclaration existing = m_ParameterDeclarations[i];
+                if (existing == declaration)
+                    return i;
+                if (string.Equals(existing.Symbol, declaration.Symbol, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        $"Material parameter '{declaration.Symbol}' is already declared as {existing.Type}.",
+                        nameof(declaration));
+                }
+            }
+
+            int index = m_ParameterDeclarations.Count;
+            m_ParameterDeclarations.Add(declaration);
+            return index;
         }
 
-        private void RequireSameType(MaterialValue left, MaterialValue right)
+        private int GetOrAddResourceDeclaration(
+            in MaterialResourceDeclaration declaration)
+        {
+            RequireMutable();
+            ValidateDeclaration(declaration.Symbol, declaration.Type, isResource: true);
+            for (int i = 0; i < m_ResourceDeclarations.Count; i++)
+            {
+                MaterialResourceDeclaration existing = m_ResourceDeclarations[i];
+                if (existing == declaration)
+                    return i;
+                if (string.Equals(existing.Symbol, declaration.Symbol, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        $"Material resource '{declaration.Symbol}' is already declared as {existing.Type}.",
+                        nameof(declaration));
+                }
+            }
+
+            int index = m_ResourceDeclarations.Count;
+            m_ResourceDeclarations.Add(declaration);
+            return index;
+        }
+
+        private static void ValidateDeclaration(
+            string symbol,
+            MaterialValueType type,
+            bool isResource)
+        {
+            if (string.IsNullOrEmpty(symbol))
+                throw new ArgumentException("Material declaration symbol cannot be empty.", nameof(symbol));
+            if (isResource)
+            {
+                if (type != MaterialValueType.Texture2D)
+                {
+                    throw new ArgumentException(
+                        $"Material resource '{symbol}' has unsupported type {type}.",
+                        nameof(type));
+                }
+                return;
+            }
+
+            if (type == MaterialValueType.Texture2D
+                || (uint) type > (uint) MaterialValueType.Texture2D)
+            {
+                throw new ArgumentException(
+                    $"Material parameter '{symbol}' has unsupported type {type}.",
+                    nameof(type));
+            }
+        }
+
+        private void ValidateBinaryOperands(MaterialValue left, MaterialValue right)
         {
             ValidateValue(left, nameof(left));
             ValidateValue(right, nameof(right));
-            if (left.Type != right.Type)
-            {
-                throw new ArgumentException(
-                    $"Material values must have matching types, got {left.Type} and {right.Type}.");
-            }
-        }
-
-        private void RequireNumeric(MaterialValue value, string parameterName)
-        {
-            ValidateValue(value, parameterName);
-            if (value.Type == MaterialValueType.Bool || value.Type == MaterialValueType.Texture2D)
-            {
-                throw new ArgumentException(
-                    $"Material value must be numeric, got {value.Type}.",
-                    parameterName);
-            }
-        }
-
-        private void RequireType(
-            MaterialValue value,
-            MaterialValueType expectedType,
-            string parameterName)
-        {
-            ValidateValue(value, parameterName);
-            if (value.Type != expectedType)
-            {
-                throw new ArgumentException(
-                    $"Material value must be {expectedType}, got {value.Type}.",
-                    parameterName);
-            }
         }
 
         private void ValidateValue(MaterialValue value, string parameterName)
         {
             if (!Owns(value))
                 throw new ArgumentException("Material value is not owned by this IR.", parameterName);
+        }
+
+        private void RequireMutable()
+        {
+            if (IsFrozen)
+                throw new InvalidOperationException("Cannot modify a frozen material value IR.");
         }
 
         private static MaterialValueType GetExternalInputType(MaterialExternalInput input)
@@ -499,23 +876,5 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        private static MaterialValueType GetParameterType(MaterialParameter parameter)
-        {
-            switch (parameter)
-            {
-                case MaterialParameter.BaseColor:
-                case MaterialParameter.TopBaseColor:
-                    return MaterialValueType.Float4;
-                case MaterialParameter.Roughness:
-                case MaterialParameter.TopRoughness:
-                case MaterialParameter.Metallic:
-                case MaterialParameter.TopMetallic:
-                case MaterialParameter.LayerWeight:
-                case MaterialParameter.AlphaClipThreshold:
-                    return MaterialValueType.Float;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(parameter), parameter, null);
-            }
-        }
     }
 }

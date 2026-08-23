@@ -37,12 +37,319 @@ namespace VividRP.Editor.Tests
             Assert.That(valueIR.GetNode(uvDdy).Opcode, Is.EqualTo(MaterialValueOpcode.Ddy));
             Assert.That(valueIR.GetNode(shadedColor).Opcode, Is.EqualTo(MaterialValueOpcode.Multiply));
             Assert.That(valueIR.NodeCount, Is.EqualTo(10));
-            Assert.Throws<ArgumentException>(() => valueIR.Add(uv, sample));
+            MaterialIRVerificationException typeException =
+                Assert.Throws<MaterialIRVerificationException>(() => valueIR.Add(uv, sample));
+            AssertDiagnostic(
+                typeException.Diagnostics,
+                MaterialIRDiagnosticCodes.OperandTypeMismatch,
+                nodeIndex: 10);
 
             var foreignIR = new MaterialValueIR();
             MaterialValue foreignUV = foreignIR.ExternalInput(MaterialExternalInput.UV0);
             Assert.That(valueIR.Owns(foreignUV), Is.False);
             Assert.Throws<ArgumentException>(() => valueIR.Ddx(foreignUV));
+        }
+
+        [Test]
+        public void MaterialDeclarations_AreTypedAndRoundTripNativeTemplateSemantics()
+        {
+            foreach (MaterialParameter parameter in Enum.GetValues(typeof(MaterialParameter)))
+            {
+                MaterialParameterDeclaration declaration =
+                    MaterialNativeTemplateDeclarationAdapter.GetParameter(parameter);
+                Assert.That(declaration.Symbol, Is.EqualTo(parameter.ToString()));
+                Assert.That(
+                    MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                        declaration,
+                        out MaterialParameter roundTrip),
+                    Is.True);
+                Assert.That(roundTrip, Is.EqualTo(parameter));
+            }
+
+            foreach (MaterialTextureResource resource in
+                     Enum.GetValues(typeof(MaterialTextureResource)))
+            {
+                MaterialResourceDeclaration declaration =
+                    MaterialNativeTemplateDeclarationAdapter.GetTexture(resource);
+                Assert.That(declaration.Symbol, Is.EqualTo(resource.ToString()));
+                Assert.That(declaration.Type, Is.EqualTo(MaterialValueType.Texture2D));
+                Assert.That(
+                    MaterialNativeTemplateDeclarationAdapter.TryGetTexture(
+                        declaration,
+                        out MaterialTextureResource roundTrip),
+                    Is.True);
+                Assert.That(roundTrip, Is.EqualTo(resource));
+            }
+
+            Assert.That(
+                MaterialNativeTemplateDeclarationAdapter.GetParameter(
+                    MaterialParameter.Emission).Type,
+                Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(
+                new MaterialParameterDeclaration("BaseColor", MaterialValueType.Float4),
+                Is.EqualTo(
+                    MaterialNativeTemplateDeclarationAdapter.GetParameter(
+                        MaterialParameter.BaseColor)));
+            Assert.That(
+                new MaterialParameterDeclaration("baseColor", MaterialValueType.Float4),
+                Is.Not.EqualTo(
+                    MaterialNativeTemplateDeclarationAdapter.GetParameter(
+                        MaterialParameter.BaseColor)));
+            Assert.That(
+                new MaterialParameterDeclaration("BaseColor", MaterialValueType.Float3),
+                Is.Not.EqualTo(
+                    MaterialNativeTemplateDeclarationAdapter.GetParameter(
+                        MaterialParameter.BaseColor)));
+
+            var valueIR = new MaterialValueIR();
+            var customParameter = new MaterialParameterDeclaration(
+                "CustomTint",
+                MaterialValueType.Float3);
+            MaterialValue firstParameter = valueIR.Parameter(customParameter);
+            MaterialValue duplicateParameter = valueIR.Parameter(customParameter);
+            var customResource = new MaterialResourceDeclaration(
+                "CustomTexture",
+                MaterialValueType.Texture2D);
+            MaterialValue firstResource = valueIR.TextureResource(customResource);
+            MaterialValue duplicateResource = valueIR.TextureResource(customResource);
+
+            Assert.That(duplicateParameter, Is.EqualTo(firstParameter));
+            Assert.That(duplicateResource, Is.EqualTo(firstResource));
+            Assert.That(firstParameter.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(firstResource.Type, Is.EqualTo(MaterialValueType.Texture2D));
+            Assert.That(valueIR.ParameterDeclarations, Has.Count.EqualTo(1));
+            Assert.That(valueIR.ResourceDeclarations, Has.Count.EqualTo(1));
+            Assert.That(
+                MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                    customParameter,
+                    out _),
+                Is.False);
+            Assert.That(
+                MaterialNativeTemplateDeclarationAdapter.TryGetTexture(
+                    customResource,
+                    out _),
+                Is.False);
+        }
+
+        [Test]
+        public void MaterialOpcodeTable_CoversEveryMaterialIRV2Opcode()
+        {
+            MaterialValueOpcode[] opcodes =
+                (MaterialValueOpcode[]) Enum.GetValues(typeof(MaterialValueOpcode));
+            var expectedOpcodes = new[]
+            {
+                MaterialValueOpcode.Constant,
+                MaterialValueOpcode.ExternalInput,
+                MaterialValueOpcode.Parameter,
+                MaterialValueOpcode.TextureResource,
+                MaterialValueOpcode.TextureSampleGrad,
+                MaterialValueOpcode.Ddx,
+                MaterialValueOpcode.Ddy,
+                MaterialValueOpcode.Add,
+                MaterialValueOpcode.Multiply,
+                MaterialValueOpcode.Lerp,
+                MaterialValueOpcode.Select,
+                MaterialValueOpcode.Swizzle,
+                MaterialValueOpcode.Compose,
+                MaterialValueOpcode.Subtract,
+                MaterialValueOpcode.Divide,
+                MaterialValueOpcode.Min,
+                MaterialValueOpcode.Max,
+                MaterialValueOpcode.Saturate,
+                MaterialValueOpcode.OneMinus,
+                MaterialValueOpcode.Dot,
+                MaterialValueOpcode.Normalize,
+                MaterialValueOpcode.Compare,
+            };
+            CollectionAssert.AreEqual(expectedOpcodes, opcodes);
+            for (int opcodeIndex = 0; opcodeIndex < expectedOpcodes.Length; opcodeIndex++)
+                Assert.That((int) expectedOpcodes[opcodeIndex], Is.EqualTo(opcodeIndex));
+
+            foreach (MaterialValueOpcode opcode in opcodes)
+            {
+                Assert.That(
+                    MaterialOpcodeTable.TryGetInfo(opcode, out MaterialOpcodeInfo info),
+                    Is.True,
+                    opcode.ToString());
+                Assert.That(info.Opcode, Is.EqualTo(opcode));
+                Assert.That(info.Name, Is.Not.Empty);
+                Assert.That(info.MinOperandCount, Is.GreaterThanOrEqualTo(0));
+                Assert.That(info.MaxOperandCount, Is.GreaterThanOrEqualTo(info.MinOperandCount));
+                Assert.That(info.EvaluationStages, Is.EqualTo(MaterialEvaluationStageMask.All));
+            }
+
+            MaterialOpcodeTable.TryGetInfo(
+                MaterialValueOpcode.TextureSampleGrad,
+                out MaterialOpcodeInfo textureSample);
+            MaterialOpcodeTable.TryGetInfo(
+                MaterialValueOpcode.Ddx,
+                out MaterialOpcodeInfo ddx);
+            MaterialOpcodeTable.TryGetInfo(
+                MaterialValueOpcode.Ddy,
+                out MaterialOpcodeInfo ddy);
+            Assert.That(
+                textureSample.DerivativePolicy,
+                Is.EqualTo(MaterialDerivativePolicy.RequiresExplicitGradients));
+            Assert.That(
+                ddx.DerivativePolicy,
+                Is.EqualTo(MaterialDerivativePolicy.ProducesDerivative));
+            Assert.That(
+                ddy.DerivativePolicy,
+                Is.EqualTo(MaterialDerivativePolicy.ProducesDerivative));
+
+            Assert.That(
+                MaterialOpcodeTable.TryGetInfo((MaterialValueOpcode) 999, out _),
+                Is.False);
+        }
+
+        [Test]
+        public void MaterialValueIR_V2OperationsAreTypedAndDeduplicated()
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue x = valueIR.Constant(1.0f);
+            MaterialValue y = valueIR.Constant(2.0f);
+            MaterialValue z = valueIR.Constant(3.0f);
+            MaterialValue w = valueIR.Constant(4.0f);
+            MaterialValue left = valueIR.Constant(new float3(1.0f, 2.0f, 3.0f));
+            MaterialValue right = valueIR.Constant(new float3(4.0f, 5.0f, 6.0f));
+
+            MaterialValue swizzle = valueIR.Swizzle(left, MaterialSwizzleMask.XYZ);
+            MaterialValue compose2 = valueIR.Compose(x, y);
+            MaterialValue compose3 = valueIR.Compose(x, y, z);
+            MaterialValue compose4 = valueIR.Compose(x, y, z, w);
+            MaterialValue subtract = valueIR.Subtract(left, right);
+            MaterialValue divide = valueIR.Divide(left, right);
+            MaterialValue min = valueIR.Min(left, right);
+            MaterialValue max = valueIR.Max(left, right);
+            MaterialValue saturate = valueIR.Saturate(left);
+            MaterialValue oneMinus = valueIR.OneMinus(left);
+            MaterialValue dot = valueIR.Dot(left, right);
+            MaterialValue normalize = valueIR.Normalize(left);
+            MaterialValue compare = valueIR.Compare(x, y, MaterialComparison.Less);
+
+            Assert.That(swizzle.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(compose2.Type, Is.EqualTo(MaterialValueType.Float2));
+            Assert.That(compose3.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(compose4.Type, Is.EqualTo(MaterialValueType.Float4));
+            Assert.That(subtract.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(divide.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(min.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(max.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(saturate.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(oneMinus.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(dot.Type, Is.EqualTo(MaterialValueType.Float));
+            Assert.That(normalize.Type, Is.EqualTo(MaterialValueType.Float3));
+            Assert.That(compare.Type, Is.EqualTo(MaterialValueType.Bool));
+
+            Assert.That(valueIR.Swizzle(left, MaterialSwizzleMask.XYZ), Is.EqualTo(swizzle));
+            Assert.That(valueIR.Compose(x, y), Is.EqualTo(compose2));
+            Assert.That(valueIR.Compose(x, y, z), Is.EqualTo(compose3));
+            Assert.That(valueIR.Compose(x, y, z, w), Is.EqualTo(compose4));
+            Assert.That(valueIR.Subtract(left, right), Is.EqualTo(subtract));
+            Assert.That(valueIR.Divide(left, right), Is.EqualTo(divide));
+            Assert.That(valueIR.Min(left, right), Is.EqualTo(min));
+            Assert.That(valueIR.Max(left, right), Is.EqualTo(max));
+            Assert.That(valueIR.Saturate(left), Is.EqualTo(saturate));
+            Assert.That(valueIR.OneMinus(left), Is.EqualTo(oneMinus));
+            Assert.That(valueIR.Dot(left, right), Is.EqualTo(dot));
+            Assert.That(valueIR.Normalize(left), Is.EqualTo(normalize));
+            Assert.That(
+                valueIR.Compare(x, y, MaterialComparison.Less),
+                Is.EqualTo(compare));
+        }
+
+        [Test]
+        public void MaterialIRVerifier_CandidateDiagnosticsHaveStableCodesAndNodeIndices()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue left = values.Constant(1.0f);
+            MaterialValue right = values.Constant(2.0f);
+            MaterialValue condition = values.Constant(true);
+
+            AssertCandidateDiagnostic(
+                values,
+                new MaterialValueNode(
+                    (MaterialValueOpcode) 999,
+                    MaterialValueType.Float,
+                    0,
+                    default,
+                    -1,
+                    -1,
+                    -1,
+                    -1),
+                MaterialIRDiagnosticCodes.UnknownOpcode);
+            AssertCandidateDiagnostic(
+                values,
+                new MaterialValueNode(
+                    MaterialValueOpcode.Constant,
+                    (MaterialValueType) 999,
+                    0,
+                    default,
+                    -1,
+                    -1,
+                    -1,
+                    -1),
+                MaterialIRDiagnosticCodes.UnknownValueType);
+            AssertCandidateDiagnostic(
+                values,
+                new MaterialValueNode(
+                    MaterialValueOpcode.Add,
+                    MaterialValueType.Float,
+                    0,
+                    default,
+                    left.Index,
+                    -1,
+                    -1,
+                    -1),
+                MaterialIRDiagnosticCodes.InvalidOperandEncoding);
+            AssertCandidateDiagnostic(
+                values,
+                new MaterialValueNode(
+                    MaterialValueOpcode.Add,
+                    MaterialValueType.Float,
+                    0,
+                    default,
+                    left.Index,
+                    values.NodeCount,
+                    -1,
+                    -1),
+                MaterialIRDiagnosticCodes.NonTopologicalOperand);
+            AssertCandidateDiagnostic(
+                values,
+                new MaterialValueNode(
+                    MaterialValueOpcode.Add,
+                    MaterialValueType.Float,
+                    0,
+                    default,
+                    left.Index,
+                    condition.Index,
+                    -1,
+                    -1),
+                MaterialIRDiagnosticCodes.OperandTypeMismatch);
+            AssertCandidateDiagnostic(
+                values,
+                new MaterialValueNode(
+                    MaterialValueOpcode.Parameter,
+                    MaterialValueType.Float,
+                    values.ParameterDeclarations.Count,
+                    default,
+                    -1,
+                    -1,
+                    -1,
+                    -1),
+                MaterialIRDiagnosticCodes.InvalidSemantic);
+            AssertCandidateDiagnostic(
+                values,
+                new MaterialValueNode(
+                    MaterialValueOpcode.Add,
+                    MaterialValueType.Float,
+                    1,
+                    default,
+                    left.Index,
+                    right.Index,
+                    -1,
+                    -1),
+                MaterialIRDiagnosticCodes.NonCanonicalPayload);
         }
 
         [Test]
@@ -76,13 +383,18 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
             Assert.That(horizontal.ProgramID, Is.Not.EqualTo(vertical.ProgramID));
             Assert.That(module.Values.Owns(module.Outputs.CoverageValue), Is.True);
-            Assert.That(module.Outputs.CoverageValue.Type, Is.EqualTo(MaterialValueType.Float4));
+            Assert.That(module.Outputs.CoverageValue.Type, Is.EqualTo(MaterialValueType.Float));
+            Assert.That(module.Outputs.Emission.Type, Is.EqualTo(MaterialValueType.Float3));
             Assert.That(
                 module.MaterialFeatures,
+                Is.EqualTo(MaterialFeatureMask.AlphaClip));
+            Assert.That(
+                module.ShadingModels,
                 Is.EqualTo(
-                    MaterialFeatureMask.AlphaClip
-                    | MaterialFeatureMask.Emission
-                    | MaterialFeatureMask.Unlit));
+                    MaterialShadingModelMask.StandardLit
+                    | MaterialShadingModelMask.Unlit));
+            Assert.That(module.Verification.IsValid, Is.True);
+            Assert.That(module.Verification.Diagnostics, Is.Empty);
             Assert.That(
                 module.Topology.FeatureMask,
                 Is.EqualTo(
@@ -103,26 +415,46 @@ namespace VividRP.Editor.Tests
             Assert.That(module.GetDebugDump(), Does.Contain("coverage=%"));
             Assert.That(
                 module.GetDebugDump(),
-                Does.Contain("material_features=AlphaClip, Emission, Unlit"));
+                Does.Contain("material_features=AlphaClip"));
+            Assert.That(
+                module.GetDebugDump(),
+                Does.Contain("shading_models=StandardLit, Unlit"));
             var noMaterialFeatures = new MaterialIRModule(
                 module.Values,
                 module.Outputs,
                 module.Topology,
-                MaterialFeatureMask.None);
+                MaterialFeatureMask.None,
+                module.ShadingModels);
             Assert.That(noMaterialFeatures.StructuralHash, Is.Not.EqualTo(module.StructuralHash));
+            MaterialIRVerificationException unknownFeatureException =
+                Assert.Throws<MaterialIRVerificationException>(() => new MaterialIRModule(
+                    module.Values,
+                    module.Outputs,
+                    module.Topology,
+                    (MaterialFeatureMask) (1 << 1),
+                    module.ShadingModels));
+            AssertDiagnostic(
+                unknownFeatureException.Diagnostics,
+                MaterialIRDiagnosticCodes.UnknownMaterialFeature);
             Assert.Throws<InvalidOperationException>(() =>
                 module.Values.Parameter(MaterialParameter.Roughness));
 
             var foreignValues = new MaterialValueIR();
             MaterialValue foreignCoverage =
                 foreignValues.Parameter(MaterialParameter.BaseColor);
-            Assert.Throws<ArgumentException>(() => new MaterialIRModule(
-                module.Values,
-                new MaterialOutputRoots(
-                    foreignCoverage,
-                    module.Outputs.AlphaClipThreshold),
-                module.Topology,
-                module.MaterialFeatures));
+            MaterialIRVerificationException outputException =
+                Assert.Throws<MaterialIRVerificationException>(() => new MaterialIRModule(
+                    module.Values,
+                    new MaterialOutputRoots(
+                        foreignCoverage,
+                        module.Outputs.AlphaClipThreshold,
+                        module.Outputs.Emission),
+                    module.Topology,
+                    module.MaterialFeatures,
+                    module.ShadingModels));
+            AssertDiagnostic(
+                outputException.Diagnostics,
+                MaterialIRDiagnosticCodes.OutputNotOwned);
         }
 
         [Test]
@@ -139,11 +471,12 @@ namespace VividRP.Editor.Tests
         [Test]
         public void CompilationContract_ProgramCatalog0To2HasFrozenAbi()
         {
-            Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.ProgramVersion, Is.EqualTo(1u));
@@ -176,15 +509,15 @@ namespace VividRP.Editor.Tests
             };
             var expectedSemanticHashes = new[]
             {
-                0x28BD8897839120B1ul,
-                0xA9FA2E736EB8F056ul,
-                0xE0D2EB2E6A59C9D9ul,
+                0x64F1CA45107C27F8ul,
+                0x19543940D7603740ul,
+                0x055478DD3B3B45ABul,
             };
             var expectedCompiledHashes = new[]
             {
-                0xD77FC4F037F599DCul,
-                0xEB723FA3CC3807D4ul,
-                0x9FF98369DD679A20ul,
+                0x04A59854D0819128ul,
+                0x43C3B1B4311A2A48ul,
+                0x44A606DB9A862400ul,
             };
 
             for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)
@@ -247,22 +580,23 @@ namespace VividRP.Editor.Tests
                 MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
                     MaterialProgramContract.RuntimeAbiVersion);
             MaterialIRModule prototypeModule = prototype.Module;
-            var withoutEmission = new MaterialIRModule(
+            var unlitOnly = new MaterialIRModule(
                 prototypeModule.Values,
                 prototypeModule.Outputs,
                 prototypeModule.Topology,
-                prototypeModule.MaterialFeatures & ~MaterialFeatureMask.Emission);
-            CompiledMaterialProgram compiledWithoutEmission =
+                prototypeModule.MaterialFeatures,
+                MaterialShadingModelMask.Unlit);
+            CompiledMaterialProgram compiledUnlitOnly =
                 CompiledMaterialProgram.Compile(
-                    withoutEmission,
+                    unlitOnly,
                     MaterialProgramContract.RuntimeAbiVersion);
 
-            Assert.That(compiledWithoutEmission.ProgramID, Is.EqualTo(prototype.ProgramID));
+            Assert.That(compiledUnlitOnly.ProgramID, Is.EqualTo(prototype.ProgramID));
             AssertRuntimeProgramData(
-                compiledWithoutEmission.RuntimeData,
+                compiledUnlitOnly.RuntimeData,
                 new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u });
-            Assert.That(compiledWithoutEmission.SemanticHash, Is.Not.EqualTo(prototype.SemanticHash));
-            Assert.That(compiledWithoutEmission.CompiledHash, Is.Not.EqualTo(prototype.CompiledHash));
+            Assert.That(compiledUnlitOnly.SemanticHash, Is.Not.EqualTo(prototype.SemanticHash));
+            Assert.That(compiledUnlitOnly.CompiledHash, Is.Not.EqualTo(prototype.CompiledHash));
         }
 
         [Test]
@@ -359,7 +693,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SurfaceMatcher_RejectsUnsupportedClosureOperator()
+        public void ClosureTopology_RejectsUnknownClosureOperatorWithStableDiagnostic()
         {
             CompiledMaterialProgram prototype =
                 MaterialProgramPrototypeBuilder.BuildDualSlab(
@@ -367,27 +701,23 @@ namespace VividRP.Editor.Tests
                     VividDualSlabOperator.HorizontalMix);
             MaterialIRModule prototypeModule = prototype.Module;
             ClosureTopology prototypeTopology = prototypeModule.Topology;
-            var topology = new ClosureTopology(
-                prototypeModule.Values,
-                prototypeTopology.NormalBases.ToArray(),
-                prototypeTopology.Slabs.ToArray(),
-                new[]
-                {
-                    new ClosureOperator(
-                        (ClosureOperatorKind) 99,
-                        backgroundSlabIndex: 0,
-                        foregroundSlabIndex: 1,
-                        weight: prototypeTopology.Operators[0].Weight),
-                },
-                ClosureTopologyBudget.Prototype);
-            var module = new MaterialIRModule(
-                prototypeModule.Values,
-                prototypeModule.Outputs,
-                topology,
-                prototypeModule.MaterialFeatures);
-
-            Assert.Throws<NotSupportedException>(() =>
-                SurfaceProgramMatcher.Compile(module));
+            MaterialIRVerificationException exception =
+                Assert.Throws<MaterialIRVerificationException>(() => new ClosureTopology(
+                    prototypeModule.Values,
+                    prototypeTopology.NormalBases.ToArray(),
+                    prototypeTopology.Slabs.ToArray(),
+                    new[]
+                    {
+                        new ClosureOperator(
+                            (ClosureOperatorKind) 99,
+                            backgroundSlabIndex: 0,
+                            foregroundSlabIndex: 1,
+                            weight: prototypeTopology.Operators[0].Weight),
+                    },
+                    ClosureTopologyBudget.Prototype));
+            AssertDiagnostic(
+                exception.Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidTopologySemantic);
         }
 
         [Test]
@@ -447,29 +777,29 @@ namespace VividRP.Editor.Tests
             MaterialProgramCost standardCost = firstStandard.Diagnostics.Cost;
             AssertStageCost(
                 standardCost.Coverage,
-                nodes: 8,
+                nodes: 9,
                 textureSamples: 1,
                 derivatives: 2,
-                arithmeticNodes: 1,
+                arithmeticNodes: 2,
                 parameters: 2,
                 textureResources: 1,
                 externalInputs: 1);
             AssertStageCost(
                 standardCost.Surface,
-                nodes: 11,
-                textureSamples: 1,
-                derivatives: 2,
-                arithmeticNodes: 1,
-                parameters: 3,
-                textureResources: 1,
-                externalInputs: 3);
-            AssertStageCost(
-                standardCost.Combined,
                 nodes: 12,
                 textureSamples: 1,
                 derivatives: 2,
                 arithmeticNodes: 1,
                 parameters: 4,
+                textureResources: 1,
+                externalInputs: 3);
+            AssertStageCost(
+                standardCost.Combined,
+                nodes: 14,
+                textureSamples: 1,
+                derivatives: 2,
+                arithmeticNodes: 2,
+                parameters: 5,
                 textureResources: 1,
                 externalInputs: 3);
             Assert.That(standardCost.ClosureCount, Is.EqualTo(1));
@@ -485,29 +815,29 @@ namespace VividRP.Editor.Tests
             MaterialProgramCost dualCost = vertical.Diagnostics.Cost;
             AssertStageCost(
                 dualCost.Coverage,
-                nodes: 8,
+                nodes: 9,
                 textureSamples: 1,
                 derivatives: 2,
-                arithmeticNodes: 1,
+                arithmeticNodes: 2,
                 parameters: 2,
                 textureResources: 1,
                 externalInputs: 1);
             AssertStageCost(
                 dualCost.Surface,
-                nodes: 18,
-                textureSamples: 2,
-                derivatives: 2,
-                arithmeticNodes: 2,
-                parameters: 7,
-                textureResources: 2,
-                externalInputs: 3);
-            AssertStageCost(
-                dualCost.Combined,
                 nodes: 19,
                 textureSamples: 2,
                 derivatives: 2,
                 arithmeticNodes: 2,
                 parameters: 8,
+                textureResources: 2,
+                externalInputs: 3);
+            AssertStageCost(
+                dualCost.Combined,
+                nodes: 21,
+                textureSamples: 2,
+                derivatives: 2,
+                arithmeticNodes: 3,
+                parameters: 9,
                 textureResources: 2,
                 externalInputs: 3);
             Assert.That(dualCost.ClosureCount, Is.EqualTo(2));
@@ -544,7 +874,7 @@ namespace VividRP.Editor.Tests
                 MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
                     GPUDrivenMaterialCompiler.ProgramVersion);
             var budget = new MaterialProgramCostBudget(
-                maxCombinedValueNodes: 11,
+                maxCombinedValueNodes: 13,
                 maxCoverageTextureSamples: 1,
                 maxSurfaceTextureSamples: 6,
                 maxTotalTextureSamples: 7,
@@ -565,7 +895,7 @@ namespace VividRP.Editor.Tests
             Assert.That(exception.Message, Does.Contain("MPC1001"));
             Assert.That(
                 exception.Message,
-                Does.Contain("combined value nodes cost 12 exceeds budget 11"));
+                Does.Contain("combined value nodes cost 14 exceeds budget 13"));
         }
 
         [Test]
@@ -710,12 +1040,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(budget.Allows(1, 0), Is.True);
             Assert.That(budget.Allows(2, 1), Is.False);
-            Assert.Throws<InvalidOperationException>(() => new ClosureTopology(
-                prototype.Module.Values,
-                new[] { prototype.Module.Topology.NormalBases[0] },
-                new[] { prototype.Module.Topology.Slabs[0], prototype.Module.Topology.Slabs[1] },
-                new[] { prototype.Module.Topology.Operators[0] },
-                budget));
+            MaterialIRVerificationException exception =
+                Assert.Throws<MaterialIRVerificationException>(() => new ClosureTopology(
+                    prototype.Module.Values,
+                    new[] { prototype.Module.Topology.NormalBases[0] },
+                    new[] { prototype.Module.Topology.Slabs[0], prototype.Module.Topology.Slabs[1] },
+                    new[] { prototype.Module.Topology.Operators[0] },
+                    budget));
+            AssertDiagnostic(
+                exception.Diagnostics,
+                MaterialIRDiagnosticCodes.TopologyBudgetExceeded);
         }
 
         private static void AssertCoverageRequirements(CompiledMaterialProgram program)
@@ -725,16 +1059,23 @@ namespace VividRP.Editor.Tests
                 coverage.ProgramID,
                 Is.EqualTo(VividMaterialCoverageProgramID.BaseColorAlpha));
             Assert.That(program.RuntimeData.CoverageProgramID, Is.EqualTo(coverage.ProgramID));
-            Assert.That(coverage.ValueSlice.NodeCount, Is.EqualTo(8));
+            Assert.That(coverage.ValueSlice.NodeCount, Is.EqualTo(9));
             Assert.That(
                 coverage.ValueSlice.Contains(program.Module.Outputs.CoverageValue),
                 Is.True);
             Assert.That(
                 coverage.ValueSlice.Contains(program.Module.Outputs.AlphaClipThreshold),
                 Is.True);
+            Assert.That(
+                coverage.ValueSlice.Contains(program.Module.Outputs.Emission),
+                Is.False);
             CollectionAssert.AreEqual(
                 new[] { MaterialParameter.BaseColor, MaterialParameter.AlphaClipThreshold },
                 coverage.RequiredParameters);
+            CollectionAssert.DoesNotContain(
+                coverage.Requirements.ParameterDeclarations,
+                MaterialNativeTemplateDeclarationAdapter.GetParameter(
+                    MaterialParameter.Emission));
             CollectionAssert.AreEqual(
                 new[] { MaterialTextureResource.BaseColor },
                 coverage.RequiredTextureResources);
@@ -751,7 +1092,7 @@ namespace VividRP.Editor.Tests
                 surface.ProgramID,
                 Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
             Assert.That(program.RuntimeData.SurfaceProgramID, Is.EqualTo(surface.ProgramID));
-            Assert.That(surface.ValueSlice.NodeCount, Is.EqualTo(11));
+            Assert.That(surface.ValueSlice.NodeCount, Is.EqualTo(12));
             Assert.That(
                 surface.ValueSlice.Contains(program.Module.Topology.Slabs[0].Roughness),
                 Is.True);
@@ -761,14 +1102,22 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 surface.ValueSlice.Contains(program.Module.Outputs.AlphaClipThreshold),
                 Is.False);
+            Assert.That(
+                surface.ValueSlice.Contains(program.Module.Outputs.Emission),
+                Is.True);
             CollectionAssert.AreEqual(
                 new[]
                 {
                     MaterialParameter.BaseColor,
                     MaterialParameter.Roughness,
                     MaterialParameter.Metallic,
+                    MaterialParameter.Emission,
                 },
                 surface.RequiredParameters);
+            CollectionAssert.Contains(
+                surface.Requirements.ParameterDeclarations,
+                MaterialNativeTemplateDeclarationAdapter.GetParameter(
+                    MaterialParameter.Emission));
             CollectionAssert.AreEqual(
                 new[] { MaterialTextureResource.BaseColor },
                 surface.RequiredTextureResources);
@@ -790,7 +1139,7 @@ namespace VividRP.Editor.Tests
                 surface.ProgramID,
                 Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
             Assert.That(program.RuntimeData.SurfaceProgramID, Is.EqualTo(surface.ProgramID));
-            Assert.That(surface.ValueSlice.NodeCount, Is.EqualTo(18));
+            Assert.That(surface.ValueSlice.NodeCount, Is.EqualTo(19));
             Assert.That(
                 surface.ValueSlice.Contains(program.Module.Topology.Slabs[1].BaseColor),
                 Is.True);
@@ -800,6 +1149,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 surface.ValueSlice.Contains(program.Module.Outputs.AlphaClipThreshold),
                 Is.False);
+            Assert.That(
+                surface.ValueSlice.Contains(program.Module.Outputs.Emission),
+                Is.True);
             CollectionAssert.AreEqual(
                 new[]
                 {
@@ -810,8 +1162,13 @@ namespace VividRP.Editor.Tests
                     MaterialParameter.Metallic,
                     MaterialParameter.TopMetallic,
                     MaterialParameter.LayerWeight,
+                    MaterialParameter.Emission,
                 },
                 surface.RequiredParameters);
+            CollectionAssert.Contains(
+                surface.Requirements.ParameterDeclarations,
+                MaterialNativeTemplateDeclarationAdapter.GetParameter(
+                    MaterialParameter.Emission));
             CollectionAssert.AreEqual(
                 new[]
                 {
@@ -856,6 +1213,7 @@ namespace VividRP.Editor.Tests
                     MaterialParameter.Roughness,
                     MaterialParameter.Metallic,
                     MaterialParameter.AlphaClipThreshold,
+                    MaterialParameter.Emission,
                 },
                 layout.Requirements.Parameters);
             CollectionAssert.AreEqual(
@@ -967,6 +1325,7 @@ namespace VividRP.Editor.Tests
                     MaterialParameter.TopMetallic,
                     MaterialParameter.LayerWeight,
                     MaterialParameter.AlphaClipThreshold,
+                    MaterialParameter.Emission,
                 },
                 layout.Requirements.Parameters);
             CollectionAssert.AreEqual(
@@ -1146,6 +1505,30 @@ namespace VividRP.Editor.Tests
             Assert.That(binding.ByteOffset, Is.EqualTo(byteOffset));
         }
 
+        private static void AssertCandidateDiagnostic(
+            MaterialValueIR values,
+            in MaterialValueNode candidate,
+            string expectedCode)
+        {
+            int expectedNodeIndex = values.NodeCount;
+            MaterialIRVerificationResult result =
+                MaterialIRVerifier.VerifyCandidateNode(values, candidate);
+
+            Assert.That(result.IsValid, Is.False);
+            AssertDiagnostic(result.Diagnostics, expectedCode, expectedNodeIndex);
+        }
+
+        private static void AssertDiagnostic(
+            System.Collections.Generic.IReadOnlyList<MaterialIRDiagnostic> diagnostics,
+            string expectedCode,
+            int nodeIndex = -1)
+        {
+            MaterialIRDiagnostic diagnostic = diagnostics.First(entry =>
+                string.Equals(entry.Code, expectedCode, StringComparison.Ordinal));
+            Assert.That(diagnostic.Code, Is.EqualTo(expectedCode));
+            Assert.That(diagnostic.NodeIndex, Is.EqualTo(nodeIndex));
+        }
+
         private static void AssertStageCost(
             in MaterialStageCost cost,
             int nodes,
@@ -1189,7 +1572,24 @@ namespace VividRP.Editor.Tests
             return valueSlice.NodeIndices.Select(index =>
             {
                 MaterialValueNode node = valueSlice.Values.Nodes[index];
-                return $"{node.Opcode}:{node.Type}:{node.Semantic}";
+                string semantic;
+                if (node.Opcode == MaterialValueOpcode.Parameter)
+                {
+                    MaterialParameterDeclaration declaration =
+                        valueSlice.Values.ParameterDeclarations[node.Semantic];
+                    semantic = $"{declaration.Symbol}:{declaration.Type}";
+                }
+                else if (node.Opcode == MaterialValueOpcode.TextureResource)
+                {
+                    MaterialResourceDeclaration declaration =
+                        valueSlice.Values.ResourceDeclarations[node.Semantic];
+                    semantic = $"{declaration.Symbol}:{declaration.Type}";
+                }
+                else
+                {
+                    semantic = node.Semantic.ToString();
+                }
+                return $"{node.Opcode}:{node.Type}:{semantic}";
             }).ToArray();
         }
 
@@ -1201,7 +1601,8 @@ namespace VividRP.Editor.Tests
             MaterialValue metallic = valueIR.Parameter(MaterialParameter.Metallic);
             MaterialValue alphaClipThreshold =
                 valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
-            MaterialValue coverageValue = valueIR.Constant(new float4(1.0f));
+            MaterialValue emission = valueIR.Parameter(MaterialParameter.Emission);
+            MaterialValue coverageValue = valueIR.Constant(1.0f);
             var normalBases = new[]
             {
                 new ClosureNormalBasis(
@@ -1227,9 +1628,10 @@ namespace VividRP.Editor.Tests
                 ClosureTopologyBudget.Prototype);
             return new MaterialIRModule(
                 valueIR,
-                new MaterialOutputRoots(coverageValue, alphaClipThreshold),
+                new MaterialOutputRoots(coverageValue, alphaClipThreshold, emission),
                 topology,
-                MaterialFeatureMask.AlphaClip);
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
         }
 
         private static MaterialIRModule BuildCanonicalHashModule(bool useAlternateValueOrder)
@@ -1239,6 +1641,8 @@ namespace VividRP.Editor.Tests
             MaterialValue roughness;
             MaterialValue metallic;
             MaterialValue alphaClipThreshold;
+            MaterialValue emission;
+            MaterialValue coverage;
             MaterialValue normal;
             MaterialValue tangent;
 
@@ -1247,6 +1651,7 @@ namespace VividRP.Editor.Tests
                 roughness = valueIR.Parameter(MaterialParameter.Roughness);
                 metallic = valueIR.Parameter(MaterialParameter.Metallic);
                 alphaClipThreshold = valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+                emission = valueIR.Parameter(MaterialParameter.Emission);
                 normal = valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
                 tangent = valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
                 valueIR.Constant(123.0f);
@@ -1266,7 +1671,9 @@ namespace VividRP.Editor.Tests
                 roughness = valueIR.Parameter(MaterialParameter.Roughness);
                 metallic = valueIR.Parameter(MaterialParameter.Metallic);
                 alphaClipThreshold = valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+                emission = valueIR.Parameter(MaterialParameter.Emission);
             }
+            coverage = valueIR.Swizzle(baseColor, MaterialSwizzleMask.W);
 
             var topology = new ClosureTopology(
                 valueIR,
@@ -1289,11 +1696,11 @@ namespace VividRP.Editor.Tests
                 ClosureTopologyBudget.Prototype);
             return new MaterialIRModule(
                 valueIR,
-                new MaterialOutputRoots(baseColor, alphaClipThreshold),
+                new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
                 topology,
-                MaterialFeatureMask.AlphaClip
-                | MaterialFeatureMask.Emission
-                | MaterialFeatureMask.Unlit);
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit
+                | MaterialShadingModelMask.Unlit);
         }
 
         private static MaterialIRModule BuildUnsupportedSurfaceModule()
@@ -1307,6 +1714,8 @@ namespace VividRP.Editor.Tests
             MaterialValue metallic = valueIR.Parameter(MaterialParameter.Metallic);
             MaterialValue alphaClipThreshold =
                 valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+            MaterialValue emission = valueIR.Parameter(MaterialParameter.Emission);
+            MaterialValue coverage = valueIR.Swizzle(baseColor, MaterialSwizzleMask.W);
             var normalBases = new[]
             {
                 new ClosureNormalBasis(
@@ -1331,9 +1740,10 @@ namespace VividRP.Editor.Tests
                 ClosureTopologyBudget.Prototype);
             return new MaterialIRModule(
                 valueIR,
-                new MaterialOutputRoots(baseColor, alphaClipThreshold),
+                new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
                 topology,
-                MaterialFeatureMask.AlphaClip);
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
         }
 
         private static MaterialValue BuildSampledBaseColor(

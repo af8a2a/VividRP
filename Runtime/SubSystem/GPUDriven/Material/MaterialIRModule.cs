@@ -11,23 +11,33 @@ namespace VividRP.Runtime.GPUDriven
     {
         None = 0,
         AlphaClip = 1 << 0,
-        Emission = 1 << 1,
-        Unlit = 1 << 2,
+    }
+
+    [Flags]
+    internal enum MaterialShadingModelMask
+    {
+        None = 0,
+        StandardLit = 1 << 0,
+        Unlit = 1 << 1,
     }
 
     internal readonly struct MaterialOutputRoots
     {
         internal MaterialOutputRoots(
             MaterialValue coverageValue,
-            MaterialValue alphaClipThreshold)
+            MaterialValue alphaClipThreshold,
+            MaterialValue emission)
         {
             CoverageValue = coverageValue;
             AlphaClipThreshold = alphaClipThreshold;
+            Emission = emission;
         }
 
         internal MaterialValue CoverageValue { get; }
 
         internal MaterialValue AlphaClipThreshold { get; }
+
+        internal MaterialValue Emission { get; }
     }
 
     internal sealed class MaterialValueSlice
@@ -109,14 +119,22 @@ namespace VividRP.Runtime.GPUDriven
             MaterialValueIR values,
             in MaterialOutputRoots outputs,
             ClosureTopology topology,
-            MaterialFeatureMask materialFeatures)
+            MaterialFeatureMask materialFeatures,
+            MaterialShadingModelMask shadingModels)
         {
             Values = values ?? throw new ArgumentNullException(nameof(values));
             Topology = topology ?? throw new ArgumentNullException(nameof(topology));
             Outputs = outputs;
             MaterialFeatures = materialFeatures;
+            ShadingModels = shadingModels;
 
-            Validate();
+            Verification = MaterialIRVerifier.VerifyModule(
+                Values,
+                Outputs,
+                Topology,
+                MaterialFeatures,
+                ShadingModels);
+            Verification.ThrowIfInvalid();
             Values.Freeze();
             SemanticHash = new MaterialSemanticHash(
                 MaterialProgramContract.IRSchemaVersion,
@@ -133,6 +151,10 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialFeatureMask MaterialFeatures { get; }
 
+        internal MaterialShadingModelMask ShadingModels { get; }
+
+        internal MaterialIRVerificationResult Verification { get; }
+
         internal MaterialSemanticHash SemanticHash { get; }
 
         internal ulong StructuralHash => SemanticHash.Value;
@@ -147,35 +169,6 @@ namespace VividRP.Runtime.GPUDriven
             return new MaterialValueSlice(Values, roots);
         }
 
-        private void Validate()
-        {
-            if (!ReferenceEquals(Values, Topology.ValueIR))
-                throw new ArgumentException("Closure topology must reference the module value IR.");
-
-            RequireOutputType(
-                Outputs.CoverageValue,
-                MaterialValueType.Float4,
-                nameof(MaterialOutputRoots.CoverageValue));
-            RequireOutputType(
-                Outputs.AlphaClipThreshold,
-                MaterialValueType.Float,
-                nameof(MaterialOutputRoots.AlphaClipThreshold));
-        }
-
-        private void RequireOutputType(
-            MaterialValue value,
-            MaterialValueType expectedType,
-            string outputName)
-        {
-            if (!Values.Owns(value))
-                throw new ArgumentException($"Material output '{outputName}' is not owned by the module value IR.");
-            if (value.Type != expectedType)
-            {
-                throw new ArgumentException(
-                    $"Material output '{outputName}' must be {expectedType}, got {value.Type}.");
-            }
-        }
-
         private ulong ComputeStructuralHash()
         {
             var valueHashes = new ulong[Values.NodeCount];
@@ -184,7 +177,9 @@ namespace VividRP.Runtime.GPUDriven
             AddHash(ref hash, MaterialProgramContract.SemanticHashVersion);
             AddValueHash(ref hash, Outputs.CoverageValue, valueHashes, hasValueHash);
             AddValueHash(ref hash, Outputs.AlphaClipThreshold, valueHashes, hasValueHash);
+            AddValueHash(ref hash, Outputs.Emission, valueHashes, hasValueHash);
             AddHash(ref hash, (int) MaterialFeatures);
+            AddHash(ref hash, (int) ShadingModels);
 
             AddHash(ref hash, Topology.ClosureCount);
             foreach (ClosureSlab slab in Topology.Slabs)
@@ -232,7 +227,7 @@ namespace VividRP.Runtime.GPUDriven
             ulong hash = MaterialProgramHashUtility.OffsetBasis;
             AddHash(ref hash, (int) node.Opcode);
             AddHash(ref hash, (int) node.Type);
-            AddHash(ref hash, node.Semantic);
+            AddNodePayloadHash(ref hash, node);
             uint4 constantBits = math.asuint(node.Constant);
             AddHash(ref hash, constantBits.x);
             AddHash(ref hash, constantBits.y);
@@ -246,6 +241,28 @@ namespace VividRP.Runtime.GPUDriven
             valueHashes[nodeIndex] = hash;
             hasValueHash[nodeIndex] = true;
             return hash;
+        }
+
+        private void AddNodePayloadHash(ref ulong hash, in MaterialValueNode node)
+        {
+            switch (node.Opcode)
+            {
+                case MaterialValueOpcode.Parameter:
+                    MaterialParameterDeclaration parameter =
+                        Values.ParameterDeclarations[node.Semantic];
+                    AddHash(ref hash, parameter.Symbol);
+                    AddHash(ref hash, (int) parameter.Type);
+                    break;
+                case MaterialValueOpcode.TextureResource:
+                    MaterialResourceDeclaration resource =
+                        Values.ResourceDeclarations[node.Semantic];
+                    AddHash(ref hash, resource.Symbol);
+                    AddHash(ref hash, (int) resource.Type);
+                    break;
+                default:
+                    AddHash(ref hash, node.Semantic);
+                    break;
+            }
         }
 
         private void AddOperandHash(
@@ -267,6 +284,25 @@ namespace VividRP.Runtime.GPUDriven
                 .AppendLine(StructuralHash.ToString("X16", CultureInfo.InvariantCulture));
             builder.Append("semantic_identity ")
                 .AppendLine(SemanticHash.ToString());
+            builder.AppendLine("declarations:");
+            for (int i = 0; i < Values.ParameterDeclarations.Count; i++)
+            {
+                MaterialParameterDeclaration declaration =
+                    Values.ParameterDeclarations[i];
+                builder.Append("  parameter @p").Append(i)
+                    .Append(' ').Append(declaration.Symbol)
+                    .Append(':').Append(declaration.Type)
+                    .AppendLine();
+            }
+            for (int i = 0; i < Values.ResourceDeclarations.Count; i++)
+            {
+                MaterialResourceDeclaration declaration =
+                    Values.ResourceDeclarations[i];
+                builder.Append("  resource @r").Append(i)
+                    .Append(' ').Append(declaration.Symbol)
+                    .Append(':').Append(declaration.Type)
+                    .AppendLine();
+            }
             builder.AppendLine("values:");
             for (int i = 0; i < Values.Nodes.Count; i++)
             {
@@ -283,7 +319,9 @@ namespace VividRP.Runtime.GPUDriven
             builder.Append("  alpha_clip_threshold=%")
                 .Append(Outputs.AlphaClipThreshold.Index)
                 .AppendLine();
+            builder.Append("  emission=%").Append(Outputs.Emission.Index).AppendLine();
             builder.Append("material_features=").Append(MaterialFeatures).AppendLine();
+            builder.Append("shading_models=").Append(ShadingModels).AppendLine();
             builder.Append("topology: closures=").Append(Topology.ClosureCount)
                 .Append(" operators=").Append(Topology.OperatorCount)
                 .Append(" budget=").Append(Topology.Budget.MaxClosureCount)
@@ -326,7 +364,7 @@ namespace VividRP.Runtime.GPUDriven
             return builder.ToString();
         }
 
-        private static string FormatOpcode(in MaterialValueNode node)
+        private string FormatOpcode(in MaterialValueNode node)
         {
             switch (node.Opcode)
             {
@@ -335,12 +373,30 @@ namespace VividRP.Runtime.GPUDriven
                 case MaterialValueOpcode.ExternalInput:
                     return "external_input " + (MaterialExternalInput) node.Semantic;
                 case MaterialValueOpcode.Parameter:
-                    return "parameter " + (MaterialParameter) node.Semantic;
+                    return "parameter "
+                        + Values.ParameterDeclarations[node.Semantic].Symbol;
                 case MaterialValueOpcode.TextureResource:
-                    return "texture_resource " + (MaterialTextureResource) node.Semantic;
+                    return "texture_resource "
+                        + Values.ResourceDeclarations[node.Semantic].Symbol;
+                case MaterialValueOpcode.Swizzle:
+                    return "swizzle " + FormatSwizzle(node.Semantic);
+                case MaterialValueOpcode.Compare:
+                    return "compare " + (MaterialComparison) node.Semantic;
                 default:
                     return node.Opcode.ToString();
             }
+        }
+
+        private static string FormatSwizzle(int packedMask)
+        {
+            if (!MaterialSwizzleMask.TryDecode(packedMask, out MaterialSwizzleMask mask))
+                return "<invalid>";
+
+            const string components = "xyzw";
+            var builder = new StringBuilder(".");
+            for (int i = 0; i < mask.ComponentCount; i++)
+                builder.Append(components[mask.GetComponent(i)]);
+            return builder.ToString();
         }
 
         private static string FormatConstant(in MaterialValueNode node)
@@ -404,6 +460,11 @@ namespace VividRP.Runtime.GPUDriven
         }
 
         private static void AddHash(ref ulong hash, ulong value)
+        {
+            MaterialProgramHashUtility.Add(ref hash, value);
+        }
+
+        private static void AddHash(ref ulong hash, string value)
         {
             MaterialProgramHashUtility.Add(ref hash, value);
         }

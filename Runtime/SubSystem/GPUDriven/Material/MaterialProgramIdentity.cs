@@ -5,11 +5,12 @@ namespace VividRP.Runtime.GPUDriven
 {
     internal static class MaterialProgramContract
     {
-        internal const uint IRSchemaVersion = 1u;
-        internal const uint SemanticHashVersion = 1u;
+        internal const uint IRSchemaVersion = 2u;
+        internal const uint SemanticHashVersion = 2u;
         internal const uint CompiledHashVersion = 1u;
-        internal const uint CompilerVersion = 1u;
-        internal const uint NativeTemplateBackendVersion = 1u;
+        internal const uint CompilerVersion = 2u;
+        internal const uint NativeTemplateBackendVersion = 2u;
+        internal const uint VerifierVersion = 1u;
         internal const uint RuntimeAbiVersion = 1u;
 
         internal const int BuiltinProgramCount = 3;
@@ -20,7 +21,7 @@ namespace VividRP.Runtime.GPUDriven
         NativeTemplate = 0u,
     }
 
-    // V1 hashes are deterministic 64-bit fingerprints. Dynamic catalogs must compare
+    // Hashes are deterministic 64-bit fingerprints. Dynamic catalogs must compare
     // canonical payloads after a hash match; the fixed native catalog uses golden tests.
     internal readonly struct MaterialSemanticHash : IEquatable<MaterialSemanticHash>
     {
@@ -178,6 +179,16 @@ namespace VividRP.Runtime.GPUDriven
                 hash ^= (byte) (value >> (byteIndex * 8));
                 hash *= Prime;
             }
+        }
+
+        internal static void Add(ref ulong hash, string value)
+        {
+            if (value == null)
+                throw new ArgumentNullException(nameof(value));
+
+            Add(ref hash, value.Length);
+            for (int characterIndex = 0; characterIndex < value.Length; characterIndex++)
+                Add(ref hash, (uint) value[characterIndex]);
         }
     }
 

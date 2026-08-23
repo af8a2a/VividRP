@@ -182,76 +182,7 @@ namespace VividRP.Runtime.GPUDriven
 
         private void Validate()
         {
-            if (m_Slabs.Length == 0)
-                throw new ArgumentException("Closure topology must contain at least one slab.", nameof(m_Slabs));
-            if (!IsWithinBudget)
-            {
-                throw new InvalidOperationException(
-                    $"Closure topology requires {ClosureCount} closures and {OperatorCount} operators, "
-                    + $"but the prototype budget allows {Budget.MaxClosureCount} closures and "
-                    + $"{Budget.MaxOperatorCount} operators.");
-            }
-
-            for (int i = 0; i < m_NormalBases.Length; i++)
-            {
-                ClosureNormalBasis basis = m_NormalBases[i];
-                RequireValueType(basis.Normal, MaterialValueType.Float3, "normal basis normal");
-                RequireValueType(basis.Tangent, MaterialValueType.Float4, "normal basis tangent");
-            }
-
-            for (int i = 0; i < m_Slabs.Length; i++)
-            {
-                ClosureSlab slab = m_Slabs[i];
-                RequireValueType(slab.BaseColor, MaterialValueType.Float4, "slab base color");
-                RequireValueType(slab.Roughness, MaterialValueType.Float, "slab roughness");
-                RequireValueType(slab.Metallic, MaterialValueType.Float, "slab metallic");
-                if ((uint) slab.NormalBasisIndex >= (uint) m_NormalBases.Length)
-                    throw new ArgumentOutOfRangeException(nameof(m_Slabs), "Slab normal basis is invalid.");
-            }
-
-            if (m_Slabs.Length == 1)
-            {
-                if (m_Operators.Length != 0)
-                    throw new ArgumentException("A single-slab topology cannot contain an operator.", nameof(m_Operators));
-                if (!m_Slabs[0].IsTop || !m_Slabs[0].IsBottom)
-                    throw new ArgumentException("A single slab must be both top and bottom.", nameof(m_Slabs));
-                return;
-            }
-
-            if (m_Slabs.Length != 2 || m_Operators.Length != 1)
-            {
-                throw new NotSupportedException(
-                    "The prototype supports one slab or two slabs connected by one operator.");
-            }
-
-            ClosureOperator closureOperator = m_Operators[0];
-            if (closureOperator.Kind == ClosureOperatorKind.None)
-                throw new ArgumentException("A dual-slab topology requires an operator.", nameof(m_Operators));
-            if (closureOperator.BackgroundSlabIndex != 0 || closureOperator.ForegroundSlabIndex != 1)
-            {
-                throw new ArgumentException(
-                    "The prototype requires the base slab at index 0 and top slab at index 1.",
-                    nameof(m_Operators));
-            }
-            RequireValueType(closureOperator.Weight, MaterialValueType.Float, "operator weight");
-            if (m_Slabs[0].IsTop || !m_Slabs[0].IsBottom)
-                throw new ArgumentException("The base slab must be marked as bottom only.", nameof(m_Slabs));
-            if (!m_Slabs[1].IsTop || m_Slabs[1].IsBottom)
-                throw new ArgumentException("The top slab must be marked as top only.", nameof(m_Slabs));
-        }
-
-        private void RequireValueType(
-            MaterialValue value,
-            MaterialValueType expectedType,
-            string description)
-        {
-            if (!ValueIR.Owns(value))
-                throw new ArgumentException($"The {description} is not owned by the topology value IR.");
-            if (value.Type != expectedType)
-            {
-                throw new ArgumentException(
-                    $"The {description} must be {expectedType}, got {value.Type}.");
-            }
+            MaterialIRVerifier.VerifyTopology(this).ThrowIfInvalid();
         }
     }
 }

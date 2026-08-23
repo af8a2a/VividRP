@@ -26,6 +26,10 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeContract, Does.Contain("struct VividMaterialProgramData"));
             Assert.That(
                 runtimeContract,
+                Does.Contain(
+                    $"#define VIVID_MATERIAL_PROGRAM_VERSION {GPUDrivenMaterialCompiler.ProgramVersion}u"));
+            Assert.That(
+                runtimeContract,
                 Does.Contain("StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;"));
             Assert.That(
                 runtimeContract,

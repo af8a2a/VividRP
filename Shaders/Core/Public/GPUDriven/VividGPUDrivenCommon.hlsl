@@ -15,6 +15,17 @@
 #define VIVIDMATERIALFLAGS_TERRAIN 2u
 #define VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE 4u
 
+#define VIVID_MATERIAL_PROGRAM_VERSION 1u
+#define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB 0u
+#define VIVIDMATERIALPROGRAMID_INVALID 0xffffffffu
+#define VIVIDMATERIALCOVERAGEPROGRAMID_BASE_COLOR_ALPHA 0u
+#define VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB 0u
+#define VIVIDMATERIALTRANSPORTPROGRAMID_NONE 0u
+#define VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA 0u
+#define VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING 0u
+#define VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT 1u
+#define VIVIDMATERIALEXECUTIONCLASS_VISIBILITY_DEFERRED 0u
+
 #define VIVIDRENDERERLISTID_CULL_FRONT 1u
 #define VIVIDRENDERERLISTID_CULL_OFF 2u
 #define VIVIDRENDERERLISTID_ALPHA_TEST 4u
@@ -344,6 +355,7 @@ StructuredBuffer<VividInstanceData> _InstanceData;
 uint _InstanceDataCount;
 
 StructuredBuffer<VividMaterialData> _MaterialData;
+uint _MaterialDataCount;
 StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;
 uint _MaterialRuntimeHeaderCount;
 StructuredBuffer<VividMaterialProgramData> _MaterialPrograms;
@@ -367,6 +379,16 @@ VividInstanceData PullInstanceData(const uint instanceIndex)
 VividMaterialData PullMaterialData(const uint materialIndex)
 {
     return _MaterialData[materialIndex];
+}
+
+VividMaterialRuntimeHeader PullMaterialRuntimeHeader(const uint materialIndex)
+{
+    return _MaterialRuntimeHeaders[materialIndex];
+}
+
+VividMaterialProgramData PullMaterialProgramData(const uint programIndex)
+{
+    return _MaterialPrograms[programIndex];
 }
 
 VividSurfaceBindingData PullSurfaceBindingData(const uint surfaceBindingIndex)

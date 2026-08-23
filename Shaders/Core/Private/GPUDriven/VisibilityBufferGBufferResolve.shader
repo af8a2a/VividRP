@@ -251,12 +251,74 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return true;
             }
 
+            bool IsStandardSingleSlabProgram(
+                const VividMaterialRuntimeHeader runtimeHeader,
+                const VividMaterialProgramData programData)
+            {
+                return runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB
+                    && programData.Version == VIVID_MATERIAL_PROGRAM_VERSION
+                    && programData.CoverageProgramID
+                        == VIVIDMATERIALCOVERAGEPROGRAMID_BASE_COLOR_ALPHA
+                    && programData.SurfaceProgramID
+                        == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
+                    && programData.TransportProgramID
+                        == VIVIDMATERIALTRANSPORTPROGRAMID_NONE
+                    && programData.ParameterLayoutID
+                        == VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA
+                    && programData.ResourceLayoutID
+                        == VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING
+                    && (programData.CapabilityFlags
+                        & VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT) != 0u
+                    && programData.ExecutionClass
+                        == VIVIDMATERIALEXECUTIONCLASS_VISIBILITY_DEFERRED;
+            }
+
+            bool TryResolveStandardSingleSlabProgram(
+                const uint materialIndex,
+                out VividMaterialData materialData,
+                out VividSurfaceBindingData surfaceBindingData)
+            {
+                materialData = (VividMaterialData) 0;
+                surfaceBindingData = (VividSurfaceBindingData) 0;
+                if (materialIndex >= _MaterialRuntimeHeaderCount)
+                    return false;
+
+                const VividMaterialRuntimeHeader runtimeHeader =
+                    PullMaterialRuntimeHeader(materialIndex);
+                if (runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID
+                    || runtimeHeader.ProgramID >= _MaterialProgramCount)
+                {
+                    return false;
+                }
+
+                const VividMaterialProgramData programData =
+                    PullMaterialProgramData(runtimeHeader.ProgramID);
+                if (!IsStandardSingleSlabProgram(runtimeHeader, programData)
+                    || runtimeHeader.ParameterAddress >= _MaterialDataCount
+                    || runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount)
+                {
+                    return false;
+                }
+
+                materialData = PullMaterialData(runtimeHeader.ParameterAddress);
+                surfaceBindingData = PullSurfaceBindingData(
+                    runtimeHeader.ResourceBindingAddress);
+                return true;
+            }
+
             TriangleData LoadTriangleData(VividVisibilityBufferValue visibilityBufferValue)
             {
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
-                result.materialData = PullMaterialData(result.instanceData.MaterialIndex);
-                result.surfaceBindingData = PullSurfaceBindingData(result.materialData.SurfaceBindingIndex);
+                if (!TryResolveStandardSingleSlabProgram(
+                        result.instanceData.MaterialIndex,
+                        result.materialData,
+                        result.surfaceBindingData))
+                {
+                    result.materialData = PullMaterialData(result.instanceData.MaterialIndex);
+                    result.surfaceBindingData = PullSurfaceBindingData(
+                        result.materialData.SurfaceBindingIndex);
+                }
                 const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
                 const uint3 indices = uint3(

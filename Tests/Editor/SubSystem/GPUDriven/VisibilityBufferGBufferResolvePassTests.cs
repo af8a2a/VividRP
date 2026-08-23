@@ -156,6 +156,41 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("clipPosition", source);
         }
 
+        [Test]
+        public void ResolveShader_ConsumesProgram0AddressesAndPreservesLegacyFallback()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(VisibilityBufferGBufferResolvePass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferGBufferResolve.shader");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+
+            StringAssert.Contains("TryResolveStandardSingleSlabProgram", source);
+            StringAssert.Contains("PullMaterialRuntimeHeader(materialIndex)", source);
+            StringAssert.Contains("PullMaterialProgramData(runtimeHeader.ProgramID)", source);
+            StringAssert.Contains("PullMaterialData(runtimeHeader.ParameterAddress)", source);
+            StringAssert.Contains(
+                "runtimeHeader.ParameterAddress >= _MaterialDataCount",
+                source);
+            StringAssert.Contains("runtimeHeader.ResourceBindingAddress", source);
+            StringAssert.Contains(
+                "runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount",
+                source);
+            StringAssert.Contains(
+                "result.materialData = PullMaterialData(result.instanceData.MaterialIndex)",
+                source);
+            StringAssert.Contains("result.materialData.SurfaceBindingIndex", source);
+        }
+
         private static RenderGraphTexture GetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName)
         {
             var field = typeof(VisibilityBufferGBufferResolvePass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

@@ -133,7 +133,13 @@ namespace VividRP.Runtime.GPUDriven
             AppendFunctionSignature(builder, entryPoint, physicalContract);
             builder.AppendLine("{");
             AppendNodes(builder, stageLIR, schema, physicalContract);
-            AppendOutput(builder, module, stageLIR, lowering.SelectionKey.Topology);
+            AppendOutput(
+                builder,
+                module,
+                stageLIR,
+                schema,
+                physicalContract,
+                lowering.SelectionKey.Topology);
             builder.AppendLine("}");
 
             return new MaterialSurfaceHlslArtifact(
@@ -325,6 +331,8 @@ namespace VividRP.Runtime.GPUDriven
             StringBuilder builder,
             MaterialIRModule module,
             MaterialStageLIR stageLIR,
+            MaterialNativeTemplateLayoutSchema schema,
+            MaterialSurfaceHlslPhysicalContract physicalContract,
             MaterialProgramTopologySpecialization topology)
         {
             builder.AppendLine("    VividAOTSurfaceProgramOutput output = (VividAOTSurfaceProgramOutput) 0;");
@@ -334,7 +342,13 @@ namespace VividRP.Runtime.GPUDriven
             {
                 if (topology != MaterialProgramTopologySpecialization.SingleSlab)
                     throw new InvalidOperationException("Surface topology and closure root disagree.");
-                AppendSlabOutput(builder, stageLIR, root.Slab, "BaseSlab");
+                AppendSlabOutput(
+                    builder,
+                    stageLIR,
+                    schema,
+                    physicalContract,
+                    root.Slab,
+                    "BaseSlab");
                 builder.AppendLine("    output.ClosureCount = 1u;");
                 builder.AppendLine("    output.LayerOperator = 0u;");
             }
@@ -363,11 +377,15 @@ namespace VividRP.Runtime.GPUDriven
                 AppendSlabOutput(
                     builder,
                     stageLIR,
+                    schema,
+                    physicalContract,
                     module.ClosureGraph.Nodes[root.Operand0].Slab,
                     "BaseSlab");
                 AppendSlabOutput(
                     builder,
                     stageLIR,
+                    schema,
+                    physicalContract,
                     module.ClosureGraph.Nodes[root.Operand1].Slab,
                     "TopSlab");
                 RequireType(root.Weight, MaterialValueType.Float, "closure weight");
@@ -392,6 +410,8 @@ namespace VividRP.Runtime.GPUDriven
         private static void AppendSlabOutput(
             StringBuilder builder,
             MaterialStageLIR stageLIR,
+            MaterialNativeTemplateLayoutSchema schema,
+            MaterialSurfaceHlslPhysicalContract physicalContract,
             in ClosureSlabExpression slab,
             string field)
         {
@@ -408,6 +428,117 @@ namespace VividRP.Runtime.GPUDriven
             builder.Append("    output.").Append(field).Append(".FeatureMask = ")
                 .Append(((uint) slab.Features).ToString(CultureInfo.InvariantCulture))
                 .AppendLine("u;");
+
+            int sampleIndex = FindSlabBaseColorSampleIndex(stageLIR, slab);
+            MaterialStageLIRNode sample = stageLIR.Nodes[sampleIndex];
+            MaterialStageLIRNode resource = stageLIR.Nodes[sample.Operand0];
+            if (!stageLIR.Values.TryGetResourceDeclaration(
+                    resource.Semantic,
+                    out MaterialResourceDeclaration declaration)
+                || !schema.TryGetResourceBinding(
+                    declaration,
+                    out MaterialNativeResourceBinding binding))
+            {
+                throw new NotSupportedException(
+                    $"Slab base-color declaration @{resource.Semantic} has no native binding.");
+            }
+            if (binding.Target != MaterialTextureResource.BaseColor
+                && binding.Target != MaterialTextureResource.TopBaseColor)
+            {
+                throw new NotSupportedException(
+                    $"Slab base-color sample maps to unsupported native resource '{binding.Target}'.");
+            }
+
+            GetResourceExpressions(
+                binding.Target,
+                physicalContract,
+                out string surfaceBinding,
+                out _,
+                out _);
+            string detailName = field == "BaseSlab"
+                ? "vivid_base_slab_detail"
+                : "vivid_top_slab_detail";
+            builder.Append("    const VividEvaluatedSlabSurface ")
+                .Append(detailName)
+                .AppendLine(" = VividEvaluateAOTSlabSurfaceDetail(");
+            builder.Append("        vivid_sample_slab_").Append(sampleIndex).AppendLine(",");
+            builder.Append("        ").Append(surfaceBinding).AppendLine(",");
+            builder.Append("        vivid_sample_context_").Append(sampleIndex).AppendLine(",");
+            builder.Append("        ")
+                .Append((slab.Features & ClosureFeatureMask.NormalTexture) != 0
+                    ? "true"
+                    : "false")
+                .AppendLine(",");
+            builder.Append("        ")
+                .Append((slab.Features & ClosureFeatureMask.MaskTexture) != 0
+                    ? "true"
+                    : "false")
+                .AppendLine(",");
+            builder.Append("        output.").Append(field).AppendLine(".BaseColor.rgb,");
+            builder.Append("        output.").Append(field)
+                .AppendLine(".PerceptualRoughness,");
+            builder.Append("        output.").Append(field).AppendLine(".Metallic);");
+            builder.Append("    output.").Append(field).Append(".PerceptualRoughness = ")
+                .Append(detailName).AppendLine(".PerceptualRoughness;");
+            builder.Append("    output.").Append(field).Append(".Metallic = ")
+                .Append(detailName).AppendLine(".Metallic;");
+            builder.Append("    output.").Append(field).Append(".NormalTS = ")
+                .Append(detailName).AppendLine(".NormalTS;");
+            builder.Append("    output.").Append(field).Append(".AmbientOcclusion = ")
+                .Append(detailName).AppendLine(".AmbientOcclusion;");
+            builder.Append("    output.").Append(field).Append(".HasNormal = ")
+                .Append(detailName).AppendLine(".HasNormal;");
+        }
+
+        private static int FindSlabBaseColorSampleIndex(
+            MaterialStageLIR stageLIR,
+            in ClosureSlabExpression slab)
+        {
+            int sampleIndex = -1;
+            var visited = new bool[stageLIR.NodeCount];
+            FindTextureSampleGrad(
+                stageLIR,
+                stageLIR.GetValue(slab.BaseColor).Index,
+                visited,
+                ref sampleIndex);
+            if (sampleIndex < 0)
+            {
+                throw new NotSupportedException(
+                    "Slab base color must depend on one explicit-gradient texture sample.");
+            }
+            return sampleIndex;
+        }
+
+        private static void FindTextureSampleGrad(
+            MaterialStageLIR stageLIR,
+            int nodeIndex,
+            bool[] visited,
+            ref int sampleIndex)
+        {
+            if (visited[nodeIndex])
+                return;
+            visited[nodeIndex] = true;
+
+            MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
+            if (node.Opcode == MaterialStageLIROpcode.TextureSampleGrad)
+            {
+                if (sampleIndex >= 0 && sampleIndex != nodeIndex)
+                {
+                    throw new NotSupportedException(
+                        "Slab base color may depend on only one texture sample in the native AOT adapter.");
+                }
+                sampleIndex = nodeIndex;
+                return;
+            }
+
+            for (int operandIndex = 0; operandIndex < node.OperandCount; operandIndex++)
+            {
+                FindTextureSampleGrad(
+                    stageLIR,
+                    node.GetOperand(operandIndex),
+                    visited,
+                    ref sampleIndex);
+            }
         }
 
         private static void AppendOutputAssignment(
@@ -946,6 +1077,9 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine("    float Metallic;");
             builder.AppendLine("    float3 NormalWS;");
             builder.AppendLine("    float4 TangentWS;");
+            builder.AppendLine("    float3 NormalTS;");
+            builder.AppendLine("    float AmbientOcclusion;");
+            builder.AppendLine("    uint HasNormal;");
             builder.AppendLine("    uint FeatureMask;");
             builder.AppendLine("};");
             builder.AppendLine();

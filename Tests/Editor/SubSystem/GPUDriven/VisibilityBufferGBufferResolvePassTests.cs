@@ -160,7 +160,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveShader_ConsumesSharedSurfaceProgramAndPreservesLegacyFallback()
+        public void ResolveShader_ConsumesGeneratedSurfaceProgramAndPreservesLegacyFallback()
         {
             UnityEditor.PackageManager.PackageInfo package =
                 UnityEditor.PackageManager.PackageInfo.FindForAssembly(
@@ -192,8 +192,24 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VividMaterialSurfaceAOT.generated.hlsl", surfaceProgramSource);
             StringAssert.Contains("VividTryEvaluateAOTSurfaceProgram", source);
             StringAssert.Contains("aotSurfaceOutput.BaseSlab.BaseColor.rgb", source);
+            StringAssert.Contains("aotSurfaceOutput.BaseSlab.AmbientOcclusion", source);
+            StringAssert.Contains("aotSurfaceOutput.TopSlab.AmbientOcclusion", source);
+            StringAssert.Contains("float3 EvaluateAOTSlabNormalWS(", source);
+            StringAssert.Contains("slab.NormalWS", source);
+            StringAssert.Contains("slab.TangentWS", source);
+            StringAssert.Contains("slab.NormalTS", source);
+            StringAssert.Contains("slab.HasNormal", source);
+            StringAssert.Contains(
+                "EvaluateAOTSlabNormalWS(aotSurfaceOutput.BaseSlab,",
+                compactSource);
+            StringAssert.Contains(
+                "EvaluateAOTSlabNormalWS(aotSurfaceOutput.TopSlab,",
+                compactSource);
+            StringAssert.Contains("aotSurfaceOutput.ClosureCount", source);
+            StringAssert.Contains("aotSurfaceOutput.LayerOperator", source);
             StringAssert.Contains("aotSurfaceOutput.Emission", source);
-            StringAssert.Contains("VividEvaluateSlabSurfaceDetailGrad", source);
+            StringAssert.Contains("VividEvaluateAOTSlabSurfaceDetail", surfaceProgramSource);
+            StringAssert.DoesNotContain("VividEvaluateSlabSurfaceDetailGrad", source);
             StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
             StringAssert.Contains("VividTryLoadDualSlabSurfaceProgram", source);
             StringAssert.Contains("VividEvaluateSlabSurfaceGrad", source);

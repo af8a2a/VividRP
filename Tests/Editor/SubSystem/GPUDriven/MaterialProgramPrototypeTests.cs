@@ -1100,10 +1100,10 @@ namespace VividRP.Editor.Tests
             Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(4u));
             Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(7u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(8u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
@@ -1143,9 +1143,9 @@ namespace VividRP.Editor.Tests
             };
             var expectedCompiledHashes = new[]
             {
-                0x4726D300F06E2634ul,
-                0xE432911550F939ECul,
-                0x05E14A1067797A1Eul,
+                0x739089D4D2A34585ul,
+                0xBCCDEA308029D72Eul,
+                0x5DCD42D8F09CECB8ul,
             };
 
             for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)

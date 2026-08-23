@@ -3,7 +3,7 @@
 #ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 #define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 
-#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 1u
+#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 2u
 
 struct VividAOTSurfaceContext
 {
@@ -22,6 +22,9 @@ struct VividAOTSurfaceSlabValues
     float Metallic;
     float3 NormalWS;
     float4 TangentWS;
+    float3 NormalTS;
+    float AmbientOcclusion;
+    uint HasNormal;
     uint FeatureMask;
 };
 
@@ -35,7 +38,7 @@ struct VividAOTSurfaceProgramOutput
     uint LayerOperator;
 };
 
-// Surface AOT HLSL artifact v1, backend v1.
+// Surface AOT HLSL artifact v2, backend v2.
 VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_StandardSingleSlab(
     const VividMaterialData materialParameters,
     const VividSurfaceBindingData surfaceBinding0,
@@ -65,13 +68,27 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_StandardSingleSlab(
     output.BaseSlab.NormalWS = vivid_v0001;
     output.BaseSlab.TangentWS = vivid_v0002;
     output.BaseSlab.FeatureMask = 7u;
+    const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
+        vivid_sample_slab_10,
+        surfaceBinding0,
+        vivid_sample_context_10,
+        true,
+        true,
+        output.BaseSlab.BaseColor.rgb,
+        output.BaseSlab.PerceptualRoughness,
+        output.BaseSlab.Metallic);
+    output.BaseSlab.PerceptualRoughness = vivid_base_slab_detail.PerceptualRoughness;
+    output.BaseSlab.Metallic = vivid_base_slab_detail.Metallic;
+    output.BaseSlab.NormalTS = vivid_base_slab_detail.NormalTS;
+    output.BaseSlab.AmbientOcclusion = vivid_base_slab_detail.AmbientOcclusion;
+    output.BaseSlab.HasNormal = vivid_base_slab_detail.HasNormal;
     output.ClosureCount = 1u;
     output.LayerOperator = 0u;
     output.Emission = vivid_v0005;
     return output;
 }
 
-// Surface AOT HLSL artifact v1, backend v1.
+// Surface AOT HLSL artifact v2, backend v2.
 VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_DualSlabHorizontalMix(
     const VividDualSlabMaterialData materialParameters,
     const VividSurfaceBindingData surfaceBinding0,
@@ -113,12 +130,40 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_DualSlabHorizontalMix(
     output.BaseSlab.NormalWS = vivid_v0001;
     output.BaseSlab.TangentWS = vivid_v0002;
     output.BaseSlab.FeatureMask = 7u;
+    const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
+        vivid_sample_slab_15,
+        surfaceBinding0,
+        vivid_sample_context_15,
+        true,
+        true,
+        output.BaseSlab.BaseColor.rgb,
+        output.BaseSlab.PerceptualRoughness,
+        output.BaseSlab.Metallic);
+    output.BaseSlab.PerceptualRoughness = vivid_base_slab_detail.PerceptualRoughness;
+    output.BaseSlab.Metallic = vivid_base_slab_detail.Metallic;
+    output.BaseSlab.NormalTS = vivid_base_slab_detail.NormalTS;
+    output.BaseSlab.AmbientOcclusion = vivid_base_slab_detail.AmbientOcclusion;
+    output.BaseSlab.HasNormal = vivid_base_slab_detail.HasNormal;
     output.TopSlab.BaseColor = vivid_v0018;
     output.TopSlab.PerceptualRoughness = vivid_v0007;
     output.TopSlab.Metallic = vivid_v0006;
     output.TopSlab.NormalWS = vivid_v0001;
     output.TopSlab.TangentWS = vivid_v0002;
     output.TopSlab.FeatureMask = 7u;
+    const VividEvaluatedSlabSurface vivid_top_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
+        vivid_sample_slab_16,
+        surfaceBinding1,
+        vivid_sample_context_16,
+        true,
+        true,
+        output.TopSlab.BaseColor.rgb,
+        output.TopSlab.PerceptualRoughness,
+        output.TopSlab.Metallic);
+    output.TopSlab.PerceptualRoughness = vivid_top_slab_detail.PerceptualRoughness;
+    output.TopSlab.Metallic = vivid_top_slab_detail.Metallic;
+    output.TopSlab.NormalTS = vivid_top_slab_detail.NormalTS;
+    output.TopSlab.AmbientOcclusion = vivid_top_slab_detail.AmbientOcclusion;
+    output.TopSlab.HasNormal = vivid_top_slab_detail.HasNormal;
     output.LayerWeight = vivid_v0003;
     output.ClosureCount = 2u;
     output.LayerOperator = 1u;
@@ -126,7 +171,7 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_DualSlabHorizontalMix(
     return output;
 }
 
-// Surface AOT HLSL artifact v1, backend v1.
+// Surface AOT HLSL artifact v2, backend v2.
 VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_DualSlabVerticalLayer(
     const VividDualSlabMaterialData materialParameters,
     const VividSurfaceBindingData surfaceBinding0,
@@ -168,12 +213,40 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_DualSlabVerticalLayer(
     output.BaseSlab.NormalWS = vivid_v0001;
     output.BaseSlab.TangentWS = vivid_v0002;
     output.BaseSlab.FeatureMask = 7u;
+    const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
+        vivid_sample_slab_15,
+        surfaceBinding0,
+        vivid_sample_context_15,
+        true,
+        true,
+        output.BaseSlab.BaseColor.rgb,
+        output.BaseSlab.PerceptualRoughness,
+        output.BaseSlab.Metallic);
+    output.BaseSlab.PerceptualRoughness = vivid_base_slab_detail.PerceptualRoughness;
+    output.BaseSlab.Metallic = vivid_base_slab_detail.Metallic;
+    output.BaseSlab.NormalTS = vivid_base_slab_detail.NormalTS;
+    output.BaseSlab.AmbientOcclusion = vivid_base_slab_detail.AmbientOcclusion;
+    output.BaseSlab.HasNormal = vivid_base_slab_detail.HasNormal;
     output.TopSlab.BaseColor = vivid_v0018;
     output.TopSlab.PerceptualRoughness = vivid_v0007;
     output.TopSlab.Metallic = vivid_v0006;
     output.TopSlab.NormalWS = vivid_v0001;
     output.TopSlab.TangentWS = vivid_v0002;
     output.TopSlab.FeatureMask = 7u;
+    const VividEvaluatedSlabSurface vivid_top_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
+        vivid_sample_slab_16,
+        surfaceBinding1,
+        vivid_sample_context_16,
+        true,
+        true,
+        output.TopSlab.BaseColor.rgb,
+        output.TopSlab.PerceptualRoughness,
+        output.TopSlab.Metallic);
+    output.TopSlab.PerceptualRoughness = vivid_top_slab_detail.PerceptualRoughness;
+    output.TopSlab.Metallic = vivid_top_slab_detail.Metallic;
+    output.TopSlab.NormalTS = vivid_top_slab_detail.NormalTS;
+    output.TopSlab.AmbientOcclusion = vivid_top_slab_detail.AmbientOcclusion;
+    output.TopSlab.HasNormal = vivid_top_slab_detail.HasNormal;
     output.LayerWeight = vivid_v0003;
     output.ClosureCount = 2u;
     output.LayerOperator = 2u;

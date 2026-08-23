@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using VividRP.Runtime.GPUDriven;
@@ -122,7 +123,11 @@ namespace VividRP.Editor.Tests
 
             Assert.That(sorted, Does.Contain("output.LayerOperator = 1u;"));
             Assert.That(sorted, Does.Contain("output.LayerOperator = 2u;"));
+            Assert.That(sorted, Does.Contain("float3 NormalTS;"));
+            Assert.That(sorted, Does.Contain("float AmbientOcclusion;"));
+            Assert.That(sorted, Does.Contain("uint HasNormal;"));
             AssertExplicitGradientContract(sorted, expectedSampleCount: 5);
+            AssertAotDetailContract(sorted, expectedSlabCount: 5);
         }
 
         [Test]
@@ -131,11 +136,12 @@ namespace VividRP.Editor.Tests
             CompiledMaterialProgram program = BuildStandard();
             MaterialSurfaceHlslArtifact artifact = program.SurfaceHlsl;
 
-            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(7u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(8u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(1u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.SurfaceHlslArtifactVersion));
             Assert.That(artifact.BackendVersion, Is.EqualTo(
@@ -231,6 +237,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(artifact.Source, Does.Contain("surfaceBinding1"));
 
             AssertExplicitGradientContract(artifact.Source, expectedSampleCount);
+            AssertAotDetailContract(artifact.Source, expectedSampleCount);
         }
 
         private static void AssertExplicitGradientContract(
@@ -249,6 +256,131 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain(".Sample("));
             Assert.That(source, Does.Not.Contain("ddx("));
             Assert.That(source, Does.Not.Contain("ddy("));
+        }
+
+        private static void AssertAotDetailContract(
+            string source,
+            int expectedSlabCount)
+        {
+            const string detailFunction = "VividEvaluateAOTSlabSurfaceDetail";
+            List<string> detailCalls = ExtractCalls(source, detailFunction);
+            List<string> sampleContexts = ExtractDeclaredIdentifiers(
+                source,
+                "const VividSurfaceSampleContext ");
+
+            Assert.That(detailCalls.Count, Is.EqualTo(expectedSlabCount));
+            Assert.That(sampleContexts.Count, Is.EqualTo(expectedSlabCount));
+            Assert.That(
+                CountOccurrences(source, ".NormalTS ="),
+                Is.EqualTo(expectedSlabCount));
+            Assert.That(
+                CountOccurrences(source, ".AmbientOcclusion ="),
+                Is.EqualTo(expectedSlabCount));
+            Assert.That(
+                CountOccurrences(source, ".HasNormal ="),
+                Is.EqualTo(expectedSlabCount));
+
+            var contextDeclarationCounts = new Dictionary<string, int>();
+            for (int contextIndex = 0;
+                 contextIndex < sampleContexts.Count;
+                 contextIndex++)
+            {
+                string contextName = sampleContexts[contextIndex];
+                contextDeclarationCounts.TryGetValue(
+                    contextName,
+                    out int declarationCount);
+                contextDeclarationCounts[contextName] = declarationCount + 1;
+            }
+
+            foreach (KeyValuePair<string, int> contextDeclaration in
+                     contextDeclarationCounts)
+            {
+                int matchingDetailCalls = 0;
+                for (int callIndex = 0;
+                     callIndex < detailCalls.Count;
+                     callIndex++)
+                {
+                    if (detailCalls[callIndex].IndexOf(
+                            contextDeclaration.Key,
+                            StringComparison.Ordinal) >= 0)
+                    {
+                        matchingDetailCalls++;
+                    }
+                }
+
+                Assert.That(
+                    matchingDetailCalls,
+                    Is.EqualTo(contextDeclaration.Value),
+                    $"Sample context '{contextDeclaration.Key}' must be reused once per declaration.");
+            }
+
+            for (int callIndex = 0; callIndex < detailCalls.Count; callIndex++)
+            {
+                Assert.That(
+                    CountOccurrences(detailCalls[callIndex], "true"),
+                    Is.EqualTo(2),
+                    "The frozen P0-P2 catalog enables Normal and Mask detail evaluation.");
+            }
+        }
+
+        private static List<string> ExtractCalls(
+            string source,
+            string functionName)
+        {
+            var calls = new List<string>();
+            string marker = functionName + "(";
+            int searchOffset = 0;
+            while (true)
+            {
+                int callStart = source.IndexOf(
+                    marker,
+                    searchOffset,
+                    StringComparison.Ordinal);
+                if (callStart < 0)
+                    return calls;
+
+                int depth = 1;
+                int cursor = callStart + marker.Length;
+                for (; cursor < source.Length && depth > 0; cursor++)
+                {
+                    if (source[cursor] == '(')
+                        depth++;
+                    else if (source[cursor] == ')')
+                        depth--;
+                }
+
+                Assert.That(
+                    depth,
+                    Is.Zero,
+                    $"Generated call to '{functionName}' is not balanced.");
+                calls.Add(source.Substring(callStart, cursor - callStart));
+                searchOffset = cursor;
+            }
+        }
+
+        private static List<string> ExtractDeclaredIdentifiers(
+            string source,
+            string declarationPrefix)
+        {
+            var identifiers = new List<string>();
+            int searchOffset = 0;
+            while (true)
+            {
+                int prefixStart = source.IndexOf(
+                    declarationPrefix,
+                    searchOffset,
+                    StringComparison.Ordinal);
+                if (prefixStart < 0)
+                    return identifiers;
+
+                int identifierStart = prefixStart + declarationPrefix.Length;
+                int identifierEnd = source.IndexOf(' ', identifierStart);
+                Assert.That(identifierEnd, Is.GreaterThan(identifierStart));
+                identifiers.Add(source.Substring(
+                    identifierStart,
+                    identifierEnd - identifierStart));
+                searchOffset = identifierEnd;
+            }
         }
 
         private static int CountOccurrences(string value, string pattern)

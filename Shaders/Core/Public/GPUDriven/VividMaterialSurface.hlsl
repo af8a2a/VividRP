@@ -198,10 +198,12 @@ VividSlabMaterialData VividCreateSlabMaterialData(
     return slabData;
 }
 
-VividEvaluatedSlabSurface VividEvaluateSlabSurfaceDetail(
+VividEvaluatedSlabSurface VividEvaluateAOTSlabSurfaceDetail(
     const VividSlabMaterialData slabData,
     const VividSurfaceBindingData surfaceBindingData,
     const VividSurfaceSampleContext context,
+    const bool evaluateNormal,
+    const bool evaluateMask,
     const float3 baseColor,
     const float perceptualRoughness,
     const float metallic)
@@ -212,14 +214,17 @@ VividEvaluatedSlabSurface VividEvaluateSlabSurfaceDetail(
     surface.PerceptualRoughness = perceptualRoughness;
     surface.Metallic = metallic;
     surface.AmbientOcclusion = 1.0f;
-    surface.HasNormal = VividSurfaceHasNormal(surfaceBindingData) ? 1u : 0u;
+    surface.HasNormal = evaluateNormal
+        && VividSurfaceHasNormal(surfaceBindingData)
+            ? 1u
+            : 0u;
     if (surface.HasNormal != 0u)
     {
         surface.NormalTS = VividUnpackSlabNormalScale(
             VividSampleNormalGrad(surfaceBindingData, context),
             slabData.NormalsStrength);
     }
-    if (VividSurfaceHasMask(surfaceBindingData))
+    if (evaluateMask && VividSurfaceHasMask(surfaceBindingData))
     {
         VividApplySlabMaskSample(
             slabData,
@@ -231,30 +236,20 @@ VividEvaluatedSlabSurface VividEvaluateSlabSurfaceDetail(
     return surface;
 }
 
-VividEvaluatedSlabSurface VividEvaluateSlabSurfaceDetailGrad(
+VividEvaluatedSlabSurface VividEvaluateSlabSurfaceDetail(
     const VividSlabMaterialData slabData,
     const VividSurfaceBindingData surfaceBindingData,
+    const VividSurfaceSampleContext context,
     const float3 baseColor,
     const float perceptualRoughness,
-    const float metallic,
-    const float2 uv0,
-    const float2 uvDdx,
-    const float2 uvDdy)
+    const float metallic)
 {
-    const float2 uv = uv0 * slabData.TextureTilingOffset.xy
-        + slabData.TextureTilingOffset.zw;
-    const float2 tiledUVDdx = uvDdx * slabData.TextureTilingOffset.xy;
-    const float2 tiledUVDdy = uvDdy * slabData.TextureTilingOffset.xy;
-    const VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(
-        surfaceBindingData,
-        uv,
-        tiledUVDdx,
-        tiledUVDdy);
-
-    return VividEvaluateSlabSurfaceDetail(
+    return VividEvaluateAOTSlabSurfaceDetail(
         slabData,
         surfaceBindingData,
         context,
+        true,
+        true,
         baseColor,
         perceptualRoughness,
         metallic);

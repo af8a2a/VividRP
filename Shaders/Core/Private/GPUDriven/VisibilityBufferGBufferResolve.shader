@@ -163,6 +163,35 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return float3x3(tangentWS, bitangentWS, normalWS);
             }
 
+            float3 EvaluateAOTSlabNormalWS(
+                const VividAOTSurfaceSlabValues slab,
+                const float3 fallbackNormalWS)
+            {
+                const float normalLengthSq = dot(slab.NormalWS, slab.NormalWS);
+                const float3 normalWS = normalLengthSq > 1e-8f
+                    ? slab.NormalWS * rsqrt(normalLengthSq)
+                    : fallbackNormalWS;
+                if (slab.HasNormal == 0u)
+                    return normalWS;
+
+                const float tangentLengthSq = dot(
+                    slab.TangentWS.xyz,
+                    slab.TangentWS.xyz);
+                if (tangentLengthSq <= 1e-8f)
+                    return normalWS;
+
+                const float3 tangentWS = slab.TangentWS.xyz
+                    * rsqrt(tangentLengthSq);
+                const float3x3 tangentToWorld = CreateInstanceTangentToWorld(
+                    normalWS,
+                    tangentWS,
+                    slab.TangentWS.w);
+                return TransformTangentToWorld(
+                    slab.NormalTS,
+                    tangentToWorld,
+                    true);
+            }
+
             float3 UnpackVividNormalScale(float4 packedNormal, float scale)
             {
                 float3 normalTS;
@@ -273,6 +302,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         : 0u;
                 bool loadedMaterialProgram = result.isDualSlab != 0u;
                 result.materialData = (VividMaterialData) 0;
+                if (result.isDualSlab != 0u)
+                {
+                    result.materialData = PullMaterialData(
+                        result.instanceData.MaterialIndex);
+                }
                 if (result.isDualSlab == 0u)
                 {
                     loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
@@ -571,10 +605,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 aotContext.PositionCS = positionCS;
                 VividAOTSurfaceProgramOutput aotSurfaceOutput =
                     (VividAOTSurfaceProgramOutput) 0;
-                bool evaluatedAOTSurface = false;
+                bool dispatchedAOTSurface = false;
                 if (triangleData.materialProgramID != VIVIDMATERIALPROGRAMID_INVALID)
                 {
-                    evaluatedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
+                    dispatchedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
                         triangleData.materialProgramID,
                         triangleData.materialData,
                         triangleData.dualSlabMaterialData,
@@ -583,10 +617,23 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         aotContext,
                         aotSurfaceOutput);
                 }
+                const bool evaluatedAOTSingleSurface = dispatchedAOTSurface
+                    && triangleData.isDualSlab == 0u
+                    && aotSurfaceOutput.ClosureCount == 1u
+                    && aotSurfaceOutput.LayerOperator == 0u;
+                const bool evaluatedAOTDualSurface = dispatchedAOTSurface
+                    && triangleData.isDualSlab != 0u
+                    && aotSurfaceOutput.ClosureCount == 2u
+                    && (aotSurfaceOutput.LayerOperator == 1u
+                        || aotSurfaceOutput.LayerOperator == 2u);
+                const bool evaluatedAOTSurface = evaluatedAOTSingleSurface
+                    || evaluatedAOTDualSurface;
 
                 float3 baseColor;
                 float3 sampledNormalTS = float3(0.0f, 0.0f, 1.0f);
                 bool hasSampledNormal = false;
+                float3 evaluatedAOTNormalWS = geometryNormalWS;
+                bool hasEvaluatedAOTNormalWS = false;
                 float perceptualRoughness;
                 float metallic;
                 float ambientOcclusion;
@@ -621,173 +668,170 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         metallic,
                         ambientOcclusion);
                 }
+                else if (evaluatedAOTDualSurface)
+                {
+                    const float layerWeight = saturate(
+                        aotSurfaceOutput.LayerWeight);
+
+                    // Legacy GBuffer cannot preserve the two-Closure topology. Both
+                    // validated operators deliberately degrade to the same blend.
+                    baseColor = lerp(
+                        aotSurfaceOutput.BaseSlab.BaseColor.rgb,
+                        aotSurfaceOutput.TopSlab.BaseColor.rgb,
+                        layerWeight);
+                    const float3 baseNormalWS = EvaluateAOTSlabNormalWS(
+                        aotSurfaceOutput.BaseSlab,
+                        geometryNormalWS);
+                    const float3 topNormalWS = EvaluateAOTSlabNormalWS(
+                        aotSurfaceOutput.TopSlab,
+                        geometryNormalWS);
+                    evaluatedAOTNormalWS = SafeNormalize(lerp(
+                        baseNormalWS,
+                        topNormalWS,
+                        layerWeight));
+                    hasEvaluatedAOTNormalWS = true;
+                    perceptualRoughness = lerp(
+                        aotSurfaceOutput.BaseSlab.PerceptualRoughness,
+                        aotSurfaceOutput.TopSlab.PerceptualRoughness,
+                        layerWeight);
+                    metallic = lerp(
+                        aotSurfaceOutput.BaseSlab.Metallic,
+                        aotSurfaceOutput.TopSlab.Metallic,
+                        layerWeight);
+                    ambientOcclusion = lerp(
+                        aotSurfaceOutput.BaseSlab.AmbientOcclusion,
+                        aotSurfaceOutput.TopSlab.AmbientOcclusion,
+                        layerWeight);
+                }
+                else if (evaluatedAOTSingleSurface)
+                {
+                    baseColor = aotSurfaceOutput.BaseSlab.BaseColor.rgb;
+                    evaluatedAOTNormalWS = EvaluateAOTSlabNormalWS(
+                        aotSurfaceOutput.BaseSlab,
+                        geometryNormalWS);
+                    hasEvaluatedAOTNormalWS = true;
+                    perceptualRoughness =
+                        aotSurfaceOutput.BaseSlab.PerceptualRoughness;
+                    metallic = aotSurfaceOutput.BaseSlab.Metallic;
+                    ambientOcclusion =
+                        aotSurfaceOutput.BaseSlab.AmbientOcclusion;
+                }
+                else if (triangleData.isDualSlab != 0u)
+                {
+                    const VividEvaluatedSlabSurface baseSlab =
+                        VividEvaluateSlabSurfaceGrad(
+                            VividGetBaseSlabMaterialData(
+                                triangleData.dualSlabMaterialData),
+                            triangleData.surfaceBindingData,
+                            visibilityUV.uv,
+                            visibilityUV.ddx,
+                            visibilityUV.ddy,
+                            positionCS);
+                    const VividEvaluatedSlabSurface topSlab =
+                        VividEvaluateSlabSurfaceGrad(
+                            VividGetTopSlabMaterialData(
+                                triangleData.dualSlabMaterialData),
+                            triangleData.topSurfaceBindingData,
+                            visibilityUV.uv,
+                            visibilityUV.ddx,
+                            visibilityUV.ddy,
+                            positionCS);
+                    const float layerWeight = saturate(
+                        triangleData.dualSlabMaterialData.LayerWeight);
+
+                    // Preserve the same legacy degradation when generated code is
+                    // unavailable for an otherwise compatible Dual-Slab program.
+                    baseColor = lerp(
+                        baseSlab.BaseColor,
+                        topSlab.BaseColor,
+                        layerWeight);
+                    sampledNormalTS = SafeNormalize(lerp(
+                        baseSlab.NormalTS,
+                        topSlab.NormalTS,
+                        layerWeight));
+                    hasSampledNormal =
+                        baseSlab.HasNormal != 0u || topSlab.HasNormal != 0u;
+                    perceptualRoughness = lerp(
+                        baseSlab.PerceptualRoughness,
+                        topSlab.PerceptualRoughness,
+                        layerWeight);
+                    metallic = lerp(
+                        baseSlab.Metallic,
+                        topSlab.Metallic,
+                        layerWeight);
+                    ambientOcclusion = lerp(
+                        baseSlab.AmbientOcclusion,
+                        topSlab.AmbientOcclusion,
+                        layerWeight);
+                }
                 else
                 {
-                    if (triangleData.isDualSlab != 0u)
-                    {
-                        VividEvaluatedSlabSurface baseSlab;
-                        VividEvaluatedSlabSurface topSlab;
-                        float layerWeight;
-                        if (evaluatedAOTSurface)
-                        {
-                            const VividSlabMaterialData baseSlabData =
-                                VividGetBaseSlabMaterialData(
-                                    triangleData.dualSlabMaterialData);
-                            const VividSlabMaterialData topSlabData =
-                                VividGetTopSlabMaterialData(
-                                    triangleData.dualSlabMaterialData);
-                            baseSlab = VividEvaluateSlabSurfaceDetailGrad(
-                                baseSlabData,
-                                triangleData.surfaceBindingData,
-                                aotSurfaceOutput.BaseSlab.BaseColor.rgb,
-                                aotSurfaceOutput.BaseSlab.PerceptualRoughness,
-                                aotSurfaceOutput.BaseSlab.Metallic,
-                                visibilityUV.uv,
-                                visibilityUV.ddx,
-                                visibilityUV.ddy);
-                            topSlab = VividEvaluateSlabSurfaceDetailGrad(
-                                topSlabData,
-                                triangleData.topSurfaceBindingData,
-                                aotSurfaceOutput.TopSlab.BaseColor.rgb,
-                                aotSurfaceOutput.TopSlab.PerceptualRoughness,
-                                aotSurfaceOutput.TopSlab.Metallic,
-                                visibilityUV.uv,
-                                visibilityUV.ddx,
-                                visibilityUV.ddy);
-                            layerWeight = saturate(aotSurfaceOutput.LayerWeight);
-                        }
-                        else
-                        {
-                            baseSlab = VividEvaluateSlabSurfaceGrad(
-                                VividGetBaseSlabMaterialData(
-                                    triangleData.dualSlabMaterialData),
-                                triangleData.surfaceBindingData,
-                                visibilityUV.uv,
-                                visibilityUV.ddx,
-                                visibilityUV.ddy,
-                                positionCS);
-                            topSlab = VividEvaluateSlabSurfaceGrad(
-                                VividGetTopSlabMaterialData(
-                                    triangleData.dualSlabMaterialData),
-                                triangleData.topSurfaceBindingData,
-                                visibilityUV.uv,
-                                visibilityUV.ddx,
-                                visibilityUV.ddy,
-                                positionCS);
-                            layerWeight = saturate(
-                                triangleData.dualSlabMaterialData.LayerWeight);
-                        }
+                    InterpolatedUV uv = terrainUv;
+                    ApplyTilingOffset(uv, triangleData.materialData.TextureTilingOffset);
+                    VividSurfaceSampleContext surfaceSampleContext = VividCreateSurfaceSampleContextGrad(
+                        triangleData.surfaceBindingData,
+                        uv.uv,
+                        uv.ddx,
+                        uv.ddy,
+                        positionCS);
+                    float4 albedoSample = SampleAlbedoTextureGrad(
+                        triangleData.surfaceBindingData,
+                        surfaceSampleContext);
+                    baseColor = albedoSample.rgb * triangleData.materialData.AlbedoColor.rgb;
+                    perceptualRoughness = triangleData.materialData.Roughness;
+                    metallic = triangleData.materialData.Metallic;
+                    ambientOcclusion = 1.0f;
 
-                        // Legacy GBuffer cannot preserve the two-Closure topology. Both
-                        // operators deliberately degrade to the same parameter blend.
-                        baseColor = lerp(
-                            baseSlab.BaseColor,
-                            topSlab.BaseColor,
-                            layerWeight);
-                        sampledNormalTS = SafeNormalize(lerp(
-                            baseSlab.NormalTS,
-                            topSlab.NormalTS,
-                            layerWeight));
-                        hasSampledNormal =
-                            baseSlab.HasNormal != 0u || topSlab.HasNormal != 0u;
-                        perceptualRoughness = lerp(
-                            baseSlab.PerceptualRoughness,
-                            topSlab.PerceptualRoughness,
-                            layerWeight);
-                        metallic = lerp(
-                            baseSlab.Metallic,
-                            topSlab.Metallic,
-                            layerWeight);
-                        ambientOcclusion = lerp(
-                            baseSlab.AmbientOcclusion,
-                            topSlab.AmbientOcclusion,
-                            layerWeight);
-                    }
-                    else if (evaluatedAOTSurface)
+                    if (VividSurfaceHasNormal(triangleData.surfaceBindingData))
                     {
-                        const VividEvaluatedSlabSurface slab =
-                            VividEvaluateSlabSurfaceDetailGrad(
-                                VividCreateSlabMaterialData(
-                                    triangleData.materialData),
-                                triangleData.surfaceBindingData,
-                                aotSurfaceOutput.BaseSlab.BaseColor.rgb,
-                                aotSurfaceOutput.BaseSlab.PerceptualRoughness,
-                                aotSurfaceOutput.BaseSlab.Metallic,
-                                visibilityUV.uv,
-                                visibilityUV.ddx,
-                                visibilityUV.ddy);
-                        baseColor = slab.BaseColor;
-                        sampledNormalTS = slab.NormalTS;
-                        hasSampledNormal = slab.HasNormal != 0u;
-                        perceptualRoughness = slab.PerceptualRoughness;
-                        metallic = slab.Metallic;
-                        ambientOcclusion = slab.AmbientOcclusion;
-                    }
-                    else
-                    {
-                        InterpolatedUV uv = terrainUv;
-                        ApplyTilingOffset(uv, triangleData.materialData.TextureTilingOffset);
-                        VividSurfaceSampleContext surfaceSampleContext = VividCreateSurfaceSampleContextGrad(
-                            triangleData.surfaceBindingData,
-                            uv.uv,
-                            uv.ddx,
-                            uv.ddy,
-                            positionCS);
-                        float4 albedoSample = SampleAlbedoTextureGrad(
+                        sampledNormalTS = SampleNormalTSGrad(
+                            triangleData.materialData,
                             triangleData.surfaceBindingData,
                             surfaceSampleContext);
-                        baseColor = albedoSample.rgb * triangleData.materialData.AlbedoColor.rgb;
-                        perceptualRoughness = triangleData.materialData.Roughness;
-                        metallic = triangleData.materialData.Metallic;
-                        ambientOcclusion = 1.0f;
+                        hasSampledNormal = true;
+                    }
 
-                        if (VividSurfaceHasNormal(triangleData.surfaceBindingData))
-                        {
-                            sampledNormalTS = SampleNormalTSGrad(
-                                triangleData.materialData,
-                                triangleData.surfaceBindingData,
-                                surfaceSampleContext);
-                            hasSampledNormal = true;
-                        }
-
-                        float4 maskSample = VividSurfaceHasMask(triangleData.surfaceBindingData)
-                            ? VividSampleMaskGrad(
-                                triangleData.surfaceBindingData,
-                                surfaceSampleContext)
-                            : 1.0.xxxx;
+                    float4 maskSample = VividSurfaceHasMask(triangleData.surfaceBindingData)
+                        ? VividSampleMaskGrad(
+                            triangleData.surfaceBindingData,
+                            surfaceSampleContext)
+                        : 1.0.xxxx;
 #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
-                        if (isTerrainRVT)
-                        {
-                            bool sampledTerrainRVT = VividResolveTerrainRVT(
-                                triangleData.materialData.Padding1,
-                                terrainUv.uv,
-                                terrainUv.ddx,
-                                terrainUv.ddy,
-                                positionCS,
-                                baseColor,
-                                sampledNormalTS,
-                                maskSample);
-                            hasSampledNormal = hasSampledNormal || sampledTerrainRVT;
-                        }
+                    if (isTerrainRVT)
+                    {
+                        bool sampledTerrainRVT = VividResolveTerrainRVT(
+                            triangleData.materialData.Padding1,
+                            terrainUv.uv,
+                            terrainUv.ddx,
+                            terrainUv.ddy,
+                            positionCS,
+                            baseColor,
+                            sampledNormalTS,
+                            maskSample);
+                        hasSampledNormal = hasSampledNormal || sampledTerrainRVT;
+                    }
 #endif
-                        if (VividSurfaceHasMask(triangleData.surfaceBindingData) || isTerrainRVT)
-                        {
-                            ApplyMaskSample(
-                                triangleData.materialData.Padding0,
-                                maskSample,
-                                triangleData.materialData.MetallicSmoothnessRemap,
-                                triangleData.materialData.AmbientOcclusionRemap.xy,
-                                perceptualRoughness,
-                                metallic,
-                                ambientOcclusion);
-                        }
+                    if (VividSurfaceHasMask(triangleData.surfaceBindingData) || isTerrainRVT)
+                    {
+                        ApplyMaskSample(
+                            triangleData.materialData.Padding0,
+                            maskSample,
+                            triangleData.materialData.MetallicSmoothnessRemap,
+                            triangleData.materialData.AmbientOcclusionRemap.xy,
+                            perceptualRoughness,
+                            metallic,
+                            ambientOcclusion);
                     }
                 }
 
-                float3 normalWS = geometryNormalWS;
+                float3 normalWS = hasEvaluatedAOTNormalWS
+                    ? evaluatedAOTNormalWS
+                    : geometryNormalWS;
 
                 UNITY_BRANCH
-                if (hasSampledNormal && tangentLengthSq > 1e-8f)
+                if (!hasEvaluatedAOTNormalWS
+                    && hasSampledNormal
+                    && tangentLengthSq > 1e-8f)
                 {
                     const float3x3 tangentToWorld = CreateInstanceTangentToWorld(
                         normalWS,

@@ -152,6 +152,9 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("DecodeVividVisibilityBufferBarycentrics", source);
             StringAssert.Contains("_VisibilityBufferAttributes0", source);
             StringAssert.Contains("_VisibilityBufferAttributes1", source);
+            StringAssert.Contains("interpolatedUV.uv = attributes0.xy;", source);
+            StringAssert.Contains("interpolatedUV.ddx = attributes0.zw;", source);
+            StringAssert.Contains("interpolatedUV.ddy = attributes1.xy;", source);
             StringAssert.DoesNotContain("CalculateFullBarycentric(", source);
             StringAssert.DoesNotContain("clipPosition", source);
         }

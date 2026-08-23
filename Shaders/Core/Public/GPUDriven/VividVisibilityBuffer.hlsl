@@ -38,14 +38,16 @@ float2 VividEncodeVisibilityBufferNormalOct(float3 normalWS)
 VividVisibilityBufferFragmentOutput PackVividVisibilityBufferFragmentOutput(
     uint2 visibility,
     float2 uv0,
+    float2 uv0Ddx,
+    float2 uv0Ddy,
     float3 geometricNormalWS,
     float3 barycentrics)
 {
     VividVisibilityBufferFragmentOutput output;
     output.visibility = visibility;
-    output.attributes0 = float4(uv0, ddx(uv0));
+    output.attributes0 = float4(uv0, uv0Ddx);
     output.attributes1 = float4(
-        ddy(uv0),
+        uv0Ddy,
         VividEncodeVisibilityBufferNormalOct(geometricNormalWS));
     output.barycentrics = barycentrics.xy;
     return output;

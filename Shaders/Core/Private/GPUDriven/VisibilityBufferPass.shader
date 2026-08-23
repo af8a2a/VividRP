@@ -116,9 +116,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 Varyings input,
                 linear float3 barycentrics : SV_Barycentrics)
             {
-                #ifdef _ALPHATEST_ON
                 const float2 uv0Ddx = ddx(input.uv0);
                 const float2 uv0Ddy = ddy(input.uv0);
+                #ifdef _ALPHATEST_ON
                 const VividVisibilityBufferValue visibilityBufferValue = UnpackVisibilityBufferValue(input.visibilityValue);
                 const VividInstanceData instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 VividMaterialCoverageEvaluation coverage;
@@ -146,6 +146,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 return PackVividVisibilityBufferFragmentOutput(
                     input.visibilityValue,
                     input.uv0,
+                    uv0Ddx,
+                    uv0Ddy,
                     input.geometricNormalWS,
                     barycentrics);
             }

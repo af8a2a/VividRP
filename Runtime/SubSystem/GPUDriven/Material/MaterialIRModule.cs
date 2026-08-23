@@ -42,6 +42,7 @@ namespace VividRP.Runtime.GPUDriven
     internal sealed class MaterialValueSlice
     {
         private readonly IReadOnlyList<int> m_NodeIndices;
+        private readonly IReadOnlyList<MaterialValue> m_Roots;
 
         internal MaterialValueSlice(MaterialValueIR values, params MaterialValue[] roots)
         {
@@ -51,11 +52,15 @@ namespace VividRP.Runtime.GPUDriven
             if (roots == null)
                 throw new ArgumentNullException(nameof(roots));
 
+            var rootValues = new MaterialValue[roots.Length];
+            Array.Copy(roots, rootValues, roots.Length);
+            m_Roots = Array.AsReadOnly(rootValues);
+
             var reachable = new bool[Values.NodeCount];
             var pending = new Stack<int>();
-            for (int i = 0; i < roots.Length; i++)
+            for (int i = 0; i < m_Roots.Count; i++)
             {
-                MaterialValue root = roots[i];
+                MaterialValue root = m_Roots[i];
                 if (!Values.Owns(root))
                     throw new ArgumentException("Material slice root is not owned by the value IR.", nameof(roots));
                 pending.Push(root.Index);
@@ -87,6 +92,8 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialValueIR Values { get; }
 
         internal IReadOnlyList<int> NodeIndices => m_NodeIndices;
+
+        internal IReadOnlyList<MaterialValue> Roots => m_Roots;
 
         internal int NodeCount => m_NodeIndices.Count;
 
@@ -205,6 +212,15 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialValueSlice CreateValueSlice(params MaterialValue[] roots)
         {
             return new MaterialValueSlice(Values, roots);
+        }
+
+        internal MaterialStageLIR CreateStageLIR(
+            MaterialEvaluationStage stage,
+            params MaterialValue[] roots)
+        {
+            return MaterialStageLIRLowerer.Lower(
+                CreateValueSlice(roots),
+                stage);
         }
 
         private string BuildDebugDump()

@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -260,11 +261,19 @@ namespace VividRP.Editor.Tests
                 "Public",
                 "GPUDriven",
                 "VividMaterialCoverage.hlsl");
+            string visibilityBufferPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividVisibilityBuffer.hlsl");
             string visibilitySource = File.ReadAllText(
                 Path.Combine(gpuDrivenShaderPath, "VisibilityBufferPass.shader"));
             string shadowSource = File.ReadAllText(
                 Path.Combine(gpuDrivenShaderPath, "VisibilityBufferShadowCasterPass.shader"));
             string coverageSource = File.ReadAllText(coveragePath);
+            string visibilityBufferSource = File.ReadAllText(visibilityBufferPath);
 
             StringAssert.Contains("programData.CoverageProgramID", coverageSource);
             StringAssert.Contains(
@@ -286,6 +295,8 @@ namespace VividRP.Editor.Tests
             int visibilityDdx = visibilitySource.IndexOf("ddx(input.uv0)");
             int visibilityDdy = visibilitySource.IndexOf("ddy(input.uv0)");
             int visibilityProgram = visibilitySource.IndexOf("VividTryEvaluateCoverageProgram");
+            int visibilityPack = visibilitySource.IndexOf(
+                "PackVividVisibilityBufferFragmentOutput");
             int shadowDdx = shadowSource.IndexOf("ddx(input.uv0)");
             int shadowDdy = shadowSource.IndexOf("ddy(input.uv0)");
             int shadowProgram = shadowSource.IndexOf("VividTryEvaluateCoverageProgram");
@@ -293,12 +304,46 @@ namespace VividRP.Editor.Tests
             Assert.That(visibilityProgram, Is.GreaterThan(visibilityDdx));
             Assert.That(visibilityDdy, Is.GreaterThanOrEqualTo(0));
             Assert.That(visibilityProgram, Is.GreaterThan(visibilityDdy));
+            Assert.That(visibilityPack, Is.GreaterThan(visibilityProgram));
+            Assert.That(CountOccurrences(visibilitySource, "ddx(input.uv0)"), Is.EqualTo(1));
+            Assert.That(CountOccurrences(visibilitySource, "ddy(input.uv0)"), Is.EqualTo(1));
             Assert.That(shadowDdx, Is.GreaterThanOrEqualTo(0));
             Assert.That(shadowProgram, Is.GreaterThan(shadowDdx));
             Assert.That(shadowDdy, Is.GreaterThanOrEqualTo(0));
             Assert.That(shadowProgram, Is.GreaterThan(shadowDdy));
+            Assert.That(CountOccurrences(shadowSource, "ddx(input.uv0)"), Is.EqualTo(1));
+            Assert.That(CountOccurrences(shadowSource, "ddy(input.uv0)"), Is.EqualTo(1));
+            StringAssert.Contains("float2 uv0Ddx", visibilityBufferSource);
+            StringAssert.Contains("float2 uv0Ddy", visibilityBufferSource);
+            StringAssert.Contains(
+                "output.attributes0 = float4(uv0, uv0Ddx)",
+                visibilityBufferSource);
+            StringAssert.Contains("uv0Ddy,", visibilityBufferSource);
+            StringAssert.DoesNotContain("ddx(uv0)", visibilityBufferSource);
+            StringAssert.DoesNotContain("ddy(uv0)", visibilityBufferSource);
+            StringAssert.Contains("uv0Ddx,", visibilitySource);
+            StringAssert.Contains("uv0Ddy,", visibilitySource);
+            StringAssert.Contains(
+                "PackVividVisibilityBufferFragmentOutput(\n"
+                + "                    input.visibilityValue,\n"
+                + "                    input.uv0,\n"
+                + "                    uv0Ddx,\n"
+                + "                    uv0Ddy,",
+                visibilitySource.Replace("\r\n", "\n"));
             StringAssert.DoesNotContain("float4 SampleAlbedo(", visibilitySource);
             StringAssert.DoesNotContain("float4 SampleAlbedo(", shadowSource);
+        }
+
+        private static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int startIndex = 0;
+            while ((startIndex = source.IndexOf(value, startIndex, StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                startIndex += value.Length;
+            }
+            return count;
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferPass pass, string fieldName)

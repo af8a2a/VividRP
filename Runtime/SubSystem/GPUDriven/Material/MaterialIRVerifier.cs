@@ -372,6 +372,11 @@ namespace VividRP.Runtime.GPUDriven
         internal const string InvalidClosureGraphShape = "MIR4009";
         internal const string ClosureGraphFanOut = "MIR4010";
         internal const string ClosureGraphBudgetExceeded = "MIR4011";
+
+        internal const string UnsupportedStageOpcode = "MIR5001";
+        internal const string StageInputUnavailable = "MIR5002";
+        internal const string DerivativeSourceCannotBeLegalized = "MIR5003";
+        internal const string InvalidStageLIR = "MIR5004";
     }
 
     internal readonly struct MaterialIRDiagnostic
@@ -595,6 +600,1151 @@ namespace VividRP.Runtime.GPUDriven
                 closureBudget,
                 diagnostics);
             return CreateResult(diagnostics);
+        }
+
+        internal static MaterialIRVerificationResult VerifyStageSlice(
+            MaterialValueSlice sourceSlice,
+            MaterialEvaluationStage stage)
+        {
+            if (sourceSlice == null)
+                throw new ArgumentNullException(nameof(sourceSlice));
+            if (stage != MaterialEvaluationStage.Coverage
+                && stage != MaterialEvaluationStage.Surface)
+            {
+                throw new ArgumentOutOfRangeException(nameof(stage), stage, null);
+            }
+
+            var diagnostics = new List<MaterialIRDiagnostic>();
+            MaterialValueIR values = sourceSlice.Values;
+            var derivativeStates = new StageDerivativeAvailability[values.NodeCount];
+            var uniformityStates = new MaterialStageUniformity[values.NodeCount];
+            MaterialEvaluationStageMask stageMask = stage
+                == MaterialEvaluationStage.Coverage
+                ? MaterialEvaluationStageMask.Coverage
+                : MaterialEvaluationStageMask.Surface;
+
+            for (int sliceIndex = 0;
+                 sliceIndex < sourceSlice.NodeIndices.Count;
+                 sliceIndex++)
+            {
+                int nodeIndex = sourceSlice.NodeIndices[sliceIndex];
+                MaterialValueNode node = values.Nodes[nodeIndex];
+                if (!MaterialOpcodeTable.TryGetInfo(
+                        node.Opcode,
+                        out MaterialOpcodeInfo info)
+                    || (info.EvaluationStages & stageMask) == 0)
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.UnsupportedStageOpcode,
+                        nodeIndex,
+                        $"Opcode {node.Opcode} is not available in {stage} evaluation.");
+                    continue;
+                }
+
+                if (node.Opcode == MaterialValueOpcode.ExternalInput
+                    && !IsExternalInputAvailable(
+                        stage,
+                        (MaterialExternalInput) node.Semantic))
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.StageInputUnavailable,
+                        nodeIndex,
+                        $"External input {(MaterialExternalInput) node.Semantic} is not available in {stage} evaluation.");
+                }
+
+                if (info.DerivativePolicy
+                    != MaterialDerivativePolicy.ProducesDerivative)
+                {
+                    continue;
+                }
+
+                if (AnalyzeStageDerivative(
+                        values,
+                        node.Operand0,
+                        derivativeStates,
+                        uniformityStates)
+                    == StageDerivativeAvailability.Unavailable)
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.DerivativeSourceCannotBeLegalized,
+                        nodeIndex,
+                        $"{node.Opcode} source %{node.Operand0} cannot be legalized for {stage} evaluation.");
+                }
+            }
+
+            return CreateResult(diagnostics);
+        }
+
+        internal static MaterialIRVerificationResult VerifyStageLIR(
+            MaterialStageLIR stageLIR)
+        {
+            return VerifyStageLIR(stageLIR, verifyCanonicalLowering: true);
+        }
+
+        internal static MaterialIRVerificationResult VerifyStageLIRStructure(
+            MaterialStageLIR stageLIR)
+        {
+            return VerifyStageLIR(stageLIR, verifyCanonicalLowering: false);
+        }
+
+        private static MaterialIRVerificationResult VerifyStageLIR(
+            MaterialStageLIR stageLIR,
+            bool verifyCanonicalLowering)
+        {
+            if (stageLIR == null)
+                throw new ArgumentNullException(nameof(stageLIR));
+
+            var diagnostics = new List<MaterialIRDiagnostic>();
+            bool hasKnownStage = stageLIR.Stage == MaterialEvaluationStage.Coverage
+                || stageLIR.Stage == MaterialEvaluationStage.Surface;
+            if (!hasKnownStage)
+            {
+                AddError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidStageLIR,
+                    $"Stage LIR evaluation stage value {(int) stageLIR.Stage} is not defined.");
+            }
+            else
+            {
+                MaterialStageExecutionModel expectedExecution = stageLIR.Stage
+                    == MaterialEvaluationStage.Coverage
+                    ? MaterialStageExecutionModel.RasterFragment
+                    : MaterialStageExecutionModel.VisibilityResolve;
+                MaterialStageDerivativeProvider expectedProvider = stageLIR.Stage
+                    == MaterialEvaluationStage.Coverage
+                    ? MaterialStageDerivativeProvider.NativeQuad
+                    : MaterialStageDerivativeProvider.VisibilityBuffer;
+                if (stageLIR.ExecutionModel != expectedExecution
+                    || stageLIR.DerivativeProvider != expectedProvider)
+                {
+                    AddError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        $"{stageLIR.Stage} LIR has an invalid execution or derivative provider profile.");
+                }
+            }
+
+            if (stageLIR.SourceValueMapCount != stageLIR.Values.NodeCount)
+            {
+                AddError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidStageLIR,
+                    "Stage LIR source map size does not match its source value IR.");
+            }
+
+            for (int nodeIndex = 0; nodeIndex < stageLIR.Nodes.Count; nodeIndex++)
+            {
+                MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
+                bool hasValidSource = (uint) node.SourceNodeIndex
+                    < (uint) stageLIR.Values.NodeCount
+                    && ContainsSourceNode(stageLIR.SourceSlice, node.SourceNodeIndex);
+                if (!hasValidSource)
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        node.SourceNodeIndex,
+                        $"Stage LIR node %{nodeIndex} has invalid source provenance %{node.SourceNodeIndex}.");
+                }
+
+                if ((uint) node.Opcode > (uint) MaterialStageLIROpcode.Compare
+                    || !IsKnownType(node.Type))
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        node.SourceNodeIndex,
+                        $"Stage LIR node %{nodeIndex} has an unknown opcode or result type.");
+                    continue;
+                }
+
+                GetStageLIROperandRange(
+                    node.Opcode,
+                    out int minimumOperands,
+                    out int maximumOperands);
+                bool hasValidOperandCount = node.OperandCount >= minimumOperands
+                    && node.OperandCount <= maximumOperands
+                    && node.OperandCount <= 4;
+                if (!hasValidOperandCount)
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        node.SourceNodeIndex,
+                        $"Stage LIR node %{nodeIndex} has {node.OperandCount} operands; expected {minimumOperands} to {maximumOperands}.");
+                }
+
+                bool hasValidOperands = true;
+                for (int operandIndex = 0; operandIndex < 4; operandIndex++)
+                {
+                    int operand = node.GetOperand(operandIndex);
+                    if (operandIndex >= node.OperandCount)
+                    {
+                        if (operand != InvalidOperand)
+                        {
+                            hasValidOperands = false;
+                            AddNodeError(
+                                diagnostics,
+                                MaterialIRDiagnosticCodes.InvalidStageLIR,
+                                node.SourceNodeIndex,
+                                $"Stage LIR node %{nodeIndex} inactive operand {operandIndex} must be -1.");
+                        }
+                        continue;
+                    }
+
+                    if (operand < 0 || operand >= nodeIndex)
+                    {
+                        hasValidOperands = false;
+                        AddNodeError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.InvalidStageLIR,
+                            node.SourceNodeIndex,
+                            $"Stage LIR node %{nodeIndex} operand {operandIndex} is not topological.");
+                    }
+                }
+
+                if (hasValidOperandCount && hasValidOperands)
+                {
+                    AppendStageLIRNodeDiagnostics(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        hasKnownStage,
+                        diagnostics);
+                }
+            }
+
+            AppendStageLIRSourceMapDiagnostics(stageLIR, diagnostics);
+            AppendStageLIRReachabilityDiagnostics(stageLIR, diagnostics);
+
+            if (stageLIR.Roots.Count != stageLIR.SourceSlice.Roots.Count)
+            {
+                AddError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidStageLIR,
+                    "Stage LIR root count does not match its source slice.");
+            }
+            else
+            {
+                for (int rootIndex = 0; rootIndex < stageLIR.Roots.Count; rootIndex++)
+                {
+                    MaterialStageValue root = stageLIR.Roots[rootIndex];
+                    if (!stageLIR.Owns(root)
+                        || !stageLIR.TryGetValue(
+                            stageLIR.SourceSlice.Roots[rootIndex],
+                            out MaterialStageValue mappedRoot)
+                        || !root.Equals(mappedRoot))
+                    {
+                        AddError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.InvalidStageLIR,
+                            $"Stage LIR root {rootIndex} is not the lowered source root.");
+                    }
+                }
+            }
+
+            if (hasKnownStage && verifyCanonicalLowering)
+            {
+                MaterialIRVerificationResult stageSliceVerification =
+                    VerifyStageSlice(stageLIR.SourceSlice, stageLIR.Stage);
+                if (!stageSliceVerification.IsValid)
+                {
+                    diagnostics.AddRange(stageSliceVerification.Diagnostics);
+                }
+                else
+                {
+                    MaterialStageLIR canonical =
+                        MaterialStageLIRLowerer.BuildCanonicalUnchecked(
+                            stageLIR.SourceSlice,
+                            stageLIR.Stage);
+                    if (!IsCanonicalStageLIR(stageLIR, canonical))
+                    {
+                        AddError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.InvalidStageLIR,
+                            "Stage LIR does not match the canonical stage lowering of its source slice.");
+                    }
+                }
+            }
+
+            return CreateResult(diagnostics);
+        }
+
+        private static bool IsCanonicalStageLIR(
+            MaterialStageLIR stageLIR,
+            MaterialStageLIR canonical)
+        {
+            if (stageLIR.ExecutionModel != canonical.ExecutionModel
+                || stageLIR.DerivativeProvider != canonical.DerivativeProvider
+                || stageLIR.NodeCount != canonical.NodeCount
+                || stageLIR.Roots.Count != canonical.Roots.Count
+                || stageLIR.SourceValueMapCount != canonical.SourceValueMapCount)
+            {
+                return false;
+            }
+
+            for (int nodeIndex = 0; nodeIndex < stageLIR.NodeCount; nodeIndex++)
+            {
+                MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
+                MaterialStageLIRNode expected = canonical.Nodes[nodeIndex];
+                uint4 constantBits = math.asuint(node.Constant);
+                uint4 expectedConstantBits = math.asuint(expected.Constant);
+                if (node.Opcode != expected.Opcode
+                    || node.Type != expected.Type
+                    || node.Semantic != expected.Semantic
+                    || node.SourceNodeIndex != expected.SourceNodeIndex
+                    || node.OperandCount != expected.OperandCount
+                    || node.Operand0 != expected.Operand0
+                    || node.Operand1 != expected.Operand1
+                    || node.Operand2 != expected.Operand2
+                    || node.Operand3 != expected.Operand3
+                    || constantBits.x != expectedConstantBits.x
+                    || constantBits.y != expectedConstantBits.y
+                    || constantBits.z != expectedConstantBits.z
+                    || constantBits.w != expectedConstantBits.w)
+                {
+                    return false;
+                }
+            }
+
+            for (int rootIndex = 0; rootIndex < stageLIR.Roots.Count; rootIndex++)
+            {
+                if (stageLIR.Roots[rootIndex].Index
+                    != canonical.Roots[rootIndex].Index)
+                {
+                    return false;
+                }
+            }
+
+            for (int sourceIndex = 0;
+                 sourceIndex < stageLIR.SourceValueMapCount;
+                 sourceIndex++)
+            {
+                if (stageLIR.GetMappedNodeIndex(sourceIndex)
+                    != canonical.GetMappedNodeIndex(sourceIndex))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static void AppendStageLIRNodeDiagnostics(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            bool hasKnownStage,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            if (node.Opcode != MaterialStageLIROpcode.Constant
+                && !IsDefaultBits(node.Constant))
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    "must not carry a constant payload.");
+            }
+
+            switch (node.Opcode)
+            {
+                case MaterialStageLIROpcode.StageInput:
+                    var input = (MaterialStageInput) node.Semantic;
+                    MaterialValueType inputType = GetStageInputType(input);
+                    if (!IsKnownType(inputType)
+                        || (hasKnownStage
+                            && !IsStageInputAvailable(stageLIR.Stage, input)))
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            $"has invalid input semantic {node.Semantic} for {stageLIR.Stage} evaluation.");
+                    }
+                    else
+                    {
+                        RequireStageLIRResultType(
+                            node,
+                            nodeIndex,
+                            inputType,
+                            diagnostics);
+                    }
+                    break;
+                case MaterialStageLIROpcode.Constant:
+                    if (node.Semantic != 0)
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            "constant semantic payload must be 0.");
+                    }
+                    VerifyStageLIRConstant(node, nodeIndex, diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Parameter:
+                    if (!stageLIR.Values.TryGetParameterDeclaration(
+                            node.Semantic,
+                            out MaterialParameterDeclaration parameter)
+                        || !IsDataType(parameter.Type))
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            $"references invalid parameter declaration {node.Semantic}.");
+                    }
+                    else
+                    {
+                        RequireStageLIRResultType(
+                            node,
+                            nodeIndex,
+                            parameter.Type,
+                            diagnostics);
+                    }
+                    break;
+                case MaterialStageLIROpcode.TextureResource:
+                    if (!stageLIR.Values.TryGetResourceDeclaration(
+                            node.Semantic,
+                            out MaterialResourceDeclaration resource)
+                        || resource.Type != MaterialValueType.Texture2D)
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            $"references invalid resource declaration {node.Semantic}.");
+                    }
+                    else
+                    {
+                        RequireStageLIRResultType(
+                            node,
+                            nodeIndex,
+                            resource.Type,
+                            diagnostics);
+                    }
+                    break;
+                case MaterialStageLIROpcode.Swizzle:
+                    if (!MaterialSwizzleMask.TryDecode(
+                            node.Semantic,
+                            out MaterialSwizzleMask mask))
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            $"has non-canonical swizzle payload 0x{node.Semantic:X8}.");
+                    }
+                    else
+                    {
+                        VerifyStageLIRSwizzle(
+                            stageLIR,
+                            node,
+                            nodeIndex,
+                            mask,
+                            diagnostics);
+                    }
+                    break;
+                case MaterialStageLIROpcode.Compare:
+                    if (node.Semantic < (int) MaterialComparison.Equal
+                        || node.Semantic > (int) MaterialComparison.GreaterOrEqual)
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            $"has undefined comparison semantic {node.Semantic}.");
+                    }
+                    VerifyStageLIRCompare(stageLIR, node, nodeIndex, diagnostics);
+                    break;
+                default:
+                    if (node.Semantic != 0)
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            "semantic payload must be 0.");
+                    }
+                    AppendStageLIRSignatureDiagnostics(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        diagnostics);
+                    break;
+            }
+        }
+
+        private static void AppendStageLIRSignatureDiagnostics(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            switch (node.Opcode)
+            {
+                case MaterialStageLIROpcode.TextureSampleGrad:
+                    RequireStageLIROperandType(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        0,
+                        MaterialValueType.Texture2D,
+                        diagnostics);
+                    RequireStageLIROperandType(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        1,
+                        MaterialValueType.Float2,
+                        diagnostics);
+                    RequireStageLIROperandType(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        2,
+                        MaterialValueType.Float2,
+                        diagnostics);
+                    RequireStageLIROperandType(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        3,
+                        MaterialValueType.Float2,
+                        diagnostics);
+                    RequireStageLIRResultType(
+                        node,
+                        nodeIndex,
+                        MaterialValueType.Float4,
+                        diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Add:
+                case MaterialStageLIROpcode.Multiply:
+                case MaterialStageLIROpcode.Subtract:
+                case MaterialStageLIROpcode.Divide:
+                case MaterialStageLIROpcode.Min:
+                case MaterialStageLIROpcode.Max:
+                    VerifyStageLIRBinarySameNumeric(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Lerp:
+                    VerifyStageLIRLerp(stageLIR, node, nodeIndex, diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Select:
+                    VerifyStageLIRSelect(stageLIR, node, nodeIndex, diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Compose:
+                    for (int operandIndex = 0;
+                         operandIndex < node.OperandCount;
+                         operandIndex++)
+                    {
+                        RequireStageLIROperandType(
+                            stageLIR,
+                            node,
+                            nodeIndex,
+                            operandIndex,
+                            MaterialValueType.Float,
+                            diagnostics);
+                    }
+                    RequireStageLIRResultType(
+                        node,
+                        nodeIndex,
+                        GetFloatType(node.OperandCount),
+                        diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Saturate:
+                case MaterialStageLIROpcode.OneMinus:
+                    VerifyStageLIRUnarySameNumeric(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Dot:
+                    VerifyStageLIRDot(stageLIR, node, nodeIndex, diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Normalize:
+                    MaterialValueType operandType = GetStageLIROperandType(
+                        stageLIR,
+                        node,
+                        0);
+                    if (!IsVectorType(operandType))
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            $"normalize operand must be a vector, got {operandType}.");
+                    }
+                    else
+                    {
+                        RequireStageLIRResultType(
+                            node,
+                            nodeIndex,
+                            operandType,
+                            diagnostics);
+                    }
+                    break;
+            }
+        }
+
+        private static void VerifyStageLIRConstant(
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            if (!IsDataType(node.Type))
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"constant result must be Bool or numeric, got {node.Type}.");
+                return;
+            }
+
+            uint4 bits = math.asuint(node.Constant);
+            if (node.Type == MaterialValueType.Bool
+                && bits.x != 0u
+                && bits.x != math.asuint(1.0f))
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    "Bool constant must be exactly 0 or 1.");
+            }
+            for (int componentIndex = GetComponentCount(node.Type);
+                 componentIndex < 4;
+                 componentIndex++)
+            {
+                if (bits[componentIndex] != 0u)
+                {
+                    AddStageLIRNodeError(
+                        diagnostics,
+                        node,
+                        nodeIndex,
+                        $"unused constant component {componentIndex} must be positive zero.");
+                }
+            }
+        }
+
+        private static void VerifyStageLIRUnarySameNumeric(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialValueType operandType = GetStageLIROperandType(stageLIR, node, 0);
+            if (!IsNumericType(operandType))
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"operand must be numeric, got {operandType}.");
+                return;
+            }
+            RequireStageLIRResultType(node, nodeIndex, operandType, diagnostics);
+        }
+
+        private static void VerifyStageLIRBinarySameNumeric(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialValueType leftType = GetStageLIROperandType(stageLIR, node, 0);
+            MaterialValueType rightType = GetStageLIROperandType(stageLIR, node, 1);
+            if (!IsNumericType(leftType)
+                || !IsNumericType(rightType)
+                || leftType != rightType)
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"binary operands must have the same numeric type, got {leftType} and {rightType}.");
+                return;
+            }
+            RequireStageLIRResultType(node, nodeIndex, leftType, diagnostics);
+        }
+
+        private static void VerifyStageLIRLerp(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialValueType leftType = GetStageLIROperandType(stageLIR, node, 0);
+            MaterialValueType rightType = GetStageLIROperandType(stageLIR, node, 1);
+            if (!IsNumericType(leftType) || leftType != rightType)
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"lerp values must have the same numeric type, got {leftType} and {rightType}.");
+            }
+            RequireStageLIROperandType(
+                stageLIR,
+                node,
+                nodeIndex,
+                2,
+                MaterialValueType.Float,
+                diagnostics);
+            if (IsNumericType(leftType) && leftType == rightType)
+                RequireStageLIRResultType(node, nodeIndex, leftType, diagnostics);
+        }
+
+        private static void VerifyStageLIRSelect(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            RequireStageLIROperandType(
+                stageLIR,
+                node,
+                nodeIndex,
+                0,
+                MaterialValueType.Bool,
+                diagnostics);
+            MaterialValueType trueType = GetStageLIROperandType(stageLIR, node, 1);
+            MaterialValueType falseType = GetStageLIROperandType(stageLIR, node, 2);
+            if (!IsDataType(trueType) || trueType != falseType)
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"select values must have the same data type, got {trueType} and {falseType}.");
+                return;
+            }
+            RequireStageLIRResultType(node, nodeIndex, trueType, diagnostics);
+        }
+
+        private static void VerifyStageLIRSwizzle(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            in MaterialSwizzleMask mask,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialValueType sourceType = GetStageLIROperandType(stageLIR, node, 0);
+            if (!IsNumericType(sourceType))
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"swizzle source must be numeric, got {sourceType}.");
+                return;
+            }
+
+            int sourceComponentCount = GetComponentCount(sourceType);
+            for (int componentIndex = 0;
+                 componentIndex < mask.ComponentCount;
+                 componentIndex++)
+            {
+                if (mask.GetComponent(componentIndex) >= sourceComponentCount)
+                {
+                    AddStageLIRNodeError(
+                        diagnostics,
+                        node,
+                        nodeIndex,
+                        $"swizzle component {mask.GetComponent(componentIndex)} is unavailable on {sourceType}.");
+                }
+            }
+            RequireStageLIRResultType(node, nodeIndex, mask.ResultType, diagnostics);
+        }
+
+        private static void VerifyStageLIRDot(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialValueType leftType = GetStageLIROperandType(stageLIR, node, 0);
+            MaterialValueType rightType = GetStageLIROperandType(stageLIR, node, 1);
+            if (!IsVectorType(leftType) || leftType != rightType)
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"dot operands must have the same vector type, got {leftType} and {rightType}.");
+            }
+            RequireStageLIRResultType(
+                node,
+                nodeIndex,
+                MaterialValueType.Float,
+                diagnostics);
+        }
+
+        private static void VerifyStageLIRCompare(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialValueType leftType = GetStageLIROperandType(stageLIR, node, 0);
+            MaterialValueType rightType = GetStageLIROperandType(stageLIR, node, 1);
+            if (!IsNumericType(leftType) || leftType != rightType)
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"compare operands must have the same numeric type, got {leftType} and {rightType}.");
+            }
+            RequireStageLIRResultType(
+                node,
+                nodeIndex,
+                MaterialValueType.Bool,
+                diagnostics);
+        }
+
+        private static void AppendStageLIRSourceMapDiagnostics(
+            MaterialStageLIR stageLIR,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            var uniformityStates = new MaterialStageUniformity[
+                stageLIR.Values.NodeCount];
+            int sourceCount = Math.Min(
+                stageLIR.SourceValueMapCount,
+                stageLIR.Values.NodeCount);
+            for (int sourceIndex = 0; sourceIndex < sourceCount; sourceIndex++)
+            {
+                int mappedNodeIndex = stageLIR.GetMappedNodeIndex(sourceIndex);
+                if (mappedNodeIndex == InvalidOperand)
+                    continue;
+                if (mappedNodeIndex < 0
+                    || mappedNodeIndex >= stageLIR.NodeCount
+                    || !ContainsSourceNode(stageLIR.SourceSlice, sourceIndex))
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        sourceIndex,
+                        $"Stage LIR source map entry %{sourceIndex} -> %{mappedNodeIndex} is invalid.");
+                    continue;
+                }
+
+                MaterialStageLIRNode mappedNode = stageLIR.Nodes[mappedNodeIndex];
+                if (mappedNode.Type != stageLIR.Values.Nodes[sourceIndex].Type)
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        sourceIndex,
+                        $"Stage LIR source map entry %{sourceIndex} has an incompatible type.");
+                    continue;
+                }
+                AppendDirectStageLIRMappingDiagnostics(
+                    stageLIR,
+                    sourceIndex,
+                    mappedNodeIndex,
+                    uniformityStates,
+                    diagnostics);
+            }
+        }
+
+        private static void AppendDirectStageLIRMappingDiagnostics(
+            MaterialStageLIR stageLIR,
+            int sourceIndex,
+            int mappedNodeIndex,
+            MaterialStageUniformity[] uniformityStates,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialValueNode source = stageLIR.Values.Nodes[sourceIndex];
+            if (source.Opcode == MaterialValueOpcode.Ddx
+                || source.Opcode == MaterialValueOpcode.Ddy)
+            {
+                AppendDerivativeStageLIRMappingDiagnostics(
+                    stageLIR,
+                    source,
+                    sourceIndex,
+                    mappedNodeIndex,
+                    uniformityStates,
+                    diagnostics);
+                return;
+            }
+
+            MaterialStageLIRNode mapped = stageLIR.Nodes[mappedNodeIndex];
+            MaterialStageLIROpcode expectedOpcode;
+            int expectedSemantic;
+            if (source.Opcode == MaterialValueOpcode.ExternalInput)
+            {
+                expectedOpcode = MaterialStageLIROpcode.StageInput;
+                expectedSemantic = (int) MaterialStageLIRLowerer.MapStageInput(
+                    (MaterialExternalInput) source.Semantic);
+            }
+            else
+            {
+                expectedOpcode = MaterialStageLIRLowerer.MapOpcode(source.Opcode);
+                expectedSemantic = source.Semantic;
+            }
+
+            if (mapped.Opcode != expectedOpcode
+                || mapped.Semantic != expectedSemantic)
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidStageLIR,
+                    sourceIndex,
+                    $"Stage LIR source map entry %{sourceIndex} does not preserve opcode or semantic payload.");
+            }
+
+            uint4 sourceBits = math.asuint(source.Constant);
+            uint4 mappedBits = math.asuint(mapped.Constant);
+            if (sourceBits.x != mappedBits.x
+                || sourceBits.y != mappedBits.y
+                || sourceBits.z != mappedBits.z
+                || sourceBits.w != mappedBits.w)
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidStageLIR,
+                    sourceIndex,
+                    $"Stage LIR source map entry %{sourceIndex} does not preserve constant payload.");
+            }
+
+            int sourceOperandCount = 0;
+            while (sourceOperandCount < 4
+                   && GetOperand(source, sourceOperandCount) >= 0)
+            {
+                sourceOperandCount++;
+            }
+            if (mapped.OperandCount != sourceOperandCount)
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidStageLIR,
+                    sourceIndex,
+                    $"Stage LIR source map entry %{sourceIndex} does not preserve operand count.");
+                return;
+            }
+
+            for (int operandIndex = 0;
+                 operandIndex < sourceOperandCount;
+                 operandIndex++)
+            {
+                int sourceOperand = GetOperand(source, operandIndex);
+                if ((uint) sourceOperand >= (uint) stageLIR.SourceValueMapCount
+                    || stageLIR.GetMappedNodeIndex(sourceOperand)
+                        != mapped.GetOperand(operandIndex))
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        sourceIndex,
+                        $"Stage LIR source map entry %{sourceIndex} does not preserve operand {operandIndex}.");
+                }
+            }
+        }
+
+        private static void AppendDerivativeStageLIRMappingDiagnostics(
+            MaterialStageLIR stageLIR,
+            in MaterialValueNode source,
+            int sourceIndex,
+            int mappedNodeIndex,
+            MaterialStageUniformity[] uniformityStates,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialStageLIRNode mapped = stageLIR.Nodes[mappedNodeIndex];
+            bool isDdx = source.Opcode == MaterialValueOpcode.Ddx;
+            if (MaterialStageUniformityAnalyzer.Analyze(
+                    stageLIR.Values,
+                    source.Operand0,
+                    uniformityStates)
+                == MaterialStageUniformity.Uniform)
+            {
+                if (mapped.Opcode != MaterialStageLIROpcode.Constant
+                    || !IsDefaultBits(mapped.Constant))
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        sourceIndex,
+                        $"Uniform derivative source map entry %{sourceIndex} must lower to typed zero.");
+                }
+                return;
+            }
+
+            MaterialValueNode operand = stageLIR.Values.Nodes[source.Operand0];
+            if (operand.Opcode == MaterialValueOpcode.ExternalInput
+                && operand.Semantic == (int) MaterialExternalInput.UV0)
+            {
+                MaterialStageInput expectedInput = isDdx
+                    ? MaterialStageInput.UV0Ddx
+                    : MaterialStageInput.UV0Ddy;
+                if (mapped.Opcode != MaterialStageLIROpcode.StageInput
+                    || mapped.Semantic != (int) expectedInput)
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        sourceIndex,
+                        $"Direct UV derivative source map entry %{sourceIndex} must use {expectedInput}.");
+                }
+                return;
+            }
+
+            if (mapped.Opcode == MaterialStageLIROpcode.StageInput)
+            {
+                MaterialStageInput expectedInput = isDdx
+                    ? MaterialStageInput.UV0Ddx
+                    : MaterialStageInput.UV0Ddy;
+                if (mapped.Semantic != (int) expectedInput)
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidStageLIR,
+                        sourceIndex,
+                        $"Derivative source map entry %{sourceIndex} uses the wrong gradient axis.");
+                }
+            }
+
+            if ((uint) mapped.SourceNodeIndex
+                >= (uint) stageLIR.Values.NodeCount)
+            {
+                return;
+            }
+            MaterialValueOpcode provenanceOpcode =
+                stageLIR.Values.Nodes[mapped.SourceNodeIndex].Opcode;
+            if (provenanceOpcode != source.Opcode)
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidStageLIR,
+                    sourceIndex,
+                    $"Derivative source map entry %{sourceIndex} has incompatible axis provenance.");
+            }
+        }
+
+        private static void AppendStageLIRReachabilityDiagnostics(
+            MaterialStageLIR stageLIR,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            var reachable = new bool[stageLIR.NodeCount];
+            var pending = new Stack<int>();
+            for (int rootIndex = 0; rootIndex < stageLIR.Roots.Count; rootIndex++)
+            {
+                MaterialStageValue root = stageLIR.Roots[rootIndex];
+                if (stageLIR.Owns(root))
+                    pending.Push(root.Index);
+            }
+
+            while (pending.Count > 0)
+            {
+                int nodeIndex = pending.Pop();
+                if ((uint) nodeIndex >= (uint) stageLIR.NodeCount
+                    || reachable[nodeIndex])
+                {
+                    continue;
+                }
+
+                reachable[nodeIndex] = true;
+                MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
+                int operandCount = Math.Min(Math.Max(node.OperandCount, 0), 4);
+                for (int operandIndex = 0;
+                     operandIndex < operandCount;
+                     operandIndex++)
+                {
+                    int operand = node.GetOperand(operandIndex);
+                    if ((uint) operand < (uint) stageLIR.NodeCount)
+                        pending.Push(operand);
+                }
+            }
+
+            for (int nodeIndex = 0; nodeIndex < reachable.Length; nodeIndex++)
+            {
+                if (!reachable[nodeIndex])
+                {
+                    AddStageLIRNodeError(
+                        diagnostics,
+                        stageLIR.Nodes[nodeIndex],
+                        nodeIndex,
+                        "is not reachable from a stage root.");
+                }
+            }
+        }
+
+        private static bool ContainsSourceNode(
+            MaterialValueSlice sourceSlice,
+            int sourceNodeIndex)
+        {
+            for (int i = 0; i < sourceSlice.NodeIndices.Count; i++)
+            {
+                if (sourceSlice.NodeIndices[i] == sourceNodeIndex)
+                    return true;
+            }
+            return false;
+        }
+
+        private static MaterialValueType GetStageLIROperandType(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int operandIndex)
+        {
+            return stageLIR.Nodes[node.GetOperand(operandIndex)].Type;
+        }
+
+        private static void RequireStageLIROperandType(
+            MaterialStageLIR stageLIR,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            int operandIndex,
+            MaterialValueType expectedType,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            MaterialValueType actualType = GetStageLIROperandType(
+                stageLIR,
+                node,
+                operandIndex);
+            if (actualType != expectedType)
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"operand {operandIndex} must be {expectedType}, got {actualType}.");
+            }
+        }
+
+        private static void RequireStageLIRResultType(
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            MaterialValueType expectedType,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            if (node.Type != expectedType)
+            {
+                AddStageLIRNodeError(
+                    diagnostics,
+                    node,
+                    nodeIndex,
+                    $"result must be {expectedType}, got {node.Type}.");
+            }
+        }
+
+        private static void AddStageLIRNodeError(
+            List<MaterialIRDiagnostic> diagnostics,
+            in MaterialStageLIRNode node,
+            int nodeIndex,
+            string message)
+        {
+            AddNodeError(
+                diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR,
+                node.SourceNodeIndex,
+                $"Stage LIR node %{nodeIndex} {message}");
         }
 
         internal static MaterialIRVerificationResult VerifyClosureGraph(
@@ -2067,6 +3217,339 @@ namespace VividRP.Runtime.GPUDriven
                     return 4;
                 default:
                     return 0;
+            }
+        }
+
+        private enum StageDerivativeAvailability
+        {
+            Unknown = 0,
+            Zero = 1,
+            Valid = 2,
+            Unavailable = 3,
+        }
+
+        private static StageDerivativeAvailability AnalyzeStageDerivative(
+            MaterialValueIR values,
+            int nodeIndex,
+            StageDerivativeAvailability[] states,
+            MaterialStageUniformity[] uniformityStates)
+        {
+            StageDerivativeAvailability cached = states[nodeIndex];
+            if (cached != StageDerivativeAvailability.Unknown)
+                return cached;
+
+            if (MaterialStageUniformityAnalyzer.Analyze(
+                    values,
+                    nodeIndex,
+                    uniformityStates)
+                == MaterialStageUniformity.Uniform)
+            {
+                states[nodeIndex] = StageDerivativeAvailability.Zero;
+                return StageDerivativeAvailability.Zero;
+            }
+
+            MaterialValueNode node = values.Nodes[nodeIndex];
+            StageDerivativeAvailability result;
+            switch (MaterialDerivativeLegalizationRules.GetRule(node.Opcode))
+            {
+                case MaterialDerivativeLegalizationRule.Zero:
+                    result = StageDerivativeAvailability.Zero;
+                    break;
+                case MaterialDerivativeLegalizationRule.StageInput:
+                    result = node.Semantic == (int) MaterialExternalInput.UV0
+                        ? StageDerivativeAvailability.Valid
+                        : StageDerivativeAvailability.Unavailable;
+                    break;
+                case MaterialDerivativeLegalizationRule.Add:
+                case MaterialDerivativeLegalizationRule.Subtract:
+                    result = MergeDerivativeAvailability(
+                        AnalyzeStageDerivative(
+                            values,
+                            node.Operand0,
+                            states,
+                            uniformityStates),
+                        AnalyzeStageDerivative(
+                            values,
+                            node.Operand1,
+                            states,
+                            uniformityStates));
+                    break;
+                case MaterialDerivativeLegalizationRule.Multiply:
+                    StageDerivativeAvailability left = AnalyzeStageDerivative(
+                        values,
+                        node.Operand0,
+                        states,
+                        uniformityStates);
+                    StageDerivativeAvailability right = AnalyzeStageDerivative(
+                        values,
+                        node.Operand1,
+                        states,
+                        uniformityStates);
+                    result = left == StageDerivativeAvailability.Valid
+                        && right == StageDerivativeAvailability.Valid
+                            ? StageDerivativeAvailability.Unavailable
+                            : MergeDerivativeAvailability(left, right);
+                    break;
+                case MaterialDerivativeLegalizationRule.Divide:
+                    result = MaterialStageUniformityAnalyzer.Analyze(
+                            values,
+                            node.Operand1,
+                            uniformityStates)
+                        == MaterialStageUniformity.Uniform
+                            ? AnalyzeStageDerivative(
+                                values,
+                                node.Operand0,
+                                states,
+                                uniformityStates)
+                            : StageDerivativeAvailability.Unavailable;
+                    break;
+                case MaterialDerivativeLegalizationRule.Lerp:
+                    result = AnalyzeLerpDerivative(
+                        values,
+                        node,
+                        states,
+                        uniformityStates);
+                    break;
+                case MaterialDerivativeLegalizationRule.Select:
+                    result = MaterialStageUniformityAnalyzer.Analyze(
+                            values,
+                            node.Operand0,
+                            uniformityStates)
+                        == MaterialStageUniformity.Uniform
+                            ? MergeDerivativeAvailability(
+                                AnalyzeStageDerivative(
+                                    values,
+                                    node.Operand1,
+                                    states,
+                                    uniformityStates),
+                                AnalyzeStageDerivative(
+                                    values,
+                                    node.Operand2,
+                                    states,
+                                    uniformityStates))
+                            : StageDerivativeAvailability.Unavailable;
+                    break;
+                case MaterialDerivativeLegalizationRule.Swizzle:
+                case MaterialDerivativeLegalizationRule.OneMinus:
+                    result = AnalyzeStageDerivative(
+                        values,
+                        node.Operand0,
+                        states,
+                        uniformityStates);
+                    break;
+                case MaterialDerivativeLegalizationRule.Compose:
+                    result = AnalyzeComposeDerivative(
+                        values,
+                        node,
+                        states,
+                        uniformityStates);
+                    break;
+                case MaterialDerivativeLegalizationRule.Dot:
+                    StageDerivativeAvailability dotLeft = AnalyzeStageDerivative(
+                        values,
+                        node.Operand0,
+                        states,
+                        uniformityStates);
+                    StageDerivativeAvailability dotRight = AnalyzeStageDerivative(
+                        values,
+                        node.Operand1,
+                        states,
+                        uniformityStates);
+                    result = dotLeft == StageDerivativeAvailability.Valid
+                        && dotRight == StageDerivativeAvailability.Valid
+                            ? StageDerivativeAvailability.Unavailable
+                            : MergeDerivativeAvailability(dotLeft, dotRight);
+                    break;
+                default:
+                    result = StageDerivativeAvailability.Unavailable;
+                    break;
+            }
+
+            states[nodeIndex] = result;
+            return result;
+        }
+
+        private static StageDerivativeAvailability AnalyzeLerpDerivative(
+            MaterialValueIR values,
+            in MaterialValueNode node,
+            StageDerivativeAvailability[] states,
+            MaterialStageUniformity[] uniformityStates)
+        {
+            if (MaterialStageUniformityAnalyzer.Analyze(
+                    values,
+                    node.Operand2,
+                    uniformityStates)
+                == MaterialStageUniformity.Uniform)
+            {
+                return MergeDerivativeAvailability(
+                    AnalyzeStageDerivative(
+                        values,
+                        node.Operand0,
+                        states,
+                        uniformityStates),
+                    AnalyzeStageDerivative(
+                        values,
+                        node.Operand1,
+                        states,
+                        uniformityStates));
+            }
+
+            bool hasUniformEndpoints = MaterialStageUniformityAnalyzer.Analyze(
+                    values,
+                    node.Operand0,
+                    uniformityStates)
+                == MaterialStageUniformity.Uniform
+                && MaterialStageUniformityAnalyzer.Analyze(
+                    values,
+                    node.Operand1,
+                    uniformityStates)
+                == MaterialStageUniformity.Uniform;
+            return hasUniformEndpoints
+                ? AnalyzeStageDerivative(
+                    values,
+                    node.Operand2,
+                    states,
+                    uniformityStates)
+                : StageDerivativeAvailability.Unavailable;
+        }
+
+        private static StageDerivativeAvailability AnalyzeComposeDerivative(
+            MaterialValueIR values,
+            in MaterialValueNode node,
+            StageDerivativeAvailability[] states,
+            MaterialStageUniformity[] uniformityStates)
+        {
+            var operands = new[]
+            {
+                node.Operand0,
+                node.Operand1,
+                node.Operand2,
+                node.Operand3,
+            };
+            StageDerivativeAvailability result = StageDerivativeAvailability.Zero;
+            for (int operandIndex = 0;
+                 operandIndex < operands.Length && operands[operandIndex] >= 0;
+                 operandIndex++)
+            {
+                result = MergeDerivativeAvailability(
+                    result,
+                    AnalyzeStageDerivative(
+                        values,
+                        operands[operandIndex],
+                        states,
+                        uniformityStates));
+                if (result == StageDerivativeAvailability.Unavailable)
+                    return result;
+            }
+            return result;
+        }
+
+        private static StageDerivativeAvailability MergeDerivativeAvailability(
+            StageDerivativeAvailability left,
+            StageDerivativeAvailability right)
+        {
+            if (left == StageDerivativeAvailability.Unavailable
+                || right == StageDerivativeAvailability.Unavailable)
+            {
+                return StageDerivativeAvailability.Unavailable;
+            }
+            if (left == StageDerivativeAvailability.Valid
+                || right == StageDerivativeAvailability.Valid)
+            {
+                return StageDerivativeAvailability.Valid;
+            }
+            return StageDerivativeAvailability.Zero;
+        }
+
+        private static bool IsExternalInputAvailable(
+            MaterialEvaluationStage stage,
+            MaterialExternalInput input)
+        {
+            if (input == MaterialExternalInput.UV0)
+                return true;
+            return stage == MaterialEvaluationStage.Surface
+                && (input == MaterialExternalInput.GeometryNormalWS
+                    || input == MaterialExternalInput.GeometryTangentWS);
+        }
+
+        private static bool IsStageInputAvailable(
+            MaterialEvaluationStage stage,
+            MaterialStageInput input)
+        {
+            switch (input)
+            {
+                case MaterialStageInput.UV0:
+                case MaterialStageInput.UV0Ddx:
+                case MaterialStageInput.UV0Ddy:
+                    return true;
+                case MaterialStageInput.GeometryNormalWS:
+                case MaterialStageInput.GeometryTangentWS:
+                    return stage == MaterialEvaluationStage.Surface;
+                default:
+                    return false;
+            }
+        }
+
+        private static MaterialValueType GetStageInputType(MaterialStageInput input)
+        {
+            switch (input)
+            {
+                case MaterialStageInput.UV0:
+                case MaterialStageInput.UV0Ddx:
+                case MaterialStageInput.UV0Ddy:
+                    return MaterialValueType.Float2;
+                case MaterialStageInput.GeometryNormalWS:
+                    return MaterialValueType.Float3;
+                case MaterialStageInput.GeometryTangentWS:
+                    return MaterialValueType.Float4;
+                default:
+                    return (MaterialValueType) (-1);
+            }
+        }
+
+        private static void GetStageLIROperandRange(
+            MaterialStageLIROpcode opcode,
+            out int minimum,
+            out int maximum)
+        {
+            switch (opcode)
+            {
+                case MaterialStageLIROpcode.StageInput:
+                case MaterialStageLIROpcode.Constant:
+                case MaterialStageLIROpcode.Parameter:
+                case MaterialStageLIROpcode.TextureResource:
+                    minimum = maximum = 0;
+                    return;
+                case MaterialStageLIROpcode.TextureSampleGrad:
+                    minimum = maximum = 4;
+                    return;
+                case MaterialStageLIROpcode.Add:
+                case MaterialStageLIROpcode.Multiply:
+                case MaterialStageLIROpcode.Subtract:
+                case MaterialStageLIROpcode.Divide:
+                case MaterialStageLIROpcode.Min:
+                case MaterialStageLIROpcode.Max:
+                case MaterialStageLIROpcode.Dot:
+                case MaterialStageLIROpcode.Compare:
+                    minimum = maximum = 2;
+                    return;
+                case MaterialStageLIROpcode.Lerp:
+                case MaterialStageLIROpcode.Select:
+                    minimum = maximum = 3;
+                    return;
+                case MaterialStageLIROpcode.Swizzle:
+                case MaterialStageLIROpcode.Saturate:
+                case MaterialStageLIROpcode.OneMinus:
+                case MaterialStageLIROpcode.Normalize:
+                    minimum = maximum = 1;
+                    return;
+                case MaterialStageLIROpcode.Compose:
+                    minimum = 2;
+                    maximum = 4;
+                    return;
+                default:
+                    minimum = maximum = 0;
+                    return;
             }
         }
 

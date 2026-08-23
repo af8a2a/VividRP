@@ -12,13 +12,15 @@ namespace VividRP.Runtime.GPUDriven
             IReadOnlyList<MaterialResourceDeclaration> resourceDeclarations,
             IReadOnlyList<MaterialParameter> nativeParameters,
             IReadOnlyList<MaterialTextureResource> nativeTextureResources,
-            IReadOnlyList<MaterialExternalInput> externalInputs)
+            IReadOnlyList<MaterialExternalInput> externalInputs,
+            IReadOnlyList<MaterialStageInput> stageInputs)
         {
             ParameterDeclarations = parameterDeclarations;
             ResourceDeclarations = resourceDeclarations;
             Parameters = nativeParameters;
             TextureResources = nativeTextureResources;
             ExternalInputs = externalInputs;
+            StageInputs = stageInputs;
         }
 
         internal IReadOnlyList<MaterialParameterDeclaration> ParameterDeclarations { get; }
@@ -32,21 +34,24 @@ namespace VividRP.Runtime.GPUDriven
 
         internal IReadOnlyList<MaterialExternalInput> ExternalInputs { get; }
 
-        internal static MaterialValueRequirements Collect(MaterialValueSlice valueSlice)
+        internal IReadOnlyList<MaterialStageInput> StageInputs { get; }
+
+        internal static MaterialValueRequirements Collect(MaterialStageLIR stageLIR)
         {
-            if (valueSlice == null)
-                throw new ArgumentNullException(nameof(valueSlice));
+            if (stageLIR == null)
+                throw new ArgumentNullException(nameof(stageLIR));
 
             var parameterDeclarations = new List<MaterialParameterDeclaration>();
             var resourceDeclarations = new List<MaterialResourceDeclaration>();
             var externalInputs = new List<MaterialExternalInput>();
-            for (int i = 0; i < valueSlice.NodeIndices.Count; i++)
+            var stageInputs = new List<MaterialStageInput>();
+            for (int i = 0; i < stageLIR.Nodes.Count; i++)
             {
-                MaterialValueNode node = valueSlice.Values.Nodes[valueSlice.NodeIndices[i]];
+                MaterialStageLIRNode node = stageLIR.Nodes[i];
                 switch (node.Opcode)
                 {
-                    case MaterialValueOpcode.Parameter:
-                        if (!valueSlice.Values.TryGetParameterDeclaration(
+                    case MaterialStageLIROpcode.Parameter:
+                        if (!stageLIR.Values.TryGetParameterDeclaration(
                                 node.Semantic,
                                 out MaterialParameterDeclaration parameter))
                         {
@@ -55,8 +60,8 @@ namespace VividRP.Runtime.GPUDriven
                         }
                         AddUnique(parameterDeclarations, parameter);
                         break;
-                    case MaterialValueOpcode.TextureResource:
-                        if (!valueSlice.Values.TryGetResourceDeclaration(
+                    case MaterialStageLIROpcode.TextureResource:
+                        if (!stageLIR.Values.TryGetResourceDeclaration(
                                 node.Semantic,
                                 out MaterialResourceDeclaration resource))
                         {
@@ -65,15 +70,24 @@ namespace VividRP.Runtime.GPUDriven
                         }
                         AddUnique(resourceDeclarations, resource);
                         break;
-                    case MaterialValueOpcode.ExternalInput:
-                        AddUnique(externalInputs, (MaterialExternalInput) node.Semantic);
+                    case MaterialStageLIROpcode.StageInput:
+                        var stageInput = (MaterialStageInput) node.Semantic;
+                        AddUnique(stageInputs, stageInput);
+                        AddUnique(
+                            externalInputs,
+                            GetExternalInput(stageInput));
                         break;
                 }
             }
 
             SortDeclarations(parameterDeclarations, resourceDeclarations);
             externalInputs.Sort((left, right) => ((int) left).CompareTo((int) right));
-            return Create(parameterDeclarations, resourceDeclarations, externalInputs);
+            stageInputs.Sort((left, right) => ((int) left).CompareTo((int) right));
+            return Create(
+                parameterDeclarations,
+                resourceDeclarations,
+                externalInputs,
+                stageInputs);
         }
 
         internal static MaterialValueRequirements Merge(
@@ -85,6 +99,7 @@ namespace VividRP.Runtime.GPUDriven
             var parameterDeclarations = new List<MaterialParameterDeclaration>();
             var resourceDeclarations = new List<MaterialResourceDeclaration>();
             var externalInputs = new List<MaterialExternalInput>();
+            var stageInputs = new List<MaterialStageInput>();
             for (int i = 0; i < requirements.Length; i++)
             {
                 MaterialValueRequirements source = requirements[i]
@@ -94,17 +109,42 @@ namespace VividRP.Runtime.GPUDriven
                 AddUnique(parameterDeclarations, source.ParameterDeclarations);
                 AddUnique(resourceDeclarations, source.ResourceDeclarations);
                 AddUnique(externalInputs, source.ExternalInputs);
+                AddUnique(stageInputs, source.StageInputs);
             }
 
             SortDeclarations(parameterDeclarations, resourceDeclarations);
             externalInputs.Sort((left, right) => ((int) left).CompareTo((int) right));
-            return Create(parameterDeclarations, resourceDeclarations, externalInputs);
+            stageInputs.Sort((left, right) => ((int) left).CompareTo((int) right));
+            return Create(
+                parameterDeclarations,
+                resourceDeclarations,
+                externalInputs,
+                stageInputs);
+        }
+
+        private static MaterialExternalInput GetExternalInput(MaterialStageInput input)
+        {
+            switch (input)
+            {
+                case MaterialStageInput.UV0:
+                case MaterialStageInput.UV0Ddx:
+                case MaterialStageInput.UV0Ddy:
+                    return MaterialExternalInput.UV0;
+                case MaterialStageInput.GeometryNormalWS:
+                    return MaterialExternalInput.GeometryNormalWS;
+                case MaterialStageInput.GeometryTangentWS:
+                    return MaterialExternalInput.GeometryTangentWS;
+                default:
+                    throw new InvalidOperationException(
+                        $"Verified Stage LIR contains input {input}.");
+            }
         }
 
         private static MaterialValueRequirements Create(
             List<MaterialParameterDeclaration> parameterDeclarations,
             List<MaterialResourceDeclaration> resourceDeclarations,
-            List<MaterialExternalInput> externalInputs)
+            List<MaterialExternalInput> externalInputs,
+            List<MaterialStageInput> stageInputs)
         {
             var nativeParameters = new List<MaterialParameter>();
             for (int i = 0; i < parameterDeclarations.Count; i++)
@@ -139,7 +179,8 @@ namespace VividRP.Runtime.GPUDriven
                 resourceDeclarations.AsReadOnly(),
                 nativeParameters.AsReadOnly(),
                 nativeTextureResources.AsReadOnly(),
-                externalInputs.AsReadOnly());
+                externalInputs.AsReadOnly(),
+                stageInputs.AsReadOnly());
         }
 
         private static void SortDeclarations(
@@ -178,36 +219,51 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
-    internal static class MaterialValuePatternMatcher
+    internal static class MaterialStageValuePatternMatcher
     {
         internal static bool MatchesParameter(
-            MaterialValueIR values,
+            MaterialStageLIR stageLIR,
             MaterialValue value,
             MaterialParameter parameter)
         {
-            return MatchesParameterNode(values, values.GetNode(value), parameter);
+            return MatchesParameterNode(
+                stageLIR.Values,
+                stageLIR.GetNode(stageLIR.GetValue(value)),
+                parameter);
         }
 
         internal static bool MatchesExternalInput(
-            MaterialValueIR values,
+            MaterialStageLIR stageLIR,
             MaterialValue value,
             MaterialExternalInput input)
         {
-            return MatchesSemantic(
-                values.GetNode(value),
-                MaterialValueOpcode.ExternalInput,
+            return MatchesStageInput(
+                stageLIR.GetNode(stageLIR.GetValue(value)),
                 value.Type,
-                (int) input);
+                GetStageInput(input));
         }
 
         internal static bool MatchesSampledColor(
-            MaterialValueIR values,
+            MaterialStageLIR stageLIR,
             MaterialValue value,
             MaterialTextureResource textureResource,
             MaterialParameter colorParameter)
         {
-            MaterialValueNode color = values.GetNode(value);
-            if (color.Opcode != MaterialValueOpcode.Multiply
+            return MatchesSampledColorNode(
+                stageLIR,
+                stageLIR.GetValue(value).Index,
+                textureResource,
+                colorParameter);
+        }
+
+        private static bool MatchesSampledColorNode(
+            MaterialStageLIR stageLIR,
+            int colorIndex,
+            MaterialTextureResource textureResource,
+            MaterialParameter colorParameter)
+        {
+            MaterialStageLIRNode color = stageLIR.Nodes[colorIndex];
+            if (color.Opcode != MaterialStageLIROpcode.Multiply
                 || color.Type != MaterialValueType.Float4)
             {
                 return false;
@@ -215,15 +271,15 @@ namespace VividRP.Runtime.GPUDriven
 
             int sampleIndex;
             if (MatchesParameterNode(
-                    values,
-                    values.Nodes[color.Operand0],
+                    stageLIR.Values,
+                    stageLIR.Nodes[color.Operand0],
                     colorParameter))
             {
                 sampleIndex = color.Operand1;
             }
             else if (MatchesParameterNode(
-                         values,
-                         values.Nodes[color.Operand1],
+                         stageLIR.Values,
+                         stageLIR.Nodes[color.Operand1],
                          colorParameter))
             {
                 sampleIndex = color.Operand0;
@@ -233,43 +289,41 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             }
 
-            MaterialValueNode sample = values.Nodes[sampleIndex];
-            if (sample.Opcode != MaterialValueOpcode.TextureSampleGrad
+            MaterialStageLIRNode sample = stageLIR.Nodes[sampleIndex];
+            if (sample.Opcode != MaterialStageLIROpcode.TextureSampleGrad
                 || sample.Type != MaterialValueType.Float4
                 || !MatchesResourceNode(
-                    values,
-                    values.Nodes[sample.Operand0],
+                    stageLIR.Values,
+                    stageLIR.Nodes[sample.Operand0],
                     textureResource)
-                || !MatchesSemantic(
-                    values.Nodes[sample.Operand1],
-                    MaterialValueOpcode.ExternalInput,
+                || !MatchesStageInput(
+                    stageLIR.Nodes[sample.Operand1],
                     MaterialValueType.Float2,
-                    (int) MaterialExternalInput.UV0))
+                    MaterialStageInput.UV0))
             {
                 return false;
             }
 
-            return MatchesDerivative(
-                    values,
-                    sample.Operand2,
-                    MaterialValueOpcode.Ddx,
-                    sample.Operand1)
-                && MatchesDerivative(
-                    values,
-                    sample.Operand3,
-                    MaterialValueOpcode.Ddy,
-                    sample.Operand1);
+            return MatchesStageInput(
+                    stageLIR.Nodes[sample.Operand2],
+                    MaterialValueType.Float2,
+                    MaterialStageInput.UV0Ddx)
+                && MatchesStageInput(
+                    stageLIR.Nodes[sample.Operand3],
+                    MaterialValueType.Float2,
+                    MaterialStageInput.UV0Ddy);
         }
 
         internal static bool MatchesSampledColorComponent(
-            MaterialValueIR values,
+            MaterialStageLIR stageLIR,
             MaterialValue value,
             int component,
             MaterialTextureResource textureResource,
             MaterialParameter colorParameter)
         {
-            MaterialValueNode swizzle = values.GetNode(value);
-            if (swizzle.Opcode != MaterialValueOpcode.Swizzle
+            MaterialStageLIRNode swizzle =
+                stageLIR.GetNode(stageLIR.GetValue(value));
+            if (swizzle.Opcode != MaterialStageLIROpcode.Swizzle
                 || swizzle.Type != MaterialValueType.Float
                 || !MaterialSwizzleMask.TryDecode(
                     swizzle.Semantic,
@@ -280,43 +334,29 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             }
 
-            MaterialValueNode source = values.Nodes[swizzle.Operand0];
-            return MatchesSampledColor(
-                values,
-                new MaterialValue(values, swizzle.Operand0, source.Type),
+            return MatchesSampledColorNode(
+                stageLIR,
+                swizzle.Operand0,
                 textureResource,
                 colorParameter);
         }
 
-        private static bool MatchesDerivative(
-            MaterialValueIR values,
-            int nodeIndex,
-            MaterialValueOpcode opcode,
-            int sourceIndex)
-        {
-            MaterialValueNode node = values.Nodes[nodeIndex];
-            return node.Opcode == opcode
-                && node.Type == MaterialValueType.Float2
-                && node.Operand0 == sourceIndex;
-        }
-
-        private static bool MatchesSemantic(
-            in MaterialValueNode node,
-            MaterialValueOpcode opcode,
+        private static bool MatchesStageInput(
+            in MaterialStageLIRNode node,
             MaterialValueType type,
-            int semantic)
+            MaterialStageInput input)
         {
-            return node.Opcode == opcode
+            return node.Opcode == MaterialStageLIROpcode.StageInput
                 && node.Type == type
-                && node.Semantic == semantic;
+                && node.Semantic == (int) input;
         }
 
         private static bool MatchesParameterNode(
             MaterialValueIR values,
-            in MaterialValueNode node,
+            in MaterialStageLIRNode node,
             MaterialParameter parameter)
         {
-            return node.Opcode == MaterialValueOpcode.Parameter
+            return node.Opcode == MaterialStageLIROpcode.Parameter
                 && values.TryGetParameterDeclaration(
                     node.Semantic,
                     out MaterialParameterDeclaration declaration)
@@ -326,15 +366,30 @@ namespace VividRP.Runtime.GPUDriven
 
         private static bool MatchesResourceNode(
             MaterialValueIR values,
-            in MaterialValueNode node,
+            in MaterialStageLIRNode node,
             MaterialTextureResource resource)
         {
-            return node.Opcode == MaterialValueOpcode.TextureResource
+            return node.Opcode == MaterialStageLIROpcode.TextureResource
                 && values.TryGetResourceDeclaration(
                     node.Semantic,
                     out MaterialResourceDeclaration declaration)
                 && declaration
                     == MaterialNativeTemplateDeclarationAdapter.GetTexture(resource);
+        }
+
+        private static MaterialStageInput GetStageInput(MaterialExternalInput input)
+        {
+            switch (input)
+            {
+                case MaterialExternalInput.UV0:
+                    return MaterialStageInput.UV0;
+                case MaterialExternalInput.GeometryNormalWS:
+                    return MaterialStageInput.GeometryNormalWS;
+                case MaterialExternalInput.GeometryTangentWS:
+                    return MaterialStageInput.GeometryTangentWS;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(input), input, null);
+            }
         }
     }
 
@@ -342,18 +397,22 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal CompiledCoverageProgram(
             VividMaterialCoverageProgramID programID,
-            MaterialValueSlice valueSlice,
+            MaterialStageLIR stageLIR,
             MaterialValueRequirements requirements)
         {
             ProgramID = programID;
-            ValueSlice = valueSlice ?? throw new ArgumentNullException(nameof(valueSlice));
+            StageLIR = stageLIR ?? throw new ArgumentNullException(nameof(stageLIR));
+            if (StageLIR.Stage != MaterialEvaluationStage.Coverage)
+                throw new ArgumentException("Coverage program requires Coverage Stage LIR.", nameof(stageLIR));
             Requirements = requirements
                 ?? throw new ArgumentNullException(nameof(requirements));
         }
 
         internal VividMaterialCoverageProgramID ProgramID { get; }
 
-        internal MaterialValueSlice ValueSlice { get; }
+        internal MaterialStageLIR StageLIR { get; }
+
+        internal MaterialValueSlice ValueSlice => StageLIR.SourceSlice;
 
         internal MaterialValueRequirements Requirements { get; }
 
@@ -365,6 +424,9 @@ namespace VividRP.Runtime.GPUDriven
 
         internal IReadOnlyList<MaterialExternalInput> RequiredExternalInputs =>
             Requirements.ExternalInputs;
+
+        internal IReadOnlyList<MaterialStageInput> RequiredStageInputs =>
+            Requirements.StageInputs;
     }
 
     internal static class CoverageProgramLowerer
@@ -374,39 +436,39 @@ namespace VividRP.Runtime.GPUDriven
             if (module == null)
                 throw new ArgumentNullException(nameof(module));
 
-            MaterialValueSlice valueSlice = module.CreateValueSlice(
+            MaterialStageLIR stageLIR = module.CreateStageLIR(
+                MaterialEvaluationStage.Coverage,
                 module.Outputs.CoverageValue,
                 module.Outputs.AlphaClipThreshold);
-            if (!MatchesBaseColorAlphaProgram(module, valueSlice))
+            if (!MatchesBaseColorAlphaProgram(module, stageLIR))
             {
                 throw new NotSupportedException(
                     "Coverage value IR cannot be lowered to an existing coverage program ABI.");
             }
 
             MaterialValueRequirements requirements =
-                MaterialValueRequirements.Collect(valueSlice);
+                MaterialValueRequirements.Collect(stageLIR);
             return new CompiledCoverageProgram(
                 VividMaterialCoverageProgramID.BaseColorAlpha,
-                valueSlice,
+                stageLIR,
                 requirements);
         }
 
         private static bool MatchesBaseColorAlphaProgram(
             MaterialIRModule module,
-            MaterialValueSlice valueSlice)
+            MaterialStageLIR stageLIR)
         {
-            MaterialValueIR values = module.Values;
-            return MaterialValuePatternMatcher.MatchesParameter(
-                    values,
+            return MaterialStageValuePatternMatcher.MatchesParameter(
+                    stageLIR,
                     module.Outputs.AlphaClipThreshold,
                     MaterialParameter.AlphaClipThreshold)
-                && MaterialValuePatternMatcher.MatchesSampledColorComponent(
-                    values,
+                && MaterialStageValuePatternMatcher.MatchesSampledColorComponent(
+                    stageLIR,
                     module.Outputs.CoverageValue,
                     component: 3,
                     MaterialTextureResource.BaseColor,
                     MaterialParameter.BaseColor)
-                && valueSlice.NodeCount == 9;
+                && stageLIR.NodeCount == 9;
         }
     }
 
@@ -415,12 +477,14 @@ namespace VividRP.Runtime.GPUDriven
         internal CompiledSurfaceProgram(
             VividMaterialSurfaceProgramID programID,
             VividMaterialProgramID materialProgramID,
-            MaterialValueSlice valueSlice,
+            MaterialStageLIR stageLIR,
             MaterialValueRequirements requirements)
         {
             ProgramID = programID;
             MaterialProgramID = materialProgramID;
-            ValueSlice = valueSlice ?? throw new ArgumentNullException(nameof(valueSlice));
+            StageLIR = stageLIR ?? throw new ArgumentNullException(nameof(stageLIR));
+            if (StageLIR.Stage != MaterialEvaluationStage.Surface)
+                throw new ArgumentException("Surface program requires Surface Stage LIR.", nameof(stageLIR));
             Requirements = requirements
                 ?? throw new ArgumentNullException(nameof(requirements));
         }
@@ -429,7 +493,9 @@ namespace VividRP.Runtime.GPUDriven
 
         internal VividMaterialProgramID MaterialProgramID { get; }
 
-        internal MaterialValueSlice ValueSlice { get; }
+        internal MaterialStageLIR StageLIR { get; }
+
+        internal MaterialValueSlice ValueSlice => StageLIR.SourceSlice;
 
         internal MaterialValueRequirements Requirements { get; }
 
@@ -441,6 +507,9 @@ namespace VividRP.Runtime.GPUDriven
 
         internal IReadOnlyList<MaterialExternalInput> RequiredExternalInputs =>
             Requirements.ExternalInputs;
+
+        internal IReadOnlyList<MaterialStageInput> RequiredStageInputs =>
+            Requirements.StageInputs;
     }
 
     internal static class SurfaceProgramMatcher
@@ -456,17 +525,20 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(module));
 
             MaterialValueSlice valueSlice = CreateSurfaceValueSlice(module);
+            MaterialStageLIR stageLIR = MaterialStageLIRLowerer.Lower(
+                valueSlice,
+                MaterialEvaluationStage.Surface);
             VividMaterialSurfaceProgramID programID;
             VividMaterialProgramID materialProgramID;
             ClosureExpressionNode root =
                 module.ClosureGraph.GetNode(module.SurfaceClosure);
             if (root.Opcode == ClosureExpressionOpcode.Slab
-                && MatchesStandardSingleSlab(module, root.Slab, valueSlice))
+                && MatchesStandardSingleSlab(module, root.Slab, stageLIR))
             {
                 programID = VividMaterialSurfaceProgramID.StandardSingleSlab;
                 materialProgramID = VividMaterialProgramID.StandardSingleSlab;
             }
-            else if (MatchesDualSlab(module, root, valueSlice))
+            else if (MatchesDualSlab(module, root, stageLIR))
             {
                 programID = VividMaterialSurfaceProgramID.DualSlab;
                 materialProgramID = root.Opcode == ClosureExpressionOpcode.HorizontalMix
@@ -482,8 +554,8 @@ namespace VividRP.Runtime.GPUDriven
             return new CompiledSurfaceProgram(
                 programID,
                 materialProgramID,
-                valueSlice,
-                MaterialValueRequirements.Collect(valueSlice));
+                stageLIR,
+                MaterialValueRequirements.Collect(stageLIR));
         }
 
         private static MaterialValueSlice CreateSurfaceValueSlice(MaterialIRModule module)
@@ -514,27 +586,27 @@ namespace VividRP.Runtime.GPUDriven
         private static bool MatchesStandardSingleSlab(
             MaterialIRModule module,
             in ClosureSlabExpression slab,
-            MaterialValueSlice valueSlice)
+            MaterialStageLIR stageLIR)
         {
-            return MatchesNormalBasis(module.Values, slab)
+            return MatchesNormalBasis(stageLIR, slab)
                 && MatchesSlab(
-                    module.Values,
+                    stageLIR,
                     slab,
                     MaterialTextureResource.BaseColor,
                     MaterialParameter.BaseColor,
                     MaterialParameter.Roughness,
                     MaterialParameter.Metallic)
-                && MaterialValuePatternMatcher.MatchesParameter(
-                    module.Values,
+                && MaterialStageValuePatternMatcher.MatchesParameter(
+                    stageLIR,
                     module.Outputs.Emission,
                     MaterialParameter.Emission)
-                && valueSlice.NodeCount == 12;
+                && stageLIR.NodeCount == 12;
         }
 
         private static bool MatchesDualSlab(
             MaterialIRModule module,
             in ClosureExpressionNode root,
-            MaterialValueSlice valueSlice)
+            MaterialStageLIR stageLIR)
         {
             if (root.Opcode != ClosureExpressionOpcode.HorizontalMix
                 && root.Opcode != ClosureExpressionOpcode.VerticalLayer)
@@ -554,49 +626,49 @@ namespace VividRP.Runtime.GPUDriven
 
             ClosureSlabExpression baseSlab = baseNode.Slab;
             ClosureSlabExpression topSlab = topNode.Slab;
-            return MatchesNormalBasis(module.Values, baseSlab)
-                && MatchesNormalBasis(module.Values, topSlab)
+            return MatchesNormalBasis(stageLIR, baseSlab)
+                && MatchesNormalBasis(stageLIR, topSlab)
                 && MatchesSlab(
-                    module.Values,
+                    stageLIR,
                     baseSlab,
                     MaterialTextureResource.BaseColor,
                     MaterialParameter.BaseColor,
                     MaterialParameter.Roughness,
                     MaterialParameter.Metallic)
                 && MatchesSlab(
-                    module.Values,
+                    stageLIR,
                     topSlab,
                     MaterialTextureResource.TopBaseColor,
                     MaterialParameter.TopBaseColor,
                     MaterialParameter.TopRoughness,
                     MaterialParameter.TopMetallic)
-                && MaterialValuePatternMatcher.MatchesParameter(
-                    module.Values,
+                && MaterialStageValuePatternMatcher.MatchesParameter(
+                    stageLIR,
                     root.Weight,
                     MaterialParameter.LayerWeight)
-                && MaterialValuePatternMatcher.MatchesParameter(
-                    module.Values,
+                && MaterialStageValuePatternMatcher.MatchesParameter(
+                    stageLIR,
                     module.Outputs.Emission,
                     MaterialParameter.Emission)
-                && valueSlice.NodeCount == 19;
+                && stageLIR.NodeCount == 19;
         }
 
         private static bool MatchesNormalBasis(
-            MaterialValueIR values,
+            MaterialStageLIR stageLIR,
             in ClosureSlabExpression slab)
         {
-            return MaterialValuePatternMatcher.MatchesExternalInput(
-                    values,
+            return MaterialStageValuePatternMatcher.MatchesExternalInput(
+                    stageLIR,
                     slab.Normal,
                     MaterialExternalInput.GeometryNormalWS)
-                && MaterialValuePatternMatcher.MatchesExternalInput(
-                    values,
+                && MaterialStageValuePatternMatcher.MatchesExternalInput(
+                    stageLIR,
                     slab.Tangent,
                     MaterialExternalInput.GeometryTangentWS);
         }
 
         private static bool MatchesSlab(
-            MaterialValueIR values,
+            MaterialStageLIR stageLIR,
             in ClosureSlabExpression slab,
             MaterialTextureResource textureResource,
             MaterialParameter baseColorParameter,
@@ -606,17 +678,17 @@ namespace VividRP.Runtime.GPUDriven
             // Tiling/remap and optional Normal/Mask evaluation remain in the V1 layout ABI.
             return (slab.Features & ClosureFeatureMask.BaseColorTexture) != 0
                 && (slab.Features & ~SupportedSlabFeatures) == 0
-                && MaterialValuePatternMatcher.MatchesSampledColor(
-                    values,
+                && MaterialStageValuePatternMatcher.MatchesSampledColor(
+                    stageLIR,
                     slab.BaseColor,
                     textureResource,
                     baseColorParameter)
-                && MaterialValuePatternMatcher.MatchesParameter(
-                    values,
+                && MaterialStageValuePatternMatcher.MatchesParameter(
+                    stageLIR,
                     slab.Roughness,
                     roughnessParameter)
-                && MaterialValuePatternMatcher.MatchesParameter(
-                    values,
+                && MaterialStageValuePatternMatcher.MatchesParameter(
+                    stageLIR,
                     slab.Metallic,
                     metallicParameter);
         }
@@ -1211,6 +1283,9 @@ namespace VividRP.Runtime.GPUDriven
             int valueNodeCount,
             int textureSampleCount,
             int derivativeCount,
+            int nativeDerivativeCount,
+            int importedGradientCount,
+            int survivingDerivativeOpCount,
             int arithmeticNodeCount,
             int parameterCount,
             int textureResourceCount,
@@ -1219,6 +1294,9 @@ namespace VividRP.Runtime.GPUDriven
             ValueNodeCount = valueNodeCount;
             TextureSampleCount = textureSampleCount;
             DerivativeCount = derivativeCount;
+            NativeDerivativeCount = nativeDerivativeCount;
+            ImportedGradientCount = importedGradientCount;
+            SurvivingDerivativeOpCount = survivingDerivativeOpCount;
             ArithmeticNodeCount = arithmeticNodeCount;
             ParameterCount = parameterCount;
             TextureResourceCount = textureResourceCount;
@@ -1230,6 +1308,12 @@ namespace VividRP.Runtime.GPUDriven
         internal int TextureSampleCount { get; }
 
         internal int DerivativeCount { get; }
+
+        internal int NativeDerivativeCount { get; }
+
+        internal int ImportedGradientCount { get; }
+
+        internal int SurvivingDerivativeOpCount { get; }
 
         internal int ArithmeticNodeCount { get; }
 
@@ -1448,7 +1532,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             var builder = new StringBuilder();
             builder.AppendLine("material_program_diagnostics");
-            builder.AppendLine("cost_model=lowered_program_worst_case_v2");
+            builder.AppendLine("cost_model=lowered_program_worst_case_v3");
             builder.AppendLine("typed_ir:");
             AppendStageCost(builder, "coverage", Cost.Coverage);
             AppendStageCost(builder, "surface", Cost.Surface);
@@ -1498,6 +1582,10 @@ namespace VividRP.Runtime.GPUDriven
             builder.Append(stage).Append(" nodes=").Append(cost.ValueNodeCount)
                 .Append(" texture_samples=").Append(cost.TextureSampleCount)
                 .Append(" derivatives=").Append(cost.DerivativeCount)
+                .Append(" native_derivatives=").Append(cost.NativeDerivativeCount)
+                .Append(" imported_gradients=").Append(cost.ImportedGradientCount)
+                .Append(" surviving_derivative_ops=")
+                .Append(cost.SurvivingDerivativeOpCount)
                 .Append(" arithmetic_nodes=").Append(cost.ArithmeticNodeCount)
                 .Append(" parameters=").Append(cost.ParameterCount)
                 .Append(" texture_resources=").Append(cost.TextureResourceCount)
@@ -1523,8 +1611,8 @@ namespace VividRP.Runtime.GPUDriven
             if (materialLayout == null)
                 throw new ArgumentNullException(nameof(materialLayout));
 
-            MaterialStageCost coverageCost = AnalyzeSlice(coverageProgram.ValueSlice);
-            MaterialStageCost surfaceCost = AnalyzeSlice(surfaceProgram.ValueSlice);
+            MaterialStageCost coverageCost = AnalyzeStageLIR(coverageProgram.StageLIR);
+            MaterialStageCost surfaceCost = AnalyzeStageLIR(surfaceProgram.StageLIR);
             int worstCaseCoverageTextureSamples =
                 AnalyzeWorstCaseCoverageTextureSamples(module, coverageCost);
             int worstCaseSurfaceTextureSamples =
@@ -1577,9 +1665,82 @@ namespace VividRP.Runtime.GPUDriven
             return textureSamples;
         }
 
-        private static MaterialStageCost AnalyzeSlice(MaterialValueSlice slice)
+        private static MaterialStageCost AnalyzeStageLIR(MaterialStageLIR stageLIR)
         {
-            return AnalyzeNodes(slice.Values, slice.NodeIndices);
+            int textureSamples = 0;
+            int derivatives = 0;
+            int nativeDerivatives = 0;
+            int importedGradients = 0;
+            int arithmeticNodes = 0;
+            int parameters = 0;
+            int textureResources = 0;
+            int externalInputs = 0;
+            for (int nodeIndex = 0; nodeIndex < stageLIR.Nodes.Count; nodeIndex++)
+            {
+                MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
+                switch (node.Opcode)
+                {
+                    case MaterialStageLIROpcode.StageInput:
+                        MaterialStageInput input = (MaterialStageInput) node.Semantic;
+                        if (input == MaterialStageInput.UV0Ddx
+                            || input == MaterialStageInput.UV0Ddy)
+                        {
+                            derivatives++;
+                            if (stageLIR.DerivativeProvider
+                                == MaterialStageDerivativeProvider.NativeQuad)
+                            {
+                                nativeDerivatives++;
+                            }
+                            else
+                            {
+                                importedGradients++;
+                            }
+                        }
+                        else
+                        {
+                            externalInputs++;
+                        }
+                        break;
+                    case MaterialStageLIROpcode.Parameter:
+                        parameters++;
+                        break;
+                    case MaterialStageLIROpcode.TextureResource:
+                        textureResources++;
+                        break;
+                    case MaterialStageLIROpcode.TextureSampleGrad:
+                        textureSamples++;
+                        break;
+                    case MaterialStageLIROpcode.Add:
+                    case MaterialStageLIROpcode.Multiply:
+                    case MaterialStageLIROpcode.Lerp:
+                    case MaterialStageLIROpcode.Select:
+                    case MaterialStageLIROpcode.Swizzle:
+                    case MaterialStageLIROpcode.Compose:
+                    case MaterialStageLIROpcode.Subtract:
+                    case MaterialStageLIROpcode.Divide:
+                    case MaterialStageLIROpcode.Min:
+                    case MaterialStageLIROpcode.Max:
+                    case MaterialStageLIROpcode.Saturate:
+                    case MaterialStageLIROpcode.OneMinus:
+                    case MaterialStageLIROpcode.Dot:
+                    case MaterialStageLIROpcode.Normalize:
+                    case MaterialStageLIROpcode.Compare:
+                        arithmeticNodes++;
+                        break;
+                }
+            }
+
+            return new MaterialStageCost(
+                stageLIR.NodeCount,
+                textureSamples,
+                derivatives,
+                nativeDerivatives,
+                importedGradients,
+                0,
+                arithmeticNodes,
+                parameters,
+                textureResources,
+                externalInputs);
         }
 
         private static MaterialStageCost AnalyzeCombined(
@@ -1640,6 +1801,9 @@ namespace VividRP.Runtime.GPUDriven
                 nodeIndices.Count,
                 textureSamples,
                 derivatives,
+                0,
+                0,
+                0,
                 arithmeticNodes,
                 parameters,
                 textureResources,

@@ -1093,11 +1093,13 @@ namespace VividRP.Editor.Tests
             Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.CanonicalIRVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.StageLIRVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.DerivativeLegalizationVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(4u));
             Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(5u));
             Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.ProgramVersion, Is.EqualTo(1u));
@@ -1136,9 +1138,9 @@ namespace VividRP.Editor.Tests
             };
             var expectedCompiledHashes = new[]
             {
-                0x31C7452C12C535D1ul,
-                0x2771779BECAA3BC7ul,
-                0xAC9D2B12076CFB1Eul,
+                0x2C03E7E9B630CFE0ul,
+                0x40E8E96F37629666ul,
+                0x8B15198E5E120DBFul,
             };
 
             for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)
@@ -1259,6 +1261,574 @@ namespace VividRP.Editor.Tests
 
             Assert.That(exception.ParamName, Is.EqualTo("programVersion"));
             Assert.That(exception.Message, Does.Contain("Only material runtime ABI version 1"));
+        }
+
+        [Test]
+        public void StageLIR_ProjectsCanonicalValuesPerStageAndEliminatesAbstractDerivatives()
+        {
+            CompiledMaterialProgram standard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            MaterialStageLIR coverage = standard.CoverageProgram.StageLIR;
+            MaterialStageLIR surface = standard.SurfaceProgram.StageLIR;
+
+            Assert.That(coverage.Stage, Is.EqualTo(MaterialEvaluationStage.Coverage));
+            Assert.That(
+                coverage.ExecutionModel,
+                Is.EqualTo(MaterialStageExecutionModel.RasterFragment));
+            Assert.That(
+                coverage.DerivativeProvider,
+                Is.EqualTo(MaterialStageDerivativeProvider.NativeQuad));
+            Assert.That(surface.Stage, Is.EqualTo(MaterialEvaluationStage.Surface));
+            Assert.That(
+                surface.ExecutionModel,
+                Is.EqualTo(MaterialStageExecutionModel.VisibilityResolve));
+            Assert.That(
+                surface.DerivativeProvider,
+                Is.EqualTo(MaterialStageDerivativeProvider.VisibilityBuffer));
+            Assert.That(coverage.IsFrozen, Is.True);
+            Assert.That(surface.IsFrozen, Is.True);
+            Assert.That(coverage.Roots, Has.Count.EqualTo(2));
+            Assert.That(surface.Roots, Has.Count.EqualTo(6));
+            Assert.That(
+                coverage.Roots.All(coverage.Owns),
+                Is.True);
+            Assert.That(
+                surface.Roots.All(surface.Owns),
+                Is.True);
+
+            AssertLegalizedGradientInputs(coverage);
+            AssertLegalizedGradientInputs(surface);
+            Assert.That(
+                coverage.Nodes.Count(node =>
+                    node.Opcode == MaterialStageLIROpcode.StageInput
+                    && (node.Semantic == (int) MaterialStageInput.GeometryNormalWS
+                        || node.Semantic == (int) MaterialStageInput.GeometryTangentWS)),
+                Is.Zero);
+            Assert.That(
+                surface.Nodes.Count(node =>
+                    node.Opcode == MaterialStageLIROpcode.StageInput
+                    && (node.Semantic == (int) MaterialStageInput.GeometryNormalWS
+                        || node.Semantic == (int) MaterialStageInput.GeometryTangentWS)),
+                Is.EqualTo(2));
+            Assert.That(
+                coverage.GetDebugDump(),
+                Does.Contain("derivative_provider=NativeQuad"));
+            Assert.That(
+                surface.GetDebugDump(),
+                Does.Contain("derivative_provider=VisibilityBuffer"));
+        }
+
+        [Test]
+        public void StageLIR_LegalizesAffineUVAndUniformDerivatives()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue uv = values.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue scale = values.Parameter(new MaterialParameterDeclaration(
+                "UVScale",
+                MaterialValueType.Float2));
+            MaterialValue offset = values.Parameter(new MaterialParameterDeclaration(
+                "UVOffset",
+                MaterialValueType.Float2));
+            MaterialValue scalarOffset = values.Parameter(new MaterialParameterDeclaration(
+                "ScalarOffset",
+                MaterialValueType.Float));
+            MaterialValue blendFactor = values.Parameter(new MaterialParameterDeclaration(
+                "BlendFactor",
+                MaterialValueType.Float));
+            MaterialValue saturatedScale = values.Saturate(scale);
+            MaterialValue transformedUV = values.Add(
+                values.Multiply(uv, saturatedScale),
+                offset);
+            MaterialValue transformedDdx = values.Ddx(transformedUV);
+            MaterialValue directUVDdx = values.Ddx(uv);
+            MaterialValue transformedDdy = values.Ddy(transformedUV);
+            MaterialValue uniformDdx = values.Ddx(saturatedScale);
+            MaterialValue dividedDdx = values.Ddx(values.Divide(uv, saturatedScale));
+            MaterialValue uniformWeightLerpDdx = values.Ddx(
+                values.Lerp(uv, offset, blendFactor));
+            MaterialValue uvX = values.Swizzle(uv, MaterialSwizzleMask.X);
+            MaterialValue varyingWeightLerpDdx = values.Ddx(
+                values.Lerp(offset, scale, uvX));
+            MaterialValue uniformCondition = values.Compare(
+                scalarOffset,
+                blendFactor,
+                MaterialComparison.Less);
+            MaterialValue selectDdx = values.Ddx(
+                values.Select(uniformCondition, uv, offset));
+            MaterialValue composedDdx = values.Ddx(values.Compose(uvX, scalarOffset));
+            MaterialValue dottedDdx = values.Ddx(values.Dot(uv, saturatedScale));
+            MaterialValue texture = values.TextureResource(MaterialTextureResource.BaseColor);
+            MaterialValue sample = values.TextureSampleGrad(
+                texture,
+                transformedUV,
+                transformedDdx,
+                transformedDdy);
+            values.Freeze();
+
+            var slice = new MaterialValueSlice(
+                values,
+                sample,
+                uniformDdx,
+                directUVDdx,
+                dividedDdx,
+                uniformWeightLerpDdx,
+                varyingWeightLerpDdx,
+                selectDdx,
+                composedDdx,
+                dottedDdx);
+            MaterialStageLIR coverage = MaterialStageLIRLowerer.Lower(
+                slice,
+                MaterialEvaluationStage.Coverage);
+            MaterialStageLIR surface = MaterialStageLIRLowerer.Lower(
+                slice,
+                MaterialEvaluationStage.Surface);
+
+            foreach (MaterialStageLIR stageLIR in new[] { coverage, surface })
+            {
+                MaterialStageLIRNode ddxNode =
+                    stageLIR.GetNode(stageLIR.GetValue(transformedDdx));
+                MaterialStageLIRNode ddyNode =
+                    stageLIR.GetNode(stageLIR.GetValue(transformedDdy));
+                MaterialStageLIRNode uniformDdxNode =
+                    stageLIR.GetNode(stageLIR.GetValue(uniformDdx));
+                Assert.That(ddxNode.Opcode, Is.EqualTo(MaterialStageLIROpcode.Multiply));
+                Assert.That(ddyNode.Opcode, Is.EqualTo(MaterialStageLIROpcode.Multiply));
+                Assert.That(uniformDdxNode.Opcode, Is.EqualTo(MaterialStageLIROpcode.Constant));
+                Assert.That(
+                    stageLIR.GetNode(stageLIR.GetValue(directUVDdx)).Opcode,
+                    Is.EqualTo(MaterialStageLIROpcode.StageInput));
+                Assert.That(
+                    stageLIR.GetNode(stageLIR.GetValue(dividedDdx)).Opcode,
+                    Is.EqualTo(MaterialStageLIROpcode.Divide));
+                Assert.That(
+                    stageLIR.GetNode(stageLIR.GetValue(uniformWeightLerpDdx)).Opcode,
+                    Is.EqualTo(MaterialStageLIROpcode.Lerp));
+                Assert.That(
+                    stageLIR.GetNode(stageLIR.GetValue(varyingWeightLerpDdx)).Opcode,
+                    Is.EqualTo(MaterialStageLIROpcode.Lerp));
+                Assert.That(
+                    stageLIR.GetNode(stageLIR.GetValue(selectDdx)).Opcode,
+                    Is.EqualTo(MaterialStageLIROpcode.Select));
+                Assert.That(
+                    stageLIR.GetNode(stageLIR.GetValue(composedDdx)).Opcode,
+                    Is.EqualTo(MaterialStageLIROpcode.Compose));
+                Assert.That(
+                    stageLIR.GetNode(stageLIR.GetValue(dottedDdx)).Opcode,
+                    Is.EqualTo(MaterialStageLIROpcode.Dot));
+                Assert.That(
+                    stageLIR.Nodes.Any(node =>
+                        node.Opcode == MaterialStageLIROpcode.StageInput
+                        && node.Semantic == (int) MaterialStageInput.UV0Ddx),
+                    Is.True);
+                Assert.That(
+                    stageLIR.Nodes.Any(node =>
+                        node.Opcode == MaterialStageLIROpcode.StageInput
+                        && node.Semantic == (int) MaterialStageInput.UV0Ddy),
+                    Is.True);
+                Assert.That(MaterialIRVerifier.VerifyStageLIR(stageLIR).IsValid, Is.True);
+            }
+
+            MaterialStageLIR uniformOnly = MaterialStageLIRLowerer.Lower(
+                new MaterialValueSlice(values, uniformDdx),
+                MaterialEvaluationStage.Surface);
+            MaterialValueRequirements uniformRequirements =
+                MaterialValueRequirements.Collect(uniformOnly);
+            Assert.That(uniformOnly.NodeCount, Is.EqualTo(1));
+            Assert.That(
+                uniformOnly.GetNode(uniformOnly.Roots[0]).Opcode,
+                Is.EqualTo(MaterialStageLIROpcode.Constant));
+            Assert.That(uniformOnly.TryGetValue(scale, out _), Is.False);
+            Assert.That(uniformRequirements.ParameterDeclarations, Is.Empty);
+            Assert.That(uniformRequirements.StageInputs, Is.Empty);
+        }
+
+        [Test]
+        public void StageLIR_RejectsUnavailableInputsAndUndefinedDerivatives()
+        {
+            var coverageValues = new MaterialValueIR();
+            MaterialValue normal = coverageValues.ExternalInput(
+                MaterialExternalInput.GeometryNormalWS);
+            coverageValues.Freeze();
+            MaterialIRVerificationException inputException =
+                Assert.Throws<MaterialIRVerificationException>(() =>
+                    MaterialStageLIRLowerer.Lower(
+                        new MaterialValueSlice(coverageValues, normal),
+                        MaterialEvaluationStage.Coverage));
+            AssertDiagnostic(
+                inputException.Diagnostics,
+                MaterialIRDiagnosticCodes.StageInputUnavailable,
+                normal.Index);
+
+            var derivativeValues = new MaterialValueIR();
+            MaterialValue uv = derivativeValues.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue texture = derivativeValues.TextureResource(
+                MaterialTextureResource.BaseColor);
+            MaterialValue sample = derivativeValues.TextureSampleGrad(
+                texture,
+                uv,
+                derivativeValues.Ddx(uv),
+                derivativeValues.Ddy(uv));
+            MaterialValue sampleDdx = derivativeValues.Ddx(sample);
+            MaterialValue varyingProductDdx = derivativeValues.Ddx(
+                derivativeValues.Multiply(uv, uv));
+            derivativeValues.Freeze();
+            MaterialIRVerificationException derivativeException =
+                Assert.Throws<MaterialIRVerificationException>(() =>
+                    MaterialStageLIRLowerer.Lower(
+                        new MaterialValueSlice(derivativeValues, sampleDdx),
+                        MaterialEvaluationStage.Surface));
+            AssertDiagnostic(
+                derivativeException.Diagnostics,
+                MaterialIRDiagnosticCodes.DerivativeSourceCannotBeLegalized,
+                sampleDdx.Index);
+            foreach (MaterialEvaluationStage stage in new[]
+                     {
+                         MaterialEvaluationStage.Coverage,
+                         MaterialEvaluationStage.Surface,
+                     })
+            {
+                MaterialIRVerificationException varyingProductException =
+                    Assert.Throws<MaterialIRVerificationException>(() =>
+                        MaterialStageLIRLowerer.Lower(
+                            new MaterialValueSlice(
+                                derivativeValues,
+                                varyingProductDdx),
+                            stage));
+                AssertDiagnostic(
+                    varyingProductException.Diagnostics,
+                    MaterialIRDiagnosticCodes.DerivativeSourceCannotBeLegalized,
+                    varyingProductDdx.Index);
+            }
+        }
+
+        [Test]
+        public void StageLIR_PreservesAlreadyExplicitConstantGradients()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue texture = values.TextureResource(MaterialTextureResource.BaseColor);
+            MaterialValue uv = values.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue gradient = values.Constant(new float2(0.25f, 0.5f));
+            MaterialValue sample = values.TextureSampleGrad(texture, uv, gradient, gradient);
+            values.Freeze();
+
+            MaterialStageLIR stageLIR = MaterialStageLIRLowerer.Lower(
+                new MaterialValueSlice(values, sample),
+                MaterialEvaluationStage.Surface);
+            MaterialStageLIRNode sampleNode =
+                stageLIR.GetNode(stageLIR.GetValue(sample));
+
+            Assert.That(sampleNode.Opcode, Is.EqualTo(MaterialStageLIROpcode.TextureSampleGrad));
+            Assert.That(
+                stageLIR.Nodes[sampleNode.Operand2].Opcode,
+                Is.EqualTo(MaterialStageLIROpcode.Constant));
+            Assert.That(sampleNode.Operand3, Is.EqualTo(sampleNode.Operand2));
+        }
+
+        [Test]
+        public void StageLIRVerifier_RejectsMalformedTypesPayloadProfilesAndDeadNodes()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue parameter = values.Parameter(new MaterialParameterDeclaration(
+                "VerifierParameter",
+                MaterialValueType.Float));
+            values.Freeze();
+            var slice = new MaterialValueSlice(values, parameter);
+
+            int[] malformedMap = Enumerable.Repeat(-1, values.NodeCount).ToArray();
+            malformedMap[parameter.Index] = 0;
+            var malformedParameter = new MaterialStageLIR(
+                MaterialEvaluationStage.Coverage,
+                MaterialStageExecutionModel.RasterFragment,
+                MaterialStageDerivativeProvider.NativeQuad,
+                slice,
+                new[]
+                {
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Parameter,
+                        MaterialValueType.Float,
+                        semantic: 999,
+                        constant: default,
+                        sourceNodeIndex: parameter.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                },
+                new[] { 0 },
+                malformedMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(malformedParameter).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR,
+                parameter.Index);
+
+            var semanticMismatch = new MaterialStageLIR(
+                MaterialEvaluationStage.Coverage,
+                MaterialStageExecutionModel.RasterFragment,
+                MaterialStageDerivativeProvider.NativeQuad,
+                slice,
+                new[]
+                {
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Constant,
+                        MaterialValueType.Float,
+                        semantic: 0,
+                        constant: default,
+                        sourceNodeIndex: parameter.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                },
+                new[] { 0 },
+                malformedMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(semanticMismatch).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR,
+                parameter.Index);
+
+            var derivativeValues = new MaterialValueIR();
+            MaterialValue uv = derivativeValues.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue uvDdx = derivativeValues.Ddx(uv);
+            derivativeValues.Freeze();
+            int[] derivativeMap = Enumerable.Repeat(
+                -1,
+                derivativeValues.NodeCount).ToArray();
+            derivativeMap[uvDdx.Index] = 0;
+            var axisMismatch = new MaterialStageLIR(
+                MaterialEvaluationStage.Coverage,
+                MaterialStageExecutionModel.RasterFragment,
+                MaterialStageDerivativeProvider.NativeQuad,
+                new MaterialValueSlice(derivativeValues, uvDdx),
+                new[]
+                {
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.StageInput,
+                        MaterialValueType.Float2,
+                        semantic: (int) MaterialStageInput.UV0Ddy,
+                        constant: default,
+                        sourceNodeIndex: uvDdx.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                },
+                new[] { 0 },
+                derivativeMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(axisMismatch).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR,
+                uvDdx.Index);
+
+            var affineValues = new MaterialValueIR();
+            MaterialValue affineUV = affineValues.ExternalInput(
+                MaterialExternalInput.UV0);
+            MaterialValue affineScale = affineValues.Parameter(
+                new MaterialParameterDeclaration(
+                    "AffineScale",
+                    MaterialValueType.Float2));
+            MaterialValue affineDdx = affineValues.Ddx(
+                affineValues.Multiply(affineUV, affineScale));
+            affineValues.Freeze();
+            int[] affineMap = Enumerable.Repeat(
+                -1,
+                affineValues.NodeCount).ToArray();
+            affineMap[affineDdx.Index] = 0;
+            var incompleteAffineRecipe = new MaterialStageLIR(
+                MaterialEvaluationStage.Coverage,
+                MaterialStageExecutionModel.RasterFragment,
+                MaterialStageDerivativeProvider.NativeQuad,
+                new MaterialValueSlice(affineValues, affineDdx),
+                new[]
+                {
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.StageInput,
+                        MaterialValueType.Float2,
+                        semantic: (int) MaterialStageInput.UV0Ddx,
+                        constant: default,
+                        sourceNodeIndex: affineDdx.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                },
+                new[] { 0 },
+                affineMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(incompleteAffineRecipe).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR);
+
+            var nonlinearValues = new MaterialValueIR();
+            MaterialValue nonlinearUV = nonlinearValues.ExternalInput(
+                MaterialExternalInput.UV0);
+            MaterialValue nonlinearDdx = nonlinearValues.Ddx(
+                nonlinearValues.Multiply(nonlinearUV, nonlinearUV));
+            nonlinearValues.Freeze();
+            int[] nonlinearMap = Enumerable.Repeat(
+                -1,
+                nonlinearValues.NodeCount).ToArray();
+            nonlinearMap[nonlinearDdx.Index] = 0;
+            var illegalSourceRecipe = new MaterialStageLIR(
+                MaterialEvaluationStage.Coverage,
+                MaterialStageExecutionModel.RasterFragment,
+                MaterialStageDerivativeProvider.NativeQuad,
+                new MaterialValueSlice(nonlinearValues, nonlinearDdx),
+                new[]
+                {
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.StageInput,
+                        MaterialValueType.Float2,
+                        semantic: (int) MaterialStageInput.UV0Ddx,
+                        constant: default,
+                        sourceNodeIndex: nonlinearDdx.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                },
+                new[] { 0 },
+                nonlinearMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(illegalSourceRecipe).Diagnostics,
+                MaterialIRDiagnosticCodes.DerivativeSourceCannotBeLegalized,
+                nonlinearDdx.Index);
+
+            var malformedTypes = new MaterialStageLIR(
+                MaterialEvaluationStage.Coverage,
+                MaterialStageExecutionModel.RasterFragment,
+                MaterialStageDerivativeProvider.NativeQuad,
+                slice,
+                new[]
+                {
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Parameter,
+                        MaterialValueType.Float,
+                        semantic: 0,
+                        constant: default,
+                        sourceNodeIndex: parameter.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Constant,
+                        MaterialValueType.Float2,
+                        semantic: 0,
+                        constant: new float4(1.0f, 1.0f, 0.0f, 0.0f),
+                        sourceNodeIndex: parameter.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Add,
+                        MaterialValueType.Float,
+                        semantic: 0,
+                        constant: default,
+                        sourceNodeIndex: parameter.Index,
+                        operandCount: 2,
+                        operand0: 0,
+                        operand1: 1,
+                        operand2: -1,
+                        operand3: -1),
+                },
+                new[] { 2 },
+                new[] { 2 });
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(malformedTypes).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR,
+                parameter.Index);
+
+            MaterialStageLIR valid = MaterialStageLIRLowerer.Lower(
+                slice,
+                MaterialEvaluationStage.Coverage);
+            int[] validRoots = valid.Roots.Select(root => root.Index).ToArray();
+            int[] validMap = Enumerable.Range(0, valid.SourceValueMapCount)
+                .Select(valid.GetMappedNodeIndex)
+                .ToArray();
+            MaterialStageLIRNode[] deadNodes = valid.Nodes.Concat(new[]
+            {
+                new MaterialStageLIRNode(
+                    MaterialStageLIROpcode.Constant,
+                    MaterialValueType.Float,
+                    semantic: 0,
+                    constant: new float4(2.0f, 0.0f, 0.0f, 0.0f),
+                    sourceNodeIndex: parameter.Index,
+                    operandCount: 0,
+                    operand0: -1,
+                    operand1: -1,
+                    operand2: -1,
+                    operand3: -1),
+            }).ToArray();
+            var deadLIR = new MaterialStageLIR(
+                valid.Stage,
+                valid.ExecutionModel,
+                valid.DerivativeProvider,
+                slice,
+                deadNodes,
+                validRoots,
+                validMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(deadLIR).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR,
+                parameter.Index);
+
+            var unknownStage = new MaterialStageLIR(
+                (MaterialEvaluationStage) 99,
+                valid.ExecutionModel,
+                valid.DerivativeProvider,
+                slice,
+                valid.Nodes.ToArray(),
+                validRoots,
+                validMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(unknownStage).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR);
+
+            var invalidRoot = new MaterialStageLIR(
+                valid.Stage,
+                valid.ExecutionModel,
+                valid.DerivativeProvider,
+                slice,
+                valid.Nodes.ToArray(),
+                new[] { valid.NodeCount },
+                validMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(invalidRoot).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR);
+
+            var invalidOperandCount = new MaterialStageLIR(
+                valid.Stage,
+                valid.ExecutionModel,
+                valid.DerivativeProvider,
+                slice,
+                new[]
+                {
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Parameter,
+                        MaterialValueType.Float,
+                        semantic: 0,
+                        constant: default,
+                        sourceNodeIndex: parameter.Index,
+                        operandCount: 5,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                },
+                new[] { 0 },
+                malformedMap);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyStageLIR(invalidOperandCount).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidStageLIR,
+                parameter.Index);
         }
 
         [Test]
@@ -1416,7 +1986,7 @@ namespace VividRP.Editor.Tests
             var mismatchedSurfaceProgram = new CompiledSurfaceProgram(
                 VividMaterialSurfaceProgramID.StandardSingleSlab,
                 VividMaterialProgramID.StandardSingleSlab,
-                dualSlab.SurfaceProgram.ValueSlice,
+                dualSlab.SurfaceProgram.StageLIR,
                 dualSlab.SurfaceProgram.Requirements);
 
             Assert.Throws<NotSupportedException>(() =>
@@ -1449,6 +2019,8 @@ namespace VividRP.Editor.Tests
                 nodes: 9,
                 textureSamples: 1,
                 derivatives: 2,
+                nativeDerivatives: 2,
+                importedGradients: 0,
                 arithmeticNodes: 2,
                 parameters: 2,
                 textureResources: 1,
@@ -1458,6 +2030,8 @@ namespace VividRP.Editor.Tests
                 nodes: 12,
                 textureSamples: 1,
                 derivatives: 2,
+                nativeDerivatives: 0,
+                importedGradients: 2,
                 arithmeticNodes: 1,
                 parameters: 4,
                 textureResources: 1,
@@ -1467,6 +2041,8 @@ namespace VividRP.Editor.Tests
                 nodes: 14,
                 textureSamples: 1,
                 derivatives: 2,
+                nativeDerivatives: 0,
+                importedGradients: 0,
                 arithmeticNodes: 2,
                 parameters: 5,
                 textureResources: 1,
@@ -1487,6 +2063,8 @@ namespace VividRP.Editor.Tests
                 nodes: 9,
                 textureSamples: 1,
                 derivatives: 2,
+                nativeDerivatives: 2,
+                importedGradients: 0,
                 arithmeticNodes: 2,
                 parameters: 2,
                 textureResources: 1,
@@ -1496,6 +2074,8 @@ namespace VividRP.Editor.Tests
                 nodes: 19,
                 textureSamples: 2,
                 derivatives: 2,
+                nativeDerivatives: 0,
+                importedGradients: 2,
                 arithmeticNodes: 2,
                 parameters: 8,
                 textureResources: 2,
@@ -1505,6 +2085,8 @@ namespace VividRP.Editor.Tests
                 nodes: 21,
                 textureSamples: 2,
                 derivatives: 2,
+                nativeDerivatives: 0,
+                importedGradients: 0,
                 arithmeticNodes: 3,
                 parameters: 9,
                 textureResources: 2,
@@ -1528,7 +2110,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 horizontal.Diagnostics.GetDebugDump(),
                 Is.EqualTo(vertical.Diagnostics.GetDebugDump()));
-            Assert.That(standardDump, Does.Contain("cost_model=lowered_program_worst_case_v2"));
+            Assert.That(standardDump, Does.Contain("cost_model=lowered_program_worst_case_v3"));
             Assert.That(
                 standardDump,
                 Does.Contain("lowered texture_samples coverage=1 surface=3 total=4"));
@@ -1751,6 +2333,14 @@ namespace VividRP.Editor.Tests
             CollectionAssert.AreEqual(
                 new[] { MaterialExternalInput.UV0 },
                 coverage.RequiredExternalInputs);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialStageInput.UV0,
+                    MaterialStageInput.UV0Ddx,
+                    MaterialStageInput.UV0Ddy,
+                },
+                coverage.RequiredStageInputs);
         }
 
         private static void AssertStandardSurfaceRequirements(
@@ -1798,6 +2388,16 @@ namespace VividRP.Editor.Tests
                     MaterialExternalInput.GeometryTangentWS,
                 },
                 surface.RequiredExternalInputs);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialStageInput.UV0,
+                    MaterialStageInput.UV0Ddx,
+                    MaterialStageInput.UV0Ddy,
+                    MaterialStageInput.GeometryNormalWS,
+                    MaterialStageInput.GeometryTangentWS,
+                },
+                surface.RequiredStageInputs);
         }
 
         private static void AssertDualSlabSurfaceRequirements(
@@ -1853,6 +2453,16 @@ namespace VividRP.Editor.Tests
                     MaterialExternalInput.GeometryTangentWS,
                 },
                 surface.RequiredExternalInputs);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialStageInput.UV0,
+                    MaterialStageInput.UV0Ddx,
+                    MaterialStageInput.UV0Ddy,
+                    MaterialStageInput.GeometryNormalWS,
+                    MaterialStageInput.GeometryTangentWS,
+                },
+                surface.RequiredStageInputs);
         }
 
         private static void AssertStandardMaterialLayout(CompiledMaterialProgram program)
@@ -1896,6 +2506,16 @@ namespace VividRP.Editor.Tests
                     MaterialExternalInput.GeometryTangentWS,
                 },
                 layout.Requirements.ExternalInputs);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialStageInput.UV0,
+                    MaterialStageInput.UV0Ddx,
+                    MaterialStageInput.UV0Ddy,
+                    MaterialStageInput.GeometryNormalWS,
+                    MaterialStageInput.GeometryTangentWS,
+                },
+                layout.Requirements.StageInputs);
             AssertParameterBinding(
                 layout.ParameterLayout,
                 MaterialRuntimeParameter.BaseColor,
@@ -2012,6 +2632,16 @@ namespace VividRP.Editor.Tests
                     MaterialExternalInput.GeometryTangentWS,
                 },
                 layout.Requirements.ExternalInputs);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialStageInput.UV0,
+                    MaterialStageInput.UV0Ddx,
+                    MaterialStageInput.UV0Ddy,
+                    MaterialStageInput.GeometryNormalWS,
+                    MaterialStageInput.GeometryTangentWS,
+                },
+                layout.Requirements.StageInputs);
             AssertParameterBinding(
                 layout.ParameterLayout,
                 MaterialRuntimeParameter.BaseColor,
@@ -2198,11 +2828,43 @@ namespace VividRP.Editor.Tests
             Assert.That(diagnostic.NodeIndex, Is.EqualTo(nodeIndex));
         }
 
+        private static void AssertLegalizedGradientInputs(MaterialStageLIR stageLIR)
+        {
+            Assert.That(
+                stageLIR.Nodes.Count(node =>
+                    node.Opcode == MaterialStageLIROpcode.StageInput
+                    && node.Semantic == (int) MaterialStageInput.UV0Ddx),
+                Is.EqualTo(1));
+            Assert.That(
+                stageLIR.Nodes.Count(node =>
+                    node.Opcode == MaterialStageLIROpcode.StageInput
+                    && node.Semantic == (int) MaterialStageInput.UV0Ddy),
+                Is.EqualTo(1));
+            foreach (MaterialStageLIRNode sample in stageLIR.Nodes.Where(node =>
+                         node.Opcode == MaterialStageLIROpcode.TextureSampleGrad))
+            {
+                Assert.That(
+                    stageLIR.Nodes[sample.Operand2].Semantic,
+                    Is.EqualTo((int) MaterialStageInput.UV0Ddx));
+                Assert.That(
+                    stageLIR.Nodes[sample.Operand3].Semantic,
+                    Is.EqualTo((int) MaterialStageInput.UV0Ddy));
+            }
+            for (int nodeIndex = 0; nodeIndex < stageLIR.Nodes.Count; nodeIndex++)
+            {
+                MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
+                for (int operandIndex = 0; operandIndex < node.OperandCount; operandIndex++)
+                    Assert.That(node.GetOperand(operandIndex), Is.LessThan(nodeIndex));
+            }
+        }
+
         private static void AssertStageCost(
             in MaterialStageCost cost,
             int nodes,
             int textureSamples,
             int derivatives,
+            int nativeDerivatives,
+            int importedGradients,
             int arithmeticNodes,
             int parameters,
             int textureResources,
@@ -2211,6 +2873,9 @@ namespace VividRP.Editor.Tests
             Assert.That(cost.ValueNodeCount, Is.EqualTo(nodes));
             Assert.That(cost.TextureSampleCount, Is.EqualTo(textureSamples));
             Assert.That(cost.DerivativeCount, Is.EqualTo(derivatives));
+            Assert.That(cost.NativeDerivativeCount, Is.EqualTo(nativeDerivatives));
+            Assert.That(cost.ImportedGradientCount, Is.EqualTo(importedGradients));
+            Assert.That(cost.SurvivingDerivativeOpCount, Is.Zero);
             Assert.That(cost.ArithmeticNodeCount, Is.EqualTo(arithmeticNodes));
             Assert.That(cost.ParameterCount, Is.EqualTo(parameters));
             Assert.That(cost.TextureResourceCount, Is.EqualTo(textureResources));

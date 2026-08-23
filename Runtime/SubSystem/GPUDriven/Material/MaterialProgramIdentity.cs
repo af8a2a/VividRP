@@ -8,11 +8,13 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint IRSchemaVersion = 3u;
         internal const uint CanonicalIRVersion = 2u;
         internal const uint ClosureExpressionVersion = 1u;
+        internal const uint StageLIRVersion = 1u;
+        internal const uint DerivativeLegalizationVersion = 1u;
         internal const uint SemanticHashVersion = 4u;
         internal const uint CompiledHashVersion = 1u;
-        internal const uint CompilerVersion = 4u;
+        internal const uint CompilerVersion = 5u;
         internal const uint NativeTemplateBackendVersion = 2u;
-        internal const uint VerifierVersion = 2u;
+        internal const uint VerifierVersion = 3u;
         internal const uint RuntimeAbiVersion = 1u;
 
         internal const int BuiltinProgramCount = 3;

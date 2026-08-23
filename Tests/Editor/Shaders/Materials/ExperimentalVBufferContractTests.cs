@@ -44,6 +44,10 @@ namespace VividRP.Editor.Tests
                 resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes1")
                     .Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(
+                resources.Textures.Single(entry => entry.Name == "VisibilityBufferBarycentrics")
+                    .Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16_SFloat));
         }
 
         [Test]

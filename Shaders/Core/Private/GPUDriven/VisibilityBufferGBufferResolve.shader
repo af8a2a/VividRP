@@ -40,11 +40,17 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
 
             TYPED_TEXTURE2D(float2, _VisibilityBuffer);
+            TEXTURE2D(_VisibilityBufferAttributes0);
+            TEXTURE2D(_VisibilityBufferAttributes1);
+            TEXTURE2D(_VisibilityBufferBarycentrics);
 
             StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
             ByteAddressBuffer _SharedIndexBuffer;
 
             float4 _VisibilityBufferScaleBias;
+            float4 _VisibilityBufferAttributes0ScaleBias;
+            float4 _VisibilityBufferAttributes1ScaleBias;
+            float4 _VisibilityBufferBarycentricsScaleBias;
 
             struct Attributes
             {
@@ -75,9 +81,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 float3 positionWS0;
                 float3 positionWS1;
                 float3 positionWS2;
-                float4 clipPosition0;
-                float4 clipPosition1;
-                float4 clipPosition2;
             };
 
             float2 ApplyScaleBias(float2 uv, float4 scaleBias)
@@ -130,11 +133,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         : 1.0f);
             }
 
-            float2 GetUV0(const VividMeshletVertex vertex)
-            {
-                return vertex.UV;
-            }
-
             float3 TransformInstanceObjectToWorldDir(float3 dirOS, float4x4 objectToWorldMatrix, bool doNormalize = true)
             {
                 float3 dirWS = mul((float3x3) objectToWorldMatrix, dirOS);
@@ -165,30 +163,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 normalTS.xy *= scale;
                 normalTS.z = sqrt(saturate(1.0 - dot(normalTS.xy, normalTS.xy)));
                 return normalTS;
-            }
-
-            InterpolatedUV InterpolateUV(
-                const VividBarycentricDerivatives barycentric,
-                const VividMeshletVertex vertex0,
-                const VividMeshletVertex vertex1,
-                const VividMeshletVertex vertex2)
-            {
-                const float3 u = InterpolateWithBarycentric(
-                    barycentric,
-                    GetUV0(vertex0).x,
-                    GetUV0(vertex1).x,
-                    GetUV0(vertex2).x);
-                const float3 v = InterpolateWithBarycentric(
-                    barycentric,
-                    GetUV0(vertex0).y,
-                    GetUV0(vertex1).y,
-                    GetUV0(vertex2).y);
-
-                InterpolatedUV result;
-                result.uv = float2(u.x, v.x);
-                result.ddx = float2(u.y, v.y);
-                result.ddy = float2(u.z, v.z);
-                return result;
             }
 
             void ApplyTilingOffset(inout InterpolatedUV uv, float4 tilingOffset)
@@ -227,10 +201,14 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return dot(autoNormalWS, viewForwardDirWS) < 0.0f ? -1.0f : 1.0f;
             }
 
-            bool TryLoadVisibilityValue(
+            bool TryLoadVisibilityData(
                 Varyings input,
-                out VividVisibilityBufferValue visibilityBufferValue)
+                out VividVisibilityBufferValue visibilityBufferValue,
+                out VividBarycentricDerivatives barycentric,
+                out InterpolatedUV interpolatedUV)
             {
+                barycentric = (VividBarycentricDerivatives) 0;
+                interpolatedUV = (InterpolatedUV) 0;
                 float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
                 uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
                 if (!IsPackedVisibilityBufferValueValid(packedValue))
@@ -240,6 +218,36 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 }
 
                 visibilityBufferValue = UnpackVisibilityBufferValue(packedValue);
+
+                float2 attributes0Uv = ApplyScaleBias(
+                    input.uv,
+                    _VisibilityBufferAttributes0ScaleBias);
+                float2 attributes1Uv = ApplyScaleBias(
+                    input.uv,
+                    _VisibilityBufferAttributes1ScaleBias);
+                float2 barycentricsUv = ApplyScaleBias(
+                    input.uv,
+                    _VisibilityBufferBarycentricsScaleBias);
+                float4 attributes0 = SAMPLE_TEXTURE2D_LOD(
+                    _VisibilityBufferAttributes0,
+                    sampler_PointClamp,
+                    attributes0Uv,
+                    0);
+                float4 attributes1 = SAMPLE_TEXTURE2D_LOD(
+                    _VisibilityBufferAttributes1,
+                    sampler_PointClamp,
+                    attributes1Uv,
+                    0);
+                float2 barycentrics = SAMPLE_TEXTURE2D_LOD(
+                    _VisibilityBufferBarycentrics,
+                    sampler_PointClamp,
+                    barycentricsUv,
+                    0).xy;
+
+                barycentric.lambda = DecodeVividVisibilityBufferBarycentrics(barycentrics);
+                interpolatedUV.uv = attributes0.xy;
+                interpolatedUV.ddx = attributes0.zw;
+                interpolatedUV.ddy = attributes1.xy;
                 return true;
             }
 
@@ -264,10 +272,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 result.positionWS0 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex0));
                 result.positionWS1 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex1));
                 result.positionWS2 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex2));
-
-                result.clipPosition0 = TransformWorldToHClip(result.positionWS0);
-                result.clipPosition1 = TransformWorldToHClip(result.positionWS1);
-                result.clipPosition2 = TransformWorldToHClip(result.positionWS2);
                 return result;
             }
 
@@ -454,13 +458,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             VividGBufferSurfaceData ResolveSurfaceData(
                 const TriangleData triangleData,
                 const VividBarycentricDerivatives barycentric,
+                const InterpolatedUV visibilityUV,
                 const float4 positionCS)
             {
-                InterpolatedUV terrainUv = InterpolateUV(
-                    barycentric,
-                    triangleData.vertex0,
-                    triangleData.vertex1,
-                    triangleData.vertex2);
+                InterpolatedUV terrainUv = visibilityUV;
 
                 float3 baseColor;
                 float3 sampledNormalTS = float3(0.0f, 0.0f, 1.0f);
@@ -636,24 +637,24 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             VividGBufferFragmentOutput Frag(Varyings input)
             {
                 VividVisibilityBufferValue visibilityBufferValue;
-                if (!TryLoadVisibilityValue(input, visibilityBufferValue))
+                VividBarycentricDerivatives barycentric;
+                InterpolatedUV interpolatedUV;
+                if (!TryLoadVisibilityData(
+                        input,
+                        visibilityBufferValue,
+                        barycentric,
+                        interpolatedUV))
                 {
                     discard;
                     return (VividGBufferFragmentOutput) 0;
                 }
 
                 TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
-
-                float2 pixelNdc = ScreenCoordsToNDC(input.positionCS);
-                VividBarycentricDerivatives barycentric = CalculateFullBarycentric(
-                    triangleData.clipPosition0,
-                    triangleData.clipPosition1,
-                    triangleData.clipPosition2,
-                    pixelNdc,
-                    _ScreenSize.zw
-                );
-
-                VividGBufferSurfaceData surfaceData = ResolveSurfaceData(triangleData, barycentric, input.positionCS);
+                VividGBufferSurfaceData surfaceData = ResolveSurfaceData(
+                    triangleData,
+                    barycentric,
+                    interpolatedUV,
+                    input.positionCS);
                 return PackVividGBufferSurfaceData(surfaceData);
             }
             ENDHLSL

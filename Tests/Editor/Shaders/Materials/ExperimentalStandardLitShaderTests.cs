@@ -155,12 +155,15 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VisibilityBuffer_UsesSharedAttributeAbiWithoutMaterialSampling()
         {
+            string shaderSource = File.ReadAllText(ExperimentalShaderAssetPath);
             string source = File.ReadAllText(ExperimentalVisibilityAssetPath);
             string commonSource = File.ReadAllText(VisibilityBufferCommonAssetPath);
 
+            StringAssert.Contains("#pragma require barycentrics", shaderSource);
             StringAssert.Contains("VividVisibilityBuffer.hlsl", source);
             StringAssert.Contains("PackVividVisibilityBufferFragmentOutput", source);
             StringAssert.Contains("uint primitiveID : SV_PrimitiveID", source);
+            StringAssert.Contains("SV_Barycentrics", source);
             StringAssert.Contains("StandardLit/StandardLitInput.hlsl", source);
             StringAssert.DoesNotContain("CBUFFER_START(UnityPerMaterial)", source);
             StringAssert.DoesNotContain("SAMPLE_TEXTURE2D", source);
@@ -168,6 +171,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("uint2 visibility : SV_Target0", commonSource);
             StringAssert.Contains("float4 attributes0 : SV_Target1", commonSource);
             StringAssert.Contains("float4 attributes1 : SV_Target2", commonSource);
+            StringAssert.Contains("float2 barycentrics : SV_Target3", commonSource);
             StringAssert.Contains("ddx(uv0)", commonSource);
             StringAssert.Contains("ddy(uv0)", commonSource);
             StringAssert.Contains("VividEncodeVisibilityBufferNormalOct", commonSource);

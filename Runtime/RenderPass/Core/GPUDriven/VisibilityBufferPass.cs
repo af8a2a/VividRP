@@ -89,6 +89,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_Attributes1;
 
         [RenderGraphResource(
+            Name = "VisibilityBufferBarycentrics",
+            Access = AccessFlags.ReadWrite,
+            AttachmentIndex = 3,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_Barycentrics;
+
+        [RenderGraphResource(
             Name = "Depth",
             Access = AccessFlags.ReadWrite,
             IsDepthAttachment = true)]
@@ -97,8 +104,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultVisibilityBuffer;
         private readonly RenderGraphTexture m_DefaultAttributes0;
         private readonly RenderGraphTexture m_DefaultAttributes1;
+        private readonly RenderGraphTexture m_DefaultBarycentrics;
         private readonly RenderGraphTexture m_DefaultDepth;
-        private readonly RenderTargetIdentifier[] m_ColorTargets = new RenderTargetIdentifier[3];
+        private readonly RenderTargetIdentifier[] m_ColorTargets = new RenderTargetIdentifier[4];
         private readonly Material[] m_Materials = new Material[(int)VividRendererListID.Count];
         private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
         private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
@@ -197,6 +205,22 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Attributes1.desc.AutoGenerateMips = false;
             m_Attributes1.desc.MipCount = 1;
 
+            m_Barycentrics = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(
+                    1,
+                    1,
+                    GraphicsFormat.R16G16_SFloat)
+            };
+            m_Barycentrics.desc.Name = "VisibilityBufferBarycentrics";
+            m_Barycentrics.desc.FilterMode = FilterMode.Point;
+            m_Barycentrics.desc.WrapMode = TextureWrapMode.Clamp;
+            m_Barycentrics.desc.ClearBuffer = true;
+            m_Barycentrics.desc.ClearColor = Color.clear;
+            m_Barycentrics.desc.UseMipMap = false;
+            m_Barycentrics.desc.AutoGenerateMips = false;
+            m_Barycentrics.desc.MipCount = 1;
+
             m_Depth = new RenderGraphTexture
             {
                 desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
@@ -206,6 +230,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DefaultVisibilityBuffer = m_VisibilityBuffer;
             m_DefaultAttributes0 = m_Attributes0;
             m_DefaultAttributes1 = m_Attributes1;
+            m_DefaultBarycentrics = m_Barycentrics;
             m_DefaultDepth = m_Depth;
         }
 
@@ -266,6 +291,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizePassOwnedTexture(m_VisibilityBuffer, m_DefaultVisibilityBuffer, width, height);
             ResizePassOwnedTexture(m_Attributes0, m_DefaultAttributes0, width, height);
             ResizePassOwnedTexture(m_Attributes1, m_DefaultAttributes1, width, height);
+            ResizePassOwnedTexture(m_Barycentrics, m_DefaultBarycentrics, width, height);
             ResizePassOwnedTexture(m_Depth, m_DefaultDepth, width, height);
 
             var gpuDrivenFrameData = frameData.GetOrCreate<VividGPUDrivenFrameData>();
@@ -303,6 +329,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_VisibilityBuffer?.IsValid() != true
                 || m_Attributes0?.IsValid() != true
                 || m_Attributes1?.IsValid() != true
+                || m_Barycentrics?.IsValid() != true
                 || m_Depth?.IsValid() != true)
                 return;
 
@@ -734,6 +761,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorTargets[0] = m_VisibilityBuffer;
             m_ColorTargets[1] = m_Attributes0;
             m_ColorTargets[2] = m_Attributes1;
+            m_ColorTargets[3] = m_Barycentrics;
             cmd.SetRenderTarget(m_ColorTargets, m_Depth);
             if (!clearTargets)
                 return;

@@ -152,6 +152,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
 
             HLSLPROGRAM
                 #pragma use_dxc
+                #pragma require barycentrics
                 #pragma multi_compile_instancing
                 #pragma instancing_options renderinglayer
                 #pragma vertex Vert

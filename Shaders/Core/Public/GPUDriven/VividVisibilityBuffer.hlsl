@@ -17,6 +17,7 @@ struct VividVisibilityBufferFragmentOutput
     uint2 visibility : SV_Target0;
     float4 attributes0 : SV_Target1;
     float4 attributes1 : SV_Target2;
+    float2 barycentrics : SV_Target3;
 };
 
 float2 VividEncodeVisibilityBufferNormalOct(float3 normalWS)
@@ -37,7 +38,8 @@ float2 VividEncodeVisibilityBufferNormalOct(float3 normalWS)
 VividVisibilityBufferFragmentOutput PackVividVisibilityBufferFragmentOutput(
     uint2 visibility,
     float2 uv0,
-    float3 geometricNormalWS)
+    float3 geometricNormalWS,
+    float3 barycentrics)
 {
     VividVisibilityBufferFragmentOutput output;
     output.visibility = visibility;
@@ -45,7 +47,13 @@ VividVisibilityBufferFragmentOutput PackVividVisibilityBufferFragmentOutput(
     output.attributes1 = float4(
         ddy(uv0),
         VividEncodeVisibilityBufferNormalOct(geometricNormalWS));
+    output.barycentrics = barycentrics.xy;
     return output;
+}
+
+float3 DecodeVividVisibilityBufferBarycentrics(float2 barycentrics)
+{
+    return float3(barycentrics, 1.0 - barycentrics.x - barycentrics.y);
 }
 
 bool IsPackedVisibilityBufferValueValid(const uint2 packedValue)

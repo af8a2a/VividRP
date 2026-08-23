@@ -15,7 +15,7 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalClosureRenderPassTests
     {
         [Test]
-        public void SharedVisibilityBufferPass_RegistersExperimentalRendererListAndThreeAttachments()
+        public void SharedVisibilityBufferPass_RegistersExperimentalRendererListAndFourAttachments()
         {
             IRenderPass pass = new VisibilityBufferPass();
             var resources = pass.Initialize();
@@ -28,7 +28,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 resources.RenderLists[0].RenderList.desc.ShaderTagNames,
                 Is.EqualTo(new[] { "VisibilityBuffer" }));
-            Assert.That(colorEntries, Has.Length.EqualTo(3));
+            Assert.That(colorEntries, Has.Length.EqualTo(4));
             Assert.That(
                 colorEntries.Select(entry => entry.Name),
                 Is.EqualTo(new[]
@@ -36,6 +36,7 @@ namespace VividRP.Editor.Tests
                     "VisibilityBuffer",
                     "VisibilityBufferAttributes0",
                     "VisibilityBufferAttributes1",
+                    "VisibilityBufferBarycentrics",
                 }));
             Assert.That(
                 resources.Textures.Single(entry => entry.IsDepthAttachment).Name,
@@ -55,6 +56,7 @@ namespace VividRP.Editor.Tests
                 AssertTexture(pass, "m_VisibilityBuffer", 1506, 674);
                 AssertTexture(pass, "m_Attributes0", 1506, 674);
                 AssertTexture(pass, "m_Attributes1", 1506, 674);
+                AssertTexture(pass, "m_Barycentrics", 1506, 674);
             }
             finally
             {

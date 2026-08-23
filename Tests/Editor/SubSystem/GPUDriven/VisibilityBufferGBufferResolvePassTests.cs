@@ -1,3 +1,4 @@
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -13,24 +14,36 @@ namespace VividRP.Editor.Tests
     public sealed class VisibilityBufferGBufferResolvePassTests
     {
         [Test]
-        public void Initialize_RegistersVisibilityAndSchedulingDepthInputsAndGBufferOutputs()
+        public void Initialize_RegistersVisibilityInputsAndGBufferOutputs()
         {
             IRenderPass renderPass = new VisibilityBufferGBufferResolvePass();
 
             var resources = renderPass.Initialize();
             var visibilityEntry = resources.Textures.Single(entry => entry.Name == "VisibilityBuffer");
-            var depthEntry = resources.Textures.Single(entry => entry.Name == "Depth");
+            var attributes0Entry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes0");
+            var attributes1Entry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes1");
+            var barycentricsEntry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferBarycentrics");
             var gbuffer0Entry = resources.Textures.Single(entry => entry.Name == "GBuffer0");
             var gbuffer1Entry = resources.Textures.Single(entry => entry.Name == "GBuffer1");
             var gbuffer2Entry = resources.Textures.Single(entry => entry.Name == "GBuffer2");
             var gbuffer3Entry = resources.Textures.Single(entry => entry.Name == "GBuffer3");
             var gbuffer4Entry = resources.Textures.Single(entry => entry.Name == "GBuffer4");
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(7));
+            Assert.That(resources.Textures, Has.Length.EqualTo(9));
             Assert.That(visibilityEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(visibilityEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32_UInt));
-            Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(depthEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.Depth32));
+            Assert.That(attributes0Entry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                attributes0Entry.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(attributes1Entry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                attributes1Entry.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(barycentricsEntry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                barycentricsEntry.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16_SFloat));
             Assert.That(gbuffer0Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer0Entry.AttachmentIndex, Is.EqualTo(0));
             Assert.That(gbuffer0Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
@@ -115,6 +128,32 @@ namespace VividRP.Editor.Tests
             Assert.That(externalGBuffer0.desc.Width, Is.EqualTo(320));
             Assert.That(externalGBuffer0.desc.Height, Is.EqualTo(240));
             Assert.That(externalGBuffer0.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        [Test]
+        public void ResolveShader_ConsumesHardwareBarycentricsAndVisibilityUvDerivatives()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(VisibilityBufferGBufferResolvePass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferGBufferResolve.shader");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+
+            StringAssert.Contains("_VisibilityBufferBarycentrics", source);
+            StringAssert.Contains("DecodeVividVisibilityBufferBarycentrics", source);
+            StringAssert.Contains("_VisibilityBufferAttributes0", source);
+            StringAssert.Contains("_VisibilityBufferAttributes1", source);
+            StringAssert.DoesNotContain("CalculateFullBarycentric(", source);
+            StringAssert.DoesNotContain("clipPosition", source);
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName)

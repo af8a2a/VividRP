@@ -24,6 +24,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
             
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma use_dxc
+            #pragma require barycentrics
             #pragma shader_feature_local_fragment _ALPHATEST_ON
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
 
@@ -123,7 +125,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 return output;
             }
             // [earlydepthstencil]
-            VividVisibilityBufferFragmentOutput Frag(Varyings input)
+            VividVisibilityBufferFragmentOutput Frag(
+                Varyings input,
+                linear float3 barycentrics : SV_Barycentrics)
             {
                 #ifdef _ALPHATEST_ON
                 const VividVisibilityBufferValue visibilityBufferValue = UnpackVisibilityBufferValue(input.visibilityValue);
@@ -140,7 +144,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 return PackVividVisibilityBufferFragmentOutput(
                     input.visibilityValue,
                     input.uv0,
-                    input.geometricNormalWS);
+                    input.geometricNormalWS,
+                    barycentrics);
             }
             ENDHLSL
         }

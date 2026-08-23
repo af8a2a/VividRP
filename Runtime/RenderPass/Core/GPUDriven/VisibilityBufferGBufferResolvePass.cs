@@ -13,9 +13,24 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int VisibilityBufferId = Shader.PropertyToID("_VisibilityBuffer");
         private static readonly int VisibilityBufferScaleBiasId = Shader.PropertyToID("_VisibilityBufferScaleBias");
+        private static readonly int VisibilityBufferAttributes0Id = Shader.PropertyToID("_VisibilityBufferAttributes0");
+        private static readonly int VisibilityBufferAttributes0ScaleBiasId = Shader.PropertyToID("_VisibilityBufferAttributes0ScaleBias");
+        private static readonly int VisibilityBufferAttributes1Id = Shader.PropertyToID("_VisibilityBufferAttributes1");
+        private static readonly int VisibilityBufferAttributes1ScaleBiasId = Shader.PropertyToID("_VisibilityBufferAttributes1ScaleBias");
+        private static readonly int VisibilityBufferBarycentricsId = Shader.PropertyToID("_VisibilityBufferBarycentrics");
+        private static readonly int VisibilityBufferBarycentricsScaleBiasId = Shader.PropertyToID("_VisibilityBufferBarycentricsScaleBias");
 
         [RenderGraphResource(Name = "VisibilityBuffer", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VisibilityBuffer;
+
+        [RenderGraphResource(Name = "VisibilityBufferAttributes0", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Attributes0;
+
+        [RenderGraphResource(Name = "VisibilityBufferAttributes1", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Attributes1;
+
+        [RenderGraphResource(Name = "VisibilityBufferBarycentrics", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Barycentrics;
         
         [RenderGraphResource(
             Name = "GBuffer0",
@@ -71,7 +86,18 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_VisibilityBuffer = RenderGraphTexture.CreateInput("VisibilityBuffer", GraphicsFormat.R32G32_UInt);
             m_VisibilityBuffer.desc.FilterMode = FilterMode.Point;
-
+            m_Attributes0 = RenderGraphTexture.CreateInput(
+                "VisibilityBufferAttributes0",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_Attributes0.desc.FilterMode = FilterMode.Point;
+            m_Attributes1 = RenderGraphTexture.CreateInput(
+                "VisibilityBufferAttributes1",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_Attributes1.desc.FilterMode = FilterMode.Point;
+            m_Barycentrics = RenderGraphTexture.CreateInput(
+                "VisibilityBufferBarycentrics",
+                GraphicsFormat.R16G16_SFloat);
+            m_Barycentrics.desc.FilterMode = FilterMode.Point;
 
             m_GBuffer0 = RenderGraphTexture.CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer1 = RenderGraphTexture.CreateColorTarget("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
@@ -129,6 +155,9 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             if (m_Material == null
                 || !m_VisibilityBuffer.innerHandle.IsValid()
+                || !m_Attributes0.innerHandle.IsValid()
+                || !m_Attributes1.innerHandle.IsValid()
+                || !m_Barycentrics.innerHandle.IsValid()
                 || !m_GBuffer0.innerHandle.IsValid()
                 || !m_GBuffer1.innerHandle.IsValid()
                 || !m_GBuffer2.innerHandle.IsValid()
@@ -139,7 +168,13 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var visibilityTexture = m_VisibilityBuffer.innerHandle.ResolveTexture();
-            if (visibilityTexture == null)
+            var attributes0Texture = m_Attributes0.innerHandle.ResolveTexture();
+            var attributes1Texture = m_Attributes1.innerHandle.ResolveTexture();
+            var barycentricsTexture = m_Barycentrics.innerHandle.ResolveTexture();
+            if (visibilityTexture == null
+                || attributes0Texture == null
+                || attributes1Texture == null
+                || barycentricsTexture == null)
                 return;
 
             VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance
@@ -170,6 +205,18 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DrawProperties.Clear();
             m_DrawProperties.SetTexture(VisibilityBufferId, visibilityTexture);
             m_DrawProperties.SetVector(VisibilityBufferScaleBiasId, m_VisibilityBuffer.innerHandle.GetScaleBias());
+            m_DrawProperties.SetTexture(VisibilityBufferAttributes0Id, attributes0Texture);
+            m_DrawProperties.SetVector(
+                VisibilityBufferAttributes0ScaleBiasId,
+                m_Attributes0.innerHandle.GetScaleBias());
+            m_DrawProperties.SetTexture(VisibilityBufferAttributes1Id, attributes1Texture);
+            m_DrawProperties.SetVector(
+                VisibilityBufferAttributes1ScaleBiasId,
+                m_Attributes1.innerHandle.GetScaleBias());
+            m_DrawProperties.SetTexture(VisibilityBufferBarycentricsId, barycentricsTexture);
+            m_DrawProperties.SetVector(
+                VisibilityBufferBarycentricsScaleBiasId,
+                m_Barycentrics.innerHandle.GetScaleBias());
 
             BindGBufferTargets(nativeCmd);
             CoreUtils.DrawFullScreen(nativeCmd, m_Material, m_DrawProperties, 0);

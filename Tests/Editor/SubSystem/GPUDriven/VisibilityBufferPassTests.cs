@@ -16,7 +16,7 @@ namespace VividRP.Editor.Tests
     public class VisibilityBufferPassTests
     {
         [Test]
-        public void Initialize_RegistersRendererListMeshletBuffersThreeVisibilityTargetsAndDepth()
+        public void Initialize_RegistersRendererListMeshletBuffersFourVisibilityTargetsAndDepth()
         {
             IRenderPass renderPass = new VisibilityBufferPass();
 
@@ -24,11 +24,12 @@ namespace VividRP.Editor.Tests
             var visibilityEntry = resources.Textures.Single(entry => entry.Name == "VisibilityBuffer");
             var attributes0Entry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes0");
             var attributes1Entry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes1");
+            var barycentricsEntry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferBarycentrics");
             var depthEntry = resources.Textures.Single(entry => entry.Name == "Depth");
             var visibleMeshletRequestsEntry = resources.Buffers.Single(entry => entry.Name == "VisibleMeshletRenderRequests");
             var indirectArgsEntry = resources.Buffers.Single(entry => entry.Name == "VisibleMeshletIndirectArgs");
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(4));
+            Assert.That(resources.Textures, Has.Length.EqualTo(5));
             Assert.That(resources.Buffers, Has.Length.EqualTo(2));
             Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
             Assert.That(
@@ -49,6 +50,11 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 attributes1Entry.Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(barycentricsEntry.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(barycentricsEntry.AttachmentIndex, Is.EqualTo(3));
+            Assert.That(
+                barycentricsEntry.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16_SFloat));
 
             Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(depthEntry.IsDepthAttachment, Is.True);
@@ -81,6 +87,7 @@ namespace VividRP.Editor.Tests
                 var visibilityTexture = GetTextureField(pass, "m_VisibilityBuffer");
                 var attributes0Texture = GetTextureField(pass, "m_Attributes0");
                 var attributes1Texture = GetTextureField(pass, "m_Attributes1");
+                var barycentricsTexture = GetTextureField(pass, "m_Barycentrics");
                 var depthTexture = GetTextureField(pass, "m_Depth");
                 var renderRequestsBuffer = GetBufferField(pass, "m_VisibleMeshletRenderRequests");
                 var indirectArgsBuffer = GetBufferField(pass, "m_VisibleMeshletIndirectArgs");
@@ -91,6 +98,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(attributes0Texture.desc.Height, Is.EqualTo(576));
                 Assert.That(attributes1Texture.desc.Width, Is.EqualTo(1024));
                 Assert.That(attributes1Texture.desc.Height, Is.EqualTo(576));
+                Assert.That(barycentricsTexture.desc.Width, Is.EqualTo(1024));
+                Assert.That(barycentricsTexture.desc.Height, Is.EqualTo(576));
                 Assert.That(depthTexture.desc.Width, Is.EqualTo(1024));
                 Assert.That(depthTexture.desc.Height, Is.EqualTo(576));
                 Assert.That(renderRequestsBuffer.HasImportedBuffer, Is.False);
@@ -228,6 +237,8 @@ namespace VividRP.Editor.Tests
             string source = File.ReadAllText(path);
 
             StringAssert.Contains("VividVisibilityBufferFragmentOutput Frag", source);
+            StringAssert.Contains("#pragma require barycentrics", source);
+            StringAssert.Contains("SV_Barycentrics", source);
             StringAssert.Contains("PackVividVisibilityBufferFragmentOutput", source);
             StringAssert.Contains("output.uv0 = vertex.UV.xy", source);
             StringAssert.Contains("output.geometricNormalWS", source);

@@ -73,7 +73,9 @@ namespace VividRP.Editor.Tests
                 RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_VisibilityBuffer"), Is.Not.Null);
-                Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_Attributes0"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_Attributes1"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_Barycentrics"), Is.Not.Null);
 
                 Assert.That(node.HasOverrideOption("m_GBuffer0"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer1"), Is.True);
@@ -216,8 +218,14 @@ namespace VividRP.Editor.Tests
                     visibilityNode.GetOutputPortByName("m_VisibilityBuffer_Out"),
                     resolveNode.GetInputPortByName("m_VisibilityBuffer"));
                 graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBufferDepth_Out"),
-                    resolveNode.GetInputPortByName("m_DepthTexture"));
+                    visibilityNode.GetOutputPortByName("m_Attributes0_Out"),
+                    resolveNode.GetInputPortByName("m_Attributes0"));
+                graph.Connect(
+                    visibilityNode.GetOutputPortByName("m_Attributes1_Out"),
+                    resolveNode.GetInputPortByName("m_Attributes1"));
+                graph.Connect(
+                    visibilityNode.GetOutputPortByName("m_Barycentrics_Out"),
+                    resolveNode.GetInputPortByName("m_Barycentrics"));
                 graph.Connect(
                     gbufferNode.GetOutputPortByName("m_GBuffer0"),
                     resolveNode.GetInputPortByName("m_GBuffer0_In"));

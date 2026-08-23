@@ -37,7 +37,8 @@ VividExperimentalVisibilityVaryings Vert(
 
 VividVisibilityBufferFragmentOutput FragVisibilityBuffer(
     VividExperimentalVisibilityVaryings input,
-    uint primitiveID : SV_PrimitiveID)
+    uint primitiveID : SV_PrimitiveID,
+    linear float3 barycentrics : SV_Barycentrics)
 {
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
@@ -48,7 +49,8 @@ VividVisibilityBufferFragmentOutput FragVisibilityBuffer(
     return PackVividVisibilityBufferFragmentOutput(
         uint2(materialSlot + 1u, primitiveID),
         input.uv0,
-        input.geometricNormalWS);
+        input.geometricNormalWS,
+        barycentrics);
 }
 
 #endif

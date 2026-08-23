@@ -11,6 +11,8 @@ namespace VividRP.Editor.Tests
     {
         private const string ResolveAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBufferResolve.shader";
+        private const string SurfaceProgramAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl";
 
         [Test]
         public void ClosureBackend_UsesSharedVisibilityBufferAbi()
@@ -39,21 +41,28 @@ namespace VividRP.Editor.Tests
         public void ClosureResolve_ConsumesMaterialProgramWithoutExperimentalRegistry()
         {
             string source = File.ReadAllText(ResolveAssetPath);
+            string surfaceProgramSource = File.ReadAllText(SurfaceProgramAssetPath);
 
             StringAssert.Contains("UnpackVisibilityBufferValue", source);
             StringAssert.Contains("PullInstanceData(visibility.InstanceID)", source);
             StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
+            StringAssert.Contains("VividTryLoadDualSlabSurfaceProgram", source);
             StringAssert.Contains("VividMaterialData materialData", source);
             StringAssert.Contains("VividSurfaceBindingData surfaceBindingData", source);
-            StringAssert.Contains("VividCreateSurfaceSampleContextGrad", source);
-            StringAssert.Contains("VividSampleBaseColorGrad", source);
-            StringAssert.Contains("VividSampleNormalGrad", source);
-            StringAssert.Contains("VividSampleMaskGrad", source);
+            StringAssert.Contains("VividEvaluateSlabSurfaceGrad", source);
+            StringAssert.Contains(
+                "VividCreateSurfaceSampleContextGrad",
+                surfaceProgramSource);
+            StringAssert.Contains("VividSampleBaseColorGrad", surfaceProgramSource);
+            StringAssert.Contains("VividSampleNormalGrad", surfaceProgramSource);
+            StringAssert.Contains("VividSampleMaskGrad", surfaceProgramSource);
             StringAssert.Contains("ComputeWorldSpacePosition", source);
             StringAssert.Contains("ReconstructTangentToWorld", source);
             StringAssert.Contains("VividCompileExperimentalStandardSurface", source);
-            StringAssert.DoesNotContain("VividCompileExperimentalLayeredSurface", source);
-            StringAssert.DoesNotContain("TopBinding", source);
+            StringAssert.Contains("VividCompileExperimentalLayeredSurface", source);
+            StringAssert.Contains("topSurfaceBindingData", source);
+            StringAssert.Contains("dualSlabMaterialData.LayerOperator", source);
+            StringAssert.Contains("dualSlabMaterialData.LayerWeight", source);
             StringAssert.Contains("VividPackExperimentalClosureBuffer", source);
             StringAssert.DoesNotContain("VividExperimentalVBufferMaterialData", source);
             StringAssert.DoesNotContain("_VividExperimentalVBufferMaterials", source);

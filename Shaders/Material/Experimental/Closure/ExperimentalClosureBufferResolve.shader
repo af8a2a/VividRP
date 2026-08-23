@@ -82,15 +82,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 return SafeNormalize(normal);
             }
 
-            float3 VividExperimentalUnpackNormalScale(float4 packedNormal, float scale)
-            {
-                float3 normalTS;
-                normalTS.xy = packedNormal.wy * 2.0 - 1.0;
-                normalTS.xy *= scale;
-                normalTS.z = sqrt(saturate(1.0 - dot(normalTS.xy, normalTS.xy)));
-                return normalTS;
-            }
-
             float3x3 ReconstructTangentToWorld(
                 float3 positionWS,
                 float3 geometricNormalWS,
@@ -126,51 +117,6 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 return float3x3(tangentWS, crossBitangent * handedness, normalWS);
             }
 
-            float RemapPBRChannel(const float sampleValue, const float2 remap)
-            {
-                return saturate(lerp(remap.x, remap.y, saturate(sampleValue)));
-            }
-
-            void ApplyMaskSample(
-                const uint maskMode,
-                const float4 maskSample,
-                const float4 metallicSmoothnessRemap,
-                const float2 ambientOcclusionRemap,
-                inout float perceptualRoughness,
-                inout float metallic,
-                inout float ambientOcclusion)
-            {
-                if (maskMode == 1u)
-                {
-                    metallic = RemapPBRChannel(maskSample.r, metallicSmoothnessRemap.xy);
-                    perceptualRoughness = 1.0
-                        - RemapPBRChannel(maskSample.a, metallicSmoothnessRemap.zw);
-                }
-                else if (maskMode == 2u)
-                {
-                    perceptualRoughness = 1.0
-                        - RemapPBRChannel(1.0 - maskSample.r, metallicSmoothnessRemap.zw);
-                }
-                else if (maskMode == 3u)
-                {
-                    metallic = RemapPBRChannel(maskSample.r, metallicSmoothnessRemap.xy);
-                    ambientOcclusion = RemapPBRChannel(
-                        maskSample.g,
-                        ambientOcclusionRemap);
-                    perceptualRoughness = 1.0
-                        - RemapPBRChannel(maskSample.a, metallicSmoothnessRemap.zw);
-                }
-                else if (maskMode == 4u)
-                {
-                    perceptualRoughness = 1.0
-                        - RemapPBRChannel(1.0 - maskSample.r, metallicSmoothnessRemap.zw);
-                    metallic = RemapPBRChannel(maskSample.g, metallicSmoothnessRemap.xy);
-                    ambientOcclusion = RemapPBRChannel(
-                        maskSample.b,
-                        ambientOcclusionRemap);
-                }
-            }
-
             VividBuiltinData BuildProbeVolumeBuiltinData(
                 float3 positionWS,
                 float3 normalWS)
@@ -186,6 +132,56 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                     hasBakedGI,
                     0.0,
                     float4(1.0, 1.0, 1.0, 1.0));
+            }
+
+            float3 ResolveSlabNormalWS(
+                const VividEvaluatedSlabSurface surface,
+                const VividSlabMaterialData slabData,
+                const float3 positionWS,
+                const float3 geometricNormalWS,
+                const float2 rawUVDdx,
+                const float2 rawUVDdy)
+            {
+                if (surface.HasNormal == 0u)
+                    return geometricNormalWS;
+
+                const float2 uvDdx = rawUVDdx * slabData.TextureTilingOffset.xy;
+                const float2 uvDdy = rawUVDdy * slabData.TextureTilingOffset.xy;
+                const float3x3 tangentToWorld = ReconstructTangentToWorld(
+                    positionWS,
+                    geometricNormalWS,
+                    uvDdx,
+                    uvDdy);
+                return SafeNormalize(
+                    surface.NormalTS.x * tangentToWorld[0]
+                    + surface.NormalTS.y * tangentToWorld[1]
+                    + surface.NormalTS.z * tangentToWorld[2]);
+            }
+
+            VividExperimentalStandardSurface BuildStandardSurface(
+                const VividEvaluatedSlabSurface surface,
+                const float3 normalWS,
+                const float3 emissive,
+                const uint materialFeatures,
+                const VividBuiltinData builtinData)
+            {
+                VividExperimentalStandardSurfaceParameters parameters;
+                parameters.baseColor = surface.BaseColor;
+                parameters.normalWS = normalWS;
+                parameters.perceptualRoughness =
+                    saturate(surface.PerceptualRoughness);
+                parameters.metallic = surface.Metallic;
+                parameters.ambientOcclusion = surface.AmbientOcclusion;
+                parameters.coverage = 1.0;
+                parameters.specularIor = 1.5;
+                parameters.clearCoatWeight = 0.0;
+                parameters.clearCoatPerceptualRoughness = 0.0;
+                parameters.transmissionWeight = 0.0;
+                parameters.subsurfaceWeight = 0.0;
+                parameters.emissive = max(emissive, 0.0);
+                parameters.materialFeatures = materialFeatures;
+                parameters.builtinData = builtinData;
+                return VividResolveExperimentalStandardSurface(parameters);
             }
 
             VividExperimentalClosureBufferOutput Frag(Varyings input)
@@ -208,17 +204,29 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
 
                 const VividInstanceData instanceData =
                     PullInstanceData(visibility.InstanceID);
+                if (instanceData.MaterialIndex >= _MaterialDataCount)
+                    discard;
+
                 VividMaterialData materialData;
                 VividSurfaceBindingData surfaceBindingData;
-                if (!VividTryLoadStandardSingleSlabSurfaceProgram(
+                VividSurfaceBindingData topSurfaceBindingData;
+                VividDualSlabMaterialData dualSlabMaterialData;
+                bool isDualSlab = VividTryLoadDualSlabSurfaceProgram(
+                    instanceData.MaterialIndex,
+                    0u,
+                    dualSlabMaterialData,
+                    surfaceBindingData,
+                    topSurfaceBindingData);
+                if (isDualSlab)
+                {
+                    materialData = PullMaterialData(instanceData.MaterialIndex);
+                }
+                else if (!VividTryLoadStandardSingleSlabSurfaceProgram(
                         instanceData.MaterialIndex,
                         0u,
                         materialData,
                         surfaceBindingData))
                 {
-                    if (instanceData.MaterialIndex >= _MaterialDataCount)
-                        discard;
-
                     materialData = PullMaterialData(instanceData.MaterialIndex);
                     if (materialData.SurfaceBindingIndex >= _SurfaceBindingDataCount)
                         discard;
@@ -254,78 +262,76 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 float2 rawUVDdx = attributes0.zw;
                 float2 rawUVDdy = attributes1.xy;
                 float3 geometricNormalWS = DecodeNormalOct(attributes1.zw);
-                float2 baseUV = rawUV * materialData.TextureTilingOffset.xy
-                    + materialData.TextureTilingOffset.zw;
-                float2 baseUVDdx = rawUVDdx * materialData.TextureTilingOffset.xy;
-                float2 baseUVDdy = rawUVDdy * materialData.TextureTilingOffset.xy;
-                VividSurfaceSampleContext baseContext =
-                    VividCreateSurfaceSampleContextGrad(
+                VividSlabMaterialData baseSlabData =
+                    VividCreateSlabMaterialData(materialData);
+                if (isDualSlab)
+                {
+                    baseSlabData =
+                        VividGetBaseSlabMaterialData(dualSlabMaterialData);
+                }
+                const VividEvaluatedSlabSurface baseEvaluation =
+                    VividEvaluateSlabSurfaceGrad(
+                        baseSlabData,
                         surfaceBindingData,
-                        baseUV,
-                        baseUVDdx,
-                        baseUVDdy,
+                        rawUV,
+                        rawUVDdx,
+                        rawUVDdy,
                         input.positionCS);
-                float4 baseSample = VividSampleBaseColorGrad(
-                    surfaceBindingData,
-                    baseContext) * materialData.AlbedoColor;
-                float perceptualRoughness = materialData.Roughness;
-                float metallic = materialData.Metallic;
-                float ambientOcclusion = 1.0;
-                if (VividSurfaceHasMask(surfaceBindingData))
-                {
-                    ApplyMaskSample(
-                        materialData.Padding0,
-                        VividSampleMaskGrad(surfaceBindingData, baseContext),
-                        materialData.MetallicSmoothnessRemap,
-                        materialData.AmbientOcclusionRemap.xy,
-                        perceptualRoughness,
-                        metallic,
-                        ambientOcclusion);
-                }
-
-                float3 normalWS = geometricNormalWS;
-                if (VividSurfaceHasNormal(surfaceBindingData))
-                {
-                    float3 normalTS = VividExperimentalUnpackNormalScale(
-                        VividSampleNormalGrad(surfaceBindingData, baseContext),
-                        materialData.NormalsStrength);
-                    float3x3 tangentToWorld = ReconstructTangentToWorld(
-                        positionWS,
-                        geometricNormalWS,
-                        baseUVDdx,
-                        baseUVDdy);
-                    normalWS = SafeNormalize(
-                        normalTS.x * tangentToWorld[0]
-                        + normalTS.y * tangentToWorld[1]
-                        + normalTS.z * tangentToWorld[2]);
-                }
+                const float3 normalWS = ResolveSlabNormalWS(
+                    baseEvaluation,
+                    baseSlabData,
+                    positionWS,
+                    geometricNormalWS,
+                    rawUVDdx,
+                    rawUVDdy);
 
                 VividBuiltinData builtinData = BuildProbeVolumeBuiltinData(
                     positionWS,
                     normalWS);
-                VividExperimentalStandardSurfaceParameters baseParameters;
-                baseParameters.baseColor = baseSample.rgb;
-                baseParameters.normalWS = normalWS;
-                baseParameters.perceptualRoughness = saturate(perceptualRoughness);
-                baseParameters.metallic = metallic;
-                baseParameters.ambientOcclusion = ambientOcclusion;
-                baseParameters.coverage = 1.0;
-                baseParameters.specularIor = 1.5;
-                baseParameters.clearCoatWeight = 0.0;
-                baseParameters.clearCoatPerceptualRoughness = 0.0;
-                baseParameters.transmissionWeight = 0.0;
-                baseParameters.subsurfaceWeight = 0.0;
-                baseParameters.emissive = max(materialData.Emission.rgb, 0.0);
-                baseParameters.materialFeatures =
+                const uint materialFeatures =
                     (materialData.MaterialFlags & VIVIDMATERIALFLAGS_UNLIT) != 0u
                         ? 0u
                         : VIVID_MATERIALFEATURE_DEFAULT;
-                baseParameters.builtinData = builtinData;
                 VividExperimentalStandardSurface baseSurface =
-                    VividResolveExperimentalStandardSurface(baseParameters);
+                    BuildStandardSurface(
+                        baseEvaluation,
+                        normalWS,
+                        isDualSlab
+                            ? dualSlabMaterialData.Emission.rgb
+                            : materialData.Emission.rgb,
+                        materialFeatures,
+                        builtinData);
 
-                VividExperimentalClosureMaterial closureMaterial =
-                    VividCompileExperimentalStandardSurface(baseSurface);
+                VividExperimentalClosureMaterial closureMaterial;
+                if (isDualSlab)
+                {
+                    const VividEvaluatedSlabSurface topEvaluation =
+                        VividEvaluateSlabSurfaceGrad(
+                            VividGetTopSlabMaterialData(dualSlabMaterialData),
+                            topSurfaceBindingData,
+                            rawUV,
+                            rawUVDdx,
+                            rawUVDdy,
+                            input.positionCS);
+                    // Closure Buffer ABI v2 intentionally shares the base normal.
+                    const VividExperimentalStandardSurface topSurface =
+                        BuildStandardSurface(
+                            topEvaluation,
+                            normalWS,
+                            0.0f,
+                            materialFeatures,
+                            builtinData);
+                    closureMaterial = VividCompileExperimentalLayeredSurface(
+                        baseSurface,
+                        topSurface,
+                        dualSlabMaterialData.LayerOperator,
+                        dualSlabMaterialData.LayerWeight);
+                }
+                else
+                {
+                    closureMaterial =
+                        VividCompileExperimentalStandardSurface(baseSurface);
+                }
 
                 return VividPackExperimentalClosureBuffer(closureMaterial);
             }

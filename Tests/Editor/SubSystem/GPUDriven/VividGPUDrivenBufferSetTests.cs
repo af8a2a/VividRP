@@ -217,7 +217,8 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialCount, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
-            Assert.That(bufferSet.MaterialProgramCount, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialProgramCount, Is.EqualTo(2));
+            Assert.That(bufferSet.DualSlabMaterialCount, Is.Zero);
             Assert.That(bufferSet.SurfaceBindingCount, Is.EqualTo(1));
             Assert.That(bufferSet.MeshLODNodeCount, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletCount, Is.EqualTo(1));
@@ -225,6 +226,7 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.SharedIndexCount, Is.EqualTo(3));
             Assert.That(bufferSet.InstanceDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.DualSlabMaterialDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialRuntimeHeaderBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialProgramBuffer, Is.Not.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
@@ -235,7 +237,8 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.InstanceDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialRuntimeHeaderBuffer.count, Is.EqualTo(1));
-            Assert.That(bufferSet.MaterialProgramBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialProgramBuffer.count, Is.EqualTo(2));
+            Assert.That(bufferSet.DualSlabMaterialDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshLODNodesBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletsBuffer.count, Is.EqualTo(1));
@@ -290,14 +293,21 @@ namespace VividRP.Editor.Tests
             sceneData.AddMaterial(
                 new VividMaterialData { SurfaceBindingIndex = 5u },
                 runtimeHeader);
+            sceneData.MutableDualSlabMaterials.Add(new VividDualSlabMaterialData
+            {
+                LayerOperator = VividDualSlabOperator.VerticalLayer,
+                LayerWeight = 0.75f,
+            });
 
             using var bufferSet = new VividGPUDrivenBufferSet();
             bufferSet.Upload(sceneData);
 
             var uploadedHeaders = new VividMaterialRuntimeHeader[1];
             bufferSet.MaterialRuntimeHeaderBuffer.GetData(uploadedHeaders);
-            var uploadedPrograms = new VividMaterialProgramData[1];
+            var uploadedPrograms = new VividMaterialProgramData[2];
             bufferSet.MaterialProgramBuffer.GetData(uploadedPrograms);
+            var uploadedDualSlabs = new VividDualSlabMaterialData[1];
+            bufferSet.DualSlabMaterialDataBuffer.GetData(uploadedDualSlabs);
 
             Assert.That(uploadedHeaders[0].ProgramID, Is.EqualTo(runtimeHeader.ProgramID));
             Assert.That(uploadedHeaders[0].ParameterAddress, Is.EqualTo(runtimeHeader.ParameterAddress));
@@ -315,6 +325,13 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 uploadedPrograms[0].ResourceLayoutID,
                 Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
+            Assert.That(
+                uploadedPrograms[1].SurfaceProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
+            Assert.That(
+                uploadedDualSlabs[0].LayerOperator,
+                Is.EqualTo(VividDualSlabOperator.VerticalLayer));
+            Assert.That(uploadedDualSlabs[0].LayerWeight, Is.EqualTo(0.75f));
         }
 
         [Test]

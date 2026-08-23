@@ -19,9 +19,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(generatedContract, Does.Contain("struct VividMaterialRuntimeHeader"));
             Assert.That(generatedContract, Does.Contain("struct VividMaterialProgramData"));
+            Assert.That(generatedContract, Does.Contain("struct VividDualSlabMaterialData"));
             Assert.That(
                 generatedContract,
                 Does.Contain("#define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB (0)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDMATERIALPROGRAMID_DUAL_SLAB (1)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDDUALSLABOPERATOR_VERTICAL_LAYER (1)"));
             Assert.That(runtimeContract, Does.Contain("struct VividMaterialRuntimeHeader"));
             Assert.That(runtimeContract, Does.Contain("struct VividMaterialProgramData"));
             Assert.That(
@@ -42,6 +49,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 runtimeContract,
                 Does.Contain("StructuredBuffer<VividMaterialProgramData> _MaterialPrograms;"));
+            Assert.That(
+                runtimeContract,
+                Does.Contain("StructuredBuffer<VividDualSlabMaterialData> _DualSlabMaterialData;"));
         }
 
         [Test]
@@ -131,7 +141,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(firstCompiled.LegacyMaterialData.Metallic, Is.Not.EqualTo(secondCompiled.LegacyMaterialData.Metallic));
 
                 var sceneData = new VividGPUDrivenSceneData();
-                Assert.That(sceneData.MaterialProgramCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialProgramCount, Is.EqualTo(2));
                 VividMaterialProgramData program = sceneData.MaterialPrograms[0];
                 Assert.That(program.Version, Is.EqualTo(GPUDrivenMaterialCompiler.ProgramVersion));
                 Assert.That(
@@ -143,11 +153,81 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     program.CapabilityFlags & VividMaterialProgramCapabilities.AlphaClip,
                     Is.EqualTo(VividMaterialProgramCapabilities.AlphaClip));
+
+                VividMaterialProgramData dualSlabProgram = sceneData.MaterialPrograms[1];
+                Assert.That(
+                    dualSlabProgram.SurfaceProgramID,
+                    Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
+                Assert.That(
+                    dualSlabProgram.ParameterLayoutID,
+                    Is.EqualTo(VividMaterialParameterLayoutID.DualSlabMaterialData));
+                Assert.That(
+                    dualSlabProgram.ResourceLayoutID,
+                    Is.EqualTo(VividMaterialResourceLayoutID.DualSurfaceBinding));
             }
             finally
             {
                 Object.DestroyImmediate(first);
                 Object.DestroyImmediate(second);
+            }
+        }
+
+        [Test]
+        public void CompileDualSlab_ProducesProgram1WithTwoFixedSlabs()
+        {
+            var baseProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                baseProxy.BaseColor = Color.red;
+                baseProxy.Metallic = 0.2f;
+                baseProxy.Roughness = 0.3f;
+                baseProxy.LayerWeight = 0.65f;
+                baseProxy.AlphaClip = true;
+                baseProxy.Cutoff = 0.4f;
+                topProxy.BaseColor = Color.blue;
+                topProxy.Metallic = 0.8f;
+                topProxy.Roughness = 0.7f;
+                definition.TopSlab = topProxy;
+                definition.Operator = VividDualSlabOperator.VerticalLayer;
+                baseProxy.DualSlabDefinition = definition;
+
+                GPUDrivenCompiledMaterialInstance compiled =
+                    GPUDrivenMaterialCompiler.CompileDualSlab(
+                        baseProxy,
+                        parameterAddress: 3u,
+                        baseSurfaceBindingIndex: 7u,
+                        topSurfaceBindingIndex: 8u);
+
+                Assert.That(
+                    compiled.RuntimeHeader.ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.DualSlab));
+                Assert.That(compiled.RuntimeHeader.ParameterAddress, Is.EqualTo(3u));
+                Assert.That(compiled.RuntimeHeader.ResourceBindingAddress, Is.EqualTo(7u));
+                Assert.That(
+                    compiled.RuntimeHeader.Flags & VividMaterialRuntimeFlags.AlphaClip,
+                    Is.EqualTo(VividMaterialRuntimeFlags.AlphaClip));
+                Assert.That(
+                    compiled.DualSlabMaterialData.BaseMetallic,
+                    Is.EqualTo(0.2f));
+                Assert.That(
+                    compiled.DualSlabMaterialData.TopMetallic,
+                    Is.EqualTo(0.8f));
+                Assert.That(
+                    compiled.DualSlabMaterialData.LayerOperator,
+                    Is.EqualTo(VividDualSlabOperator.VerticalLayer));
+                Assert.That(compiled.DualSlabMaterialData.LayerWeight, Is.EqualTo(0.65f));
+                Assert.That(compiled.DualSlabMaterialData.AlphaClipThreshold, Is.EqualTo(0.4f));
+                Assert.That(compiled.LegacyMaterialData.SurfaceBindingIndex, Is.EqualTo(7u));
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topProxy);
+                Object.DestroyImmediate(baseProxy);
             }
         }
 

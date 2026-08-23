@@ -75,7 +75,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 VividInstanceData instanceData;
                 VividMaterialData materialData;
+                VividDualSlabMaterialData dualSlabMaterialData;
                 VividSurfaceBindingData surfaceBindingData;
+                VividSurfaceBindingData topSurfaceBindingData;
+                uint isDualSlab;
                 VividMeshletVertex vertex0;
                 VividMeshletVertex vertex1;
                 VividMeshletVertex vertex2;
@@ -256,7 +259,20 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
-                if (!VividTryLoadStandardSingleSlabSurfaceProgram(
+                result.isDualSlab = VividTryLoadDualSlabSurfaceProgram(
+                    result.instanceData.MaterialIndex,
+                    VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
+                    result.dualSlabMaterialData,
+                    result.surfaceBindingData,
+                    result.topSurfaceBindingData)
+                        ? 1u
+                        : 0u;
+                if (result.isDualSlab != 0u)
+                {
+                    result.materialData = PullMaterialData(
+                        result.instanceData.MaterialIndex);
+                }
+                else if (!VividTryLoadStandardSingleSlabSurfaceProgram(
                         result.instanceData.MaterialIndex,
                         VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
                         result.materialData,
@@ -509,61 +525,112 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 }
                 else
                 {
-                    InterpolatedUV uv = terrainUv;
-                    ApplyTilingOffset(uv, triangleData.materialData.TextureTilingOffset);
-                    VividSurfaceSampleContext surfaceSampleContext = VividCreateSurfaceSampleContextGrad(
-                        triangleData.surfaceBindingData,
-                        uv.uv,
-                        uv.ddx,
-                        uv.ddy,
-                        positionCS);
-                    float4 albedoSample = SampleAlbedoTextureGrad(
-                        triangleData.surfaceBindingData,
-                        surfaceSampleContext);
-                    baseColor = albedoSample.rgb * triangleData.materialData.AlbedoColor.rgb;
-                    perceptualRoughness = triangleData.materialData.Roughness;
-                    metallic = triangleData.materialData.Metallic;
-                    ambientOcclusion = 1.0f;
-
-                    if (VividSurfaceHasNormal(triangleData.surfaceBindingData))
+                    if (triangleData.isDualSlab != 0u)
                     {
-                        sampledNormalTS = SampleNormalTSGrad(
-                            triangleData.materialData,
+                        const VividEvaluatedSlabSurface baseSlab =
+                            VividEvaluateSlabSurfaceGrad(
+                                VividGetBaseSlabMaterialData(
+                                    triangleData.dualSlabMaterialData),
+                                triangleData.surfaceBindingData,
+                                visibilityUV.uv,
+                                visibilityUV.ddx,
+                                visibilityUV.ddy,
+                                positionCS);
+                        const VividEvaluatedSlabSurface topSlab =
+                            VividEvaluateSlabSurfaceGrad(
+                                VividGetTopSlabMaterialData(
+                                    triangleData.dualSlabMaterialData),
+                                triangleData.topSurfaceBindingData,
+                                visibilityUV.uv,
+                                visibilityUV.ddx,
+                                visibilityUV.ddy,
+                                positionCS);
+                        const float layerWeight = saturate(
+                            triangleData.dualSlabMaterialData.LayerWeight);
+
+                        // Legacy GBuffer cannot preserve the two-Closure topology. Both
+                        // operators deliberately degrade to the same parameter blend.
+                        baseColor = lerp(
+                            baseSlab.BaseColor,
+                            topSlab.BaseColor,
+                            layerWeight);
+                        sampledNormalTS = SafeNormalize(lerp(
+                            baseSlab.NormalTS,
+                            topSlab.NormalTS,
+                            layerWeight));
+                        hasSampledNormal =
+                            baseSlab.HasNormal != 0u || topSlab.HasNormal != 0u;
+                        perceptualRoughness = lerp(
+                            baseSlab.PerceptualRoughness,
+                            topSlab.PerceptualRoughness,
+                            layerWeight);
+                        metallic = lerp(
+                            baseSlab.Metallic,
+                            topSlab.Metallic,
+                            layerWeight);
+                        ambientOcclusion = lerp(
+                            baseSlab.AmbientOcclusion,
+                            topSlab.AmbientOcclusion,
+                            layerWeight);
+                    }
+                    else
+                    {
+                        InterpolatedUV uv = terrainUv;
+                        ApplyTilingOffset(uv, triangleData.materialData.TextureTilingOffset);
+                        VividSurfaceSampleContext surfaceSampleContext = VividCreateSurfaceSampleContextGrad(
+                            triangleData.surfaceBindingData,
+                            uv.uv,
+                            uv.ddx,
+                            uv.ddy,
+                            positionCS);
+                        float4 albedoSample = SampleAlbedoTextureGrad(
                             triangleData.surfaceBindingData,
                             surfaceSampleContext);
-                        hasSampledNormal = true;
-                    }
+                        baseColor = albedoSample.rgb * triangleData.materialData.AlbedoColor.rgb;
+                        perceptualRoughness = triangleData.materialData.Roughness;
+                        metallic = triangleData.materialData.Metallic;
+                        ambientOcclusion = 1.0f;
 
-                    float4 maskSample = VividSurfaceHasMask(triangleData.surfaceBindingData)
-                        ? VividSampleMaskGrad(
-                            triangleData.surfaceBindingData,
-                            surfaceSampleContext)
-                        : 1.0.xxxx;
+                        if (VividSurfaceHasNormal(triangleData.surfaceBindingData))
+                        {
+                            sampledNormalTS = SampleNormalTSGrad(
+                                triangleData.materialData,
+                                triangleData.surfaceBindingData,
+                                surfaceSampleContext);
+                            hasSampledNormal = true;
+                        }
+
+                        float4 maskSample = VividSurfaceHasMask(triangleData.surfaceBindingData)
+                            ? VividSampleMaskGrad(
+                                triangleData.surfaceBindingData,
+                                surfaceSampleContext)
+                            : 1.0.xxxx;
 #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
-                    if (isTerrainRVT)
-                    {
-                        bool sampledTerrainRVT = VividResolveTerrainRVT(
-                            triangleData.materialData.Padding1,
-                            terrainUv.uv,
-                            terrainUv.ddx,
-                            terrainUv.ddy,
-                            positionCS,
-                            baseColor,
-                            sampledNormalTS,
-                            maskSample);
-                        hasSampledNormal = hasSampledNormal || sampledTerrainRVT;
-                    }
+                        if (isTerrainRVT)
+                        {
+                            bool sampledTerrainRVT = VividResolveTerrainRVT(
+                                triangleData.materialData.Padding1,
+                                terrainUv.uv,
+                                terrainUv.ddx,
+                                terrainUv.ddy,
+                                positionCS,
+                                baseColor,
+                                sampledNormalTS,
+                                maskSample);
+                            hasSampledNormal = hasSampledNormal || sampledTerrainRVT;
+                        }
 #endif
-                    if (VividSurfaceHasMask(triangleData.surfaceBindingData) || isTerrainRVT)
-                    {
-                        ApplyMaskSample(
-                            triangleData.materialData.Padding0,
-                            maskSample,
-                            triangleData.materialData.MetallicSmoothnessRemap,
-                            triangleData.materialData.AmbientOcclusionRemap.xy,
-                            perceptualRoughness,
-                            metallic,
-                            ambientOcclusion);
+                        if (VividSurfaceHasMask(triangleData.surfaceBindingData) || isTerrainRVT)
+                        {
+                            ApplyMaskSample(
+                                triangleData.materialData.Padding0,
+                                maskSample,
+                                triangleData.materialData.MetallicSmoothnessRemap,
+                                triangleData.materialData.AmbientOcclusionRemap.xy,
+                                perceptualRoughness,
+                                metallic,
+                                ambientOcclusion);
+                        }
                     }
                 }
 

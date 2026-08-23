@@ -191,6 +191,90 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_CompilesDualSlabIntoTwoSurfaceBindings()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy baseProxy = null;
+            GPUDrivenMaterialProxy topProxy = null;
+            GPUDrivenDualSlabMaterialDefinition definition = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("DualSlabMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "DualSlabCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 });
+                gameObject = CreateMeshletRendererObject(
+                    "DualSlabRenderer",
+                    mesh,
+                    new[] { material },
+                    out MeshletRenderer meshletRenderer);
+                baseProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                topProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                definition =
+                    ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                baseProxy.LayerWeight = 0.6f;
+                topProxy.Metallic = 0.9f;
+                definition.TopSlab = topProxy;
+                definition.Operator = VividDualSlabOperator.VerticalLayer;
+                baseProxy.DualSlabDefinition = definition;
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { baseProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new BindlessGPUDrivenTextureBackend(
+                    new FakeBindlessTextureDescriptorAllocator(16));
+                builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    textureBackend);
+
+                Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.DualSlabMaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(2));
+                Assert.That(
+                    sceneData.MaterialRuntimeHeaders[0].ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.DualSlab));
+                Assert.That(sceneData.MaterialRuntimeHeaders[0].ParameterAddress, Is.Zero);
+                Assert.That(sceneData.MaterialRuntimeHeaders[0].ResourceBindingAddress, Is.Zero);
+                Assert.That(sceneData.DualSlabMaterials[0].TopMetallic, Is.EqualTo(0.9f));
+                Assert.That(
+                    sceneData.DualSlabMaterials[0].LayerOperator,
+                    Is.EqualTo(VividDualSlabOperator.VerticalLayer));
+                Assert.That(sceneData.DualSlabMaterials[0].LayerWeight, Is.EqualTo(0.6f));
+            }
+            finally
+            {
+                DestroyTestObjects(
+                    gameObject,
+                    null,
+                    material,
+                    mesh,
+                    meshletCollection,
+                    definition,
+                    topProxy,
+                    baseProxy);
+            }
+        }
+
+        [Test]
         public void PrimitiveSceneAdapter_BuildsRendererSectionsBridgeAndIncrementalTransformUpdate()
         {
             GameObject gameObject = null;
@@ -1342,7 +1426,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(system.BufferSet.InstanceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
-                Assert.That(system.BufferSet.MaterialProgramCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MaterialProgramCount, Is.EqualTo(2));
                 Assert.That(system.BufferSet.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshletCount, Is.EqualTo(1));

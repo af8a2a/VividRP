@@ -185,6 +185,13 @@ namespace VividRP.Editor.Tests
 
             StringAssert.Contains("VividMaterialSurface.hlsl", source);
             StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
+            StringAssert.Contains("VividTryLoadDualSlabSurfaceProgram", source);
+            StringAssert.Contains("VividEvaluateSlabSurfaceGrad", source);
+            StringAssert.Contains("Both", source);
+            StringAssert.Contains("degrade to the same parameter blend", source);
+            StringAssert.DoesNotContain(
+                "triangleData.dualSlabMaterialData.LayerOperator",
+                source);
             StringAssert.Contains(
                 "VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT",
                 source);

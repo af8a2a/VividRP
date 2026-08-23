@@ -10,14 +10,25 @@ namespace VividRP.Runtime.GPUDriven
         internal GPUDrivenCompiledMaterialInstance(
             in VividMaterialRuntimeHeader runtimeHeader,
             in VividMaterialData legacyMaterialData)
+            : this(runtimeHeader, legacyMaterialData, default)
+        {
+        }
+
+        internal GPUDrivenCompiledMaterialInstance(
+            in VividMaterialRuntimeHeader runtimeHeader,
+            in VividMaterialData legacyMaterialData,
+            in VividDualSlabMaterialData dualSlabMaterialData)
         {
             RuntimeHeader = runtimeHeader;
             LegacyMaterialData = legacyMaterialData;
+            DualSlabMaterialData = dualSlabMaterialData;
         }
 
         internal VividMaterialRuntimeHeader RuntimeHeader { get; }
 
         internal VividMaterialData LegacyMaterialData { get; }
+
+        internal VividDualSlabMaterialData DualSlabMaterialData { get; }
     }
 
     internal static class GPUDrivenMaterialCompiler
@@ -39,6 +50,21 @@ namespace VividRP.Runtime.GPUDriven
                 ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
             };
 
+        internal static VividMaterialProgramData DualSlabProgram =>
+            new()
+            {
+                Version = ProgramVersion,
+                CoverageProgramID = VividMaterialCoverageProgramID.BaseColorAlpha,
+                SurfaceProgramID = VividMaterialSurfaceProgramID.DualSlab,
+                TransportProgramID = VividMaterialTransportProgramID.None,
+                ParameterLayoutID = VividMaterialParameterLayoutID.DualSlabMaterialData,
+                ResourceLayoutID = VividMaterialResourceLayoutID.DualSurfaceBinding,
+                CapabilityFlags = VividMaterialProgramCapabilities.LegacyGBufferExport
+                    | VividMaterialProgramCapabilities.AlphaClip
+                    | VividMaterialProgramCapabilities.Unlit,
+                ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
+            };
+
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
             GPUDrivenMaterialProxy materialProxy,
             uint parameterAddress,
@@ -53,20 +79,94 @@ namespace VividRP.Runtime.GPUDriven
                     $"GPU-driven material model '{materialProxy.Model}' is not supported by Program 0.");
             }
 
-            VividMaterialRuntimeFlags runtimeFlags = VividMaterialRuntimeFlags.None;
-            if (materialProxy.AlphaClip)
-                runtimeFlags |= VividMaterialRuntimeFlags.AlphaClip;
-            if (materialProxy.DisableLighting)
-                runtimeFlags |= VividMaterialRuntimeFlags.Unlit;
-
             var runtimeHeader = new VividMaterialRuntimeHeader
             {
                 ProgramID = VividMaterialProgramID.StandardSingleSlab,
                 ParameterAddress = parameterAddress,
                 ResourceBindingAddress = surfaceBindingIndex,
-                Flags = runtimeFlags,
+                Flags = GetRuntimeFlags(materialProxy),
             };
-            var legacyMaterialData = new VividMaterialData
+            return new GPUDrivenCompiledMaterialInstance(
+                runtimeHeader,
+                CreateLegacyMaterialData(materialProxy, surfaceBindingIndex));
+        }
+
+        internal static GPUDrivenCompiledMaterialInstance CompileDualSlab(
+            GPUDrivenMaterialProxy materialProxy,
+            uint parameterAddress,
+            uint baseSurfaceBindingIndex,
+            uint topSurfaceBindingIndex)
+        {
+            if (materialProxy == null)
+                throw new ArgumentNullException(nameof(materialProxy));
+            if (materialProxy.Model != GPUDrivenMaterialProxyModel.DualSlab)
+            {
+                throw new NotSupportedException(
+                    $"GPU-driven material model '{materialProxy.Model}' is not supported by Program 1.");
+            }
+
+            GPUDrivenDualSlabMaterialDefinition definition =
+                materialProxy.DualSlabDefinition;
+            if (definition == null)
+                throw new InvalidOperationException("Dual Slab materials require a definition.");
+
+            GPUDrivenMaterialProxy topSlab = definition.TopSlab;
+            if (topSlab == null || topSlab.Model != GPUDrivenMaterialProxyModel.StandardLit)
+            {
+                throw new InvalidOperationException(
+                    "Dual Slab definitions require a StandardLit top-slab proxy.");
+            }
+            if (topSurfaceBindingIndex != baseSurfaceBindingIndex + 1u)
+            {
+                throw new ArgumentException(
+                    "Dual Slab surface bindings must be consecutive.",
+                    nameof(topSurfaceBindingIndex));
+            }
+
+            var runtimeHeader = new VividMaterialRuntimeHeader
+            {
+                ProgramID = VividMaterialProgramID.DualSlab,
+                ParameterAddress = parameterAddress,
+                ResourceBindingAddress = baseSurfaceBindingIndex,
+                Flags = GetRuntimeFlags(materialProxy),
+            };
+            VividSlabMaterialData baseSlab = CreateSlabMaterialData(materialProxy);
+            VividSlabMaterialData topSlabData = CreateSlabMaterialData(topSlab);
+            var dualSlabMaterialData = new VividDualSlabMaterialData
+            {
+                BaseAlbedoColor = baseSlab.AlbedoColor,
+                BaseTextureTilingOffset = baseSlab.TextureTilingOffset,
+                BaseMetallicSmoothnessRemap = baseSlab.MetallicSmoothnessRemap,
+                BaseAmbientOcclusionRemap = baseSlab.AmbientOcclusionRemap,
+                BaseNormalsStrength = baseSlab.NormalsStrength,
+                BaseRoughness = baseSlab.Roughness,
+                BaseMetallic = baseSlab.Metallic,
+                BaseMaskMode = baseSlab.MaskMode,
+                TopAlbedoColor = topSlabData.AlbedoColor,
+                TopTextureTilingOffset = topSlabData.TextureTilingOffset,
+                TopMetallicSmoothnessRemap = topSlabData.MetallicSmoothnessRemap,
+                TopAmbientOcclusionRemap = topSlabData.AmbientOcclusionRemap,
+                TopNormalsStrength = topSlabData.NormalsStrength,
+                TopRoughness = topSlabData.Roughness,
+                TopMetallic = topSlabData.Metallic,
+                TopMaskMode = topSlabData.MaskMode,
+                Emission = ConvertMaterialColorForGPU(materialProxy.EmissionColor),
+                LayerOperator = definition.Operator,
+                LayerWeight = Mathf.Clamp01(materialProxy.LayerWeight),
+                AlphaClipThreshold = materialProxy.AlphaClip ? materialProxy.Cutoff : 0.0f,
+                Padding0 = 0u,
+            };
+            return new GPUDrivenCompiledMaterialInstance(
+                runtimeHeader,
+                CreateLegacyMaterialData(materialProxy, baseSurfaceBindingIndex),
+                dualSlabMaterialData);
+        }
+
+        private static VividMaterialData CreateLegacyMaterialData(
+            GPUDrivenMaterialProxy materialProxy,
+            uint surfaceBindingIndex)
+        {
+            return new VividMaterialData
             {
                 AlbedoColor = ConvertMaterialColorForGPU(materialProxy.BaseColor),
                 TextureTilingOffset = ToFloat4(materialProxy.TextureTilingOffset),
@@ -96,7 +196,41 @@ namespace VividRP.Runtime.GPUDriven
                 Padding0 = (uint) materialProxy.MaskMode,
                 Padding1 = 0u,
             };
-            return new GPUDrivenCompiledMaterialInstance(runtimeHeader, legacyMaterialData);
+        }
+
+        private static VividSlabMaterialData CreateSlabMaterialData(
+            GPUDrivenMaterialProxy materialProxy)
+        {
+            return new VividSlabMaterialData
+            {
+                AlbedoColor = ConvertMaterialColorForGPU(materialProxy.BaseColor),
+                TextureTilingOffset = ToFloat4(materialProxy.TextureTilingOffset),
+                MetallicSmoothnessRemap = new float4(
+                    materialProxy.MetallicRemap.x,
+                    materialProxy.MetallicRemap.y,
+                    materialProxy.SmoothnessRemap.x,
+                    materialProxy.SmoothnessRemap.y),
+                AmbientOcclusionRemap = new float4(
+                    materialProxy.AmbientOcclusionRemap.x,
+                    materialProxy.AmbientOcclusionRemap.y,
+                    0.0f,
+                    0.0f),
+                NormalsStrength = materialProxy.BumpScale,
+                Roughness = materialProxy.Roughness,
+                Metallic = materialProxy.Metallic,
+                MaskMode = (uint) materialProxy.MaskMode,
+            };
+        }
+
+        private static VividMaterialRuntimeFlags GetRuntimeFlags(
+            GPUDrivenMaterialProxy materialProxy)
+        {
+            VividMaterialRuntimeFlags runtimeFlags = VividMaterialRuntimeFlags.None;
+            if (materialProxy.AlphaClip)
+                runtimeFlags |= VividMaterialRuntimeFlags.AlphaClip;
+            if (materialProxy.DisableLighting)
+                runtimeFlags |= VividMaterialRuntimeFlags.Unlit;
+            return runtimeFlags;
         }
 
         internal static VividMaterialRuntimeHeader CreateLegacyFallbackHeader(

@@ -8,6 +8,8 @@ namespace VividRP.Runtime.GPUDriven
     {
         public static readonly int _InstanceData = Shader.PropertyToID(nameof(_InstanceData));
         public static readonly int _MaterialData = Shader.PropertyToID(nameof(_MaterialData));
+        public static readonly int _DualSlabMaterialData =
+            Shader.PropertyToID(nameof(_DualSlabMaterialData));
         public static readonly int _MaterialRuntimeHeaders = Shader.PropertyToID(nameof(_MaterialRuntimeHeaders));
         public static readonly int _MaterialPrograms = Shader.PropertyToID(nameof(_MaterialPrograms));
         public static readonly int _SurfaceBindingData = Shader.PropertyToID(nameof(_SurfaceBindingData));
@@ -29,6 +31,8 @@ namespace VividRP.Runtime.GPUDriven
 
         public static readonly int _InstanceDataCount = Shader.PropertyToID(nameof(_InstanceDataCount));
         public static readonly int _MaterialDataCount = Shader.PropertyToID(nameof(_MaterialDataCount));
+        public static readonly int _DualSlabMaterialDataCount =
+            Shader.PropertyToID(nameof(_DualSlabMaterialDataCount));
         public static readonly int _MaterialRuntimeHeaderCount = Shader.PropertyToID(nameof(_MaterialRuntimeHeaderCount));
         public static readonly int _MaterialProgramCount = Shader.PropertyToID(nameof(_MaterialProgramCount));
         public static readonly int _SurfaceBindingDataCount = Shader.PropertyToID(nameof(_SurfaceBindingDataCount));

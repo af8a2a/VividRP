@@ -17,12 +17,18 @@
 
 #define VIVID_MATERIAL_PROGRAM_VERSION 1u
 #define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB 0u
+#define VIVIDMATERIALPROGRAMID_DUAL_SLAB 1u
 #define VIVIDMATERIALPROGRAMID_INVALID 0xffffffffu
 #define VIVIDMATERIALCOVERAGEPROGRAMID_BASE_COLOR_ALPHA 0u
 #define VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB 0u
+#define VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB 1u
 #define VIVIDMATERIALTRANSPORTPROGRAMID_NONE 0u
 #define VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA 0u
+#define VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA 1u
 #define VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING 0u
+#define VIVIDMATERIALRESOURCELAYOUTID_DUAL_SURFACE_BINDING 1u
+#define VIVIDDUALSLABOPERATOR_HORIZONTAL_MIX 0u
+#define VIVIDDUALSLABOPERATOR_VERTICAL_LAYER 1u
 #define VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT 1u
 #define VIVIDMATERIALPROGRAMCAPABILITIES_ALPHA_CLIP 2u
 #define VIVIDMATERIALEXECUTIONCLASS_VISIBILITY_DEFERRED 0u
@@ -75,6 +81,49 @@ struct VividMaterialData
     float AlphaClipThreshold;
     uint Padding0;
     uint Padding1;
+};
+
+struct VividSlabMaterialData
+{
+    float4 AlbedoColor;
+    float4 TextureTilingOffset;
+    float4 MetallicSmoothnessRemap;
+    float4 AmbientOcclusionRemap;
+
+    float NormalsStrength;
+    float Roughness;
+    float Metallic;
+    uint MaskMode;
+};
+
+struct VividDualSlabMaterialData
+{
+    float4 BaseAlbedoColor;
+    float4 BaseTextureTilingOffset;
+    float4 BaseMetallicSmoothnessRemap;
+    float4 BaseAmbientOcclusionRemap;
+
+    float BaseNormalsStrength;
+    float BaseRoughness;
+    float BaseMetallic;
+    uint BaseMaskMode;
+
+    float4 TopAlbedoColor;
+    float4 TopTextureTilingOffset;
+    float4 TopMetallicSmoothnessRemap;
+    float4 TopAmbientOcclusionRemap;
+
+    float TopNormalsStrength;
+    float TopRoughness;
+    float TopMetallic;
+    uint TopMaskMode;
+
+    float4 Emission;
+
+    uint LayerOperator;
+    float LayerWeight;
+    float AlphaClipThreshold;
+    uint Padding0;
 };
 
 struct VividMaterialRuntimeHeader
@@ -358,6 +407,8 @@ uint _InstanceDataCount;
 
 StructuredBuffer<VividMaterialData> _MaterialData;
 uint _MaterialDataCount;
+StructuredBuffer<VividDualSlabMaterialData> _DualSlabMaterialData;
+uint _DualSlabMaterialDataCount;
 StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;
 uint _MaterialRuntimeHeaderCount;
 StructuredBuffer<VividMaterialProgramData> _MaterialPrograms;
@@ -381,6 +432,41 @@ VividInstanceData PullInstanceData(const uint instanceIndex)
 VividMaterialData PullMaterialData(const uint materialIndex)
 {
     return _MaterialData[materialIndex];
+}
+
+VividDualSlabMaterialData PullDualSlabMaterialData(const uint materialIndex)
+{
+    return _DualSlabMaterialData[materialIndex];
+}
+
+VividSlabMaterialData VividGetBaseSlabMaterialData(
+    const VividDualSlabMaterialData materialData)
+{
+    VividSlabMaterialData slabData;
+    slabData.AlbedoColor = materialData.BaseAlbedoColor;
+    slabData.TextureTilingOffset = materialData.BaseTextureTilingOffset;
+    slabData.MetallicSmoothnessRemap = materialData.BaseMetallicSmoothnessRemap;
+    slabData.AmbientOcclusionRemap = materialData.BaseAmbientOcclusionRemap;
+    slabData.NormalsStrength = materialData.BaseNormalsStrength;
+    slabData.Roughness = materialData.BaseRoughness;
+    slabData.Metallic = materialData.BaseMetallic;
+    slabData.MaskMode = materialData.BaseMaskMode;
+    return slabData;
+}
+
+VividSlabMaterialData VividGetTopSlabMaterialData(
+    const VividDualSlabMaterialData materialData)
+{
+    VividSlabMaterialData slabData;
+    slabData.AlbedoColor = materialData.TopAlbedoColor;
+    slabData.TextureTilingOffset = materialData.TopTextureTilingOffset;
+    slabData.MetallicSmoothnessRemap = materialData.TopMetallicSmoothnessRemap;
+    slabData.AmbientOcclusionRemap = materialData.TopAmbientOcclusionRemap;
+    slabData.NormalsStrength = materialData.TopNormalsStrength;
+    slabData.Roughness = materialData.TopRoughness;
+    slabData.Metallic = materialData.TopMetallic;
+    slabData.MaskMode = materialData.TopMaskMode;
+    return slabData;
 }
 
 VividMaterialRuntimeHeader PullMaterialRuntimeHeader(const uint materialIndex)

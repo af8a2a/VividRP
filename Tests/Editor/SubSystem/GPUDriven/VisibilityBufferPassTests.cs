@@ -267,6 +267,10 @@ namespace VividRP.Editor.Tests
             string coverageSource = File.ReadAllText(coveragePath);
 
             StringAssert.Contains("programData.CoverageProgramID", coverageSource);
+            StringAssert.Contains(
+                "VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA",
+                coverageSource);
+            StringAssert.Contains("VividGetBaseSlabMaterialData(materialData)", coverageSource);
             StringAssert.Contains("runtimeHeader.ParameterAddress", coverageSource);
             StringAssert.Contains("runtimeHeader.ResourceBindingAddress", coverageSource);
             StringAssert.DoesNotContain("programData.SurfaceProgramID", coverageSource);

@@ -23,15 +23,28 @@ VividMaterialCoverageEvaluation VividEvaluateBaseColorAlphaCoverage(
     return evaluation;
 }
 
+VividMaterialCoverageEvaluation VividEvaluateBaseColorAlphaCoverage(
+    const VividSlabMaterialData slabData,
+    const float alphaClipThreshold,
+    const VividSurfaceBindingData surfaceBindingData,
+    const float2 uv0)
+{
+    const float2 uv = uv0 * slabData.TextureTilingOffset.xy
+        + slabData.TextureTilingOffset.zw;
+    const float4 albedo = slabData.AlbedoColor
+        * VividSampleBaseColor(surfaceBindingData, uv);
+
+    VividMaterialCoverageEvaluation evaluation;
+    evaluation.Coverage = albedo.a;
+    evaluation.AlphaClipThreshold = alphaClipThreshold;
+    return evaluation;
+}
+
 bool VividIsCoverageProgramCompatible(
     const VividMaterialRuntimeHeader runtimeHeader,
     const VividMaterialProgramData programData)
 {
     return programData.Version == VIVID_MATERIAL_PROGRAM_VERSION
-        && programData.ParameterLayoutID
-            == VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA
-        && programData.ResourceLayoutID
-            == VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING
         && (programData.CapabilityFlags
             & VIVIDMATERIALPROGRAMCAPABILITIES_ALPHA_CLIP) != 0u
         && (runtimeHeader.Flags & VIVIDMATERIALRUNTIMEFLAGS_ALPHA_CLIP) != 0u;
@@ -63,21 +76,51 @@ bool VividTryEvaluateCoverageProgram(
     if (programData.CoverageProgramID
         == VIVIDMATERIALCOVERAGEPROGRAMID_BASE_COLOR_ALPHA)
     {
-        if (runtimeHeader.ParameterAddress >= _MaterialDataCount
-            || runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount)
+        if (programData.ParameterLayoutID
+                == VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA
+            && programData.ResourceLayoutID
+                == VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING)
         {
-            return false;
-        }
+            if (runtimeHeader.ParameterAddress >= _MaterialDataCount
+                || runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount)
+            {
+                return false;
+            }
 
-        const VividMaterialData materialData =
-            PullMaterialData(runtimeHeader.ParameterAddress);
-        const VividSurfaceBindingData surfaceBindingData =
-            PullSurfaceBindingData(runtimeHeader.ResourceBindingAddress);
-        evaluation = VividEvaluateBaseColorAlphaCoverage(
-            materialData,
-            surfaceBindingData,
-            uv0);
-        return true;
+            const VividMaterialData materialData =
+                PullMaterialData(runtimeHeader.ParameterAddress);
+            const VividSurfaceBindingData surfaceBindingData =
+                PullSurfaceBindingData(runtimeHeader.ResourceBindingAddress);
+            evaluation = VividEvaluateBaseColorAlphaCoverage(
+                materialData,
+                surfaceBindingData,
+                uv0);
+            return true;
+        }
+        if (programData.ParameterLayoutID
+                == VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA
+            && programData.ResourceLayoutID
+                == VIVIDMATERIALRESOURCELAYOUTID_DUAL_SURFACE_BINDING)
+        {
+            const uint bindingAddress = runtimeHeader.ResourceBindingAddress;
+            if (runtimeHeader.ParameterAddress >= _DualSlabMaterialDataCount
+                || bindingAddress >= _SurfaceBindingDataCount
+                || _SurfaceBindingDataCount - bindingAddress < 2u)
+            {
+                return false;
+            }
+
+            const VividDualSlabMaterialData materialData =
+                PullDualSlabMaterialData(runtimeHeader.ParameterAddress);
+            const VividSurfaceBindingData surfaceBindingData =
+                PullSurfaceBindingData(bindingAddress);
+            evaluation = VividEvaluateBaseColorAlphaCoverage(
+                VividGetBaseSlabMaterialData(materialData),
+                materialData.AlphaClipThreshold,
+                surfaceBindingData,
+                uv0);
+            return true;
+        }
     }
 
     return false;

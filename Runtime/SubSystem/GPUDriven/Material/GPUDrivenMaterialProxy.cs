@@ -7,6 +7,7 @@ namespace VividRP.Runtime.GPUDriven
     public enum GPUDrivenMaterialProxyModel
     {
         StandardLit = 0,
+        DualSlab = 1,
     }
 
     public enum GPUDrivenMaterialMaskMode
@@ -32,6 +33,12 @@ namespace VividRP.Runtime.GPUDriven
 
         [SerializeField]
         private GPUDrivenMaterialProxyModel m_Model = GPUDrivenMaterialProxyModel.StandardLit;
+
+        [SerializeField]
+        private GPUDrivenDualSlabMaterialDefinition m_DualSlabDefinition;
+
+        [SerializeField, Range(0.0f, 1.0f)]
+        private float m_LayerWeight = 0.5f;
 
         [SerializeField]
         private GPUDrivenMaterialProxyTextureMode m_TextureMode =
@@ -106,6 +113,18 @@ namespace VividRP.Runtime.GPUDriven
         {
             get => m_Model;
             set => SetValue(ref m_Model, value);
+        }
+
+        public GPUDrivenDualSlabMaterialDefinition DualSlabDefinition
+        {
+            get => m_DualSlabDefinition;
+            set => SetValue(ref m_DualSlabDefinition, value);
+        }
+
+        public float LayerWeight
+        {
+            get => m_LayerWeight;
+            set => SetValue(ref m_LayerWeight, Mathf.Clamp01(value));
         }
 
         public GPUDrivenMaterialProxyTextureMode TextureMode

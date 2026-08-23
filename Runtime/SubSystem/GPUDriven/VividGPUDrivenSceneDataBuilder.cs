@@ -1090,32 +1090,58 @@ namespace VividRP.Runtime.GPUDriven
                 return materialIndex;
             }
 
-            GPUDrivenSurfaceTextureSet surfaceTextures;
             VividMaterialData materialData;
             VividMaterialRuntimeHeader runtimeHeader;
             uint surfaceBindingIndex = (uint) sceneData.SurfaceBindingCount;
             if (materialProxy != null)
             {
-                surfaceTextures = ExtractSurfaceTextures(materialProxy, textureBackend);
-                GPUDrivenCompiledMaterialInstance compiledMaterial =
-                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                GPUDrivenCompiledMaterialInstance compiledMaterial;
+                if (materialProxy.Model == GPUDrivenMaterialProxyModel.DualSlab)
+                {
+                    GPUDrivenDualSlabMaterialDefinition definition =
+                        materialProxy.DualSlabDefinition;
+                    GPUDrivenMaterialProxy topSlab = definition != null
+                        ? definition.TopSlab
+                        : null;
+                    uint topSurfaceBindingIndex = surfaceBindingIndex + 1u;
+                    compiledMaterial = GPUDrivenMaterialCompiler.CompileDualSlab(
+                        materialProxy,
+                        (uint) sceneData.DualSlabMaterialCount,
+                        surfaceBindingIndex,
+                        topSurfaceBindingIndex);
+                    sceneData.MutableSurfaceBindings.Add(
+                        textureBackend.CreateSurfaceBinding(
+                            ExtractSurfaceTextures(materialProxy, textureBackend)));
+                    sceneData.MutableSurfaceBindings.Add(
+                        textureBackend.CreateSurfaceBinding(
+                            ExtractSurfaceTextures(topSlab, textureBackend)));
+                    sceneData.MutableDualSlabMaterials.Add(
+                        compiledMaterial.DualSlabMaterialData);
+                }
+                else
+                {
+                    compiledMaterial = GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
                         materialProxy,
                         (uint) sceneData.MaterialCount,
                         surfaceBindingIndex);
+                    sceneData.MutableSurfaceBindings.Add(
+                        textureBackend.CreateSurfaceBinding(
+                            ExtractSurfaceTextures(materialProxy, textureBackend)));
+                }
                 materialData = compiledMaterial.LegacyMaterialData;
                 runtimeHeader = compiledMaterial.RuntimeHeader;
             }
             else
             {
                 WarnMissingMaterialProxy(meshletRenderer, material, subMeshIndex);
-                surfaceTextures = ExtractSurfaceTextures(material);
                 materialData = CreateMaterialData(material, surfaceBindingIndex);
                 runtimeHeader = GPUDrivenMaterialCompiler.CreateLegacyFallbackHeader(
                     (uint) sceneData.MaterialCount,
                     surfaceBindingIndex);
+                sceneData.MutableSurfaceBindings.Add(
+                    textureBackend.CreateSurfaceBinding(ExtractSurfaceTextures(material)));
             }
 
-            sceneData.MutableSurfaceBindings.Add(textureBackend.CreateSurfaceBinding(surfaceTextures));
             materialIndex = sceneData.AddMaterial(materialData, runtimeHeader);
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
             if (materialProxy != null)
@@ -1370,6 +1396,21 @@ namespace VividRP.Runtime.GPUDriven
                     hash = (hash ^ GetObjectRevisionId(fallbackTextures.BaseColor)) * 16777619u;
                     hash = (hash ^ GetObjectRevisionId(fallbackTextures.Normal)) * 16777619u;
                     hash = (hash ^ GetObjectRevisionId(fallbackTextures.Mask)) * 16777619u;
+                }
+                if (materialProxy.Model == GPUDrivenMaterialProxyModel.DualSlab)
+                {
+                    GPUDrivenDualSlabMaterialDefinition definition =
+                        materialProxy.DualSlabDefinition;
+                    hash = (hash ^ GetObjectRevisionId(definition)) * 16777619u;
+                    hash = (hash ^ (definition != null ? definition.Revision : 0u)) * 16777619u;
+                    GPUDrivenMaterialProxy topSlab = definition != null
+                        ? definition.TopSlab
+                        : null;
+                    if (topSlab != null && !ReferenceEquals(topSlab, materialProxy))
+                    {
+                        hash = (hash ^ ComputeMaterialProxyRevision(topSlab, textureBackend))
+                               * 16777619u;
+                    }
                 }
                 return hash;
             }

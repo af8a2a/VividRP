@@ -126,6 +126,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void MaterialIRModule_StructuralHashIsCanonicalAcrossValueAllocationOrder()
+        {
+            MaterialIRModule first = BuildCanonicalHashModule(useAlternateValueOrder: false);
+            MaterialIRModule reordered = BuildCanonicalHashModule(useAlternateValueOrder: true);
+
+            Assert.That(first.Values.NodeCount, Is.Not.EqualTo(reordered.Values.NodeCount));
+            Assert.That(first.GetDebugDump(), Is.Not.EqualTo(reordered.GetDebugDump()));
+            Assert.That(first.StructuralHash, Is.EqualTo(reordered.StructuralHash));
+        }
+
+        [Test]
         public void CoverageLowering_ConsumesOnlyCoverageRootsForProgram0AndProgram1()
         {
             CompiledMaterialProgram standard =
@@ -1004,6 +1015,70 @@ namespace VividRP.Editor.Tests
                 new MaterialOutputRoots(coverageValue, alphaClipThreshold),
                 topology,
                 MaterialFeatureMask.AlphaClip);
+        }
+
+        private static MaterialIRModule BuildCanonicalHashModule(bool useAlternateValueOrder)
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue baseColor;
+            MaterialValue roughness;
+            MaterialValue metallic;
+            MaterialValue alphaClipThreshold;
+            MaterialValue normal;
+            MaterialValue tangent;
+
+            if (useAlternateValueOrder)
+            {
+                roughness = valueIR.Parameter(MaterialParameter.Roughness);
+                metallic = valueIR.Parameter(MaterialParameter.Metallic);
+                alphaClipThreshold = valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+                normal = valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+                tangent = valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+                valueIR.Constant(123.0f);
+                baseColor = BuildSampledBaseColor(
+                    valueIR,
+                    MaterialTextureResource.BaseColor,
+                    MaterialParameter.BaseColor);
+            }
+            else
+            {
+                baseColor = BuildSampledBaseColor(
+                    valueIR,
+                    MaterialTextureResource.BaseColor,
+                    MaterialParameter.BaseColor);
+                normal = valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+                tangent = valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+                roughness = valueIR.Parameter(MaterialParameter.Roughness);
+                metallic = valueIR.Parameter(MaterialParameter.Metallic);
+                alphaClipThreshold = valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+            }
+
+            var topology = new ClosureTopology(
+                valueIR,
+                new[] { new ClosureNormalBasis(normal, tangent) },
+                new[]
+                {
+                    new ClosureSlab(
+                        baseColor,
+                        roughness,
+                        metallic,
+                        normalBasisIndex: 0,
+                        features:
+                            ClosureFeatureMask.BaseColorTexture
+                            | ClosureFeatureMask.NormalTexture
+                            | ClosureFeatureMask.MaskTexture,
+                        isTop: true,
+                        isBottom: true),
+                },
+                Array.Empty<ClosureOperator>(),
+                ClosureTopologyBudget.Prototype);
+            return new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(baseColor, alphaClipThreshold),
+                topology,
+                MaterialFeatureMask.AlphaClip
+                | MaterialFeatureMask.Emission
+                | MaterialFeatureMask.Unlit);
         }
 
         private static MaterialIRModule BuildUnsupportedSurfaceModule()

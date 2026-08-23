@@ -103,6 +103,7 @@ namespace VividRP.Runtime.GPUDriven
 
     internal sealed class MaterialIRModule
     {
+        private const uint CanonicalProgramHashVersion = 1;
         private const ulong HashOffsetBasis = 14695981039346656037ul;
         private const ulong HashPrime = 1099511628211ul;
 
@@ -176,43 +177,23 @@ namespace VividRP.Runtime.GPUDriven
 
         private ulong ComputeStructuralHash()
         {
+            var valueHashes = new ulong[Values.NodeCount];
+            var hasValueHash = new bool[Values.NodeCount];
             ulong hash = HashOffsetBasis;
-            AddHash(ref hash, Values.NodeCount);
-            foreach (MaterialValueNode node in Values.Nodes)
-            {
-                AddHash(ref hash, (int) node.Opcode);
-                AddHash(ref hash, (int) node.Type);
-                AddHash(ref hash, node.Semantic);
-                uint4 constantBits = math.asuint(node.Constant);
-                AddHash(ref hash, constantBits.x);
-                AddHash(ref hash, constantBits.y);
-                AddHash(ref hash, constantBits.z);
-                AddHash(ref hash, constantBits.w);
-                AddHash(ref hash, node.Operand0);
-                AddHash(ref hash, node.Operand1);
-                AddHash(ref hash, node.Operand2);
-                AddHash(ref hash, node.Operand3);
-            }
-
-            AddValueHash(ref hash, Outputs.CoverageValue);
-            AddValueHash(ref hash, Outputs.AlphaClipThreshold);
+            AddHash(ref hash, CanonicalProgramHashVersion);
+            AddValueHash(ref hash, Outputs.CoverageValue, valueHashes, hasValueHash);
+            AddValueHash(ref hash, Outputs.AlphaClipThreshold, valueHashes, hasValueHash);
             AddHash(ref hash, (int) MaterialFeatures);
-            AddHash(ref hash, Topology.Budget.MaxClosureCount);
-            AddHash(ref hash, Topology.Budget.MaxOperatorCount);
-            AddHash(ref hash, Topology.NormalBases.Count);
-            foreach (ClosureNormalBasis basis in Topology.NormalBases)
-            {
-                AddValueHash(ref hash, basis.Normal);
-                AddValueHash(ref hash, basis.Tangent);
-            }
 
             AddHash(ref hash, Topology.ClosureCount);
             foreach (ClosureSlab slab in Topology.Slabs)
             {
-                AddValueHash(ref hash, slab.BaseColor);
-                AddValueHash(ref hash, slab.Roughness);
-                AddValueHash(ref hash, slab.Metallic);
-                AddHash(ref hash, slab.NormalBasisIndex);
+                AddValueHash(ref hash, slab.BaseColor, valueHashes, hasValueHash);
+                AddValueHash(ref hash, slab.Roughness, valueHashes, hasValueHash);
+                AddValueHash(ref hash, slab.Metallic, valueHashes, hasValueHash);
+                ClosureNormalBasis normalBasis = Topology.NormalBases[slab.NormalBasisIndex];
+                AddValueHash(ref hash, normalBasis.Normal, valueHashes, hasValueHash);
+                AddValueHash(ref hash, normalBasis.Tangent, valueHashes, hasValueHash);
                 AddHash(ref hash, (int) slab.Features);
                 AddHash(ref hash, slab.IsTop);
                 AddHash(ref hash, slab.IsBottom);
@@ -224,9 +205,58 @@ namespace VividRP.Runtime.GPUDriven
                 AddHash(ref hash, (int) closureOperator.Kind);
                 AddHash(ref hash, closureOperator.BackgroundSlabIndex);
                 AddHash(ref hash, closureOperator.ForegroundSlabIndex);
-                AddValueHash(ref hash, closureOperator.Weight);
+                AddValueHash(ref hash, closureOperator.Weight, valueHashes, hasValueHash);
             }
             return hash;
+        }
+
+        private void AddValueHash(
+            ref ulong hash,
+            MaterialValue value,
+            ulong[] valueHashes,
+            bool[] hasValueHash)
+        {
+            AddHash(ref hash, ComputeValueHash(value.Index, valueHashes, hasValueHash));
+        }
+
+        private ulong ComputeValueHash(
+            int nodeIndex,
+            ulong[] valueHashes,
+            bool[] hasValueHash)
+        {
+            if (hasValueHash[nodeIndex])
+                return valueHashes[nodeIndex];
+
+            MaterialValueNode node = Values.Nodes[nodeIndex];
+            ulong hash = HashOffsetBasis;
+            AddHash(ref hash, (int) node.Opcode);
+            AddHash(ref hash, (int) node.Type);
+            AddHash(ref hash, node.Semantic);
+            uint4 constantBits = math.asuint(node.Constant);
+            AddHash(ref hash, constantBits.x);
+            AddHash(ref hash, constantBits.y);
+            AddHash(ref hash, constantBits.z);
+            AddHash(ref hash, constantBits.w);
+            AddOperandHash(ref hash, node.Operand0, valueHashes, hasValueHash);
+            AddOperandHash(ref hash, node.Operand1, valueHashes, hasValueHash);
+            AddOperandHash(ref hash, node.Operand2, valueHashes, hasValueHash);
+            AddOperandHash(ref hash, node.Operand3, valueHashes, hasValueHash);
+
+            valueHashes[nodeIndex] = hash;
+            hasValueHash[nodeIndex] = true;
+            return hash;
+        }
+
+        private void AddOperandHash(
+            ref ulong hash,
+            int operand,
+            ulong[] valueHashes,
+            bool[] hasValueHash)
+        {
+            bool isValid = operand >= 0;
+            AddHash(ref hash, isValid);
+            if (isValid)
+                AddHash(ref hash, ComputeValueHash(operand, valueHashes, hasValueHash));
         }
 
         private string BuildDebugDump()
@@ -355,12 +385,6 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        private static void AddValueHash(ref ulong hash, MaterialValue value)
-        {
-            AddHash(ref hash, value.Index);
-            AddHash(ref hash, (int) value.Type);
-        }
-
         private static void AddHash(ref ulong hash, bool value)
         {
             AddHash(ref hash, value ? 1u : 0u);
@@ -374,6 +398,15 @@ namespace VividRP.Runtime.GPUDriven
         private static void AddHash(ref ulong hash, uint value)
         {
             for (int byteIndex = 0; byteIndex < sizeof(uint); byteIndex++)
+            {
+                hash ^= (byte) (value >> (byteIndex * 8));
+                hash *= HashPrime;
+            }
+        }
+
+        private static void AddHash(ref ulong hash, ulong value)
+        {
+            for (int byteIndex = 0; byteIndex < sizeof(ulong); byteIndex++)
             {
                 hash ^= (byte) (value >> (byteIndex * 8));
                 hash *= HashPrime;

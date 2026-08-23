@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
-using Unity.Mathematics;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -118,34 +117,73 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialIRModule(
             MaterialValueIR values,
             in MaterialOutputRoots outputs,
-            ClosureTopology topology,
+            ClosureExpressionGraph closureGraph,
+            MaterialClosure surfaceClosure,
+            in ClosureTopologyBudget closureBudget,
             MaterialFeatureMask materialFeatures,
             MaterialShadingModelMask shadingModels)
         {
-            Values = values ?? throw new ArgumentNullException(nameof(values));
-            Topology = topology ?? throw new ArgumentNullException(nameof(topology));
-            Outputs = outputs;
-            MaterialFeatures = materialFeatures;
-            ShadingModels = shadingModels;
+            if (values == null)
+                throw new ArgumentNullException(nameof(values));
+            if (closureGraph == null)
+                throw new ArgumentNullException(nameof(closureGraph));
+
+            MaterialIRVerificationResult sourceVerification =
+                MaterialIRVerifier.VerifyModule(
+                    values,
+                    outputs,
+                    closureGraph,
+                    surfaceClosure,
+                    closureBudget,
+                    materialFeatures,
+                    shadingModels);
+            sourceVerification.ThrowIfInvalid();
+            values.Freeze();
+            closureGraph.Freeze();
+
+            CanonicalIR = MaterialIRCanonicalizer.CanonicalizeVerified(
+                values,
+                outputs,
+                closureGraph,
+                surfaceClosure,
+                closureBudget,
+                materialFeatures,
+                shadingModels);
+            Values = CanonicalIR.Values;
+            Outputs = CanonicalIR.Outputs;
+            ClosureGraph = CanonicalIR.ClosureGraph;
+            SurfaceClosure = CanonicalIR.SurfaceClosure;
+            Topology = CanonicalIR.Topology;
+            MaterialFeatures = CanonicalIR.MaterialFeatures;
+            ShadingModels = CanonicalIR.ShadingModels;
 
             Verification = MaterialIRVerifier.VerifyModule(
                 Values,
                 Outputs,
-                Topology,
+                ClosureGraph,
+                SurfaceClosure,
+                Topology.Budget,
                 MaterialFeatures,
                 ShadingModels);
             Verification.ThrowIfInvalid();
             Values.Freeze();
+            ClosureGraph.Freeze();
             SemanticHash = new MaterialSemanticHash(
                 MaterialProgramContract.IRSchemaVersion,
                 MaterialProgramContract.SemanticHashVersion,
-                ComputeStructuralHash());
+                CanonicalIR.PayloadHash);
             m_DebugDump = BuildDebugDump();
         }
+
+        internal CanonicalMaterialIR CanonicalIR { get; }
 
         internal MaterialValueIR Values { get; }
 
         internal MaterialOutputRoots Outputs { get; }
+
+        internal ClosureExpressionGraph ClosureGraph { get; }
+
+        internal MaterialClosure SurfaceClosure { get; }
 
         internal ClosureTopology Topology { get; }
 
@@ -169,118 +207,13 @@ namespace VividRP.Runtime.GPUDriven
             return new MaterialValueSlice(Values, roots);
         }
 
-        private ulong ComputeStructuralHash()
-        {
-            var valueHashes = new ulong[Values.NodeCount];
-            var hasValueHash = new bool[Values.NodeCount];
-            ulong hash = MaterialProgramHashUtility.OffsetBasis;
-            AddHash(ref hash, MaterialProgramContract.SemanticHashVersion);
-            AddValueHash(ref hash, Outputs.CoverageValue, valueHashes, hasValueHash);
-            AddValueHash(ref hash, Outputs.AlphaClipThreshold, valueHashes, hasValueHash);
-            AddValueHash(ref hash, Outputs.Emission, valueHashes, hasValueHash);
-            AddHash(ref hash, (int) MaterialFeatures);
-            AddHash(ref hash, (int) ShadingModels);
-
-            AddHash(ref hash, Topology.ClosureCount);
-            foreach (ClosureSlab slab in Topology.Slabs)
-            {
-                AddValueHash(ref hash, slab.BaseColor, valueHashes, hasValueHash);
-                AddValueHash(ref hash, slab.Roughness, valueHashes, hasValueHash);
-                AddValueHash(ref hash, slab.Metallic, valueHashes, hasValueHash);
-                ClosureNormalBasis normalBasis = Topology.NormalBases[slab.NormalBasisIndex];
-                AddValueHash(ref hash, normalBasis.Normal, valueHashes, hasValueHash);
-                AddValueHash(ref hash, normalBasis.Tangent, valueHashes, hasValueHash);
-                AddHash(ref hash, (int) slab.Features);
-                AddHash(ref hash, slab.IsTop);
-                AddHash(ref hash, slab.IsBottom);
-            }
-
-            AddHash(ref hash, Topology.OperatorCount);
-            foreach (ClosureOperator closureOperator in Topology.Operators)
-            {
-                AddHash(ref hash, (int) closureOperator.Kind);
-                AddHash(ref hash, closureOperator.BackgroundSlabIndex);
-                AddHash(ref hash, closureOperator.ForegroundSlabIndex);
-                AddValueHash(ref hash, closureOperator.Weight, valueHashes, hasValueHash);
-            }
-            return hash;
-        }
-
-        private void AddValueHash(
-            ref ulong hash,
-            MaterialValue value,
-            ulong[] valueHashes,
-            bool[] hasValueHash)
-        {
-            AddHash(ref hash, ComputeValueHash(value.Index, valueHashes, hasValueHash));
-        }
-
-        private ulong ComputeValueHash(
-            int nodeIndex,
-            ulong[] valueHashes,
-            bool[] hasValueHash)
-        {
-            if (hasValueHash[nodeIndex])
-                return valueHashes[nodeIndex];
-
-            MaterialValueNode node = Values.Nodes[nodeIndex];
-            ulong hash = MaterialProgramHashUtility.OffsetBasis;
-            AddHash(ref hash, (int) node.Opcode);
-            AddHash(ref hash, (int) node.Type);
-            AddNodePayloadHash(ref hash, node);
-            uint4 constantBits = math.asuint(node.Constant);
-            AddHash(ref hash, constantBits.x);
-            AddHash(ref hash, constantBits.y);
-            AddHash(ref hash, constantBits.z);
-            AddHash(ref hash, constantBits.w);
-            AddOperandHash(ref hash, node.Operand0, valueHashes, hasValueHash);
-            AddOperandHash(ref hash, node.Operand1, valueHashes, hasValueHash);
-            AddOperandHash(ref hash, node.Operand2, valueHashes, hasValueHash);
-            AddOperandHash(ref hash, node.Operand3, valueHashes, hasValueHash);
-
-            valueHashes[nodeIndex] = hash;
-            hasValueHash[nodeIndex] = true;
-            return hash;
-        }
-
-        private void AddNodePayloadHash(ref ulong hash, in MaterialValueNode node)
-        {
-            switch (node.Opcode)
-            {
-                case MaterialValueOpcode.Parameter:
-                    MaterialParameterDeclaration parameter =
-                        Values.ParameterDeclarations[node.Semantic];
-                    AddHash(ref hash, parameter.Symbol);
-                    AddHash(ref hash, (int) parameter.Type);
-                    break;
-                case MaterialValueOpcode.TextureResource:
-                    MaterialResourceDeclaration resource =
-                        Values.ResourceDeclarations[node.Semantic];
-                    AddHash(ref hash, resource.Symbol);
-                    AddHash(ref hash, (int) resource.Type);
-                    break;
-                default:
-                    AddHash(ref hash, node.Semantic);
-                    break;
-            }
-        }
-
-        private void AddOperandHash(
-            ref ulong hash,
-            int operand,
-            ulong[] valueHashes,
-            bool[] hasValueHash)
-        {
-            bool isValid = operand >= 0;
-            AddHash(ref hash, isValid);
-            if (isValid)
-                AddHash(ref hash, ComputeValueHash(operand, valueHashes, hasValueHash));
-        }
-
         private string BuildDebugDump()
         {
             var builder = new StringBuilder();
-            builder.Append("material_ir_module hash=0x")
+            builder.Append("canonical_material_ir version=")
+                .Append(MaterialProgramContract.CanonicalIRVersion)
+                .Append(" payload_bytes=").Append(CanonicalIR.PayloadLength)
+                .Append(" hash=0x")
                 .AppendLine(StructuralHash.ToString("X16", CultureInfo.InvariantCulture));
             builder.Append("semantic_identity ")
                 .AppendLine(SemanticHash.ToString());
@@ -322,45 +255,49 @@ namespace VividRP.Runtime.GPUDriven
             builder.Append("  emission=%").Append(Outputs.Emission.Index).AppendLine();
             builder.Append("material_features=").Append(MaterialFeatures).AppendLine();
             builder.Append("shading_models=").Append(ShadingModels).AppendLine();
-            builder.Append("topology: closures=").Append(Topology.ClosureCount)
+            builder.Append("surface_closure=@c")
+                .Append(SurfaceClosure.Index)
+                .AppendLine();
+            builder.Append("closure_graph: nodes=").Append(ClosureGraph.NodeCount)
+                .Append(" closures=").Append(Topology.ClosureCount)
                 .Append(" operators=").Append(Topology.OperatorCount)
-                .Append(" budget=").Append(Topology.Budget.MaxClosureCount)
-                .Append('/').Append(Topology.Budget.MaxOperatorCount)
                 .AppendLine();
 
-            for (int i = 0; i < Topology.NormalBases.Count; i++)
+            for (int i = 0; i < ClosureGraph.Nodes.Count; i++)
             {
-                ClosureNormalBasis basis = Topology.NormalBases[i];
-                builder.Append("  normal_basis ").Append(i)
-                    .Append(" normal=%").Append(basis.Normal.Index)
-                    .Append(" tangent=%").Append(basis.Tangent.Index)
-                    .AppendLine();
-            }
+                ClosureExpressionNode node = ClosureGraph.Nodes[i];
+                builder.Append("  @c").Append(i).Append(" = ");
+                if (node.Opcode == ClosureExpressionOpcode.Slab)
+                {
+                    ClosureSlabExpression slab = node.Slab;
+                    builder.Append("slab")
+                        .Append(" base_color=%").Append(slab.BaseColor.Index)
+                        .Append(" roughness=%").Append(slab.Roughness.Index)
+                        .Append(" metallic=%").Append(slab.Metallic.Index)
+                        .Append(" normal=%").Append(slab.Normal.Index)
+                        .Append(" tangent=%").Append(slab.Tangent.Index)
+                        .Append(" features=").Append(slab.Features)
+                        .AppendLine();
+                    continue;
+                }
 
-            for (int i = 0; i < Topology.Slabs.Count; i++)
-            {
-                ClosureSlab slab = Topology.Slabs[i];
-                builder.Append("  slab ").Append(i)
-                    .Append(" base_color=%").Append(slab.BaseColor.Index)
-                    .Append(" roughness=%").Append(slab.Roughness.Index)
-                    .Append(" metallic=%").Append(slab.Metallic.Index)
-                    .Append(" normal_basis=").Append(slab.NormalBasisIndex)
-                    .Append(" features=").Append(slab.Features)
-                    .Append(" top=").Append(slab.IsTop ? '1' : '0')
-                    .Append(" bottom=").Append(slab.IsBottom ? '1' : '0')
+                string firstRole = node.Opcode == ClosureExpressionOpcode.VerticalLayer
+                    ? "bottom"
+                    : "background";
+                string secondRole = node.Opcode == ClosureExpressionOpcode.VerticalLayer
+                    ? "top"
+                    : "foreground";
+                builder.Append(node.Opcode)
+                    .Append(' ').Append(firstRole).Append("=@c").Append(node.Operand0)
+                    .Append(' ').Append(secondRole).Append("=@c").Append(node.Operand1)
+                    .Append(" weight=%").Append(node.Weight.Index)
                     .AppendLine();
             }
-
-            for (int i = 0; i < Topology.Operators.Count; i++)
-            {
-                ClosureOperator closureOperator = Topology.Operators[i];
-                builder.Append("  operator ").Append(i)
-                    .Append(" kind=").Append(closureOperator.Kind)
-                    .Append(" background=").Append(closureOperator.BackgroundSlabIndex)
-                    .Append(" foreground=").Append(closureOperator.ForegroundSlabIndex)
-                    .Append(" weight=%").Append(closureOperator.Weight.Index)
-                    .AppendLine();
-            }
+            builder.Append("topology_projection: normal_bases=")
+                .Append(Topology.NormalBases.Count)
+                .Append(" closures=").Append(Topology.ClosureCount)
+                .Append(" operators=").Append(Topology.OperatorCount)
+                .AppendLine();
             return builder.ToString();
         }
 
@@ -442,31 +379,6 @@ namespace VividRP.Runtime.GPUDriven
                 builder.Append(hasOperand ? ", %" : " %").Append(operand);
                 hasOperand = true;
             }
-        }
-
-        private static void AddHash(ref ulong hash, bool value)
-        {
-            MaterialProgramHashUtility.Add(ref hash, value);
-        }
-
-        private static void AddHash(ref ulong hash, int value)
-        {
-            MaterialProgramHashUtility.Add(ref hash, value);
-        }
-
-        private static void AddHash(ref ulong hash, uint value)
-        {
-            MaterialProgramHashUtility.Add(ref hash, value);
-        }
-
-        private static void AddHash(ref ulong hash, ulong value)
-        {
-            MaterialProgramHashUtility.Add(ref hash, value);
-        }
-
-        private static void AddHash(ref ulong hash, string value)
-        {
-            MaterialProgramHashUtility.Add(ref hash, value);
         }
     }
 }

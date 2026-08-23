@@ -14,6 +14,8 @@ namespace VividRP.Runtime.GPUDriven
         Parameter = 1 << 3,
         TextureResource = 1 << 4,
         ExternalInput = 1 << 5,
+        // Canonical semantic contract: operands may be reordered. Backends must
+        // not preserve operand-order-specific NaN payload selection for these ops.
         Commutative = 1 << 6,
     }
 
@@ -358,6 +360,18 @@ namespace VividRP.Runtime.GPUDriven
         internal const string InvalidTopologyValue = "MIR3004";
         internal const string InvalidTopologyIndex = "MIR3005";
         internal const string InvalidTopologySemantic = "MIR3006";
+
+        internal const string ClosureGraphOwnerMismatch = "MIR4001";
+        internal const string UnknownClosureOpcode = "MIR4002";
+        internal const string InvalidClosureOperandEncoding = "MIR4003";
+        internal const string ClosureOperandOutOfRange = "MIR4004";
+        internal const string NonTopologicalClosureOperand = "MIR4005";
+        internal const string InvalidClosureValue = "MIR4006";
+        internal const string InvalidClosureFeature = "MIR4007";
+        internal const string ClosureRootNotOwned = "MIR4008";
+        internal const string InvalidClosureGraphShape = "MIR4009";
+        internal const string ClosureGraphFanOut = "MIR4010";
+        internal const string ClosureGraphBudgetExceeded = "MIR4011";
     }
 
     internal readonly struct MaterialIRDiagnostic
@@ -493,17 +507,36 @@ namespace VividRP.Runtime.GPUDriven
             return CreateResult(diagnostics);
         }
 
+        internal static MaterialIRVerificationResult VerifyCandidateClosureNode(
+            ClosureExpressionGraph graph,
+            in ClosureExpressionNode node)
+        {
+            if (graph == null)
+                throw new ArgumentNullException(nameof(graph));
+
+            var diagnostics = new List<MaterialIRDiagnostic>();
+            AppendClosureNodeDiagnostics(
+                graph,
+                node,
+                graph.NodeCount,
+                graph.NodeCount + 1,
+                diagnostics);
+            return CreateResult(diagnostics);
+        }
+
         internal static MaterialIRVerificationResult VerifyModule(
             MaterialValueIR values,
             in MaterialOutputRoots outputs,
-            ClosureTopology topology,
+            ClosureExpressionGraph closureGraph,
+            MaterialClosure closureRoot,
+            ClosureTopologyBudget closureBudget,
             MaterialFeatureMask materialFeatures,
             MaterialShadingModelMask shadingModels)
         {
             if (values == null)
                 throw new ArgumentNullException(nameof(values));
-            if (topology == null)
-                throw new ArgumentNullException(nameof(topology));
+            if (closureGraph == null)
+                throw new ArgumentNullException(nameof(closureGraph));
 
             var diagnostics = new List<MaterialIRDiagnostic>();
             AppendDeclarationDiagnostics(values, diagnostics);
@@ -549,14 +582,31 @@ namespace VividRP.Runtime.GPUDriven
                         : $"Material shading model mask contains unknown bits 0x{unknownShadingModels:X}.");
             }
 
-            if (!ReferenceEquals(values, topology.ValueIR))
+            if (!ReferenceEquals(values, closureGraph.ValueIR))
             {
                 AddError(
                     diagnostics,
-                    MaterialIRDiagnosticCodes.TopologyOwnerMismatch,
-                    "Closure topology must reference the module value IR.");
+                    MaterialIRDiagnosticCodes.ClosureGraphOwnerMismatch,
+                    "Closure expression graph must reference the module value IR.");
             }
-            AppendTopologyDiagnostics(topology, diagnostics);
+            AppendClosureGraphDiagnostics(
+                closureGraph,
+                closureRoot,
+                closureBudget,
+                diagnostics);
+            return CreateResult(diagnostics);
+        }
+
+        internal static MaterialIRVerificationResult VerifyClosureGraph(
+            ClosureExpressionGraph graph,
+            MaterialClosure root,
+            ClosureTopologyBudget budget)
+        {
+            if (graph == null)
+                throw new ArgumentNullException(nameof(graph));
+
+            var diagnostics = new List<MaterialIRDiagnostic>();
+            AppendClosureGraphDiagnostics(graph, root, budget, diagnostics);
             return CreateResult(diagnostics);
         }
 
@@ -688,7 +738,7 @@ namespace VividRP.Runtime.GPUDriven
                     diagnostics,
                     MaterialIRDiagnosticCodes.UnknownOpcode,
                     nodeIndex,
-                    $"Opcode value {(int) node.Opcode} is not defined by Material IR V2.");
+                    $"Opcode value {(int) node.Opcode} is not defined by the current Material IR schema.");
                 return;
             }
 
@@ -699,7 +749,7 @@ namespace VividRP.Runtime.GPUDriven
                     diagnostics,
                     MaterialIRDiagnosticCodes.UnknownValueType,
                     nodeIndex,
-                    $"Result type value {(int) node.Type} is not defined by Material IR V2.");
+                    $"Result type value {(int) node.Type} is not defined by the current Material IR schema.");
             }
 
             int activeOperandCount = 0;
@@ -1334,6 +1384,375 @@ namespace VividRP.Runtime.GPUDriven
                 $"Material output '{outputName}' must be {expectedType}, got {output.Type}.");
         }
 
+        private static void AppendClosureGraphDiagnostics(
+            ClosureExpressionGraph graph,
+            MaterialClosure root,
+            ClosureTopologyBudget budget,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            for (int nodeIndex = 0; nodeIndex < graph.NodeCount; nodeIndex++)
+            {
+                AppendClosureNodeDiagnostics(
+                    graph,
+                    graph.Nodes[nodeIndex],
+                    nodeIndex,
+                    graph.NodeCount,
+                    diagnostics);
+            }
+
+            if (!graph.Owns(root))
+            {
+                AddError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.ClosureRootNotOwned,
+                    "Closure root is not owned by the closure expression graph.");
+                return;
+            }
+
+            int nodeCount = graph.NodeCount;
+            var reachable = new bool[nodeCount];
+            var incomingEdges = new int[nodeCount];
+            var pending = new Stack<int>();
+            pending.Push(root.Index);
+
+            int closureCount = 0;
+            int operatorCount = 0;
+            while (pending.Count > 0)
+            {
+                int nodeIndex = pending.Pop();
+                if (reachable[nodeIndex])
+                    continue;
+
+                reachable[nodeIndex] = true;
+                ClosureExpressionNode node = graph.Nodes[nodeIndex];
+                switch (node.Opcode)
+                {
+                    case ClosureExpressionOpcode.Slab:
+                        closureCount++;
+                        break;
+                    case ClosureExpressionOpcode.HorizontalMix:
+                    case ClosureExpressionOpcode.VerticalLayer:
+                        operatorCount++;
+                        AppendReachableClosureEdge(
+                            node.Operand0,
+                            nodeIndex,
+                            nodeCount,
+                            incomingEdges,
+                            pending);
+                        AppendReachableClosureEdge(
+                            node.Operand1,
+                            nodeIndex,
+                            nodeCount,
+                            incomingEdges,
+                            pending);
+                        break;
+                }
+            }
+
+            for (int nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
+            {
+                if (!reachable[nodeIndex] || nodeIndex == root.Index)
+                    continue;
+                if (incomingEdges[nodeIndex] == 1)
+                    continue;
+
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.ClosureGraphFanOut,
+                    nodeIndex,
+                    incomingEdges[nodeIndex] > 1
+                        ? $"Reachable closure node has {incomingEdges[nodeIndex]} parents; closure occurrences cannot fan out."
+                        : "Reachable non-root closure node must have exactly one parent.");
+            }
+
+            AppendClosurePrototypeShapeDiagnostics(
+                graph,
+                root,
+                closureCount,
+                operatorCount,
+                diagnostics);
+
+            if (!budget.Allows(closureCount, operatorCount))
+            {
+                AddError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.ClosureGraphBudgetExceeded,
+                    $"Reachable closure graph requires {closureCount} closures and "
+                    + $"{operatorCount} operators, but its budget allows "
+                    + $"{budget.MaxClosureCount} closures and "
+                    + $"{budget.MaxOperatorCount} operators.");
+            }
+        }
+
+        private static void AppendClosureNodeDiagnostics(
+            ClosureExpressionGraph graph,
+            in ClosureExpressionNode node,
+            int nodeIndex,
+            int nodeCount,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            switch (node.Opcode)
+            {
+                case ClosureExpressionOpcode.Slab:
+                    if (node.Operand0 != InvalidOperand
+                        || node.Operand1 != InvalidOperand
+                        || node.Weight != default)
+                    {
+                        AddNodeError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.InvalidClosureOperandEncoding,
+                            nodeIndex,
+                            "Slab closure nodes cannot contain operator operands or weight.");
+                    }
+
+                    AppendClosureValueDiagnostics(
+                        graph.ValueIR,
+                        node.Slab.BaseColor,
+                        MaterialValueType.Float4,
+                        "slab base color",
+                        nodeIndex,
+                        diagnostics);
+                    AppendClosureValueDiagnostics(
+                        graph.ValueIR,
+                        node.Slab.Roughness,
+                        MaterialValueType.Float,
+                        "slab roughness",
+                        nodeIndex,
+                        diagnostics);
+                    AppendClosureValueDiagnostics(
+                        graph.ValueIR,
+                        node.Slab.Metallic,
+                        MaterialValueType.Float,
+                        "slab metallic",
+                        nodeIndex,
+                        diagnostics);
+                    AppendClosureValueDiagnostics(
+                        graph.ValueIR,
+                        node.Slab.Normal,
+                        MaterialValueType.Float3,
+                        "slab normal",
+                        nodeIndex,
+                        diagnostics);
+                    AppendClosureValueDiagnostics(
+                        graph.ValueIR,
+                        node.Slab.Tangent,
+                        MaterialValueType.Float4,
+                        "slab tangent",
+                        nodeIndex,
+                        diagnostics);
+
+                    int unknownFeatures =
+                        (int) node.Slab.Features & ~KnownClosureFeatureBits;
+                    if (unknownFeatures != 0)
+                    {
+                        AddNodeError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.InvalidClosureFeature,
+                            nodeIndex,
+                            $"Closure slab contains unknown feature bits 0x{unknownFeatures:X}.");
+                    }
+                    break;
+
+                case ClosureExpressionOpcode.HorizontalMix:
+                case ClosureExpressionOpcode.VerticalLayer:
+                    if (HasSlabPayload(node.Slab))
+                    {
+                        AddNodeError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.InvalidClosureOperandEncoding,
+                            nodeIndex,
+                            "Closure operator nodes cannot contain a slab payload.");
+                    }
+                    AppendClosureOperandDiagnostics(
+                        node.Operand0,
+                        0,
+                        nodeIndex,
+                        nodeCount,
+                        diagnostics);
+                    AppendClosureOperandDiagnostics(
+                        node.Operand1,
+                        1,
+                        nodeIndex,
+                        nodeCount,
+                        diagnostics);
+                    AppendClosureValueDiagnostics(
+                        graph.ValueIR,
+                        node.Weight,
+                        MaterialValueType.Float,
+                        "closure operator weight",
+                        nodeIndex,
+                        diagnostics);
+                    break;
+
+                default:
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.UnknownClosureOpcode,
+                        nodeIndex,
+                        $"Closure opcode value {(int) node.Opcode} is not defined.");
+                    break;
+            }
+        }
+
+        private static bool HasSlabPayload(in ClosureSlabExpression slab)
+        {
+            return slab.BaseColor != default
+                || slab.Roughness != default
+                || slab.Metallic != default
+                || slab.Normal != default
+                || slab.Tangent != default
+                || slab.Features != ClosureFeatureMask.None;
+        }
+
+        private static void AppendClosureOperandDiagnostics(
+            int operand,
+            int operandIndex,
+            int nodeIndex,
+            int nodeCount,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            if (operand == InvalidOperand)
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidClosureOperandEncoding,
+                    nodeIndex,
+                    $"Closure operand {operandIndex} is required.");
+                return;
+            }
+            if ((uint) operand >= (uint) nodeCount)
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.ClosureOperandOutOfRange,
+                    nodeIndex,
+                    $"Closure operand {operandIndex} references node {operand}, "
+                    + $"outside [0, {nodeCount}).");
+                return;
+            }
+            if (operand < nodeIndex)
+                return;
+
+            AddNodeError(
+                diagnostics,
+                MaterialIRDiagnosticCodes.NonTopologicalClosureOperand,
+                nodeIndex,
+                $"Closure operand {operandIndex} references node {operand}; "
+                + "closure operands must precede their user.");
+        }
+
+        private static void AppendClosureValueDiagnostics(
+            MaterialValueIR values,
+            MaterialValue value,
+            MaterialValueType expectedType,
+            string description,
+            int closureNodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            if (!values.Owns(value))
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidClosureValue,
+                    closureNodeIndex,
+                    $"The {description} is not owned by the closure graph value IR.");
+                return;
+            }
+            if (value.Type == expectedType)
+                return;
+
+            AddNodeError(
+                diagnostics,
+                MaterialIRDiagnosticCodes.InvalidClosureValue,
+                closureNodeIndex,
+                $"The {description} must be {expectedType}, got {value.Type}.");
+        }
+
+        private static void AppendReachableClosureEdge(
+            int childIndex,
+            int parentIndex,
+            int nodeCount,
+            int[] incomingEdges,
+            Stack<int> pending)
+        {
+            if ((uint) childIndex >= (uint) nodeCount
+                || childIndex >= parentIndex)
+            {
+                return;
+            }
+
+            incomingEdges[childIndex]++;
+            pending.Push(childIndex);
+        }
+
+        private static void AppendClosurePrototypeShapeDiagnostics(
+            ClosureExpressionGraph graph,
+            MaterialClosure root,
+            int closureCount,
+            int operatorCount,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            ClosureExpressionNode rootNode = graph.Nodes[root.Index];
+            if (rootNode.Opcode == ClosureExpressionOpcode.Slab)
+            {
+                if (closureCount != 1 || operatorCount != 0)
+                {
+                    AddNodeError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidClosureGraphShape,
+                        root.Index,
+                        "A slab root must resolve to exactly one slab and no operators.");
+                }
+                return;
+            }
+
+            if (rootNode.Opcode != ClosureExpressionOpcode.HorizontalMix
+                && rootNode.Opcode != ClosureExpressionOpcode.VerticalLayer)
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidClosureGraphShape,
+                    root.Index,
+                    "Closure graph root must be a slab or a supported closure operator.");
+                return;
+            }
+
+            bool operandsAreValid =
+                IsValidClosureChild(rootNode.Operand0, root.Index, graph.NodeCount)
+                && IsValidClosureChild(rootNode.Operand1, root.Index, graph.NodeCount);
+            if (operandsAreValid
+                && (graph.Nodes[rootNode.Operand0].Opcode
+                        != ClosureExpressionOpcode.Slab
+                    || graph.Nodes[rootNode.Operand1].Opcode
+                        != ClosureExpressionOpcode.Slab))
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidClosureGraphShape,
+                    root.Index,
+                    "Prototype closure operators must reference two direct slab operands.");
+            }
+
+            if (closureCount == 2 && operatorCount == 1)
+                return;
+
+            AddNodeError(
+                diagnostics,
+                MaterialIRDiagnosticCodes.InvalidClosureGraphShape,
+                root.Index,
+                "A prototype operator root must resolve to exactly two slabs "
+                + "and one operator at depth one.");
+        }
+
+        private static bool IsValidClosureChild(
+            int childIndex,
+            int parentIndex,
+            int nodeCount)
+        {
+            return (uint) childIndex < (uint) nodeCount
+                && childIndex < parentIndex;
+        }
+
         private static void AppendTopologyDiagnostics(
             ClosureTopology topology,
             List<MaterialIRDiagnostic> diagnostics)
@@ -1437,7 +1856,7 @@ namespace VividRP.Runtime.GPUDriven
                 AddError(
                     diagnostics,
                     MaterialIRDiagnosticCodes.InvalidTopologyShape,
-                    "Material IR V2 supports one slab or two slabs connected by one operator.");
+                    "The closure topology projection supports one slab or two slabs connected by one operator.");
                 return;
             }
 
@@ -1464,19 +1883,38 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialValueType.Float,
                 "closure operator weight",
                 diagnostics);
-            if (topology.Slabs[0].IsTop || !topology.Slabs[0].IsBottom)
+            if (closureOperator.Kind == ClosureOperatorKind.HorizontalMix)
             {
-                AddError(
-                    diagnostics,
-                    MaterialIRDiagnosticCodes.InvalidTopologyShape,
-                    "The base slab must be marked as bottom only.");
+                for (int slabIndex = 0; slabIndex < topology.Slabs.Count; slabIndex++)
+                {
+                    if (topology.Slabs[slabIndex].IsTop
+                        && topology.Slabs[slabIndex].IsBottom)
+                    {
+                        continue;
+                    }
+
+                    AddError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidTopologyShape,
+                        $"Horizontal slab {slabIndex} must be marked as both top and bottom.");
+                }
             }
-            if (!topology.Slabs[1].IsTop || topology.Slabs[1].IsBottom)
+            else if (closureOperator.Kind == ClosureOperatorKind.VerticalLayer)
             {
-                AddError(
-                    diagnostics,
-                    MaterialIRDiagnosticCodes.InvalidTopologyShape,
-                    "The top slab must be marked as top only.");
+                if (topology.Slabs[0].IsTop || !topology.Slabs[0].IsBottom)
+                {
+                    AddError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidTopologyShape,
+                        "The vertical bottom slab must be marked as bottom only.");
+                }
+                if (!topology.Slabs[1].IsTop || topology.Slabs[1].IsBottom)
+                {
+                    AddError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidTopologyShape,
+                        "The vertical top slab must be marked as top only.");
+                }
             }
         }
 

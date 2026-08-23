@@ -5,12 +5,14 @@ namespace VividRP.Runtime.GPUDriven
 {
     internal static class MaterialProgramContract
     {
-        internal const uint IRSchemaVersion = 2u;
-        internal const uint SemanticHashVersion = 2u;
+        internal const uint IRSchemaVersion = 3u;
+        internal const uint CanonicalIRVersion = 2u;
+        internal const uint ClosureExpressionVersion = 1u;
+        internal const uint SemanticHashVersion = 4u;
         internal const uint CompiledHashVersion = 1u;
-        internal const uint CompilerVersion = 2u;
+        internal const uint CompilerVersion = 4u;
         internal const uint NativeTemplateBackendVersion = 2u;
-        internal const uint VerifierVersion = 1u;
+        internal const uint VerifierVersion = 2u;
         internal const uint RuntimeAbiVersion = 1u;
 
         internal const int BuiltinProgramCount = 3;
@@ -152,6 +154,20 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal const ulong OffsetBasis = 14695981039346656037ul;
         private const ulong Prime = 1099511628211ul;
+
+        internal static ulong Compute(byte[] payload)
+        {
+            if (payload == null)
+                throw new ArgumentNullException(nameof(payload));
+
+            ulong hash = OffsetBasis;
+            for (int byteIndex = 0; byteIndex < payload.Length; byteIndex++)
+            {
+                hash ^= payload[byteIndex];
+                hash *= Prime;
+            }
+            return hash;
+        }
 
         internal static void Add(ref ulong hash, bool value)
         {

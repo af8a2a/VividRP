@@ -176,6 +176,16 @@ namespace VividRP.Editor.Tests
                 Assert.That(info.MinOperandCount, Is.GreaterThanOrEqualTo(0));
                 Assert.That(info.MaxOperandCount, Is.GreaterThanOrEqualTo(info.MinOperandCount));
                 Assert.That(info.EvaluationStages, Is.EqualTo(MaterialEvaluationStageMask.All));
+
+                bool expectedCommutative = opcode == MaterialValueOpcode.Add
+                    || opcode == MaterialValueOpcode.Multiply
+                    || opcode == MaterialValueOpcode.Min
+                    || opcode == MaterialValueOpcode.Max
+                    || opcode == MaterialValueOpcode.Dot;
+                Assert.That(
+                    (info.Flags & MaterialOpcodeFlags.Commutative) != 0,
+                    Is.EqualTo(expectedCommutative),
+                    opcode.ToString());
             }
 
             MaterialOpcodeTable.TryGetInfo(
@@ -353,6 +363,393 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ClosureExpressionGraph_EmitsOrderedOccurrencesAndFreezes()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue baseColor = values.Parameter(MaterialParameter.BaseColor);
+            MaterialValue topBaseColor = values.Parameter(MaterialParameter.TopBaseColor);
+            MaterialValue roughness = values.Parameter(MaterialParameter.Roughness);
+            MaterialValue topRoughness = values.Parameter(MaterialParameter.TopRoughness);
+            MaterialValue metallic = values.Parameter(MaterialParameter.Metallic);
+            MaterialValue topMetallic = values.Parameter(MaterialParameter.TopMetallic);
+            MaterialValue normal =
+                values.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                values.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            MaterialValue weight = values.Parameter(MaterialParameter.LayerWeight);
+            var graph = new ClosureExpressionGraph(values);
+            MaterialClosure background = graph.Slab(
+                baseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                ClosureFeatureMask.None);
+            MaterialClosure foreground = graph.Slab(
+                topBaseColor,
+                topRoughness,
+                topMetallic,
+                normal,
+                tangent,
+                ClosureFeatureMask.None);
+            MaterialClosure forward = graph.HorizontalMix(
+                background,
+                foreground,
+                weight);
+            MaterialClosure reversed = graph.HorizontalMix(
+                foreground,
+                background,
+                weight);
+
+            Assert.That(graph.ValueIR, Is.SameAs(values));
+            Assert.That(graph.NodeCount, Is.EqualTo(4));
+            Assert.That(graph.GetNode(background).Opcode, Is.EqualTo(ClosureExpressionOpcode.Slab));
+            Assert.That(graph.GetNode(forward).Opcode, Is.EqualTo(ClosureExpressionOpcode.HorizontalMix));
+            Assert.That(graph.GetNode(forward).Operand0, Is.EqualTo(background.Index));
+            Assert.That(graph.GetNode(forward).Operand1, Is.EqualTo(foreground.Index));
+            Assert.That(graph.GetNode(reversed).Operand0, Is.EqualTo(foreground.Index));
+            Assert.That(graph.GetNode(reversed).Operand1, Is.EqualTo(background.Index));
+            Assert.That(forward, Is.Not.EqualTo(reversed));
+
+            MaterialIRVerificationResult invalidWeight =
+                MaterialIRVerifier.VerifyCandidateClosureNode(
+                    graph,
+                    new ClosureExpressionNode(
+                        ClosureExpressionOpcode.VerticalLayer,
+                        default,
+                        background.Index,
+                        foreground.Index,
+                        baseColor));
+            AssertDiagnostic(
+                invalidWeight.Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidClosureValue,
+                nodeIndex: graph.NodeCount);
+
+            graph.Freeze();
+            Assert.That(graph.IsFrozen, Is.True);
+            Assert.Throws<InvalidOperationException>(() => graph.VerticalLayer(
+                background,
+                foreground,
+                weight));
+        }
+
+        [Test]
+        public void ClosureExpressionGraph_VerifierReportsStableMalformedGraphDiagnostics()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue baseColor = values.Parameter(MaterialParameter.BaseColor);
+            MaterialValue roughness = values.Parameter(MaterialParameter.Roughness);
+            MaterialValue metallic = values.Parameter(MaterialParameter.Metallic);
+            MaterialValue normal =
+                values.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                values.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            MaterialValue weight = values.Parameter(MaterialParameter.LayerWeight);
+            var graph = new ClosureExpressionGraph(values);
+            var slabExpression = new ClosureSlabExpression(
+                baseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                ClosureFeatureMask.None);
+            MaterialClosure slab = graph.Slab(slabExpression);
+
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyCandidateClosureNode(
+                    graph,
+                    new ClosureExpressionNode(
+                        (ClosureExpressionOpcode) 99,
+                        default,
+                        -1,
+                        -1,
+                        default)).Diagnostics,
+                MaterialIRDiagnosticCodes.UnknownClosureOpcode,
+                nodeIndex: graph.NodeCount);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyCandidateClosureNode(
+                    graph,
+                    new ClosureExpressionNode(
+                        ClosureExpressionOpcode.Slab,
+                        slabExpression,
+                        slab.Index,
+                        -1,
+                        default)).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidClosureOperandEncoding,
+                nodeIndex: graph.NodeCount);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyCandidateClosureNode(
+                    graph,
+                    new ClosureExpressionNode(
+                        ClosureExpressionOpcode.HorizontalMix,
+                        default,
+                        graph.NodeCount + 1,
+                        slab.Index,
+                        weight)).Diagnostics,
+                MaterialIRDiagnosticCodes.ClosureOperandOutOfRange,
+                nodeIndex: graph.NodeCount);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyCandidateClosureNode(
+                    graph,
+                    new ClosureExpressionNode(
+                        ClosureExpressionOpcode.HorizontalMix,
+                        default,
+                        graph.NodeCount,
+                        slab.Index,
+                        weight)).Diagnostics,
+                MaterialIRDiagnosticCodes.NonTopologicalClosureOperand,
+                nodeIndex: graph.NodeCount);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyCandidateClosureNode(
+                    graph,
+                    new ClosureExpressionNode(
+                        ClosureExpressionOpcode.Slab,
+                        new ClosureSlabExpression(
+                            baseColor,
+                            roughness,
+                            metallic,
+                            normal,
+                            tangent,
+                            (ClosureFeatureMask) (1 << 8)),
+                        -1,
+                        -1,
+                        default)).Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidClosureFeature,
+                nodeIndex: graph.NodeCount);
+
+            var otherGraph = new ClosureExpressionGraph(values);
+            MaterialClosure foreignRoot = otherGraph.Slab(slabExpression);
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyClosureGraph(
+                    graph,
+                    foreignRoot,
+                    ClosureTopologyBudget.Prototype).Diagnostics,
+                MaterialIRDiagnosticCodes.ClosureRootNotOwned);
+
+            var moduleValues = new MaterialValueIR();
+            MaterialValue coverage = moduleValues.Constant(1.0f);
+            MaterialValue alphaClipThreshold = moduleValues.Constant(0.5f);
+            MaterialValue emission = moduleValues.Constant(new float3(0.0f));
+            AssertDiagnostic(
+                MaterialIRVerifier.VerifyModule(
+                    moduleValues,
+                    new MaterialOutputRoots(
+                        coverage,
+                        alphaClipThreshold,
+                        emission),
+                    graph,
+                    slab,
+                    ClosureTopologyBudget.Prototype,
+                    MaterialFeatureMask.None,
+                    MaterialShadingModelMask.StandardLit).Diagnostics,
+                MaterialIRDiagnosticCodes.ClosureGraphOwnerMismatch);
+        }
+
+        [Test]
+        public void ClosureExpressionGraph_VerifierRejectsFanOutNestedShapeAndBudget()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue baseColor = values.Parameter(MaterialParameter.BaseColor);
+            MaterialValue topBaseColor = values.Parameter(MaterialParameter.TopBaseColor);
+            MaterialValue roughness = values.Parameter(MaterialParameter.Roughness);
+            MaterialValue metallic = values.Parameter(MaterialParameter.Metallic);
+            MaterialValue normal =
+                values.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                values.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            MaterialValue weight = values.Parameter(MaterialParameter.LayerWeight);
+            var graph = new ClosureExpressionGraph(values);
+            MaterialClosure background = graph.Slab(
+                baseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                ClosureFeatureMask.None);
+            MaterialClosure foreground = graph.Slab(
+                topBaseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                ClosureFeatureMask.None);
+            MaterialClosure mixed = graph.HorizontalMix(
+                background,
+                foreground,
+                weight);
+            MaterialClosure nested = graph.VerticalLayer(
+                mixed,
+                foreground,
+                weight);
+
+            MaterialIRVerificationResult result =
+                MaterialIRVerifier.VerifyClosureGraph(
+                    graph,
+                    nested,
+                    ClosureTopologyBudget.Prototype);
+
+            Assert.That(result.IsValid, Is.False);
+            AssertDiagnostic(
+                result.Diagnostics,
+                MaterialIRDiagnosticCodes.ClosureGraphFanOut,
+                nodeIndex: foreground.Index);
+            AssertDiagnostic(
+                result.Diagnostics,
+                MaterialIRDiagnosticCodes.InvalidClosureGraphShape,
+                nodeIndex: nested.Index);
+            AssertDiagnostic(
+                result.Diagnostics,
+                MaterialIRDiagnosticCodes.ClosureGraphBudgetExceeded);
+        }
+
+        [Test]
+        public void MaterialIRModule_CanonicalizesClosureAllocationAndPrunesDeadClosures()
+        {
+            MaterialIRModule baseline = BuildCanonicalClosureGraphModule(
+                reverseClosureAllocation: false,
+                includeDeadClosure: false);
+            MaterialIRModule reordered = BuildCanonicalClosureGraphModule(
+                reverseClosureAllocation: true,
+                includeDeadClosure: true);
+
+            Assert.That(baseline.ClosureGraph.NodeCount, Is.EqualTo(3));
+            Assert.That(reordered.ClosureGraph.NodeCount, Is.EqualTo(3));
+            ClosureExpressionNode baselineRoot =
+                baseline.ClosureGraph.GetNode(baseline.SurfaceClosure);
+            ClosureExpressionNode reorderedRoot =
+                reordered.ClosureGraph.GetNode(reordered.SurfaceClosure);
+            Assert.That(baseline.SurfaceClosure.Index, Is.EqualTo(2));
+            Assert.That(reordered.SurfaceClosure.Index, Is.EqualTo(2));
+            Assert.That(baselineRoot.Opcode, Is.EqualTo(ClosureExpressionOpcode.HorizontalMix));
+            Assert.That(reorderedRoot.Opcode, Is.EqualTo(ClosureExpressionOpcode.HorizontalMix));
+            Assert.That(baselineRoot.Operand0, Is.Zero);
+            Assert.That(baselineRoot.Operand1, Is.EqualTo(1));
+            Assert.That(reorderedRoot.Operand0, Is.Zero);
+            Assert.That(reorderedRoot.Operand1, Is.EqualTo(1));
+            CollectionAssert.AreEqual(baseline.Values.Nodes, reordered.Values.Nodes);
+            CollectionAssert.AreEqual(
+                baseline.CanonicalIR.Payload,
+                reordered.CanonicalIR.Payload);
+            Assert.That(baseline.CanonicalIR.PayloadEquals(reordered.CanonicalIR), Is.True);
+            Assert.That(baseline.SemanticHash, Is.EqualTo(reordered.SemanticHash));
+            Assert.That(baseline.GetDebugDump(), Is.EqualTo(reordered.GetDebugDump()));
+            Assert.That(
+                reordered.Values.Nodes.Any(node =>
+                    node.Opcode == MaterialValueOpcode.Constant
+                    && node.Type == MaterialValueType.Float4
+                    && node.Constant.x == 0.125f),
+                Is.False,
+                "Canonical IR must prune values referenced only by an unreachable closure.");
+        }
+
+        [Test]
+        public void MaterialIRModule_PreservesClosureOperandOrderAndOperatorKind()
+        {
+            MaterialIRModule horizontal = BuildCanonicalClosureGraphModule(
+                reverseClosureAllocation: false,
+                includeDeadClosure: false);
+            MaterialIRModule swapped = BuildCanonicalClosureGraphModule(
+                reverseClosureAllocation: false,
+                includeDeadClosure: false,
+                swapRootOperands: true);
+            MaterialIRModule vertical = BuildCanonicalClosureGraphModule(
+                reverseClosureAllocation: false,
+                includeDeadClosure: false,
+                rootOpcode: ClosureExpressionOpcode.VerticalLayer);
+
+            Assert.That(horizontal.CanonicalIR.PayloadEquals(swapped.CanonicalIR), Is.False);
+            Assert.That(horizontal.CanonicalIR.PayloadEquals(vertical.CanonicalIR), Is.False);
+            Assert.That(horizontal.SemanticHash, Is.Not.EqualTo(swapped.SemanticHash));
+            Assert.That(horizontal.SemanticHash, Is.Not.EqualTo(vertical.SemanticHash));
+        }
+
+        [Test]
+        public void ClosureExpressionGraph_LowersPrototypeTopAndBottomRoles()
+        {
+            CompiledMaterialProgram single =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram horizontal =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.HorizontalMix);
+            CompiledMaterialProgram vertical =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.VerticalLayer);
+
+            Assert.That(single.Module.ClosureGraph.IsFrozen, Is.True);
+            Assert.That(single.Module.Topology.Slabs[0].IsTop, Is.True);
+            Assert.That(single.Module.Topology.Slabs[0].IsBottom, Is.True);
+            Assert.That(horizontal.Module.Topology.Slabs[0].IsTop, Is.True);
+            Assert.That(horizontal.Module.Topology.Slabs[0].IsBottom, Is.True);
+            Assert.That(horizontal.Module.Topology.Slabs[1].IsTop, Is.True);
+            Assert.That(horizontal.Module.Topology.Slabs[1].IsBottom, Is.True);
+            Assert.That(vertical.Module.Topology.Slabs[0].IsTop, Is.False);
+            Assert.That(vertical.Module.Topology.Slabs[0].IsBottom, Is.True);
+            Assert.That(vertical.Module.Topology.Slabs[1].IsTop, Is.True);
+            Assert.That(vertical.Module.Topology.Slabs[1].IsBottom, Is.False);
+        }
+
+        [Test]
+        public void ClosureExpressionGraph_FromTopologyPreservesDualSlabOrderAndKind()
+        {
+            var operatorKinds = new[]
+            {
+                VividDualSlabOperator.HorizontalMix,
+                VividDualSlabOperator.VerticalLayer,
+            };
+            foreach (VividDualSlabOperator operatorKind in operatorKinds)
+            {
+                CompiledMaterialProgram program =
+                    MaterialProgramPrototypeBuilder.BuildDualSlab(
+                        GPUDrivenMaterialCompiler.ProgramVersion,
+                        operatorKind);
+                ClosureTopology source = program.Module.Topology;
+                ClosureExpressionGraph graph =
+                    ClosureExpressionGraph.FromTopology(
+                        source,
+                        out MaterialClosure root);
+                ClosureExpressionNode rootNode = graph.GetNode(root);
+                ClosureExpressionOpcode expectedOpcode =
+                    operatorKind == VividDualSlabOperator.HorizontalMix
+                        ? ClosureExpressionOpcode.HorizontalMix
+                        : ClosureExpressionOpcode.VerticalLayer;
+
+                Assert.That(rootNode.Opcode, Is.EqualTo(expectedOpcode));
+                Assert.That(rootNode.Operand0, Is.Zero);
+                Assert.That(rootNode.Operand1, Is.EqualTo(1));
+                Assert.That(rootNode.Weight, Is.EqualTo(source.Operators[0].Weight));
+                Assert.That(
+                    graph.Nodes[rootNode.Operand0].Slab.BaseColor,
+                    Is.EqualTo(source.Slabs[0].BaseColor));
+                Assert.That(
+                    graph.Nodes[rootNode.Operand1].Slab.BaseColor,
+                    Is.EqualTo(source.Slabs[1].BaseColor));
+
+                ClosureTopology lowered = ClosureTopologyLowerer.Lower(
+                    graph,
+                    root,
+                    source.Budget);
+                Assert.That(
+                    lowered.Operators[0].Kind,
+                    Is.EqualTo(source.Operators[0].Kind));
+                Assert.That(
+                    lowered.Slabs[0].IsTop,
+                    Is.EqualTo(source.Slabs[0].IsTop));
+                Assert.That(
+                    lowered.Slabs[0].IsBottom,
+                    Is.EqualTo(source.Slabs[0].IsBottom));
+                Assert.That(
+                    lowered.Slabs[1].IsTop,
+                    Is.EqualTo(source.Slabs[1].IsTop));
+                Assert.That(
+                    lowered.Slabs[1].IsBottom,
+                    Is.EqualTo(source.Slabs[1].IsBottom));
+            }
+        }
+
+        [Test]
         public void MaterialIRModule_FreezesValuesAndProducesDeterministicHashAndDump()
         {
             CompiledMaterialProgram first =
@@ -422,7 +819,9 @@ namespace VividRP.Editor.Tests
             var noMaterialFeatures = new MaterialIRModule(
                 module.Values,
                 module.Outputs,
-                module.Topology,
+                module.ClosureGraph,
+                module.SurfaceClosure,
+                module.Topology.Budget,
                 MaterialFeatureMask.None,
                 module.ShadingModels);
             Assert.That(noMaterialFeatures.StructuralHash, Is.Not.EqualTo(module.StructuralHash));
@@ -430,7 +829,9 @@ namespace VividRP.Editor.Tests
                 Assert.Throws<MaterialIRVerificationException>(() => new MaterialIRModule(
                     module.Values,
                     module.Outputs,
-                    module.Topology,
+                    module.ClosureGraph,
+                    module.SurfaceClosure,
+                    module.Topology.Budget,
                     (MaterialFeatureMask) (1 << 1),
                     module.ShadingModels));
             AssertDiagnostic(
@@ -449,7 +850,9 @@ namespace VividRP.Editor.Tests
                         foreignCoverage,
                         module.Outputs.AlphaClipThreshold,
                         module.Outputs.Emission),
-                    module.Topology,
+                    module.ClosureGraph,
+                    module.SurfaceClosure,
+                    module.Topology.Budget,
                     module.MaterialFeatures,
                     module.ShadingModels));
             AssertDiagnostic(
@@ -458,25 +861,243 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void MaterialIRModule_StructuralHashIsCanonicalAcrossValueAllocationOrder()
+        public void MaterialIRModule_CanonicalizesAcrossValueAllocationAndDeclarationOrder()
         {
             MaterialIRModule first = BuildCanonicalHashModule(useAlternateValueOrder: false);
             MaterialIRModule reordered = BuildCanonicalHashModule(useAlternateValueOrder: true);
 
-            Assert.That(first.Values.NodeCount, Is.Not.EqualTo(reordered.Values.NodeCount));
-            Assert.That(first.GetDebugDump(), Is.Not.EqualTo(reordered.GetDebugDump()));
+            Assert.That(first.Values.NodeCount, Is.EqualTo(reordered.Values.NodeCount));
+            CollectionAssert.AreEqual(first.Values.Nodes, reordered.Values.Nodes);
+            CollectionAssert.AreEqual(
+                first.Values.ParameterDeclarations,
+                reordered.Values.ParameterDeclarations);
+            CollectionAssert.AreEqual(
+                first.Values.ResourceDeclarations,
+                reordered.Values.ResourceDeclarations);
+            CollectionAssert.AreEqual(
+                first.CanonicalIR.Payload,
+                reordered.CanonicalIR.Payload);
+            Assert.That(first.CanonicalIR.PayloadEquals(reordered.CanonicalIR), Is.True);
+            Assert.That(first.GetDebugDump(), Is.EqualTo(reordered.GetDebugDump()));
             Assert.That(first.StructuralHash, Is.EqualTo(reordered.StructuralHash));
+            Assert.That(
+                reordered.Values.Nodes.Any(node =>
+                    node.Opcode == MaterialValueOpcode.Constant
+                    && node.Type == MaterialValueType.Float
+                    && node.Constant.x == 123.0f),
+                Is.False,
+                "Canonical IR must not retain the deliberately unreachable constant.");
+        }
+
+        [Test]
+        public void MaterialIRModule_CanonicalizesCommutativeAddAndMergesEquivalentSubgraphs()
+        {
+            MaterialIRModule reused = BuildBinaryCanonicalModule(
+                MaterialValueOpcode.Add,
+                reversePrimaryOperands: false,
+                emitOppositeOrderForAlpha: false);
+            MaterialIRModule swappedDuplicate = BuildBinaryCanonicalModule(
+                MaterialValueOpcode.Add,
+                reversePrimaryOperands: false,
+                emitOppositeOrderForAlpha: true);
+            MaterialIRModule swappedOnly = BuildBinaryCanonicalModule(
+                MaterialValueOpcode.Add,
+                reversePrimaryOperands: true,
+                emitOppositeOrderForAlpha: false);
+
+            Assert.That(reused.CanonicalIR.PayloadEquals(swappedDuplicate.CanonicalIR), Is.True);
+            Assert.That(reused.CanonicalIR.PayloadEquals(swappedOnly.CanonicalIR), Is.True);
+            CollectionAssert.AreEqual(
+                reused.CanonicalIR.Payload,
+                swappedDuplicate.CanonicalIR.Payload);
+            CollectionAssert.AreEqual(
+                reused.CanonicalIR.Payload,
+                swappedOnly.CanonicalIR.Payload);
+            CollectionAssert.AreEqual(reused.Values.Nodes, swappedDuplicate.Values.Nodes);
+            CollectionAssert.AreEqual(reused.Values.Nodes, swappedOnly.Values.Nodes);
+            Assert.That(reused.StructuralHash, Is.EqualTo(swappedDuplicate.StructuralHash));
+            Assert.That(
+                swappedDuplicate.Values.Nodes.Count(node =>
+                    node.Opcode == MaterialValueOpcode.Add),
+                Is.EqualTo(1));
+            Assert.That(
+                swappedDuplicate.Outputs.CoverageValue.Index,
+                Is.EqualTo(swappedDuplicate.Outputs.AlphaClipThreshold.Index));
+        }
+
+        [Test]
+        public void MaterialIRModule_PreservesOrderedSubtractOperands()
+        {
+            MaterialIRModule forward = BuildBinaryCanonicalModule(
+                MaterialValueOpcode.Subtract,
+                reversePrimaryOperands: false,
+                emitOppositeOrderForAlpha: false);
+            MaterialIRModule reversed = BuildBinaryCanonicalModule(
+                MaterialValueOpcode.Subtract,
+                reversePrimaryOperands: true,
+                emitOppositeOrderForAlpha: false);
+
+            Assert.That(forward.CanonicalIR.PayloadEquals(reversed.CanonicalIR), Is.False);
+            CollectionAssert.AreNotEqual(
+                forward.CanonicalIR.Payload,
+                reversed.CanonicalIR.Payload);
+            Assert.That(forward.StructuralHash, Is.Not.EqualTo(reversed.StructuralHash));
+        }
+
+        [Test]
+        public void MaterialIRModule_PrunesUnreferencedNormalBasisWithoutChangingIdentity()
+        {
+            MaterialIRModule baseline = BuildCanonicalHashModule(
+                useAlternateValueOrder: false);
+            MaterialIRModule withUnusedNormalBasis = BuildCanonicalHashModule(
+                useAlternateValueOrder: false,
+                includeUnusedNormalBasis: true);
+
+            Assert.That(withUnusedNormalBasis.Topology.NormalBases, Has.Count.EqualTo(1));
+            Assert.That(
+                withUnusedNormalBasis.Values.Nodes.Any(node =>
+                    node.Opcode == MaterialValueOpcode.Normalize),
+                Is.False);
+            Assert.That(
+                baseline.CanonicalIR.PayloadEquals(withUnusedNormalBasis.CanonicalIR),
+                Is.True);
+            CollectionAssert.AreEqual(
+                baseline.CanonicalIR.Payload,
+                withUnusedNormalBasis.CanonicalIR.Payload);
+            CollectionAssert.AreEqual(
+                baseline.Values.Nodes,
+                withUnusedNormalBasis.Values.Nodes);
+            Assert.That(
+                baseline.StructuralHash,
+                Is.EqualTo(withUnusedNormalBasis.StructuralHash));
+            Assert.That(
+                baseline.GetDebugDump(),
+                Is.EqualTo(withUnusedNormalBasis.GetDebugDump()));
+        }
+
+        [Test]
+        public void MaterialIRModule_DoesNotApplyAssociativeRewrites()
+        {
+            MaterialIRModule leftAssociated = BuildAssociativeCanonicalModule(
+                leftAssociated: true);
+            MaterialIRModule rightAssociated = BuildAssociativeCanonicalModule(
+                leftAssociated: false);
+
+            Assert.That(
+                leftAssociated.CanonicalIR.PayloadEquals(rightAssociated.CanonicalIR),
+                Is.False);
+            CollectionAssert.AreNotEqual(
+                leftAssociated.CanonicalIR.Payload,
+                rightAssociated.CanonicalIR.Payload);
+            Assert.That(
+                leftAssociated.StructuralHash,
+                Is.Not.EqualTo(rightAssociated.StructuralHash));
+        }
+
+        [Test]
+        public void MaterialIRModule_CanonicalPayloadIsDefensivelyCopied()
+        {
+            MaterialIRModule module = BuildCanonicalHashModule(
+                useAlternateValueOrder: false);
+            byte[] originalPayload = module.CanonicalIR.Payload;
+            byte[] exposedPayload = module.CanonicalIR.Payload;
+            ulong originalHash = module.CanonicalIR.PayloadHash;
+
+            Assert.That(exposedPayload, Is.Not.SameAs(originalPayload));
+            exposedPayload[0] ^= byte.MaxValue;
+
+            CollectionAssert.AreEqual(originalPayload, module.CanonicalIR.Payload);
+            Assert.That(module.CanonicalIR.PayloadHash, Is.EqualTo(originalHash));
+            Assert.That(module.CanonicalIR.PayloadEquals(originalPayload), Is.True);
+        }
+
+        [Test]
+        public void MaterialIRModule_CanonicalizationIsIdempotent()
+        {
+            MaterialIRModule first = BuildCanonicalHashModule(
+                useAlternateValueOrder: true);
+            var second = new MaterialIRModule(
+                first.Values,
+                first.Outputs,
+                first.ClosureGraph,
+                first.SurfaceClosure,
+                first.Topology.Budget,
+                first.MaterialFeatures,
+                first.ShadingModels);
+
+            CollectionAssert.AreEqual(first.Values.Nodes, second.Values.Nodes);
+            CollectionAssert.AreEqual(
+                first.CanonicalIR.Payload,
+                second.CanonicalIR.Payload);
+            Assert.That(first.CanonicalIR.PayloadEquals(second.CanonicalIR), Is.True);
+            Assert.That(first.SemanticHash, Is.EqualTo(second.SemanticHash));
+            Assert.That(first.GetDebugDump(), Is.EqualTo(second.GetDebugDump()));
+        }
+
+        [Test]
+        public void MaterialIRModule_TopologyBudgetIsNotMaterialSemantics()
+        {
+            MaterialIRModule baseline = BuildCanonicalHashModule(
+                useAlternateValueOrder: false);
+            var roomyBudget = new ClosureTopologyBudget(
+                maxClosureCount: 4,
+                maxOperatorCount: 3);
+            var roomy = new MaterialIRModule(
+                baseline.Values,
+                baseline.Outputs,
+                baseline.ClosureGraph,
+                baseline.SurfaceClosure,
+                roomyBudget,
+                baseline.MaterialFeatures,
+                baseline.ShadingModels);
+
+            Assert.That(
+                baseline.Topology.Budget.MaxClosureCount,
+                Is.Not.EqualTo(roomy.Topology.Budget.MaxClosureCount));
+            Assert.That(baseline.CanonicalIR.PayloadEquals(roomy.CanonicalIR), Is.True);
+            Assert.That(baseline.SemanticHash, Is.EqualTo(roomy.SemanticHash));
+            Assert.That(baseline.GetDebugDump(), Is.EqualTo(roomy.GetDebugDump()));
+        }
+
+        [Test]
+        public void MaterialValueIR_CanonicalCsePreservesRawConstantBits()
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue positiveZero = valueIR.Constant(math.asfloat(0x00000000u));
+            MaterialValue negativeZero = valueIR.Constant(math.asfloat(0x80000000u));
+            MaterialValue firstNaN = valueIR.Constant(math.asfloat(0x7FC00001u));
+            MaterialValue duplicateNaN = valueIR.Constant(math.asfloat(0x7FC00001u));
+            MaterialValue distinctNaN = valueIR.Constant(math.asfloat(0x7FC00002u));
+
+            Assert.That(positiveZero, Is.Not.EqualTo(negativeZero));
+            Assert.That(firstNaN, Is.EqualTo(duplicateNaN));
+            Assert.That(firstNaN, Is.Not.EqualTo(distinctNaN));
+            Assert.That(valueIR.NodeCount, Is.EqualTo(4));
+
+            MaterialIRModule positiveZeroModule = BuildConstantCoverageModule(
+                0x00000000u);
+            MaterialIRModule negativeZeroModule = BuildConstantCoverageModule(
+                0x80000000u);
+            Assert.That(
+                positiveZeroModule.CanonicalIR.PayloadEquals(
+                    negativeZeroModule.CanonicalIR),
+                Is.False);
+            Assert.That(
+                positiveZeroModule.SemanticHash,
+                Is.Not.EqualTo(negativeZeroModule.SemanticHash));
         }
 
         [Test]
         public void CompilationContract_ProgramCatalog0To2HasFrozenAbi()
         {
-            Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.CanonicalIRVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(4u));
             Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(4u));
             Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.ProgramVersion, Is.EqualTo(1u));
@@ -509,15 +1130,15 @@ namespace VividRP.Editor.Tests
             };
             var expectedSemanticHashes = new[]
             {
-                0x64F1CA45107C27F8ul,
-                0x19543940D7603740ul,
-                0x055478DD3B3B45ABul,
+                0xF934E6AEDE283181ul,
+                0x7B58B734ED0EDE45ul,
+                0x2E8FA4336811E656ul,
             };
             var expectedCompiledHashes = new[]
             {
-                0x04A59854D0819128ul,
-                0x43C3B1B4311A2A48ul,
-                0x44A606DB9A862400ul,
+                0x31C7452C12C535D1ul,
+                0x2771779BECAA3BC7ul,
+                0xAC9D2B12076CFB1Eul,
             };
 
             for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)
@@ -537,6 +1158,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     program.SemanticHash.Value,
                     Is.EqualTo(expectedSemanticHashes[programIndex]));
+                Assert.That(
+                    program.Module.CanonicalIR.PayloadHash,
+                    Is.EqualTo(expectedSemanticHashes[programIndex]));
                 Assert.That(program.Module.StructuralHash, Is.EqualTo(program.SemanticHash.Value));
                 Assert.That(
                     program.CompiledHash.Version,
@@ -551,6 +1175,7 @@ namespace VividRP.Editor.Tests
                     AssertDualSlabMaterialLayout(program);
             }
 
+            CollectionAssert.AllItemsAreUnique(expectedSemanticHashes);
             CollectionAssert.AllItemsAreUnique(expectedCompiledHashes);
         }
 
@@ -568,9 +1193,29 @@ namespace VividRP.Editor.Tests
                 reorderedModule,
                 MaterialProgramContract.RuntimeAbiVersion);
 
+            Assert.That(
+                first.Module.CanonicalIR.PayloadEquals(reordered.Module.CanonicalIR),
+                Is.True);
+            CollectionAssert.AreEqual(
+                first.Module.CanonicalIR.Payload,
+                reordered.Module.CanonicalIR.Payload);
             Assert.That(first.SemanticHash, Is.EqualTo(reordered.SemanticHash));
             Assert.That(first.CompiledHash, Is.EqualTo(reordered.CompiledHash));
             Assert.That(first.ProgramID, Is.EqualTo(reordered.ProgramID));
+            CollectionAssert.AreEqual(
+                GetRuntimeProgramDataWords(first.RuntimeData),
+                GetRuntimeProgramDataWords(reordered.RuntimeData));
+            AssertStandardMaterialLayout(first);
+            AssertStandardMaterialLayout(reordered);
+            CollectionAssert.AreEqual(
+                GetValueSliceSignature(first.CoverageProgram.ValueSlice),
+                GetValueSliceSignature(reordered.CoverageProgram.ValueSlice));
+            CollectionAssert.AreEqual(
+                GetValueSliceSignature(first.SurfaceProgram.ValueSlice),
+                GetValueSliceSignature(reordered.SurfaceProgram.ValueSlice));
+            Assert.That(
+                first.Diagnostics.GetDebugDump(),
+                Is.EqualTo(reordered.Diagnostics.GetDebugDump()));
         }
 
         [Test]
@@ -583,7 +1228,9 @@ namespace VividRP.Editor.Tests
             var unlitOnly = new MaterialIRModule(
                 prototypeModule.Values,
                 prototypeModule.Outputs,
-                prototypeModule.Topology,
+                prototypeModule.ClosureGraph,
+                prototypeModule.SurfaceClosure,
+                prototypeModule.Topology.Budget,
                 prototypeModule.MaterialFeatures,
                 MaterialShadingModelMask.Unlit);
             CompiledMaterialProgram compiledUnlitOnly =
@@ -661,7 +1308,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SurfaceMatcher_ConsumesSlabTopologyForProgram0AndProgram1()
+        public void SurfaceMatcher_ConsumesClosureGraphForProgram0To2()
         {
             CompiledMaterialProgram standard =
                 MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
@@ -678,6 +1325,27 @@ namespace VividRP.Editor.Tests
             AssertStandardSurfaceRequirements(standard);
             AssertDualSlabSurfaceRequirements(horizontal);
             AssertDualSlabSurfaceRequirements(vertical);
+            Assert.That(
+                standard.SurfaceProgram.MaterialProgramID,
+                Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+            Assert.That(
+                horizontal.SurfaceProgram.MaterialProgramID,
+                Is.EqualTo(VividMaterialProgramID.DualSlabHorizontalMix));
+            Assert.That(
+                vertical.SurfaceProgram.MaterialProgramID,
+                Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
+            Assert.That(
+                standard.Module.ClosureGraph.GetNode(
+                    standard.Module.SurfaceClosure).Opcode,
+                Is.EqualTo(ClosureExpressionOpcode.Slab));
+            Assert.That(
+                horizontal.Module.ClosureGraph.GetNode(
+                    horizontal.Module.SurfaceClosure).Opcode,
+                Is.EqualTo(ClosureExpressionOpcode.HorizontalMix));
+            Assert.That(
+                vertical.Module.ClosureGraph.GetNode(
+                    vertical.Module.SurfaceClosure).Opcode,
+                Is.EqualTo(ClosureExpressionOpcode.VerticalLayer));
             CollectionAssert.AreEqual(
                 GetValueSliceSignature(horizontal.SurfaceProgram.ValueSlice),
                 GetValueSliceSignature(vertical.SurfaceProgram.ValueSlice));
@@ -747,6 +1415,7 @@ namespace VividRP.Editor.Tests
                     VividDualSlabOperator.HorizontalMix);
             var mismatchedSurfaceProgram = new CompiledSurfaceProgram(
                 VividMaterialSurfaceProgramID.StandardSingleSlab,
+                VividMaterialProgramID.StandardSingleSlab,
                 dualSlab.SurfaceProgram.ValueSlice,
                 dualSlab.SurfaceProgram.Requirements);
 
@@ -1554,17 +2223,23 @@ namespace VividRP.Editor.Tests
         {
             CollectionAssert.AreEqual(
                 expected,
-                new[]
-                {
-                    runtimeData.Version,
-                    (uint) runtimeData.CoverageProgramID,
-                    (uint) runtimeData.SurfaceProgramID,
-                    (uint) runtimeData.TransportProgramID,
-                    (uint) runtimeData.ParameterLayoutID,
-                    (uint) runtimeData.ResourceLayoutID,
-                    (uint) runtimeData.CapabilityFlags,
-                    (uint) runtimeData.ExecutionClass,
-                });
+                GetRuntimeProgramDataWords(runtimeData));
+        }
+
+        private static uint[] GetRuntimeProgramDataWords(
+            in VividMaterialProgramData runtimeData)
+        {
+            return new[]
+            {
+                runtimeData.Version,
+                (uint) runtimeData.CoverageProgramID,
+                (uint) runtimeData.SurfaceProgramID,
+                (uint) runtimeData.TransportProgramID,
+                (uint) runtimeData.ParameterLayoutID,
+                (uint) runtimeData.ResourceLayoutID,
+                (uint) runtimeData.CapabilityFlags,
+                (uint) runtimeData.ExecutionClass,
+            };
         }
 
         private static string[] GetValueSliceSignature(MaterialValueSlice valueSlice)
@@ -1591,6 +2266,148 @@ namespace VividRP.Editor.Tests
                 }
                 return $"{node.Opcode}:{node.Type}:{semantic}";
             }).ToArray();
+        }
+
+        private static MaterialIRModule BuildBinaryCanonicalModule(
+            MaterialValueOpcode opcode,
+            bool reversePrimaryOperands,
+            bool emitOppositeOrderForAlpha)
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue left = valueIR.Parameter(MaterialParameter.Roughness);
+            MaterialValue right = valueIR.Parameter(MaterialParameter.Metallic);
+            MaterialValue primary = EmitBinary(
+                valueIR,
+                opcode,
+                reversePrimaryOperands ? right : left,
+                reversePrimaryOperands ? left : right);
+            MaterialValue alphaClipThreshold = emitOppositeOrderForAlpha
+                ? EmitBinary(valueIR, opcode, right, left)
+                : primary;
+            MaterialValue baseColor = valueIR.Parameter(MaterialParameter.BaseColor);
+            MaterialValue emission = valueIR.Parameter(MaterialParameter.Emission);
+            MaterialValue normal =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            var topology = new ClosureTopology(
+                valueIR,
+                new[] { new ClosureNormalBasis(normal, tangent) },
+                new[]
+                {
+                    new ClosureSlab(
+                        baseColor,
+                        left,
+                        right,
+                        normalBasisIndex: 0,
+                        features: ClosureFeatureMask.None,
+                        isTop: true,
+                        isBottom: true),
+                },
+                Array.Empty<ClosureOperator>(),
+                ClosureTopologyBudget.Prototype);
+            return CreateModuleFromTopology(
+                valueIR,
+                new MaterialOutputRoots(primary, alphaClipThreshold, emission),
+                topology,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
+        }
+
+        private static MaterialIRModule BuildAssociativeCanonicalModule(
+            bool leftAssociated)
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue a = valueIR.Parameter(MaterialParameter.Roughness);
+            MaterialValue b = valueIR.Parameter(MaterialParameter.Metallic);
+            MaterialValue c = valueIR.Parameter(MaterialParameter.LayerWeight);
+            MaterialValue sum = leftAssociated
+                ? valueIR.Add(valueIR.Add(a, b), c)
+                : valueIR.Add(a, valueIR.Add(b, c));
+            MaterialValue baseColor = valueIR.Parameter(MaterialParameter.BaseColor);
+            MaterialValue emission = valueIR.Parameter(MaterialParameter.Emission);
+            MaterialValue normal =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            var topology = new ClosureTopology(
+                valueIR,
+                new[] { new ClosureNormalBasis(normal, tangent) },
+                new[]
+                {
+                    new ClosureSlab(
+                        baseColor,
+                        a,
+                        b,
+                        normalBasisIndex: 0,
+                        features: ClosureFeatureMask.None,
+                        isTop: true,
+                        isBottom: true),
+                },
+                Array.Empty<ClosureOperator>(),
+                ClosureTopologyBudget.Prototype);
+            return CreateModuleFromTopology(
+                valueIR,
+                new MaterialOutputRoots(sum, sum, emission),
+                topology,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
+        }
+
+        private static MaterialIRModule BuildConstantCoverageModule(
+            uint coverageBits)
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue coverage = valueIR.Constant(math.asfloat(coverageBits));
+            MaterialValue alphaClipThreshold =
+                valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+            MaterialValue emission = valueIR.Parameter(MaterialParameter.Emission);
+            MaterialValue baseColor = valueIR.Parameter(MaterialParameter.BaseColor);
+            MaterialValue roughness = valueIR.Parameter(MaterialParameter.Roughness);
+            MaterialValue metallic = valueIR.Parameter(MaterialParameter.Metallic);
+            MaterialValue normal =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            var topology = new ClosureTopology(
+                valueIR,
+                new[] { new ClosureNormalBasis(normal, tangent) },
+                new[]
+                {
+                    new ClosureSlab(
+                        baseColor,
+                        roughness,
+                        metallic,
+                        normalBasisIndex: 0,
+                        features: ClosureFeatureMask.None,
+                        isTop: true,
+                        isBottom: true),
+                },
+                Array.Empty<ClosureOperator>(),
+                ClosureTopologyBudget.Prototype);
+            return CreateModuleFromTopology(
+                valueIR,
+                new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
+                topology,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
+        }
+
+        private static MaterialValue EmitBinary(
+            MaterialValueIR valueIR,
+            MaterialValueOpcode opcode,
+            MaterialValue left,
+            MaterialValue right)
+        {
+            switch (opcode)
+            {
+                case MaterialValueOpcode.Add:
+                    return valueIR.Add(left, right);
+                case MaterialValueOpcode.Subtract:
+                    return valueIR.Subtract(left, right);
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(opcode), opcode, null);
+            }
         }
 
         private static MaterialIRModule BuildUnsupportedCoverageModule()
@@ -1626,7 +2443,7 @@ namespace VividRP.Editor.Tests
                 slabs,
                 Array.Empty<ClosureOperator>(),
                 ClosureTopologyBudget.Prototype);
-            return new MaterialIRModule(
+            return CreateModuleFromTopology(
                 valueIR,
                 new MaterialOutputRoots(coverageValue, alphaClipThreshold, emission),
                 topology,
@@ -1634,7 +2451,9 @@ namespace VividRP.Editor.Tests
                 MaterialShadingModelMask.StandardLit);
         }
 
-        private static MaterialIRModule BuildCanonicalHashModule(bool useAlternateValueOrder)
+        private static MaterialIRModule BuildCanonicalHashModule(
+            bool useAlternateValueOrder,
+            bool includeUnusedNormalBasis = false)
         {
             var valueIR = new MaterialValueIR();
             MaterialValue baseColor;
@@ -1655,6 +2474,8 @@ namespace VividRP.Editor.Tests
                 normal = valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
                 tangent = valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
                 valueIR.Constant(123.0f);
+                valueIR.Parameter(MaterialParameter.TopRoughness);
+                valueIR.TextureResource(MaterialTextureResource.TopBaseColor);
                 baseColor = BuildSampledBaseColor(
                     valueIR,
                     MaterialTextureResource.BaseColor,
@@ -1675,9 +2496,20 @@ namespace VividRP.Editor.Tests
             }
             coverage = valueIR.Swizzle(baseColor, MaterialSwizzleMask.W);
 
+            var normalBases = new System.Collections.Generic.List<ClosureNormalBasis>
+            {
+                new ClosureNormalBasis(normal, tangent),
+            };
+            if (includeUnusedNormalBasis)
+            {
+                normalBases.Add(new ClosureNormalBasis(
+                    valueIR.Normalize(normal),
+                    valueIR.Normalize(tangent)));
+            }
+
             var topology = new ClosureTopology(
                 valueIR,
-                new[] { new ClosureNormalBasis(normal, tangent) },
+                normalBases.ToArray(),
                 new[]
                 {
                     new ClosureSlab(
@@ -1694,7 +2526,7 @@ namespace VividRP.Editor.Tests
                 },
                 Array.Empty<ClosureOperator>(),
                 ClosureTopologyBudget.Prototype);
-            return new MaterialIRModule(
+            return CreateModuleFromTopology(
                 valueIR,
                 new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
                 topology,
@@ -1738,12 +2570,160 @@ namespace VividRP.Editor.Tests
                 },
                 Array.Empty<ClosureOperator>(),
                 ClosureTopologyBudget.Prototype);
-            return new MaterialIRModule(
+            return CreateModuleFromTopology(
                 valueIR,
                 new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
                 topology,
                 MaterialFeatureMask.AlphaClip,
                 MaterialShadingModelMask.StandardLit);
+        }
+
+        private static MaterialIRModule BuildCanonicalClosureGraphModule(
+            bool reverseClosureAllocation,
+            bool includeDeadClosure,
+            bool swapRootOperands = false,
+            ClosureExpressionOpcode rootOpcode =
+                ClosureExpressionOpcode.HorizontalMix)
+        {
+            var values = new MaterialValueIR();
+            MaterialValue baseColor;
+            MaterialValue roughness;
+            MaterialValue metallic;
+            MaterialValue topBaseColor;
+            MaterialValue topRoughness;
+            MaterialValue topMetallic;
+            if (reverseClosureAllocation)
+            {
+                topBaseColor = values.Parameter(MaterialParameter.TopBaseColor);
+                topRoughness = values.Parameter(MaterialParameter.TopRoughness);
+                topMetallic = values.Parameter(MaterialParameter.TopMetallic);
+                baseColor = values.Parameter(MaterialParameter.BaseColor);
+                roughness = values.Parameter(MaterialParameter.Roughness);
+                metallic = values.Parameter(MaterialParameter.Metallic);
+            }
+            else
+            {
+                baseColor = values.Parameter(MaterialParameter.BaseColor);
+                roughness = values.Parameter(MaterialParameter.Roughness);
+                metallic = values.Parameter(MaterialParameter.Metallic);
+                topBaseColor = values.Parameter(MaterialParameter.TopBaseColor);
+                topRoughness = values.Parameter(MaterialParameter.TopRoughness);
+                topMetallic = values.Parameter(MaterialParameter.TopMetallic);
+            }
+
+            MaterialValue normal =
+                values.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                values.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            MaterialValue weight = values.Parameter(MaterialParameter.LayerWeight);
+            MaterialValue coverage = values.Constant(1.0f);
+            MaterialValue alphaClipThreshold =
+                values.Parameter(MaterialParameter.AlphaClipThreshold);
+            MaterialValue emission = values.Parameter(MaterialParameter.Emission);
+            var graph = new ClosureExpressionGraph(values);
+
+            if (includeDeadClosure)
+            {
+                graph.Slab(
+                    values.Constant(new float4(0.125f)),
+                    values.Constant(0.25f),
+                    values.Constant(0.375f),
+                    normal,
+                    tangent,
+                    ClosureFeatureMask.None);
+            }
+
+            MaterialClosure background;
+            MaterialClosure foreground;
+            if (reverseClosureAllocation)
+            {
+                foreground = graph.Slab(
+                    topBaseColor,
+                    topRoughness,
+                    topMetallic,
+                    normal,
+                    tangent,
+                    ClosureFeatureMask.None);
+                background = graph.Slab(
+                    baseColor,
+                    roughness,
+                    metallic,
+                    normal,
+                    tangent,
+                    ClosureFeatureMask.None);
+            }
+            else
+            {
+                background = graph.Slab(
+                    baseColor,
+                    roughness,
+                    metallic,
+                    normal,
+                    tangent,
+                    ClosureFeatureMask.None);
+                foreground = graph.Slab(
+                    topBaseColor,
+                    topRoughness,
+                    topMetallic,
+                    normal,
+                    tangent,
+                    ClosureFeatureMask.None);
+            }
+
+            MaterialClosure operand0 = swapRootOperands
+                ? foreground
+                : background;
+            MaterialClosure operand1 = swapRootOperands
+                ? background
+                : foreground;
+            MaterialClosure root;
+            switch (rootOpcode)
+            {
+                case ClosureExpressionOpcode.HorizontalMix:
+                    root = graph.HorizontalMix(operand0, operand1, weight);
+                    break;
+                case ClosureExpressionOpcode.VerticalLayer:
+                    root = graph.VerticalLayer(operand0, operand1, weight);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(rootOpcode),
+                        rootOpcode,
+                        null);
+            }
+
+            return new MaterialIRModule(
+                values,
+                new MaterialOutputRoots(
+                    coverage,
+                    alphaClipThreshold,
+                    emission),
+                graph,
+                root,
+                ClosureTopologyBudget.Prototype,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
+        }
+
+        private static MaterialIRModule CreateModuleFromTopology(
+            MaterialValueIR values,
+            in MaterialOutputRoots outputs,
+            ClosureTopology topology,
+            MaterialFeatureMask materialFeatures,
+            MaterialShadingModelMask shadingModels)
+        {
+            ClosureExpressionGraph closureGraph =
+                ClosureExpressionGraph.FromTopology(
+                    topology,
+                    out MaterialClosure surfaceClosure);
+            return new MaterialIRModule(
+                values,
+                outputs,
+                closureGraph,
+                surfaceClosure,
+                topology.Budget,
+                materialFeatures,
+                shadingModels);
         }
 
         private static MaterialValue BuildSampledBaseColor(

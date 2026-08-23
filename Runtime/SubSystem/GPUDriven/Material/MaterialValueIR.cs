@@ -284,10 +284,15 @@ namespace VividRP.Runtime.GPUDriven
 
         public bool Equals(MaterialValueNode other)
         {
+            uint4 constantBits = math.asuint(Constant);
+            uint4 otherConstantBits = math.asuint(other.Constant);
             return Opcode == other.Opcode
                 && Type == other.Type
                 && Semantic == other.Semantic
-                && Constant.Equals(other.Constant)
+                && constantBits.x == otherConstantBits.x
+                && constantBits.y == otherConstantBits.y
+                && constantBits.z == otherConstantBits.z
+                && constantBits.w == otherConstantBits.w
                 && Operand0 == other.Operand0
                 && Operand1 == other.Operand1
                 && Operand2 == other.Operand2
@@ -303,10 +308,14 @@ namespace VividRP.Runtime.GPUDriven
         {
             unchecked
             {
+                uint4 constantBits = math.asuint(Constant);
                 int hashCode = (int) Opcode;
                 hashCode = (hashCode * 397) ^ (int) Type;
                 hashCode = (hashCode * 397) ^ Semantic;
-                hashCode = (hashCode * 397) ^ Constant.GetHashCode();
+                hashCode = (hashCode * 397) ^ (int) constantBits.x;
+                hashCode = (hashCode * 397) ^ (int) constantBits.y;
+                hashCode = (hashCode * 397) ^ (int) constantBits.z;
+                hashCode = (hashCode * 397) ^ (int) constantBits.w;
                 hashCode = (hashCode * 397) ^ Operand0;
                 hashCode = (hashCode * 397) ^ Operand1;
                 hashCode = (hashCode * 397) ^ Operand2;
@@ -333,6 +342,22 @@ namespace VividRP.Runtime.GPUDriven
             m_NodesView = m_Nodes.AsReadOnly();
             m_ParameterDeclarationsView = m_ParameterDeclarations.AsReadOnly();
             m_ResourceDeclarationsView = m_ResourceDeclarations.AsReadOnly();
+        }
+
+        internal MaterialValueIR(
+            IReadOnlyList<MaterialParameterDeclaration> parameterDeclarations,
+            IReadOnlyList<MaterialResourceDeclaration> resourceDeclarations)
+            : this()
+        {
+            if (parameterDeclarations == null)
+                throw new ArgumentNullException(nameof(parameterDeclarations));
+            if (resourceDeclarations == null)
+                throw new ArgumentNullException(nameof(resourceDeclarations));
+
+            for (int i = 0; i < parameterDeclarations.Count; i++)
+                AddPredeclaredParameter(parameterDeclarations[i]);
+            for (int i = 0; i < resourceDeclarations.Count; i++)
+                AddPredeclaredResource(resourceDeclarations[i]);
         }
 
         internal IReadOnlyList<MaterialValueNode> Nodes => m_NodesView;
@@ -712,6 +737,11 @@ namespace VividRP.Runtime.GPUDriven
             IsFrozen = true;
         }
 
+        internal MaterialValue AppendVerifiedNode(in MaterialValueNode node)
+        {
+            return Emit(node);
+        }
+
         private MaterialValue EmitUnary(MaterialValueOpcode opcode, MaterialValue value)
         {
             return Emit(new MaterialValueNode(
@@ -814,6 +844,44 @@ namespace VividRP.Runtime.GPUDriven
             int index = m_ResourceDeclarations.Count;
             m_ResourceDeclarations.Add(declaration);
             return index;
+        }
+
+        private void AddPredeclaredParameter(
+            in MaterialParameterDeclaration declaration)
+        {
+            ValidateDeclaration(declaration.Symbol, declaration.Type, isResource: false);
+            for (int i = 0; i < m_ParameterDeclarations.Count; i++)
+            {
+                if (string.Equals(
+                        m_ParameterDeclarations[i].Symbol,
+                        declaration.Symbol,
+                        StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        $"Material parameter '{declaration.Symbol}' is already declared.",
+                        nameof(declaration));
+                }
+            }
+            m_ParameterDeclarations.Add(declaration);
+        }
+
+        private void AddPredeclaredResource(
+            in MaterialResourceDeclaration declaration)
+        {
+            ValidateDeclaration(declaration.Symbol, declaration.Type, isResource: true);
+            for (int i = 0; i < m_ResourceDeclarations.Count; i++)
+            {
+                if (string.Equals(
+                        m_ResourceDeclarations[i].Symbol,
+                        declaration.Symbol,
+                        StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        $"Material resource '{declaration.Symbol}' is already declared.",
+                        nameof(declaration));
+                }
+            }
+            m_ResourceDeclarations.Add(declaration);
         }
 
         private static void ValidateDeclaration(

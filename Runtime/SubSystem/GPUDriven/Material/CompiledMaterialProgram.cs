@@ -414,16 +414,20 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal CompiledSurfaceProgram(
             VividMaterialSurfaceProgramID programID,
+            VividMaterialProgramID materialProgramID,
             MaterialValueSlice valueSlice,
             MaterialValueRequirements requirements)
         {
             ProgramID = programID;
+            MaterialProgramID = materialProgramID;
             ValueSlice = valueSlice ?? throw new ArgumentNullException(nameof(valueSlice));
             Requirements = requirements
                 ?? throw new ArgumentNullException(nameof(requirements));
         }
 
         internal VividMaterialSurfaceProgramID ProgramID { get; }
+
+        internal VividMaterialProgramID MaterialProgramID { get; }
 
         internal MaterialValueSlice ValueSlice { get; }
 
@@ -453,43 +457,55 @@ namespace VividRP.Runtime.GPUDriven
 
             MaterialValueSlice valueSlice = CreateSurfaceValueSlice(module);
             VividMaterialSurfaceProgramID programID;
-            if (MatchesStandardSingleSlab(module, valueSlice))
+            VividMaterialProgramID materialProgramID;
+            ClosureExpressionNode root =
+                module.ClosureGraph.GetNode(module.SurfaceClosure);
+            if (root.Opcode == ClosureExpressionOpcode.Slab
+                && MatchesStandardSingleSlab(module, root.Slab, valueSlice))
             {
                 programID = VividMaterialSurfaceProgramID.StandardSingleSlab;
+                materialProgramID = VividMaterialProgramID.StandardSingleSlab;
             }
-            else if (MatchesDualSlab(module, valueSlice))
+            else if (MatchesDualSlab(module, root, valueSlice))
             {
                 programID = VividMaterialSurfaceProgramID.DualSlab;
+                materialProgramID = root.Opcode == ClosureExpressionOpcode.HorizontalMix
+                    ? VividMaterialProgramID.DualSlabHorizontalMix
+                    : VividMaterialProgramID.DualSlabVerticalLayer;
             }
             else
             {
                 throw new NotSupportedException(
-                    "Closure topology and value IR cannot be matched to an existing surface program ABI.");
+                    "Closure expression and value IR cannot be matched to an existing surface program ABI.");
             }
 
             return new CompiledSurfaceProgram(
                 programID,
+                materialProgramID,
                 valueSlice,
                 MaterialValueRequirements.Collect(valueSlice));
         }
 
         private static MaterialValueSlice CreateSurfaceValueSlice(MaterialIRModule module)
         {
-            ClosureTopology topology = module.Topology;
             var roots = new List<MaterialValue>();
-            for (int i = 0; i < topology.NormalBases.Count; i++)
+            IReadOnlyList<ClosureExpressionNode> nodes = module.ClosureGraph.Nodes;
+            for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
             {
-                roots.Add(topology.NormalBases[i].Normal);
-                roots.Add(topology.NormalBases[i].Tangent);
+                ClosureExpressionNode node = nodes[nodeIndex];
+                if (node.Opcode == ClosureExpressionOpcode.Slab)
+                {
+                    roots.Add(node.Slab.BaseColor);
+                    roots.Add(node.Slab.Roughness);
+                    roots.Add(node.Slab.Metallic);
+                    roots.Add(node.Slab.Normal);
+                    roots.Add(node.Slab.Tangent);
+                }
+                else
+                {
+                    roots.Add(node.Weight);
+                }
             }
-            for (int i = 0; i < topology.Slabs.Count; i++)
-            {
-                roots.Add(topology.Slabs[i].BaseColor);
-                roots.Add(topology.Slabs[i].Roughness);
-                roots.Add(topology.Slabs[i].Metallic);
-            }
-            for (int i = 0; i < topology.Operators.Count; i++)
-                roots.Add(topology.Operators[i].Weight);
             roots.Add(module.Outputs.Emission);
 
             return module.CreateValueSlice(roots.ToArray());
@@ -497,20 +513,10 @@ namespace VividRP.Runtime.GPUDriven
 
         private static bool MatchesStandardSingleSlab(
             MaterialIRModule module,
+            in ClosureSlabExpression slab,
             MaterialValueSlice valueSlice)
         {
-            ClosureTopology topology = module.Topology;
-            if (topology.ClosureCount != 1
-                || topology.OperatorCount != 0
-                || topology.NormalBases.Count != 1)
-            {
-                return false;
-            }
-
-            ClosureSlab slab = topology.Slabs[0];
-            return slab.IsTop
-                && slab.IsBottom
-                && MatchesNormalBasis(module.Values, topology.NormalBases[0])
+            return MatchesNormalBasis(module.Values, slab)
                 && MatchesSlab(
                     module.Values,
                     slab,
@@ -527,24 +533,29 @@ namespace VividRP.Runtime.GPUDriven
 
         private static bool MatchesDualSlab(
             MaterialIRModule module,
+            in ClosureExpressionNode root,
             MaterialValueSlice valueSlice)
         {
-            ClosureTopology topology = module.Topology;
-            if (topology.ClosureCount != 2
-                || topology.OperatorCount != 1
-                || topology.NormalBases.Count != 1)
+            if (root.Opcode != ClosureExpressionOpcode.HorizontalMix
+                && root.Opcode != ClosureExpressionOpcode.VerticalLayer)
             {
                 return false;
             }
 
-            ClosureSlab baseSlab = topology.Slabs[0];
-            ClosureSlab topSlab = topology.Slabs[1];
-            ClosureOperator closureOperator = topology.Operators[0];
-            return !baseSlab.IsTop
-                && baseSlab.IsBottom
-                && topSlab.IsTop
-                && !topSlab.IsBottom
-                && MatchesNormalBasis(module.Values, topology.NormalBases[0])
+            ClosureExpressionNode baseNode =
+                module.ClosureGraph.Nodes[root.Operand0];
+            ClosureExpressionNode topNode =
+                module.ClosureGraph.Nodes[root.Operand1];
+            if (baseNode.Opcode != ClosureExpressionOpcode.Slab
+                || topNode.Opcode != ClosureExpressionOpcode.Slab)
+            {
+                return false;
+            }
+
+            ClosureSlabExpression baseSlab = baseNode.Slab;
+            ClosureSlabExpression topSlab = topNode.Slab;
+            return MatchesNormalBasis(module.Values, baseSlab)
+                && MatchesNormalBasis(module.Values, topSlab)
                 && MatchesSlab(
                     module.Values,
                     baseSlab,
@@ -559,13 +570,9 @@ namespace VividRP.Runtime.GPUDriven
                     MaterialParameter.TopBaseColor,
                     MaterialParameter.TopRoughness,
                     MaterialParameter.TopMetallic)
-                && (closureOperator.Kind == ClosureOperatorKind.HorizontalMix
-                    || closureOperator.Kind == ClosureOperatorKind.VerticalLayer)
-                && closureOperator.BackgroundSlabIndex == 0
-                && closureOperator.ForegroundSlabIndex == 1
                 && MaterialValuePatternMatcher.MatchesParameter(
                     module.Values,
-                    closureOperator.Weight,
+                    root.Weight,
                     MaterialParameter.LayerWeight)
                 && MaterialValuePatternMatcher.MatchesParameter(
                     module.Values,
@@ -576,29 +583,28 @@ namespace VividRP.Runtime.GPUDriven
 
         private static bool MatchesNormalBasis(
             MaterialValueIR values,
-            in ClosureNormalBasis normalBasis)
+            in ClosureSlabExpression slab)
         {
             return MaterialValuePatternMatcher.MatchesExternalInput(
                     values,
-                    normalBasis.Normal,
+                    slab.Normal,
                     MaterialExternalInput.GeometryNormalWS)
                 && MaterialValuePatternMatcher.MatchesExternalInput(
                     values,
-                    normalBasis.Tangent,
+                    slab.Tangent,
                     MaterialExternalInput.GeometryTangentWS);
         }
 
         private static bool MatchesSlab(
             MaterialValueIR values,
-            in ClosureSlab slab,
+            in ClosureSlabExpression slab,
             MaterialTextureResource textureResource,
             MaterialParameter baseColorParameter,
             MaterialParameter roughnessParameter,
             MaterialParameter metallicParameter)
         {
             // Tiling/remap and optional Normal/Mask evaluation remain in the V1 layout ABI.
-            return slab.NormalBasisIndex == 0
-                && (slab.Features & ClosureFeatureMask.BaseColorTexture) != 0
+            return (slab.Features & ClosureFeatureMask.BaseColorTexture) != 0
                 && (slab.Features & ~SupportedSlabFeatures) == 0
                 && MaterialValuePatternMatcher.MatchesSampledColor(
                     values,
@@ -1555,9 +1561,14 @@ namespace VividRP.Runtime.GPUDriven
             in MaterialStageCost surfaceCost)
         {
             int textureSamples = surfaceCost.TextureSampleCount;
-            for (int slabIndex = 0; slabIndex < module.Topology.Slabs.Count; slabIndex++)
+            IReadOnlyList<ClosureExpressionNode> nodes = module.ClosureGraph.Nodes;
+            for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
             {
-                ClosureFeatureMask features = module.Topology.Slabs[slabIndex].Features;
+                ClosureExpressionNode node = nodes[nodeIndex];
+                if (node.Opcode != ClosureExpressionOpcode.Slab)
+                    continue;
+
+                ClosureFeatureMask features = node.Slab.Features;
                 if ((features & ClosureFeatureMask.NormalTexture) != 0)
                     textureSamples++;
                 if ((features & ClosureFeatureMask.MaskTexture) != 0)
@@ -1812,9 +1823,7 @@ namespace VividRP.Runtime.GPUDriven
             if (!diagnostics.IsWithinBudget)
                 throw new InvalidOperationException(diagnostics.GetDebugDump());
 
-            VividMaterialProgramID programID = ResolveProgramID(
-                surfaceProgram.ProgramID,
-                topology);
+            VividMaterialProgramID programID = surfaceProgram.MaterialProgramID;
 
             VividMaterialProgramCapabilities capabilities =
                 VividMaterialProgramCapabilities.LegacyGBufferExport;
@@ -1849,31 +1858,6 @@ namespace VividRP.Runtime.GPUDriven
                 runtimeData,
                 compiledHash);
         }
-
-        private static VividMaterialProgramID ResolveProgramID(
-            VividMaterialSurfaceProgramID surfaceProgramID,
-            ClosureTopology topology)
-        {
-            switch (surfaceProgramID)
-            {
-                case VividMaterialSurfaceProgramID.StandardSingleSlab:
-                    return VividMaterialProgramID.StandardSingleSlab;
-                case VividMaterialSurfaceProgramID.DualSlab:
-                    switch (topology.Operators[0].Kind)
-                    {
-                        case ClosureOperatorKind.HorizontalMix:
-                            return VividMaterialProgramID.DualSlabHorizontalMix;
-                        case ClosureOperatorKind.VerticalLayer:
-                            return VividMaterialProgramID.DualSlabVerticalLayer;
-                        default:
-                            throw new NotSupportedException(
-                                $"Closure operator '{topology.Operators[0].Kind}' has no material program ABI.");
-                    }
-                default:
-                    throw new NotSupportedException(
-                        $"Surface program '{surfaceProgramID}' has no material program ABI.");
-            }
-        }
     }
 
     internal static class MaterialProgramPrototypeBuilder
@@ -1903,28 +1887,24 @@ namespace VividRP.Runtime.GPUDriven
                 valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
             MaterialValue emission = valueIR.Parameter(MaterialParameter.Emission);
             MaterialValue coverage = valueIR.Swizzle(baseColor, MaterialSwizzleMask.W);
-            ClosureNormalBasis[] normalBases = BuildGeometryNormalBasis(valueIR);
-            var slabs = new[]
-            {
-                new ClosureSlab(
-                    baseColor,
-                    roughness,
-                    metallic,
-                    normalBasisIndex: 0,
-                    features: SupportedSlabFeatures,
-                    isTop: true,
-                    isBottom: true),
-            };
-            var topology = new ClosureTopology(
-                valueIR,
-                normalBases,
-                slabs,
-                Array.Empty<ClosureOperator>(),
-                ClosureTopologyBudget.Prototype);
+            MaterialValue normal =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            var closureGraph = new ClosureExpressionGraph(valueIR);
+            MaterialClosure surfaceClosure = closureGraph.Slab(
+                baseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                SupportedSlabFeatures);
             var module = new MaterialIRModule(
                 valueIR,
                 new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
-                topology,
+                closureGraph,
+                surfaceClosure,
+                ClosureTopologyBudget.Prototype,
                 SupportedMaterialFeatures,
                 SupportedShadingModels);
             return CompiledMaterialProgram.Compile(module, programVersion);
@@ -1952,44 +1932,52 @@ namespace VividRP.Runtime.GPUDriven
                 valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
             MaterialValue emission = valueIR.Parameter(MaterialParameter.Emission);
             MaterialValue coverage = valueIR.Swizzle(baseColor, MaterialSwizzleMask.W);
-            ClosureNormalBasis[] normalBases = BuildGeometryNormalBasis(valueIR);
-            var slabs = new[]
+            MaterialValue normal =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            var closureGraph = new ClosureExpressionGraph(valueIR);
+            MaterialClosure baseSlab = closureGraph.Slab(
+                baseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                SupportedSlabFeatures);
+            MaterialClosure topSlab = closureGraph.Slab(
+                topBaseColor,
+                topRoughness,
+                topMetallic,
+                normal,
+                tangent,
+                SupportedSlabFeatures);
+            MaterialClosure surfaceClosure;
+            switch (layerOperator)
             {
-                new ClosureSlab(
-                    baseColor,
-                    roughness,
-                    metallic,
-                    normalBasisIndex: 0,
-                    features: SupportedSlabFeatures,
-                    isTop: false,
-                    isBottom: true),
-                new ClosureSlab(
-                    topBaseColor,
-                    topRoughness,
-                    topMetallic,
-                    normalBasisIndex: 0,
-                    features: SupportedSlabFeatures,
-                    isTop: true,
-                    isBottom: false),
-            };
-            var operators = new[]
-            {
-                new ClosureOperator(
-                    ToClosureOperator(layerOperator),
-                    backgroundSlabIndex: 0,
-                    foregroundSlabIndex: 1,
-                    weight: layerWeight),
-            };
-            var topology = new ClosureTopology(
-                valueIR,
-                normalBases,
-                slabs,
-                operators,
-                ClosureTopologyBudget.Prototype);
+                case VividDualSlabOperator.HorizontalMix:
+                    surfaceClosure = closureGraph.HorizontalMix(
+                        baseSlab,
+                        topSlab,
+                        layerWeight);
+                    break;
+                case VividDualSlabOperator.VerticalLayer:
+                    surfaceClosure = closureGraph.VerticalLayer(
+                        baseSlab,
+                        topSlab,
+                        layerWeight);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(layerOperator),
+                        layerOperator,
+                        null);
+            }
             var module = new MaterialIRModule(
                 valueIR,
                 new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
-                topology,
+                closureGraph,
+                surfaceClosure,
+                ClosureTopologyBudget.Prototype,
                 SupportedMaterialFeatures,
                 SupportedShadingModels);
             return CompiledMaterialProgram.Compile(module, programVersion);
@@ -2008,29 +1996,6 @@ namespace VividRP.Runtime.GPUDriven
                 valueIR.Ddx(uv),
                 valueIR.Ddy(uv));
             return valueIR.Multiply(sample, valueIR.Parameter(colorParameter));
-        }
-
-        private static ClosureNormalBasis[] BuildGeometryNormalBasis(MaterialValueIR valueIR)
-        {
-            return new[]
-            {
-                new ClosureNormalBasis(
-                    valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS),
-                    valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS)),
-            };
-        }
-
-        private static ClosureOperatorKind ToClosureOperator(VividDualSlabOperator layerOperator)
-        {
-            switch (layerOperator)
-            {
-                case VividDualSlabOperator.HorizontalMix:
-                    return ClosureOperatorKind.HorizontalMix;
-                case VividDualSlabOperator.VerticalLayer:
-                    return ClosureOperatorKind.VerticalLayer;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(layerOperator), layerOperator, null);
-            }
         }
     }
 }

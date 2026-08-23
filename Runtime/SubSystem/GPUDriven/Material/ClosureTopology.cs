@@ -10,9 +10,6 @@ namespace VividRP.Runtime.GPUDriven
         BaseColorTexture = 1 << 0,
         NormalTexture = 1 << 1,
         MaskTexture = 1 << 2,
-        AlphaClip = 1 << 3,
-        Emission = 1 << 4,
-        Unlit = 1 << 5,
     }
 
     internal enum ClosureOperatorKind

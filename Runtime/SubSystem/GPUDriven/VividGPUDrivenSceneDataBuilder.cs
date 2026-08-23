@@ -1103,12 +1103,10 @@ namespace VividRP.Runtime.GPUDriven
                     GPUDrivenMaterialProxy topSlab = definition != null
                         ? definition.TopSlab
                         : null;
-                    uint topSurfaceBindingIndex = surfaceBindingIndex + 1u;
                     compiledMaterial = GPUDrivenMaterialCompiler.CompileDualSlab(
                         materialProxy,
                         (uint) sceneData.DualSlabMaterialCount,
-                        surfaceBindingIndex,
-                        topSurfaceBindingIndex);
+                        surfaceBindingIndex);
                     sceneData.MutableSurfaceBindings.Add(
                         textureBackend.CreateSurfaceBinding(
                             ExtractSurfaceTextures(materialProxy, textureBackend)));
@@ -1127,6 +1125,15 @@ namespace VividRP.Runtime.GPUDriven
                     sceneData.MutableSurfaceBindings.Add(
                         textureBackend.CreateSurfaceBinding(
                             ExtractSurfaceTextures(materialProxy, textureBackend)));
+                }
+                int appendedResourceRecordCount =
+                    sceneData.SurfaceBindingCount - (int) surfaceBindingIndex;
+                int requiredResourceRecordCount = compiledMaterial.MaterialProgram
+                    .MaterialLayout.ResourceLayout.RecordCount;
+                if (appendedResourceRecordCount != requiredResourceRecordCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Material program '{compiledMaterial.MaterialProgram.ProgramID}' requires {requiredResourceRecordCount} resource records, but the material compiler appended {appendedResourceRecordCount}.");
                 }
                 materialData = compiledMaterial.LegacyMaterialData;
                 runtimeHeader = compiledMaterial.RuntimeHeader;

@@ -78,11 +78,38 @@ namespace VividRP.Editor.Tests
             Assert.That(module.Values.Owns(module.Outputs.CoverageValue), Is.True);
             Assert.That(module.Outputs.CoverageValue.Type, Is.EqualTo(MaterialValueType.Float4));
             Assert.That(
+                module.MaterialFeatures,
+                Is.EqualTo(
+                    MaterialFeatureMask.AlphaClip
+                    | MaterialFeatureMask.Emission
+                    | MaterialFeatureMask.Unlit));
+            Assert.That(
+                module.Topology.FeatureMask,
+                Is.EqualTo(
+                    ClosureFeatureMask.BaseColorTexture
+                    | ClosureFeatureMask.NormalTexture
+                    | ClosureFeatureMask.MaskTexture));
+            Assert.That(
+                first.RuntimeData.CapabilityFlags,
+                Is.EqualTo(
+                    VividMaterialProgramCapabilities.LegacyGBufferExport
+                    | VividMaterialProgramCapabilities.AlphaClip
+                    | VividMaterialProgramCapabilities.Unlit));
+            Assert.That(
                 module.Outputs.AlphaClipThreshold.Type,
                 Is.EqualTo(MaterialValueType.Float));
             Assert.That(module.GetDebugDump(), Does.Contain("external_input UV0"));
             Assert.That(module.GetDebugDump(), Does.Contain("texture_resource BaseColor"));
             Assert.That(module.GetDebugDump(), Does.Contain("coverage=%"));
+            Assert.That(
+                module.GetDebugDump(),
+                Does.Contain("material_features=AlphaClip, Emission, Unlit"));
+            var noMaterialFeatures = new MaterialIRModule(
+                module.Values,
+                module.Outputs,
+                module.Topology,
+                MaterialFeatureMask.None);
+            Assert.That(noMaterialFeatures.StructuralHash, Is.Not.EqualTo(module.StructuralHash));
             Assert.Throws<InvalidOperationException>(() =>
                 module.Values.Parameter(MaterialParameter.Roughness));
 
@@ -94,7 +121,8 @@ namespace VividRP.Editor.Tests
                 new MaterialOutputRoots(
                     foreignCoverage,
                     module.Outputs.AlphaClipThreshold),
-                module.Topology));
+                module.Topology,
+                module.MaterialFeatures));
         }
 
         [Test]
@@ -200,7 +228,8 @@ namespace VividRP.Editor.Tests
             var module = new MaterialIRModule(
                 prototypeModule.Values,
                 prototypeModule.Outputs,
-                topology);
+                topology,
+                prototypeModule.MaterialFeatures);
 
             Assert.Throws<NotSupportedException>(() =>
                 SurfaceProgramMatcher.Compile(module));
@@ -425,7 +454,7 @@ namespace VividRP.Editor.Tests
                 baseProxy.DualSlabDefinition = definition;
 
                 GPUDrivenCompiledMaterialInstance compiled =
-                    GPUDrivenMaterialCompiler.CompileDualSlab(baseProxy, 3u, 6u, 7u);
+                    GPUDrivenMaterialCompiler.CompileDualSlab(baseProxy, 3u, 6u);
                 CompiledMaterialProgram program = compiled.MaterialProgram;
                 ClosureTopology topology = program.Module.Topology;
 
@@ -611,6 +640,8 @@ namespace VividRP.Editor.Tests
             Assert.That(layout.ParameterLayout.Stride, Is.EqualTo(128));
             Assert.That(layout.ResourceLayout.RecordStride, Is.EqualTo(32));
             Assert.That(layout.ResourceLayout.RecordCount, Is.EqualTo(1));
+            Assert.That(layout.ParameterLayout.Bindings.Count, Is.EqualTo(10));
+            Assert.That(layout.ResourceLayout.Bindings.Count, Is.EqualTo(3));
             CollectionAssert.AreEqual(
                 new[]
                 {
@@ -633,29 +664,69 @@ namespace VividRP.Editor.Tests
                 layout.Requirements.ExternalInputs);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.BaseColor,
-                MaterialValueType.Float4,
+                MaterialRuntimeParameter.BaseColor,
+                MaterialLayoutValueType.Float4,
                 byteOffset: 0);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.Roughness,
-                MaterialValueType.Float,
+                MaterialRuntimeParameter.BaseTextureTilingOffset,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 16);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.Emission,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 32);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.BaseMetallicSmoothnessRemap,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 48);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.BaseAmbientOcclusionRemap,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 64);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.BaseNormalsStrength,
+                MaterialLayoutValueType.Float,
+                byteOffset: 84);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.Roughness,
+                MaterialLayoutValueType.Float,
                 byteOffset: 88);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.Metallic,
-                MaterialValueType.Float,
+                MaterialRuntimeParameter.Metallic,
+                MaterialLayoutValueType.Float,
                 byteOffset: 92);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.AlphaClipThreshold,
-                MaterialValueType.Float,
+                MaterialRuntimeParameter.BaseMaskMode,
+                MaterialLayoutValueType.UInt,
+                byteOffset: 120);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.AlphaClipThreshold,
+                MaterialLayoutValueType.Float,
                 byteOffset: 116);
             AssertResourceBinding(
                 layout.ResourceLayout,
                 MaterialTextureResource.BaseColor,
                 recordOffset: 0,
                 byteOffset: 0);
+            AssertResourceBinding(
+                layout.ResourceLayout,
+                MaterialTextureResource.BaseNormal,
+                recordOffset: 0,
+                byteOffset: 4);
+            AssertResourceBinding(
+                layout.ResourceLayout,
+                MaterialTextureResource.BaseMask,
+                recordOffset: 0,
+                byteOffset: 8);
         }
 
         private static void AssertDualSlabMaterialLayout(CompiledMaterialProgram program)
@@ -676,6 +747,8 @@ namespace VividRP.Editor.Tests
             Assert.That(layout.ParameterLayout.Stride, Is.EqualTo(192));
             Assert.That(layout.ResourceLayout.RecordStride, Is.EqualTo(32));
             Assert.That(layout.ResourceLayout.RecordCount, Is.EqualTo(2));
+            Assert.That(layout.ParameterLayout.Bindings.Count, Is.EqualTo(20));
+            Assert.That(layout.ResourceLayout.Bindings.Count, Is.EqualTo(6));
             CollectionAssert.AreEqual(
                 new[]
                 {
@@ -706,43 +779,103 @@ namespace VividRP.Editor.Tests
                 layout.Requirements.ExternalInputs);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.BaseColor,
-                MaterialValueType.Float4,
+                MaterialRuntimeParameter.BaseColor,
+                MaterialLayoutValueType.Float4,
                 byteOffset: 0);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.TopBaseColor,
-                MaterialValueType.Float4,
-                byteOffset: 80);
+                MaterialRuntimeParameter.BaseTextureTilingOffset,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 16);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.Roughness,
-                MaterialValueType.Float,
+                MaterialRuntimeParameter.BaseMetallicSmoothnessRemap,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 32);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.BaseAmbientOcclusionRemap,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 48);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.BaseNormalsStrength,
+                MaterialLayoutValueType.Float,
+                byteOffset: 64);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.Roughness,
+                MaterialLayoutValueType.Float,
                 byteOffset: 68);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.TopRoughness,
-                MaterialValueType.Float,
-                byteOffset: 148);
-            AssertParameterBinding(
-                layout.ParameterLayout,
-                MaterialParameter.Metallic,
-                MaterialValueType.Float,
+                MaterialRuntimeParameter.Metallic,
+                MaterialLayoutValueType.Float,
                 byteOffset: 72);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.TopMetallic,
-                MaterialValueType.Float,
+                MaterialRuntimeParameter.BaseMaskMode,
+                MaterialLayoutValueType.UInt,
+                byteOffset: 76);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.TopBaseColor,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 80);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.TopTextureTilingOffset,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 96);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.TopMetallicSmoothnessRemap,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 112);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.TopAmbientOcclusionRemap,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 128);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.TopNormalsStrength,
+                MaterialLayoutValueType.Float,
+                byteOffset: 144);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.TopRoughness,
+                MaterialLayoutValueType.Float,
+                byteOffset: 148);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.TopMetallic,
+                MaterialLayoutValueType.Float,
                 byteOffset: 152);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.LayerWeight,
-                MaterialValueType.Float,
+                MaterialRuntimeParameter.TopMaskMode,
+                MaterialLayoutValueType.UInt,
+                byteOffset: 156);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.Emission,
+                MaterialLayoutValueType.Float4,
+                byteOffset: 160);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.LayerOperator,
+                MaterialLayoutValueType.UInt,
+                byteOffset: 176);
+            AssertParameterBinding(
+                layout.ParameterLayout,
+                MaterialRuntimeParameter.LayerWeight,
+                MaterialLayoutValueType.Float,
                 byteOffset: 180);
             AssertParameterBinding(
                 layout.ParameterLayout,
-                MaterialParameter.AlphaClipThreshold,
-                MaterialValueType.Float,
+                MaterialRuntimeParameter.AlphaClipThreshold,
+                MaterialLayoutValueType.Float,
                 byteOffset: 184);
             AssertResourceBinding(
                 layout.ResourceLayout,
@@ -751,15 +884,35 @@ namespace VividRP.Editor.Tests
                 byteOffset: 0);
             AssertResourceBinding(
                 layout.ResourceLayout,
+                MaterialTextureResource.BaseNormal,
+                recordOffset: 0,
+                byteOffset: 4);
+            AssertResourceBinding(
+                layout.ResourceLayout,
+                MaterialTextureResource.BaseMask,
+                recordOffset: 0,
+                byteOffset: 8);
+            AssertResourceBinding(
+                layout.ResourceLayout,
                 MaterialTextureResource.TopBaseColor,
                 recordOffset: 1,
                 byteOffset: 0);
+            AssertResourceBinding(
+                layout.ResourceLayout,
+                MaterialTextureResource.TopNormal,
+                recordOffset: 1,
+                byteOffset: 4);
+            AssertResourceBinding(
+                layout.ResourceLayout,
+                MaterialTextureResource.TopMask,
+                recordOffset: 1,
+                byteOffset: 8);
         }
 
         private static void AssertParameterBinding(
             CompiledParameterLayout layout,
-            MaterialParameter parameter,
-            MaterialValueType type,
+            MaterialRuntimeParameter parameter,
+            MaterialLayoutValueType type,
             int byteOffset)
         {
             Assert.That(
@@ -836,7 +989,7 @@ namespace VividRP.Editor.Tests
                     roughness,
                     metallic,
                     normalBasisIndex: 0,
-                    features: ClosureFeatureMask.AlphaClip,
+                    features: ClosureFeatureMask.None,
                     isTop: true,
                     isBottom: true),
             };
@@ -849,7 +1002,8 @@ namespace VividRP.Editor.Tests
             return new MaterialIRModule(
                 valueIR,
                 new MaterialOutputRoots(coverageValue, alphaClipThreshold),
-                topology);
+                topology,
+                MaterialFeatureMask.AlphaClip);
         }
 
         private static MaterialIRModule BuildUnsupportedSurfaceModule()
@@ -888,7 +1042,8 @@ namespace VividRP.Editor.Tests
             return new MaterialIRModule(
                 valueIR,
                 new MaterialOutputRoots(baseColor, alphaClipThreshold),
-                topology);
+                topology,
+                MaterialFeatureMask.AlphaClip);
         }
 
         private static MaterialValue BuildSampledBaseColor(

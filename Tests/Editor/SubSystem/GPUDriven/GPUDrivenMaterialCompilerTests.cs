@@ -229,8 +229,7 @@ namespace VividRP.Editor.Tests
                     GPUDrivenMaterialCompiler.CompileDualSlab(
                         baseProxy,
                         parameterAddress: 3u,
-                        baseSurfaceBindingIndex: 7u,
-                        topSurfaceBindingIndex: 8u);
+                        baseSurfaceBindingIndex: 7u);
 
                 Assert.That(
                     compiled.RuntimeHeader.ProgramID,
@@ -272,6 +271,8 @@ namespace VividRP.Editor.Tests
                     GPUDrivenMaterialCompiler.CompileStandardSingleSlab(proxy, 0u, 3u);
                 GPUDrivenCompiledMaterialInstance second =
                     GPUDrivenMaterialCompiler.CompileStandardSingleSlab(proxy, 1u, 5u);
+                for (int bindingIndex = 0; bindingIndex < 6; bindingIndex++)
+                    sceneData.MutableSurfaceBindings.Add(default);
 
                 Assert.That(
                     sceneData.AddMaterial(first.LegacyMaterialData, first.RuntimeHeader),
@@ -311,6 +312,47 @@ namespace VividRP.Editor.Tests
             Assert.That(header.ProgramID, Is.EqualTo(VividMaterialProgramID.Invalid));
             Assert.That(header.ParameterAddress, Is.Zero);
             Assert.That(header.ResourceBindingAddress, Is.EqualTo(6u));
+        }
+
+        [Test]
+        public void SceneData_AddMaterial_UsesCompiledResourceLayoutRecordCount()
+        {
+            var baseProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = topProxy;
+                definition.Operator = VividDualSlabOperator.VerticalLayer;
+                baseProxy.DualSlabDefinition = definition;
+                GPUDrivenCompiledMaterialInstance compiled =
+                    GPUDrivenMaterialCompiler.CompileDualSlab(
+                        baseProxy,
+                        parameterAddress: 0u,
+                        baseSurfaceBindingIndex: 0u);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                sceneData.MutableDualSlabMaterials.Add(compiled.DualSlabMaterialData);
+                sceneData.MutableSurfaceBindings.Add(default);
+                Assert.Throws<System.ArgumentException>(() => sceneData.AddMaterial(
+                    compiled.LegacyMaterialData,
+                    compiled.RuntimeHeader));
+
+                sceneData.MutableSurfaceBindings.Add(default);
+                Assert.That(
+                    sceneData.AddMaterial(
+                        compiled.LegacyMaterialData,
+                        compiled.RuntimeHeader),
+                    Is.Zero);
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topProxy);
+                Object.DestroyImmediate(baseProxy);
+            }
         }
     }
 }

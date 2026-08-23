@@ -52,6 +52,10 @@ namespace VividRP.Runtime.GPUDriven
     {
         BaseColor,
         TopBaseColor,
+        BaseNormal,
+        BaseMask,
+        TopNormal,
+        TopMask,
     }
 
     internal readonly struct MaterialValue : IEquatable<MaterialValue>

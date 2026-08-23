@@ -80,6 +80,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 VividSurfaceBindingData topSurfaceBindingData;
                 uint isDualSlab;
                 uint isUnlit;
+                uint usesLegacyMaterial;
                 VividMeshletVertex vertex0;
                 VividMeshletVertex vertex1;
                 VividMeshletVertex vertex2;
@@ -269,12 +270,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         ? 1u
                         : 0u;
                 bool loadedMaterialProgram = result.isDualSlab != 0u;
-                if (result.isDualSlab != 0u)
-                {
-                    result.materialData = PullMaterialData(
-                        result.instanceData.MaterialIndex);
-                }
-                else
+                result.materialData = (VividMaterialData) 0;
+                if (result.isDualSlab == 0u)
                 {
                     loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
                         result.instanceData.MaterialIndex,
@@ -310,6 +307,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 {
                     result.isUnlit = 1u;
                 }
+                result.usesLegacyMaterial = loadedMaterialProgram ? 0u : 1u;
                 const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
                 const uint3 indices = uint3(
@@ -522,10 +520,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 float perceptualRoughness;
                 float metallic;
                 float ambientOcclusion;
-                bool isTerrain = (triangleData.materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u
+                bool isTerrain = triangleData.usesLegacyMaterial != 0u
+                    && (triangleData.materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u
                     && triangleData.materialData.Padding1 < _TerrainMaterialDataCount;
                 bool isTerrainRVT =
-                    (triangleData.materialData.MaterialFlags
+                    triangleData.usesLegacyMaterial != 0u
+                    && (triangleData.materialData.MaterialFlags
                         & VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE) != 0u;
 #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
                 uint terrainRVTRecordFlags = 0u;
@@ -727,7 +727,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     surfaceData.materialFeatures &= ~VIVID_MATERIALFEATURE_DECAL_RECEIVE;
                 }
 #endif
-                surfaceData.emissive = max(triangleData.materialData.Emission.rgb, 0.0f);
+                surfaceData.emissive = max(
+                    triangleData.isDualSlab != 0u
+                        ? triangleData.dualSlabMaterialData.Emission.rgb
+                        : triangleData.materialData.Emission.rgb,
+                    0.0f);
                 surfaceData.builtinData = CreateVividBuiltinData(
                     SampleVividProbeVolume(
                         positionWS,

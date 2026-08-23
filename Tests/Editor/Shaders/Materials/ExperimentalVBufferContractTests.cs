@@ -42,6 +42,8 @@ namespace VividRP.Editor.Tests
         {
             string source = File.ReadAllText(ResolveAssetPath);
             string surfaceProgramSource = File.ReadAllText(SurfaceProgramAssetPath);
+            string compactSource = string.Concat(
+                source.Where(character => !char.IsWhiteSpace(character)));
 
             StringAssert.Contains("UnpackVisibilityBufferValue", source);
             StringAssert.Contains("PullInstanceData(visibility.InstanceID)", source);
@@ -63,6 +65,10 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("topSurfaceBindingData", source);
             StringAssert.Contains("dualSlabMaterialData.LayerOperator", source);
             StringAssert.Contains("dualSlabMaterialData.LayerWeight", source);
+            StringAssert.Contains("dualSlabMaterialData.Emission.rgb", source);
+            StringAssert.DoesNotContain(
+                "if(isDualSlab){materialData=PullMaterialData(",
+                compactSource);
             StringAssert.Contains("VividPackExperimentalClosureBuffer", source);
             StringAssert.DoesNotContain("VividExperimentalVBufferMaterialData", source);
             StringAssert.DoesNotContain("_VividExperimentalVBufferMaterials", source);

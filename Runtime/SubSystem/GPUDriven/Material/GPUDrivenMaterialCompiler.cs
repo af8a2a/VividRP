@@ -58,14 +58,43 @@ namespace VividRP.Runtime.GPUDriven
                 ProgramVersion,
                 VividDualSlabOperator.VerticalLayer);
 
-        internal static VividMaterialProgramData StandardSingleSlabProgram =>
-            s_StandardSingleSlabProgram.RuntimeData;
+        [NoAutoStaticsCleanup]
+        private static readonly CompiledMaterialProgram[] s_MaterialPrograms =
+        {
+            s_StandardSingleSlabProgram,
+            s_DualSlabHorizontalMixProgram,
+            s_DualSlabVerticalLayerProgram,
+        };
 
-        internal static VividMaterialProgramData DualSlabHorizontalMixProgram =>
-            s_DualSlabHorizontalMixProgram.RuntimeData;
+        internal static CompiledMaterialProgram GetMaterialProgram(
+            VividMaterialProgramID programID)
+        {
+            uint programIndex = (uint) programID;
+            if (programIndex >= (uint) s_MaterialPrograms.Length
+                || s_MaterialPrograms[programIndex].ProgramID != programID)
+            {
+                throw new ArgumentOutOfRangeException(nameof(programID), programID, null);
+            }
 
-        internal static VividMaterialProgramData DualSlabVerticalLayerProgram =>
-            s_DualSlabVerticalLayerProgram.RuntimeData;
+            return s_MaterialPrograms[programIndex];
+        }
+
+        internal static VividMaterialProgramData[] CreateRuntimeProgramTable()
+        {
+            var runtimePrograms = new VividMaterialProgramData[s_MaterialPrograms.Length];
+            for (int programIndex = 0; programIndex < s_MaterialPrograms.Length; programIndex++)
+            {
+                CompiledMaterialProgram materialProgram = s_MaterialPrograms[programIndex];
+                if ((uint) materialProgram.ProgramID != (uint) programIndex)
+                {
+                    throw new InvalidOperationException(
+                        $"Material program '{materialProgram.ProgramID}' is not stored at its ABI index {programIndex}.");
+                }
+
+                runtimePrograms[programIndex] = materialProgram.RuntimeData;
+            }
+            return runtimePrograms;
+        }
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
             GPUDrivenMaterialProxy materialProxy,
@@ -98,8 +127,7 @@ namespace VividRP.Runtime.GPUDriven
         internal static GPUDrivenCompiledMaterialInstance CompileDualSlab(
             GPUDrivenMaterialProxy materialProxy,
             uint parameterAddress,
-            uint baseSurfaceBindingIndex,
-            uint topSurfaceBindingIndex)
+            uint baseSurfaceBindingIndex)
         {
             if (materialProxy == null)
                 throw new ArgumentNullException(nameof(materialProxy));
@@ -120,14 +148,8 @@ namespace VividRP.Runtime.GPUDriven
                 throw new InvalidOperationException(
                     "Dual Slab definitions require a StandardLit top-slab proxy.");
             }
-            if (topSurfaceBindingIndex != baseSurfaceBindingIndex + 1u)
-            {
-                throw new ArgumentException(
-                    "Dual Slab surface bindings must be consecutive.",
-                    nameof(topSurfaceBindingIndex));
-            }
-
             CompiledMaterialProgram materialProgram = GetDualSlabProgram(definition.Operator);
+
             var runtimeHeader = new VividMaterialRuntimeHeader
             {
                 ProgramID = materialProgram.ProgramID,

@@ -231,6 +231,14 @@ namespace VividRP.Editor.Tests
                 "surfaceData.materialFeatures=triangleData.isUnlit!=0u"
                 + "?0u:VIVID_MATERIALFEATURE_DEFAULT;",
                 compactSource);
+            StringAssert.Contains(
+                "triangleData.isDualSlab!=0u"
+                + "?triangleData.dualSlabMaterialData.Emission.rgb"
+                + ":triangleData.materialData.Emission.rgb",
+                compactSource);
+            StringAssert.DoesNotContain(
+                "if(result.isDualSlab!=0u){result.materialData=PullMaterialData(",
+                compactSource);
             StringAssert.DoesNotContain(
                 "surfaceData.materialFeatures=VIVID_MATERIALFEATURE_DEFAULT;",
                 compactSource);

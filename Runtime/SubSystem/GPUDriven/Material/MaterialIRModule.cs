@@ -6,6 +6,15 @@ using Unity.Mathematics;
 
 namespace VividRP.Runtime.GPUDriven
 {
+    [Flags]
+    internal enum MaterialFeatureMask
+    {
+        None = 0,
+        AlphaClip = 1 << 0,
+        Emission = 1 << 1,
+        Unlit = 1 << 2,
+    }
+
     internal readonly struct MaterialOutputRoots
     {
         internal MaterialOutputRoots(
@@ -102,11 +111,13 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialIRModule(
             MaterialValueIR values,
             in MaterialOutputRoots outputs,
-            ClosureTopology topology)
+            ClosureTopology topology,
+            MaterialFeatureMask materialFeatures)
         {
             Values = values ?? throw new ArgumentNullException(nameof(values));
             Topology = topology ?? throw new ArgumentNullException(nameof(topology));
             Outputs = outputs;
+            MaterialFeatures = materialFeatures;
 
             Validate();
             Values.Freeze();
@@ -119,6 +130,8 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialOutputRoots Outputs { get; }
 
         internal ClosureTopology Topology { get; }
+
+        internal MaterialFeatureMask MaterialFeatures { get; }
 
         internal ulong StructuralHash { get; }
 
@@ -183,6 +196,7 @@ namespace VividRP.Runtime.GPUDriven
 
             AddValueHash(ref hash, Outputs.CoverageValue);
             AddValueHash(ref hash, Outputs.AlphaClipThreshold);
+            AddHash(ref hash, (int) MaterialFeatures);
             AddHash(ref hash, Topology.Budget.MaxClosureCount);
             AddHash(ref hash, Topology.Budget.MaxOperatorCount);
             AddHash(ref hash, Topology.NormalBases.Count);
@@ -236,6 +250,7 @@ namespace VividRP.Runtime.GPUDriven
             builder.Append("  alpha_clip_threshold=%")
                 .Append(Outputs.AlphaClipThreshold.Index)
                 .AppendLine();
+            builder.Append("material_features=").Append(MaterialFeatures).AppendLine();
             builder.Append("topology: closures=").Append(Topology.ClosureCount)
                 .Append(" operators=").Append(Topology.OperatorCount)
                 .Append(" budget=").Append(Topology.Budget.MaxClosureCount)

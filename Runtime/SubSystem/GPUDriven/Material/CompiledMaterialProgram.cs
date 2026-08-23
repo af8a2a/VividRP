@@ -309,13 +309,10 @@ namespace VividRP.Runtime.GPUDriven
 
     internal static class SurfaceProgramMatcher
     {
-        private const ClosureFeatureMask SupportedFeatures =
+        private const ClosureFeatureMask SupportedSlabFeatures =
             ClosureFeatureMask.BaseColorTexture
             | ClosureFeatureMask.NormalTexture
-            | ClosureFeatureMask.MaskTexture
-            | ClosureFeatureMask.AlphaClip
-            | ClosureFeatureMask.Emission
-            | ClosureFeatureMask.Unlit;
+            | ClosureFeatureMask.MaskTexture;
 
         internal static CompiledSurfaceProgram Compile(MaterialIRModule module)
         {
@@ -461,7 +458,7 @@ namespace VividRP.Runtime.GPUDriven
             // Tiling/remap and optional Normal/Mask evaluation remain in the V1 layout ABI.
             return slab.NormalBasisIndex == 0
                 && (slab.Features & ClosureFeatureMask.BaseColorTexture) != 0
-                && (slab.Features & ~SupportedFeatures) == 0
+                && (slab.Features & ~SupportedSlabFeatures) == 0
                 && MaterialValuePatternMatcher.MatchesSampledColor(
                     values,
                     slab.BaseColor,
@@ -478,11 +475,42 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
+    internal enum MaterialLayoutValueType
+    {
+        Float,
+        Float4,
+        UInt,
+    }
+
+    internal enum MaterialRuntimeParameter
+    {
+        BaseColor,
+        TopBaseColor,
+        BaseTextureTilingOffset,
+        TopTextureTilingOffset,
+        Emission,
+        BaseMetallicSmoothnessRemap,
+        TopMetallicSmoothnessRemap,
+        BaseAmbientOcclusionRemap,
+        TopAmbientOcclusionRemap,
+        BaseNormalsStrength,
+        TopNormalsStrength,
+        Roughness,
+        TopRoughness,
+        Metallic,
+        TopMetallic,
+        BaseMaskMode,
+        TopMaskMode,
+        LayerOperator,
+        LayerWeight,
+        AlphaClipThreshold,
+    }
+
     internal readonly struct MaterialParameterLayoutBinding
     {
         internal MaterialParameterLayoutBinding(
-            MaterialParameter parameter,
-            MaterialValueType type,
+            MaterialRuntimeParameter parameter,
+            MaterialLayoutValueType type,
             int byteOffset)
         {
             Parameter = parameter;
@@ -490,9 +518,9 @@ namespace VividRP.Runtime.GPUDriven
             ByteOffset = byteOffset;
         }
 
-        internal MaterialParameter Parameter { get; }
+        internal MaterialRuntimeParameter Parameter { get; }
 
-        internal MaterialValueType Type { get; }
+        internal MaterialLayoutValueType Type { get; }
 
         internal int ByteOffset { get; }
     }
@@ -530,6 +558,28 @@ namespace VividRP.Runtime.GPUDriven
             if (bindings == null)
                 throw new ArgumentNullException(nameof(bindings));
 
+            for (int bindingIndex = 0; bindingIndex < bindings.Length; bindingIndex++)
+            {
+                MaterialParameterLayoutBinding binding = bindings[bindingIndex];
+                int bindingSize = GetValueSize(binding.Type);
+                if (binding.ByteOffset < 0
+                    || binding.ByteOffset > stride - bindingSize)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(bindings),
+                        $"Parameter '{binding.Parameter}' exceeds layout stride {stride}.");
+                }
+                for (int previousIndex = 0; previousIndex < bindingIndex; previousIndex++)
+                {
+                    if (bindings[previousIndex].Parameter == binding.Parameter)
+                    {
+                        throw new ArgumentException(
+                            $"Parameter '{binding.Parameter}' has multiple layout bindings.",
+                            nameof(bindings));
+                    }
+                }
+            }
+
             LayoutID = layoutID;
             Stride = stride;
             m_Bindings = Array.AsReadOnly(
@@ -543,7 +593,7 @@ namespace VividRP.Runtime.GPUDriven
         internal IReadOnlyList<MaterialParameterLayoutBinding> Bindings => m_Bindings;
 
         internal bool TryGetBinding(
-            MaterialParameter parameter,
+            MaterialRuntimeParameter parameter,
             out MaterialParameterLayoutBinding binding)
         {
             for (int i = 0; i < m_Bindings.Count; i++)
@@ -557,6 +607,20 @@ namespace VividRP.Runtime.GPUDriven
 
             binding = default;
             return false;
+        }
+
+        private static int GetValueSize(MaterialLayoutValueType type)
+        {
+            switch (type)
+            {
+                case MaterialLayoutValueType.Float:
+                case MaterialLayoutValueType.UInt:
+                    return sizeof(uint);
+                case MaterialLayoutValueType.Float4:
+                    return sizeof(float) * 4;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(type), type, null);
+            }
         }
     }
 
@@ -576,6 +640,29 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentOutOfRangeException(nameof(recordCount));
             if (bindings == null)
                 throw new ArgumentNullException(nameof(bindings));
+
+            for (int bindingIndex = 0; bindingIndex < bindings.Length; bindingIndex++)
+            {
+                MaterialResourceLayoutBinding binding = bindings[bindingIndex];
+                if (binding.RecordOffset < 0
+                    || binding.RecordOffset >= recordCount
+                    || binding.ByteOffset < 0
+                    || binding.ByteOffset > recordStride - sizeof(uint))
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(bindings),
+                        $"Resource '{binding.Resource}' exceeds the resource record layout.");
+                }
+                for (int previousIndex = 0; previousIndex < bindingIndex; previousIndex++)
+                {
+                    if (bindings[previousIndex].Resource == binding.Resource)
+                    {
+                        throw new ArgumentException(
+                            $"Resource '{binding.Resource}' has multiple layout bindings.",
+                            nameof(bindings));
+                    }
+                }
+            }
 
             LayoutID = layoutID;
             RecordStride = recordStride;
@@ -723,20 +810,44 @@ namespace VividRP.Runtime.GPUDriven
                 new[]
                 {
                     ParameterBinding<VividMaterialData>(
-                        MaterialParameter.BaseColor,
-                        MaterialValueType.Float4,
+                        MaterialRuntimeParameter.BaseColor,
+                        MaterialLayoutValueType.Float4,
                         nameof(VividMaterialData.AlbedoColor)),
                     ParameterBinding<VividMaterialData>(
-                        MaterialParameter.Roughness,
-                        MaterialValueType.Float,
+                        MaterialRuntimeParameter.BaseTextureTilingOffset,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividMaterialData.TextureTilingOffset)),
+                    ParameterBinding<VividMaterialData>(
+                        MaterialRuntimeParameter.Emission,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividMaterialData.Emission)),
+                    ParameterBinding<VividMaterialData>(
+                        MaterialRuntimeParameter.BaseMetallicSmoothnessRemap,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividMaterialData.MetallicSmoothnessRemap)),
+                    ParameterBinding<VividMaterialData>(
+                        MaterialRuntimeParameter.BaseAmbientOcclusionRemap,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividMaterialData.AmbientOcclusionRemap)),
+                    ParameterBinding<VividMaterialData>(
+                        MaterialRuntimeParameter.BaseNormalsStrength,
+                        MaterialLayoutValueType.Float,
+                        nameof(VividMaterialData.NormalsStrength)),
+                    ParameterBinding<VividMaterialData>(
+                        MaterialRuntimeParameter.Roughness,
+                        MaterialLayoutValueType.Float,
                         nameof(VividMaterialData.Roughness)),
                     ParameterBinding<VividMaterialData>(
-                        MaterialParameter.Metallic,
-                        MaterialValueType.Float,
+                        MaterialRuntimeParameter.Metallic,
+                        MaterialLayoutValueType.Float,
                         nameof(VividMaterialData.Metallic)),
                     ParameterBinding<VividMaterialData>(
-                        MaterialParameter.AlphaClipThreshold,
-                        MaterialValueType.Float,
+                        MaterialRuntimeParameter.BaseMaskMode,
+                        MaterialLayoutValueType.UInt,
+                        nameof(VividMaterialData.Padding0)),
+                    ParameterBinding<VividMaterialData>(
+                        MaterialRuntimeParameter.AlphaClipThreshold,
+                        MaterialLayoutValueType.Float,
                         nameof(VividMaterialData.AlphaClipThreshold)),
                 });
         }
@@ -749,36 +860,84 @@ namespace VividRP.Runtime.GPUDriven
                 new[]
                 {
                     ParameterBinding<VividDualSlabMaterialData>(
-                        MaterialParameter.BaseColor,
-                        MaterialValueType.Float4,
+                        MaterialRuntimeParameter.BaseColor,
+                        MaterialLayoutValueType.Float4,
                         nameof(VividDualSlabMaterialData.BaseAlbedoColor)),
                     ParameterBinding<VividDualSlabMaterialData>(
-                        MaterialParameter.TopBaseColor,
-                        MaterialValueType.Float4,
-                        nameof(VividDualSlabMaterialData.TopAlbedoColor)),
+                        MaterialRuntimeParameter.BaseTextureTilingOffset,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividDualSlabMaterialData.BaseTextureTilingOffset)),
                     ParameterBinding<VividDualSlabMaterialData>(
-                        MaterialParameter.Roughness,
-                        MaterialValueType.Float,
+                        MaterialRuntimeParameter.BaseMetallicSmoothnessRemap,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividDualSlabMaterialData.BaseMetallicSmoothnessRemap)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.BaseAmbientOcclusionRemap,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividDualSlabMaterialData.BaseAmbientOcclusionRemap)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.BaseNormalsStrength,
+                        MaterialLayoutValueType.Float,
+                        nameof(VividDualSlabMaterialData.BaseNormalsStrength)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.Roughness,
+                        MaterialLayoutValueType.Float,
                         nameof(VividDualSlabMaterialData.BaseRoughness)),
                     ParameterBinding<VividDualSlabMaterialData>(
-                        MaterialParameter.TopRoughness,
-                        MaterialValueType.Float,
-                        nameof(VividDualSlabMaterialData.TopRoughness)),
-                    ParameterBinding<VividDualSlabMaterialData>(
-                        MaterialParameter.Metallic,
-                        MaterialValueType.Float,
+                        MaterialRuntimeParameter.Metallic,
+                        MaterialLayoutValueType.Float,
                         nameof(VividDualSlabMaterialData.BaseMetallic)),
                     ParameterBinding<VividDualSlabMaterialData>(
-                        MaterialParameter.TopMetallic,
-                        MaterialValueType.Float,
+                        MaterialRuntimeParameter.BaseMaskMode,
+                        MaterialLayoutValueType.UInt,
+                        nameof(VividDualSlabMaterialData.BaseMaskMode)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.TopBaseColor,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividDualSlabMaterialData.TopAlbedoColor)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.TopTextureTilingOffset,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividDualSlabMaterialData.TopTextureTilingOffset)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.TopMetallicSmoothnessRemap,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividDualSlabMaterialData.TopMetallicSmoothnessRemap)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.TopAmbientOcclusionRemap,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividDualSlabMaterialData.TopAmbientOcclusionRemap)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.TopNormalsStrength,
+                        MaterialLayoutValueType.Float,
+                        nameof(VividDualSlabMaterialData.TopNormalsStrength)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.TopRoughness,
+                        MaterialLayoutValueType.Float,
+                        nameof(VividDualSlabMaterialData.TopRoughness)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.TopMetallic,
+                        MaterialLayoutValueType.Float,
                         nameof(VividDualSlabMaterialData.TopMetallic)),
                     ParameterBinding<VividDualSlabMaterialData>(
-                        MaterialParameter.LayerWeight,
-                        MaterialValueType.Float,
+                        MaterialRuntimeParameter.TopMaskMode,
+                        MaterialLayoutValueType.UInt,
+                        nameof(VividDualSlabMaterialData.TopMaskMode)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.Emission,
+                        MaterialLayoutValueType.Float4,
+                        nameof(VividDualSlabMaterialData.Emission)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.LayerOperator,
+                        MaterialLayoutValueType.UInt,
+                        nameof(VividDualSlabMaterialData.LayerOperator)),
+                    ParameterBinding<VividDualSlabMaterialData>(
+                        MaterialRuntimeParameter.LayerWeight,
+                        MaterialLayoutValueType.Float,
                         nameof(VividDualSlabMaterialData.LayerWeight)),
                     ParameterBinding<VividDualSlabMaterialData>(
-                        MaterialParameter.AlphaClipThreshold,
-                        MaterialValueType.Float,
+                        MaterialRuntimeParameter.AlphaClipThreshold,
+                        MaterialLayoutValueType.Float,
                         nameof(VividDualSlabMaterialData.AlphaClipThreshold)),
                 });
         }
@@ -793,7 +952,16 @@ namespace VividRP.Runtime.GPUDriven
                 {
                     ResourceBinding(
                         MaterialTextureResource.BaseColor,
-                        recordOffset: 0),
+                        recordOffset: 0,
+                        nameof(VividSurfaceBindingData.BaseColorResource)),
+                    ResourceBinding(
+                        MaterialTextureResource.BaseNormal,
+                        recordOffset: 0,
+                        nameof(VividSurfaceBindingData.NormalResource)),
+                    ResourceBinding(
+                        MaterialTextureResource.BaseMask,
+                        recordOffset: 0,
+                        nameof(VividSurfaceBindingData.MaskResource)),
                 });
         }
 
@@ -807,16 +975,34 @@ namespace VividRP.Runtime.GPUDriven
                 {
                     ResourceBinding(
                         MaterialTextureResource.BaseColor,
-                        recordOffset: 0),
+                        recordOffset: 0,
+                        nameof(VividSurfaceBindingData.BaseColorResource)),
+                    ResourceBinding(
+                        MaterialTextureResource.BaseNormal,
+                        recordOffset: 0,
+                        nameof(VividSurfaceBindingData.NormalResource)),
+                    ResourceBinding(
+                        MaterialTextureResource.BaseMask,
+                        recordOffset: 0,
+                        nameof(VividSurfaceBindingData.MaskResource)),
                     ResourceBinding(
                         MaterialTextureResource.TopBaseColor,
-                        recordOffset: 1),
+                        recordOffset: 1,
+                        nameof(VividSurfaceBindingData.BaseColorResource)),
+                    ResourceBinding(
+                        MaterialTextureResource.TopNormal,
+                        recordOffset: 1,
+                        nameof(VividSurfaceBindingData.NormalResource)),
+                    ResourceBinding(
+                        MaterialTextureResource.TopMask,
+                        recordOffset: 1,
+                        nameof(VividSurfaceBindingData.MaskResource)),
                 });
         }
 
         private static MaterialParameterLayoutBinding ParameterBinding<T>(
-            MaterialParameter parameter,
-            MaterialValueType type,
+            MaterialRuntimeParameter parameter,
+            MaterialLayoutValueType type,
             string fieldName)
         {
             return new MaterialParameterLayoutBinding(
@@ -827,13 +1013,13 @@ namespace VividRP.Runtime.GPUDriven
 
         private static MaterialResourceLayoutBinding ResourceBinding(
             MaterialTextureResource resource,
-            int recordOffset)
+            int recordOffset,
+            string fieldName)
         {
             return new MaterialResourceLayoutBinding(
                 resource,
                 recordOffset,
-                OffsetOf<VividSurfaceBindingData>(
-                    nameof(VividSurfaceBindingData.BaseColorResource)));
+                OffsetOf<VividSurfaceBindingData>(fieldName));
         }
 
         private static bool Matches<T>(IReadOnlyList<T> values, params T[] expected)
@@ -1392,12 +1578,12 @@ namespace VividRP.Runtime.GPUDriven
                 surfaceProgram.ProgramID,
                 topology);
 
-            ClosureFeatureMask features = topology.FeatureMask;
+            MaterialFeatureMask features = module.MaterialFeatures;
             VividMaterialProgramCapabilities capabilities =
                 VividMaterialProgramCapabilities.LegacyGBufferExport;
-            if ((features & ClosureFeatureMask.AlphaClip) != 0)
+            if ((features & MaterialFeatureMask.AlphaClip) != 0)
                 capabilities |= VividMaterialProgramCapabilities.AlphaClip;
-            if ((features & ClosureFeatureMask.Unlit) != 0)
+            if ((features & MaterialFeatureMask.Unlit) != 0)
                 capabilities |= VividMaterialProgramCapabilities.Unlit;
 
             var runtimeData = new VividMaterialProgramData
@@ -1452,10 +1638,12 @@ namespace VividRP.Runtime.GPUDriven
         private const ClosureFeatureMask SupportedSlabFeatures =
             ClosureFeatureMask.BaseColorTexture
             | ClosureFeatureMask.NormalTexture
-            | ClosureFeatureMask.MaskTexture
-            | ClosureFeatureMask.AlphaClip
-            | ClosureFeatureMask.Emission
-            | ClosureFeatureMask.Unlit;
+            | ClosureFeatureMask.MaskTexture;
+
+        private const MaterialFeatureMask SupportedMaterialFeatures =
+            MaterialFeatureMask.AlphaClip
+            | MaterialFeatureMask.Emission
+            | MaterialFeatureMask.Unlit;
 
         internal static CompiledMaterialProgram BuildStandardSingleSlab(uint programVersion)
         {
@@ -1489,7 +1677,8 @@ namespace VividRP.Runtime.GPUDriven
             var module = new MaterialIRModule(
                 valueIR,
                 new MaterialOutputRoots(baseColor, alphaClipThreshold),
-                topology);
+                topology,
+                SupportedMaterialFeatures);
             return CompiledMaterialProgram.Compile(module, programVersion);
         }
 
@@ -1550,7 +1739,8 @@ namespace VividRP.Runtime.GPUDriven
             var module = new MaterialIRModule(
                 valueIR,
                 new MaterialOutputRoots(baseColor, alphaClipThreshold),
-                topology);
+                topology,
+                SupportedMaterialFeatures);
             return CompiledMaterialProgram.Compile(module, programVersion);
         }
 

@@ -290,6 +290,8 @@ namespace VividRP.Editor.Tests
                 ResourceBindingAddress = 5u,
                 Flags = VividMaterialRuntimeFlags.AlphaClip,
             };
+            for (int bindingIndex = 0; bindingIndex < 6; bindingIndex++)
+                sceneData.MutableSurfaceBindings.Add(default);
             sceneData.AddMaterial(
                 new VividMaterialData { SurfaceBindingIndex = 5u },
                 runtimeHeader);
@@ -304,7 +306,7 @@ namespace VividRP.Editor.Tests
 
             var uploadedHeaders = new VividMaterialRuntimeHeader[1];
             bufferSet.MaterialRuntimeHeaderBuffer.GetData(uploadedHeaders);
-            var uploadedPrograms = new VividMaterialProgramData[2];
+            var uploadedPrograms = new VividMaterialProgramData[3];
             bufferSet.MaterialProgramBuffer.GetData(uploadedPrograms);
             var uploadedDualSlabs = new VividDualSlabMaterialData[1];
             bufferSet.DualSlabMaterialDataBuffer.GetData(uploadedDualSlabs);
@@ -327,6 +329,9 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
             Assert.That(
                 uploadedPrograms[1].SurfaceProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
+            Assert.That(
+                uploadedPrograms[2].SurfaceProgramID,
                 Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
             Assert.That(
                 uploadedDualSlabs[0].LayerOperator,

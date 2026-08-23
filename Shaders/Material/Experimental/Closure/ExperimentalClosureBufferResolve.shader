@@ -207,7 +207,7 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 if (instanceData.MaterialIndex >= _MaterialDataCount)
                     discard;
 
-                VividMaterialData materialData;
+                VividMaterialData materialData = (VividMaterialData) 0;
                 VividSurfaceBindingData surfaceBindingData;
                 VividSurfaceBindingData topSurfaceBindingData;
                 VividDualSlabMaterialData dualSlabMaterialData;
@@ -217,15 +217,16 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                     dualSlabMaterialData,
                     surfaceBindingData,
                     topSurfaceBindingData);
-                if (isDualSlab)
+                bool loadedMaterialProgram = isDualSlab;
+                if (!isDualSlab)
                 {
-                    materialData = PullMaterialData(instanceData.MaterialIndex);
-                }
-                else if (!VividTryLoadStandardSingleSlabSurfaceProgram(
+                    loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
                         instanceData.MaterialIndex,
                         0u,
                         materialData,
-                        surfaceBindingData))
+                        surfaceBindingData);
+                }
+                if (!loadedMaterialProgram)
                 {
                     materialData = PullMaterialData(instanceData.MaterialIndex);
                     if (materialData.SurfaceBindingIndex >= _SurfaceBindingDataCount)
@@ -235,7 +236,8 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                         materialData.SurfaceBindingIndex);
                 }
 
-                if ((materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u)
+                if (!loadedMaterialProgram
+                    && (materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u)
                     discard;
 
                 float4 attributes0 = SAMPLE_TEXTURE2D_LOD(
@@ -288,8 +290,25 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 VividBuiltinData builtinData = BuildProbeVolumeBuiltinData(
                     positionWS,
                     normalWS);
-                const uint materialFeatures =
-                    (materialData.MaterialFlags & VIVIDMATERIALFLAGS_UNLIT) != 0u
+                bool isUnlit = false;
+                if (loadedMaterialProgram)
+                {
+                    const VividMaterialRuntimeHeader runtimeHeader =
+                        PullMaterialRuntimeHeader(instanceData.MaterialIndex);
+                    const VividMaterialProgramData programData =
+                        PullMaterialProgramData(runtimeHeader.ProgramID);
+                    isUnlit =
+                        (programData.CapabilityFlags
+                            & VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT) != 0u
+                        && (runtimeHeader.Flags
+                            & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) != 0u;
+                }
+                else
+                {
+                    isUnlit =
+                        (materialData.MaterialFlags & VIVIDMATERIALFLAGS_UNLIT) != 0u;
+                }
+                const uint materialFeatures = isUnlit
                         ? 0u
                         : VIVID_MATERIALFEATURE_DEFAULT;
                 VividExperimentalStandardSurface baseSurface =

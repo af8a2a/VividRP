@@ -45,12 +45,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMaterialData> m_Materials = new();
         private readonly List<VividDualSlabMaterialData> m_DualSlabMaterials = new();
         private readonly List<VividMaterialRuntimeHeader> m_MaterialRuntimeHeaders = new();
-        private readonly List<VividMaterialProgramData> m_MaterialPrograms = new()
-        {
-            GPUDrivenMaterialCompiler.StandardSingleSlabProgram,
-            GPUDrivenMaterialCompiler.DualSlabHorizontalMixProgram,
-            GPUDrivenMaterialCompiler.DualSlabVerticalLayerProgram,
-        };
+        private readonly List<VividMaterialProgramData> m_MaterialPrograms = new(
+            GPUDrivenMaterialCompiler.CreateRuntimeProgramTable());
         private readonly List<VividSurfaceBindingData> m_SurfaceBindings = new();
         private readonly List<VividTerrainMaterialData> m_TerrainMaterials = new();
         private readonly List<VividTerrainLayerGPUData> m_TerrainLayers = new();
@@ -229,8 +225,11 @@ namespace VividRP.Runtime.GPUDriven
                         nameof(runtimeHeader));
                 }
 
+                CompiledMaterialLayout materialLayout =
+                    GPUDrivenMaterialCompiler.GetMaterialProgram(
+                        runtimeHeader.ProgramID).MaterialLayout;
                 VividMaterialParameterLayoutID parameterLayoutID =
-                    m_MaterialPrograms[(int) programIndex].ParameterLayoutID;
+                    materialLayout.ParameterLayout.LayoutID;
                 usesLegacyParameterLayout =
                     parameterLayoutID == VividMaterialParameterLayoutID.LegacyMaterialData;
                 usesDualSlabParameterLayout =
@@ -239,6 +238,18 @@ namespace VividRP.Runtime.GPUDriven
                 {
                     throw new ArgumentException(
                         $"Material program {programIndex} uses unsupported parameter layout '{parameterLayoutID}'.",
+                        nameof(runtimeHeader));
+                }
+
+                uint resourceBindingAddress = runtimeHeader.ResourceBindingAddress;
+                uint resourceRecordCount =
+                    (uint) materialLayout.ResourceLayout.RecordCount;
+                if (resourceBindingAddress > (uint) m_SurfaceBindings.Count
+                    || resourceRecordCount
+                        > (uint) m_SurfaceBindings.Count - resourceBindingAddress)
+                {
+                    throw new ArgumentException(
+                        $"Material program {programIndex} requires {resourceRecordCount} resource records at address {resourceBindingAddress}, but only {m_SurfaceBindings.Count} records are present.",
                         nameof(runtimeHeader));
                 }
             }

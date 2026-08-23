@@ -1095,10 +1095,13 @@ namespace VividRP.Editor.Tests
             Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.StageLIRVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.DerivativeLegalizationVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.GenericLayoutVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(6u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
@@ -1138,9 +1141,9 @@ namespace VividRP.Editor.Tests
             };
             var expectedCompiledHashes = new[]
             {
-                0x2C03E7E9B630CFE0ul,
-                0x40E8E96F37629666ul,
-                0x8B15198E5E120DBFul,
+                0xC75AC95E41797B0Bul,
+                0x319B8537AD7D7C31ul,
+                0xE0506BC06A2DA187ul,
             };
 
             for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)
@@ -1233,7 +1236,7 @@ namespace VividRP.Editor.Tests
                 prototypeModule.ClosureGraph,
                 prototypeModule.SurfaceClosure,
                 prototypeModule.Topology.Budget,
-                prototypeModule.MaterialFeatures,
+                MaterialFeatureMask.None,
                 MaterialShadingModelMask.Unlit);
             CompiledMaterialProgram compiledUnlitOnly =
                 CompiledMaterialProgram.Compile(
@@ -1878,7 +1881,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SurfaceMatcher_ConsumesClosureGraphForProgram0To2()
+        public void SurfaceMatcherAndCatalog_SeparateEvaluatorFromTopologyProgramID()
         {
             CompiledMaterialProgram standard =
                 MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
@@ -1896,14 +1899,30 @@ namespace VividRP.Editor.Tests
             AssertDualSlabSurfaceRequirements(horizontal);
             AssertDualSlabSurfaceRequirements(vertical);
             Assert.That(
-                standard.SurfaceProgram.MaterialProgramID,
-                Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                standard.SurfaceProgram.ProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
             Assert.That(
-                horizontal.SurfaceProgram.MaterialProgramID,
+                horizontal.SurfaceProgram.ProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
+            Assert.That(
+                vertical.SurfaceProgram.ProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
+            Assert.That(
+                standard.Lowering.SelectionKey.Topology,
+                Is.EqualTo(MaterialProgramTopologySpecialization.SingleSlab));
+            Assert.That(
+                horizontal.Lowering.SelectionKey.Topology,
+                Is.EqualTo(MaterialProgramTopologySpecialization.HorizontalMix));
+            Assert.That(
+                vertical.Lowering.SelectionKey.Topology,
+                Is.EqualTo(MaterialProgramTopologySpecialization.VerticalLayer));
+            Assert.That(
+                horizontal.Lowering.CatalogEntry.ProgramID,
                 Is.EqualTo(VividMaterialProgramID.DualSlabHorizontalMix));
             Assert.That(
-                vertical.SurfaceProgram.MaterialProgramID,
+                vertical.Lowering.CatalogEntry.ProgramID,
                 Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
+            Assert.That(horizontal.ProgramID, Is.Not.EqualTo(vertical.ProgramID));
             Assert.That(
                 standard.Module.ClosureGraph.GetNode(
                     standard.Module.SurfaceClosure).Opcode,
@@ -1928,6 +1947,63 @@ namespace VividRP.Editor.Tests
 
             Assert.Throws<NotSupportedException>(() =>
                 SurfaceProgramMatcher.Compile(module));
+        }
+
+        [Test]
+        public void TransportLowering_UsesExplicitNoneProgram()
+        {
+            CompiledMaterialProgram program =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+
+            Assert.That(program.TransportProgram, Is.SameAs(CompiledTransportProgram.None));
+            Assert.That(
+                program.TransportProgram.ProgramID,
+                Is.EqualTo(VividMaterialTransportProgramID.None));
+            Assert.That(program.TransportProgram.Requirements.ParameterDeclarations, Is.Empty);
+            Assert.That(program.TransportProgram.Requirements.ResourceDeclarations, Is.Empty);
+            Assert.That(
+                program.Lowering.SelectionKey.TransportProgramID,
+                Is.EqualTo(VividMaterialTransportProgramID.None));
+            Assert.That(
+                program.RuntimeData.TransportProgramID,
+                Is.EqualTo(VividMaterialTransportProgramID.None));
+        }
+
+        [Test]
+        public void ProgramCatalog_IsClosedAndPreservesExplicitIDHoles()
+        {
+            CompiledMaterialProgram builtin =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            var customProgramID = (VividMaterialProgramID) 4u;
+            var entry = new MaterialProgramCatalogEntry(
+                customProgramID,
+                builtin.Lowering.SelectionKey,
+                MaterialLayoutLowerer.CreateLegacyLayoutSchema(),
+                builtin.RuntimeData.CapabilityFlags,
+                MaterialProgramContract.RuntimeAbiVersion);
+            var definition = new MaterialProgramCatalogDefinition(entry);
+            CompiledMaterialProgram compiled = CompiledMaterialProgram.Compile(
+                builtin.Module,
+                MaterialProgramContract.RuntimeAbiVersion,
+                definition);
+            var catalog = new MaterialProgramCatalog(
+                definition,
+                new[] { compiled });
+
+            Assert.That(compiled.ProgramID, Is.EqualTo(customProgramID));
+            Assert.That(compiled.CompiledHash, Is.EqualTo(builtin.CompiledHash));
+            VividMaterialProgramData[] runtimeTable =
+                catalog.CreateRuntimeProgramTable();
+            Assert.That(runtimeTable, Has.Length.EqualTo(5));
+            for (int holeIndex = 0; holeIndex < 4; holeIndex++)
+                Assert.That(runtimeTable[holeIndex].Version, Is.Zero);
+            AssertRuntimeProgramData(
+                runtimeTable[4],
+                new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u });
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                catalog.GetMaterialProgram(VividMaterialProgramID.StandardSingleSlab));
         }
 
         [Test]
@@ -1974,7 +2050,114 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void LayoutLowering_RejectsRequirementsFromDifferentSurfaceAbi()
+        public void GenericLayout_IsCanonicalAndDoesNotCrossFourWordLanes()
+        {
+            var boolParameter = new MaterialParameterDeclaration(
+                "A_Bool",
+                MaterialValueType.Bool);
+            var float2Parameter = new MaterialParameterDeclaration(
+                "B_Float2",
+                MaterialValueType.Float2);
+            var float3Parameter = new MaterialParameterDeclaration(
+                "C_CustomFloat3",
+                MaterialValueType.Float3);
+            var floatParameter = new MaterialParameterDeclaration(
+                "D_Float",
+                MaterialValueType.Float);
+            var float4Parameter = new MaterialParameterDeclaration(
+                "E_Float4",
+                MaterialValueType.Float4);
+            var firstResource = new MaterialResourceDeclaration(
+                "A_CustomTexture",
+                MaterialValueType.Texture2D);
+            var secondResource = new MaterialResourceDeclaration(
+                "Z_CustomTexture",
+                MaterialValueType.Texture2D);
+            var first = new MaterialGenericLayout(
+                new[]
+                {
+                    float4Parameter,
+                    float3Parameter,
+                    boolParameter,
+                    floatParameter,
+                    float2Parameter,
+                },
+                new[] { secondResource, firstResource });
+            var reordered = new MaterialGenericLayout(
+                new[]
+                {
+                    float2Parameter,
+                    floatParameter,
+                    boolParameter,
+                    float3Parameter,
+                    float4Parameter,
+                },
+                new[] { firstResource, secondResource });
+
+            Assert.That(first.Version, Is.EqualTo(MaterialProgramContract.GenericLayoutVersion));
+            Assert.That(first.PayloadEquals(reordered), Is.True);
+            Assert.That(first.Fingerprint, Is.EqualTo(reordered.Fingerprint));
+            Assert.That(first.ParameterStrideInWords, Is.EqualTo(12));
+            AssertGenericParameterBinding(first, boolParameter, wordOffset: 0, wordCount: 1);
+            AssertGenericParameterBinding(first, float2Parameter, wordOffset: 1, wordCount: 2);
+            AssertGenericParameterBinding(first, float3Parameter, wordOffset: 4, wordCount: 3);
+            AssertGenericParameterBinding(first, floatParameter, wordOffset: 7, wordCount: 1);
+            AssertGenericParameterBinding(first, float4Parameter, wordOffset: 8, wordCount: 4);
+            Assert.That(
+                first.TryGetResourceBinding(
+                    firstResource,
+                    out MaterialGenericResourceBinding firstBinding),
+                Is.True);
+            Assert.That(firstBinding.Slot, Is.Zero);
+            Assert.That(
+                first.TryGetResourceBinding(
+                    secondResource,
+                    out MaterialGenericResourceBinding secondBinding),
+                Is.True);
+            Assert.That(secondBinding.Slot, Is.EqualTo(1));
+            Assert.That(
+                MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                    float3Parameter,
+                    out _),
+                Is.False);
+            Assert.That(
+                MaterialNativeTemplateDeclarationAdapter.TryGetTexture(
+                    firstResource,
+                    out _),
+                Is.False);
+        }
+
+        [Test]
+        public void ValueRequirements_PreserveCustomDeclarationsForGenericLowering()
+        {
+            var values = new MaterialValueIR();
+            var declaration = new MaterialParameterDeclaration(
+                "CustomFloat2",
+                MaterialValueType.Float2);
+            MaterialValue value = values.Parameter(declaration);
+            values.Freeze();
+            MaterialStageLIR stageLIR = MaterialStageLIRLowerer.Lower(
+                new MaterialValueSlice(values, value),
+                MaterialEvaluationStage.Surface);
+
+            MaterialValueRequirements requirements =
+                MaterialValueRequirements.Collect(stageLIR);
+            var layout = new MaterialGenericLayout(requirements);
+
+            Assert.That(requirements.IsNativeTemplateCompatible, Is.False);
+            CollectionAssert.AreEqual(
+                new[] { declaration },
+                requirements.ParameterDeclarations);
+            Assert.That(requirements.Parameters, Is.Empty);
+            AssertGenericParameterBinding(
+                layout,
+                declaration,
+                wordOffset: 0,
+                wordCount: 2);
+        }
+
+        [Test]
+        public void NativeLayoutSchema_RequiresExactLiveDeclarationsAndConvertsEmission()
         {
             CompiledMaterialProgram standard =
                 MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
@@ -1983,16 +2166,29 @@ namespace VividRP.Editor.Tests
                 MaterialProgramPrototypeBuilder.BuildDualSlab(
                     GPUDrivenMaterialCompiler.ProgramVersion,
                     VividDualSlabOperator.HorizontalMix);
-            var mismatchedSurfaceProgram = new CompiledSurfaceProgram(
-                VividMaterialSurfaceProgramID.StandardSingleSlab,
-                VividMaterialProgramID.StandardSingleSlab,
-                dualSlab.SurfaceProgram.StageLIR,
-                dualSlab.SurfaceProgram.Requirements);
+            MaterialNativeTemplateLayoutSchema schema =
+                MaterialLayoutLowerer.CreateLegacyLayoutSchema();
+
+            Assert.That(schema.Matches(standard.Lowering.Requirements), Is.True);
+            Assert.That(schema.Matches(dualSlab.Lowering.Requirements), Is.False);
+            Assert.That(
+                schema.TryGetParameterBinding(
+                    MaterialNativeTemplateDeclarationAdapter.GetParameter(
+                        MaterialParameter.Emission),
+                    out MaterialNativeParameterBinding emissionBinding),
+                Is.True);
+            Assert.That(
+                emissionBinding.Target,
+                Is.EqualTo(MaterialRuntimeParameter.Emission));
+            Assert.That(
+                emissionBinding.Conversion,
+                Is.EqualTo(MaterialParameterStorageConversion.Float3ToFloat4));
 
             Assert.Throws<NotSupportedException>(() =>
                 MaterialLayoutLowerer.Compile(
-                    standard.CoverageProgram,
-                    mismatchedSurfaceProgram));
+                    dualSlab.Lowering.Requirements,
+                    dualSlab.Lowering.GenericLayout,
+                    schema));
         }
 
         [Test]
@@ -2772,6 +2968,21 @@ namespace VividRP.Editor.Tests
                 MaterialTextureResource.TopMask,
                 recordOffset: 1,
                 byteOffset: 8);
+        }
+
+        private static void AssertGenericParameterBinding(
+            MaterialGenericLayout layout,
+            in MaterialParameterDeclaration declaration,
+            int wordOffset,
+            int wordCount)
+        {
+            Assert.That(
+                layout.TryGetParameterBinding(
+                    declaration,
+                    out MaterialGenericParameterBinding binding),
+                Is.True);
+            Assert.That(binding.WordOffset, Is.EqualTo(wordOffset));
+            Assert.That(binding.WordCount, Is.EqualTo(wordCount));
         }
 
         private static void AssertParameterBinding(

@@ -10,10 +10,13 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint ClosureExpressionVersion = 1u;
         internal const uint StageLIRVersion = 1u;
         internal const uint DerivativeLegalizationVersion = 1u;
+        internal const uint ProgramLoweringVersion = 1u;
+        internal const uint GenericLayoutVersion = 1u;
+        internal const uint ProgramCatalogVersion = 1u;
         internal const uint SemanticHashVersion = 4u;
-        internal const uint CompiledHashVersion = 1u;
-        internal const uint CompilerVersion = 5u;
-        internal const uint NativeTemplateBackendVersion = 2u;
+        internal const uint CompiledHashVersion = 2u;
+        internal const uint CompilerVersion = 6u;
+        internal const uint NativeTemplateBackendVersion = 3u;
         internal const uint VerifierVersion = 3u;
         internal const uint RuntimeAbiVersion = 1u;
 
@@ -25,8 +28,8 @@ namespace VividRP.Runtime.GPUDriven
         NativeTemplate = 0u,
     }
 
-    // Hashes are deterministic 64-bit fingerprints. Dynamic catalogs must compare
-    // canonical payloads after a hash match; the fixed native catalog uses golden tests.
+    // Hashes are deterministic 64-bit fingerprints. A catalog hash match never proves
+    // identity; exact canonical and compiled payloads must still be compared.
     internal readonly struct MaterialSemanticHash : IEquatable<MaterialSemanticHash>
     {
         internal MaterialSemanticHash(
@@ -214,11 +217,10 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal static CompiledMaterialProgramHash ComputeNativeTemplate(
             in MaterialSemanticHash semanticHash,
-            in VividMaterialProgramData runtimeData,
-            CompiledMaterialLayout materialLayout)
+            MaterialProgramLoweringResult lowering)
         {
-            if (materialLayout == null)
-                throw new ArgumentNullException(nameof(materialLayout));
+            if (lowering == null)
+                throw new ArgumentNullException(nameof(lowering));
 
             ulong hash = MaterialProgramHashUtility.OffsetBasis;
             MaterialProgramHashUtility.Add(
@@ -232,17 +234,151 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialProgramContract.CompilerVersion);
             MaterialProgramHashUtility.Add(
                 ref hash,
-                (uint) MaterialProgramBackendKind.NativeTemplate);
+                MaterialProgramContract.ProgramLoweringVersion);
             MaterialProgramHashUtility.Add(
                 ref hash,
-                MaterialProgramContract.NativeTemplateBackendVersion);
+                MaterialProgramContract.ProgramCatalogVersion);
 
-            AddRuntimeData(ref hash, runtimeData);
-            AddParameterLayout(ref hash, materialLayout.ParameterLayout);
-            AddResourceLayout(ref hash, materialLayout.ResourceLayout);
+            AddSelectionKey(ref hash, lowering.SelectionKey);
+            AddGenericLayout(ref hash, lowering.GenericLayout);
+            AddNativeLayoutSchema(ref hash, lowering.CatalogEntry);
+            AddRuntimeData(ref hash, lowering.RuntimeData);
+            AddParameterLayout(
+                ref hash,
+                lowering.MaterialLayout.ParameterLayout);
+            AddResourceLayout(
+                ref hash,
+                lowering.MaterialLayout.ResourceLayout);
             return new CompiledMaterialProgramHash(
                 MaterialProgramContract.CompiledHashVersion,
                 hash);
+        }
+
+        private static void AddSelectionKey(
+            ref ulong hash,
+            in MaterialProgramSelectionKey selectionKey)
+        {
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) selectionKey.BackendKind);
+            MaterialProgramHashUtility.Add(ref hash, selectionKey.BackendVersion);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) selectionKey.CoverageProgramID);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) selectionKey.SurfaceProgramID);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) selectionKey.TransportProgramID);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) selectionKey.Topology);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) selectionKey.ExecutionClass);
+        }
+
+        private static void AddGenericLayout(
+            ref ulong hash,
+            MaterialGenericLayout layout)
+        {
+            MaterialProgramHashUtility.Add(ref hash, layout.Version);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                layout.ParameterStrideInWords);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                layout.ParameterBindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.ParameterBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialGenericParameterBinding binding =
+                    layout.ParameterBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(ref hash, binding.WordOffset);
+                MaterialProgramHashUtility.Add(ref hash, binding.WordCount);
+            }
+
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                layout.ResourceBindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.ResourceBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialGenericResourceBinding binding =
+                    layout.ResourceBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(ref hash, binding.Slot);
+            }
+        }
+
+        private static void AddNativeLayoutSchema(
+            ref ulong hash,
+            MaterialProgramCatalogEntry catalogEntry)
+        {
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                catalogEntry.RuntimeAbiVersion);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) catalogEntry.Capabilities);
+            MaterialNativeTemplateLayoutSchema schema =
+                catalogEntry.LayoutSchema;
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                schema.ParameterBindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < schema.ParameterBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialNativeParameterBinding binding =
+                    schema.ParameterBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Target);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Conversion);
+            }
+
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                schema.ResourceBindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < schema.ResourceBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialNativeResourceBinding binding =
+                    schema.ResourceBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Target);
+            }
         }
 
         private static void AddRuntimeData(

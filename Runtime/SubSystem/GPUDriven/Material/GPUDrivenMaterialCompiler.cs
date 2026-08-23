@@ -46,99 +46,57 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint ProgramVersion = RuntimeAbiVersion;
 
         [NoAutoStaticsCleanup]
-        private static readonly CompiledMaterialProgram s_StandardSingleSlabProgram =
-            MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(ProgramVersion);
-
-        [NoAutoStaticsCleanup]
-        private static readonly CompiledMaterialProgram s_DualSlabHorizontalMixProgram =
-            MaterialProgramPrototypeBuilder.BuildDualSlab(
-                ProgramVersion,
-                VividDualSlabOperator.HorizontalMix);
-
-        [NoAutoStaticsCleanup]
-        private static readonly CompiledMaterialProgram s_DualSlabVerticalLayerProgram =
-            MaterialProgramPrototypeBuilder.BuildDualSlab(
-                ProgramVersion,
-                VividDualSlabOperator.VerticalLayer);
-
-        [NoAutoStaticsCleanup]
-        private static readonly CompiledMaterialProgram[] s_MaterialPrograms =
-        {
-            s_StandardSingleSlabProgram,
-            s_DualSlabHorizontalMixProgram,
-            s_DualSlabVerticalLayerProgram,
-        };
+        private static readonly MaterialProgramCatalog s_MaterialProgramCatalog =
+            CreateBuiltinProgramCatalog();
 
         internal static CompiledMaterialProgram GetMaterialProgram(
             VividMaterialProgramID programID)
         {
-            uint programIndex = (uint) programID;
-            if (programIndex >= (uint) s_MaterialPrograms.Length
-                || s_MaterialPrograms[programIndex].ProgramID != programID)
-            {
-                throw new ArgumentOutOfRangeException(nameof(programID), programID, null);
-            }
-
-            return s_MaterialPrograms[programIndex];
+            return s_MaterialProgramCatalog.GetMaterialProgram(programID);
         }
 
         internal static VividMaterialProgramData[] CreateRuntimeProgramTable()
         {
-            ValidateBuiltinProgramCatalog();
-            var runtimePrograms = new VividMaterialProgramData[s_MaterialPrograms.Length];
-            for (int programIndex = 0; programIndex < s_MaterialPrograms.Length; programIndex++)
-            {
-                CompiledMaterialProgram materialProgram = s_MaterialPrograms[programIndex];
-                if ((uint) materialProgram.ProgramID != (uint) programIndex)
-                {
-                    throw new InvalidOperationException(
-                        $"Material program '{materialProgram.ProgramID}' is not stored at its ABI index {programIndex}.");
-                }
-
-                runtimePrograms[programIndex] = materialProgram.RuntimeData;
-            }
-            return runtimePrograms;
+            return s_MaterialProgramCatalog.CreateRuntimeProgramTable();
         }
 
-        private static void ValidateBuiltinProgramCatalog()
+        private static MaterialProgramCatalog CreateBuiltinProgramCatalog()
         {
-            if (s_MaterialPrograms.Length != MaterialProgramContract.BuiltinProgramCount)
+            MaterialProgramCatalogDefinition definition =
+                MaterialProgramBuiltinCatalog.Definition;
+            if (definition.Count != MaterialProgramContract.BuiltinProgramCount)
             {
                 throw new InvalidOperationException(
                     $"The native material program catalog must contain exactly "
                     + $"{MaterialProgramContract.BuiltinProgramCount} programs.");
             }
-
-            for (int programIndex = 0; programIndex < s_MaterialPrograms.Length; programIndex++)
+            for (int programIndex = 0;
+                 programIndex < definition.Entries.Count;
+                 programIndex++)
             {
-                CompiledMaterialProgram materialProgram = s_MaterialPrograms[programIndex];
-                if (materialProgram.ProgramID == VividMaterialProgramID.Invalid
-                    || (uint) materialProgram.ProgramID != (uint) programIndex)
+                var expectedProgramID =
+                    (VividMaterialProgramID) (uint) programIndex;
+                if (definition.Entries[programIndex].ProgramID != expectedProgramID)
                 {
                     throw new InvalidOperationException(
-                        $"Material program '{materialProgram.ProgramID}' is not stored at its "
-                        + $"frozen ABI index {programIndex}.");
-                }
-                if (materialProgram.RuntimeData.Version != RuntimeAbiVersion)
-                {
-                    throw new InvalidOperationException(
-                        $"Material program '{materialProgram.ProgramID}' targets runtime ABI "
-                        + $"{materialProgram.RuntimeData.Version}, expected {RuntimeAbiVersion}.");
-                }
-
-                for (int previousIndex = 0; previousIndex < programIndex; previousIndex++)
-                {
-                    if (s_MaterialPrograms[previousIndex].CompiledHash
-                        != materialProgram.CompiledHash)
-                    {
-                        continue;
-                    }
-
-                    throw new InvalidOperationException(
-                        $"Material programs '{s_MaterialPrograms[previousIndex].ProgramID}' and "
-                        + $"'{materialProgram.ProgramID}' have the same compiled identity.");
+                        $"Builtin material program '{expectedProgramID}' must occupy "
+                        + $"its frozen ABI index {programIndex}.");
                 }
             }
+
+            return new MaterialProgramCatalog(
+                definition,
+                new[]
+                {
+                    MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                        ProgramVersion),
+                    MaterialProgramPrototypeBuilder.BuildDualSlab(
+                        ProgramVersion,
+                        VividDualSlabOperator.HorizontalMix),
+                    MaterialProgramPrototypeBuilder.BuildDualSlab(
+                        ProgramVersion,
+                        VividDualSlabOperator.VerticalLayer),
+                });
         }
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
@@ -155,7 +113,8 @@ namespace VividRP.Runtime.GPUDriven
                     $"GPU-driven material model '{materialProxy.Model}' is not supported by Program 0.");
             }
 
-            CompiledMaterialProgram materialProgram = s_StandardSingleSlabProgram;
+            CompiledMaterialProgram materialProgram = GetMaterialProgram(
+                VividMaterialProgramID.StandardSingleSlab);
             var runtimeHeader = new VividMaterialRuntimeHeader
             {
                 ProgramID = materialProgram.ProgramID,
@@ -241,9 +200,11 @@ namespace VividRP.Runtime.GPUDriven
             switch (layerOperator)
             {
                 case VividDualSlabOperator.HorizontalMix:
-                    return s_DualSlabHorizontalMixProgram;
+                    return GetMaterialProgram(
+                        VividMaterialProgramID.DualSlabHorizontalMix);
                 case VividDualSlabOperator.VerticalLayer:
-                    return s_DualSlabVerticalLayerProgram;
+                    return GetMaterialProgram(
+                        VividMaterialProgramID.DualSlabVerticalLayer);
                 default:
                     throw new ArgumentOutOfRangeException(
                         nameof(layerOperator),

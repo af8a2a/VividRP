@@ -13,7 +13,8 @@ namespace VividRP.Runtime.GPUDriven
             IReadOnlyList<MaterialParameter> nativeParameters,
             IReadOnlyList<MaterialTextureResource> nativeTextureResources,
             IReadOnlyList<MaterialExternalInput> externalInputs,
-            IReadOnlyList<MaterialStageInput> stageInputs)
+            IReadOnlyList<MaterialStageInput> stageInputs,
+            bool isNativeTemplateCompatible)
         {
             ParameterDeclarations = parameterDeclarations;
             ResourceDeclarations = resourceDeclarations;
@@ -21,6 +22,7 @@ namespace VividRP.Runtime.GPUDriven
             TextureResources = nativeTextureResources;
             ExternalInputs = externalInputs;
             StageInputs = stageInputs;
+            IsNativeTemplateCompatible = isNativeTemplateCompatible;
         }
 
         internal IReadOnlyList<MaterialParameterDeclaration> ParameterDeclarations { get; }
@@ -35,6 +37,17 @@ namespace VividRP.Runtime.GPUDriven
         internal IReadOnlyList<MaterialExternalInput> ExternalInputs { get; }
 
         internal IReadOnlyList<MaterialStageInput> StageInputs { get; }
+
+        internal bool IsNativeTemplateCompatible { get; }
+
+        internal static MaterialValueRequirements CreateEmpty()
+        {
+            return Create(
+                new List<MaterialParameterDeclaration>(),
+                new List<MaterialResourceDeclaration>(),
+                new List<MaterialExternalInput>(),
+                new List<MaterialStageInput>());
+        }
 
         internal static MaterialValueRequirements Collect(MaterialStageLIR stageLIR)
         {
@@ -147,14 +160,15 @@ namespace VividRP.Runtime.GPUDriven
             List<MaterialStageInput> stageInputs)
         {
             var nativeParameters = new List<MaterialParameter>();
+            bool isNativeTemplateCompatible = true;
             for (int i = 0; i < parameterDeclarations.Count; i++)
             {
                 if (!MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
                         parameterDeclarations[i],
                         out MaterialParameter parameter))
                 {
-                    throw new NotSupportedException(
-                        $"Material parameter '{parameterDeclarations[i].Symbol}' has no Native Template ABI binding.");
+                    isNativeTemplateCompatible = false;
+                    continue;
                 }
                 nativeParameters.Add(parameter);
             }
@@ -166,8 +180,8 @@ namespace VividRP.Runtime.GPUDriven
                         resourceDeclarations[i],
                         out MaterialTextureResource resource))
                 {
-                    throw new NotSupportedException(
-                        $"Material resource '{resourceDeclarations[i].Symbol}' has no Native Template ABI binding.");
+                    isNativeTemplateCompatible = false;
+                    continue;
                 }
                 nativeTextureResources.Add(resource);
             }
@@ -180,7 +194,8 @@ namespace VividRP.Runtime.GPUDriven
                 nativeParameters.AsReadOnly(),
                 nativeTextureResources.AsReadOnly(),
                 externalInputs.AsReadOnly(),
-                stageInputs.AsReadOnly());
+                stageInputs.AsReadOnly(),
+                isNativeTemplateCompatible);
         }
 
         private static void SortDeclarations(
@@ -476,12 +491,10 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal CompiledSurfaceProgram(
             VividMaterialSurfaceProgramID programID,
-            VividMaterialProgramID materialProgramID,
             MaterialStageLIR stageLIR,
             MaterialValueRequirements requirements)
         {
             ProgramID = programID;
-            MaterialProgramID = materialProgramID;
             StageLIR = stageLIR ?? throw new ArgumentNullException(nameof(stageLIR));
             if (StageLIR.Stage != MaterialEvaluationStage.Surface)
                 throw new ArgumentException("Surface program requires Surface Stage LIR.", nameof(stageLIR));
@@ -490,8 +503,6 @@ namespace VividRP.Runtime.GPUDriven
         }
 
         internal VividMaterialSurfaceProgramID ProgramID { get; }
-
-        internal VividMaterialProgramID MaterialProgramID { get; }
 
         internal MaterialStageLIR StageLIR { get; }
 
@@ -529,21 +540,16 @@ namespace VividRP.Runtime.GPUDriven
                 valueSlice,
                 MaterialEvaluationStage.Surface);
             VividMaterialSurfaceProgramID programID;
-            VividMaterialProgramID materialProgramID;
             ClosureExpressionNode root =
                 module.ClosureGraph.GetNode(module.SurfaceClosure);
             if (root.Opcode == ClosureExpressionOpcode.Slab
                 && MatchesStandardSingleSlab(module, root.Slab, stageLIR))
             {
                 programID = VividMaterialSurfaceProgramID.StandardSingleSlab;
-                materialProgramID = VividMaterialProgramID.StandardSingleSlab;
             }
             else if (MatchesDualSlab(module, root, stageLIR))
             {
                 programID = VividMaterialSurfaceProgramID.DualSlab;
-                materialProgramID = root.Opcode == ClosureExpressionOpcode.HorizontalMix
-                    ? VividMaterialProgramID.DualSlabHorizontalMix
-                    : VividMaterialProgramID.DualSlabVerticalLayer;
             }
             else
             {
@@ -553,7 +559,6 @@ namespace VividRP.Runtime.GPUDriven
 
             return new CompiledSurfaceProgram(
                 programID,
-                materialProgramID,
                 stageLIR,
                 MaterialValueRequirements.Collect(stageLIR));
         }
@@ -782,6 +787,7 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialParameterLayoutBinding binding = bindings[bindingIndex];
                 int bindingSize = GetValueSize(binding.Type);
                 if (binding.ByteOffset < 0
+                    || (binding.ByteOffset & (sizeof(uint) - 1)) != 0
                     || binding.ByteOffset > stride - bindingSize)
                 {
                     throw new ArgumentOutOfRangeException(
@@ -796,13 +802,24 @@ namespace VividRP.Runtime.GPUDriven
                             $"Parameter '{binding.Parameter}' has multiple layout bindings.",
                             nameof(bindings));
                     }
+                    int previousSize = GetValueSize(bindings[previousIndex].Type);
+                    if (binding.ByteOffset < bindings[previousIndex].ByteOffset + previousSize
+                        && bindings[previousIndex].ByteOffset < binding.ByteOffset + bindingSize)
+                    {
+                        throw new ArgumentException(
+                            $"Parameters '{bindings[previousIndex].Parameter}' and "
+                            + $"'{binding.Parameter}' overlap in the physical layout.",
+                            nameof(bindings));
+                    }
                 }
             }
 
             LayoutID = layoutID;
             Stride = stride;
-            m_Bindings = Array.AsReadOnly(
-                (MaterialParameterLayoutBinding[]) bindings.Clone());
+            var bindingCopy =
+                (MaterialParameterLayoutBinding[]) bindings.Clone();
+            Array.Sort(bindingCopy, CompareBindings);
+            m_Bindings = Array.AsReadOnly(bindingCopy);
         }
 
         internal VividMaterialParameterLayoutID LayoutID { get; }
@@ -841,6 +858,16 @@ namespace VividRP.Runtime.GPUDriven
                     throw new ArgumentOutOfRangeException(nameof(type), type, null);
             }
         }
+
+        private static int CompareBindings(
+            MaterialParameterLayoutBinding left,
+            MaterialParameterLayoutBinding right)
+        {
+            int result = left.ByteOffset.CompareTo(right.ByteOffset);
+            return result != 0
+                ? result
+                : ((int) left.Parameter).CompareTo((int) right.Parameter);
+        }
     }
 
     internal sealed class CompiledResourceLayout
@@ -866,6 +893,7 @@ namespace VividRP.Runtime.GPUDriven
                 if (binding.RecordOffset < 0
                     || binding.RecordOffset >= recordCount
                     || binding.ByteOffset < 0
+                    || (binding.ByteOffset & (sizeof(uint) - 1)) != 0
                     || binding.ByteOffset > recordStride - sizeof(uint))
                 {
                     throw new ArgumentOutOfRangeException(
@@ -880,14 +908,24 @@ namespace VividRP.Runtime.GPUDriven
                             $"Resource '{binding.Resource}' has multiple layout bindings.",
                             nameof(bindings));
                     }
+                    if (bindings[previousIndex].RecordOffset == binding.RecordOffset
+                        && bindings[previousIndex].ByteOffset == binding.ByteOffset)
+                    {
+                        throw new ArgumentException(
+                            $"Resources '{bindings[previousIndex].Resource}' and "
+                            + $"'{binding.Resource}' overlap in the physical layout.",
+                            nameof(bindings));
+                    }
                 }
             }
 
             LayoutID = layoutID;
             RecordStride = recordStride;
             RecordCount = recordCount;
-            m_Bindings = Array.AsReadOnly(
-                (MaterialResourceLayoutBinding[]) bindings.Clone());
+            var bindingCopy =
+                (MaterialResourceLayoutBinding[]) bindings.Clone();
+            Array.Sort(bindingCopy, CompareBindings);
+            m_Bindings = Array.AsReadOnly(bindingCopy);
         }
 
         internal VividMaterialResourceLayoutID LayoutID { get; }
@@ -913,6 +951,20 @@ namespace VividRP.Runtime.GPUDriven
 
             binding = default;
             return false;
+        }
+
+        private static int CompareBindings(
+            MaterialResourceLayoutBinding left,
+            MaterialResourceLayoutBinding right)
+        {
+            int result = left.RecordOffset.CompareTo(right.RecordOffset);
+            if (result != 0)
+                return result;
+
+            result = left.ByteOffset.CompareTo(right.ByteOffset);
+            return result != 0
+                ? result
+                : ((int) left.Resource).CompareTo((int) right.Resource);
         }
     }
 
@@ -941,86 +993,106 @@ namespace VividRP.Runtime.GPUDriven
     internal static class MaterialLayoutLowerer
     {
         internal static CompiledMaterialLayout Compile(
-            CompiledCoverageProgram coverageProgram,
-            CompiledSurfaceProgram surfaceProgram)
+            MaterialValueRequirements requirements,
+            MaterialGenericLayout genericLayout,
+            MaterialNativeTemplateLayoutSchema layoutSchema)
         {
-            if (coverageProgram == null)
-                throw new ArgumentNullException(nameof(coverageProgram));
-            if (surfaceProgram == null)
-                throw new ArgumentNullException(nameof(surfaceProgram));
+            if (requirements == null)
+                throw new ArgumentNullException(nameof(requirements));
+            if (genericLayout == null)
+                throw new ArgumentNullException(nameof(genericLayout));
+            if (layoutSchema == null)
+                throw new ArgumentNullException(nameof(layoutSchema));
+            if (!layoutSchema.Matches(requirements)
+                || !layoutSchema.LiveLayout.PayloadEquals(genericLayout))
+            {
+                throw new NotSupportedException(
+                    "The generic material layout does not match the selected native template layout schema.");
+            }
 
-            MaterialValueRequirements requirements = MaterialValueRequirements.Merge(
-                coverageProgram.Requirements,
-                surfaceProgram.Requirements);
             return new CompiledMaterialLayout(
                 requirements,
-                LowerParameterLayout(surfaceProgram.ProgramID, requirements.Parameters),
-                LowerResourceLayout(surfaceProgram.ProgramID, requirements.TextureResources));
+                layoutSchema.ParameterLayout,
+                layoutSchema.ResourceLayout);
         }
 
-        private static CompiledParameterLayout LowerParameterLayout(
-            VividMaterialSurfaceProgramID surfaceProgramID,
-            IReadOnlyList<MaterialParameter> parameters)
+        internal static MaterialNativeTemplateLayoutSchema CreateLegacyLayoutSchema()
         {
-            switch (surfaceProgramID)
-            {
-                case VividMaterialSurfaceProgramID.StandardSingleSlab:
-                    if (Matches(
-                        parameters,
+            return new MaterialNativeTemplateLayoutSchema(
+                CreateLegacyParameterLayout(),
+                CreateLegacyResourceLayout(),
+                new[]
+                {
+                    NativeParameter(
                         MaterialParameter.BaseColor,
+                        MaterialRuntimeParameter.BaseColor),
+                    NativeParameter(
                         MaterialParameter.Emission,
+                        MaterialRuntimeParameter.Emission,
+                        MaterialParameterStorageConversion.Float3ToFloat4),
+                    NativeParameter(
                         MaterialParameter.Roughness,
+                        MaterialRuntimeParameter.Roughness),
+                    NativeParameter(
                         MaterialParameter.Metallic,
-                        MaterialParameter.AlphaClipThreshold))
-                    {
-                        return CreateLegacyParameterLayout();
-                    }
-                    break;
-                case VividMaterialSurfaceProgramID.DualSlab:
-                    if (Matches(
-                        parameters,
-                        MaterialParameter.BaseColor,
-                        MaterialParameter.TopBaseColor,
-                        MaterialParameter.Emission,
-                        MaterialParameter.Roughness,
-                        MaterialParameter.TopRoughness,
-                        MaterialParameter.Metallic,
-                        MaterialParameter.TopMetallic,
-                        MaterialParameter.LayerWeight,
-                        MaterialParameter.AlphaClipThreshold))
-                    {
-                        return CreateDualSlabParameterLayout();
-                    }
-                    break;
-            }
-
-            throw new NotSupportedException(
-                $"Material parameters cannot be lowered for surface program '{surfaceProgramID}'.");
-        }
-
-        private static CompiledResourceLayout LowerResourceLayout(
-            VividMaterialSurfaceProgramID surfaceProgramID,
-            IReadOnlyList<MaterialTextureResource> resources)
-        {
-            switch (surfaceProgramID)
-            {
-                case VividMaterialSurfaceProgramID.StandardSingleSlab:
-                    if (Matches(resources, MaterialTextureResource.BaseColor))
-                        return CreateLegacyResourceLayout();
-                    break;
-                case VividMaterialSurfaceProgramID.DualSlab:
-                    if (Matches(
-                        resources,
+                        MaterialRuntimeParameter.Metallic),
+                    NativeParameter(
+                        MaterialParameter.AlphaClipThreshold,
+                        MaterialRuntimeParameter.AlphaClipThreshold),
+                },
+                new[]
+                {
+                    NativeResource(
                         MaterialTextureResource.BaseColor,
-                        MaterialTextureResource.TopBaseColor))
-                    {
-                        return CreateDualSlabResourceLayout();
-                    }
-                    break;
-            }
+                        MaterialTextureResource.BaseColor),
+                });
+        }
 
-            throw new NotSupportedException(
-                $"Material resources cannot be lowered for surface program '{surfaceProgramID}'.");
+        internal static MaterialNativeTemplateLayoutSchema CreateDualSlabLayoutSchema()
+        {
+            return new MaterialNativeTemplateLayoutSchema(
+                CreateDualSlabParameterLayout(),
+                CreateDualSlabResourceLayout(),
+                new[]
+                {
+                    NativeParameter(
+                        MaterialParameter.BaseColor,
+                        MaterialRuntimeParameter.BaseColor),
+                    NativeParameter(
+                        MaterialParameter.TopBaseColor,
+                        MaterialRuntimeParameter.TopBaseColor),
+                    NativeParameter(
+                        MaterialParameter.Emission,
+                        MaterialRuntimeParameter.Emission,
+                        MaterialParameterStorageConversion.Float3ToFloat4),
+                    NativeParameter(
+                        MaterialParameter.Roughness,
+                        MaterialRuntimeParameter.Roughness),
+                    NativeParameter(
+                        MaterialParameter.TopRoughness,
+                        MaterialRuntimeParameter.TopRoughness),
+                    NativeParameter(
+                        MaterialParameter.Metallic,
+                        MaterialRuntimeParameter.Metallic),
+                    NativeParameter(
+                        MaterialParameter.TopMetallic,
+                        MaterialRuntimeParameter.TopMetallic),
+                    NativeParameter(
+                        MaterialParameter.LayerWeight,
+                        MaterialRuntimeParameter.LayerWeight),
+                    NativeParameter(
+                        MaterialParameter.AlphaClipThreshold,
+                        MaterialRuntimeParameter.AlphaClipThreshold),
+                },
+                new[]
+                {
+                    NativeResource(
+                        MaterialTextureResource.BaseColor,
+                        MaterialTextureResource.BaseColor),
+                    NativeResource(
+                        MaterialTextureResource.TopBaseColor,
+                        MaterialTextureResource.TopBaseColor),
+                });
         }
 
         private static CompiledParameterLayout CreateLegacyParameterLayout()
@@ -1243,27 +1315,25 @@ namespace VividRP.Runtime.GPUDriven
                 OffsetOf<VividSurfaceBindingData>(fieldName));
         }
 
-        private static bool Matches<T>(IReadOnlyList<T> values, params T[] expected)
+        private static MaterialNativeParameterBinding NativeParameter(
+            MaterialParameter source,
+            MaterialRuntimeParameter target,
+            MaterialParameterStorageConversion conversion =
+                MaterialParameterStorageConversion.None)
         {
-            if (values.Count != expected.Length)
-                return false;
+            return new MaterialNativeParameterBinding(
+                MaterialNativeTemplateDeclarationAdapter.GetParameter(source),
+                target,
+                conversion);
+        }
 
-            var comparer = EqualityComparer<T>.Default;
-            for (int i = 0; i < expected.Length; i++)
-            {
-                bool found = false;
-                for (int valueIndex = 0; valueIndex < values.Count; valueIndex++)
-                {
-                    if (!comparer.Equals(values[valueIndex], expected[i]))
-                        continue;
-
-                    found = true;
-                    break;
-                }
-                if (!found)
-                    return false;
-            }
-            return true;
+        private static MaterialNativeResourceBinding NativeResource(
+            MaterialTextureResource source,
+            MaterialTextureResource target)
+        {
+            return new MaterialNativeResourceBinding(
+                MaterialNativeTemplateDeclarationAdapter.GetTexture(source),
+                target);
         }
 
         private static int SizeOf<T>()
@@ -1910,37 +1980,38 @@ namespace VividRP.Runtime.GPUDriven
     {
         private CompiledMaterialProgram(
             MaterialIRModule module,
-            CompiledCoverageProgram coverageProgram,
-            CompiledSurfaceProgram surfaceProgram,
-            CompiledMaterialLayout materialLayout,
+            MaterialProgramLoweringResult lowering,
             MaterialProgramDiagnostics diagnostics,
-            VividMaterialProgramID programID,
-            in VividMaterialProgramData runtimeData,
             in CompiledMaterialProgramHash compiledHash)
         {
-            Module = module;
-            CoverageProgram = coverageProgram;
-            SurfaceProgram = surfaceProgram;
-            MaterialLayout = materialLayout;
-            Diagnostics = diagnostics;
-            ProgramID = programID;
-            RuntimeData = runtimeData;
+            Module = module ?? throw new ArgumentNullException(nameof(module));
+            Lowering = lowering ?? throw new ArgumentNullException(nameof(lowering));
+            Diagnostics = diagnostics
+                ?? throw new ArgumentNullException(nameof(diagnostics));
             CompiledHash = compiledHash;
         }
 
         internal MaterialIRModule Module { get; }
 
-        internal CompiledCoverageProgram CoverageProgram { get; }
+        internal MaterialProgramLoweringResult Lowering { get; }
 
-        internal CompiledSurfaceProgram SurfaceProgram { get; }
+        internal CompiledCoverageProgram CoverageProgram =>
+            Lowering.CoverageProgram;
 
-        internal CompiledMaterialLayout MaterialLayout { get; }
+        internal CompiledSurfaceProgram SurfaceProgram =>
+            Lowering.SurfaceProgram;
+
+        internal CompiledTransportProgram TransportProgram =>
+            Lowering.TransportProgram;
+
+        internal CompiledMaterialLayout MaterialLayout =>
+            Lowering.MaterialLayout;
 
         internal MaterialProgramDiagnostics Diagnostics { get; }
 
-        internal VividMaterialProgramID ProgramID { get; }
+        internal VividMaterialProgramID ProgramID => Lowering.ProgramID;
 
-        internal VividMaterialProgramData RuntimeData { get; }
+        internal VividMaterialProgramData RuntimeData => Lowering.RuntimeData;
 
         internal MaterialSemanticHash SemanticHash => Module.SemanticHash;
 
@@ -1951,7 +2022,11 @@ namespace VividRP.Runtime.GPUDriven
             uint programVersion)
         {
             MaterialProgramCostBudget budget = MaterialProgramCostBudget.Prototype;
-            return Compile(module, programVersion, budget);
+            return Compile(
+                module,
+                programVersion,
+                budget,
+                MaterialProgramBuiltinCatalog.Definition);
         }
 
         internal static CompiledMaterialProgram Compile(
@@ -1959,8 +2034,32 @@ namespace VividRP.Runtime.GPUDriven
             uint programVersion,
             in MaterialProgramCostBudget costBudget)
         {
+            return Compile(
+                module,
+                programVersion,
+                costBudget,
+                MaterialProgramBuiltinCatalog.Definition);
+        }
+
+        internal static CompiledMaterialProgram Compile(
+            MaterialIRModule module,
+            uint programVersion,
+            MaterialProgramCatalogDefinition catalogDefinition)
+        {
+            MaterialProgramCostBudget budget = MaterialProgramCostBudget.Prototype;
+            return Compile(module, programVersion, budget, catalogDefinition);
+        }
+
+        internal static CompiledMaterialProgram Compile(
+            MaterialIRModule module,
+            uint programVersion,
+            in MaterialProgramCostBudget costBudget,
+            MaterialProgramCatalogDefinition catalogDefinition)
+        {
             if (module == null)
                 throw new ArgumentNullException(nameof(module));
+            if (catalogDefinition == null)
+                throw new ArgumentNullException(nameof(catalogDefinition));
             if (programVersion != MaterialProgramContract.RuntimeAbiVersion)
             {
                 throw new ArgumentOutOfRangeException(
@@ -1973,53 +2072,27 @@ namespace VividRP.Runtime.GPUDriven
             ClosureTopology topology = module.Topology;
             if (!topology.IsWithinBudget)
                 throw new InvalidOperationException("Closure topology exceeds its compilation budget.");
-            CompiledCoverageProgram coverageProgram = CoverageProgramLowerer.Compile(module);
-            CompiledSurfaceProgram surfaceProgram = SurfaceProgramMatcher.Compile(module);
-            CompiledMaterialLayout materialLayout = MaterialLayoutLowerer.Compile(
-                coverageProgram,
-                surfaceProgram);
+            MaterialProgramLoweringResult lowering = MaterialProgramLowerer.Lower(
+                module,
+                programVersion,
+                catalogDefinition);
             MaterialProgramDiagnostics diagnostics = MaterialProgramDiagnosticsBuilder.Build(
                 module,
-                coverageProgram,
-                surfaceProgram,
-                materialLayout,
+                lowering.CoverageProgram,
+                lowering.SurfaceProgram,
+                lowering.MaterialLayout,
                 costBudget);
             if (!diagnostics.IsWithinBudget)
                 throw new InvalidOperationException(diagnostics.GetDebugDump());
 
-            VividMaterialProgramID programID = surfaceProgram.MaterialProgramID;
-
-            VividMaterialProgramCapabilities capabilities =
-                VividMaterialProgramCapabilities.LegacyGBufferExport;
-            if ((module.MaterialFeatures & MaterialFeatureMask.AlphaClip) != 0)
-                capabilities |= VividMaterialProgramCapabilities.AlphaClip;
-            if ((module.ShadingModels & MaterialShadingModelMask.Unlit) != 0)
-                capabilities |= VividMaterialProgramCapabilities.Unlit;
-
-            var runtimeData = new VividMaterialProgramData
-            {
-                Version = programVersion,
-                CoverageProgramID = coverageProgram.ProgramID,
-                SurfaceProgramID = surfaceProgram.ProgramID,
-                TransportProgramID = VividMaterialTransportProgramID.None,
-                ParameterLayoutID = materialLayout.ParameterLayout.LayoutID,
-                ResourceLayoutID = materialLayout.ResourceLayout.LayoutID,
-                CapabilityFlags = capabilities,
-                ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
-            };
             CompiledMaterialProgramHash compiledHash =
                 CompiledMaterialProgramHashBuilder.ComputeNativeTemplate(
                     module.SemanticHash,
-                    runtimeData,
-                    materialLayout);
+                    lowering);
             return new CompiledMaterialProgram(
                 module,
-                coverageProgram,
-                surfaceProgram,
-                materialLayout,
+                lowering,
                 diagnostics,
-                programID,
-                runtimeData,
                 compiledHash);
         }
     }

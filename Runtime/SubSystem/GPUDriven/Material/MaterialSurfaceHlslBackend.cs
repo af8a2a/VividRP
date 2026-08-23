@@ -177,6 +177,27 @@ namespace VividRP.Runtime.GPUDriven
             MaterialNativeTemplateLayoutSchema schema,
             MaterialSurfaceHlslPhysicalContract physicalContract)
         {
+            AppendStageNodes(
+                builder,
+                stageLIR,
+                schema,
+                physicalContract,
+                includePositionCS: true);
+        }
+
+        internal static void AppendStageNodes(
+            StringBuilder builder,
+            MaterialStageLIR stageLIR,
+            MaterialNativeTemplateLayoutSchema schema,
+            MaterialSurfaceHlslPhysicalContract physicalContract,
+            bool includePositionCS)
+        {
+            if (builder == null)
+                throw new ArgumentNullException(nameof(builder));
+            if (stageLIR == null)
+                throw new ArgumentNullException(nameof(stageLIR));
+            if (schema == null)
+                throw new ArgumentNullException(nameof(schema));
             for (int nodeIndex = 0; nodeIndex < stageLIR.Nodes.Count; nodeIndex++)
             {
                 MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
@@ -191,7 +212,8 @@ namespace VividRP.Runtime.GPUDriven
                         node,
                         nodeIndex,
                         schema,
-                        physicalContract);
+                        physicalContract,
+                        includePositionCS);
                     continue;
                 }
 
@@ -270,7 +292,8 @@ namespace VividRP.Runtime.GPUDriven
             in MaterialStageLIRNode sample,
             int sampleIndex,
             MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
+            MaterialSurfaceHlslPhysicalContract physicalContract,
+            bool includePositionCS)
         {
             MaterialStageLIRNode resourceNode = stageLIR.Nodes[sample.Operand0];
             if (!stageLIR.Values.TryGetResourceDeclaration(
@@ -318,8 +341,14 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(surfaceBinding).Append(", ")
                 .Append(uvName).Append(", ")
                 .Append(ddxName).Append(", ")
-                .Append(ddyName).Append(", ")
-                .Append(ContextVariable).AppendLine(".PositionCS);");
+                .Append(ddyName);
+            if (includePositionCS)
+            {
+                builder.Append(", ")
+                    .Append(ContextVariable)
+                    .Append(".PositionCS");
+            }
+            builder.AppendLine(");");
             builder.Append("    const float4 ")
                 .Append(GetValueName(sampleIndex)).Append(" = ")
                 .Append(sampleFunction).Append('(')
@@ -678,7 +707,7 @@ namespace VividRP.Runtime.GPUDriven
                 : $"VividGetBaseSlabMaterialData({MaterialVariable})";
         }
 
-        private static MaterialSurfaceHlslPhysicalContract GetPhysicalContract(
+        internal static MaterialSurfaceHlslPhysicalContract GetPhysicalContract(
             MaterialNativeTemplateLayoutSchema schema)
         {
             if (schema.ParameterLayout.LayoutID
@@ -926,7 +955,7 @@ namespace VividRP.Runtime.GPUDriven
             return GetValueName(nodeIndex);
         }
 
-        private static ulong ComputeBindingHash(MaterialNativeTemplateLayoutSchema schema)
+        internal static ulong ComputeBindingHash(MaterialNativeTemplateLayoutSchema schema)
         {
             ulong hash = MaterialProgramHashUtility.OffsetBasis;
             MaterialProgramHashUtility.Add(ref hash, (uint) schema.ParameterLayout.LayoutID);

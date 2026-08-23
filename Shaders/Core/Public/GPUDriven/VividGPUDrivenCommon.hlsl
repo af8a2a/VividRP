@@ -442,6 +442,21 @@ VividDualSlabMaterialData PullDualSlabMaterialData(const uint materialIndex)
     return _DualSlabMaterialData[materialIndex];
 }
 
+VividSlabMaterialData VividCreateSlabMaterialData(
+    const VividMaterialData materialData)
+{
+    VividSlabMaterialData slabData;
+    slabData.AlbedoColor = materialData.AlbedoColor;
+    slabData.TextureTilingOffset = materialData.TextureTilingOffset;
+    slabData.MetallicSmoothnessRemap = materialData.MetallicSmoothnessRemap;
+    slabData.AmbientOcclusionRemap = materialData.AmbientOcclusionRemap;
+    slabData.NormalsStrength = materialData.NormalsStrength;
+    slabData.Roughness = materialData.Roughness;
+    slabData.Metallic = materialData.Metallic;
+    slabData.MaskMode = materialData.Padding0;
+    return slabData;
+}
+
 VividSlabMaterialData VividGetBaseSlabMaterialData(
     const VividDualSlabMaterialData materialData)
 {

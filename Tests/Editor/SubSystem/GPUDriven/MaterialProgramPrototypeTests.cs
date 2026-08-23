@@ -1095,13 +1095,15 @@ namespace VividRP.Editor.Tests
             Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.StageLIRVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.DerivativeLegalizationVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.GenericLayoutVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(8u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(9u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(6u));
+            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(3u));
@@ -1143,9 +1145,9 @@ namespace VividRP.Editor.Tests
             };
             var expectedCompiledHashes = new[]
             {
-                0x739089D4D2A34585ul,
-                0xBCCDEA308029D72Eul,
-                0x5DCD42D8F09CECB8ul,
+                0xD8AE199993CE2C48ul,
+                0x0DE142FFDFE2B11Ful,
+                0x7322436BBEAF8561ul,
             };
 
             for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)
@@ -1872,14 +1874,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CoverageLowering_RejectsUnmappedCoverageValueIR()
+        public void CoverageLowering_AcceptsGeneralVerifiedCoverageValueIR()
         {
             MaterialIRModule module = BuildUnsupportedCoverageModule();
 
-            Assert.Throws<NotSupportedException>(() =>
-                CompiledMaterialProgram.Compile(
-                    module,
-                    GPUDrivenMaterialCompiler.ProgramVersion));
+            CompiledCoverageProgram coverage = CoverageProgramLowerer.Compile(module);
+
+            Assert.That(
+                coverage.ProgramID,
+                Is.EqualTo(VividMaterialCoverageProgramID.BaseColorAlpha));
+            Assert.That(coverage.StageLIR.Stage, Is.EqualTo(MaterialEvaluationStage.Coverage));
+            Assert.That(coverage.StageLIR.Roots, Has.Count.EqualTo(2));
+            Assert.That(
+                coverage.ValueSlice.Contains(module.Outputs.CoverageValue),
+                Is.True);
+            Assert.That(
+                coverage.ValueSlice.Contains(module.Outputs.AlphaClipThreshold),
+                Is.True);
         }
 
         [Test]
@@ -1996,6 +2007,12 @@ namespace VividRP.Editor.Tests
 
             Assert.That(compiled.ProgramID, Is.EqualTo(customProgramID));
             Assert.That(compiled.CompiledHash, Is.EqualTo(builtin.CompiledHash));
+            Assert.That(
+                compiled.CoverageHlsl.PayloadEquals(builtin.CoverageHlsl),
+                Is.True);
+            Assert.That(
+                compiled.CoverageHlsl.EntryPoint,
+                Is.EqualTo(builtin.CoverageHlsl.EntryPoint));
             VividMaterialProgramData[] runtimeTable =
                 catalog.CreateRuntimeProgramTable();
             Assert.That(runtimeTable, Has.Length.EqualTo(5));

@@ -329,33 +329,6 @@ namespace VividRP.Runtime.GPUDriven
                     MaterialStageInput.UV0Ddy);
         }
 
-        internal static bool MatchesSampledColorComponent(
-            MaterialStageLIR stageLIR,
-            MaterialValue value,
-            int component,
-            MaterialTextureResource textureResource,
-            MaterialParameter colorParameter)
-        {
-            MaterialStageLIRNode swizzle =
-                stageLIR.GetNode(stageLIR.GetValue(value));
-            if (swizzle.Opcode != MaterialStageLIROpcode.Swizzle
-                || swizzle.Type != MaterialValueType.Float
-                || !MaterialSwizzleMask.TryDecode(
-                    swizzle.Semantic,
-                    out MaterialSwizzleMask mask)
-                || mask.ComponentCount != 1
-                || mask.GetComponent(0) != component)
-            {
-                return false;
-            }
-
-            return MatchesSampledColorNode(
-                stageLIR,
-                swizzle.Operand0,
-                textureResource,
-                colorParameter);
-        }
-
         private static bool MatchesStageInput(
             in MaterialStageLIRNode node,
             MaterialValueType type,
@@ -455,10 +428,12 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialEvaluationStage.Coverage,
                 module.Outputs.CoverageValue,
                 module.Outputs.AlphaClipThreshold);
-            if (!MatchesBaseColorAlphaProgram(module, stageLIR))
+            if (stageLIR.Roots.Count != 2
+                || stageLIR.Roots[0].Type != MaterialValueType.Float
+                || stageLIR.Roots[1].Type != MaterialValueType.Float)
             {
                 throw new NotSupportedException(
-                    "Coverage value IR cannot be lowered to an existing coverage program ABI.");
+                    "Coverage lowering requires Float coverage and alpha-clip-threshold roots.");
             }
 
             MaterialValueRequirements requirements =
@@ -467,23 +442,6 @@ namespace VividRP.Runtime.GPUDriven
                 VividMaterialCoverageProgramID.BaseColorAlpha,
                 stageLIR,
                 requirements);
-        }
-
-        private static bool MatchesBaseColorAlphaProgram(
-            MaterialIRModule module,
-            MaterialStageLIR stageLIR)
-        {
-            return MaterialStageValuePatternMatcher.MatchesParameter(
-                    stageLIR,
-                    module.Outputs.AlphaClipThreshold,
-                    MaterialParameter.AlphaClipThreshold)
-                && MaterialStageValuePatternMatcher.MatchesSampledColorComponent(
-                    stageLIR,
-                    module.Outputs.CoverageValue,
-                    component: 3,
-                    MaterialTextureResource.BaseColor,
-                    MaterialParameter.BaseColor)
-                && stageLIR.NodeCount == 9;
         }
     }
 
@@ -1981,12 +1939,15 @@ namespace VividRP.Runtime.GPUDriven
         private CompiledMaterialProgram(
             MaterialIRModule module,
             MaterialProgramLoweringResult lowering,
+            MaterialCoverageHlslArtifact coverageHlsl,
             MaterialSurfaceHlslArtifact surfaceHlsl,
             MaterialProgramDiagnostics diagnostics,
             in CompiledMaterialProgramHash compiledHash)
         {
             Module = module ?? throw new ArgumentNullException(nameof(module));
             Lowering = lowering ?? throw new ArgumentNullException(nameof(lowering));
+            CoverageHlsl = coverageHlsl
+                ?? throw new ArgumentNullException(nameof(coverageHlsl));
             SurfaceHlsl = surfaceHlsl
                 ?? throw new ArgumentNullException(nameof(surfaceHlsl));
             Diagnostics = diagnostics
@@ -2009,6 +1970,8 @@ namespace VividRP.Runtime.GPUDriven
 
         internal CompiledMaterialLayout MaterialLayout =>
             Lowering.MaterialLayout;
+
+        internal MaterialCoverageHlslArtifact CoverageHlsl { get; }
 
         internal MaterialSurfaceHlslArtifact SurfaceHlsl { get; }
 
@@ -2090,6 +2053,8 @@ namespace VividRP.Runtime.GPUDriven
             if (!diagnostics.IsWithinBudget)
                 throw new InvalidOperationException(diagnostics.GetDebugDump());
 
+            MaterialCoverageHlslArtifact coverageHlsl =
+                MaterialCoverageHlslBackend.Compile(module, lowering);
             MaterialSurfaceHlslArtifact surfaceHlsl =
                 MaterialSurfaceHlslBackend.Compile(module, lowering);
 
@@ -2097,10 +2062,12 @@ namespace VividRP.Runtime.GPUDriven
                 CompiledMaterialProgramHashBuilder.ComputeNativeTemplate(
                     module.SemanticHash,
                     lowering,
+                    coverageHlsl,
                     surfaceHlsl);
             return new CompiledMaterialProgram(
                 module,
                 lowering,
+                coverageHlsl,
                 surfaceHlsl,
                 diagnostics,
                 compiledHash);

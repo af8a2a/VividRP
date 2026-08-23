@@ -3,19 +3,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEditor;
-using UnityEditor.Build;
-using UnityEditor.Build.Reporting;
-using UnityEditor.Callbacks;
 using UnityEngine;
 using Unity.Scripting.LifecycleManagement;
 using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor
 {
-    internal static class MaterialSurfaceHlslGenerator
+    internal static class MaterialCoverageHlslGenerator
     {
         private const string GeneratedRelativePath =
-            "Shaders/Core/Public/GPUDriven/VividMaterialSurfaceAOT.generated.hlsl";
+            "Shaders/Core/Public/GPUDriven/VividMaterialCoverageAOT.generated.hlsl";
 
         [NoAutoStaticsCleanup]
         private static bool s_IsGenerating;
@@ -25,7 +22,9 @@ namespace VividRP.Editor
 
         internal static string GenerateAll()
         {
-            return Generate(GetBuiltinPrograms(), GeneratedPath);
+            return Generate(
+                MaterialSurfaceHlslGenerator.GetBuiltinPrograms(),
+                GeneratedPath);
         }
 
         internal static string Generate(
@@ -73,7 +72,9 @@ namespace VividRP.Editor
 
         internal static bool IsSynchronized()
         {
-            return IsSynchronized(GetBuiltinPrograms(), GeneratedPath);
+            return IsSynchronized(
+                MaterialSurfaceHlslGenerator.GetBuiltinPrograms(),
+                GeneratedPath);
         }
 
         internal static bool IsSynchronized(
@@ -102,87 +103,26 @@ namespace VividRP.Editor
 
         internal static string BuildSource()
         {
-            return BuildSource(GetBuiltinPrograms());
+            return BuildSource(MaterialSurfaceHlslGenerator.GetBuiltinPrograms());
         }
 
         internal static string BuildSource(
             IReadOnlyList<CompiledMaterialProgram> programs)
         {
-            return MaterialSurfaceHlslSourceBuilder.BuildSource(programs);
+            return MaterialCoverageHlslSourceBuilder.BuildSource(programs);
         }
 
-        internal static IReadOnlyList<CompiledMaterialProgram> GetBuiltinPrograms()
-        {
-            return new[]
-            {
-                GPUDrivenMaterialCompiler.GetMaterialProgram(
-                    VividMaterialProgramID.StandardSingleSlab),
-                GPUDrivenMaterialCompiler.GetMaterialProgram(
-                    VividMaterialProgramID.DualSlabHorizontalMix),
-                GPUDrivenMaterialCompiler.GetMaterialProgram(
-                    VividMaterialProgramID.DualSlabVerticalLayer),
-            };
-        }
-
-        [MenuItem("VividRP/GPU Driven/Generate AOT Surface HLSL")]
+        [MenuItem("VividRP/GPU Driven/Generate AOT Coverage HLSL")]
         private static void GenerateFromMenu()
         {
             try
             {
                 string generatedPath = GenerateAll();
-                Debug.Log($"Generated AOT Surface HLSL at '{generatedPath}'.");
+                Debug.Log($"Generated AOT Coverage HLSL at '{generatedPath}'.");
             }
             catch (Exception exception)
             {
                 Debug.LogException(exception);
-            }
-        }
-    }
-
-    [InitializeOnLoad]
-    internal static class MaterialSurfaceHlslGenerationBootstrap
-    {
-        static MaterialSurfaceHlslGenerationBootstrap()
-        {
-            EditorApplication.delayCall += Generate;
-        }
-
-        [DidReloadScripts]
-        private static void OnScriptsReloaded()
-        {
-            EditorApplication.delayCall += Generate;
-        }
-
-        private static void Generate()
-        {
-            try
-            {
-                MaterialSurfaceHlslGenerator.GenerateAll();
-                MaterialCoverageHlslGenerator.GenerateAll();
-            }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception);
-            }
-        }
-    }
-
-    internal sealed class MaterialSurfaceHlslBuildPreprocessor :
-        IPreprocessBuildWithReport
-    {
-        public int callbackOrder => 0;
-
-        public void OnPreprocessBuild(BuildReport report)
-        {
-            try
-            {
-                MaterialSurfaceHlslGenerator.GenerateAll();
-                MaterialCoverageHlslGenerator.GenerateAll();
-            }
-            catch (Exception exception)
-            {
-                throw new BuildFailedException(
-                    $"Failed to generate AOT Material HLSL: {exception.Message}");
             }
         }
     }

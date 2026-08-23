@@ -138,9 +138,11 @@ namespace VividRP.Editor.Tests
 
             Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(8u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(9u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(6u));
             Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(1u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.SurfaceHlslArtifactVersion));
@@ -153,6 +155,7 @@ namespace VividRP.Editor.Tests
                 CompiledMaterialProgramHashBuilder.ComputeNativeTemplate(
                     program.SemanticHash,
                     program.Lowering,
+                    program.CoverageHlsl,
                     artifact);
             var changedArtifact = new MaterialSurfaceHlslArtifact(
                 artifact.EntryPoint,
@@ -164,6 +167,7 @@ namespace VividRP.Editor.Tests
                 CompiledMaterialProgramHashBuilder.ComputeNativeTemplate(
                     program.SemanticHash,
                     program.Lowering,
+                    program.CoverageHlsl,
                     changedArtifact);
 
             Assert.That(reproduced, Is.EqualTo(program.CompiledHash));

@@ -183,21 +183,6 @@ float3 VividUnpackSlabNormalScale(const float4 packedNormal, const float scale)
     return normalTS;
 }
 
-VividSlabMaterialData VividCreateSlabMaterialData(
-    const VividMaterialData materialData)
-{
-    VividSlabMaterialData slabData;
-    slabData.AlbedoColor = materialData.AlbedoColor;
-    slabData.TextureTilingOffset = materialData.TextureTilingOffset;
-    slabData.MetallicSmoothnessRemap = materialData.MetallicSmoothnessRemap;
-    slabData.AmbientOcclusionRemap = materialData.AmbientOcclusionRemap;
-    slabData.NormalsStrength = materialData.NormalsStrength;
-    slabData.Roughness = materialData.Roughness;
-    slabData.Metallic = materialData.Metallic;
-    slabData.MaskMode = materialData.Padding0;
-    return slabData;
-}
-
 VividEvaluatedSlabSurface VividEvaluateAOTSlabSurfaceDetail(
     const VividSlabMaterialData slabData,
     const VividSurfaceBindingData surfaceBindingData,

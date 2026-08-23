@@ -10,15 +10,17 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint ClosureExpressionVersion = 1u;
         internal const uint StageLIRVersion = 1u;
         internal const uint DerivativeLegalizationVersion = 1u;
-        internal const uint ProgramLoweringVersion = 1u;
+        internal const uint ProgramLoweringVersion = 2u;
         internal const uint GenericLayoutVersion = 1u;
         internal const uint ProgramCatalogVersion = 1u;
         internal const uint SurfaceHlslArtifactVersion = 2u;
         internal const uint SurfaceHlslBackendVersion = 2u;
+        internal const uint CoverageHlslArtifactVersion = 1u;
+        internal const uint CoverageHlslBackendVersion = 1u;
         internal const uint SemanticHashVersion = 4u;
-        internal const uint CompiledHashVersion = 3u;
-        internal const uint CompilerVersion = 8u;
-        internal const uint NativeTemplateBackendVersion = 5u;
+        internal const uint CompiledHashVersion = 4u;
+        internal const uint CompilerVersion = 9u;
+        internal const uint NativeTemplateBackendVersion = 6u;
         internal const uint VerifierVersion = 3u;
         internal const uint RuntimeAbiVersion = 1u;
 
@@ -220,10 +222,13 @@ namespace VividRP.Runtime.GPUDriven
         internal static CompiledMaterialProgramHash ComputeNativeTemplate(
             in MaterialSemanticHash semanticHash,
             MaterialProgramLoweringResult lowering,
+            MaterialCoverageHlslArtifact coverageHlsl,
             MaterialSurfaceHlslArtifact surfaceHlsl)
         {
             if (lowering == null)
                 throw new ArgumentNullException(nameof(lowering));
+            if (coverageHlsl == null)
+                throw new ArgumentNullException(nameof(coverageHlsl));
             if (surfaceHlsl == null)
                 throw new ArgumentNullException(nameof(surfaceHlsl));
 
@@ -254,10 +259,24 @@ namespace VividRP.Runtime.GPUDriven
             AddResourceLayout(
                 ref hash,
                 lowering.MaterialLayout.ResourceLayout);
+            AddCoverageHlslArtifact(ref hash, coverageHlsl);
             AddSurfaceHlslArtifact(ref hash, surfaceHlsl);
             return new CompiledMaterialProgramHash(
                 MaterialProgramContract.CompiledHashVersion,
                 hash);
+        }
+
+        private static void AddCoverageHlslArtifact(
+            ref ulong hash,
+            MaterialCoverageHlslArtifact artifact)
+        {
+            MaterialProgramHashUtility.Add(ref hash, artifact.Version);
+            MaterialProgramHashUtility.Add(ref hash, artifact.BackendVersion);
+            MaterialProgramHashUtility.Add(ref hash, (int) artifact.PhysicalContract);
+            MaterialProgramHashUtility.Add(ref hash, artifact.BindingHash);
+            MaterialProgramHashUtility.Add(ref hash, artifact.CodeHash);
+            MaterialProgramHashUtility.Add(ref hash, artifact.EntryPoint);
+            MaterialProgramHashUtility.Add(ref hash, artifact.Source);
         }
 
         private static void AddSurfaceHlslArtifact(

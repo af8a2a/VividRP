@@ -6,56 +6,56 @@ namespace VividRP.Runtime.GPUDriven
 {
     internal enum MaterialValueType
     {
-        Bool,
-        Float,
-        Float2,
-        Float3,
-        Float4,
-        Texture2D,
+        Bool = 0,
+        Float = 1,
+        Float2 = 2,
+        Float3 = 3,
+        Float4 = 4,
+        Texture2D = 5,
     }
 
     internal enum MaterialValueOpcode
     {
-        Constant,
-        ExternalInput,
-        Parameter,
-        TextureResource,
-        TextureSampleGrad,
-        Ddx,
-        Ddy,
-        Add,
-        Multiply,
-        Lerp,
-        Select,
+        Constant = 0,
+        ExternalInput = 1,
+        Parameter = 2,
+        TextureResource = 3,
+        TextureSampleGrad = 4,
+        Ddx = 5,
+        Ddy = 6,
+        Add = 7,
+        Multiply = 8,
+        Lerp = 9,
+        Select = 10,
     }
 
     internal enum MaterialExternalInput
     {
-        UV0,
-        GeometryNormalWS,
-        GeometryTangentWS,
+        UV0 = 0,
+        GeometryNormalWS = 1,
+        GeometryTangentWS = 2,
     }
 
     internal enum MaterialParameter
     {
-        BaseColor,
-        TopBaseColor,
-        Roughness,
-        TopRoughness,
-        Metallic,
-        TopMetallic,
-        LayerWeight,
-        AlphaClipThreshold,
+        BaseColor = 0,
+        TopBaseColor = 1,
+        Roughness = 2,
+        TopRoughness = 3,
+        Metallic = 4,
+        TopMetallic = 5,
+        LayerWeight = 6,
+        AlphaClipThreshold = 7,
     }
 
     internal enum MaterialTextureResource
     {
-        BaseColor,
-        TopBaseColor,
-        BaseNormal,
-        BaseMask,
-        TopNormal,
-        TopMask,
+        BaseColor = 0,
+        TopBaseColor = 1,
+        BaseNormal = 2,
+        BaseMask = 3,
+        TopNormal = 4,
+        TopMask = 5,
     }
 
     internal readonly struct MaterialValue : IEquatable<MaterialValue>

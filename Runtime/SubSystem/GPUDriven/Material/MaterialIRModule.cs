@@ -103,10 +103,6 @@ namespace VividRP.Runtime.GPUDriven
 
     internal sealed class MaterialIRModule
     {
-        private const uint CanonicalProgramHashVersion = 1;
-        private const ulong HashOffsetBasis = 14695981039346656037ul;
-        private const ulong HashPrime = 1099511628211ul;
-
         private readonly string m_DebugDump;
 
         internal MaterialIRModule(
@@ -122,7 +118,10 @@ namespace VividRP.Runtime.GPUDriven
 
             Validate();
             Values.Freeze();
-            StructuralHash = ComputeStructuralHash();
+            SemanticHash = new MaterialSemanticHash(
+                MaterialProgramContract.IRSchemaVersion,
+                MaterialProgramContract.SemanticHashVersion,
+                ComputeStructuralHash());
             m_DebugDump = BuildDebugDump();
         }
 
@@ -134,7 +133,9 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialFeatureMask MaterialFeatures { get; }
 
-        internal ulong StructuralHash { get; }
+        internal MaterialSemanticHash SemanticHash { get; }
+
+        internal ulong StructuralHash => SemanticHash.Value;
 
         internal string GetDebugDump()
         {
@@ -179,8 +180,8 @@ namespace VividRP.Runtime.GPUDriven
         {
             var valueHashes = new ulong[Values.NodeCount];
             var hasValueHash = new bool[Values.NodeCount];
-            ulong hash = HashOffsetBasis;
-            AddHash(ref hash, CanonicalProgramHashVersion);
+            ulong hash = MaterialProgramHashUtility.OffsetBasis;
+            AddHash(ref hash, MaterialProgramContract.SemanticHashVersion);
             AddValueHash(ref hash, Outputs.CoverageValue, valueHashes, hasValueHash);
             AddValueHash(ref hash, Outputs.AlphaClipThreshold, valueHashes, hasValueHash);
             AddHash(ref hash, (int) MaterialFeatures);
@@ -228,7 +229,7 @@ namespace VividRP.Runtime.GPUDriven
                 return valueHashes[nodeIndex];
 
             MaterialValueNode node = Values.Nodes[nodeIndex];
-            ulong hash = HashOffsetBasis;
+            ulong hash = MaterialProgramHashUtility.OffsetBasis;
             AddHash(ref hash, (int) node.Opcode);
             AddHash(ref hash, (int) node.Type);
             AddHash(ref hash, node.Semantic);
@@ -264,6 +265,8 @@ namespace VividRP.Runtime.GPUDriven
             var builder = new StringBuilder();
             builder.Append("material_ir_module hash=0x")
                 .AppendLine(StructuralHash.ToString("X16", CultureInfo.InvariantCulture));
+            builder.Append("semantic_identity ")
+                .AppendLine(SemanticHash.ToString());
             builder.AppendLine("values:");
             for (int i = 0; i < Values.Nodes.Count; i++)
             {
@@ -387,30 +390,22 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AddHash(ref ulong hash, bool value)
         {
-            AddHash(ref hash, value ? 1u : 0u);
+            MaterialProgramHashUtility.Add(ref hash, value);
         }
 
         private static void AddHash(ref ulong hash, int value)
         {
-            AddHash(ref hash, unchecked((uint) value));
+            MaterialProgramHashUtility.Add(ref hash, value);
         }
 
         private static void AddHash(ref ulong hash, uint value)
         {
-            for (int byteIndex = 0; byteIndex < sizeof(uint); byteIndex++)
-            {
-                hash ^= (byte) (value >> (byteIndex * 8));
-                hash *= HashPrime;
-            }
+            MaterialProgramHashUtility.Add(ref hash, value);
         }
 
         private static void AddHash(ref ulong hash, ulong value)
         {
-            for (int byteIndex = 0; byteIndex < sizeof(ulong); byteIndex++)
-            {
-                hash ^= (byte) (value >> (byteIndex * 8));
-                hash *= HashPrime;
-            }
+            MaterialProgramHashUtility.Add(ref hash, value);
         }
     }
 }

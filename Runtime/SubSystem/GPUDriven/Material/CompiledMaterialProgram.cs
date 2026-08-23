@@ -477,33 +477,33 @@ namespace VividRP.Runtime.GPUDriven
 
     internal enum MaterialLayoutValueType
     {
-        Float,
-        Float4,
-        UInt,
+        Float = 0,
+        Float4 = 1,
+        UInt = 2,
     }
 
     internal enum MaterialRuntimeParameter
     {
-        BaseColor,
-        TopBaseColor,
-        BaseTextureTilingOffset,
-        TopTextureTilingOffset,
-        Emission,
-        BaseMetallicSmoothnessRemap,
-        TopMetallicSmoothnessRemap,
-        BaseAmbientOcclusionRemap,
-        TopAmbientOcclusionRemap,
-        BaseNormalsStrength,
-        TopNormalsStrength,
-        Roughness,
-        TopRoughness,
-        Metallic,
-        TopMetallic,
-        BaseMaskMode,
-        TopMaskMode,
-        LayerOperator,
-        LayerWeight,
-        AlphaClipThreshold,
+        BaseColor = 0,
+        TopBaseColor = 1,
+        BaseTextureTilingOffset = 2,
+        TopTextureTilingOffset = 3,
+        Emission = 4,
+        BaseMetallicSmoothnessRemap = 5,
+        TopMetallicSmoothnessRemap = 6,
+        BaseAmbientOcclusionRemap = 7,
+        TopAmbientOcclusionRemap = 8,
+        BaseNormalsStrength = 9,
+        TopNormalsStrength = 10,
+        Roughness = 11,
+        TopRoughness = 12,
+        Metallic = 13,
+        TopMetallic = 14,
+        BaseMaskMode = 15,
+        TopMaskMode = 16,
+        LayerOperator = 17,
+        LayerWeight = 18,
+        AlphaClipThreshold = 19,
     }
 
     internal readonly struct MaterialParameterLayoutBinding
@@ -1605,7 +1605,8 @@ namespace VividRP.Runtime.GPUDriven
             CompiledMaterialLayout materialLayout,
             MaterialProgramDiagnostics diagnostics,
             VividMaterialProgramID programID,
-            in VividMaterialProgramData runtimeData)
+            in VividMaterialProgramData runtimeData,
+            in CompiledMaterialProgramHash compiledHash)
         {
             Module = module;
             CoverageProgram = coverageProgram;
@@ -1614,6 +1615,7 @@ namespace VividRP.Runtime.GPUDriven
             Diagnostics = diagnostics;
             ProgramID = programID;
             RuntimeData = runtimeData;
+            CompiledHash = compiledHash;
         }
 
         internal MaterialIRModule Module { get; }
@@ -1630,6 +1632,10 @@ namespace VividRP.Runtime.GPUDriven
 
         internal VividMaterialProgramData RuntimeData { get; }
 
+        internal MaterialSemanticHash SemanticHash => Module.SemanticHash;
+
+        internal CompiledMaterialProgramHash CompiledHash { get; }
+
         internal static CompiledMaterialProgram Compile(
             MaterialIRModule module,
             uint programVersion)
@@ -1645,6 +1651,14 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (module == null)
                 throw new ArgumentNullException(nameof(module));
+            if (programVersion != MaterialProgramContract.RuntimeAbiVersion)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(programVersion),
+                    programVersion,
+                    $"Only material runtime ABI version "
+                    + $"{MaterialProgramContract.RuntimeAbiVersion} is supported.");
+            }
 
             ClosureTopology topology = module.Topology;
             if (!topology.IsWithinBudget)
@@ -1686,6 +1700,11 @@ namespace VividRP.Runtime.GPUDriven
                 CapabilityFlags = capabilities,
                 ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
             };
+            CompiledMaterialProgramHash compiledHash =
+                CompiledMaterialProgramHashBuilder.ComputeNativeTemplate(
+                    module.SemanticHash,
+                    runtimeData,
+                    materialLayout);
             return new CompiledMaterialProgram(
                 module,
                 coverageProgram,
@@ -1693,7 +1712,8 @@ namespace VividRP.Runtime.GPUDriven
                 materialLayout,
                 diagnostics,
                 programID,
-                runtimeData);
+                runtimeData,
+                compiledHash);
         }
 
         private static VividMaterialProgramID ResolveProgramID(

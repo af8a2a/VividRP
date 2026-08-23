@@ -77,6 +77,22 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 runtimeContract,
                 Does.Contain("StructuredBuffer<VividDualSlabMaterialData> _DualSlabMaterialData;"));
+
+            string[] sharedStructs =
+            {
+                "VividMaterialRuntimeHeader",
+                "VividMaterialProgramData",
+                "VividMaterialData",
+                "VividDualSlabMaterialData",
+                "VividSurfaceBindingData",
+            };
+            foreach (string structName in sharedStructs)
+            {
+                Assert.That(
+                    GetHlslStructSignature(runtimeContract, structName),
+                    Is.EqualTo(GetHlslStructSignature(generatedContract, structName)),
+                    $"C#-generated and runtime HLSL contracts differ for {structName}.");
+            }
         }
 
         [Test]
@@ -353,6 +369,22 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(topProxy);
                 Object.DestroyImmediate(baseProxy);
             }
+        }
+
+        private static string GetHlslStructSignature(string source, string structName)
+        {
+            string declaration = $"struct {structName}";
+            int start = source.IndexOf(declaration, System.StringComparison.Ordinal);
+            Assert.That(start, Is.GreaterThanOrEqualTo(0), $"Missing {declaration}.");
+            int end = source.IndexOf("};", start, System.StringComparison.Ordinal);
+            Assert.That(end, Is.GreaterThan(start), $"Incomplete {declaration}.");
+            string body = source.Substring(start, end - start + 2);
+            string signature = string.Join(
+                " ",
+                body.Split((char[]) null, System.StringSplitOptions.RemoveEmptyEntries));
+            // GenerateHLSL emits default-underlying C# enums as int, while the runtime
+            // contract exposes the same 32-bit bitfields as uint.
+            return signature.Replace(" int ", " uint ");
         }
     }
 }

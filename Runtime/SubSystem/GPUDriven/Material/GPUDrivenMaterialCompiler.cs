@@ -40,7 +40,10 @@ namespace VividRP.Runtime.GPUDriven
 
     internal static class GPUDrivenMaterialCompiler
     {
-        internal const uint ProgramVersion = 1u;
+        internal const uint RuntimeAbiVersion = MaterialProgramContract.RuntimeAbiVersion;
+
+        // Compatibility name used by the current HLSL contract and existing callers.
+        internal const uint ProgramVersion = RuntimeAbiVersion;
 
         [NoAutoStaticsCleanup]
         private static readonly CompiledMaterialProgram s_StandardSingleSlabProgram =
@@ -81,6 +84,7 @@ namespace VividRP.Runtime.GPUDriven
 
         internal static VividMaterialProgramData[] CreateRuntimeProgramTable()
         {
+            ValidateBuiltinProgramCatalog();
             var runtimePrograms = new VividMaterialProgramData[s_MaterialPrograms.Length];
             for (int programIndex = 0; programIndex < s_MaterialPrograms.Length; programIndex++)
             {
@@ -94,6 +98,47 @@ namespace VividRP.Runtime.GPUDriven
                 runtimePrograms[programIndex] = materialProgram.RuntimeData;
             }
             return runtimePrograms;
+        }
+
+        private static void ValidateBuiltinProgramCatalog()
+        {
+            if (s_MaterialPrograms.Length != MaterialProgramContract.BuiltinProgramCount)
+            {
+                throw new InvalidOperationException(
+                    $"The native material program catalog must contain exactly "
+                    + $"{MaterialProgramContract.BuiltinProgramCount} programs.");
+            }
+
+            for (int programIndex = 0; programIndex < s_MaterialPrograms.Length; programIndex++)
+            {
+                CompiledMaterialProgram materialProgram = s_MaterialPrograms[programIndex];
+                if (materialProgram.ProgramID == VividMaterialProgramID.Invalid
+                    || (uint) materialProgram.ProgramID != (uint) programIndex)
+                {
+                    throw new InvalidOperationException(
+                        $"Material program '{materialProgram.ProgramID}' is not stored at its "
+                        + $"frozen ABI index {programIndex}.");
+                }
+                if (materialProgram.RuntimeData.Version != RuntimeAbiVersion)
+                {
+                    throw new InvalidOperationException(
+                        $"Material program '{materialProgram.ProgramID}' targets runtime ABI "
+                        + $"{materialProgram.RuntimeData.Version}, expected {RuntimeAbiVersion}.");
+                }
+
+                for (int previousIndex = 0; previousIndex < programIndex; previousIndex++)
+                {
+                    if (s_MaterialPrograms[previousIndex].CompiledHash
+                        != materialProgram.CompiledHash)
+                    {
+                        continue;
+                    }
+
+                    throw new InvalidOperationException(
+                        $"Material programs '{s_MaterialPrograms[previousIndex].ProgramID}' and "
+                        + $"'{materialProgram.ProgramID}' have the same compiled identity.");
+                }
+            }
         }
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(

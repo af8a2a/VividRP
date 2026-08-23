@@ -14,9 +14,9 @@ namespace VividRP.Runtime.GPUDriven
 
     internal enum ClosureOperatorKind
     {
-        None,
-        HorizontalMix,
-        VerticalLayer,
+        None = 0,
+        HorizontalMix = 1,
+        VerticalLayer = 2,
     }
 
     internal readonly struct ClosureTopologyBudget

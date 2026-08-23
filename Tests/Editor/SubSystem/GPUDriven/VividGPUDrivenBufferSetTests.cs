@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
@@ -14,6 +15,7 @@ namespace VividRP.Editor.Tests
         public void GPUDataLayouts_HaveExpectedStrides()
         {
             Assert.That(UnsafeUtility.SizeOf<VividMaterialData>(), Is.EqualTo(128));
+            Assert.That(UnsafeUtility.SizeOf<VividDualSlabMaterialData>(), Is.EqualTo(192));
             Assert.That(UnsafeUtility.SizeOf<VividMaterialRuntimeHeader>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividMaterialProgramData>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividSurfaceBindingData>(), Is.EqualTo(32));
@@ -22,6 +24,146 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(32));
+        }
+
+        [Test]
+        public void MaterialProgramGpuData_HasFrozenFieldOffsets()
+        {
+            AssertFieldOffset<VividMaterialRuntimeHeader>(
+                nameof(VividMaterialRuntimeHeader.ProgramID),
+                0);
+            AssertFieldOffset<VividMaterialRuntimeHeader>(
+                nameof(VividMaterialRuntimeHeader.ParameterAddress),
+                4);
+            AssertFieldOffset<VividMaterialRuntimeHeader>(
+                nameof(VividMaterialRuntimeHeader.ResourceBindingAddress),
+                8);
+            AssertFieldOffset<VividMaterialRuntimeHeader>(
+                nameof(VividMaterialRuntimeHeader.Flags),
+                12);
+
+            AssertFieldOffset<VividMaterialProgramData>(
+                nameof(VividMaterialProgramData.Version),
+                0);
+            AssertFieldOffset<VividMaterialProgramData>(
+                nameof(VividMaterialProgramData.CoverageProgramID),
+                4);
+            AssertFieldOffset<VividMaterialProgramData>(
+                nameof(VividMaterialProgramData.SurfaceProgramID),
+                8);
+            AssertFieldOffset<VividMaterialProgramData>(
+                nameof(VividMaterialProgramData.TransportProgramID),
+                12);
+            AssertFieldOffset<VividMaterialProgramData>(
+                nameof(VividMaterialProgramData.ParameterLayoutID),
+                16);
+            AssertFieldOffset<VividMaterialProgramData>(
+                nameof(VividMaterialProgramData.ResourceLayoutID),
+                20);
+            AssertFieldOffset<VividMaterialProgramData>(
+                nameof(VividMaterialProgramData.CapabilityFlags),
+                24);
+            AssertFieldOffset<VividMaterialProgramData>(
+                nameof(VividMaterialProgramData.ExecutionClass),
+                28);
+
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.AlbedoColor), 0);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.TextureTilingOffset), 16);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.Emission), 32);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.MetallicSmoothnessRemap), 48);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.AmbientOcclusionRemap), 64);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.SurfaceBindingIndex), 80);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.NormalsStrength), 84);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.Roughness), 88);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.Metallic), 92);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.SpecularAAScreenSpaceVariance), 96);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.SpecularAAThreshold), 100);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.GeometryFlags), 104);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.MaterialFlags), 108);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.RendererListID), 112);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.AlphaClipThreshold), 116);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.Padding0), 120);
+            AssertFieldOffset<VividMaterialData>(nameof(VividMaterialData.Padding1), 124);
+
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.BaseAlbedoColor),
+                0);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.BaseTextureTilingOffset),
+                16);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.BaseMetallicSmoothnessRemap),
+                32);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.BaseAmbientOcclusionRemap),
+                48);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.BaseNormalsStrength),
+                64);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.BaseRoughness),
+                68);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.BaseMetallic),
+                72);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.BaseMaskMode),
+                76);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.TopAlbedoColor),
+                80);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.TopTextureTilingOffset),
+                96);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.TopMetallicSmoothnessRemap),
+                112);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.TopAmbientOcclusionRemap),
+                128);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.TopNormalsStrength),
+                144);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.TopRoughness),
+                148);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.TopMetallic),
+                152);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.TopMaskMode),
+                156);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.Emission),
+                160);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.LayerOperator),
+                176);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.LayerWeight),
+                180);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.AlphaClipThreshold),
+                184);
+            AssertFieldOffset<VividDualSlabMaterialData>(
+                nameof(VividDualSlabMaterialData.Padding0),
+                188);
+
+            AssertFieldOffset<VividSurfaceBindingData>(
+                nameof(VividSurfaceBindingData.BaseColorResource),
+                0);
+            AssertFieldOffset<VividSurfaceBindingData>(
+                nameof(VividSurfaceBindingData.NormalResource),
+                4);
+            AssertFieldOffset<VividSurfaceBindingData>(
+                nameof(VividSurfaceBindingData.MaskResource),
+                8);
+            AssertFieldOffset<VividSurfaceBindingData>(
+                nameof(VividSurfaceBindingData.Flags),
+                12);
+            AssertFieldOffset<VividSurfaceBindingData>(
+                nameof(VividSurfaceBindingData.UVScaleBias),
+                16);
         }
 
         [Test]
@@ -548,6 +690,13 @@ namespace VividRP.Editor.Tests
             Assert.That(instances[0].ObjectToWorldMatrix.c3.y, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(instances[0].ObjectToWorldMatrix.c3.z, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(1));
+        }
+
+        private static void AssertFieldOffset<T>(string fieldName, int expectedOffset)
+        {
+            Assert.That(
+                Marshal.OffsetOf(typeof(T), fieldName).ToInt32(),
+                Is.EqualTo(expectedOffset));
         }
 
         private static float3 NextUnitVector(System.Random random)

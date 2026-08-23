@@ -137,6 +137,150 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CompilationContract_ProgramCatalog0To2HasFrozenAbi()
+        {
+            Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
+            Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
+            Assert.That(GPUDrivenMaterialCompiler.ProgramVersion, Is.EqualTo(1u));
+            Assert.That((uint) MaterialProgramBackendKind.NativeTemplate, Is.Zero);
+
+            Assert.That((uint) VividMaterialProgramID.StandardSingleSlab, Is.Zero);
+            Assert.That((uint) VividMaterialProgramID.DualSlabHorizontalMix, Is.EqualTo(1u));
+            Assert.That((uint) VividMaterialProgramID.DualSlabVerticalLayer, Is.EqualTo(2u));
+            Assert.That((uint) VividMaterialProgramID.Invalid, Is.EqualTo(uint.MaxValue));
+            Assert.That((uint) VividMaterialCoverageProgramID.BaseColorAlpha, Is.Zero);
+            Assert.That((uint) VividMaterialSurfaceProgramID.StandardSingleSlab, Is.Zero);
+            Assert.That((uint) VividMaterialSurfaceProgramID.DualSlab, Is.EqualTo(1u));
+            Assert.That((uint) VividMaterialTransportProgramID.None, Is.Zero);
+            Assert.That((uint) VividMaterialParameterLayoutID.LegacyMaterialData, Is.Zero);
+            Assert.That((uint) VividMaterialParameterLayoutID.DualSlabMaterialData, Is.EqualTo(1u));
+            Assert.That((uint) VividMaterialResourceLayoutID.LegacySurfaceBinding, Is.Zero);
+            Assert.That((uint) VividMaterialResourceLayoutID.DualSurfaceBinding, Is.EqualTo(1u));
+
+            VividMaterialProgramData[] runtimePrograms =
+                GPUDrivenMaterialCompiler.CreateRuntimeProgramTable();
+            Assert.That(
+                runtimePrograms.Length,
+                Is.EqualTo(MaterialProgramContract.BuiltinProgramCount));
+
+            var expectedRuntimePrograms = new[]
+            {
+                new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u },
+                new uint[] { 1u, 0u, 1u, 0u, 1u, 1u, 7u, 0u },
+                new uint[] { 1u, 0u, 1u, 0u, 1u, 1u, 7u, 0u },
+            };
+            var expectedSemanticHashes = new[]
+            {
+                0x28BD8897839120B1ul,
+                0xA9FA2E736EB8F056ul,
+                0xE0D2EB2E6A59C9D9ul,
+            };
+            var expectedCompiledHashes = new[]
+            {
+                0xD77FC4F037F599DCul,
+                0xEB723FA3CC3807D4ul,
+                0x9FF98369DD679A20ul,
+            };
+
+            for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)
+            {
+                var programID = (VividMaterialProgramID) (uint) programIndex;
+                CompiledMaterialProgram program =
+                    GPUDrivenMaterialCompiler.GetMaterialProgram(programID);
+                Assert.That((uint) program.ProgramID, Is.EqualTo((uint) programIndex));
+                AssertRuntimeProgramData(program.RuntimeData, expectedRuntimePrograms[programIndex]);
+                AssertRuntimeProgramData(runtimePrograms[programIndex], expectedRuntimePrograms[programIndex]);
+                Assert.That(
+                    program.SemanticHash.IRSchemaVersion,
+                    Is.EqualTo(MaterialProgramContract.IRSchemaVersion));
+                Assert.That(
+                    program.SemanticHash.Version,
+                    Is.EqualTo(MaterialProgramContract.SemanticHashVersion));
+                Assert.That(
+                    program.SemanticHash.Value,
+                    Is.EqualTo(expectedSemanticHashes[programIndex]));
+                Assert.That(program.Module.StructuralHash, Is.EqualTo(program.SemanticHash.Value));
+                Assert.That(
+                    program.CompiledHash.Version,
+                    Is.EqualTo(MaterialProgramContract.CompiledHashVersion));
+                Assert.That(
+                    program.CompiledHash.Value,
+                    Is.EqualTo(expectedCompiledHashes[programIndex]));
+
+                if (programIndex == 0)
+                    AssertStandardMaterialLayout(program);
+                else
+                    AssertDualSlabMaterialLayout(program);
+            }
+
+            CollectionAssert.AllItemsAreUnique(expectedCompiledHashes);
+        }
+
+        [Test]
+        public void CompilationContract_CanonicalModulesShareCompiledIdentity()
+        {
+            MaterialIRModule firstModule =
+                BuildCanonicalHashModule(useAlternateValueOrder: false);
+            MaterialIRModule reorderedModule =
+                BuildCanonicalHashModule(useAlternateValueOrder: true);
+            CompiledMaterialProgram first = CompiledMaterialProgram.Compile(
+                firstModule,
+                MaterialProgramContract.RuntimeAbiVersion);
+            CompiledMaterialProgram reordered = CompiledMaterialProgram.Compile(
+                reorderedModule,
+                MaterialProgramContract.RuntimeAbiVersion);
+
+            Assert.That(first.SemanticHash, Is.EqualTo(reordered.SemanticHash));
+            Assert.That(first.CompiledHash, Is.EqualTo(reordered.CompiledHash));
+            Assert.That(first.ProgramID, Is.EqualTo(reordered.ProgramID));
+        }
+
+        [Test]
+        public void CompilationContract_ProgramIdIsNotCompiledIdentity()
+        {
+            CompiledMaterialProgram prototype =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    MaterialProgramContract.RuntimeAbiVersion);
+            MaterialIRModule prototypeModule = prototype.Module;
+            var withoutEmission = new MaterialIRModule(
+                prototypeModule.Values,
+                prototypeModule.Outputs,
+                prototypeModule.Topology,
+                prototypeModule.MaterialFeatures & ~MaterialFeatureMask.Emission);
+            CompiledMaterialProgram compiledWithoutEmission =
+                CompiledMaterialProgram.Compile(
+                    withoutEmission,
+                    MaterialProgramContract.RuntimeAbiVersion);
+
+            Assert.That(compiledWithoutEmission.ProgramID, Is.EqualTo(prototype.ProgramID));
+            AssertRuntimeProgramData(
+                compiledWithoutEmission.RuntimeData,
+                new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u });
+            Assert.That(compiledWithoutEmission.SemanticHash, Is.Not.EqualTo(prototype.SemanticHash));
+            Assert.That(compiledWithoutEmission.CompiledHash, Is.Not.EqualTo(prototype.CompiledHash));
+        }
+
+        [Test]
+        public void CompilationContract_RejectsUnsupportedRuntimeAbiVersion()
+        {
+            MaterialIRModule module = BuildCanonicalHashModule(useAlternateValueOrder: false);
+
+            ArgumentOutOfRangeException exception =
+                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    CompiledMaterialProgram.Compile(
+                        module,
+                        MaterialProgramContract.RuntimeAbiVersion + 1u));
+
+            Assert.That(exception.ParamName, Is.EqualTo("programVersion"));
+            Assert.That(exception.Message, Does.Contain("Only material runtime ABI version 1"));
+        }
+
+        [Test]
         public void CoverageLowering_ConsumesOnlyCoverageRootsForProgram0AndProgram1()
         {
             CompiledMaterialProgram standard =
@@ -1019,6 +1163,25 @@ namespace VividRP.Editor.Tests
             Assert.That(cost.ParameterCount, Is.EqualTo(parameters));
             Assert.That(cost.TextureResourceCount, Is.EqualTo(textureResources));
             Assert.That(cost.ExternalInputCount, Is.EqualTo(externalInputs));
+        }
+
+        private static void AssertRuntimeProgramData(
+            in VividMaterialProgramData runtimeData,
+            uint[] expected)
+        {
+            CollectionAssert.AreEqual(
+                expected,
+                new[]
+                {
+                    runtimeData.Version,
+                    (uint) runtimeData.CoverageProgramID,
+                    (uint) runtimeData.SurfaceProgramID,
+                    (uint) runtimeData.TransportProgramID,
+                    (uint) runtimeData.ParameterLayoutID,
+                    (uint) runtimeData.ResourceLayoutID,
+                    (uint) runtimeData.CapabilityFlags,
+                    (uint) runtimeData.ExecutionClass,
+                });
         }
 
         private static string[] GetValueSliceSignature(MaterialValueSlice valueSlice)

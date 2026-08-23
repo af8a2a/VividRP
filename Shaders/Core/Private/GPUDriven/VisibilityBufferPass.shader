@@ -117,12 +117,16 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 linear float3 barycentrics : SV_Barycentrics)
             {
                 #ifdef _ALPHATEST_ON
+                const float2 uv0Ddx = ddx(input.uv0);
+                const float2 uv0Ddy = ddy(input.uv0);
                 const VividVisibilityBufferValue visibilityBufferValue = UnpackVisibilityBufferValue(input.visibilityValue);
                 const VividInstanceData instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 VividMaterialCoverageEvaluation coverage;
                 if (!VividTryEvaluateCoverageProgram(
                         instanceData.MaterialIndex,
                         input.uv0,
+                        uv0Ddx,
+                        uv0Ddy,
                         coverage))
                 {
                     const VividMaterialData materialData =
@@ -132,7 +136,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                     coverage = VividEvaluateBaseColorAlphaCoverage(
                         materialData,
                         surfaceBindingData,
-                        input.uv0);
+                        input.uv0,
+                        uv0Ddx,
+                        uv0Ddy);
                 }
                 clip(coverage.Coverage - coverage.AlphaClipThreshold);
                 #endif

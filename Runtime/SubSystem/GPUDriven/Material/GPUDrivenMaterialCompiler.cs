@@ -61,8 +61,11 @@ namespace VividRP.Runtime.GPUDriven
         internal static VividMaterialProgramData StandardSingleSlabProgram =>
             s_StandardSingleSlabProgram.RuntimeData;
 
-        internal static VividMaterialProgramData DualSlabProgram =>
+        internal static VividMaterialProgramData DualSlabHorizontalMixProgram =>
             s_DualSlabHorizontalMixProgram.RuntimeData;
+
+        internal static VividMaterialProgramData DualSlabVerticalLayerProgram =>
+            s_DualSlabVerticalLayerProgram.RuntimeData;
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
             GPUDrivenMaterialProxy materialProxy,
@@ -103,7 +106,7 @@ namespace VividRP.Runtime.GPUDriven
             if (materialProxy.Model != GPUDrivenMaterialProxyModel.DualSlab)
             {
                 throw new NotSupportedException(
-                    $"GPU-driven material model '{materialProxy.Model}' is not supported by Program 1.");
+                    $"GPU-driven material model '{materialProxy.Model}' is not supported by Dual Slab programs.");
             }
 
             GPUDrivenDualSlabMaterialDefinition definition =

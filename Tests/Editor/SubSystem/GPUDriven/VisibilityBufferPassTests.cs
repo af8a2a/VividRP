@@ -275,10 +275,28 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("runtimeHeader.ResourceBindingAddress", coverageSource);
             StringAssert.DoesNotContain("programData.SurfaceProgramID", coverageSource);
             StringAssert.DoesNotContain("programData.TransportProgramID", coverageSource);
+            StringAssert.Contains("VividSampleBaseColorGrad", coverageSource);
+            StringAssert.DoesNotContain("VividSampleBaseColor(", coverageSource);
+            StringAssert.Contains("const float2 uvDdx = uv0Ddx * tiling;", coverageSource);
+            StringAssert.Contains("const float2 uvDdy = uv0Ddy * tiling;", coverageSource);
             StringAssert.Contains("VividTryEvaluateCoverageProgram", visibilitySource);
             StringAssert.Contains("VividTryEvaluateCoverageProgram", shadowSource);
             StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", visibilitySource);
             StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", shadowSource);
+            int visibilityDdx = visibilitySource.IndexOf("ddx(input.uv0)");
+            int visibilityDdy = visibilitySource.IndexOf("ddy(input.uv0)");
+            int visibilityProgram = visibilitySource.IndexOf("VividTryEvaluateCoverageProgram");
+            int shadowDdx = shadowSource.IndexOf("ddx(input.uv0)");
+            int shadowDdy = shadowSource.IndexOf("ddy(input.uv0)");
+            int shadowProgram = shadowSource.IndexOf("VividTryEvaluateCoverageProgram");
+            Assert.That(visibilityDdx, Is.GreaterThanOrEqualTo(0));
+            Assert.That(visibilityProgram, Is.GreaterThan(visibilityDdx));
+            Assert.That(visibilityDdy, Is.GreaterThanOrEqualTo(0));
+            Assert.That(visibilityProgram, Is.GreaterThan(visibilityDdy));
+            Assert.That(shadowDdx, Is.GreaterThanOrEqualTo(0));
+            Assert.That(shadowProgram, Is.GreaterThan(shadowDdx));
+            Assert.That(shadowDdy, Is.GreaterThanOrEqualTo(0));
+            Assert.That(shadowProgram, Is.GreaterThan(shadowDdy));
             StringAssert.DoesNotContain("float4 SampleAlbedo(", visibilitySource);
             StringAssert.DoesNotContain("float4 SampleAlbedo(", shadowSource);
         }

@@ -10,12 +10,17 @@ struct VividMaterialCoverageEvaluation
 VividMaterialCoverageEvaluation VividEvaluateBaseColorAlphaCoverage(
     const VividMaterialData materialData,
     const VividSurfaceBindingData surfaceBindingData,
-    const float2 uv0)
+    const float2 uv0,
+    const float2 uv0Ddx,
+    const float2 uv0Ddy)
 {
-    const float2 uv = uv0 * materialData.TextureTilingOffset.xy
+    const float2 tiling = materialData.TextureTilingOffset.xy;
+    const float2 uv = uv0 * tiling
         + materialData.TextureTilingOffset.zw;
+    const float2 uvDdx = uv0Ddx * tiling;
+    const float2 uvDdy = uv0Ddy * tiling;
     const float4 albedo = materialData.AlbedoColor
-        * VividSampleBaseColor(surfaceBindingData, uv);
+        * VividSampleBaseColorGrad(surfaceBindingData, uv, uvDdx, uvDdy);
 
     VividMaterialCoverageEvaluation evaluation;
     evaluation.Coverage = albedo.a;
@@ -27,12 +32,17 @@ VividMaterialCoverageEvaluation VividEvaluateBaseColorAlphaCoverage(
     const VividSlabMaterialData slabData,
     const float alphaClipThreshold,
     const VividSurfaceBindingData surfaceBindingData,
-    const float2 uv0)
+    const float2 uv0,
+    const float2 uv0Ddx,
+    const float2 uv0Ddy)
 {
-    const float2 uv = uv0 * slabData.TextureTilingOffset.xy
+    const float2 tiling = slabData.TextureTilingOffset.xy;
+    const float2 uv = uv0 * tiling
         + slabData.TextureTilingOffset.zw;
+    const float2 uvDdx = uv0Ddx * tiling;
+    const float2 uvDdy = uv0Ddy * tiling;
     const float4 albedo = slabData.AlbedoColor
-        * VividSampleBaseColor(surfaceBindingData, uv);
+        * VividSampleBaseColorGrad(surfaceBindingData, uv, uvDdx, uvDdy);
 
     VividMaterialCoverageEvaluation evaluation;
     evaluation.Coverage = albedo.a;
@@ -53,6 +63,8 @@ bool VividIsCoverageProgramCompatible(
 bool VividTryEvaluateCoverageProgram(
     const uint materialIndex,
     const float2 uv0,
+    const float2 uv0Ddx,
+    const float2 uv0Ddy,
     out VividMaterialCoverageEvaluation evaluation)
 {
     evaluation = (VividMaterialCoverageEvaluation) 0;
@@ -94,7 +106,9 @@ bool VividTryEvaluateCoverageProgram(
             evaluation = VividEvaluateBaseColorAlphaCoverage(
                 materialData,
                 surfaceBindingData,
-                uv0);
+                uv0,
+                uv0Ddx,
+                uv0Ddy);
             return true;
         }
         if (programData.ParameterLayoutID
@@ -118,7 +132,9 @@ bool VividTryEvaluateCoverageProgram(
                 VividGetBaseSlabMaterialData(materialData),
                 materialData.AlphaClipThreshold,
                 surfaceBindingData,
-                uv0);
+                uv0,
+                uv0Ddx,
+                uv0Ddy);
             return true;
         }
     }

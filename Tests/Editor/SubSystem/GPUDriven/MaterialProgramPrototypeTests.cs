@@ -68,6 +68,13 @@ namespace VividRP.Editor.Tests
             Assert.That(module.StructuralHash, Is.EqualTo(second.Module.StructuralHash));
             Assert.That(module.GetDebugDump(), Is.EqualTo(second.Module.GetDebugDump()));
             Assert.That(horizontal.Module.StructuralHash, Is.Not.EqualTo(vertical.Module.StructuralHash));
+            Assert.That(
+                horizontal.ProgramID,
+                Is.EqualTo(VividMaterialProgramID.DualSlabHorizontalMix));
+            Assert.That(
+                vertical.ProgramID,
+                Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
+            Assert.That(horizontal.ProgramID, Is.Not.EqualTo(vertical.ProgramID));
             Assert.That(module.Values.Owns(module.Outputs.CoverageValue), Is.True);
             Assert.That(module.Outputs.CoverageValue.Type, Is.EqualTo(MaterialValueType.Float4));
             Assert.That(
@@ -404,7 +411,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CompileDualSlab_SeparatesTopologyFromStableProgram1Abi()
+        public void CompileDualSlab_AssignsTopologySpecificStableProgramID()
         {
             var baseProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
             var topProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -422,7 +429,9 @@ namespace VividRP.Editor.Tests
                 CompiledMaterialProgram program = compiled.MaterialProgram;
                 ClosureTopology topology = program.Module.Topology;
 
-                Assert.That(program.ProgramID, Is.EqualTo(VividMaterialProgramID.DualSlab));
+                Assert.That(
+                    program.ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
                 Assert.That(topology.ClosureCount, Is.EqualTo(2));
                 Assert.That(topology.OperatorCount, Is.EqualTo(1));
                 Assert.That(

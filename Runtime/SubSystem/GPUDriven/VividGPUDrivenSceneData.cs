@@ -48,7 +48,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMaterialProgramData> m_MaterialPrograms = new()
         {
             GPUDrivenMaterialCompiler.StandardSingleSlabProgram,
-            GPUDrivenMaterialCompiler.DualSlabProgram,
+            GPUDrivenMaterialCompiler.DualSlabHorizontalMixProgram,
+            GPUDrivenMaterialCompiler.DualSlabVerticalLayerProgram,
         };
         private readonly List<VividSurfaceBindingData> m_SurfaceBindings = new();
         private readonly List<VividTerrainMaterialData> m_TerrainMaterials = new();
@@ -216,8 +217,32 @@ namespace VividRP.Runtime.GPUDriven
 
             int materialIndex = m_Materials.Count;
             bool usesLegacyParameterLayout =
-                runtimeHeader.ProgramID == VividMaterialProgramID.StandardSingleSlab
-                || runtimeHeader.ProgramID == VividMaterialProgramID.Invalid;
+                runtimeHeader.ProgramID == VividMaterialProgramID.Invalid;
+            bool usesDualSlabParameterLayout = false;
+            if (runtimeHeader.ProgramID != VividMaterialProgramID.Invalid)
+            {
+                uint programIndex = (uint) runtimeHeader.ProgramID;
+                if (programIndex >= (uint) m_MaterialPrograms.Count)
+                {
+                    throw new ArgumentException(
+                        $"Material program {programIndex} is not registered.",
+                        nameof(runtimeHeader));
+                }
+
+                VividMaterialParameterLayoutID parameterLayoutID =
+                    m_MaterialPrograms[(int) programIndex].ParameterLayoutID;
+                usesLegacyParameterLayout =
+                    parameterLayoutID == VividMaterialParameterLayoutID.LegacyMaterialData;
+                usesDualSlabParameterLayout =
+                    parameterLayoutID == VividMaterialParameterLayoutID.DualSlabMaterialData;
+                if (!usesLegacyParameterLayout && !usesDualSlabParameterLayout)
+                {
+                    throw new ArgumentException(
+                        $"Material program {programIndex} uses unsupported parameter layout '{parameterLayoutID}'.",
+                        nameof(runtimeHeader));
+                }
+            }
+
             if (usesLegacyParameterLayout
                 && runtimeHeader.ParameterAddress != (uint) materialIndex)
             {
@@ -225,7 +250,7 @@ namespace VividRP.Runtime.GPUDriven
                     $"Material parameter address {runtimeHeader.ParameterAddress} does not match material index {materialIndex}.",
                     nameof(runtimeHeader));
             }
-            if (runtimeHeader.ProgramID == VividMaterialProgramID.DualSlab
+            if (usesDualSlabParameterLayout
                 && runtimeHeader.ParameterAddress >= (uint) m_DualSlabMaterials.Count)
             {
                 throw new ArgumentException(

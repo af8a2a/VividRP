@@ -79,6 +79,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 VividSurfaceBindingData surfaceBindingData;
                 VividSurfaceBindingData topSurfaceBindingData;
                 uint isDualSlab;
+                uint isUnlit;
                 VividMeshletVertex vertex0;
                 VividMeshletVertex vertex1;
                 VividMeshletVertex vertex2;
@@ -267,20 +268,47 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     result.topSurfaceBindingData)
                         ? 1u
                         : 0u;
+                bool loadedMaterialProgram = result.isDualSlab != 0u;
                 if (result.isDualSlab != 0u)
                 {
                     result.materialData = PullMaterialData(
                         result.instanceData.MaterialIndex);
                 }
-                else if (!VividTryLoadStandardSingleSlabSurfaceProgram(
+                else
+                {
+                    loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
                         result.instanceData.MaterialIndex,
                         VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
                         result.materialData,
-                        result.surfaceBindingData))
+                        result.surfaceBindingData);
+                    if (!loadedMaterialProgram)
+                    {
+                        result.materialData = PullMaterialData(
+                            result.instanceData.MaterialIndex);
+                        result.surfaceBindingData = PullSurfaceBindingData(
+                            result.materialData.SurfaceBindingIndex);
+                    }
+                }
+
+                result.isUnlit = 0u;
+                if (loadedMaterialProgram)
                 {
-                    result.materialData = PullMaterialData(result.instanceData.MaterialIndex);
-                    result.surfaceBindingData = PullSurfaceBindingData(
-                        result.materialData.SurfaceBindingIndex);
+                    const VividMaterialRuntimeHeader runtimeHeader =
+                        PullMaterialRuntimeHeader(result.instanceData.MaterialIndex);
+                    const VividMaterialProgramData programData =
+                        PullMaterialProgramData(runtimeHeader.ProgramID);
+                    result.isUnlit =
+                        (programData.CapabilityFlags
+                            & VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT) != 0u
+                        && (runtimeHeader.Flags
+                            & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) != 0u
+                            ? 1u
+                            : 0u;
+                }
+                else if ((result.materialData.MaterialFlags
+                        & VIVIDMATERIALFLAGS_UNLIT) != 0u)
+                {
+                    result.isUnlit = 1u;
                 }
                 const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
@@ -689,7 +717,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.ambientOcclusion = ambientOcclusion;
                 surfaceData.customData = 0.0f;
                 surfaceData.customData1 = 0.0f;
-                surfaceData.materialFeatures = VIVID_MATERIALFEATURE_DEFAULT;
+                surfaceData.materialFeatures = triangleData.isUnlit != 0u
+                    ? 0u
+                    : VIVID_MATERIALFEATURE_DEFAULT;
 #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
                 if (isTerrainRVT
                     && (terrainRVTRecordFlags & VIVID_TERRAIN_RVT_RECEIVE_DECALS) == 0u)

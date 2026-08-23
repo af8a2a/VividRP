@@ -217,7 +217,7 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialCount, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
-            Assert.That(bufferSet.MaterialProgramCount, Is.EqualTo(2));
+            Assert.That(bufferSet.MaterialProgramCount, Is.EqualTo(3));
             Assert.That(bufferSet.DualSlabMaterialCount, Is.Zero);
             Assert.That(bufferSet.SurfaceBindingCount, Is.EqualTo(1));
             Assert.That(bufferSet.MeshLODNodeCount, Is.EqualTo(1));

@@ -1388,19 +1388,9 @@ namespace VividRP.Runtime.GPUDriven
             if (!diagnostics.IsWithinBudget)
                 throw new InvalidOperationException(diagnostics.GetDebugDump());
 
-            VividMaterialProgramID programID;
-            switch (surfaceProgram.ProgramID)
-            {
-                case VividMaterialSurfaceProgramID.StandardSingleSlab:
-                    programID = VividMaterialProgramID.StandardSingleSlab;
-                    break;
-                case VividMaterialSurfaceProgramID.DualSlab:
-                    programID = VividMaterialProgramID.DualSlab;
-                    break;
-                default:
-                    throw new NotSupportedException(
-                        $"Surface program '{surfaceProgram.ProgramID}' has no material program ABI.");
-            }
+            VividMaterialProgramID programID = ResolveProgramID(
+                surfaceProgram.ProgramID,
+                topology);
 
             ClosureFeatureMask features = topology.FeatureMask;
             VividMaterialProgramCapabilities capabilities =
@@ -1429,6 +1419,31 @@ namespace VividRP.Runtime.GPUDriven
                 diagnostics,
                 programID,
                 runtimeData);
+        }
+
+        private static VividMaterialProgramID ResolveProgramID(
+            VividMaterialSurfaceProgramID surfaceProgramID,
+            ClosureTopology topology)
+        {
+            switch (surfaceProgramID)
+            {
+                case VividMaterialSurfaceProgramID.StandardSingleSlab:
+                    return VividMaterialProgramID.StandardSingleSlab;
+                case VividMaterialSurfaceProgramID.DualSlab:
+                    switch (topology.Operators[0].Kind)
+                    {
+                        case ClosureOperatorKind.HorizontalMix:
+                            return VividMaterialProgramID.DualSlabHorizontalMix;
+                        case ClosureOperatorKind.VerticalLayer:
+                            return VividMaterialProgramID.DualSlabVerticalLayer;
+                        default:
+                            throw new NotSupportedException(
+                                $"Closure operator '{topology.Operators[0].Kind}' has no material program ABI.");
+                    }
+                default:
+                    throw new NotSupportedException(
+                        $"Surface program '{surfaceProgramID}' has no material program ABI.");
+            }
         }
     }
 

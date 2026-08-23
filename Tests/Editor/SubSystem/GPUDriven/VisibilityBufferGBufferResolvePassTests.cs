@@ -182,6 +182,8 @@ namespace VividRP.Editor.Tests
                 "VividMaterialSurface.hlsl");
             Assert.That(File.Exists(surfaceProgramPath), Is.True, surfaceProgramPath);
             string surfaceProgramSource = File.ReadAllText(surfaceProgramPath);
+            string compactSource = string.Concat(
+                source.Where(character => !char.IsWhiteSpace(character)));
 
             StringAssert.Contains("VividMaterialSurface.hlsl", source);
             StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
@@ -218,6 +220,20 @@ namespace VividRP.Editor.Tests
                 "result.materialData = PullMaterialData(result.instanceData.MaterialIndex)",
                 source);
             StringAssert.Contains("result.materialData.SurfaceBindingIndex", source);
+            StringAssert.Contains(
+                "(programData.CapabilityFlags&VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT)!=0u"
+                + "&&(runtimeHeader.Flags&VIVIDMATERIALRUNTIMEFLAGS_UNLIT)!=0u",
+                compactSource);
+            StringAssert.Contains(
+                "(result.materialData.MaterialFlags&VIVIDMATERIALFLAGS_UNLIT)!=0u",
+                compactSource);
+            StringAssert.Contains(
+                "surfaceData.materialFeatures=triangleData.isUnlit!=0u"
+                + "?0u:VIVID_MATERIALFEATURE_DEFAULT;",
+                compactSource);
+            StringAssert.DoesNotContain(
+                "surfaceData.materialFeatures=VIVID_MATERIALFEATURE_DEFAULT;",
+                compactSource);
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName)

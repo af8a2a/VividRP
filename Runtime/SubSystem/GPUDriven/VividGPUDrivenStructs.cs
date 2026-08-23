@@ -87,7 +87,8 @@ namespace VividRP.Runtime.GPUDriven
     public enum VividMaterialProgramID : uint
     {
         StandardSingleSlab = 0,
-        DualSlab = 1,
+        DualSlabHorizontalMix = 1,
+        DualSlabVerticalLayer = 2,
         Invalid = uint.MaxValue,
     }
 

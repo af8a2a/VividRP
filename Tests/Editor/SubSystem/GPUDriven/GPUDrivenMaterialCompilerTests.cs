@@ -25,10 +25,19 @@ namespace VividRP.Editor.Tests
                 Does.Contain("#define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB (0)"));
             Assert.That(
                 generatedContract,
-                Does.Contain("#define VIVIDMATERIALPROGRAMID_DUAL_SLAB (1)"));
+                Does.Contain("#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_HORIZONTAL_MIX (1)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_VERTICAL_LAYER (2)"));
             Assert.That(
                 generatedContract,
                 Does.Contain("#define VIVIDDUALSLABOPERATOR_VERTICAL_LAYER (1)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT (4)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDMATERIALRUNTIMEFLAGS_UNLIT (2)"));
             Assert.That(runtimeContract, Does.Contain("struct VividMaterialRuntimeHeader"));
             Assert.That(runtimeContract, Does.Contain("struct VividMaterialProgramData"));
             Assert.That(
@@ -38,11 +47,27 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 runtimeContract,
                 Does.Contain(
+                    $"#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_HORIZONTAL_MIX {(uint)VividMaterialProgramID.DualSlabHorizontalMix}u"));
+            Assert.That(
+                runtimeContract,
+                Does.Contain(
+                    $"#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_VERTICAL_LAYER {(uint)VividMaterialProgramID.DualSlabVerticalLayer}u"));
+            Assert.That(
+                runtimeContract,
+                Does.Contain(
                     $"#define VIVIDMATERIALRUNTIMEFLAGS_ALPHA_CLIP {(uint)VividMaterialRuntimeFlags.AlphaClip}u"));
             Assert.That(
                 runtimeContract,
                 Does.Contain(
                     $"#define VIVIDMATERIALPROGRAMCAPABILITIES_ALPHA_CLIP {(uint)VividMaterialProgramCapabilities.AlphaClip}u"));
+            Assert.That(
+                runtimeContract,
+                Does.Contain(
+                    $"#define VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT {(uint)VividMaterialProgramCapabilities.Unlit}u"));
+            Assert.That(
+                runtimeContract,
+                Does.Contain(
+                    $"#define VIVIDMATERIALRUNTIMEFLAGS_UNLIT {(uint)VividMaterialRuntimeFlags.Unlit}u"));
             Assert.That(
                 runtimeContract,
                 Does.Contain("StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;"));
@@ -141,7 +166,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(firstCompiled.LegacyMaterialData.Metallic, Is.Not.EqualTo(secondCompiled.LegacyMaterialData.Metallic));
 
                 var sceneData = new VividGPUDrivenSceneData();
-                Assert.That(sceneData.MaterialProgramCount, Is.EqualTo(2));
+                Assert.That(sceneData.MaterialProgramCount, Is.EqualTo(3));
                 VividMaterialProgramData program = sceneData.MaterialPrograms[0];
                 Assert.That(program.Version, Is.EqualTo(GPUDrivenMaterialCompiler.ProgramVersion));
                 Assert.That(
@@ -154,7 +179,8 @@ namespace VividRP.Editor.Tests
                     program.CapabilityFlags & VividMaterialProgramCapabilities.AlphaClip,
                     Is.EqualTo(VividMaterialProgramCapabilities.AlphaClip));
 
-                VividMaterialProgramData dualSlabProgram = sceneData.MaterialPrograms[1];
+                VividMaterialProgramData dualSlabProgram = sceneData.MaterialPrograms[
+                    (int) VividMaterialProgramID.DualSlabHorizontalMix];
                 Assert.That(
                     dualSlabProgram.SurfaceProgramID,
                     Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
@@ -164,6 +190,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     dualSlabProgram.ResourceLayoutID,
                     Is.EqualTo(VividMaterialResourceLayoutID.DualSurfaceBinding));
+                Assert.That(
+                    sceneData.MaterialPrograms[
+                        (int) VividMaterialProgramID.DualSlabVerticalLayer].SurfaceProgramID,
+                    Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
             }
             finally
             {
@@ -173,7 +203,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CompileDualSlab_ProducesProgram1WithTwoFixedSlabs()
+        public void CompileDualSlab_ProducesVerticalLayerProgramWithTwoFixedSlabs()
         {
             var baseProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
             var topProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -204,7 +234,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(
                     compiled.RuntimeHeader.ProgramID,
-                    Is.EqualTo(VividMaterialProgramID.DualSlab));
+                    Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
                 Assert.That(compiled.RuntimeHeader.ParameterAddress, Is.EqualTo(3u));
                 Assert.That(compiled.RuntimeHeader.ResourceBindingAddress, Is.EqualTo(7u));
                 Assert.That(

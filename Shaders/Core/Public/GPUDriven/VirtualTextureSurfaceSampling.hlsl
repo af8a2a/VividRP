@@ -229,8 +229,9 @@ float4 VividSampleMaskGrad(
 
 float4 VividSampleBaseColor(const VividSurfaceBindingData bindingData, const float2 uv)
 {
-    // Visibility and shadow passes intentionally skip feedback. Their implicit-gradient
-    // samples resolve through the material's locked mip tail until Resolve loads finer pages.
+    // Legacy implicit-gradient convenience overload. It intentionally skips feedback.
+    // Dynamic material/program dispatch must compute derivatives before branching and
+    // call VividSampleBaseColorGrad instead.
     VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(
         bindingData,
         uv,

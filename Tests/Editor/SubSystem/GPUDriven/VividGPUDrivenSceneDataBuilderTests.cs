@@ -251,7 +251,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(2));
                 Assert.That(
                     sceneData.MaterialRuntimeHeaders[0].ProgramID,
-                    Is.EqualTo(VividMaterialProgramID.DualSlab));
+                    Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
                 Assert.That(sceneData.MaterialRuntimeHeaders[0].ParameterAddress, Is.Zero);
                 Assert.That(sceneData.MaterialRuntimeHeaders[0].ResourceBindingAddress, Is.Zero);
                 Assert.That(sceneData.DualSlabMaterials[0].TopMetallic, Is.EqualTo(0.9f));
@@ -1426,7 +1426,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(system.BufferSet.InstanceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
-                Assert.That(system.BufferSet.MaterialProgramCount, Is.EqualTo(2));
+                Assert.That(system.BufferSet.MaterialProgramCount, Is.EqualTo(3));
                 Assert.That(system.BufferSet.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshletCount, Is.EqualTo(1));

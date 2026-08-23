@@ -174,9 +174,11 @@ namespace VividRP.Editor.Tests
             Assert.That(File.Exists(path), Is.True, path);
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("TryResolveStandardSingleSlabProgram", source);
+            StringAssert.Contains("TryResolveStandardSingleSlabSurfaceProgram", source);
             StringAssert.Contains("PullMaterialRuntimeHeader(materialIndex)", source);
             StringAssert.Contains("PullMaterialProgramData(runtimeHeader.ProgramID)", source);
+            StringAssert.Contains("programData.SurfaceProgramID", source);
+            StringAssert.DoesNotContain("programData.CoverageProgramID", source);
             StringAssert.Contains("PullMaterialData(runtimeHeader.ParameterAddress)", source);
             StringAssert.Contains(
                 "runtimeHeader.ParameterAddress >= _MaterialDataCount",

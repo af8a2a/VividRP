@@ -30,6 +30,14 @@ namespace VividRP.Editor.Tests
                     $"#define VIVID_MATERIAL_PROGRAM_VERSION {GPUDrivenMaterialCompiler.ProgramVersion}u"));
             Assert.That(
                 runtimeContract,
+                Does.Contain(
+                    $"#define VIVIDMATERIALRUNTIMEFLAGS_ALPHA_CLIP {(uint)VividMaterialRuntimeFlags.AlphaClip}u"));
+            Assert.That(
+                runtimeContract,
+                Does.Contain(
+                    $"#define VIVIDMATERIALPROGRAMCAPABILITIES_ALPHA_CLIP {(uint)VividMaterialProgramCapabilities.AlphaClip}u"));
+            Assert.That(
+                runtimeContract,
                 Does.Contain("StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;"));
             Assert.That(
                 runtimeContract,
@@ -126,9 +134,15 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MaterialProgramCount, Is.EqualTo(1));
                 VividMaterialProgramData program = sceneData.MaterialPrograms[0];
                 Assert.That(program.Version, Is.EqualTo(GPUDrivenMaterialCompiler.ProgramVersion));
+                Assert.That(
+                    program.CoverageProgramID,
+                    Is.EqualTo(VividMaterialCoverageProgramID.BaseColorAlpha));
                 Assert.That(program.SurfaceProgramID, Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
                 Assert.That(program.ParameterLayoutID, Is.EqualTo(VividMaterialParameterLayoutID.LegacyMaterialData));
                 Assert.That(program.ResourceLayoutID, Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
+                Assert.That(
+                    program.CapabilityFlags & VividMaterialProgramCapabilities.AlphaClip,
+                    Is.EqualTo(VividMaterialProgramCapabilities.AlphaClip));
             }
             finally
             {

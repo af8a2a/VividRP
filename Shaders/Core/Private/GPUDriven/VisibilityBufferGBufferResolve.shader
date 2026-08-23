@@ -251,14 +251,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return true;
             }
 
-            bool IsStandardSingleSlabProgram(
-                const VividMaterialRuntimeHeader runtimeHeader,
+            bool IsStandardSingleSlabSurfaceProgram(
                 const VividMaterialProgramData programData)
             {
-                return runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB
-                    && programData.Version == VIVID_MATERIAL_PROGRAM_VERSION
-                    && programData.CoverageProgramID
-                        == VIVIDMATERIALCOVERAGEPROGRAMID_BASE_COLOR_ALPHA
+                return programData.Version == VIVID_MATERIAL_PROGRAM_VERSION
                     && programData.SurfaceProgramID
                         == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
                     && programData.TransportProgramID
@@ -273,7 +269,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         == VIVIDMATERIALEXECUTIONCLASS_VISIBILITY_DEFERRED;
             }
 
-            bool TryResolveStandardSingleSlabProgram(
+            bool TryResolveStandardSingleSlabSurfaceProgram(
                 const uint materialIndex,
                 out VividMaterialData materialData,
                 out VividSurfaceBindingData surfaceBindingData)
@@ -293,7 +289,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
                 const VividMaterialProgramData programData =
                     PullMaterialProgramData(runtimeHeader.ProgramID);
-                if (!IsStandardSingleSlabProgram(runtimeHeader, programData)
+                if (!IsStandardSingleSlabSurfaceProgram(programData)
                     || runtimeHeader.ParameterAddress >= _MaterialDataCount
                     || runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount)
                 {
@@ -310,7 +306,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
-                if (!TryResolveStandardSingleSlabProgram(
+                if (!TryResolveStandardSingleSlabSurfaceProgram(
                         result.instanceData.MaterialIndex,
                         result.materialData,
                         result.surfaceBindingData))

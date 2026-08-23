@@ -39,6 +39,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
             #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialCoverage.hlsl"
 
             #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawArgs
             #include "UnityIndirect.cginc"
@@ -76,19 +77,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 return DecodeVividMeshletVertex(_SharedVertexBuffer[meshlet.VertexOffset + index]);
             }
 
-            float2 GetUV0(const VividDecodedMeshletVertex vertex, const VividMaterialData materialData)
-            {
-                return vertex.UV.xy * materialData.TextureTilingOffset.xy + materialData.TextureTilingOffset.zw;
-            }
-
-            float4 SampleAlbedo(
-                const float2 uv,
-                const VividMaterialData materialData,
-                const VividSurfaceBindingData surfaceBindingData)
-            {
-                return materialData.AlbedoColor * VividSampleBaseColor(surfaceBindingData, uv);
-            }
-
             float4 ApplyVividShadowClamping(float4 positionCS)
             {
             #if UNITY_REVERSED_Z
@@ -116,7 +104,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
                 const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
                 const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
-                const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
                 const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
                 const uint indexCount = meshlet.TriangleCount * 3u;
 
@@ -133,7 +120,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 
                 #ifdef _ALPHATEST_ON
                 output.instanceIndex = renderRequest.InstanceID_LOD;
-                output.uv0 = GetUV0(vertex, materialData);
+                output.uv0 = vertex.UV.xy;
                 #endif
 
                 return output;
@@ -143,10 +130,22 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             {
                 #ifdef _ALPHATEST_ON
                 const VividInstanceData instanceData = PullInstanceData(input.instanceIndex);
-                const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
-                const VividSurfaceBindingData surfaceBindingData = PullSurfaceBindingData(materialData.SurfaceBindingIndex);
-                const float4 albedo = SampleAlbedo(input.uv0, materialData, surfaceBindingData);
-                clip(albedo.a - materialData.AlphaClipThreshold);
+                VividMaterialCoverageEvaluation coverage;
+                if (!VividTryEvaluateCoverageProgram(
+                        instanceData.MaterialIndex,
+                        input.uv0,
+                        coverage))
+                {
+                    const VividMaterialData materialData =
+                        PullMaterialData(instanceData.MaterialIndex);
+                    const VividSurfaceBindingData surfaceBindingData =
+                        PullSurfaceBindingData(materialData.SurfaceBindingIndex);
+                    coverage = VividEvaluateBaseColorAlphaCoverage(
+                        materialData,
+                        surfaceBindingData,
+                        input.uv0);
+                }
+                clip(coverage.Coverage - coverage.AlphaClipThreshold);
                 #endif
             }
             ENDHLSL

@@ -244,6 +244,44 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("output.geometricNormalWS", source);
         }
 
+        [Test]
+        public void CoverageProgram_IsSharedByVisibilityAndShadowPasses()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VisibilityBufferPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string gpuDrivenShaderPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven");
+            string coveragePath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividMaterialCoverage.hlsl");
+            string visibilitySource = File.ReadAllText(
+                Path.Combine(gpuDrivenShaderPath, "VisibilityBufferPass.shader"));
+            string shadowSource = File.ReadAllText(
+                Path.Combine(gpuDrivenShaderPath, "VisibilityBufferShadowCasterPass.shader"));
+            string coverageSource = File.ReadAllText(coveragePath);
+
+            StringAssert.Contains("programData.CoverageProgramID", coverageSource);
+            StringAssert.Contains("runtimeHeader.ParameterAddress", coverageSource);
+            StringAssert.Contains("runtimeHeader.ResourceBindingAddress", coverageSource);
+            StringAssert.DoesNotContain("programData.SurfaceProgramID", coverageSource);
+            StringAssert.DoesNotContain("programData.TransportProgramID", coverageSource);
+            StringAssert.Contains("VividTryEvaluateCoverageProgram", visibilitySource);
+            StringAssert.Contains("VividTryEvaluateCoverageProgram", shadowSource);
+            StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", visibilitySource);
+            StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", shadowSource);
+            StringAssert.DoesNotContain("float4 SampleAlbedo(", visibilitySource);
+            StringAssert.DoesNotContain("float4 SampleAlbedo(", shadowSource);
+        }
+
         private static RenderGraphTexture GetTextureField(VisibilityBufferPass pass, string fieldName)
         {
             var field = typeof(VisibilityBufferPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

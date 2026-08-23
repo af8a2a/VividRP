@@ -2,27 +2,34 @@ using System;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Unity.Scripting.LifecycleManagement;
 
 namespace VividRP.Runtime.GPUDriven
 {
     internal readonly struct GPUDrivenCompiledMaterialInstance
     {
         internal GPUDrivenCompiledMaterialInstance(
+            CompiledMaterialProgram materialProgram,
             in VividMaterialRuntimeHeader runtimeHeader,
             in VividMaterialData legacyMaterialData)
-            : this(runtimeHeader, legacyMaterialData, default)
+            : this(materialProgram, runtimeHeader, legacyMaterialData, default)
         {
         }
 
         internal GPUDrivenCompiledMaterialInstance(
+            CompiledMaterialProgram materialProgram,
             in VividMaterialRuntimeHeader runtimeHeader,
             in VividMaterialData legacyMaterialData,
             in VividDualSlabMaterialData dualSlabMaterialData)
         {
+            MaterialProgram = materialProgram
+                ?? throw new ArgumentNullException(nameof(materialProgram));
             RuntimeHeader = runtimeHeader;
             LegacyMaterialData = legacyMaterialData;
             DualSlabMaterialData = dualSlabMaterialData;
         }
+
+        internal CompiledMaterialProgram MaterialProgram { get; }
 
         internal VividMaterialRuntimeHeader RuntimeHeader { get; }
 
@@ -35,35 +42,27 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal const uint ProgramVersion = 1u;
 
+        [NoAutoStaticsCleanup]
+        private static readonly CompiledMaterialProgram s_StandardSingleSlabProgram =
+            MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(ProgramVersion);
+
+        [NoAutoStaticsCleanup]
+        private static readonly CompiledMaterialProgram s_DualSlabHorizontalMixProgram =
+            MaterialProgramPrototypeBuilder.BuildDualSlab(
+                ProgramVersion,
+                VividDualSlabOperator.HorizontalMix);
+
+        [NoAutoStaticsCleanup]
+        private static readonly CompiledMaterialProgram s_DualSlabVerticalLayerProgram =
+            MaterialProgramPrototypeBuilder.BuildDualSlab(
+                ProgramVersion,
+                VividDualSlabOperator.VerticalLayer);
+
         internal static VividMaterialProgramData StandardSingleSlabProgram =>
-            new()
-            {
-                Version = ProgramVersion,
-                CoverageProgramID = VividMaterialCoverageProgramID.BaseColorAlpha,
-                SurfaceProgramID = VividMaterialSurfaceProgramID.StandardSingleSlab,
-                TransportProgramID = VividMaterialTransportProgramID.None,
-                ParameterLayoutID = VividMaterialParameterLayoutID.LegacyMaterialData,
-                ResourceLayoutID = VividMaterialResourceLayoutID.LegacySurfaceBinding,
-                CapabilityFlags = VividMaterialProgramCapabilities.LegacyGBufferExport
-                    | VividMaterialProgramCapabilities.AlphaClip
-                    | VividMaterialProgramCapabilities.Unlit,
-                ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
-            };
+            s_StandardSingleSlabProgram.RuntimeData;
 
         internal static VividMaterialProgramData DualSlabProgram =>
-            new()
-            {
-                Version = ProgramVersion,
-                CoverageProgramID = VividMaterialCoverageProgramID.BaseColorAlpha,
-                SurfaceProgramID = VividMaterialSurfaceProgramID.DualSlab,
-                TransportProgramID = VividMaterialTransportProgramID.None,
-                ParameterLayoutID = VividMaterialParameterLayoutID.DualSlabMaterialData,
-                ResourceLayoutID = VividMaterialResourceLayoutID.DualSurfaceBinding,
-                CapabilityFlags = VividMaterialProgramCapabilities.LegacyGBufferExport
-                    | VividMaterialProgramCapabilities.AlphaClip
-                    | VividMaterialProgramCapabilities.Unlit,
-                ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
-            };
+            s_DualSlabHorizontalMixProgram.RuntimeData;
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
             GPUDrivenMaterialProxy materialProxy,
@@ -79,14 +78,16 @@ namespace VividRP.Runtime.GPUDriven
                     $"GPU-driven material model '{materialProxy.Model}' is not supported by Program 0.");
             }
 
+            CompiledMaterialProgram materialProgram = s_StandardSingleSlabProgram;
             var runtimeHeader = new VividMaterialRuntimeHeader
             {
-                ProgramID = VividMaterialProgramID.StandardSingleSlab,
+                ProgramID = materialProgram.ProgramID,
                 ParameterAddress = parameterAddress,
                 ResourceBindingAddress = surfaceBindingIndex,
                 Flags = GetRuntimeFlags(materialProxy),
             };
             return new GPUDrivenCompiledMaterialInstance(
+                materialProgram,
                 runtimeHeader,
                 CreateLegacyMaterialData(materialProxy, surfaceBindingIndex));
         }
@@ -123,9 +124,10 @@ namespace VividRP.Runtime.GPUDriven
                     nameof(topSurfaceBindingIndex));
             }
 
+            CompiledMaterialProgram materialProgram = GetDualSlabProgram(definition.Operator);
             var runtimeHeader = new VividMaterialRuntimeHeader
             {
-                ProgramID = VividMaterialProgramID.DualSlab,
+                ProgramID = materialProgram.ProgramID,
                 ParameterAddress = parameterAddress,
                 ResourceBindingAddress = baseSurfaceBindingIndex,
                 Flags = GetRuntimeFlags(materialProxy),
@@ -157,9 +159,27 @@ namespace VividRP.Runtime.GPUDriven
                 Padding0 = 0u,
             };
             return new GPUDrivenCompiledMaterialInstance(
+                materialProgram,
                 runtimeHeader,
                 CreateLegacyMaterialData(materialProxy, baseSurfaceBindingIndex),
                 dualSlabMaterialData);
+        }
+
+        private static CompiledMaterialProgram GetDualSlabProgram(
+            VividDualSlabOperator layerOperator)
+        {
+            switch (layerOperator)
+            {
+                case VividDualSlabOperator.HorizontalMix:
+                    return s_DualSlabHorizontalMixProgram;
+                case VividDualSlabOperator.VerticalLayer:
+                    return s_DualSlabVerticalLayerProgram;
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(layerOperator),
+                        layerOperator,
+                        null);
+            }
         }
 
         private static VividMaterialData CreateLegacyMaterialData(

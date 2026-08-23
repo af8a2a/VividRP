@@ -126,6 +126,9 @@ namespace VividRP.Runtime.GPUDriven
         private readonly ClosureNormalBasis[] m_NormalBases;
         private readonly ClosureSlab[] m_Slabs;
         private readonly ClosureOperator[] m_Operators;
+        private readonly IReadOnlyList<ClosureNormalBasis> m_NormalBasesView;
+        private readonly IReadOnlyList<ClosureSlab> m_SlabsView;
+        private readonly IReadOnlyList<ClosureOperator> m_OperatorsView;
 
         internal ClosureTopology(
             MaterialValueIR valueIR,
@@ -135,9 +138,19 @@ namespace VividRP.Runtime.GPUDriven
             ClosureTopologyBudget budget)
         {
             ValueIR = valueIR ?? throw new ArgumentNullException(nameof(valueIR));
-            m_NormalBases = normalBases ?? throw new ArgumentNullException(nameof(normalBases));
-            m_Slabs = slabs ?? throw new ArgumentNullException(nameof(slabs));
-            m_Operators = operators ?? throw new ArgumentNullException(nameof(operators));
+            if (normalBases == null)
+                throw new ArgumentNullException(nameof(normalBases));
+            if (slabs == null)
+                throw new ArgumentNullException(nameof(slabs));
+            if (operators == null)
+                throw new ArgumentNullException(nameof(operators));
+
+            m_NormalBases = (ClosureNormalBasis[]) normalBases.Clone();
+            m_Slabs = (ClosureSlab[]) slabs.Clone();
+            m_Operators = (ClosureOperator[]) operators.Clone();
+            m_NormalBasesView = Array.AsReadOnly(m_NormalBases);
+            m_SlabsView = Array.AsReadOnly(m_Slabs);
+            m_OperatorsView = Array.AsReadOnly(m_Operators);
             Budget = budget;
 
             Validate();
@@ -145,11 +158,11 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialValueIR ValueIR { get; }
 
-        internal IReadOnlyList<ClosureNormalBasis> NormalBases => m_NormalBases;
+        internal IReadOnlyList<ClosureNormalBasis> NormalBases => m_NormalBasesView;
 
-        internal IReadOnlyList<ClosureSlab> Slabs => m_Slabs;
+        internal IReadOnlyList<ClosureSlab> Slabs => m_SlabsView;
 
-        internal IReadOnlyList<ClosureOperator> Operators => m_Operators;
+        internal IReadOnlyList<ClosureOperator> Operators => m_OperatorsView;
 
         internal ClosureTopologyBudget Budget { get; }
 

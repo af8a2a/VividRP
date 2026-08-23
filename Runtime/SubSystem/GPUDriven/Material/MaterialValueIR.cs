@@ -17,7 +17,9 @@ namespace VividRP.Runtime.GPUDriven
     internal enum MaterialValueOpcode
     {
         Constant,
+        ExternalInput,
         Parameter,
+        TextureResource,
         TextureSampleGrad,
         Ddx,
         Ddy,
@@ -27,21 +29,29 @@ namespace VividRP.Runtime.GPUDriven
         Select,
     }
 
-    internal enum MaterialValueParameter
+    internal enum MaterialExternalInput
     {
         UV0,
-        BaseColorTexture,
-        TopBaseColorTexture,
+        GeometryNormalWS,
+        GeometryTangentWS,
+    }
+
+    internal enum MaterialParameter
+    {
         BaseColor,
         TopBaseColor,
         Roughness,
         TopRoughness,
         Metallic,
         TopMetallic,
-        GeometryNormalWS,
-        GeometryTangentWS,
         LayerWeight,
         AlphaClipThreshold,
+    }
+
+    internal enum MaterialTextureResource
+    {
+        BaseColor,
+        TopBaseColor,
     }
 
     internal readonly struct MaterialValue : IEquatable<MaterialValue>
@@ -100,7 +110,7 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialValueNode(
             MaterialValueOpcode opcode,
             MaterialValueType type,
-            MaterialValueParameter parameter,
+            int semantic,
             float4 constant,
             int operand0,
             int operand1,
@@ -109,7 +119,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             Opcode = opcode;
             Type = type;
-            Parameter = parameter;
+            Semantic = semantic;
             Constant = constant;
             Operand0 = operand0;
             Operand1 = operand1;
@@ -121,7 +131,7 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialValueType Type { get; }
 
-        internal MaterialValueParameter Parameter { get; }
+        internal int Semantic { get; }
 
         internal float4 Constant { get; }
 
@@ -137,7 +147,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             return Opcode == other.Opcode
                 && Type == other.Type
-                && Parameter == other.Parameter
+                && Semantic == other.Semantic
                 && Constant.Equals(other.Constant)
                 && Operand0 == other.Operand0
                 && Operand1 == other.Operand1
@@ -156,7 +166,7 @@ namespace VividRP.Runtime.GPUDriven
             {
                 int hashCode = (int) Opcode;
                 hashCode = (hashCode * 397) ^ (int) Type;
-                hashCode = (hashCode * 397) ^ (int) Parameter;
+                hashCode = (hashCode * 397) ^ Semantic;
                 hashCode = (hashCode * 397) ^ Constant.GetHashCode();
                 hashCode = (hashCode * 397) ^ Operand0;
                 hashCode = (hashCode * 397) ^ Operand1;
@@ -173,17 +183,51 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly List<MaterialValueNode> m_Nodes = new();
         private readonly Dictionary<MaterialValueNode, int> m_ValueSet = new();
+        private readonly IReadOnlyList<MaterialValueNode> m_NodesView;
 
-        internal IReadOnlyList<MaterialValueNode> Nodes => m_Nodes;
+        internal MaterialValueIR()
+        {
+            m_NodesView = m_Nodes.AsReadOnly();
+        }
+
+        internal IReadOnlyList<MaterialValueNode> Nodes => m_NodesView;
 
         internal int NodeCount => m_Nodes.Count;
 
-        internal MaterialValue Parameter(MaterialValueParameter parameter)
+        internal bool IsFrozen { get; private set; }
+
+        internal MaterialValue ExternalInput(MaterialExternalInput input)
+        {
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.ExternalInput,
+                GetExternalInputType(input),
+                (int) input,
+                default,
+                InvalidOperand,
+                InvalidOperand,
+                InvalidOperand,
+                InvalidOperand));
+        }
+
+        internal MaterialValue Parameter(MaterialParameter parameter)
         {
             return Emit(new MaterialValueNode(
                 MaterialValueOpcode.Parameter,
                 GetParameterType(parameter),
-                parameter,
+                (int) parameter,
+                default,
+                InvalidOperand,
+                InvalidOperand,
+                InvalidOperand,
+                InvalidOperand));
+        }
+
+        internal MaterialValue TextureResource(MaterialTextureResource resource)
+        {
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.TextureResource,
+                MaterialValueType.Texture2D,
+                (int) resource,
                 default,
                 InvalidOperand,
                 InvalidOperand,
@@ -326,6 +370,11 @@ namespace VividRP.Runtime.GPUDriven
                 && m_Nodes[value.Index].Type == value.Type;
         }
 
+        internal void Freeze()
+        {
+            IsFrozen = true;
+        }
+
         private MaterialValue EmitUnary(MaterialValueOpcode opcode, MaterialValue value)
         {
             return Emit(new MaterialValueNode(
@@ -370,6 +419,9 @@ namespace VividRP.Runtime.GPUDriven
 
         private MaterialValue Emit(in MaterialValueNode node)
         {
+            if (IsFrozen)
+                throw new InvalidOperationException("Cannot modify a frozen material value IR.");
+
             if (m_ValueSet.TryGetValue(node, out int existingIndex))
                 return new MaterialValue(this, existingIndex, node.Type);
 
@@ -428,27 +480,34 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentException("Material value is not owned by this IR.", parameterName);
         }
 
-        private static MaterialValueType GetParameterType(MaterialValueParameter parameter)
+        private static MaterialValueType GetExternalInputType(MaterialExternalInput input)
+        {
+            switch (input)
+            {
+                case MaterialExternalInput.UV0:
+                    return MaterialValueType.Float2;
+                case MaterialExternalInput.GeometryNormalWS:
+                    return MaterialValueType.Float3;
+                case MaterialExternalInput.GeometryTangentWS:
+                    return MaterialValueType.Float4;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(input), input, null);
+            }
+        }
+
+        private static MaterialValueType GetParameterType(MaterialParameter parameter)
         {
             switch (parameter)
             {
-                case MaterialValueParameter.UV0:
-                    return MaterialValueType.Float2;
-                case MaterialValueParameter.BaseColorTexture:
-                case MaterialValueParameter.TopBaseColorTexture:
-                    return MaterialValueType.Texture2D;
-                case MaterialValueParameter.BaseColor:
-                case MaterialValueParameter.TopBaseColor:
-                case MaterialValueParameter.GeometryTangentWS:
+                case MaterialParameter.BaseColor:
+                case MaterialParameter.TopBaseColor:
                     return MaterialValueType.Float4;
-                case MaterialValueParameter.GeometryNormalWS:
-                    return MaterialValueType.Float3;
-                case MaterialValueParameter.Roughness:
-                case MaterialValueParameter.TopRoughness:
-                case MaterialValueParameter.Metallic:
-                case MaterialValueParameter.TopMetallic:
-                case MaterialValueParameter.LayerWeight:
-                case MaterialValueParameter.AlphaClipThreshold:
+                case MaterialParameter.Roughness:
+                case MaterialParameter.TopRoughness:
+                case MaterialParameter.Metallic:
+                case MaterialParameter.TopMetallic:
+                case MaterialParameter.LayerWeight:
+                case MaterialParameter.AlphaClipThreshold:
                     return MaterialValueType.Float;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(parameter), parameter, null);

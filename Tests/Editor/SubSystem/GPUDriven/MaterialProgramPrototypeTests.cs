@@ -14,13 +14,13 @@ namespace VividRP.Editor.Tests
         {
             var valueIR = new MaterialValueIR();
 
-            MaterialValue uv = valueIR.Parameter(MaterialValueParameter.UV0);
-            MaterialValue duplicateUV = valueIR.Parameter(MaterialValueParameter.UV0);
+            MaterialValue uv = valueIR.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue duplicateUV = valueIR.ExternalInput(MaterialExternalInput.UV0);
             MaterialValue uvDdx = valueIR.Ddx(uv);
             MaterialValue uvDdy = valueIR.Ddy(uv);
-            MaterialValue texture = valueIR.Parameter(MaterialValueParameter.BaseColorTexture);
+            MaterialValue texture = valueIR.TextureResource(MaterialTextureResource.BaseColor);
             MaterialValue sample = valueIR.TextureSampleGrad(texture, uv, uvDdx, uvDdy);
-            MaterialValue baseColor = valueIR.Parameter(MaterialValueParameter.BaseColor);
+            MaterialValue baseColor = valueIR.Parameter(MaterialParameter.BaseColor);
             MaterialValue shadedColor = valueIR.Multiply(sample, baseColor);
             MaterialValue condition = valueIR.Constant(true);
             MaterialValue selectedColor = valueIR.Select(condition, shadedColor, sample);
@@ -40,9 +40,54 @@ namespace VividRP.Editor.Tests
             Assert.Throws<ArgumentException>(() => valueIR.Add(uv, sample));
 
             var foreignIR = new MaterialValueIR();
-            MaterialValue foreignUV = foreignIR.Parameter(MaterialValueParameter.UV0);
+            MaterialValue foreignUV = foreignIR.ExternalInput(MaterialExternalInput.UV0);
             Assert.That(valueIR.Owns(foreignUV), Is.False);
             Assert.Throws<ArgumentException>(() => valueIR.Ddx(foreignUV));
+        }
+
+        [Test]
+        public void MaterialIRModule_FreezesValuesAndProducesDeterministicHashAndDump()
+        {
+            CompiledMaterialProgram first =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram second =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram horizontal =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.HorizontalMix);
+            CompiledMaterialProgram vertical =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.VerticalLayer);
+
+            MaterialIRModule module = first.Module;
+            Assert.That(module.Values.IsFrozen, Is.True);
+            Assert.That(module.StructuralHash, Is.EqualTo(second.Module.StructuralHash));
+            Assert.That(module.GetDebugDump(), Is.EqualTo(second.Module.GetDebugDump()));
+            Assert.That(horizontal.Module.StructuralHash, Is.Not.EqualTo(vertical.Module.StructuralHash));
+            Assert.That(module.Values.Owns(module.Outputs.CoverageValue), Is.True);
+            Assert.That(module.Outputs.CoverageValue.Type, Is.EqualTo(MaterialValueType.Float4));
+            Assert.That(
+                module.Outputs.AlphaClipThreshold.Type,
+                Is.EqualTo(MaterialValueType.Float));
+            Assert.That(module.GetDebugDump(), Does.Contain("external_input UV0"));
+            Assert.That(module.GetDebugDump(), Does.Contain("texture_resource BaseColor"));
+            Assert.That(module.GetDebugDump(), Does.Contain("coverage=%"));
+            Assert.Throws<InvalidOperationException>(() =>
+                module.Values.Parameter(MaterialParameter.Roughness));
+
+            var foreignValues = new MaterialValueIR();
+            MaterialValue foreignCoverage =
+                foreignValues.Parameter(MaterialParameter.BaseColor);
+            Assert.Throws<ArgumentException>(() => new MaterialIRModule(
+                module.Values,
+                new MaterialOutputRoots(
+                    foreignCoverage,
+                    module.Outputs.AlphaClipThreshold),
+                module.Topology));
         }
 
         [Test]
@@ -58,14 +103,15 @@ namespace VividRP.Editor.Tests
                     GPUDrivenMaterialCompiler.CompileStandardSingleSlab(secondProxy, 1u, 4u);
 
                 CompiledMaterialProgram program = first.MaterialProgram;
+                ClosureTopology topology = program.Module.Topology;
                 Assert.That(ReferenceEquals(program, second.MaterialProgram), Is.True);
                 Assert.That(program.ProgramID, Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
-                Assert.That(program.Topology.ClosureCount, Is.EqualTo(1));
-                Assert.That(program.Topology.OperatorCount, Is.Zero);
-                Assert.That(program.Topology.NormalBases.Count, Is.EqualTo(1));
-                Assert.That(program.Topology.Slabs[0].IsTop, Is.True);
-                Assert.That(program.Topology.Slabs[0].IsBottom, Is.True);
-                Assert.That(program.Topology.IsWithinBudget, Is.True);
+                Assert.That(topology.ClosureCount, Is.EqualTo(1));
+                Assert.That(topology.OperatorCount, Is.Zero);
+                Assert.That(topology.NormalBases.Count, Is.EqualTo(1));
+                Assert.That(topology.Slabs[0].IsTop, Is.True);
+                Assert.That(topology.Slabs[0].IsBottom, Is.True);
+                Assert.That(topology.IsWithinBudget, Is.True);
                 Assert.That(
                     program.RuntimeData.SurfaceProgramID,
                     Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
@@ -73,7 +119,7 @@ namespace VividRP.Editor.Tests
                     program.RuntimeData.ParameterLayoutID,
                     Is.EqualTo(VividMaterialParameterLayoutID.LegacyMaterialData));
                 Assert.That(
-                    program.ValueIR.Nodes.Any(
+                    program.Module.Values.Nodes.Any(
                         node => node.Opcode == MaterialValueOpcode.TextureSampleGrad),
                     Is.True);
             }
@@ -101,20 +147,21 @@ namespace VividRP.Editor.Tests
                 GPUDrivenCompiledMaterialInstance compiled =
                     GPUDrivenMaterialCompiler.CompileDualSlab(baseProxy, 3u, 6u, 7u);
                 CompiledMaterialProgram program = compiled.MaterialProgram;
+                ClosureTopology topology = program.Module.Topology;
 
                 Assert.That(program.ProgramID, Is.EqualTo(VividMaterialProgramID.DualSlab));
-                Assert.That(program.Topology.ClosureCount, Is.EqualTo(2));
-                Assert.That(program.Topology.OperatorCount, Is.EqualTo(1));
+                Assert.That(topology.ClosureCount, Is.EqualTo(2));
+                Assert.That(topology.OperatorCount, Is.EqualTo(1));
                 Assert.That(
-                    program.Topology.Operators[0].Kind,
+                    topology.Operators[0].Kind,
                     Is.EqualTo(ClosureOperatorKind.VerticalLayer));
-                Assert.That(program.Topology.Slabs[0].IsBottom, Is.True);
-                Assert.That(program.Topology.Slabs[0].IsTop, Is.False);
-                Assert.That(program.Topology.Slabs[1].IsTop, Is.True);
-                Assert.That(program.Topology.Slabs[1].IsBottom, Is.False);
-                Assert.That(program.Topology.Slabs[0].NormalBasisIndex, Is.Zero);
-                Assert.That(program.Topology.Slabs[1].NormalBasisIndex, Is.Zero);
-                Assert.That(program.Topology.IsWithinBudget, Is.True);
+                Assert.That(topology.Slabs[0].IsBottom, Is.True);
+                Assert.That(topology.Slabs[0].IsTop, Is.False);
+                Assert.That(topology.Slabs[1].IsTop, Is.True);
+                Assert.That(topology.Slabs[1].IsBottom, Is.False);
+                Assert.That(topology.Slabs[0].NormalBasisIndex, Is.Zero);
+                Assert.That(topology.Slabs[1].NormalBasisIndex, Is.Zero);
+                Assert.That(topology.IsWithinBudget, Is.True);
                 Assert.That(
                     program.RuntimeData.SurfaceProgramID,
                     Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
@@ -146,10 +193,10 @@ namespace VividRP.Editor.Tests
             Assert.That(budget.Allows(1, 0), Is.True);
             Assert.That(budget.Allows(2, 1), Is.False);
             Assert.Throws<InvalidOperationException>(() => new ClosureTopology(
-                prototype.ValueIR,
-                new[] { prototype.Topology.NormalBases[0] },
-                new[] { prototype.Topology.Slabs[0], prototype.Topology.Slabs[1] },
-                new[] { prototype.Topology.Operators[0] },
+                prototype.Module.Values,
+                new[] { prototype.Module.Topology.NormalBases[0] },
+                new[] { prototype.Module.Topology.Slabs[0], prototype.Module.Topology.Slabs[1] },
+                new[] { prototype.Module.Topology.Operators[0] },
                 budget));
         }
     }

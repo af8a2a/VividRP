@@ -5,36 +5,29 @@ namespace VividRP.Runtime.GPUDriven
     internal sealed class CompiledMaterialProgram
     {
         private CompiledMaterialProgram(
-            MaterialValueIR valueIR,
-            ClosureTopology topology,
+            MaterialIRModule module,
             VividMaterialProgramID programID,
             in VividMaterialProgramData runtimeData)
         {
-            ValueIR = valueIR;
-            Topology = topology;
+            Module = module;
             ProgramID = programID;
             RuntimeData = runtimeData;
         }
 
-        internal MaterialValueIR ValueIR { get; }
-
-        internal ClosureTopology Topology { get; }
+        internal MaterialIRModule Module { get; }
 
         internal VividMaterialProgramID ProgramID { get; }
 
         internal VividMaterialProgramData RuntimeData { get; }
 
         internal static CompiledMaterialProgram Compile(
-            MaterialValueIR valueIR,
-            ClosureTopology topology,
+            MaterialIRModule module,
             uint programVersion)
         {
-            if (valueIR == null)
-                throw new ArgumentNullException(nameof(valueIR));
-            if (topology == null)
-                throw new ArgumentNullException(nameof(topology));
-            if (!ReferenceEquals(valueIR, topology.ValueIR))
-                throw new ArgumentException("Closure topology must reference the compiled value IR.", nameof(topology));
+            if (module == null)
+                throw new ArgumentNullException(nameof(module));
+
+            ClosureTopology topology = module.Topology;
             if (!topology.IsWithinBudget)
                 throw new InvalidOperationException("Closure topology exceeds its compilation budget.");
 
@@ -89,7 +82,7 @@ namespace VividRP.Runtime.GPUDriven
                 CapabilityFlags = capabilities,
                 ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
             };
-            return new CompiledMaterialProgram(valueIR, topology, programID, runtimeData);
+            return new CompiledMaterialProgram(module, programID, runtimeData);
         }
     }
 
@@ -108,10 +101,12 @@ namespace VividRP.Runtime.GPUDriven
             var valueIR = new MaterialValueIR();
             MaterialValue baseColor = BuildSampledBaseColor(
                 valueIR,
-                MaterialValueParameter.BaseColorTexture,
-                MaterialValueParameter.BaseColor);
-            MaterialValue roughness = valueIR.Parameter(MaterialValueParameter.Roughness);
-            MaterialValue metallic = valueIR.Parameter(MaterialValueParameter.Metallic);
+                MaterialTextureResource.BaseColor,
+                MaterialParameter.BaseColor);
+            MaterialValue roughness = valueIR.Parameter(MaterialParameter.Roughness);
+            MaterialValue metallic = valueIR.Parameter(MaterialParameter.Metallic);
+            MaterialValue alphaClipThreshold =
+                valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
             ClosureNormalBasis[] normalBases = BuildGeometryNormalBasis(valueIR);
             var slabs = new[]
             {
@@ -130,7 +125,11 @@ namespace VividRP.Runtime.GPUDriven
                 slabs,
                 Array.Empty<ClosureOperator>(),
                 ClosureTopologyBudget.Prototype);
-            return CompiledMaterialProgram.Compile(valueIR, topology, programVersion);
+            var module = new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(baseColor, alphaClipThreshold),
+                topology);
+            return CompiledMaterialProgram.Compile(module, programVersion);
         }
 
         internal static CompiledMaterialProgram BuildDualSlab(
@@ -140,17 +139,19 @@ namespace VividRP.Runtime.GPUDriven
             var valueIR = new MaterialValueIR();
             MaterialValue baseColor = BuildSampledBaseColor(
                 valueIR,
-                MaterialValueParameter.BaseColorTexture,
-                MaterialValueParameter.BaseColor);
+                MaterialTextureResource.BaseColor,
+                MaterialParameter.BaseColor);
             MaterialValue topBaseColor = BuildSampledBaseColor(
                 valueIR,
-                MaterialValueParameter.TopBaseColorTexture,
-                MaterialValueParameter.TopBaseColor);
-            MaterialValue roughness = valueIR.Parameter(MaterialValueParameter.Roughness);
-            MaterialValue topRoughness = valueIR.Parameter(MaterialValueParameter.TopRoughness);
-            MaterialValue metallic = valueIR.Parameter(MaterialValueParameter.Metallic);
-            MaterialValue topMetallic = valueIR.Parameter(MaterialValueParameter.TopMetallic);
-            MaterialValue layerWeight = valueIR.Parameter(MaterialValueParameter.LayerWeight);
+                MaterialTextureResource.TopBaseColor,
+                MaterialParameter.TopBaseColor);
+            MaterialValue roughness = valueIR.Parameter(MaterialParameter.Roughness);
+            MaterialValue topRoughness = valueIR.Parameter(MaterialParameter.TopRoughness);
+            MaterialValue metallic = valueIR.Parameter(MaterialParameter.Metallic);
+            MaterialValue topMetallic = valueIR.Parameter(MaterialParameter.TopMetallic);
+            MaterialValue layerWeight = valueIR.Parameter(MaterialParameter.LayerWeight);
+            MaterialValue alphaClipThreshold =
+                valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
             ClosureNormalBasis[] normalBases = BuildGeometryNormalBasis(valueIR);
             var slabs = new[]
             {
@@ -185,16 +186,20 @@ namespace VividRP.Runtime.GPUDriven
                 slabs,
                 operators,
                 ClosureTopologyBudget.Prototype);
-            return CompiledMaterialProgram.Compile(valueIR, topology, programVersion);
+            var module = new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(baseColor, alphaClipThreshold),
+                topology);
+            return CompiledMaterialProgram.Compile(module, programVersion);
         }
 
         private static MaterialValue BuildSampledBaseColor(
             MaterialValueIR valueIR,
-            MaterialValueParameter textureParameter,
-            MaterialValueParameter colorParameter)
+            MaterialTextureResource textureResource,
+            MaterialParameter colorParameter)
         {
-            MaterialValue uv = valueIR.Parameter(MaterialValueParameter.UV0);
-            MaterialValue texture = valueIR.Parameter(textureParameter);
+            MaterialValue uv = valueIR.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue texture = valueIR.TextureResource(textureResource);
             MaterialValue sample = valueIR.TextureSampleGrad(
                 texture,
                 uv,
@@ -208,8 +213,8 @@ namespace VividRP.Runtime.GPUDriven
             return new[]
             {
                 new ClosureNormalBasis(
-                    valueIR.Parameter(MaterialValueParameter.GeometryNormalWS),
-                    valueIR.Parameter(MaterialValueParameter.GeometryTangentWS)),
+                    valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS),
+                    valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS)),
             };
         }
 

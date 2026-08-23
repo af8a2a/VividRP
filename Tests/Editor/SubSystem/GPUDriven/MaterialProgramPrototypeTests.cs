@@ -137,6 +137,69 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SurfaceMatcher_ConsumesSlabTopologyForProgram0AndProgram1()
+        {
+            CompiledMaterialProgram standard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            CompiledMaterialProgram horizontal =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.HorizontalMix);
+            CompiledMaterialProgram vertical =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.VerticalLayer);
+
+            AssertStandardSurfaceRequirements(standard);
+            AssertDualSlabSurfaceRequirements(horizontal);
+            AssertDualSlabSurfaceRequirements(vertical);
+            CollectionAssert.AreEqual(
+                GetValueSliceSignature(horizontal.SurfaceProgram.ValueSlice),
+                GetValueSliceSignature(vertical.SurfaceProgram.ValueSlice));
+        }
+
+        [Test]
+        public void SurfaceMatcher_RejectsUnmappedSlabValueIR()
+        {
+            MaterialIRModule module = BuildUnsupportedSurfaceModule();
+
+            Assert.Throws<NotSupportedException>(() =>
+                SurfaceProgramMatcher.Compile(module));
+        }
+
+        [Test]
+        public void SurfaceMatcher_RejectsUnsupportedClosureOperator()
+        {
+            CompiledMaterialProgram prototype =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    VividDualSlabOperator.HorizontalMix);
+            MaterialIRModule prototypeModule = prototype.Module;
+            ClosureTopology prototypeTopology = prototypeModule.Topology;
+            var topology = new ClosureTopology(
+                prototypeModule.Values,
+                prototypeTopology.NormalBases.ToArray(),
+                prototypeTopology.Slabs.ToArray(),
+                new[]
+                {
+                    new ClosureOperator(
+                        (ClosureOperatorKind) 99,
+                        backgroundSlabIndex: 0,
+                        foregroundSlabIndex: 1,
+                        weight: prototypeTopology.Operators[0].Weight),
+                },
+                ClosureTopologyBudget.Prototype);
+            var module = new MaterialIRModule(
+                prototypeModule.Values,
+                prototypeModule.Outputs,
+                topology);
+
+            Assert.Throws<NotSupportedException>(() =>
+                SurfaceProgramMatcher.Compile(module));
+        }
+
+        [Test]
         public void CompileStandardSingleSlab_ProducesSingleClosureProgramPrototype()
         {
             var firstProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -271,6 +334,92 @@ namespace VividRP.Editor.Tests
                 coverage.RequiredExternalInputs);
         }
 
+        private static void AssertStandardSurfaceRequirements(
+            CompiledMaterialProgram program)
+        {
+            CompiledSurfaceProgram surface = program.SurfaceProgram;
+            Assert.That(
+                surface.ProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
+            Assert.That(program.RuntimeData.SurfaceProgramID, Is.EqualTo(surface.ProgramID));
+            Assert.That(surface.ValueSlice.NodeCount, Is.EqualTo(11));
+            Assert.That(
+                surface.ValueSlice.Contains(program.Module.Topology.Slabs[0].Roughness),
+                Is.True);
+            Assert.That(
+                surface.ValueSlice.Contains(program.Module.Topology.NormalBases[0].Normal),
+                Is.True);
+            Assert.That(
+                surface.ValueSlice.Contains(program.Module.Outputs.AlphaClipThreshold),
+                Is.False);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialParameter.BaseColor,
+                    MaterialParameter.Roughness,
+                    MaterialParameter.Metallic,
+                },
+                surface.RequiredParameters);
+            CollectionAssert.AreEqual(
+                new[] { MaterialTextureResource.BaseColor },
+                surface.RequiredTextureResources);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialExternalInput.UV0,
+                    MaterialExternalInput.GeometryNormalWS,
+                    MaterialExternalInput.GeometryTangentWS,
+                },
+                surface.RequiredExternalInputs);
+        }
+
+        private static void AssertDualSlabSurfaceRequirements(
+            CompiledMaterialProgram program)
+        {
+            CompiledSurfaceProgram surface = program.SurfaceProgram;
+            Assert.That(
+                surface.ProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
+            Assert.That(program.RuntimeData.SurfaceProgramID, Is.EqualTo(surface.ProgramID));
+            Assert.That(surface.ValueSlice.NodeCount, Is.EqualTo(18));
+            Assert.That(
+                surface.ValueSlice.Contains(program.Module.Topology.Slabs[1].BaseColor),
+                Is.True);
+            Assert.That(
+                surface.ValueSlice.Contains(program.Module.Topology.Operators[0].Weight),
+                Is.True);
+            Assert.That(
+                surface.ValueSlice.Contains(program.Module.Outputs.AlphaClipThreshold),
+                Is.False);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialParameter.BaseColor,
+                    MaterialParameter.TopBaseColor,
+                    MaterialParameter.Roughness,
+                    MaterialParameter.TopRoughness,
+                    MaterialParameter.Metallic,
+                    MaterialParameter.TopMetallic,
+                    MaterialParameter.LayerWeight,
+                },
+                surface.RequiredParameters);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialTextureResource.BaseColor,
+                    MaterialTextureResource.TopBaseColor,
+                },
+                surface.RequiredTextureResources);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    MaterialExternalInput.UV0,
+                    MaterialExternalInput.GeometryNormalWS,
+                    MaterialExternalInput.GeometryTangentWS,
+                },
+                surface.RequiredExternalInputs);
+        }
+
         private static string[] GetValueSliceSignature(MaterialValueSlice valueSlice)
         {
             return valueSlice.NodeIndices.Select(index =>
@@ -316,6 +465,60 @@ namespace VividRP.Editor.Tests
                 valueIR,
                 new MaterialOutputRoots(coverageValue, alphaClipThreshold),
                 topology);
+        }
+
+        private static MaterialIRModule BuildUnsupportedSurfaceModule()
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue baseColor = BuildSampledBaseColor(
+                valueIR,
+                MaterialTextureResource.BaseColor,
+                MaterialParameter.BaseColor);
+            MaterialValue roughness = valueIR.Constant(0.5f);
+            MaterialValue metallic = valueIR.Parameter(MaterialParameter.Metallic);
+            MaterialValue alphaClipThreshold =
+                valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+            var normalBases = new[]
+            {
+                new ClosureNormalBasis(
+                    valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS),
+                    valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS)),
+            };
+            var topology = new ClosureTopology(
+                valueIR,
+                normalBases,
+                new[]
+                {
+                    new ClosureSlab(
+                        baseColor,
+                        roughness,
+                        metallic,
+                        normalBasisIndex: 0,
+                        features: ClosureFeatureMask.BaseColorTexture,
+                        isTop: true,
+                        isBottom: true),
+                },
+                Array.Empty<ClosureOperator>(),
+                ClosureTopologyBudget.Prototype);
+            return new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(baseColor, alphaClipThreshold),
+                topology);
+        }
+
+        private static MaterialValue BuildSampledBaseColor(
+            MaterialValueIR valueIR,
+            MaterialTextureResource textureResource,
+            MaterialParameter colorParameter)
+        {
+            MaterialValue uv = valueIR.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue texture = valueIR.TextureResource(textureResource);
+            MaterialValue sample = valueIR.TextureSampleGrad(
+                texture,
+                uv,
+                valueIR.Ddx(uv),
+                valueIR.Ddy(uv));
+            return valueIR.Multiply(sample, valueIR.Parameter(colorParameter));
         }
     }
 }

@@ -3,104 +3,111 @@ using System.Collections.Generic;
 
 namespace VividRP.Runtime.GPUDriven
 {
-    internal sealed class CompiledCoverageProgram
+    internal sealed class MaterialValueRequirements
     {
-        internal CompiledCoverageProgram(
-            VividMaterialCoverageProgramID programID,
-            MaterialValueSlice valueSlice,
-            IReadOnlyList<MaterialParameter> requiredParameters,
-            IReadOnlyList<MaterialTextureResource> requiredTextureResources,
-            IReadOnlyList<MaterialExternalInput> requiredExternalInputs)
+        private MaterialValueRequirements(
+            IReadOnlyList<MaterialParameter> parameters,
+            IReadOnlyList<MaterialTextureResource> textureResources,
+            IReadOnlyList<MaterialExternalInput> externalInputs)
         {
-            ProgramID = programID;
-            ValueSlice = valueSlice ?? throw new ArgumentNullException(nameof(valueSlice));
-            RequiredParameters = requiredParameters
-                ?? throw new ArgumentNullException(nameof(requiredParameters));
-            RequiredTextureResources = requiredTextureResources
-                ?? throw new ArgumentNullException(nameof(requiredTextureResources));
-            RequiredExternalInputs = requiredExternalInputs
-                ?? throw new ArgumentNullException(nameof(requiredExternalInputs));
+            Parameters = parameters;
+            TextureResources = textureResources;
+            ExternalInputs = externalInputs;
         }
 
-        internal VividMaterialCoverageProgramID ProgramID { get; }
+        internal IReadOnlyList<MaterialParameter> Parameters { get; }
 
-        internal MaterialValueSlice ValueSlice { get; }
+        internal IReadOnlyList<MaterialTextureResource> TextureResources { get; }
 
-        internal IReadOnlyList<MaterialParameter> RequiredParameters { get; }
+        internal IReadOnlyList<MaterialExternalInput> ExternalInputs { get; }
 
-        internal IReadOnlyList<MaterialTextureResource> RequiredTextureResources { get; }
+        internal static MaterialValueRequirements Collect(MaterialValueSlice valueSlice)
+        {
+            if (valueSlice == null)
+                throw new ArgumentNullException(nameof(valueSlice));
 
-        internal IReadOnlyList<MaterialExternalInput> RequiredExternalInputs { get; }
+            var parameters = new List<MaterialParameter>();
+            var textureResources = new List<MaterialTextureResource>();
+            var externalInputs = new List<MaterialExternalInput>();
+            for (int i = 0; i < valueSlice.NodeIndices.Count; i++)
+            {
+                MaterialValueNode node = valueSlice.Values.Nodes[valueSlice.NodeIndices[i]];
+                switch (node.Opcode)
+                {
+                    case MaterialValueOpcode.Parameter:
+                        parameters.Add((MaterialParameter) node.Semantic);
+                        break;
+                    case MaterialValueOpcode.TextureResource:
+                        textureResources.Add((MaterialTextureResource) node.Semantic);
+                        break;
+                    case MaterialValueOpcode.ExternalInput:
+                        externalInputs.Add((MaterialExternalInput) node.Semantic);
+                        break;
+                }
+            }
+
+            return new MaterialValueRequirements(
+                parameters.AsReadOnly(),
+                textureResources.AsReadOnly(),
+                externalInputs.AsReadOnly());
+        }
     }
 
-    internal static class CoverageProgramLowerer
+    internal static class MaterialValuePatternMatcher
     {
-        internal static CompiledCoverageProgram Compile(MaterialIRModule module)
+        internal static bool MatchesParameter(
+            MaterialValueIR values,
+            MaterialValue value,
+            MaterialParameter parameter)
         {
-            if (module == null)
-                throw new ArgumentNullException(nameof(module));
-
-            MaterialValueSlice valueSlice = module.CreateValueSlice(
-                module.Outputs.CoverageValue,
-                module.Outputs.AlphaClipThreshold);
-            if (!MatchesBaseColorAlphaProgram(module, valueSlice))
-            {
-                throw new NotSupportedException(
-                    "Coverage value IR cannot be lowered to an existing coverage program ABI.");
-            }
-
-            CollectRequirements(
-                valueSlice,
-                out IReadOnlyList<MaterialParameter> parameters,
-                out IReadOnlyList<MaterialTextureResource> textureResources,
-                out IReadOnlyList<MaterialExternalInput> externalInputs);
-            return new CompiledCoverageProgram(
-                VividMaterialCoverageProgramID.BaseColorAlpha,
-                valueSlice,
-                parameters,
-                textureResources,
-                externalInputs);
+            return MatchesSemantic(
+                values.GetNode(value),
+                MaterialValueOpcode.Parameter,
+                value.Type,
+                (int) parameter);
         }
 
-        private static bool MatchesBaseColorAlphaProgram(
-            MaterialIRModule module,
-            MaterialValueSlice valueSlice)
+        internal static bool MatchesExternalInput(
+            MaterialValueIR values,
+            MaterialValue value,
+            MaterialExternalInput input)
         {
-            MaterialValueIR values = module.Values;
-            MaterialValueNode alphaClipThreshold =
-                values.GetNode(module.Outputs.AlphaClipThreshold);
-            if (!MatchesSemantic(
-                    alphaClipThreshold,
-                    MaterialValueOpcode.Parameter,
-                    MaterialValueType.Float,
-                    (int) MaterialParameter.AlphaClipThreshold))
-            {
-                return false;
-            }
+            return MatchesSemantic(
+                values.GetNode(value),
+                MaterialValueOpcode.ExternalInput,
+                value.Type,
+                (int) input);
+        }
 
-            MaterialValueNode coverage = values.GetNode(module.Outputs.CoverageValue);
-            if (coverage.Opcode != MaterialValueOpcode.Multiply
-                || coverage.Type != MaterialValueType.Float4)
+        internal static bool MatchesSampledColor(
+            MaterialValueIR values,
+            MaterialValue value,
+            MaterialTextureResource textureResource,
+            MaterialParameter colorParameter)
+        {
+            MaterialValueNode color = values.GetNode(value);
+            if (color.Opcode != MaterialValueOpcode.Multiply
+                || color.Type != MaterialValueType.Float4)
             {
                 return false;
             }
 
             int sampleIndex;
             if (MatchesSemantic(
-                    values.Nodes[coverage.Operand0],
+                    values.Nodes[color.Operand0],
                     MaterialValueOpcode.Parameter,
                     MaterialValueType.Float4,
-                    (int) MaterialParameter.BaseColor))
+                    (int) colorParameter))
             {
-                sampleIndex = coverage.Operand1;
+                sampleIndex = color.Operand1;
             }
             else if (MatchesSemantic(
-                         values.Nodes[coverage.Operand1],
+                         values.Nodes[color.Operand1],
                          MaterialValueOpcode.Parameter,
                          MaterialValueType.Float4,
-                         (int) MaterialParameter.BaseColor))
+                         (int) colorParameter))
             {
-                sampleIndex = coverage.Operand0;
+                sampleIndex = color.Operand0;
             }
             else
             {
@@ -114,27 +121,26 @@ namespace VividRP.Runtime.GPUDriven
                     values.Nodes[sample.Operand0],
                     MaterialValueOpcode.TextureResource,
                     MaterialValueType.Texture2D,
-                    (int) MaterialTextureResource.BaseColor)
+                    (int) textureResource)
                 || !MatchesSemantic(
                     values.Nodes[sample.Operand1],
                     MaterialValueOpcode.ExternalInput,
                     MaterialValueType.Float2,
-                    (int) MaterialExternalInput.UV0)
-                || !MatchesDerivative(
-                    values,
-                    sample.Operand2,
-                    MaterialValueOpcode.Ddx,
-                    sample.Operand1)
-                || !MatchesDerivative(
-                    values,
-                    sample.Operand3,
-                    MaterialValueOpcode.Ddy,
-                    sample.Operand1))
+                    (int) MaterialExternalInput.UV0))
             {
                 return false;
             }
 
-            return valueSlice.NodeCount == 8;
+            return MatchesDerivative(
+                    values,
+                    sample.Operand2,
+                    MaterialValueOpcode.Ddx,
+                    sample.Operand1)
+                && MatchesDerivative(
+                    values,
+                    sample.Operand3,
+                    MaterialValueOpcode.Ddy,
+                    sample.Operand1);
         }
 
         private static bool MatchesDerivative(
@@ -159,36 +165,276 @@ namespace VividRP.Runtime.GPUDriven
                 && node.Type == type
                 && node.Semantic == semantic;
         }
+    }
 
-        private static void CollectRequirements(
+    internal sealed class CompiledCoverageProgram
+    {
+        internal CompiledCoverageProgram(
+            VividMaterialCoverageProgramID programID,
             MaterialValueSlice valueSlice,
-            out IReadOnlyList<MaterialParameter> parameters,
-            out IReadOnlyList<MaterialTextureResource> textureResources,
-            out IReadOnlyList<MaterialExternalInput> externalInputs)
+            MaterialValueRequirements requirements)
         {
-            var parameterList = new List<MaterialParameter>();
-            var textureResourceList = new List<MaterialTextureResource>();
-            var externalInputList = new List<MaterialExternalInput>();
-            for (int i = 0; i < valueSlice.NodeIndices.Count; i++)
+            ProgramID = programID;
+            ValueSlice = valueSlice ?? throw new ArgumentNullException(nameof(valueSlice));
+            Requirements = requirements
+                ?? throw new ArgumentNullException(nameof(requirements));
+        }
+
+        internal VividMaterialCoverageProgramID ProgramID { get; }
+
+        internal MaterialValueSlice ValueSlice { get; }
+
+        internal MaterialValueRequirements Requirements { get; }
+
+        internal IReadOnlyList<MaterialParameter> RequiredParameters =>
+            Requirements.Parameters;
+
+        internal IReadOnlyList<MaterialTextureResource> RequiredTextureResources =>
+            Requirements.TextureResources;
+
+        internal IReadOnlyList<MaterialExternalInput> RequiredExternalInputs =>
+            Requirements.ExternalInputs;
+    }
+
+    internal static class CoverageProgramLowerer
+    {
+        internal static CompiledCoverageProgram Compile(MaterialIRModule module)
+        {
+            if (module == null)
+                throw new ArgumentNullException(nameof(module));
+
+            MaterialValueSlice valueSlice = module.CreateValueSlice(
+                module.Outputs.CoverageValue,
+                module.Outputs.AlphaClipThreshold);
+            if (!MatchesBaseColorAlphaProgram(module, valueSlice))
             {
-                MaterialValueNode node = valueSlice.Values.Nodes[valueSlice.NodeIndices[i]];
-                switch (node.Opcode)
-                {
-                    case MaterialValueOpcode.Parameter:
-                        parameterList.Add((MaterialParameter) node.Semantic);
-                        break;
-                    case MaterialValueOpcode.TextureResource:
-                        textureResourceList.Add((MaterialTextureResource) node.Semantic);
-                        break;
-                    case MaterialValueOpcode.ExternalInput:
-                        externalInputList.Add((MaterialExternalInput) node.Semantic);
-                        break;
-                }
+                throw new NotSupportedException(
+                    "Coverage value IR cannot be lowered to an existing coverage program ABI.");
             }
 
-            parameters = parameterList.AsReadOnly();
-            textureResources = textureResourceList.AsReadOnly();
-            externalInputs = externalInputList.AsReadOnly();
+            MaterialValueRequirements requirements =
+                MaterialValueRequirements.Collect(valueSlice);
+            return new CompiledCoverageProgram(
+                VividMaterialCoverageProgramID.BaseColorAlpha,
+                valueSlice,
+                requirements);
+        }
+
+        private static bool MatchesBaseColorAlphaProgram(
+            MaterialIRModule module,
+            MaterialValueSlice valueSlice)
+        {
+            MaterialValueIR values = module.Values;
+            return MaterialValuePatternMatcher.MatchesParameter(
+                    values,
+                    module.Outputs.AlphaClipThreshold,
+                    MaterialParameter.AlphaClipThreshold)
+                && MaterialValuePatternMatcher.MatchesSampledColor(
+                    values,
+                    module.Outputs.CoverageValue,
+                    MaterialTextureResource.BaseColor,
+                    MaterialParameter.BaseColor)
+                && valueSlice.NodeCount == 8;
+        }
+    }
+
+    internal sealed class CompiledSurfaceProgram
+    {
+        internal CompiledSurfaceProgram(
+            VividMaterialSurfaceProgramID programID,
+            MaterialValueSlice valueSlice,
+            MaterialValueRequirements requirements)
+        {
+            ProgramID = programID;
+            ValueSlice = valueSlice ?? throw new ArgumentNullException(nameof(valueSlice));
+            Requirements = requirements
+                ?? throw new ArgumentNullException(nameof(requirements));
+        }
+
+        internal VividMaterialSurfaceProgramID ProgramID { get; }
+
+        internal MaterialValueSlice ValueSlice { get; }
+
+        internal MaterialValueRequirements Requirements { get; }
+
+        internal IReadOnlyList<MaterialParameter> RequiredParameters =>
+            Requirements.Parameters;
+
+        internal IReadOnlyList<MaterialTextureResource> RequiredTextureResources =>
+            Requirements.TextureResources;
+
+        internal IReadOnlyList<MaterialExternalInput> RequiredExternalInputs =>
+            Requirements.ExternalInputs;
+    }
+
+    internal static class SurfaceProgramMatcher
+    {
+        private const ClosureFeatureMask SupportedFeatures =
+            ClosureFeatureMask.BaseColorTexture
+            | ClosureFeatureMask.NormalTexture
+            | ClosureFeatureMask.MaskTexture
+            | ClosureFeatureMask.AlphaClip
+            | ClosureFeatureMask.Emission
+            | ClosureFeatureMask.Unlit;
+
+        internal static CompiledSurfaceProgram Compile(MaterialIRModule module)
+        {
+            if (module == null)
+                throw new ArgumentNullException(nameof(module));
+
+            MaterialValueSlice valueSlice = CreateSurfaceValueSlice(module);
+            VividMaterialSurfaceProgramID programID;
+            if (MatchesStandardSingleSlab(module, valueSlice))
+            {
+                programID = VividMaterialSurfaceProgramID.StandardSingleSlab;
+            }
+            else if (MatchesDualSlab(module, valueSlice))
+            {
+                programID = VividMaterialSurfaceProgramID.DualSlab;
+            }
+            else
+            {
+                throw new NotSupportedException(
+                    "Closure topology and value IR cannot be matched to an existing surface program ABI.");
+            }
+
+            return new CompiledSurfaceProgram(
+                programID,
+                valueSlice,
+                MaterialValueRequirements.Collect(valueSlice));
+        }
+
+        private static MaterialValueSlice CreateSurfaceValueSlice(MaterialIRModule module)
+        {
+            ClosureTopology topology = module.Topology;
+            var roots = new List<MaterialValue>();
+            for (int i = 0; i < topology.NormalBases.Count; i++)
+            {
+                roots.Add(topology.NormalBases[i].Normal);
+                roots.Add(topology.NormalBases[i].Tangent);
+            }
+            for (int i = 0; i < topology.Slabs.Count; i++)
+            {
+                roots.Add(topology.Slabs[i].BaseColor);
+                roots.Add(topology.Slabs[i].Roughness);
+                roots.Add(topology.Slabs[i].Metallic);
+            }
+            for (int i = 0; i < topology.Operators.Count; i++)
+                roots.Add(topology.Operators[i].Weight);
+
+            return module.CreateValueSlice(roots.ToArray());
+        }
+
+        private static bool MatchesStandardSingleSlab(
+            MaterialIRModule module,
+            MaterialValueSlice valueSlice)
+        {
+            ClosureTopology topology = module.Topology;
+            if (topology.ClosureCount != 1
+                || topology.OperatorCount != 0
+                || topology.NormalBases.Count != 1)
+            {
+                return false;
+            }
+
+            ClosureSlab slab = topology.Slabs[0];
+            return slab.IsTop
+                && slab.IsBottom
+                && MatchesNormalBasis(module.Values, topology.NormalBases[0])
+                && MatchesSlab(
+                    module.Values,
+                    slab,
+                    MaterialTextureResource.BaseColor,
+                    MaterialParameter.BaseColor,
+                    MaterialParameter.Roughness,
+                    MaterialParameter.Metallic)
+                && valueSlice.NodeCount == 11;
+        }
+
+        private static bool MatchesDualSlab(
+            MaterialIRModule module,
+            MaterialValueSlice valueSlice)
+        {
+            ClosureTopology topology = module.Topology;
+            if (topology.ClosureCount != 2
+                || topology.OperatorCount != 1
+                || topology.NormalBases.Count != 1)
+            {
+                return false;
+            }
+
+            ClosureSlab baseSlab = topology.Slabs[0];
+            ClosureSlab topSlab = topology.Slabs[1];
+            ClosureOperator closureOperator = topology.Operators[0];
+            return !baseSlab.IsTop
+                && baseSlab.IsBottom
+                && topSlab.IsTop
+                && !topSlab.IsBottom
+                && MatchesNormalBasis(module.Values, topology.NormalBases[0])
+                && MatchesSlab(
+                    module.Values,
+                    baseSlab,
+                    MaterialTextureResource.BaseColor,
+                    MaterialParameter.BaseColor,
+                    MaterialParameter.Roughness,
+                    MaterialParameter.Metallic)
+                && MatchesSlab(
+                    module.Values,
+                    topSlab,
+                    MaterialTextureResource.TopBaseColor,
+                    MaterialParameter.TopBaseColor,
+                    MaterialParameter.TopRoughness,
+                    MaterialParameter.TopMetallic)
+                && (closureOperator.Kind == ClosureOperatorKind.HorizontalMix
+                    || closureOperator.Kind == ClosureOperatorKind.VerticalLayer)
+                && closureOperator.BackgroundSlabIndex == 0
+                && closureOperator.ForegroundSlabIndex == 1
+                && MaterialValuePatternMatcher.MatchesParameter(
+                    module.Values,
+                    closureOperator.Weight,
+                    MaterialParameter.LayerWeight)
+                && valueSlice.NodeCount == 18;
+        }
+
+        private static bool MatchesNormalBasis(
+            MaterialValueIR values,
+            in ClosureNormalBasis normalBasis)
+        {
+            return MaterialValuePatternMatcher.MatchesExternalInput(
+                    values,
+                    normalBasis.Normal,
+                    MaterialExternalInput.GeometryNormalWS)
+                && MaterialValuePatternMatcher.MatchesExternalInput(
+                    values,
+                    normalBasis.Tangent,
+                    MaterialExternalInput.GeometryTangentWS);
+        }
+
+        private static bool MatchesSlab(
+            MaterialValueIR values,
+            in ClosureSlab slab,
+            MaterialTextureResource textureResource,
+            MaterialParameter baseColorParameter,
+            MaterialParameter roughnessParameter,
+            MaterialParameter metallicParameter)
+        {
+            // Tiling/remap and optional Normal/Mask evaluation remain in the V1 layout ABI.
+            return slab.NormalBasisIndex == 0
+                && (slab.Features & ClosureFeatureMask.BaseColorTexture) != 0
+                && (slab.Features & ~SupportedFeatures) == 0
+                && MaterialValuePatternMatcher.MatchesSampledColor(
+                    values,
+                    slab.BaseColor,
+                    textureResource,
+                    baseColorParameter)
+                && MaterialValuePatternMatcher.MatchesParameter(
+                    values,
+                    slab.Roughness,
+                    roughnessParameter)
+                && MaterialValuePatternMatcher.MatchesParameter(
+                    values,
+                    slab.Metallic,
+                    metallicParameter);
         }
     }
 
@@ -197,11 +443,13 @@ namespace VividRP.Runtime.GPUDriven
         private CompiledMaterialProgram(
             MaterialIRModule module,
             CompiledCoverageProgram coverageProgram,
+            CompiledSurfaceProgram surfaceProgram,
             VividMaterialProgramID programID,
             in VividMaterialProgramData runtimeData)
         {
             Module = module;
             CoverageProgram = coverageProgram;
+            SurfaceProgram = surfaceProgram;
             ProgramID = programID;
             RuntimeData = runtimeData;
         }
@@ -209,6 +457,8 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialIRModule Module { get; }
 
         internal CompiledCoverageProgram CoverageProgram { get; }
+
+        internal CompiledSurfaceProgram SurfaceProgram { get; }
 
         internal VividMaterialProgramID ProgramID { get; }
 
@@ -225,37 +475,26 @@ namespace VividRP.Runtime.GPUDriven
             if (!topology.IsWithinBudget)
                 throw new InvalidOperationException("Closure topology exceeds its compilation budget.");
             CompiledCoverageProgram coverageProgram = CoverageProgramLowerer.Compile(module);
+            CompiledSurfaceProgram surfaceProgram = SurfaceProgramMatcher.Compile(module);
 
             VividMaterialProgramID programID;
-            VividMaterialSurfaceProgramID surfaceProgramID;
             VividMaterialParameterLayoutID parameterLayoutID;
             VividMaterialResourceLayoutID resourceLayoutID;
-            if (topology.ClosureCount == 1 && topology.OperatorCount == 0)
+            switch (surfaceProgram.ProgramID)
             {
-                programID = VividMaterialProgramID.StandardSingleSlab;
-                surfaceProgramID = VividMaterialSurfaceProgramID.StandardSingleSlab;
-                parameterLayoutID = VividMaterialParameterLayoutID.LegacyMaterialData;
-                resourceLayoutID = VividMaterialResourceLayoutID.LegacySurfaceBinding;
-            }
-            else if (topology.ClosureCount == 2 && topology.OperatorCount == 1)
-            {
-                ClosureOperatorKind operatorKind = topology.Operators[0].Kind;
-                if (operatorKind != ClosureOperatorKind.HorizontalMix
-                    && operatorKind != ClosureOperatorKind.VerticalLayer)
-                {
+                case VividMaterialSurfaceProgramID.StandardSingleSlab:
+                    programID = VividMaterialProgramID.StandardSingleSlab;
+                    parameterLayoutID = VividMaterialParameterLayoutID.LegacyMaterialData;
+                    resourceLayoutID = VividMaterialResourceLayoutID.LegacySurfaceBinding;
+                    break;
+                case VividMaterialSurfaceProgramID.DualSlab:
+                    programID = VividMaterialProgramID.DualSlab;
+                    parameterLayoutID = VividMaterialParameterLayoutID.DualSlabMaterialData;
+                    resourceLayoutID = VividMaterialResourceLayoutID.DualSurfaceBinding;
+                    break;
+                default:
                     throw new NotSupportedException(
-                        $"Closure operator '{operatorKind}' cannot be lowered to Program 1.");
-                }
-
-                programID = VividMaterialProgramID.DualSlab;
-                surfaceProgramID = VividMaterialSurfaceProgramID.DualSlab;
-                parameterLayoutID = VividMaterialParameterLayoutID.DualSlabMaterialData;
-                resourceLayoutID = VividMaterialResourceLayoutID.DualSurfaceBinding;
-            }
-            else
-            {
-                throw new NotSupportedException(
-                    "Closure topology cannot be lowered to an existing material program ABI.");
+                        $"Surface program '{surfaceProgram.ProgramID}' has no material program ABI.");
             }
 
             ClosureFeatureMask features = topology.FeatureMask;
@@ -270,14 +509,19 @@ namespace VividRP.Runtime.GPUDriven
             {
                 Version = programVersion,
                 CoverageProgramID = coverageProgram.ProgramID,
-                SurfaceProgramID = surfaceProgramID,
+                SurfaceProgramID = surfaceProgram.ProgramID,
                 TransportProgramID = VividMaterialTransportProgramID.None,
                 ParameterLayoutID = parameterLayoutID,
                 ResourceLayoutID = resourceLayoutID,
                 CapabilityFlags = capabilities,
                 ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
             };
-            return new CompiledMaterialProgram(module, coverageProgram, programID, runtimeData);
+            return new CompiledMaterialProgram(
+                module,
+                coverageProgram,
+                surfaceProgram,
+                programID,
+                runtimeData);
         }
     }
 

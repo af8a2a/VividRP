@@ -9,27 +9,37 @@ namespace VividRP.Runtime.GPUDriven
     internal readonly struct GPUDrivenCompiledMaterialInstance
     {
         internal GPUDrivenCompiledMaterialInstance(
-            CompiledMaterialProgram materialProgram,
+            MaterialProgramCatalog.ManifestEntry catalogProgram,
             in VividMaterialRuntimeHeader runtimeHeader,
             in VividMaterialData legacyMaterialData)
-            : this(materialProgram, runtimeHeader, legacyMaterialData, default)
+            : this(catalogProgram, runtimeHeader, legacyMaterialData, default)
         {
         }
 
         internal GPUDrivenCompiledMaterialInstance(
-            CompiledMaterialProgram materialProgram,
+            MaterialProgramCatalog.ManifestEntry catalogProgram,
             in VividMaterialRuntimeHeader runtimeHeader,
             in VividMaterialData legacyMaterialData,
             in VividDualSlabMaterialData dualSlabMaterialData)
         {
-            MaterialProgram = materialProgram
-                ?? throw new ArgumentNullException(nameof(materialProgram));
+            CatalogProgram = catalogProgram
+                ?? throw new ArgumentNullException(nameof(catalogProgram));
+            if (runtimeHeader.ProgramID != catalogProgram.ProgramID)
+            {
+                throw new ArgumentException(
+                    "The runtime header ProgramID must match its cataloged material program.",
+                    nameof(runtimeHeader));
+            }
             RuntimeHeader = runtimeHeader;
             LegacyMaterialData = legacyMaterialData;
             DualSlabMaterialData = dualSlabMaterialData;
         }
 
-        internal CompiledMaterialProgram MaterialProgram { get; }
+        internal MaterialProgramCatalog.ManifestEntry CatalogProgram { get; }
+
+        internal CompiledMaterialProgram MaterialProgram => CatalogProgram.Program;
+
+        internal VividMaterialProgramID ProgramID => CatalogProgram.ProgramID;
 
         internal VividMaterialRuntimeHeader RuntimeHeader { get; }
 
@@ -49,6 +59,15 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly MaterialProgramCatalog s_MaterialProgramCatalog =
             CreateBuiltinProgramCatalog();
 
+        internal static MaterialProgramCatalog ProgramCatalog =>
+            s_MaterialProgramCatalog;
+
+        internal static MaterialProgramCatalog.ManifestEntry GetCatalogedMaterialProgram(
+            VividMaterialProgramID programID)
+        {
+            return s_MaterialProgramCatalog.GetEntry(programID);
+        }
+
         internal static CompiledMaterialProgram GetMaterialProgram(
             VividMaterialProgramID programID)
         {
@@ -62,41 +81,37 @@ namespace VividRP.Runtime.GPUDriven
 
         private static MaterialProgramCatalog CreateBuiltinProgramCatalog()
         {
-            MaterialProgramCatalogDefinition definition =
-                MaterialProgramBuiltinCatalog.Definition;
-            if (definition.Count != MaterialProgramContract.BuiltinProgramCount)
+            MaterialProgramTemplateRegistry templates =
+                MaterialProgramBuiltinCatalog.Templates;
+            if (templates.Count != MaterialProgramContract.BuiltinProgramCount)
             {
                 throw new InvalidOperationException(
-                    $"The native material program catalog must contain exactly "
-                    + $"{MaterialProgramContract.BuiltinProgramCount} programs.");
-            }
-            for (int programIndex = 0;
-                 programIndex < definition.Entries.Count;
-                 programIndex++)
-            {
-                var expectedProgramID =
-                    (VividMaterialProgramID) (uint) programIndex;
-                if (definition.Entries[programIndex].ProgramID != expectedProgramID)
-                {
-                    throw new InvalidOperationException(
-                        $"Builtin material program '{expectedProgramID}' must occupy "
-                        + $"its frozen ABI index {programIndex}.");
-                }
+                    "The builtin native material template registry must contain exactly "
+                    + $"{MaterialProgramContract.BuiltinProgramCount} templates.");
             }
 
-            return new MaterialProgramCatalog(
-                definition,
-                new[]
-                {
-                    MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
-                        ProgramVersion),
-                    MaterialProgramPrototypeBuilder.BuildDualSlab(
-                        ProgramVersion,
-                        VividDualSlabOperator.HorizontalMix),
-                    MaterialProgramPrototypeBuilder.BuildDualSlab(
-                        ProgramVersion,
-                        VividDualSlabOperator.VerticalLayer),
-                });
+            CompiledMaterialProgram standard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    ProgramVersion);
+            CompiledMaterialProgram horizontal =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    ProgramVersion,
+                    VividDualSlabOperator.HorizontalMix);
+            CompiledMaterialProgram vertical =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    ProgramVersion,
+                    VividDualSlabOperator.VerticalLayer);
+            return MaterialProgramCatalog.Bake(
+                templates,
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P0.StandardSingleSlab",
+                    standard),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P1.DualSlabHorizontalMix",
+                    horizontal),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P2.DualSlabVerticalLayer",
+                    vertical));
         }
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
@@ -113,7 +128,8 @@ namespace VividRP.Runtime.GPUDriven
                     $"GPU-driven material model '{materialProxy.Model}' is not supported by Program 0.");
             }
 
-            CompiledMaterialProgram materialProgram = GetMaterialProgram(
+            MaterialProgramCatalog.ManifestEntry materialProgram =
+                GetCatalogedMaterialProgram(
                 VividMaterialProgramID.StandardSingleSlab);
             var runtimeHeader = new VividMaterialRuntimeHeader
             {
@@ -152,7 +168,8 @@ namespace VividRP.Runtime.GPUDriven
                 throw new InvalidOperationException(
                     "Dual Slab definitions require a StandardLit top-slab proxy.");
             }
-            CompiledMaterialProgram materialProgram = GetDualSlabProgram(definition.Operator);
+            MaterialProgramCatalog.ManifestEntry materialProgram =
+                GetDualSlabProgram(definition.Operator);
 
             var runtimeHeader = new VividMaterialRuntimeHeader
             {
@@ -194,16 +211,16 @@ namespace VividRP.Runtime.GPUDriven
                 dualSlabMaterialData);
         }
 
-        private static CompiledMaterialProgram GetDualSlabProgram(
+        private static MaterialProgramCatalog.ManifestEntry GetDualSlabProgram(
             VividDualSlabOperator layerOperator)
         {
             switch (layerOperator)
             {
                 case VividDualSlabOperator.HorizontalMix:
-                    return GetMaterialProgram(
+                    return GetCatalogedMaterialProgram(
                         VividMaterialProgramID.DualSlabHorizontalMix);
                 case VividDualSlabOperator.VerticalLayer:
-                    return GetMaterialProgram(
+                    return GetCatalogedMaterialProgram(
                         VividMaterialProgramID.DualSlabVerticalLayer);
                 default:
                     throw new ArgumentOutOfRangeException(

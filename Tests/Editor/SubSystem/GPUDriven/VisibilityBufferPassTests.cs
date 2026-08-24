@@ -316,18 +316,22 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("PositionCS", coverageAotSource);
             StringAssert.DoesNotContain("ddx(", coverageAotSource);
             StringAssert.DoesNotContain("ddy(", coverageAotSource);
-            StringAssert.Contains("VividTryEvaluateCoverageProgram", visibilitySource);
-            StringAssert.Contains("VividTryEvaluateCoverageProgram", shadowSource);
+            StringAssert.Contains("VividEvaluateCoverageProgram", visibilitySource);
+            StringAssert.Contains("VividEvaluateCoverageProgram", shadowSource);
+            StringAssert.Contains("VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE", visibilitySource);
+            StringAssert.Contains("VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE", shadowSource);
+            StringAssert.Contains("clip(-1.0f)", visibilitySource);
+            StringAssert.Contains("clip(-1.0f)", shadowSource);
             StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", visibilitySource);
             StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", shadowSource);
             int visibilityDdx = visibilitySource.IndexOf("ddx(input.uv0)");
             int visibilityDdy = visibilitySource.IndexOf("ddy(input.uv0)");
-            int visibilityProgram = visibilitySource.IndexOf("VividTryEvaluateCoverageProgram");
+            int visibilityProgram = visibilitySource.IndexOf("VividEvaluateCoverageProgram");
             int visibilityPack = visibilitySource.IndexOf(
                 "PackVividVisibilityBufferFragmentOutput");
             int shadowDdx = shadowSource.IndexOf("ddx(input.uv0)");
             int shadowDdy = shadowSource.IndexOf("ddy(input.uv0)");
-            int shadowProgram = shadowSource.IndexOf("VividTryEvaluateCoverageProgram");
+            int shadowProgram = shadowSource.IndexOf("VividEvaluateCoverageProgram");
             Assert.That(visibilityDdx, Is.GreaterThanOrEqualTo(0));
             Assert.That(visibilityProgram, Is.GreaterThan(visibilityDdx));
             Assert.That(visibilityDdy, Is.GreaterThanOrEqualTo(0));

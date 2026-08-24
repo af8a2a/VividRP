@@ -3,7 +3,17 @@
 #ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 #define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 
-#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 2u
+#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 3u
+
+#ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
+#define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
+#define VIVID_MATERIAL_CATALOG_MANIFEST_VERSION 1u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0x2F95182Eu
+#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0x6E6C3933u
+#define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH 3u
+#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 1u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0x2F95182Eu || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0x6E6C3933u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 3u
+#error Material Surface and Coverage dispatchers use different frozen catalog manifests.
+#endif
 
 struct VividAOTSurfaceContext
 {
@@ -38,8 +48,8 @@ struct VividAOTSurfaceProgramOutput
     uint LayerOperator;
 };
 
-// Surface AOT HLSL artifact v2, backend v2.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_StandardSingleSlab(
+// Surface AOT HLSL artifact v3, backend v3.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_102312440865AEC1(
     const VividMaterialData materialParameters,
     const VividSurfaceBindingData surfaceBinding0,
     const VividAOTSurfaceContext context)
@@ -88,8 +98,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_StandardSingleSlab(
     return output;
 }
 
-// Surface AOT HLSL artifact v2, backend v2.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_DualSlabHorizontalMix(
+// Surface AOT HLSL artifact v3, backend v3.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_E3EBFB7224466993(
     const VividDualSlabMaterialData materialParameters,
     const VividSurfaceBindingData surfaceBinding0,
     const VividSurfaceBindingData surfaceBinding1,
@@ -171,8 +181,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_DualSlabHorizontalMix(
     return output;
 }
 
-// Surface AOT HLSL artifact v2, backend v2.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_DualSlabVerticalLayer(
+// Surface AOT HLSL artifact v3, backend v3.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_FC535184E5FA265F(
     const VividDualSlabMaterialData materialParameters,
     const VividSurfaceBindingData surfaceBinding0,
     const VividSurfaceBindingData surfaceBinding1,
@@ -267,20 +277,20 @@ bool VividTryEvaluateAOTSurfaceProgram(
     switch (programID)
     {
         case 0u:
-            output = VividEvaluateAOTSurface_StandardSingleSlab(
+            output = VividEvaluateAOTSurface_102312440865AEC1(
                 materialParameters,
                 surfaceBinding0,
                 context);
             return true;
         case 1u:
-            output = VividEvaluateAOTSurface_DualSlabHorizontalMix(
+            output = VividEvaluateAOTSurface_E3EBFB7224466993(
                 dualSlabMaterialParameters,
                 surfaceBinding0,
                 surfaceBinding1,
                 context);
             return true;
         case 2u:
-            output = VividEvaluateAOTSurface_DualSlabVerticalLayer(
+            output = VividEvaluateAOTSurface_FC535184E5FA265F(
                 dualSlabMaterialParameters,
                 surfaceBinding0,
                 surfaceBinding1,

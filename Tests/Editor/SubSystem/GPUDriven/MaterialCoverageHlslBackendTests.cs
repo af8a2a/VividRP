@@ -57,7 +57,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildSource_SortsCompleteProgramIdsAndEmitsTypedBoundsCheckedDispatcher()
+        public void BuildSource_UsesFrozenManifestAndEmitsTypedBoundsCheckedDispatcher()
         {
             CompiledMaterialProgram standard = BuildStandard();
             CompiledMaterialProgram horizontal = BuildDual(
@@ -65,12 +65,17 @@ namespace VividRP.Editor.Tests
             CompiledMaterialProgram vertical = BuildDual(
                 VividDualSlabOperator.VerticalLayer);
 
-            string sorted = MaterialCoverageHlslSourceBuilder.BuildSource(
-                new[] { standard, horizontal, vertical });
-            string shuffled = MaterialCoverageHlslSourceBuilder.BuildSource(
-                new[] { vertical, standard, horizontal });
+            MaterialProgramCatalog catalog = BakeBuiltinCatalog(
+                standard,
+                horizontal,
+                vertical);
+            string sorted = MaterialCoverageHlslSourceBuilder.BuildSource(catalog);
+            string rebuilt = MaterialCoverageHlslSourceBuilder.BuildSource(
+                BakeBuiltinCatalog(BuildStandard(), BuildDual(
+                    VividDualSlabOperator.HorizontalMix), BuildDual(
+                    VividDualSlabOperator.VerticalLayer)));
 
-            Assert.That(shuffled, Is.EqualTo(sorted));
+            Assert.That(rebuilt, Is.EqualTo(sorted));
             Assert.That(
                 sorted,
                 Does.Contain(
@@ -89,6 +94,9 @@ namespace VividRP.Editor.Tests
             Assert.That(sorted, Does.Contain("PullMaterialData("));
             Assert.That(sorted, Does.Contain("PullDualSlabMaterialData("));
             Assert.That(sorted, Does.Contain("PullSurfaceBindingData("));
+            Assert.That(
+                sorted,
+                Does.Contain("#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO"));
 
             int case0 = sorted.IndexOf("        case 0u:", StringComparison.Ordinal);
             int case1 = sorted.IndexOf("        case 1u:", StringComparison.Ordinal);
@@ -117,7 +125,6 @@ namespace VividRP.Editor.Tests
                 BuildGeneralCoverageModule(),
                 MaterialProgramContract.RuntimeAbiVersion);
 
-            Assert.That(general.ProgramID, Is.EqualTo(baseline.ProgramID));
             Assert.That(
                 general.CoverageProgram.ProgramID,
                 Is.EqualTo(VividMaterialCoverageProgramID.BaseColorAlpha));
@@ -130,6 +137,71 @@ namespace VividRP.Editor.Tests
                 general.CoverageHlsl.EntryPoint,
                 Is.Not.EqualTo(baseline.CoverageHlsl.EntryPoint));
             AssertExplicitGradientContract(general.CoverageHlsl.Source, expectedSampleCount: 1);
+
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram("Baseline", baseline),
+                MaterialProgramCatalogBakeSlot.ForProgram("General", general));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 0u).ProgramID,
+                Is.EqualTo((VividMaterialProgramID) 0u));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 1u).ProgramID,
+                Is.EqualTo((VividMaterialProgramID) 1u));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 0u).Program
+                    .Lowering.SelectionKey,
+                Is.EqualTo(catalog.GetEntry((VividMaterialProgramID) 1u).Program
+                    .Lowering.SelectionKey));
+        }
+
+        [Test]
+        public void FrozenCatalog_OneManifestDrivesRuntimeTableAndBothDispatchers()
+        {
+            CompiledMaterialProgram baseline = BuildStandard();
+            CompiledMaterialProgram general = CompiledMaterialProgram.Compile(
+                BuildGeneralCoverageModule(),
+                MaterialProgramContract.RuntimeAbiVersion);
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram("Baseline", baseline),
+                MaterialProgramCatalogBakeSlot.ForProgram("General", general));
+
+            VividMaterialProgramData[] runtimeTable =
+                catalog.CreateRuntimeProgramTable();
+            string coverageSource =
+                MaterialCoverageHlslSourceBuilder.BuildSource(catalog);
+            string surfaceSource =
+                MaterialSurfaceHlslSourceBuilder.BuildSource(catalog);
+            string manifestHashLo = $"0x{unchecked((uint) catalog.ManifestHash.Value):X8}u";
+            string manifestHashHi =
+                $"0x{unchecked((uint) (catalog.ManifestHash.Value >> 32)):X8}u";
+
+            Assert.That(runtimeTable, Has.Length.EqualTo(catalog.RuntimeTableLength));
+            Assert.That(runtimeTable[0].Version, Is.EqualTo(
+                baseline.RuntimeData.Version));
+            Assert.That(runtimeTable[1].Version, Is.EqualTo(
+                general.RuntimeData.Version));
+            Assert.That(coverageSource, Does.Contain(manifestHashLo));
+            Assert.That(coverageSource, Does.Contain(manifestHashHi));
+            Assert.That(surfaceSource, Does.Contain(manifestHashLo));
+            Assert.That(surfaceSource, Does.Contain(manifestHashHi));
+            Assert.That(coverageSource, Does.Contain("        case 0u:"));
+            Assert.That(coverageSource, Does.Contain("        case 1u:"));
+            Assert.That(surfaceSource, Does.Contain("        case 0u:"));
+            Assert.That(surfaceSource, Does.Contain("        case 1u:"));
+            Assert.That(
+                catalog.ManifestHash,
+                Is.EqualTo(MaterialProgramCatalogManifestHashBuilder.Compute(
+                    catalog.Slots,
+                    catalog.SlotNames)));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 1u).Program.CompiledHash,
+                Is.EqualTo(general.CompiledHash));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 1u).LayoutFingerprint,
+                Is.EqualTo(general.Lowering.LayoutFingerprint));
+            Assert.That(general.CompiledHash, Is.Not.EqualTo(baseline.CompiledHash));
         }
 
         [Test]
@@ -188,13 +260,26 @@ namespace VividRP.Editor.Tests
             Assert.That(File.Exists(generatedPath), Is.True, generatedPath);
 
             string expected = MaterialCoverageHlslSourceBuilder.BuildSource(
-                new[]
-                {
-                    BuildStandard(),
-                    BuildDual(VividDualSlabOperator.HorizontalMix),
-                    BuildDual(VividDualSlabOperator.VerticalLayer),
-                });
+                GPUDrivenMaterialCompiler.ProgramCatalog);
             Assert.That(File.ReadAllText(generatedPath), Is.EqualTo(expected));
+        }
+
+        private static MaterialProgramCatalog BakeBuiltinCatalog(
+            CompiledMaterialProgram standard,
+            CompiledMaterialProgram horizontal,
+            CompiledMaterialProgram vertical)
+        {
+            return MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P0.StandardSingleSlab",
+                    standard),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P1.DualSlabHorizontalMix",
+                    horizontal),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P2.DualSlabVerticalLayer",
+                    vertical));
         }
 
         private static CompiledMaterialProgram BuildStandard()

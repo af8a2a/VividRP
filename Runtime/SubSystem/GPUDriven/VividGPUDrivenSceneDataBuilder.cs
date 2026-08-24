@@ -1133,7 +1133,7 @@ namespace VividRP.Runtime.GPUDriven
                 if (appendedResourceRecordCount != requiredResourceRecordCount)
                 {
                     throw new InvalidOperationException(
-                        $"Material program '{compiledMaterial.MaterialProgram.ProgramID}' requires {requiredResourceRecordCount} resource records, but the material compiler appended {appendedResourceRecordCount}.");
+                        $"Material program '{compiledMaterial.ProgramID}' requires {requiredResourceRecordCount} resource records, but the material compiler appended {appendedResourceRecordCount}.");
                 }
                 materialData = compiledMaterial.LegacyMaterialData;
                 runtimeHeader = compiledMaterial.RuntimeHeader;

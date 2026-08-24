@@ -44,7 +44,11 @@ bool VividIsCoverageProgramCompatible(
             == VIVIDMATERIALEXECUTIONCLASS_VISIBILITY_DEFERRED;
 }
 
-bool VividTryEvaluateCoverageProgram(
+#define VIVID_MATERIAL_COVERAGE_LEGACY_FALLBACK 0u
+#define VIVID_MATERIAL_COVERAGE_EVALUATED 1u
+#define VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE 2u
+
+uint VividEvaluateCoverageProgram(
     const uint materialIndex,
     const float2 uv0,
     const float2 uv0Ddx,
@@ -53,30 +57,31 @@ bool VividTryEvaluateCoverageProgram(
 {
     evaluation = (VividMaterialCoverageEvaluation) 0;
     if (materialIndex >= _MaterialRuntimeHeaderCount)
-        return false;
+        return VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE;
 
     const VividMaterialRuntimeHeader runtimeHeader =
         PullMaterialRuntimeHeader(materialIndex);
-    if (runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID
-        || runtimeHeader.ProgramID >= _MaterialProgramCount)
-    {
-        return false;
-    }
+    if (runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID)
+        return VIVID_MATERIAL_COVERAGE_LEGACY_FALLBACK;
+    if (runtimeHeader.ProgramID >= _MaterialProgramCount)
+        return VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE;
 
     const VividMaterialProgramData programData =
         PullMaterialProgramData(runtimeHeader.ProgramID);
     if (!VividIsCoverageProgramCompatible(runtimeHeader, programData))
-        return false;
+        return VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE;
 
     VividAOTCoverageContext context;
     context.UV0 = uv0;
     context.UV0Ddx = uv0Ddx;
     context.UV0Ddy = uv0Ddy;
     return VividTryEvaluateAOTCoverageProgram(
-        runtimeHeader,
-        programData,
-        context,
-        evaluation);
+            runtimeHeader,
+            programData,
+            context,
+            evaluation)
+        ? VIVID_MATERIAL_COVERAGE_EVALUATED
+        : VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE;
 }
 
 #endif // VIVIDRP_GPU_DRIVEN_MATERIAL_COVERAGE_INCLUDED

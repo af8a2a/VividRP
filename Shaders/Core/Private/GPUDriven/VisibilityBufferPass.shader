@@ -122,12 +122,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 const VividVisibilityBufferValue visibilityBufferValue = UnpackVisibilityBufferValue(input.visibilityValue);
                 const VividInstanceData instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 VividMaterialCoverageEvaluation coverage;
-                if (!VividTryEvaluateCoverageProgram(
-                        instanceData.MaterialIndex,
-                        input.uv0,
-                        uv0Ddx,
-                        uv0Ddy,
-                        coverage))
+                const uint coverageStatus = VividEvaluateCoverageProgram(
+                    instanceData.MaterialIndex,
+                    input.uv0,
+                    uv0Ddx,
+                    uv0Ddy,
+                    coverage);
+                if (coverageStatus == VIVID_MATERIAL_COVERAGE_LEGACY_FALLBACK)
                 {
                     const VividMaterialData materialData =
                         PullMaterialData(instanceData.MaterialIndex);
@@ -140,6 +141,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                         uv0Ddx,
                         uv0Ddy);
                 }
+                if (coverageStatus == VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE)
+                    clip(-1.0f);
                 clip(coverage.Coverage - coverage.AlphaClipThreshold);
                 #endif
 

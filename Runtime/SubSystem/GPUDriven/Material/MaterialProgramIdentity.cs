@@ -10,16 +10,18 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint ClosureExpressionVersion = 1u;
         internal const uint StageLIRVersion = 1u;
         internal const uint DerivativeLegalizationVersion = 1u;
-        internal const uint ProgramLoweringVersion = 2u;
+        internal const uint ProgramLoweringVersion = 3u;
         internal const uint GenericLayoutVersion = 1u;
-        internal const uint ProgramCatalogVersion = 1u;
-        internal const uint SurfaceHlslArtifactVersion = 2u;
-        internal const uint SurfaceHlslBackendVersion = 2u;
+        internal const uint LayoutFingerprintVersion = 1u;
+        internal const uint ProgramCatalogVersion = 2u;
+        internal const uint ProgramCatalogManifestVersion = 1u;
+        internal const uint SurfaceHlslArtifactVersion = 3u;
+        internal const uint SurfaceHlslBackendVersion = 3u;
         internal const uint CoverageHlslArtifactVersion = 1u;
         internal const uint CoverageHlslBackendVersion = 1u;
         internal const uint SemanticHashVersion = 4u;
-        internal const uint CompiledHashVersion = 4u;
-        internal const uint CompilerVersion = 9u;
+        internal const uint CompiledHashVersion = 5u;
+        internal const uint CompilerVersion = 10u;
         internal const uint NativeTemplateBackendVersion = 6u;
         internal const uint VerifierVersion = 3u;
         internal const uint RuntimeAbiVersion = 1u;
@@ -159,6 +161,65 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
+    internal readonly struct MaterialProgramCatalogManifestHash :
+        IEquatable<MaterialProgramCatalogManifestHash>
+    {
+        internal MaterialProgramCatalogManifestHash(uint version, ulong value)
+        {
+            Version = version;
+            Value = value;
+        }
+
+        internal uint Version { get; }
+
+        internal ulong Value { get; }
+
+        public bool Equals(MaterialProgramCatalogManifestHash other)
+        {
+            return Version == other.Version && Value == other.Value;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is MaterialProgramCatalogManifestHash other
+                && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hashCode = (int) Version;
+                hashCode = (hashCode * 397) ^ (int) Value;
+                hashCode = (hashCode * 397) ^ (int) (Value >> 32);
+                return hashCode;
+            }
+        }
+
+        public override string ToString()
+        {
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "manifest_v={0} 0x{1:X16}",
+                Version,
+                Value);
+        }
+
+        public static bool operator ==(
+            MaterialProgramCatalogManifestHash left,
+            MaterialProgramCatalogManifestHash right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(
+            MaterialProgramCatalogManifestHash left,
+            MaterialProgramCatalogManifestHash right)
+        {
+            return !left.Equals(right);
+        }
+    }
+
     internal static class MaterialProgramHashUtility
     {
         internal const ulong OffsetBasis = 14695981039346656037ul;
@@ -217,6 +278,112 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
+    internal static class MaterialProgramCatalogManifestHashBuilder
+    {
+        internal static MaterialProgramCatalogManifestHash Compute(
+            System.Collections.Generic.IReadOnlyList<
+                MaterialProgramCatalog.ManifestEntry> slots,
+            System.Collections.Generic.IReadOnlyList<string> slotNames)
+        {
+            if (slots == null)
+                throw new ArgumentNullException(nameof(slots));
+            if (slotNames == null)
+                throw new ArgumentNullException(nameof(slotNames));
+            if (slots.Count != slotNames.Count)
+            {
+                throw new ArgumentException(
+                    "Manifest slot entries and stable names must have the same length.",
+                    nameof(slotNames));
+            }
+
+            ulong hash = MaterialProgramHashUtility.OffsetBasis;
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                MaterialProgramContract.ProgramCatalogManifestVersion);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                MaterialProgramContract.ProgramCatalogVersion);
+            MaterialProgramHashUtility.Add(ref hash, slots.Count);
+            for (int slotIndex = 0; slotIndex < slots.Count; slotIndex++)
+            {
+                MaterialProgramCatalog.ManifestEntry entry = slots[slotIndex];
+                MaterialProgramHashUtility.Add(ref hash, slotIndex);
+                MaterialProgramHashUtility.Add(ref hash, slotNames[slotIndex]);
+                MaterialProgramHashUtility.Add(ref hash, entry != null);
+                if (entry == null)
+                    continue;
+                if ((uint) entry.ProgramID != (uint) slotIndex)
+                {
+                    throw new ArgumentException(
+                        "Manifest entry ProgramID must equal its frozen table index.",
+                        nameof(slots));
+                }
+
+                MaterialProgramHashUtility.Add(ref hash, (uint) entry.ProgramID);
+                if (!string.Equals(
+                        entry.StableName,
+                        slotNames[slotIndex],
+                        StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        "Manifest entry stable name must match its frozen slot name.",
+                        nameof(slotNames));
+                }
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    entry.Program.CompiledHash.Version);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    entry.Program.CompiledHash.Value);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    entry.LayoutFingerprint.Version);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    entry.LayoutFingerprint.Value);
+                AddRuntimeData(ref hash, entry.RuntimeData);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    entry.Program.CoverageHlsl.PayloadHash);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    entry.Program.SurfaceHlsl.PayloadHash);
+            }
+
+            return new MaterialProgramCatalogManifestHash(
+                MaterialProgramContract.ProgramCatalogManifestVersion,
+                hash);
+        }
+
+        private static void AddRuntimeData(
+            ref ulong hash,
+            in VividMaterialProgramData runtimeData)
+        {
+            MaterialProgramHashUtility.Add(ref hash, runtimeData.Version);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) runtimeData.ExecutionClass);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) runtimeData.CoverageProgramID);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) runtimeData.SurfaceProgramID);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) runtimeData.TransportProgramID);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) runtimeData.ParameterLayoutID);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) runtimeData.ResourceLayoutID);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) runtimeData.CapabilityFlags);
+        }
+    }
+
     internal static class CompiledMaterialProgramHashBuilder
     {
         internal static CompiledMaterialProgramHash ComputeNativeTemplate(
@@ -251,7 +418,13 @@ namespace VividRP.Runtime.GPUDriven
 
             AddSelectionKey(ref hash, lowering.SelectionKey);
             AddGenericLayout(ref hash, lowering.GenericLayout);
-            AddNativeLayoutSchema(ref hash, lowering.CatalogEntry);
+            AddNativeLayoutSchema(ref hash, lowering.Template);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                lowering.LayoutFingerprint.Version);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                lowering.LayoutFingerprint.Value);
             AddRuntimeData(ref hash, lowering.RuntimeData);
             AddParameterLayout(
                 ref hash,
@@ -288,6 +461,7 @@ namespace VividRP.Runtime.GPUDriven
             MaterialProgramHashUtility.Add(ref hash, (int) artifact.Topology);
             MaterialProgramHashUtility.Add(ref hash, (int) artifact.PhysicalContract);
             MaterialProgramHashUtility.Add(ref hash, artifact.BindingHash);
+            MaterialProgramHashUtility.Add(ref hash, artifact.CodeHash);
             MaterialProgramHashUtility.Add(ref hash, artifact.EntryPoint);
             MaterialProgramHashUtility.Add(ref hash, artifact.Source);
         }
@@ -365,16 +539,16 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AddNativeLayoutSchema(
             ref ulong hash,
-            MaterialProgramCatalogEntry catalogEntry)
+            MaterialProgramTemplate template)
         {
             MaterialProgramHashUtility.Add(
                 ref hash,
-                catalogEntry.RuntimeAbiVersion);
+                template.RuntimeAbiVersion);
             MaterialProgramHashUtility.Add(
                 ref hash,
-                (uint) catalogEntry.Capabilities);
+                (uint) template.Capabilities);
             MaterialNativeTemplateLayoutSchema schema =
-                catalogEntry.LayoutSchema;
+                template.LayoutSchema;
             MaterialProgramHashUtility.Add(
                 ref hash,
                 schema.ParameterBindings.Count);

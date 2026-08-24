@@ -234,153 +234,6 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
-    internal static class MaterialStageValuePatternMatcher
-    {
-        internal static bool MatchesParameter(
-            MaterialStageLIR stageLIR,
-            MaterialValue value,
-            MaterialParameter parameter)
-        {
-            return MatchesParameterNode(
-                stageLIR.Values,
-                stageLIR.GetNode(stageLIR.GetValue(value)),
-                parameter);
-        }
-
-        internal static bool MatchesExternalInput(
-            MaterialStageLIR stageLIR,
-            MaterialValue value,
-            MaterialExternalInput input)
-        {
-            return MatchesStageInput(
-                stageLIR.GetNode(stageLIR.GetValue(value)),
-                value.Type,
-                GetStageInput(input));
-        }
-
-        internal static bool MatchesSampledColor(
-            MaterialStageLIR stageLIR,
-            MaterialValue value,
-            MaterialTextureResource textureResource,
-            MaterialParameter colorParameter)
-        {
-            return MatchesSampledColorNode(
-                stageLIR,
-                stageLIR.GetValue(value).Index,
-                textureResource,
-                colorParameter);
-        }
-
-        private static bool MatchesSampledColorNode(
-            MaterialStageLIR stageLIR,
-            int colorIndex,
-            MaterialTextureResource textureResource,
-            MaterialParameter colorParameter)
-        {
-            MaterialStageLIRNode color = stageLIR.Nodes[colorIndex];
-            if (color.Opcode != MaterialStageLIROpcode.Multiply
-                || color.Type != MaterialValueType.Float4)
-            {
-                return false;
-            }
-
-            int sampleIndex;
-            if (MatchesParameterNode(
-                    stageLIR.Values,
-                    stageLIR.Nodes[color.Operand0],
-                    colorParameter))
-            {
-                sampleIndex = color.Operand1;
-            }
-            else if (MatchesParameterNode(
-                         stageLIR.Values,
-                         stageLIR.Nodes[color.Operand1],
-                         colorParameter))
-            {
-                sampleIndex = color.Operand0;
-            }
-            else
-            {
-                return false;
-            }
-
-            MaterialStageLIRNode sample = stageLIR.Nodes[sampleIndex];
-            if (sample.Opcode != MaterialStageLIROpcode.TextureSampleGrad
-                || sample.Type != MaterialValueType.Float4
-                || !MatchesResourceNode(
-                    stageLIR.Values,
-                    stageLIR.Nodes[sample.Operand0],
-                    textureResource)
-                || !MatchesStageInput(
-                    stageLIR.Nodes[sample.Operand1],
-                    MaterialValueType.Float2,
-                    MaterialStageInput.UV0))
-            {
-                return false;
-            }
-
-            return MatchesStageInput(
-                    stageLIR.Nodes[sample.Operand2],
-                    MaterialValueType.Float2,
-                    MaterialStageInput.UV0Ddx)
-                && MatchesStageInput(
-                    stageLIR.Nodes[sample.Operand3],
-                    MaterialValueType.Float2,
-                    MaterialStageInput.UV0Ddy);
-        }
-
-        private static bool MatchesStageInput(
-            in MaterialStageLIRNode node,
-            MaterialValueType type,
-            MaterialStageInput input)
-        {
-            return node.Opcode == MaterialStageLIROpcode.StageInput
-                && node.Type == type
-                && node.Semantic == (int) input;
-        }
-
-        private static bool MatchesParameterNode(
-            MaterialValueIR values,
-            in MaterialStageLIRNode node,
-            MaterialParameter parameter)
-        {
-            return node.Opcode == MaterialStageLIROpcode.Parameter
-                && values.TryGetParameterDeclaration(
-                    node.Semantic,
-                    out MaterialParameterDeclaration declaration)
-                && declaration
-                    == MaterialNativeTemplateDeclarationAdapter.GetParameter(parameter);
-        }
-
-        private static bool MatchesResourceNode(
-            MaterialValueIR values,
-            in MaterialStageLIRNode node,
-            MaterialTextureResource resource)
-        {
-            return node.Opcode == MaterialStageLIROpcode.TextureResource
-                && values.TryGetResourceDeclaration(
-                    node.Semantic,
-                    out MaterialResourceDeclaration declaration)
-                && declaration
-                    == MaterialNativeTemplateDeclarationAdapter.GetTexture(resource);
-        }
-
-        private static MaterialStageInput GetStageInput(MaterialExternalInput input)
-        {
-            switch (input)
-            {
-                case MaterialExternalInput.UV0:
-                    return MaterialStageInput.UV0;
-                case MaterialExternalInput.GeometryNormalWS:
-                    return MaterialStageInput.GeometryNormalWS;
-                case MaterialExternalInput.GeometryTangentWS:
-                    return MaterialStageInput.GeometryTangentWS;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(input), input, null);
-            }
-        }
-    }
-
     internal sealed class CompiledCoverageProgram
     {
         internal CompiledCoverageProgram(
@@ -483,11 +336,6 @@ namespace VividRP.Runtime.GPUDriven
 
     internal static class SurfaceProgramMatcher
     {
-        private const ClosureFeatureMask SupportedSlabFeatures =
-            ClosureFeatureMask.BaseColorTexture
-            | ClosureFeatureMask.NormalTexture
-            | ClosureFeatureMask.MaskTexture;
-
         internal static CompiledSurfaceProgram Compile(MaterialIRModule module)
         {
             if (module == null)
@@ -500,19 +348,29 @@ namespace VividRP.Runtime.GPUDriven
             VividMaterialSurfaceProgramID programID;
             ClosureExpressionNode root =
                 module.ClosureGraph.GetNode(module.SurfaceClosure);
-            if (root.Opcode == ClosureExpressionOpcode.Slab
-                && MatchesStandardSingleSlab(module, root.Slab, stageLIR))
+            if (root.Opcode == ClosureExpressionOpcode.Slab)
             {
                 programID = VividMaterialSurfaceProgramID.StandardSingleSlab;
             }
-            else if (MatchesDualSlab(module, root, stageLIR))
+            else if (root.Opcode == ClosureExpressionOpcode.HorizontalMix
+                || root.Opcode == ClosureExpressionOpcode.VerticalLayer)
             {
+                if (root.Operand0 < 0
+                    || root.Operand1 < 0
+                    || module.ClosureGraph.Nodes[root.Operand0].Opcode
+                        != ClosureExpressionOpcode.Slab
+                    || module.ClosureGraph.Nodes[root.Operand1].Opcode
+                        != ClosureExpressionOpcode.Slab)
+                {
+                    throw new NotSupportedException(
+                        "Surface programs currently require two direct Slab operands.");
+                }
                 programID = VividMaterialSurfaceProgramID.DualSlab;
             }
             else
             {
                 throw new NotSupportedException(
-                    "Closure expression and value IR cannot be matched to an existing surface program ABI.");
+                    $"Closure opcode '{root.Opcode}' cannot be lowered to the current surface ABI.");
             }
 
             return new CompiledSurfaceProgram(
@@ -544,116 +402,6 @@ namespace VividRP.Runtime.GPUDriven
             roots.Add(module.Outputs.Emission);
 
             return module.CreateValueSlice(roots.ToArray());
-        }
-
-        private static bool MatchesStandardSingleSlab(
-            MaterialIRModule module,
-            in ClosureSlabExpression slab,
-            MaterialStageLIR stageLIR)
-        {
-            return MatchesNormalBasis(stageLIR, slab)
-                && MatchesSlab(
-                    stageLIR,
-                    slab,
-                    MaterialTextureResource.BaseColor,
-                    MaterialParameter.BaseColor,
-                    MaterialParameter.Roughness,
-                    MaterialParameter.Metallic)
-                && MaterialStageValuePatternMatcher.MatchesParameter(
-                    stageLIR,
-                    module.Outputs.Emission,
-                    MaterialParameter.Emission)
-                && stageLIR.NodeCount == 12;
-        }
-
-        private static bool MatchesDualSlab(
-            MaterialIRModule module,
-            in ClosureExpressionNode root,
-            MaterialStageLIR stageLIR)
-        {
-            if (root.Opcode != ClosureExpressionOpcode.HorizontalMix
-                && root.Opcode != ClosureExpressionOpcode.VerticalLayer)
-            {
-                return false;
-            }
-
-            ClosureExpressionNode baseNode =
-                module.ClosureGraph.Nodes[root.Operand0];
-            ClosureExpressionNode topNode =
-                module.ClosureGraph.Nodes[root.Operand1];
-            if (baseNode.Opcode != ClosureExpressionOpcode.Slab
-                || topNode.Opcode != ClosureExpressionOpcode.Slab)
-            {
-                return false;
-            }
-
-            ClosureSlabExpression baseSlab = baseNode.Slab;
-            ClosureSlabExpression topSlab = topNode.Slab;
-            return MatchesNormalBasis(stageLIR, baseSlab)
-                && MatchesNormalBasis(stageLIR, topSlab)
-                && MatchesSlab(
-                    stageLIR,
-                    baseSlab,
-                    MaterialTextureResource.BaseColor,
-                    MaterialParameter.BaseColor,
-                    MaterialParameter.Roughness,
-                    MaterialParameter.Metallic)
-                && MatchesSlab(
-                    stageLIR,
-                    topSlab,
-                    MaterialTextureResource.TopBaseColor,
-                    MaterialParameter.TopBaseColor,
-                    MaterialParameter.TopRoughness,
-                    MaterialParameter.TopMetallic)
-                && MaterialStageValuePatternMatcher.MatchesParameter(
-                    stageLIR,
-                    root.Weight,
-                    MaterialParameter.LayerWeight)
-                && MaterialStageValuePatternMatcher.MatchesParameter(
-                    stageLIR,
-                    module.Outputs.Emission,
-                    MaterialParameter.Emission)
-                && stageLIR.NodeCount == 19;
-        }
-
-        private static bool MatchesNormalBasis(
-            MaterialStageLIR stageLIR,
-            in ClosureSlabExpression slab)
-        {
-            return MaterialStageValuePatternMatcher.MatchesExternalInput(
-                    stageLIR,
-                    slab.Normal,
-                    MaterialExternalInput.GeometryNormalWS)
-                && MaterialStageValuePatternMatcher.MatchesExternalInput(
-                    stageLIR,
-                    slab.Tangent,
-                    MaterialExternalInput.GeometryTangentWS);
-        }
-
-        private static bool MatchesSlab(
-            MaterialStageLIR stageLIR,
-            in ClosureSlabExpression slab,
-            MaterialTextureResource textureResource,
-            MaterialParameter baseColorParameter,
-            MaterialParameter roughnessParameter,
-            MaterialParameter metallicParameter)
-        {
-            // Tiling/remap and optional Normal/Mask evaluation remain in the V1 layout ABI.
-            return (slab.Features & ClosureFeatureMask.BaseColorTexture) != 0
-                && (slab.Features & ~SupportedSlabFeatures) == 0
-                && MaterialStageValuePatternMatcher.MatchesSampledColor(
-                    stageLIR,
-                    slab.BaseColor,
-                    textureResource,
-                    baseColorParameter)
-                && MaterialStageValuePatternMatcher.MatchesParameter(
-                    stageLIR,
-                    slab.Roughness,
-                    roughnessParameter)
-                && MaterialStageValuePatternMatcher.MatchesParameter(
-                    stageLIR,
-                    slab.Metallic,
-                    metallicParameter);
         }
     }
 
@@ -1977,8 +1725,6 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialProgramDiagnostics Diagnostics { get; }
 
-        internal VividMaterialProgramID ProgramID => Lowering.ProgramID;
-
         internal VividMaterialProgramData RuntimeData => Lowering.RuntimeData;
 
         internal MaterialSemanticHash SemanticHash => Module.SemanticHash;
@@ -1994,7 +1740,7 @@ namespace VividRP.Runtime.GPUDriven
                 module,
                 programVersion,
                 budget,
-                MaterialProgramBuiltinCatalog.Definition);
+                MaterialProgramBuiltinCatalog.Templates);
         }
 
         internal static CompiledMaterialProgram Compile(
@@ -2006,28 +1752,28 @@ namespace VividRP.Runtime.GPUDriven
                 module,
                 programVersion,
                 costBudget,
-                MaterialProgramBuiltinCatalog.Definition);
+                MaterialProgramBuiltinCatalog.Templates);
         }
 
         internal static CompiledMaterialProgram Compile(
             MaterialIRModule module,
             uint programVersion,
-            MaterialProgramCatalogDefinition catalogDefinition)
+            MaterialProgramTemplateRegistry templates)
         {
             MaterialProgramCostBudget budget = MaterialProgramCostBudget.Prototype;
-            return Compile(module, programVersion, budget, catalogDefinition);
+            return Compile(module, programVersion, budget, templates);
         }
 
         internal static CompiledMaterialProgram Compile(
             MaterialIRModule module,
             uint programVersion,
             in MaterialProgramCostBudget costBudget,
-            MaterialProgramCatalogDefinition catalogDefinition)
+            MaterialProgramTemplateRegistry templates)
         {
             if (module == null)
                 throw new ArgumentNullException(nameof(module));
-            if (catalogDefinition == null)
-                throw new ArgumentNullException(nameof(catalogDefinition));
+            if (templates == null)
+                throw new ArgumentNullException(nameof(templates));
             if (programVersion != MaterialProgramContract.RuntimeAbiVersion)
             {
                 throw new ArgumentOutOfRangeException(
@@ -2043,7 +1789,7 @@ namespace VividRP.Runtime.GPUDriven
             MaterialProgramLoweringResult lowering = MaterialProgramLowerer.Lower(
                 module,
                 programVersion,
-                catalogDefinition);
+                templates);
             MaterialProgramDiagnostics diagnostics = MaterialProgramDiagnosticsBuilder.Build(
                 module,
                 lowering.CoverageProgram,

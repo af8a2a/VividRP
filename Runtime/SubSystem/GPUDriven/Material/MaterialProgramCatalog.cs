@@ -91,28 +91,22 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
-    internal sealed class MaterialProgramCatalogEntry
+    // Templates describe lowering compatibility only. Runtime ProgramIDs are assigned
+    // later, when a closed-world catalog manifest is baked.
+    internal sealed class MaterialProgramTemplate
     {
-        internal MaterialProgramCatalogEntry(
-            VividMaterialProgramID programID,
+        internal MaterialProgramTemplate(
             in MaterialProgramSelectionKey selectionKey,
             MaterialNativeTemplateLayoutSchema layoutSchema,
             VividMaterialProgramCapabilities capabilities,
             uint runtimeAbiVersion)
         {
-            if (programID == VividMaterialProgramID.Invalid)
-                throw new ArgumentOutOfRangeException(nameof(programID));
-            if (ReferenceEquals(layoutSchema, null))
-                throw new ArgumentNullException(nameof(layoutSchema));
-
-            ProgramID = programID;
             SelectionKey = selectionKey;
-            LayoutSchema = layoutSchema;
+            LayoutSchema = layoutSchema
+                ?? throw new ArgumentNullException(nameof(layoutSchema));
             Capabilities = capabilities;
             RuntimeAbiVersion = runtimeAbiVersion;
         }
-
-        internal VividMaterialProgramID ProgramID { get; }
 
         internal MaterialProgramSelectionKey SelectionKey { get; }
 
@@ -123,253 +117,377 @@ namespace VividRP.Runtime.GPUDriven
         internal uint RuntimeAbiVersion { get; }
     }
 
-    internal sealed class MaterialProgramCatalogDefinition
+    internal sealed class MaterialProgramTemplateRegistry
     {
-        private readonly IReadOnlyList<MaterialProgramCatalogEntry> m_Entries;
-        private readonly Dictionary<VividMaterialProgramID, MaterialProgramCatalogEntry>
-            m_EntriesByID;
-        private readonly Dictionary<MaterialProgramSelectionKey, MaterialProgramCatalogEntry>
-            m_EntriesBySelectionKey;
+        private readonly IReadOnlyList<MaterialProgramTemplate> m_Templates;
+        private readonly Dictionary<
+            MaterialProgramSelectionKey,
+            List<MaterialProgramTemplate>> m_TemplatesBySelectionKey;
 
-        internal MaterialProgramCatalogDefinition(
-            params MaterialProgramCatalogEntry[] entries)
+        internal MaterialProgramTemplateRegistry(
+            params MaterialProgramTemplate[] templates)
         {
-            if (entries == null)
-                throw new ArgumentNullException(nameof(entries));
+            if (templates == null)
+                throw new ArgumentNullException(nameof(templates));
 
-            var entryCopy = (MaterialProgramCatalogEntry[]) entries.Clone();
-            m_EntriesByID = new Dictionary<
-                VividMaterialProgramID,
-                MaterialProgramCatalogEntry>(entryCopy.Length);
-            m_EntriesBySelectionKey = new Dictionary<
+            var templateCopy = (MaterialProgramTemplate[]) templates.Clone();
+            m_TemplatesBySelectionKey = new Dictionary<
                 MaterialProgramSelectionKey,
-                MaterialProgramCatalogEntry>(entryCopy.Length);
-            for (int entryIndex = 0; entryIndex < entryCopy.Length; entryIndex++)
+                List<MaterialProgramTemplate>>(templateCopy.Length);
+            var uniqueTemplates = new HashSet<MaterialProgramTemplate>();
+            for (int templateIndex = 0;
+                 templateIndex < templateCopy.Length;
+                 templateIndex++)
             {
-                MaterialProgramCatalogEntry entry = entryCopy[entryIndex]
+                MaterialProgramTemplate template = templateCopy[templateIndex]
                     ?? throw new ArgumentException(
-                        "Material program catalog entries cannot contain null.",
-                        nameof(entries));
-                if (entry.ProgramID == VividMaterialProgramID.Invalid)
+                        "Material program templates cannot contain null.",
+                        nameof(templates));
+                if (!uniqueTemplates.Add(template))
                 {
                     throw new ArgumentException(
-                        "Material program catalog entries cannot use the invalid program ID.",
-                        nameof(entries));
+                        "The same material program template instance is registered more than once.",
+                        nameof(templates));
                 }
-                if (!m_EntriesByID.TryAdd(entry.ProgramID, entry))
+
+                if (!m_TemplatesBySelectionKey.TryGetValue(
+                        template.SelectionKey,
+                        out List<MaterialProgramTemplate> matchingTemplates))
                 {
-                    throw new ArgumentException(
-                        $"Material program catalog ID '{entry.ProgramID}' is declared more than once.",
-                        nameof(entries));
+                    matchingTemplates = new List<MaterialProgramTemplate>();
+                    m_TemplatesBySelectionKey.Add(
+                        template.SelectionKey,
+                        matchingTemplates);
                 }
-                if (!m_EntriesBySelectionKey.TryAdd(entry.SelectionKey, entry))
-                {
-                    throw new ArgumentException(
-                        $"Material program selection key for catalog ID '{entry.ProgramID}' is declared more than once.",
-                        nameof(entries));
-                }
+                matchingTemplates.Add(template);
             }
 
-            Array.Sort(
-                entryCopy,
-                (left, right) => ((uint) left.ProgramID).CompareTo((uint) right.ProgramID));
-            m_Entries = Array.AsReadOnly(entryCopy);
+            m_Templates = Array.AsReadOnly(templateCopy);
         }
 
-        internal IReadOnlyList<MaterialProgramCatalogEntry> Entries => m_Entries;
+        internal IReadOnlyList<MaterialProgramTemplate> Templates => m_Templates;
 
-        internal int Count => m_Entries.Count;
+        internal int Count => m_Templates.Count;
 
-        internal MaterialProgramCatalogEntry GetEntry(VividMaterialProgramID programID)
+        internal bool Contains(MaterialProgramTemplate template)
         {
-            if (!m_EntriesByID.TryGetValue(programID, out MaterialProgramCatalogEntry entry))
-                throw new ArgumentOutOfRangeException(nameof(programID), programID, null);
-            return entry;
+            if (template == null)
+                return false;
+
+            for (int templateIndex = 0;
+                 templateIndex < m_Templates.Count;
+                 templateIndex++)
+            {
+                if (ReferenceEquals(m_Templates[templateIndex], template))
+                    return true;
+            }
+            return false;
         }
 
-        internal bool TryGetEntry(
-            VividMaterialProgramID programID,
-            out MaterialProgramCatalogEntry entry)
-        {
-            return m_EntriesByID.TryGetValue(programID, out entry);
-        }
-
-        internal MaterialProgramCatalogEntry Resolve(
+        internal MaterialProgramTemplate Resolve(
             in MaterialProgramSelectionKey selectionKey,
             MaterialValueRequirements requirements)
         {
             if (requirements == null)
                 throw new ArgumentNullException(nameof(requirements));
-            if (!m_EntriesBySelectionKey.TryGetValue(
+            if (!m_TemplatesBySelectionKey.TryGetValue(
                     selectionKey,
-                    out MaterialProgramCatalogEntry entry))
+                    out List<MaterialProgramTemplate> templates))
             {
                 throw new NotSupportedException(
-                    "No material program catalog entry matches the lowering selection key.");
+                    "No material program template matches the lowering selection key.");
             }
-            if (!entry.LayoutSchema.Matches(requirements))
+
+            MaterialProgramTemplate match = null;
+            for (int templateIndex = 0;
+                 templateIndex < templates.Count;
+                 templateIndex++)
+            {
+                MaterialProgramTemplate candidate = templates[templateIndex];
+                if (!candidate.LayoutSchema.Matches(requirements))
+                    continue;
+                if (match != null)
+                {
+                    throw new InvalidOperationException(
+                        "More than one material program template matches the lowering selection key and live layout.");
+                }
+                match = candidate;
+            }
+
+            if (match == null)
             {
                 throw new NotSupportedException(
-                    $"Material requirements do not match catalog layout schema for program '{entry.ProgramID}'.");
+                    "Material requirements do not match any layout schema for the lowering selection key.");
             }
-            return entry;
+            return match;
+        }
+    }
+
+    internal readonly struct MaterialProgramCatalogBakeSlot
+    {
+        private MaterialProgramCatalogBakeSlot(
+            string stableName,
+            CompiledMaterialProgram program,
+            bool isReserved)
+        {
+            if (string.IsNullOrEmpty(stableName))
+                throw new ArgumentException(
+                    "A frozen catalog slot requires a stable name.",
+                    nameof(stableName));
+            if (isReserved == (program != null))
+            {
+                throw new ArgumentException(
+                    "A catalog slot must contain either one compiled program or one reservation.",
+                    nameof(program));
+            }
+
+            StableName = stableName;
+            Program = program;
+            IsReserved = isReserved;
+        }
+
+        internal string StableName { get; }
+
+        internal CompiledMaterialProgram Program { get; }
+
+        internal bool IsReserved { get; }
+
+        internal static MaterialProgramCatalogBakeSlot ForProgram(
+            string stableName,
+            CompiledMaterialProgram program)
+        {
+            if (program == null)
+                throw new ArgumentNullException(nameof(program));
+            return new MaterialProgramCatalogBakeSlot(
+                stableName,
+                program,
+                false);
+        }
+
+        internal static MaterialProgramCatalogBakeSlot Reserved(string stableName)
+        {
+            return new MaterialProgramCatalogBakeSlot(stableName, null, true);
         }
     }
 
     internal sealed class MaterialProgramCatalog
     {
-        private readonly IReadOnlyList<CompiledMaterialProgram> m_Programs;
-        private readonly CompiledMaterialProgram[] m_ProgramsByID;
-        private readonly bool[] m_HasProgramByID;
-
-        internal MaterialProgramCatalog(
-            MaterialProgramCatalogDefinition definition,
-            CompiledMaterialProgram[] programs)
+        // This is the cataloged runtime handle and the only aggregate that owns a
+        // ProgramID. The active-bake guard makes frozen bake the sole allocator.
+        internal sealed class ManifestEntry
         {
-            Definition = definition ?? throw new ArgumentNullException(nameof(definition));
-            if (programs == null)
-                throw new ArgumentNullException(nameof(programs));
-            if (programs.Length != Definition.Count)
+            internal ManifestEntry(
+                MaterialProgramCatalog catalog,
+                VividMaterialProgramID programID,
+                string stableName,
+                CompiledMaterialProgram program)
             {
-                throw new ArgumentException(
-                    "A frozen material program catalog requires exactly one compiled program per definition entry.",
-                    nameof(programs));
+                if (programID == VividMaterialProgramID.Invalid
+                    || (uint) programID > int.MaxValue)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(programID));
+                }
+                if (catalog == null
+                    || !catalog.m_IsBaking
+                    || catalog.m_ActiveBakeSlot != (int) (uint) programID)
+                {
+                    throw new InvalidOperationException(
+                        "Manifest entries can only be created by an active frozen catalog bake.");
+                }
+                if (string.IsNullOrEmpty(stableName))
+                {
+                    throw new ArgumentException(
+                        "A manifest entry requires a stable slot name.",
+                        nameof(stableName));
+                }
+
+                ProgramID = programID;
+                StableName = stableName;
+                Program = program ?? throw new ArgumentNullException(nameof(program));
             }
 
-            uint maxProgramID = 0u;
-            for (int entryIndex = 0; entryIndex < Definition.Entries.Count; entryIndex++)
+            internal VividMaterialProgramID ProgramID { get; }
+
+            internal string StableName { get; }
+
+            internal CompiledMaterialProgram Program { get; }
+
+            internal MaterialProgramLayoutFingerprint LayoutFingerprint =>
+                Program.Lowering.LayoutFingerprint;
+
+            internal VividMaterialProgramData RuntimeData => Program.RuntimeData;
+        }
+
+        private readonly IReadOnlyList<ManifestEntry> m_Entries;
+        private readonly IReadOnlyList<ManifestEntry> m_Slots;
+        private readonly IReadOnlyList<string> m_SlotNames;
+        private readonly ManifestEntry[] m_EntriesByID;
+        private bool m_IsBaking;
+        private int m_ActiveBakeSlot = -1;
+
+        private MaterialProgramCatalog(
+            MaterialProgramTemplateRegistry templates,
+            MaterialProgramCatalogBakeSlot[] slots)
+        {
+            Templates = templates ?? throw new ArgumentNullException(nameof(templates));
+            if (slots == null)
+                throw new ArgumentNullException(nameof(slots));
+
+            var slotCopy = (MaterialProgramCatalogBakeSlot[]) slots.Clone();
+            m_EntriesByID = new ManifestEntry[slotCopy.Length];
+            var slotNames = new string[slotCopy.Length];
+            var entries = new List<ManifestEntry>(slotCopy.Length);
+            var stableNames = new HashSet<string>(StringComparer.Ordinal);
+            var parameterLayouts = new Dictionary<
+                VividMaterialParameterLayoutID,
+                CompiledParameterLayout>();
+            var resourceLayouts = new Dictionary<
+                VividMaterialResourceLayoutID,
+                CompiledResourceLayout>();
+
+            m_IsBaking = true;
+            for (int slotIndex = 0; slotIndex < slotCopy.Length; slotIndex++)
             {
-                uint programID = (uint) Definition.Entries[entryIndex].ProgramID;
-                if (programID > int.MaxValue - 1u)
+                MaterialProgramCatalogBakeSlot slot = slotCopy[slotIndex];
+                if (string.IsNullOrEmpty(slot.StableName))
+                {
+                    throw new ArgumentException(
+                        $"Frozen catalog slot {slotIndex} is uninitialized.",
+                        nameof(slots));
+                }
+                if (!stableNames.Add(slot.StableName))
+                {
+                    throw new ArgumentException(
+                        $"Frozen catalog slot name '{slot.StableName}' is declared more than once.",
+                        nameof(slots));
+                }
+                slotNames[slotIndex] = slot.StableName;
+                if (slot.IsReserved)
+                    continue;
+                if (slot.Program == null)
+                {
+                    throw new ArgumentException(
+                        $"Frozen catalog slot {slotIndex} has neither a program nor a reservation.",
+                        nameof(slots));
+                }
+
+                var programID = (VividMaterialProgramID) (uint) slotIndex;
+                if (programID == VividMaterialProgramID.Invalid)
                 {
                     throw new ArgumentOutOfRangeException(
-                        nameof(definition),
-                        "Material program catalog IDs must fit a managed runtime table index.");
+                        nameof(slots),
+                        "A frozen catalog slot cannot use the invalid program ID.");
                 }
-                maxProgramID = Math.Max(maxProgramID, programID);
-            }
+                ValidateCandidate(slot.Program, Templates, nameof(slots));
+                ValidateLayoutIDContracts(
+                    slot.Program,
+                    parameterLayouts,
+                    resourceLayouts,
+                    nameof(slots));
 
-            int tableLength = Definition.Count == 0 ? 0 : (int) maxProgramID + 1;
-            m_ProgramsByID = new CompiledMaterialProgram[tableLength];
-            m_HasProgramByID = new bool[tableLength];
-            var programCopy = (CompiledMaterialProgram[]) programs.Clone();
-            for (int programIndex = 0; programIndex < programCopy.Length; programIndex++)
-            {
-                CompiledMaterialProgram program = programCopy[programIndex]
-                    ?? throw new ArgumentException(
-                        "Material program catalogs cannot contain null compiled programs.",
-                        nameof(programs));
-                MaterialProgramLoweringResult lowering = program.Lowering;
-                if (ReferenceEquals(lowering, null))
+                for (int entryIndex = 0;
+                     entryIndex < entries.Count;
+                     entryIndex++)
                 {
-                    throw new ArgumentException(
-                        "Cataloged material programs require a lowering result.",
-                        nameof(programs));
-                }
-                MaterialProgramCatalogEntry selectedEntry = lowering.CatalogEntry
-                    ?? throw new ArgumentException(
-                        "Cataloged material programs require a selected catalog entry.",
-                        nameof(programs));
-                MaterialProgramCatalogEntry resolvedEntry = Definition.Resolve(
-                    lowering.SelectionKey,
-                    program.MaterialLayout.Requirements);
-                if (!ReferenceEquals(selectedEntry, resolvedEntry))
-                {
-                    throw new ArgumentException(
-                        "A material lowering result selected an entry outside the supplied catalog definition.",
-                        nameof(programs));
-                }
-
-                ValidateRuntimeContract(program, resolvedEntry);
-                int catalogIndex = checked((int) (uint) resolvedEntry.ProgramID);
-                if (m_HasProgramByID[catalogIndex])
-                {
-                    throw new ArgumentException(
-                        $"Material program catalog ID '{resolvedEntry.ProgramID}' has multiple compiled programs.",
-                        nameof(programs));
-                }
-
-                for (int previousIndex = 0; previousIndex < programIndex; previousIndex++)
-                {
-                    CompiledMaterialProgram previous = programCopy[previousIndex];
-                    if (!AreExactlyEquivalent(previous, program))
-                        continue;
-
-                    VividMaterialProgramID previousID =
-                        previous.Lowering.CatalogEntry.ProgramID;
-                    if (previousID != resolvedEntry.ProgramID)
+                    if (AreExactlyEquivalent(entries[entryIndex].Program, slot.Program))
                     {
                         throw new ArgumentException(
-                            $"Equivalent compiled material programs cannot use different catalog IDs "
-                            + $"('{previousID}' and '{resolvedEntry.ProgramID}').",
-                            nameof(programs));
+                            "Exactly equivalent compiled material payloads cannot occupy multiple frozen catalog slots.",
+                            nameof(slots));
                     }
                 }
 
-                m_ProgramsByID[catalogIndex] = program;
-                m_HasProgramByID[catalogIndex] = true;
+                m_ActiveBakeSlot = slotIndex;
+                var entry = new ManifestEntry(
+                    this,
+                    programID,
+                    slot.StableName,
+                    slot.Program);
+                m_EntriesByID[slotIndex] = entry;
+                entries.Add(entry);
             }
+            m_ActiveBakeSlot = -1;
+            m_IsBaking = false;
 
-            for (int entryIndex = 0; entryIndex < Definition.Entries.Count; entryIndex++)
-            {
-                int catalogIndex = checked(
-                    (int) (uint) Definition.Entries[entryIndex].ProgramID);
-                if (!m_HasProgramByID[catalogIndex])
-                {
-                    throw new ArgumentException(
-                        $"Material program catalog entry '{Definition.Entries[entryIndex].ProgramID}' has no compiled program.",
-                        nameof(programs));
-                }
-            }
-
-            Array.Sort(
-                programCopy,
-                (left, right) => ((uint) left.Lowering.CatalogEntry.ProgramID)
-                    .CompareTo((uint) right.Lowering.CatalogEntry.ProgramID));
-            m_Programs = Array.AsReadOnly(programCopy);
+            m_Entries = entries.AsReadOnly();
+            m_Slots = Array.AsReadOnly(m_EntriesByID);
+            m_SlotNames = Array.AsReadOnly(slotNames);
+            ManifestHash = MaterialProgramCatalogManifestHashBuilder.Compute(
+                m_Slots,
+                m_SlotNames);
         }
 
-        internal MaterialProgramCatalogDefinition Definition { get; }
+        internal MaterialProgramTemplateRegistry Templates { get; }
 
-        internal IReadOnlyList<CompiledMaterialProgram> Programs => m_Programs;
+        internal IReadOnlyList<ManifestEntry> Entries => m_Entries;
+
+        // Reserved ABI holes are represented by null entries and remain part of the hash.
+        internal IReadOnlyList<ManifestEntry> Slots => m_Slots;
+
+        internal IReadOnlyList<string> SlotNames => m_SlotNames;
+
+        internal int Count => m_Entries.Count;
+
+        internal int RuntimeTableLength => m_EntriesByID.Length;
+
+        internal MaterialProgramCatalogManifestHash ManifestHash { get; }
+
+        internal static MaterialProgramCatalog Bake(
+            MaterialProgramTemplateRegistry templates,
+            params MaterialProgramCatalogBakeSlot[] slots)
+        {
+            return new MaterialProgramCatalog(templates, slots);
+        }
+
+        internal ManifestEntry GetEntry(
+            VividMaterialProgramID programID)
+        {
+            uint programIndex = (uint) programID;
+            if (programIndex >= (uint) m_EntriesByID.Length
+                || m_EntriesByID[programIndex] == null)
+            {
+                throw new ArgumentOutOfRangeException(nameof(programID), programID, null);
+            }
+            return m_EntriesByID[programIndex];
+        }
 
         internal CompiledMaterialProgram GetMaterialProgram(
             VividMaterialProgramID programID)
         {
-            uint programIndex = (uint) programID;
-            if (programIndex >= (uint) m_ProgramsByID.Length
-                || !m_HasProgramByID[programIndex])
-            {
-                throw new ArgumentOutOfRangeException(nameof(programID), programID, null);
-            }
-            return m_ProgramsByID[programIndex];
+            return GetEntry(programID).Program;
         }
 
         internal VividMaterialProgramData[] CreateRuntimeProgramTable()
         {
-            var runtimePrograms = new VividMaterialProgramData[m_ProgramsByID.Length];
-            for (int programIndex = 0; programIndex < m_ProgramsByID.Length; programIndex++)
+            var runtimePrograms = new VividMaterialProgramData[m_EntriesByID.Length];
+            for (int programIndex = 0;
+                 programIndex < m_EntriesByID.Length;
+                 programIndex++)
             {
-                if (m_HasProgramByID[programIndex])
-                    runtimePrograms[programIndex] = m_ProgramsByID[programIndex].RuntimeData;
+                ManifestEntry entry =
+                    m_EntriesByID[programIndex];
+                if (entry != null)
+                    runtimePrograms[programIndex] = entry.RuntimeData;
             }
             return runtimePrograms;
         }
 
-        internal bool TryGetEquivalent(
+        internal bool TryGetCatalogedProgram(
             CompiledMaterialProgram candidate,
-            out CompiledMaterialProgram equivalent)
+            out ManifestEntry equivalent)
         {
             if (candidate == null)
                 throw new ArgumentNullException(nameof(candidate));
 
-            for (int programIndex = 0; programIndex < m_Programs.Count; programIndex++)
+            for (int entryIndex = 0;
+                 entryIndex < m_Entries.Count;
+                 entryIndex++)
             {
-                CompiledMaterialProgram program = m_Programs[programIndex];
-                if (!AreExactlyEquivalent(program, candidate))
+                ManifestEntry entry = m_Entries[entryIndex];
+                if (!AreExactlyEquivalent(entry.Program, candidate))
                     continue;
 
-                equivalent = program;
+                equivalent = entry;
                 return true;
             }
 
@@ -377,34 +495,120 @@ namespace VividRP.Runtime.GPUDriven
             return false;
         }
 
+        private static void ValidateCandidate(
+            CompiledMaterialProgram program,
+            MaterialProgramTemplateRegistry templates,
+            string parameterName)
+        {
+            MaterialProgramLoweringResult lowering = program.Lowering;
+            if (lowering == null || lowering.Template == null)
+            {
+                throw new ArgumentException(
+                    "Cataloged material programs require a selected lowering template.",
+                    parameterName);
+            }
+            if (!templates.Contains(lowering.Template))
+            {
+                throw new ArgumentException(
+                    "A cataloged material program selected a template outside the supplied registry.",
+                    parameterName);
+            }
+            if (lowering.Template.SelectionKey != lowering.SelectionKey
+                || !lowering.Template.LayoutSchema.Matches(
+                    program.MaterialLayout.Requirements))
+            {
+                throw new ArgumentException(
+                    "A cataloged material program no longer satisfies its selected template.",
+                    parameterName);
+            }
+
+            MaterialProgramLayoutFingerprint expectedFingerprint =
+                MaterialProgramLayoutFingerprintBuilder.Compute(
+                    lowering.GenericLayout,
+                    lowering.Template.LayoutSchema);
+            if (lowering.LayoutFingerprint != expectedFingerprint)
+            {
+                throw new ArgumentException(
+                    "A cataloged material program carries a stale layout fingerprint.",
+                    parameterName);
+            }
+            ValidateRuntimeContract(program, lowering.Template, parameterName);
+        }
+
         private static void ValidateRuntimeContract(
             CompiledMaterialProgram program,
-            MaterialProgramCatalogEntry entry)
+            MaterialProgramTemplate template,
+            string parameterName)
         {
             VividMaterialProgramData runtimeData = program.RuntimeData;
-            MaterialProgramSelectionKey key = entry.SelectionKey;
-            if (runtimeData.Version != entry.RuntimeAbiVersion
+            MaterialProgramSelectionKey key = template.SelectionKey;
+            if (runtimeData.Version != template.RuntimeAbiVersion
                 || runtimeData.CoverageProgramID != key.CoverageProgramID
                 || runtimeData.SurfaceProgramID != key.SurfaceProgramID
                 || runtimeData.TransportProgramID != key.TransportProgramID
                 || runtimeData.ParameterLayoutID
-                    != entry.LayoutSchema.ParameterLayout.LayoutID
+                    != template.LayoutSchema.ParameterLayout.LayoutID
                 || runtimeData.ResourceLayoutID
-                    != entry.LayoutSchema.ResourceLayout.LayoutID
+                    != template.LayoutSchema.ResourceLayout.LayoutID
                 || runtimeData.ExecutionClass != key.ExecutionClass
-                || runtimeData.CapabilityFlags != entry.Capabilities
+                || runtimeData.CapabilityFlags != template.Capabilities
                 || !ReferenceEquals(
                     program.MaterialLayout.ParameterLayout,
-                    entry.LayoutSchema.ParameterLayout)
+                    template.LayoutSchema.ParameterLayout)
                 || !ReferenceEquals(
                     program.MaterialLayout.ResourceLayout,
-                    entry.LayoutSchema.ResourceLayout)
+                    template.LayoutSchema.ResourceLayout)
                 || !program.Lowering.GenericLayout.PayloadEquals(
-                    entry.LayoutSchema.LiveLayout))
+                    template.LayoutSchema.LiveLayout))
             {
                 throw new ArgumentException(
-                    $"Compiled material program does not satisfy catalog entry '{entry.ProgramID}'.",
-                    nameof(program));
+                    "Compiled material program does not satisfy its lowering template runtime contract.",
+                    parameterName);
+            }
+        }
+
+        private static void ValidateLayoutIDContracts(
+            CompiledMaterialProgram program,
+            Dictionary<VividMaterialParameterLayoutID, CompiledParameterLayout>
+                parameterLayouts,
+            Dictionary<VividMaterialResourceLayoutID, CompiledResourceLayout>
+                resourceLayouts,
+            string parameterName)
+        {
+            CompiledParameterLayout parameterLayout =
+                program.MaterialLayout.ParameterLayout;
+            if (parameterLayouts.TryGetValue(
+                    parameterLayout.LayoutID,
+                    out CompiledParameterLayout previousParameterLayout))
+            {
+                if (!ParameterLayoutsEqual(previousParameterLayout, parameterLayout))
+                {
+                    throw new ArgumentException(
+                        $"Parameter layout ID '{parameterLayout.LayoutID}' maps to more than one physical payload.",
+                        parameterName);
+                }
+            }
+            else
+            {
+                parameterLayouts.Add(parameterLayout.LayoutID, parameterLayout);
+            }
+
+            CompiledResourceLayout resourceLayout =
+                program.MaterialLayout.ResourceLayout;
+            if (resourceLayouts.TryGetValue(
+                    resourceLayout.LayoutID,
+                    out CompiledResourceLayout previousResourceLayout))
+            {
+                if (!ResourceLayoutsEqual(previousResourceLayout, resourceLayout))
+                {
+                    throw new ArgumentException(
+                        $"Resource layout ID '{resourceLayout.LayoutID}' maps to more than one physical payload.",
+                        parameterName);
+                }
+            }
+            else
+            {
+                resourceLayouts.Add(resourceLayout.LayoutID, resourceLayout);
             }
         }
 
@@ -422,14 +626,19 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             if (!left.SurfaceHlsl.PayloadEquals(right.SurfaceHlsl))
                 return false;
-            if (left.Lowering.SelectionKey != right.Lowering.SelectionKey)
+            if (left.Lowering.SelectionKey != right.Lowering.SelectionKey
+                || left.Lowering.LayoutFingerprint
+                    != right.Lowering.LayoutFingerprint)
+            {
                 return false;
-            MaterialProgramCatalogEntry leftEntry = left.Lowering.CatalogEntry;
-            MaterialProgramCatalogEntry rightEntry = right.Lowering.CatalogEntry;
-            if (leftEntry.RuntimeAbiVersion != rightEntry.RuntimeAbiVersion
-                || leftEntry.Capabilities != rightEntry.Capabilities
-                || !leftEntry.LayoutSchema.MappingPayloadEquals(
-                    rightEntry.LayoutSchema))
+            }
+
+            MaterialProgramTemplate leftTemplate = left.Lowering.Template;
+            MaterialProgramTemplate rightTemplate = right.Lowering.Template;
+            if (leftTemplate.RuntimeAbiVersion != rightTemplate.RuntimeAbiVersion
+                || leftTemplate.Capabilities != rightTemplate.Capabilities
+                || !leftTemplate.LayoutSchema.MappingPayloadEquals(
+                    rightTemplate.LayoutSchema))
             {
                 return false;
             }

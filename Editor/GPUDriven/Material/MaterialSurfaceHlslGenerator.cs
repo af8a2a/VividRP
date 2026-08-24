@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEditor;
@@ -25,15 +24,15 @@ namespace VividRP.Editor
 
         internal static string GenerateAll()
         {
-            return Generate(GetBuiltinPrograms(), GeneratedPath);
+            return Generate(GetBuiltinCatalog(), GeneratedPath);
         }
 
         internal static string Generate(
-            IReadOnlyList<CompiledMaterialProgram> programs,
+            MaterialProgramCatalog catalog,
             string generatedPath)
         {
-            if (programs == null)
-                throw new ArgumentNullException(nameof(programs));
+            if (catalog == null)
+                throw new ArgumentNullException(nameof(catalog));
             if (string.IsNullOrEmpty(generatedPath))
                 throw new ArgumentException("A generated HLSL path is required.", nameof(generatedPath));
             if (s_IsGenerating)
@@ -42,7 +41,7 @@ namespace VividRP.Editor
             s_IsGenerating = true;
             try
             {
-                string source = BuildSource(programs);
+                string source = BuildSource(catalog);
                 string directory = Path.GetDirectoryName(generatedPath);
                 if (!string.IsNullOrEmpty(directory))
                     Directory.CreateDirectory(directory);
@@ -73,14 +72,14 @@ namespace VividRP.Editor
 
         internal static bool IsSynchronized()
         {
-            return IsSynchronized(GetBuiltinPrograms(), GeneratedPath);
+            return IsSynchronized(GetBuiltinCatalog(), GeneratedPath);
         }
 
         internal static bool IsSynchronized(
-            IReadOnlyList<CompiledMaterialProgram> programs,
+            MaterialProgramCatalog catalog,
             string generatedPath)
         {
-            if (programs == null
+            if (catalog == null
                 || string.IsNullOrEmpty(generatedPath)
                 || !File.Exists(generatedPath))
             {
@@ -90,8 +89,8 @@ namespace VividRP.Editor
             try
             {
                 return string.Equals(
-                    File.ReadAllText(generatedPath),
-                    BuildSource(programs),
+                        File.ReadAllText(generatedPath),
+                    BuildSource(catalog),
                     StringComparison.Ordinal);
             }
             catch (Exception)
@@ -102,26 +101,18 @@ namespace VividRP.Editor
 
         internal static string BuildSource()
         {
-            return BuildSource(GetBuiltinPrograms());
+            return BuildSource(GetBuiltinCatalog());
         }
 
         internal static string BuildSource(
-            IReadOnlyList<CompiledMaterialProgram> programs)
+            MaterialProgramCatalog catalog)
         {
-            return MaterialSurfaceHlslSourceBuilder.BuildSource(programs);
+            return MaterialSurfaceHlslSourceBuilder.BuildSource(catalog);
         }
 
-        internal static IReadOnlyList<CompiledMaterialProgram> GetBuiltinPrograms()
+        internal static MaterialProgramCatalog GetBuiltinCatalog()
         {
-            return new[]
-            {
-                GPUDrivenMaterialCompiler.GetMaterialProgram(
-                    VividMaterialProgramID.StandardSingleSlab),
-                GPUDrivenMaterialCompiler.GetMaterialProgram(
-                    VividMaterialProgramID.DualSlabHorizontalMix),
-                GPUDrivenMaterialCompiler.GetMaterialProgram(
-                    VividMaterialProgramID.DualSlabVerticalLayer),
-            };
+            return GPUDrivenMaterialCompiler.ProgramCatalog;
         }
 
         [MenuItem("VividRP/GPU Driven/Generate AOT Surface HLSL")]

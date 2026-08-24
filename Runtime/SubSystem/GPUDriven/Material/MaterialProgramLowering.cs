@@ -36,8 +36,9 @@ namespace VividRP.Runtime.GPUDriven
             MaterialValueRequirements requirements,
             MaterialGenericLayout genericLayout,
             in MaterialProgramSelectionKey selectionKey,
-            MaterialProgramCatalogEntry catalogEntry,
+            MaterialProgramTemplate template,
             CompiledMaterialLayout materialLayout,
+            in MaterialProgramLayoutFingerprint layoutFingerprint,
             in VividMaterialProgramData runtimeData)
         {
             CoverageProgram = coverageProgram
@@ -50,18 +51,19 @@ namespace VividRP.Runtime.GPUDriven
                 ?? throw new ArgumentNullException(nameof(requirements));
             GenericLayout = genericLayout
                 ?? throw new ArgumentNullException(nameof(genericLayout));
-            CatalogEntry = catalogEntry
-                ?? throw new ArgumentNullException(nameof(catalogEntry));
+            Template = template
+                ?? throw new ArgumentNullException(nameof(template));
             MaterialLayout = materialLayout
                 ?? throw new ArgumentNullException(nameof(materialLayout));
-            if (catalogEntry.SelectionKey != selectionKey)
+            if (template.SelectionKey != selectionKey)
             {
                 throw new ArgumentException(
-                    "The selected material program catalog entry does not match the lowering key.",
-                    nameof(catalogEntry));
+                    "The selected material program template does not match the lowering key.",
+                    nameof(template));
             }
 
             SelectionKey = selectionKey;
+            LayoutFingerprint = layoutFingerprint;
             RuntimeData = runtimeData;
         }
 
@@ -77,13 +79,13 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialProgramSelectionKey SelectionKey { get; }
 
-        internal MaterialProgramCatalogEntry CatalogEntry { get; }
+        internal MaterialProgramTemplate Template { get; }
 
         internal CompiledMaterialLayout MaterialLayout { get; }
 
-        internal VividMaterialProgramData RuntimeData { get; }
+        internal MaterialProgramLayoutFingerprint LayoutFingerprint { get; }
 
-        internal VividMaterialProgramID ProgramID => CatalogEntry.ProgramID;
+        internal VividMaterialProgramData RuntimeData { get; }
     }
 
     internal static class MaterialProgramLowerer
@@ -91,12 +93,12 @@ namespace VividRP.Runtime.GPUDriven
         internal static MaterialProgramLoweringResult Lower(
             MaterialIRModule module,
             uint programVersion,
-            MaterialProgramCatalogDefinition catalogDefinition)
+            MaterialProgramTemplateRegistry templates)
         {
             if (module == null)
                 throw new ArgumentNullException(nameof(module));
-            if (catalogDefinition == null)
-                throw new ArgumentNullException(nameof(catalogDefinition));
+            if (templates == null)
+                throw new ArgumentNullException(nameof(templates));
 
             CompiledCoverageProgram coverageProgram =
                 CoverageProgramLowerer.Compile(module);
@@ -118,30 +120,34 @@ namespace VividRP.Runtime.GPUDriven
                 transportProgram.ProgramID,
                 GetTopologySpecialization(module),
                 VividMaterialExecutionClass.VisibilityDeferred);
-            MaterialProgramCatalogEntry catalogEntry = catalogDefinition.Resolve(
+            MaterialProgramTemplate template = templates.Resolve(
                 selectionKey,
                 requirements);
-            if (catalogEntry.RuntimeAbiVersion != programVersion)
+            if (template.RuntimeAbiVersion != programVersion)
             {
                 throw new NotSupportedException(
-                    $"Material program '{catalogEntry.ProgramID}' targets runtime ABI "
-                    + $"{catalogEntry.RuntimeAbiVersion}, not requested ABI {programVersion}.");
+                    $"Material program template targets runtime ABI "
+                    + $"{template.RuntimeAbiVersion}, not requested ABI {programVersion}.");
             }
 
             CompiledMaterialLayout materialLayout = MaterialLayoutLowerer.Compile(
                 requirements,
                 genericLayout,
-                catalogEntry.LayoutSchema);
+                template.LayoutSchema);
+            MaterialProgramLayoutFingerprint layoutFingerprint =
+                MaterialProgramLayoutFingerprintBuilder.Compute(
+                    genericLayout,
+                    template.LayoutSchema);
             VividMaterialProgramCapabilities requiredCapabilities =
                 VividMaterialProgramCapabilities.LegacyGBufferExport;
             if ((module.MaterialFeatures & MaterialFeatureMask.AlphaClip) != 0)
                 requiredCapabilities |= VividMaterialProgramCapabilities.AlphaClip;
             if ((module.ShadingModels & MaterialShadingModelMask.Unlit) != 0)
                 requiredCapabilities |= VividMaterialProgramCapabilities.Unlit;
-            if ((requiredCapabilities & ~catalogEntry.Capabilities) != 0)
+            if ((requiredCapabilities & ~template.Capabilities) != 0)
             {
                 throw new NotSupportedException(
-                    $"Material program '{catalogEntry.ProgramID}' does not provide all required capabilities.");
+                    "Material program template does not provide all required capabilities.");
             }
 
             var runtimeData = new VividMaterialProgramData
@@ -152,7 +158,7 @@ namespace VividRP.Runtime.GPUDriven
                 TransportProgramID = transportProgram.ProgramID,
                 ParameterLayoutID = materialLayout.ParameterLayout.LayoutID,
                 ResourceLayoutID = materialLayout.ResourceLayout.LayoutID,
-                CapabilityFlags = catalogEntry.Capabilities,
+                CapabilityFlags = template.Capabilities,
                 ExecutionClass = selectionKey.ExecutionClass,
             };
             return new MaterialProgramLoweringResult(
@@ -162,8 +168,9 @@ namespace VividRP.Runtime.GPUDriven
                 requirements,
                 genericLayout,
                 selectionKey,
-                catalogEntry,
+                template,
                 materialLayout,
+                layoutFingerprint,
                 runtimeData);
         }
 
@@ -190,37 +197,33 @@ namespace VividRP.Runtime.GPUDriven
     internal static class MaterialProgramBuiltinCatalog
     {
         [NoAutoStaticsCleanup]
-        private static readonly MaterialProgramCatalogDefinition s_Definition =
-            CreateDefinition();
+        private static readonly MaterialProgramTemplateRegistry s_Templates =
+            CreateTemplates();
 
-        internal static MaterialProgramCatalogDefinition Definition => s_Definition;
+        internal static MaterialProgramTemplateRegistry Templates => s_Templates;
 
-        private static MaterialProgramCatalogDefinition CreateDefinition()
+        private static MaterialProgramTemplateRegistry CreateTemplates()
         {
             MaterialNativeTemplateLayoutSchema legacyLayout =
                 MaterialLayoutLowerer.CreateLegacyLayoutSchema();
             MaterialNativeTemplateLayoutSchema dualSlabLayout =
                 MaterialLayoutLowerer.CreateDualSlabLayoutSchema();
-            return new MaterialProgramCatalogDefinition(
-                CreateEntry(
-                    VividMaterialProgramID.StandardSingleSlab,
+            return new MaterialProgramTemplateRegistry(
+                CreateTemplate(
                     VividMaterialSurfaceProgramID.StandardSingleSlab,
                     MaterialProgramTopologySpecialization.SingleSlab,
                     legacyLayout),
-                CreateEntry(
-                    VividMaterialProgramID.DualSlabHorizontalMix,
+                CreateTemplate(
                     VividMaterialSurfaceProgramID.DualSlab,
                     MaterialProgramTopologySpecialization.HorizontalMix,
                     dualSlabLayout),
-                CreateEntry(
-                    VividMaterialProgramID.DualSlabVerticalLayer,
+                CreateTemplate(
                     VividMaterialSurfaceProgramID.DualSlab,
                     MaterialProgramTopologySpecialization.VerticalLayer,
                     dualSlabLayout));
         }
 
-        private static MaterialProgramCatalogEntry CreateEntry(
-            VividMaterialProgramID programID,
+        private static MaterialProgramTemplate CreateTemplate(
             VividMaterialSurfaceProgramID surfaceProgramID,
             MaterialProgramTopologySpecialization topology,
             MaterialNativeTemplateLayoutSchema layoutSchema)
@@ -233,8 +236,7 @@ namespace VividRP.Runtime.GPUDriven
                 VividMaterialTransportProgramID.None,
                 topology,
                 VividMaterialExecutionClass.VisibilityDeferred);
-            return new MaterialProgramCatalogEntry(
-                programID,
+            return new MaterialProgramTemplate(
                 selectionKey,
                 layoutSchema,
                 VividMaterialProgramCapabilities.LegacyGBufferExport

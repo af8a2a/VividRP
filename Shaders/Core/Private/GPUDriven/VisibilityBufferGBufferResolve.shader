@@ -81,6 +81,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 uint isDualSlab;
                 uint isUnlit;
                 uint usesLegacyMaterial;
+                uint materialProgramFailed;
                 uint materialProgramID;
                 VividMeshletVertex vertex0;
                 VividMeshletVertex vertex1;
@@ -291,46 +292,60 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
-                result.materialProgramID = VIVIDMATERIALPROGRAMID_INVALID;
-                result.isDualSlab = VividTryLoadDualSlabSurfaceProgram(
-                    result.instanceData.MaterialIndex,
-                    VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
-                    result.dualSlabMaterialData,
-                    result.surfaceBindingData,
-                    result.topSurfaceBindingData)
-                        ? 1u
-                        : 0u;
-                bool loadedMaterialProgram = result.isDualSlab != 0u;
                 result.materialData = (VividMaterialData) 0;
-                if (result.isDualSlab != 0u)
+                result.dualSlabMaterialData = (VividDualSlabMaterialData) 0;
+                result.surfaceBindingData = (VividSurfaceBindingData) 0;
+                result.topSurfaceBindingData = (VividSurfaceBindingData) 0;
+                result.materialProgramID = VIVIDMATERIALPROGRAMID_INVALID;
+                result.isDualSlab = 0u;
+                result.materialProgramFailed = 0u;
+                VividMaterialRuntimeHeader runtimeHeader;
+                VividMaterialProgramData programData;
+                const uint programStatus = VividGetMaterialProgramStatus(
+                    result.instanceData.MaterialIndex,
+                    runtimeHeader,
+                    programData);
+                bool loadedMaterialProgram = false;
+                if (programStatus == VIVID_MATERIAL_PROGRAM_KNOWN)
+                {
+                    result.materialProgramID = runtimeHeader.ProgramID;
+                    if (programData.SurfaceProgramID
+                        == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB)
+                    {
+                        loadedMaterialProgram = VividTryLoadDualSlabSurfaceProgram(
+                            result.instanceData.MaterialIndex,
+                            VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
+                            result.dualSlabMaterialData,
+                            result.surfaceBindingData,
+                            result.topSurfaceBindingData);
+                        result.isDualSlab = loadedMaterialProgram ? 1u : 0u;
+                    }
+                    else if (programData.SurfaceProgramID
+                        == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB)
+                    {
+                        loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
+                            result.instanceData.MaterialIndex,
+                            VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
+                            result.materialData,
+                            result.surfaceBindingData);
+                    }
+                    result.materialProgramFailed = loadedMaterialProgram ? 0u : 1u;
+                }
+                else if (programStatus == VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE)
+                {
+                    result.materialProgramFailed = 1u;
+                }
+                else
                 {
                     result.materialData = PullMaterialData(
                         result.instanceData.MaterialIndex);
-                }
-                if (result.isDualSlab == 0u)
-                {
-                    loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
-                        result.instanceData.MaterialIndex,
-                        VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT,
-                        result.materialData,
-                        result.surfaceBindingData);
-                    if (!loadedMaterialProgram)
-                    {
-                        result.materialData = PullMaterialData(
-                            result.instanceData.MaterialIndex);
-                        result.surfaceBindingData = PullSurfaceBindingData(
-                            result.materialData.SurfaceBindingIndex);
-                    }
+                    result.surfaceBindingData = PullSurfaceBindingData(
+                        result.materialData.SurfaceBindingIndex);
                 }
 
                 result.isUnlit = 0u;
                 if (loadedMaterialProgram)
                 {
-                    const VividMaterialRuntimeHeader runtimeHeader =
-                        PullMaterialRuntimeHeader(result.instanceData.MaterialIndex);
-                    result.materialProgramID = runtimeHeader.ProgramID;
-                    const VividMaterialProgramData programData =
-                        PullMaterialProgramData(runtimeHeader.ProgramID);
                     result.isUnlit =
                         (programData.CapabilityFlags
                             & VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT) != 0u
@@ -344,7 +359,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 {
                     result.isUnlit = 1u;
                 }
-                result.usesLegacyMaterial = loadedMaterialProgram ? 0u : 1u;
+                result.usesLegacyMaterial = programStatus
+                    == VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK
+                        ? 1u
+                        : 0u;
                 const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
                 const uint3 indices = uint3(
@@ -606,7 +624,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 VividAOTSurfaceProgramOutput aotSurfaceOutput =
                     (VividAOTSurfaceProgramOutput) 0;
                 bool dispatchedAOTSurface = false;
-                if (triangleData.materialProgramID != VIVIDMATERIALPROGRAMID_INVALID)
+                if (triangleData.materialProgramID != VIVIDMATERIALPROGRAMID_INVALID
+                    && triangleData.materialProgramFailed == 0u)
                 {
                     dispatchedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
                         triangleData.materialProgramID,
@@ -628,6 +647,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         || aotSurfaceOutput.LayerOperator == 2u);
                 const bool evaluatedAOTSurface = evaluatedAOTSingleSurface
                     || evaluatedAOTDualSurface;
+                const bool failedAOTSurface = triangleData.materialProgramFailed != 0u
+                    || (triangleData.materialProgramID
+                            != VIVIDMATERIALPROGRAMID_INVALID
+                        && !evaluatedAOTSurface);
 
                 float3 baseColor;
                 float3 sampledNormalTS = float3(0.0f, 0.0f, 1.0f);
@@ -655,7 +678,16 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 #endif
 
                 UNITY_BRANCH
-                if (isTerrain)
+                if (failedAOTSurface)
+                {
+                    baseColor = float3(1.0f, 0.0f, 1.0f);
+                    evaluatedAOTNormalWS = geometryNormalWS;
+                    hasEvaluatedAOTNormalWS = true;
+                    perceptualRoughness = 1.0f;
+                    metallic = 0.0f;
+                    ambientOcclusion = 1.0f;
+                }
+                else if (isTerrain)
                 {
                     ResolveTerrainSurfaceSamples(
                         triangleData.materialData,
@@ -715,54 +747,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     metallic = aotSurfaceOutput.BaseSlab.Metallic;
                     ambientOcclusion =
                         aotSurfaceOutput.BaseSlab.AmbientOcclusion;
-                }
-                else if (triangleData.isDualSlab != 0u)
-                {
-                    const VividEvaluatedSlabSurface baseSlab =
-                        VividEvaluateSlabSurfaceGrad(
-                            VividGetBaseSlabMaterialData(
-                                triangleData.dualSlabMaterialData),
-                            triangleData.surfaceBindingData,
-                            visibilityUV.uv,
-                            visibilityUV.ddx,
-                            visibilityUV.ddy,
-                            positionCS);
-                    const VividEvaluatedSlabSurface topSlab =
-                        VividEvaluateSlabSurfaceGrad(
-                            VividGetTopSlabMaterialData(
-                                triangleData.dualSlabMaterialData),
-                            triangleData.topSurfaceBindingData,
-                            visibilityUV.uv,
-                            visibilityUV.ddx,
-                            visibilityUV.ddy,
-                            positionCS);
-                    const float layerWeight = saturate(
-                        triangleData.dualSlabMaterialData.LayerWeight);
-
-                    // Preserve the same legacy degradation when generated code is
-                    // unavailable for an otherwise compatible Dual-Slab program.
-                    baseColor = lerp(
-                        baseSlab.BaseColor,
-                        topSlab.BaseColor,
-                        layerWeight);
-                    sampledNormalTS = SafeNormalize(lerp(
-                        baseSlab.NormalTS,
-                        topSlab.NormalTS,
-                        layerWeight));
-                    hasSampledNormal =
-                        baseSlab.HasNormal != 0u || topSlab.HasNormal != 0u;
-                    perceptualRoughness = lerp(
-                        baseSlab.PerceptualRoughness,
-                        topSlab.PerceptualRoughness,
-                        layerWeight);
-                    metallic = lerp(
-                        baseSlab.Metallic,
-                        topSlab.Metallic,
-                        layerWeight);
-                    ambientOcclusion = lerp(
-                        baseSlab.AmbientOcclusion,
-                        topSlab.AmbientOcclusion,
-                        layerWeight);
                 }
                 else
                 {
@@ -854,6 +838,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.materialFeatures = triangleData.isUnlit != 0u
                     ? 0u
                     : VIVID_MATERIALFEATURE_DEFAULT;
+                if (failedAOTSurface)
+                    surfaceData.materialFeatures = 0u;
 #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
                 if (isTerrainRVT
                     && (terrainRVTRecordFlags & VIVID_TERRAIN_RVT_RECEIVE_DECALS) == 0u)
@@ -862,11 +848,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 }
 #endif
                 surfaceData.emissive = max(
-                    evaluatedAOTSurface
+                    failedAOTSurface
+                        ? float3(1.0f, 0.0f, 1.0f)
+                        : evaluatedAOTSurface
                         ? aotSurfaceOutput.Emission
-                        : triangleData.isDualSlab != 0u
-                            ? triangleData.dualSlabMaterialData.Emission.rgb
-                            : triangleData.materialData.Emission.rgb,
+                        : triangleData.materialData.Emission.rgb,
                     0.0f);
                 surfaceData.builtinData = CreateVividBuiltinData(
                     SampleVividProbeVolume(

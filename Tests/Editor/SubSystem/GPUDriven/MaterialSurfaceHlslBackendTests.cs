@@ -19,7 +19,6 @@ namespace VividRP.Editor.Tests
 
             AssertArtifact(
                 standard.SurfaceHlsl,
-                "VividEvaluateAOTSurface_StandardSingleSlab",
                 MaterialProgramTopologySpecialization.SingleSlab,
                 MaterialSurfaceHlslPhysicalContract.LegacySingleSlab,
                 "VividMaterialData",
@@ -28,7 +27,6 @@ namespace VividRP.Editor.Tests
                 expectedSampleCount: 1);
             AssertArtifact(
                 horizontal.SurfaceHlsl,
-                "VividEvaluateAOTSurface_DualSlabHorizontalMix",
                 MaterialProgramTopologySpecialization.HorizontalMix,
                 MaterialSurfaceHlslPhysicalContract.DualSlab,
                 "VividDualSlabMaterialData",
@@ -37,13 +35,124 @@ namespace VividRP.Editor.Tests
                 expectedSampleCount: 2);
             AssertArtifact(
                 vertical.SurfaceHlsl,
-                "VividEvaluateAOTSurface_DualSlabVerticalLayer",
                 MaterialProgramTopologySpecialization.VerticalLayer,
                 MaterialSurfaceHlslPhysicalContract.DualSlab,
                 "VividDualSlabMaterialData",
                 expectedClosureCount: 2u,
                 expectedLayerOperator: 2u,
                 expectedSampleCount: 2);
+        }
+
+        [Test]
+        public void SurfaceEntryPoint_IsStableAcrossCanonicalAllocationAndCatalogIdentity()
+        {
+            CompiledMaterialProgram baseline = BuildStandard();
+            CompiledMaterialProgram reordered = CompiledMaterialProgram.Compile(
+                BuildSingleSlabModule(
+                    alternateDeclarationOrder: true,
+                    useGeneralSurfaceMath: false),
+                MaterialProgramContract.RuntimeAbiVersion);
+
+            Assert.That(
+                reordered.Module.CanonicalIR.PayloadEquals(
+                    baseline.Module.CanonicalIR),
+                Is.True);
+            Assert.That(
+                reordered.SurfaceHlsl.EntryPoint,
+                Is.EqualTo(baseline.SurfaceHlsl.EntryPoint));
+            Assert.That(
+                reordered.SurfaceHlsl.CodeHash,
+                Is.EqualTo(baseline.SurfaceHlsl.CodeHash));
+
+            MaterialProgramCatalog lowIdentity = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "canonical-standard-low",
+                    baseline));
+            MaterialProgramCatalog highIdentity = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.Reserved("reserved-0"),
+                MaterialProgramCatalogBakeSlot.Reserved("reserved-1"),
+                MaterialProgramCatalogBakeSlot.Reserved("reserved-2"),
+                MaterialProgramCatalogBakeSlot.Reserved("reserved-3"),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "canonical-standard-high",
+                    reordered));
+            MaterialProgramCatalog.ManifestEntry lowEntry = lowIdentity.GetEntry(
+                (VividMaterialProgramID) 0u);
+            MaterialProgramCatalog.ManifestEntry highEntry = highIdentity.GetEntry(
+                (VividMaterialProgramID) 4u);
+
+            Assert.That(highEntry.ProgramID, Is.Not.EqualTo(lowEntry.ProgramID));
+            Assert.That(
+                highEntry.Program.SurfaceHlsl.EntryPoint,
+                Is.EqualTo(lowEntry.Program.SurfaceHlsl.EntryPoint));
+        }
+
+        [Test]
+        public void SameTopologyDifferentSurfaceMath_EmitsDistinctCoexistingArtifacts()
+        {
+            CompiledMaterialProgram baseline = BuildStandard();
+            CompiledMaterialProgram general = CompiledMaterialProgram.Compile(
+                BuildSingleSlabModule(
+                    alternateDeclarationOrder: false,
+                    useGeneralSurfaceMath: true),
+                MaterialProgramContract.RuntimeAbiVersion);
+
+            Assert.That(
+                general.Lowering.SelectionKey.Topology,
+                Is.EqualTo(baseline.Lowering.SelectionKey.Topology));
+            Assert.That(general.SurfaceHlsl.Source, Does.Contain("saturate("));
+            Assert.That(general.SurfaceHlsl.Source, Does.Contain("asfloat(0x3F000000u)"));
+            Assert.That(
+                general.SurfaceHlsl.EntryPoint,
+                Is.Not.EqualTo(baseline.SurfaceHlsl.EntryPoint));
+            Assert.That(
+                general.SurfaceHlsl.CodeHash,
+                Is.Not.EqualTo(baseline.SurfaceHlsl.CodeHash));
+            Assert.That(
+                general.SurfaceHlsl.PayloadEquals(baseline.SurfaceHlsl),
+                Is.False);
+
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "single-slab-baseline",
+                    baseline),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "single-slab-general-math",
+                    general));
+            string source = MaterialSurfaceHlslSourceBuilder.BuildSource(catalog);
+            Assert.That(
+                CountOccurrences(source, baseline.SurfaceHlsl.EntryPoint),
+                Is.EqualTo(2));
+            Assert.That(
+                CountOccurrences(source, general.SurfaceHlsl.EntryPoint),
+                Is.EqualTo(2));
+            Assert.That(
+                Slice(
+                    source,
+                    source.IndexOf("        case 0u:", StringComparison.Ordinal),
+                    source.IndexOf("        case 1u:", StringComparison.Ordinal)),
+                Does.Contain(baseline.SurfaceHlsl.EntryPoint));
+            Assert.That(
+                source.Substring(source.IndexOf(
+                    "        case 1u:",
+                    StringComparison.Ordinal)),
+                Does.Contain(general.SurfaceHlsl.EntryPoint));
+        }
+
+        [Test]
+        public void DualSlabCrossSlabBaseColorResourceMapping_IsRejected()
+        {
+            NotSupportedException exception = Assert.Throws<NotSupportedException>(() =>
+                CompiledMaterialProgram.Compile(
+                    BuildCrossSlabResourceModule(),
+                    MaterialProgramContract.RuntimeAbiVersion));
+
+            Assert.That(
+                exception.Message,
+                Does.Contain("BaseSlab base-color sample maps to 'TopBaseColor'"));
         }
 
         [Test]
@@ -70,7 +179,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildSource_SortsProgramIdsAndEmitsTopologyPreservingDispatcher()
+        public void BuildSource_EmitsTopologyPreservingCatalogDispatcher()
         {
             CompiledMaterialProgram standard = BuildStandard();
             CompiledMaterialProgram horizontal = BuildDual(
@@ -79,11 +188,14 @@ namespace VividRP.Editor.Tests
                 VividDualSlabOperator.VerticalLayer);
 
             string sorted = MaterialSurfaceHlslSourceBuilder.BuildSource(
-                new[] { standard, horizontal, vertical });
-            string shuffled = MaterialSurfaceHlslSourceBuilder.BuildSource(
-                new[] { vertical, standard, horizontal });
+                BakeCatalog(standard, horizontal, vertical));
+            string rebuilt = MaterialSurfaceHlslSourceBuilder.BuildSource(
+                BakeCatalog(
+                    BuildStandard(),
+                    BuildDual(VividDualSlabOperator.HorizontalMix),
+                    BuildDual(VividDualSlabOperator.VerticalLayer)));
 
-            Assert.That(shuffled, Is.EqualTo(sorted));
+            Assert.That(rebuilt, Is.EqualTo(sorted));
             Assert.That(
                 sorted,
                 Does.Contain(
@@ -136,12 +248,14 @@ namespace VividRP.Editor.Tests
             CompiledMaterialProgram program = BuildStandard();
             MaterialSurfaceHlslArtifact artifact = program.SurfaceHlsl;
 
-            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(8u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(10u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(6u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(2u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.SurfaceHlslArtifactVersion));
             Assert.That(artifact.BackendVersion, Is.EqualTo(
@@ -153,17 +267,20 @@ namespace VividRP.Editor.Tests
                 CompiledMaterialProgramHashBuilder.ComputeNativeTemplate(
                     program.SemanticHash,
                     program.Lowering,
+                    program.CoverageHlsl,
                     artifact);
             var changedArtifact = new MaterialSurfaceHlslArtifact(
                 artifact.EntryPoint,
                 artifact.Source + "// changed artifact payload\n",
                 artifact.Topology,
                 artifact.PhysicalContract,
-                artifact.BindingHash);
+                artifact.BindingHash,
+                artifact.CodeHash);
             CompiledMaterialProgramHash changed =
                 CompiledMaterialProgramHashBuilder.ComputeNativeTemplate(
                     program.SemanticHash,
                     program.Lowering,
+                    program.CoverageHlsl,
                     changedArtifact);
 
             Assert.That(reproduced, Is.EqualTo(program.CompiledHash));
@@ -188,12 +305,7 @@ namespace VividRP.Editor.Tests
             Assert.That(File.Exists(generatedPath), Is.True, generatedPath);
 
             string expected = MaterialSurfaceHlslSourceBuilder.BuildSource(
-                new[]
-                {
-                    BuildStandard(),
-                    BuildDual(VividDualSlabOperator.HorizontalMix),
-                    BuildDual(VividDualSlabOperator.VerticalLayer),
-                });
+                GPUDrivenMaterialCompiler.ProgramCatalog);
             Assert.That(File.ReadAllText(generatedPath), Is.EqualTo(expected));
         }
 
@@ -211,9 +323,191 @@ namespace VividRP.Editor.Tests
                 layerOperator);
         }
 
+        private static MaterialProgramCatalog BakeCatalog(
+            CompiledMaterialProgram standard,
+            CompiledMaterialProgram horizontal,
+            CompiledMaterialProgram vertical)
+        {
+            return MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P0.StandardSingleSlab",
+                    standard),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P1.DualSlabHorizontalMix",
+                    horizontal),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P2.DualSlabVerticalLayer",
+                    vertical));
+        }
+
+        private static MaterialIRModule BuildSingleSlabModule(
+            bool alternateDeclarationOrder,
+            bool useGeneralSurfaceMath)
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue baseColor;
+            MaterialValue roughness;
+            MaterialValue metallic;
+            MaterialValue alphaClipThreshold;
+            MaterialValue emission;
+            MaterialValue normal;
+            MaterialValue tangent;
+            if (alternateDeclarationOrder)
+            {
+                roughness = valueIR.Parameter(MaterialParameter.Roughness);
+                metallic = valueIR.Parameter(MaterialParameter.Metallic);
+                alphaClipThreshold =
+                    valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+                emission = valueIR.Parameter(MaterialParameter.Emission);
+                normal = valueIR.ExternalInput(
+                    MaterialExternalInput.GeometryNormalWS);
+                tangent = valueIR.ExternalInput(
+                    MaterialExternalInput.GeometryTangentWS);
+                valueIR.Constant(123.0f);
+                valueIR.Parameter(MaterialParameter.TopRoughness);
+                valueIR.TextureResource(MaterialTextureResource.TopBaseColor);
+                baseColor = BuildSampledBaseColor(
+                    valueIR,
+                    MaterialTextureResource.BaseColor,
+                    MaterialParameter.BaseColor);
+            }
+            else
+            {
+                baseColor = BuildSampledBaseColor(
+                    valueIR,
+                    MaterialTextureResource.BaseColor,
+                    MaterialParameter.BaseColor);
+                roughness = valueIR.Parameter(MaterialParameter.Roughness);
+                metallic = valueIR.Parameter(MaterialParameter.Metallic);
+                alphaClipThreshold =
+                    valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+                emission = valueIR.Parameter(MaterialParameter.Emission);
+                normal = valueIR.ExternalInput(
+                    MaterialExternalInput.GeometryNormalWS);
+                tangent = valueIR.ExternalInput(
+                    MaterialExternalInput.GeometryTangentWS);
+            }
+
+            MaterialValue surfaceRoughness = useGeneralSurfaceMath
+                ? valueIR.Saturate(valueIR.Multiply(
+                    roughness,
+                    valueIR.Constant(0.5f)))
+                : roughness;
+            MaterialValue coverage = valueIR.Swizzle(
+                baseColor,
+                MaterialSwizzleMask.W);
+            var closureGraph = new ClosureExpressionGraph(valueIR);
+            MaterialClosure surfaceClosure = closureGraph.Slab(
+                baseColor,
+                surfaceRoughness,
+                metallic,
+                normal,
+                tangent,
+                ClosureFeatureMask.BaseColorTexture
+                | ClosureFeatureMask.NormalTexture
+                | ClosureFeatureMask.MaskTexture);
+            return new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(
+                    coverage,
+                    alphaClipThreshold,
+                    emission),
+                closureGraph,
+                surfaceClosure,
+                ClosureTopologyBudget.Prototype,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit
+                | MaterialShadingModelMask.Unlit);
+        }
+
+        private static MaterialIRModule BuildCrossSlabResourceModule()
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue baseColor = BuildSampledBaseColor(
+                valueIR,
+                MaterialTextureResource.TopBaseColor,
+                MaterialParameter.BaseColor);
+            MaterialValue topBaseColor = BuildSampledBaseColor(
+                valueIR,
+                MaterialTextureResource.BaseColor,
+                MaterialParameter.TopBaseColor);
+            MaterialValue roughness =
+                valueIR.Parameter(MaterialParameter.Roughness);
+            MaterialValue topRoughness =
+                valueIR.Parameter(MaterialParameter.TopRoughness);
+            MaterialValue metallic =
+                valueIR.Parameter(MaterialParameter.Metallic);
+            MaterialValue topMetallic =
+                valueIR.Parameter(MaterialParameter.TopMetallic);
+            MaterialValue layerWeight =
+                valueIR.Parameter(MaterialParameter.LayerWeight);
+            MaterialValue alphaClipThreshold =
+                valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+            MaterialValue emission =
+                valueIR.Parameter(MaterialParameter.Emission);
+            MaterialValue normal = valueIR.ExternalInput(
+                MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent = valueIR.ExternalInput(
+                MaterialExternalInput.GeometryTangentWS);
+            MaterialValue coverage = valueIR.Swizzle(
+                baseColor,
+                MaterialSwizzleMask.W);
+            var closureGraph = new ClosureExpressionGraph(valueIR);
+            ClosureFeatureMask features = ClosureFeatureMask.BaseColorTexture
+                | ClosureFeatureMask.NormalTexture
+                | ClosureFeatureMask.MaskTexture;
+            MaterialClosure baseSlab = closureGraph.Slab(
+                baseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                features);
+            MaterialClosure topSlab = closureGraph.Slab(
+                topBaseColor,
+                topRoughness,
+                topMetallic,
+                normal,
+                tangent,
+                features);
+            MaterialClosure surfaceClosure = closureGraph.HorizontalMix(
+                baseSlab,
+                topSlab,
+                layerWeight);
+            return new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(
+                    coverage,
+                    alphaClipThreshold,
+                    emission),
+                closureGraph,
+                surfaceClosure,
+                ClosureTopologyBudget.Prototype,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit
+                | MaterialShadingModelMask.Unlit);
+        }
+
+        private static MaterialValue BuildSampledBaseColor(
+            MaterialValueIR valueIR,
+            MaterialTextureResource textureResource,
+            MaterialParameter colorParameter)
+        {
+            MaterialValue uv = valueIR.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue texture = valueIR.TextureResource(textureResource);
+            MaterialValue sample = valueIR.TextureSampleGrad(
+                texture,
+                uv,
+                valueIR.Ddx(uv),
+                valueIR.Ddy(uv));
+            return valueIR.Multiply(
+                sample,
+                valueIR.Parameter(colorParameter));
+        }
+
         private static void AssertArtifact(
             MaterialSurfaceHlslArtifact artifact,
-            string expectedEntryPoint,
             MaterialProgramTopologySpecialization expectedTopology,
             MaterialSurfaceHlslPhysicalContract expectedPhysicalContract,
             string expectedParameterType,
@@ -222,11 +516,13 @@ namespace VividRP.Editor.Tests
             int expectedSampleCount)
         {
             Assert.That(artifact, Is.Not.Null);
-            Assert.That(artifact.EntryPoint, Is.EqualTo(expectedEntryPoint));
+            Assert.That(
+                artifact.EntryPoint,
+                Is.EqualTo($"VividEvaluateAOTSurface_{artifact.CodeHash:X16}"));
             Assert.That(artifact.Topology, Is.EqualTo(expectedTopology));
             Assert.That(artifact.PhysicalContract, Is.EqualTo(expectedPhysicalContract));
             Assert.That(artifact.Source, Does.Contain(
-                $"VividAOTSurfaceProgramOutput {expectedEntryPoint}("));
+                $"VividAOTSurfaceProgramOutput {artifact.EntryPoint}("));
             Assert.That(artifact.Source, Does.Contain(
                 $"    const {expectedParameterType} materialParameters,"));
             Assert.That(artifact.Source, Does.Contain(

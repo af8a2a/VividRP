@@ -19,7 +19,8 @@ namespace VividRP.Runtime.GPUDriven
             string source,
             MaterialProgramTopologySpecialization topology,
             MaterialSurfaceHlslPhysicalContract physicalContract,
-            ulong bindingHash)
+            ulong bindingHash,
+            ulong codeHash)
         {
             if (string.IsNullOrEmpty(entryPoint))
                 throw new ArgumentException("A Surface HLSL entry point is required.", nameof(entryPoint));
@@ -31,6 +32,7 @@ namespace VividRP.Runtime.GPUDriven
             Topology = topology;
             PhysicalContract = physicalContract;
             BindingHash = bindingHash;
+            CodeHash = codeHash;
             PayloadHash = ComputePayloadHash();
         }
 
@@ -48,6 +50,8 @@ namespace VividRP.Runtime.GPUDriven
 
         internal ulong BindingHash { get; }
 
+        internal ulong CodeHash { get; }
+
         internal ulong PayloadHash { get; }
 
         internal bool PayloadEquals(MaterialSurfaceHlslArtifact other)
@@ -59,6 +63,7 @@ namespace VividRP.Runtime.GPUDriven
                 && Topology == other.Topology
                 && PhysicalContract == other.PhysicalContract
                 && BindingHash == other.BindingHash
+                && CodeHash == other.CodeHash
                 && string.Equals(EntryPoint, other.EntryPoint, StringComparison.Ordinal)
                 && string.Equals(Source, other.Source, StringComparison.Ordinal);
         }
@@ -71,12 +76,13 @@ namespace VividRP.Runtime.GPUDriven
             MaterialProgramHashUtility.Add(ref hash, (int) Topology);
             MaterialProgramHashUtility.Add(ref hash, (int) PhysicalContract);
             MaterialProgramHashUtility.Add(ref hash, BindingHash);
+            MaterialProgramHashUtility.Add(ref hash, CodeHash);
             MaterialProgramHashUtility.Add(ref hash, EntryPoint);
             MaterialProgramHashUtility.Add(ref hash, Source);
             return hash;
         }
 
-        private static string NormalizeLineEndings(string value)
+        internal static string NormalizeLineEndings(string value)
         {
             return value.Replace("\r\n", "\n").Replace('\r', '\n');
         }
@@ -118,36 +124,71 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             MaterialNativeTemplateLayoutSchema schema =
-                lowering.CatalogEntry.LayoutSchema;
+                lowering.Template.LayoutSchema;
             MaterialSurfaceHlslPhysicalContract physicalContract =
                 GetPhysicalContract(schema);
             ValidateResourceUses(stageLIR);
 
-            string entryPoint = GetEntryPoint(lowering.SelectionKey.Topology);
-            var builder = new StringBuilder(Math.Max(2048, stageLIR.NodeCount * 96));
-            builder.Append("// Surface AOT HLSL artifact v")
-                .Append(MaterialProgramContract.SurfaceHlslArtifactVersion)
-                .Append(", backend v")
-                .Append(MaterialProgramContract.SurfaceHlslBackendVersion)
-                .AppendLine(".");
-            AppendFunctionSignature(builder, entryPoint, physicalContract);
-            builder.AppendLine("{");
-            AppendNodes(builder, stageLIR, schema, physicalContract);
+            var bodyBuilder = new StringBuilder(Math.Max(2048, stageLIR.NodeCount * 96));
+            AppendNodes(bodyBuilder, stageLIR, schema, physicalContract);
             AppendOutput(
-                builder,
+                bodyBuilder,
                 module,
                 stageLIR,
                 schema,
                 physicalContract,
                 lowering.SelectionKey.Topology);
-            builder.AppendLine("}");
+            string bodySource = MaterialSurfaceHlslArtifact.NormalizeLineEndings(
+                bodyBuilder.ToString());
+            ulong bindingHash = ComputeBindingHash(schema);
+            ulong codeHash = ComputeCodeHash(
+                bodySource,
+                lowering.SelectionKey.Topology,
+                physicalContract,
+                bindingHash);
+            string entryPoint = string.Format(
+                CultureInfo.InvariantCulture,
+                "VividEvaluateAOTSurface_{0:X16}",
+                codeHash);
+
+            var sourceBuilder = new StringBuilder(bodySource.Length + 384);
+            sourceBuilder.Append("// Surface AOT HLSL artifact v")
+                .Append(MaterialProgramContract.SurfaceHlslArtifactVersion)
+                .Append(", backend v")
+                .Append(MaterialProgramContract.SurfaceHlslBackendVersion)
+                .AppendLine(".");
+            AppendFunctionSignature(sourceBuilder, entryPoint, physicalContract);
+            sourceBuilder.AppendLine("{");
+            sourceBuilder.Append(bodySource);
+            sourceBuilder.AppendLine("}");
 
             return new MaterialSurfaceHlslArtifact(
                 entryPoint,
-                builder.ToString(),
+                sourceBuilder.ToString(),
                 lowering.SelectionKey.Topology,
                 physicalContract,
-                ComputeBindingHash(schema));
+                bindingHash,
+                codeHash);
+        }
+
+        private static ulong ComputeCodeHash(
+            string bodySource,
+            MaterialProgramTopologySpecialization topology,
+            MaterialSurfaceHlslPhysicalContract physicalContract,
+            ulong bindingHash)
+        {
+            ulong hash = MaterialProgramHashUtility.OffsetBasis;
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                MaterialProgramContract.SurfaceHlslArtifactVersion);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                MaterialProgramContract.SurfaceHlslBackendVersion);
+            MaterialProgramHashUtility.Add(ref hash, (int) topology);
+            MaterialProgramHashUtility.Add(ref hash, (int) physicalContract);
+            MaterialProgramHashUtility.Add(ref hash, bindingHash);
+            MaterialProgramHashUtility.Add(ref hash, bodySource);
+            return hash;
         }
 
         private static void AppendFunctionSignature(
@@ -177,6 +218,27 @@ namespace VividRP.Runtime.GPUDriven
             MaterialNativeTemplateLayoutSchema schema,
             MaterialSurfaceHlslPhysicalContract physicalContract)
         {
+            AppendStageNodes(
+                builder,
+                stageLIR,
+                schema,
+                physicalContract,
+                includePositionCS: true);
+        }
+
+        internal static void AppendStageNodes(
+            StringBuilder builder,
+            MaterialStageLIR stageLIR,
+            MaterialNativeTemplateLayoutSchema schema,
+            MaterialSurfaceHlslPhysicalContract physicalContract,
+            bool includePositionCS)
+        {
+            if (builder == null)
+                throw new ArgumentNullException(nameof(builder));
+            if (stageLIR == null)
+                throw new ArgumentNullException(nameof(stageLIR));
+            if (schema == null)
+                throw new ArgumentNullException(nameof(schema));
             for (int nodeIndex = 0; nodeIndex < stageLIR.Nodes.Count; nodeIndex++)
             {
                 MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
@@ -191,7 +253,8 @@ namespace VividRP.Runtime.GPUDriven
                         node,
                         nodeIndex,
                         schema,
-                        physicalContract);
+                        physicalContract,
+                        includePositionCS);
                     continue;
                 }
 
@@ -270,7 +333,8 @@ namespace VividRP.Runtime.GPUDriven
             in MaterialStageLIRNode sample,
             int sampleIndex,
             MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
+            MaterialSurfaceHlslPhysicalContract physicalContract,
+            bool includePositionCS)
         {
             MaterialStageLIRNode resourceNode = stageLIR.Nodes[sample.Operand0];
             if (!stageLIR.Values.TryGetResourceDeclaration(
@@ -318,8 +382,14 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(surfaceBinding).Append(", ")
                 .Append(uvName).Append(", ")
                 .Append(ddxName).Append(", ")
-                .Append(ddyName).Append(", ")
-                .Append(ContextVariable).AppendLine(".PositionCS);");
+                .Append(ddyName);
+            if (includePositionCS)
+            {
+                builder.Append(", ")
+                    .Append(ContextVariable)
+                    .Append(".PositionCS");
+            }
+            builder.AppendLine(");");
             builder.Append("    const float4 ")
                 .Append(GetValueName(sampleIndex)).Append(" = ")
                 .Append(sampleFunction).Append('(')
@@ -442,11 +512,13 @@ namespace VividRP.Runtime.GPUDriven
                 throw new NotSupportedException(
                     $"Slab base-color declaration @{resource.Semantic} has no native binding.");
             }
-            if (binding.Target != MaterialTextureResource.BaseColor
-                && binding.Target != MaterialTextureResource.TopBaseColor)
+            MaterialTextureResource expectedTarget = field == "BaseSlab"
+                ? MaterialTextureResource.BaseColor
+                : MaterialTextureResource.TopBaseColor;
+            if (binding.Target != expectedTarget)
             {
                 throw new NotSupportedException(
-                    $"Slab base-color sample maps to unsupported native resource '{binding.Target}'.");
+                    $"{field} base-color sample maps to '{binding.Target}', expected '{expectedTarget}'.");
             }
 
             GetResourceExpressions(
@@ -678,7 +750,7 @@ namespace VividRP.Runtime.GPUDriven
                 : $"VividGetBaseSlabMaterialData({MaterialVariable})";
         }
 
-        private static MaterialSurfaceHlslPhysicalContract GetPhysicalContract(
+        internal static MaterialSurfaceHlslPhysicalContract GetPhysicalContract(
             MaterialNativeTemplateLayoutSchema schema)
         {
             if (schema.ParameterLayout.LayoutID
@@ -700,22 +772,6 @@ namespace VividRP.Runtime.GPUDriven
                 $"Surface AOT HLSL has no native adapter for parameter layout "
                 + $"'{schema.ParameterLayout.LayoutID}' and resource layout "
                 + $"'{schema.ResourceLayout.LayoutID}'.");
-        }
-
-        private static string GetEntryPoint(MaterialProgramTopologySpecialization topology)
-        {
-            switch (topology)
-            {
-                case MaterialProgramTopologySpecialization.SingleSlab:
-                    return "VividEvaluateAOTSurface_StandardSingleSlab";
-                case MaterialProgramTopologySpecialization.HorizontalMix:
-                    return "VividEvaluateAOTSurface_DualSlabHorizontalMix";
-                case MaterialProgramTopologySpecialization.VerticalLayer:
-                    return "VividEvaluateAOTSurface_DualSlabVerticalLayer";
-                default:
-                    throw new NotSupportedException(
-                        $"Surface topology '{topology}' has no AOT HLSL entry point.");
-            }
         }
 
         private static string GetStageInputExpression(MaterialStageInput input)
@@ -926,7 +982,7 @@ namespace VividRP.Runtime.GPUDriven
             return GetValueName(nodeIndex);
         }
 
-        private static ulong ComputeBindingHash(MaterialNativeTemplateLayoutSchema schema)
+        internal static ulong ComputeBindingHash(MaterialNativeTemplateLayoutSchema schema)
         {
             ulong hash = MaterialProgramHashUtility.OffsetBasis;
             MaterialProgramHashUtility.Add(ref hash, (uint) schema.ParameterLayout.LayoutID);
@@ -990,31 +1046,34 @@ namespace VividRP.Runtime.GPUDriven
     internal static class MaterialSurfaceHlslSourceBuilder
     {
         internal static string BuildSource(
-            IReadOnlyList<CompiledMaterialProgram> programs)
+            MaterialProgramCatalog catalog)
         {
-            if (programs == null)
-                throw new ArgumentNullException(nameof(programs));
+            if (catalog == null)
+                throw new ArgumentNullException(nameof(catalog));
 
-            var sortedPrograms = new List<CompiledMaterialProgram>(programs.Count);
+            var sortedEntries = new List<MaterialProgramCatalog.ManifestEntry>(
+                catalog.Entries.Count);
             var programIDs = new HashSet<VividMaterialProgramID>();
-            for (int programIndex = 0; programIndex < programs.Count; programIndex++)
+            for (int entryIndex = 0;
+                 entryIndex < catalog.Entries.Count;
+                 entryIndex++)
             {
-                CompiledMaterialProgram program = programs[programIndex]
+                MaterialProgramCatalog.ManifestEntry entry = catalog.Entries[entryIndex]
                     ?? throw new ArgumentException(
-                        $"Material program collection contains null at index {programIndex}.",
-                        nameof(programs));
-                if (!programIDs.Add(program.ProgramID))
+                        $"Material catalog contains null at entry {entryIndex}.",
+                        nameof(catalog));
+                if (!programIDs.Add(entry.ProgramID))
                 {
                     throw new ArgumentException(
-                        $"Material program ID '{program.ProgramID}' is emitted more than once.",
-                        nameof(programs));
+                        $"Material program ID '{entry.ProgramID}' is emitted more than once.",
+                        nameof(catalog));
                 }
-                sortedPrograms.Add(program);
+                sortedEntries.Add(entry);
             }
-            sortedPrograms.Sort((left, right) =>
+            sortedEntries.Sort((left, right) =>
                 ((uint) left.ProgramID).CompareTo((uint) right.ProgramID));
 
-            var builder = new StringBuilder(Math.Max(4096, sortedPrograms.Count * 3072));
+            var builder = new StringBuilder(Math.Max(4096, sortedEntries.Count * 3072));
             builder.AppendLine("// <auto-generated by MaterialSurfaceHlslGenerator>");
             builder.AppendLine("// Generated from canonical Surface Stage LIR; do not edit.");
             builder.AppendLine("#ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED");
@@ -1024,16 +1083,18 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(MaterialProgramContract.SurfaceHlslBackendVersion)
                 .AppendLine("u");
             builder.AppendLine();
+            MaterialProgramCatalogHlslContract.Append(builder, catalog);
+            builder.AppendLine();
             AppendAbi(builder);
 
             var artifacts = new Dictionary<string, MaterialSurfaceHlslArtifact>(
                 StringComparer.Ordinal);
-            for (int programIndex = 0;
-                 programIndex < sortedPrograms.Count;
-                 programIndex++)
+            for (int entryIndex = 0;
+                 entryIndex < sortedEntries.Count;
+                 entryIndex++)
             {
                 MaterialSurfaceHlslArtifact artifact =
-                    sortedPrograms[programIndex].SurfaceHlsl;
+                    sortedEntries[entryIndex].Program.SurfaceHlsl;
                 if (artifacts.TryGetValue(
                         artifact.EntryPoint,
                         out MaterialSurfaceHlslArtifact existing))
@@ -1052,7 +1113,7 @@ namespace VividRP.Runtime.GPUDriven
                 builder.AppendLine();
             }
 
-            AppendDispatcher(builder, sortedPrograms);
+            AppendDispatcher(builder, sortedEntries);
             builder.AppendLine();
             builder.AppendLine("#endif // VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED");
             return builder.ToString().Replace("\r\n", "\n").Replace('\r', '\n');
@@ -1097,7 +1158,7 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AppendDispatcher(
             StringBuilder builder,
-            IReadOnlyList<CompiledMaterialProgram> programs)
+            IReadOnlyList<MaterialProgramCatalog.ManifestEntry> entries)
         {
             builder.AppendLine("bool VividTryEvaluateAOTSurfaceProgram(");
             builder.AppendLine("    const uint programID,");
@@ -1111,12 +1172,12 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine("    output = (VividAOTSurfaceProgramOutput) 0;");
             builder.AppendLine("    switch (programID)");
             builder.AppendLine("    {");
-            for (int programIndex = 0; programIndex < programs.Count; programIndex++)
+            for (int entryIndex = 0; entryIndex < entries.Count; entryIndex++)
             {
-                CompiledMaterialProgram program = programs[programIndex];
-                MaterialSurfaceHlslArtifact artifact = program.SurfaceHlsl;
+                MaterialProgramCatalog.ManifestEntry entry = entries[entryIndex];
+                MaterialSurfaceHlslArtifact artifact = entry.Program.SurfaceHlsl;
                 builder.Append("        case ")
-                    .Append(((uint) program.ProgramID).ToString(CultureInfo.InvariantCulture))
+                    .Append(((uint) entry.ProgramID).ToString(CultureInfo.InvariantCulture))
                     .AppendLine("u:");
                 builder.Append("            output = ").Append(artifact.EntryPoint).AppendLine("(");
                 builder.Append("                ")

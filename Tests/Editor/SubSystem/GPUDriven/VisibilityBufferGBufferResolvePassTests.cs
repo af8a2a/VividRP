@@ -160,7 +160,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveShader_ConsumesGeneratedSurfaceProgramAndPreservesLegacyFallback()
+        public void ResolveShader_ConsumesGeneratedSurfaceProgramAndFailsKnownMissClosed()
         {
             UnityEditor.PackageManager.PackageInfo package =
                 UnityEditor.PackageManager.PackageInfo.FindForAssembly(
@@ -212,9 +212,9 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("VividEvaluateSlabSurfaceDetailGrad", source);
             StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
             StringAssert.Contains("VividTryLoadDualSlabSurfaceProgram", source);
-            StringAssert.Contains("VividEvaluateSlabSurfaceGrad", source);
+            StringAssert.DoesNotContain("VividEvaluateSlabSurfaceGrad", source);
             StringAssert.Contains("Both", source);
-            StringAssert.Contains("degrade to the same parameter blend", source);
+            StringAssert.Contains("degrade to the same blend", source);
             StringAssert.DoesNotContain(
                 "triangleData.dualSlabMaterialData.LayerOperator",
                 source);
@@ -255,13 +255,17 @@ namespace VividRP.Editor.Tests
                 "surfaceData.materialFeatures=triangleData.isUnlit!=0u"
                 + "?0u:VIVID_MATERIALFEATURE_DEFAULT;",
                 compactSource);
+            StringAssert.Contains("triangleData.materialProgramFailed", source);
             StringAssert.Contains(
-                "triangleData.isDualSlab!=0u"
-                + "?triangleData.dualSlabMaterialData.Emission.rgb"
+                "failedAOTSurface?float3(1.0f,0.0f,1.0f)"
+                + ":evaluatedAOTSurface?aotSurfaceOutput.Emission"
                 + ":triangleData.materialData.Emission.rgb",
                 compactSource);
             StringAssert.DoesNotContain(
                 "if(result.isDualSlab!=0u){result.materialData=PullMaterialData(",
+                compactSource);
+            StringAssert.DoesNotContain(
+                "VividEvaluateSlabSurfaceGrad(",
                 compactSource);
             StringAssert.DoesNotContain(
                 "surfaceData.materialFeatures=VIVID_MATERIALFEATURE_DEFAULT;",

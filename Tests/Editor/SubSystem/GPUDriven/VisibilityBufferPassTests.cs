@@ -261,6 +261,13 @@ namespace VividRP.Editor.Tests
                 "Public",
                 "GPUDriven",
                 "VividMaterialCoverage.hlsl");
+            string coverageAotPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividMaterialCoverageAOT.generated.hlsl");
             string visibilityBufferPath = Path.Combine(
                 package.resolvedPath,
                 "Shaders",
@@ -273,33 +280,58 @@ namespace VividRP.Editor.Tests
             string shadowSource = File.ReadAllText(
                 Path.Combine(gpuDrivenShaderPath, "VisibilityBufferShadowCasterPass.shader"));
             string coverageSource = File.ReadAllText(coveragePath);
+            Assert.That(File.Exists(coverageAotPath), Is.True, coverageAotPath);
+            string coverageAotSource = File.ReadAllText(coverageAotPath);
             string visibilityBufferSource = File.ReadAllText(visibilityBufferPath);
 
             StringAssert.Contains("programData.CoverageProgramID", coverageSource);
             StringAssert.Contains(
-                "VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA",
+                "VividMaterialCoverageAOT.generated.hlsl",
                 coverageSource);
-            StringAssert.Contains("VividGetBaseSlabMaterialData(materialData)", coverageSource);
-            StringAssert.Contains("runtimeHeader.ParameterAddress", coverageSource);
-            StringAssert.Contains("runtimeHeader.ResourceBindingAddress", coverageSource);
+            StringAssert.Contains("VividTryEvaluateAOTCoverageProgram", coverageSource);
             StringAssert.DoesNotContain("programData.SurfaceProgramID", coverageSource);
             StringAssert.DoesNotContain("programData.TransportProgramID", coverageSource);
+            StringAssert.DoesNotContain(
+                "VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA",
+                coverageSource);
+            StringAssert.DoesNotContain("VividGetBaseSlabMaterialData(materialData)", coverageSource);
             StringAssert.Contains("VividSampleBaseColorGrad", coverageSource);
             StringAssert.DoesNotContain("VividSampleBaseColor(", coverageSource);
             StringAssert.Contains("const float2 uvDdx = uv0Ddx * tiling;", coverageSource);
             StringAssert.Contains("const float2 uvDdy = uv0Ddy * tiling;", coverageSource);
-            StringAssert.Contains("VividTryEvaluateCoverageProgram", visibilitySource);
-            StringAssert.Contains("VividTryEvaluateCoverageProgram", shadowSource);
+            StringAssert.Contains("switch (runtimeHeader.ProgramID)", coverageAotSource);
+            StringAssert.Contains(
+                "VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA",
+                coverageAotSource);
+            StringAssert.Contains(
+                "VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA",
+                coverageAotSource);
+            StringAssert.Contains("runtimeHeader.ParameterAddress", coverageAotSource);
+            StringAssert.Contains("runtimeHeader.ResourceBindingAddress", coverageAotSource);
+            StringAssert.Contains("_MaterialDataCount", coverageAotSource);
+            StringAssert.Contains("_DualSlabMaterialDataCount", coverageAotSource);
+            StringAssert.Contains("_SurfaceBindingDataCount", coverageAotSource);
+            StringAssert.Contains("VividCreateSurfaceSampleContextGrad", coverageAotSource);
+            StringAssert.Contains("VividSampleBaseColorGrad", coverageAotSource);
+            StringAssert.DoesNotContain("PositionCS", coverageAotSource);
+            StringAssert.DoesNotContain("ddx(", coverageAotSource);
+            StringAssert.DoesNotContain("ddy(", coverageAotSource);
+            StringAssert.Contains("VividEvaluateCoverageProgram", visibilitySource);
+            StringAssert.Contains("VividEvaluateCoverageProgram", shadowSource);
+            StringAssert.Contains("VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE", visibilitySource);
+            StringAssert.Contains("VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE", shadowSource);
+            StringAssert.Contains("clip(-1.0f)", visibilitySource);
+            StringAssert.Contains("clip(-1.0f)", shadowSource);
             StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", visibilitySource);
             StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", shadowSource);
             int visibilityDdx = visibilitySource.IndexOf("ddx(input.uv0)");
             int visibilityDdy = visibilitySource.IndexOf("ddy(input.uv0)");
-            int visibilityProgram = visibilitySource.IndexOf("VividTryEvaluateCoverageProgram");
+            int visibilityProgram = visibilitySource.IndexOf("VividEvaluateCoverageProgram");
             int visibilityPack = visibilitySource.IndexOf(
                 "PackVividVisibilityBufferFragmentOutput");
             int shadowDdx = shadowSource.IndexOf("ddx(input.uv0)");
             int shadowDdy = shadowSource.IndexOf("ddy(input.uv0)");
-            int shadowProgram = shadowSource.IndexOf("VividTryEvaluateCoverageProgram");
+            int shadowProgram = shadowSource.IndexOf("VividEvaluateCoverageProgram");
             Assert.That(visibilityDdx, Is.GreaterThanOrEqualTo(0));
             Assert.That(visibilityProgram, Is.GreaterThan(visibilityDdx));
             Assert.That(visibilityDdy, Is.GreaterThanOrEqualTo(0));

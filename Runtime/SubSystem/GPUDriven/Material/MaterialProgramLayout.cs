@@ -872,4 +872,204 @@ namespace VividRP.Runtime.GPUDriven
             return declarations;
         }
     }
+
+    internal readonly struct MaterialProgramLayoutFingerprint :
+        IEquatable<MaterialProgramLayoutFingerprint>
+    {
+        internal MaterialProgramLayoutFingerprint(uint version, ulong value)
+        {
+            Version = version;
+            Value = value;
+        }
+
+        internal uint Version { get; }
+
+        internal ulong Value { get; }
+
+        public bool Equals(MaterialProgramLayoutFingerprint other)
+        {
+            return Version == other.Version && Value == other.Value;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is MaterialProgramLayoutFingerprint other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hashCode = (int) Version;
+                hashCode = (hashCode * 397) ^ (int) Value;
+                hashCode = (hashCode * 397) ^ (int) (Value >> 32);
+                return hashCode;
+            }
+        }
+
+        public override string ToString()
+        {
+            return $"layout_v={Version} 0x{Value:X16}";
+        }
+
+        public static bool operator ==(
+            MaterialProgramLayoutFingerprint left,
+            MaterialProgramLayoutFingerprint right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(
+            MaterialProgramLayoutFingerprint left,
+            MaterialProgramLayoutFingerprint right)
+        {
+            return !left.Equals(right);
+        }
+    }
+
+    internal static class MaterialProgramLayoutFingerprintBuilder
+    {
+        internal static MaterialProgramLayoutFingerprint Compute(
+            MaterialGenericLayout genericLayout,
+            MaterialNativeTemplateLayoutSchema schema)
+        {
+            if (genericLayout == null)
+                throw new ArgumentNullException(nameof(genericLayout));
+            if (schema == null)
+                throw new ArgumentNullException(nameof(schema));
+            if (!schema.LiveLayout.PayloadEquals(genericLayout))
+            {
+                throw new ArgumentException(
+                    "A layout fingerprint requires a generic layout that exactly matches the native schema.",
+                    nameof(genericLayout));
+            }
+
+            ulong hash = MaterialProgramHashUtility.OffsetBasis;
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                MaterialProgramContract.LayoutFingerprintVersion);
+            AddGenericLayout(ref hash, genericLayout);
+            AddParameterLayout(ref hash, schema.ParameterLayout);
+            AddResourceLayout(ref hash, schema.ResourceLayout);
+            AddNativeMappings(ref hash, schema);
+            return new MaterialProgramLayoutFingerprint(
+                MaterialProgramContract.LayoutFingerprintVersion,
+                hash);
+        }
+
+        private static void AddGenericLayout(
+            ref ulong hash,
+            MaterialGenericLayout layout)
+        {
+            MaterialProgramHashUtility.Add(ref hash, layout.Version);
+            MaterialProgramHashUtility.Add(ref hash, layout.ParameterStrideInWords);
+            MaterialProgramHashUtility.Add(ref hash, layout.ParameterBindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.ParameterBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialGenericParameterBinding binding =
+                    layout.ParameterBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(ref hash, binding.WordOffset);
+                MaterialProgramHashUtility.Add(ref hash, binding.WordCount);
+            }
+
+            MaterialProgramHashUtility.Add(ref hash, layout.ResourceBindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.ResourceBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialGenericResourceBinding binding =
+                    layout.ResourceBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(ref hash, binding.Slot);
+            }
+        }
+
+        private static void AddParameterLayout(
+            ref ulong hash,
+            CompiledParameterLayout layout)
+        {
+            MaterialProgramHashUtility.Add(ref hash, (uint) layout.LayoutID);
+            MaterialProgramHashUtility.Add(ref hash, layout.Stride);
+            MaterialProgramHashUtility.Add(ref hash, layout.Bindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.Bindings.Count;
+                 bindingIndex++)
+            {
+                MaterialParameterLayoutBinding binding = layout.Bindings[bindingIndex];
+                MaterialProgramHashUtility.Add(ref hash, (int) binding.Parameter);
+                MaterialProgramHashUtility.Add(ref hash, (int) binding.Type);
+                MaterialProgramHashUtility.Add(ref hash, binding.ByteOffset);
+            }
+        }
+
+        private static void AddResourceLayout(
+            ref ulong hash,
+            CompiledResourceLayout layout)
+        {
+            MaterialProgramHashUtility.Add(ref hash, (uint) layout.LayoutID);
+            MaterialProgramHashUtility.Add(ref hash, layout.RecordStride);
+            MaterialProgramHashUtility.Add(ref hash, layout.RecordCount);
+            MaterialProgramHashUtility.Add(ref hash, layout.Bindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.Bindings.Count;
+                 bindingIndex++)
+            {
+                MaterialResourceLayoutBinding binding = layout.Bindings[bindingIndex];
+                MaterialProgramHashUtility.Add(ref hash, (int) binding.Resource);
+                MaterialProgramHashUtility.Add(ref hash, binding.RecordOffset);
+                MaterialProgramHashUtility.Add(ref hash, binding.ByteOffset);
+            }
+        }
+
+        private static void AddNativeMappings(
+            ref ulong hash,
+            MaterialNativeTemplateLayoutSchema schema)
+        {
+            MaterialProgramHashUtility.Add(ref hash, schema.ParameterBindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < schema.ParameterBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialNativeParameterBinding binding =
+                    schema.ParameterBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(ref hash, (int) binding.Target);
+                MaterialProgramHashUtility.Add(ref hash, (int) binding.Conversion);
+            }
+
+            MaterialProgramHashUtility.Add(ref hash, schema.ResourceBindings.Count);
+            for (int bindingIndex = 0;
+                 bindingIndex < schema.ResourceBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialNativeResourceBinding binding =
+                    schema.ResourceBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(ref hash, (int) binding.Target);
+            }
+        }
+    }
 }

@@ -1395,13 +1395,14 @@ namespace VividRP.Runtime.GPUDriven
         {
             MaterialValueType leftType = GetStageLIROperandType(stageLIR, node, 0);
             MaterialValueType rightType = GetStageLIROperandType(stageLIR, node, 1);
-            if (!IsNumericType(leftType) || leftType != rightType)
+            if (leftType != MaterialValueType.Float
+                || rightType != MaterialValueType.Float)
             {
                 AddStageLIRNodeError(
                     diagnostics,
                     node,
                     nodeIndex,
-                    $"compare operands must have the same numeric type, got {leftType} and {rightType}.");
+                    $"compare operands must both be scalar Float, got {leftType} and {rightType}.");
             }
             RequireStageLIRResultType(
                 node,
@@ -2488,20 +2489,10 @@ namespace VividRP.Runtime.GPUDriven
         {
             MaterialValueType leftType = GetOperandType(values, node, 0);
             MaterialValueType rightType = GetOperandType(values, node, 1);
-            if (!IsNumericType(leftType))
-                AddOperandTypeError(diagnostics, nodeIndex, 0, "numeric", leftType);
-            if (!IsNumericType(rightType))
-                AddOperandTypeError(diagnostics, nodeIndex, 1, "numeric", rightType);
-            if (IsNumericType(leftType)
-                && IsNumericType(rightType)
-                && leftType != rightType)
-            {
-                AddNodeError(
-                    diagnostics,
-                    MaterialIRDiagnosticCodes.OperandTypeMismatch,
-                    nodeIndex,
-                    $"Compare operands must have matching types, got {leftType} and {rightType}.");
-            }
+            if (leftType != MaterialValueType.Float)
+                AddOperandTypeError(diagnostics, nodeIndex, 0, "Float", leftType);
+            if (rightType != MaterialValueType.Float)
+                AddOperandTypeError(diagnostics, nodeIndex, 1, "Float", rightType);
             RequireResultType(
                 node,
                 nodeIndex,

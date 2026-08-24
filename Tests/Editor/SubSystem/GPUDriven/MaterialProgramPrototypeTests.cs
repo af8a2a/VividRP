@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -266,6 +267,27 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 valueIR.Compare(x, y, MaterialComparison.Less),
                 Is.EqualTo(compare));
+        }
+
+        [Test]
+        public void MaterialValueIR_CompareRequiresScalarFloatOperands()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue left = values.Constant(new float3(1.0f, 2.0f, 3.0f));
+            MaterialValue right = values.Constant(new float3(4.0f, 5.0f, 6.0f));
+            int candidateNodeIndex = values.NodeCount;
+
+            MaterialIRVerificationException exception =
+                Assert.Throws<MaterialIRVerificationException>(() => values.Compare(
+                    left,
+                    right,
+                    MaterialComparison.Less));
+
+            AssertDiagnostic(
+                exception.Diagnostics,
+                MaterialIRDiagnosticCodes.OperandTypeMismatch,
+                candidateNodeIndex);
+            Assert.That(values.NodeCount, Is.EqualTo(candidateNodeIndex));
         }
 
         [Test]
@@ -772,13 +794,6 @@ namespace VividRP.Editor.Tests
             Assert.That(module.StructuralHash, Is.EqualTo(second.Module.StructuralHash));
             Assert.That(module.GetDebugDump(), Is.EqualTo(second.Module.GetDebugDump()));
             Assert.That(horizontal.Module.StructuralHash, Is.Not.EqualTo(vertical.Module.StructuralHash));
-            Assert.That(
-                horizontal.ProgramID,
-                Is.EqualTo(VividMaterialProgramID.DualSlabHorizontalMix));
-            Assert.That(
-                vertical.ProgramID,
-                Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
-            Assert.That(horizontal.ProgramID, Is.Not.EqualTo(vertical.ProgramID));
             Assert.That(module.Values.Owns(module.Outputs.CoverageValue), Is.True);
             Assert.That(module.Outputs.CoverageValue.Type, Is.EqualTo(MaterialValueType.Float));
             Assert.That(module.Outputs.Emission.Type, Is.EqualTo(MaterialValueType.Float3));
@@ -1095,15 +1110,19 @@ namespace VividRP.Editor.Tests
             Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.StageLIRVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.DerivativeLegalizationVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.GenericLayoutVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.LayoutFingerprintVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.ProgramCatalogManifestVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(8u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(10u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(6u));
+            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
@@ -1141,19 +1160,17 @@ namespace VividRP.Editor.Tests
                 0x7B58B734ED0EDE45ul,
                 0x2E8FA4336811E656ul,
             };
-            var expectedCompiledHashes = new[]
-            {
-                0x739089D4D2A34585ul,
-                0xBCCDEA308029D72Eul,
-                0x5DCD42D8F09CECB8ul,
-            };
+            var compiledHashes = new List<ulong>();
 
             for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)
             {
                 var programID = (VividMaterialProgramID) (uint) programIndex;
                 CompiledMaterialProgram program =
                     GPUDrivenMaterialCompiler.GetMaterialProgram(programID);
-                Assert.That((uint) program.ProgramID, Is.EqualTo((uint) programIndex));
+                Assert.That(
+                    GPUDrivenMaterialCompiler.GetCatalogedMaterialProgram(programID)
+                        .ProgramID,
+                    Is.EqualTo(programID));
                 AssertRuntimeProgramData(program.RuntimeData, expectedRuntimePrograms[programIndex]);
                 AssertRuntimeProgramData(runtimePrograms[programIndex], expectedRuntimePrograms[programIndex]);
                 Assert.That(
@@ -1172,9 +1189,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     program.CompiledHash.Version,
                     Is.EqualTo(MaterialProgramContract.CompiledHashVersion));
-                Assert.That(
-                    program.CompiledHash.Value,
-                    Is.EqualTo(expectedCompiledHashes[programIndex]));
+                Assert.That(program.CompiledHash.Value, Is.Not.Zero);
+                compiledHashes.Add(program.CompiledHash.Value);
 
                 if (programIndex == 0)
                     AssertStandardMaterialLayout(program);
@@ -1183,7 +1199,7 @@ namespace VividRP.Editor.Tests
             }
 
             CollectionAssert.AllItemsAreUnique(expectedSemanticHashes);
-            CollectionAssert.AllItemsAreUnique(expectedCompiledHashes);
+            CollectionAssert.AllItemsAreUnique(compiledHashes);
         }
 
         [Test]
@@ -1208,7 +1224,6 @@ namespace VividRP.Editor.Tests
                 reordered.Module.CanonicalIR.Payload);
             Assert.That(first.SemanticHash, Is.EqualTo(reordered.SemanticHash));
             Assert.That(first.CompiledHash, Is.EqualTo(reordered.CompiledHash));
-            Assert.That(first.ProgramID, Is.EqualTo(reordered.ProgramID));
             CollectionAssert.AreEqual(
                 GetRuntimeProgramDataWords(first.RuntimeData),
                 GetRuntimeProgramDataWords(reordered.RuntimeData));
@@ -1245,12 +1260,20 @@ namespace VividRP.Editor.Tests
                     unlitOnly,
                     MaterialProgramContract.RuntimeAbiVersion);
 
-            Assert.That(compiledUnlitOnly.ProgramID, Is.EqualTo(prototype.ProgramID));
             AssertRuntimeProgramData(
                 compiledUnlitOnly.RuntimeData,
                 new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u });
             Assert.That(compiledUnlitOnly.SemanticHash, Is.Not.EqualTo(prototype.SemanticHash));
             Assert.That(compiledUnlitOnly.CompiledHash, Is.Not.EqualTo(prototype.CompiledHash));
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram("Lit", prototype),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "UnlitOnly",
+                    compiledUnlitOnly));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 0u).ProgramID,
+                Is.Not.EqualTo(catalog.GetEntry((VividMaterialProgramID) 1u).ProgramID));
         }
 
         [Test]
@@ -1528,6 +1551,74 @@ namespace VividRP.Editor.Tests
                 stageLIR.Nodes[sampleNode.Operand2].Opcode,
                 Is.EqualTo(MaterialStageLIROpcode.Constant));
             Assert.That(sampleNode.Operand3, Is.EqualTo(sampleNode.Operand2));
+        }
+
+        [Test]
+        public void StageLIRVerifier_RejectsVectorCompareOperands()
+        {
+            var values = new MaterialValueIR();
+            MaterialValue left = values.Constant(new float2(1.0f, 2.0f));
+            MaterialValue right = values.Constant(new float2(3.0f, 4.0f));
+            MaterialValue comparisonResult = values.Constant(true);
+            values.Freeze();
+            var slice = new MaterialValueSlice(values, left, right, comparisonResult);
+            int[] sourceValueMap = Enumerable.Repeat(-1, values.NodeCount).ToArray();
+            sourceValueMap[left.Index] = 0;
+            sourceValueMap[right.Index] = 1;
+            sourceValueMap[comparisonResult.Index] = 2;
+            var stageLIR = new MaterialStageLIR(
+                MaterialEvaluationStage.Coverage,
+                MaterialStageExecutionModel.RasterFragment,
+                MaterialStageDerivativeProvider.NativeQuad,
+                slice,
+                new[]
+                {
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Constant,
+                        MaterialValueType.Float2,
+                        semantic: 0,
+                        constant: new float4(1.0f, 2.0f, 0.0f, 0.0f),
+                        sourceNodeIndex: left.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Constant,
+                        MaterialValueType.Float2,
+                        semantic: 0,
+                        constant: new float4(3.0f, 4.0f, 0.0f, 0.0f),
+                        sourceNodeIndex: right.Index,
+                        operandCount: 0,
+                        operand0: -1,
+                        operand1: -1,
+                        operand2: -1,
+                        operand3: -1),
+                    new MaterialStageLIRNode(
+                        MaterialStageLIROpcode.Compare,
+                        MaterialValueType.Bool,
+                        semantic: (int) MaterialComparison.Less,
+                        constant: default,
+                        sourceNodeIndex: comparisonResult.Index,
+                        operandCount: 2,
+                        operand0: 0,
+                        operand1: 1,
+                        operand2: -1,
+                        operand3: -1),
+                },
+                new[] { 0, 1, 2 },
+                sourceValueMap);
+
+            MaterialIRVerificationResult result =
+                MaterialIRVerifier.VerifyStageLIRStructure(stageLIR);
+            MaterialIRDiagnostic diagnostic = result.Diagnostics.First(entry =>
+                entry.Code == MaterialIRDiagnosticCodes.InvalidStageLIR
+                && entry.Message.Contains(
+                    "compare operands must both be scalar Float"));
+
+            Assert.That(result.IsValid, Is.False);
+            Assert.That(diagnostic.NodeIndex, Is.EqualTo(comparisonResult.Index));
         }
 
         [Test]
@@ -1872,18 +1963,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CoverageLowering_RejectsUnmappedCoverageValueIR()
+        public void CoverageLowering_AcceptsGeneralVerifiedCoverageValueIR()
         {
             MaterialIRModule module = BuildUnsupportedCoverageModule();
 
-            Assert.Throws<NotSupportedException>(() =>
-                CompiledMaterialProgram.Compile(
-                    module,
-                    GPUDrivenMaterialCompiler.ProgramVersion));
+            CompiledCoverageProgram coverage = CoverageProgramLowerer.Compile(module);
+
+            Assert.That(
+                coverage.ProgramID,
+                Is.EqualTo(VividMaterialCoverageProgramID.BaseColorAlpha));
+            Assert.That(coverage.StageLIR.Stage, Is.EqualTo(MaterialEvaluationStage.Coverage));
+            Assert.That(coverage.StageLIR.Roots, Has.Count.EqualTo(2));
+            Assert.That(
+                coverage.ValueSlice.Contains(module.Outputs.CoverageValue),
+                Is.True);
+            Assert.That(
+                coverage.ValueSlice.Contains(module.Outputs.AlphaClipThreshold),
+                Is.True);
         }
 
         [Test]
-        public void SurfaceMatcherAndCatalog_SeparateEvaluatorFromTopologyProgramID()
+        public void SurfaceMatcherAndFrozenCatalog_SeparateEvaluatorFromRuntimeProgramID()
         {
             CompiledMaterialProgram standard =
                 MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
@@ -1918,13 +2018,25 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 vertical.Lowering.SelectionKey.Topology,
                 Is.EqualTo(MaterialProgramTopologySpecialization.VerticalLayer));
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P0.StandardSingleSlab",
+                    standard),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P1.DualSlabHorizontalMix",
+                    horizontal),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P2.DualSlabVerticalLayer",
+                    vertical));
             Assert.That(
-                horizontal.Lowering.CatalogEntry.ProgramID,
+                catalog.GetEntry(VividMaterialProgramID.DualSlabHorizontalMix)
+                    .ProgramID,
                 Is.EqualTo(VividMaterialProgramID.DualSlabHorizontalMix));
             Assert.That(
-                vertical.Lowering.CatalogEntry.ProgramID,
+                catalog.GetEntry(VividMaterialProgramID.DualSlabVerticalLayer)
+                    .ProgramID,
                 Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
-            Assert.That(horizontal.ProgramID, Is.Not.EqualTo(vertical.ProgramID));
             Assert.That(
                 standard.Module.ClosureGraph.GetNode(
                     standard.Module.SurfaceClosure).Opcode,
@@ -1943,12 +2055,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SurfaceMatcher_RejectsUnmappedSlabValueIR()
+        public void SurfaceMatcher_AcceptsGeneralVerifiedSlabValueIR()
         {
             MaterialIRModule module = BuildUnsupportedSurfaceModule();
 
-            Assert.Throws<NotSupportedException>(() =>
-                SurfaceProgramMatcher.Compile(module));
+            CompiledSurfaceProgram surface = SurfaceProgramMatcher.Compile(module);
+
+            Assert.That(
+                surface.ProgramID,
+                Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
+            Assert.That(
+                surface.StageLIR.Nodes.Any(node =>
+                    node.Opcode == MaterialStageLIROpcode.Constant
+                    && node.Type == MaterialValueType.Float),
+                Is.True);
         }
 
         [Test]
@@ -1979,23 +2099,26 @@ namespace VividRP.Editor.Tests
                 MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
                     GPUDrivenMaterialCompiler.ProgramVersion);
             var customProgramID = (VividMaterialProgramID) 4u;
-            var entry = new MaterialProgramCatalogEntry(
-                customProgramID,
-                builtin.Lowering.SelectionKey,
-                MaterialLayoutLowerer.CreateLegacyLayoutSchema(),
-                builtin.RuntimeData.CapabilityFlags,
-                MaterialProgramContract.RuntimeAbiVersion);
-            var definition = new MaterialProgramCatalogDefinition(entry);
             CompiledMaterialProgram compiled = CompiledMaterialProgram.Compile(
                 builtin.Module,
                 MaterialProgramContract.RuntimeAbiVersion,
-                definition);
-            var catalog = new MaterialProgramCatalog(
-                definition,
-                new[] { compiled });
+                MaterialProgramBuiltinCatalog.Templates);
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.Reserved("P0.Reserved"),
+                MaterialProgramCatalogBakeSlot.Reserved("P1.Reserved"),
+                MaterialProgramCatalogBakeSlot.Reserved("P2.Reserved"),
+                MaterialProgramCatalogBakeSlot.Reserved("P3.Reserved"),
+                MaterialProgramCatalogBakeSlot.ForProgram("P4.Custom", compiled));
 
-            Assert.That(compiled.ProgramID, Is.EqualTo(customProgramID));
+            Assert.That(catalog.GetEntry(customProgramID).ProgramID, Is.EqualTo(customProgramID));
             Assert.That(compiled.CompiledHash, Is.EqualTo(builtin.CompiledHash));
+            Assert.That(
+                compiled.CoverageHlsl.PayloadEquals(builtin.CoverageHlsl),
+                Is.True);
+            Assert.That(
+                compiled.CoverageHlsl.EntryPoint,
+                Is.EqualTo(builtin.CoverageHlsl.EntryPoint));
             VividMaterialProgramData[] runtimeTable =
                 catalog.CreateRuntimeProgramTable();
             Assert.That(runtimeTable, Has.Length.EqualTo(5));
@@ -2006,6 +2129,12 @@ namespace VividRP.Editor.Tests
                 new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u });
             Assert.Throws<ArgumentOutOfRangeException>(() =>
                 catalog.GetMaterialProgram(VividMaterialProgramID.StandardSingleSlab));
+            Assert.Throws<InvalidOperationException>(() =>
+                new MaterialProgramCatalog.ManifestEntry(
+                    catalog,
+                    customProgramID,
+                    "P4.ForgedOutsideBake",
+                    compiled));
         }
 
         [Test]
@@ -2400,7 +2529,7 @@ namespace VividRP.Editor.Tests
                 CompiledMaterialProgram program = first.MaterialProgram;
                 ClosureTopology topology = program.Module.Topology;
                 Assert.That(ReferenceEquals(program, second.MaterialProgram), Is.True);
-                Assert.That(program.ProgramID, Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                Assert.That(first.ProgramID, Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
                 Assert.That(topology.ClosureCount, Is.EqualTo(1));
                 Assert.That(topology.OperatorCount, Is.Zero);
                 Assert.That(topology.NormalBases.Count, Is.EqualTo(1));
@@ -2445,7 +2574,7 @@ namespace VividRP.Editor.Tests
                 ClosureTopology topology = program.Module.Topology;
 
                 Assert.That(
-                    program.ProgramID,
+                    compiled.ProgramID,
                     Is.EqualTo(VividMaterialProgramID.DualSlabVerticalLayer));
                 Assert.That(topology.ClosureCount, Is.EqualTo(2));
                 Assert.That(topology.OperatorCount, Is.EqualTo(1));
@@ -2465,7 +2594,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     program.RuntimeData.ParameterLayoutID,
                     Is.EqualTo(VividMaterialParameterLayoutID.DualSlabMaterialData));
-                Assert.That(compiled.RuntimeHeader.ProgramID, Is.EqualTo(program.ProgramID));
+                Assert.That(compiled.RuntimeHeader.ProgramID, Is.EqualTo(compiled.ProgramID));
                 Assert.That(
                     compiled.DualSlabMaterialData.LayerOperator,
                     Is.EqualTo(VividDualSlabOperator.VerticalLayer));

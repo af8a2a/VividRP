@@ -1,6 +1,31 @@
 #ifndef VIVIDRP_GPU_DRIVEN_MATERIAL_SURFACE_INCLUDED
 #define VIVIDRP_GPU_DRIVEN_MATERIAL_SURFACE_INCLUDED
 
+#define VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK 0u
+#define VIVID_MATERIAL_PROGRAM_KNOWN 1u
+#define VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE 2u
+
+uint VividGetMaterialProgramStatus(
+    const uint materialIndex,
+    out VividMaterialRuntimeHeader runtimeHeader,
+    out VividMaterialProgramData programData)
+{
+    runtimeHeader = (VividMaterialRuntimeHeader) 0;
+    runtimeHeader.ProgramID = VIVIDMATERIALPROGRAMID_INVALID;
+    programData = (VividMaterialProgramData) 0;
+    if (materialIndex >= _MaterialRuntimeHeaderCount)
+        return VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE;
+
+    runtimeHeader = PullMaterialRuntimeHeader(materialIndex);
+    if (runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID)
+        return VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK;
+    if (runtimeHeader.ProgramID >= _MaterialProgramCount)
+        return VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE;
+
+    programData = PullMaterialProgramData(runtimeHeader.ProgramID);
+    return VIVID_MATERIAL_PROGRAM_KNOWN;
+}
+
 bool VividIsStandardSingleSlabSurfaceProgramCompatible(
     const VividMaterialProgramData programData,
     const uint requiredCapabilities)
@@ -181,21 +206,6 @@ float3 VividUnpackSlabNormalScale(const float4 packedNormal, const float scale)
     normalTS.xy *= scale;
     normalTS.z = sqrt(saturate(1.0f - dot(normalTS.xy, normalTS.xy)));
     return normalTS;
-}
-
-VividSlabMaterialData VividCreateSlabMaterialData(
-    const VividMaterialData materialData)
-{
-    VividSlabMaterialData slabData;
-    slabData.AlbedoColor = materialData.AlbedoColor;
-    slabData.TextureTilingOffset = materialData.TextureTilingOffset;
-    slabData.MetallicSmoothnessRemap = materialData.MetallicSmoothnessRemap;
-    slabData.AmbientOcclusionRemap = materialData.AmbientOcclusionRemap;
-    slabData.NormalsStrength = materialData.NormalsStrength;
-    slabData.Roughness = materialData.Roughness;
-    slabData.Metallic = materialData.Metallic;
-    slabData.MaskMode = materialData.Padding0;
-    return slabData;
 }
 
 VividEvaluatedSlabSurface VividEvaluateAOTSlabSurfaceDetail(

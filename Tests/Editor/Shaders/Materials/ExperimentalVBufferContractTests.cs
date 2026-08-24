@@ -38,7 +38,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ClosureResolve_ConsumesMaterialProgramWithoutExperimentalRegistry()
+        public void ClosureResolve_ConsumesGeneratedSurfaceProgramAndFailsKnownMissClosed()
         {
             string source = File.ReadAllText(ResolveAssetPath);
             string surfaceProgramSource = File.ReadAllText(SurfaceProgramAssetPath);
@@ -47,8 +47,25 @@ namespace VividRP.Editor.Tests
 
             StringAssert.Contains("UnpackVisibilityBufferValue", source);
             StringAssert.Contains("PullInstanceData(visibility.InstanceID)", source);
+            StringAssert.Contains("VividGetMaterialProgramStatus", source);
+            StringAssert.Contains("VIVID_MATERIAL_PROGRAM_KNOWN", source);
+            StringAssert.Contains("VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE", source);
+            StringAssert.Contains("VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK", source);
             StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
             StringAssert.Contains("VividTryLoadDualSlabSurfaceProgram", source);
+            StringAssert.Contains("VividMaterialSurfaceAOT.generated.hlsl", surfaceProgramSource);
+            StringAssert.Contains("VividTryEvaluateAOTSurfaceProgram", source);
+            StringAssert.Contains("VividAOTSurfaceContext", source);
+            StringAssert.Contains("aotSurfaceOutput.BaseSlab", source);
+            StringAssert.Contains("aotSurfaceOutput.TopSlab", source);
+            StringAssert.Contains("aotSurfaceOutput.Emission", source);
+            StringAssert.Contains("aotSurfaceOutput.ClosureCount", source);
+            StringAssert.Contains("aotSurfaceOutput.LayerOperator", source);
+            StringAssert.Contains("aotSurfaceOutput.LayerWeight", source);
+            StringAssert.Contains("evaluatedAOTSingleSurface", source);
+            StringAssert.Contains("evaluatedAOTDualSurface", source);
+            StringAssert.Contains("failedAOTSurface", source);
+            StringAssert.Contains("float3(1.0f, 0.0f, 1.0f)", source);
             StringAssert.Contains("VividMaterialData materialData", source);
             StringAssert.Contains("VividSurfaceBindingData surfaceBindingData", source);
             StringAssert.Contains("VividEvaluateSlabSurfaceGrad", source);
@@ -63,11 +80,20 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VividCompileExperimentalStandardSurface", source);
             StringAssert.Contains("VividCompileExperimentalLayeredSurface", source);
             StringAssert.Contains("topSurfaceBindingData", source);
-            StringAssert.Contains("dualSlabMaterialData.LayerOperator", source);
-            StringAssert.Contains("dualSlabMaterialData.LayerWeight", source);
-            StringAssert.Contains("dualSlabMaterialData.Emission.rgb", source);
+            StringAssert.DoesNotContain("dualSlabMaterialData.LayerOperator", source);
+            StringAssert.DoesNotContain("dualSlabMaterialData.LayerWeight", source);
+            StringAssert.DoesNotContain("dualSlabMaterialData.Emission.rgb", source);
             StringAssert.DoesNotContain(
-                "if(isDualSlab){materialData=PullMaterialData(",
+                "if(!loadedMaterialProgram){materialData=PullMaterialData(",
+                compactSource);
+            StringAssert.Contains(
+                "elseif(usesLegacyMaterial){"
+                + "if(instanceData.MaterialIndex>=_MaterialDataCount)discard;"
+                + "materialData=PullMaterialData(instanceData.MaterialIndex);",
+                compactSource);
+            StringAssert.Contains(
+                "materialProgramID!=VIVIDMATERIALPROGRAMID_INVALID"
+                + "&&!evaluatedAOTSurface",
                 compactSource);
             StringAssert.Contains("VividPackExperimentalClosureBuffer", source);
             StringAssert.DoesNotContain("VividExperimentalVBufferMaterialData", source);

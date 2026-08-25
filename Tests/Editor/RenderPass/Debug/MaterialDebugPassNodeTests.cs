@@ -42,6 +42,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetInputPortByName("m_GBuffer2"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer3"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer4"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_VisibilityBuffer"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_MaterialTileFeatureFlags"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_OutputTexture"), Is.Not.Null);
                 Assert.That(node.TryGetVisualizationMode(out var visualizationMode), Is.True);

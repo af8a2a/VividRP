@@ -162,6 +162,46 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CompileStandardSingleSlab_FromMaterialData_UsesCatalogProgramAndRuntimeFlags()
+        {
+            var materialData = new VividMaterialData
+            {
+                AlbedoColor = new float4(0.8f, 0.6f, 0.4f, 0.75f),
+                SurfaceBindingIndex = 11u,
+                RendererListID =
+                    VividRendererListID.CullOff | VividRendererListID.AlphaTest,
+                AlphaClipThreshold = 0.42f,
+            };
+
+            GPUDrivenCompiledMaterialInstance compiled =
+                GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                    in materialData,
+                    parameterAddress: 7u,
+                    surfaceBindingIndex: 11u);
+
+            Assert.That(
+                compiled.CatalogProgram,
+                Is.SameAs(GPUDrivenMaterialCompiler.GetCatalogedMaterialProgram(
+                    VividMaterialProgramID.StandardSingleSlab)));
+            Assert.That(
+                compiled.ProgramID,
+                Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+            Assert.That(compiled.RuntimeHeader.ParameterAddress, Is.EqualTo(7u));
+            Assert.That(
+                compiled.RuntimeHeader.ResourceBindingAddress,
+                Is.EqualTo(11u));
+            Assert.That(
+                compiled.RuntimeHeader.Flags,
+                Is.EqualTo(VividMaterialRuntimeFlags.AlphaClip));
+            Assert.That(
+                compiled.LegacyMaterialData.AlbedoColor,
+                Is.EqualTo(materialData.AlbedoColor));
+            Assert.That(
+                compiled.LegacyMaterialData.SurfaceBindingIndex,
+                Is.EqualTo(11u));
+        }
+
+        [Test]
         public void CompileStandardSingleSlab_DeduplicatesTopologyAcrossInstances()
         {
             var first = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();

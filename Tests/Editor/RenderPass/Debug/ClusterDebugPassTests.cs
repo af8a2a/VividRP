@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using System.Linq;
 using NUnit.Framework;
@@ -76,13 +77,46 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_SizesMaterialVariantBuffersForFourDeferredClasses()
+        {
+            var pass = new ClusterDebugPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 80;
+            cameraData.actualHeight = 40;
+
+            pass.Prepare(frameData);
+
+            var tileList = GetFieldValue<RenderGraphBuffer>(pass, "m_LocalMaterialFeatureTileList");
+            var indirectArgs = GetFieldValue<RenderGraphBuffer>(pass, "m_LocalMaterialFeatureIndirectArgs");
+            Assert.That(tileList.desc.Count, Is.EqualTo(10 * 5 * 4));
+            Assert.That(indirectArgs.desc.Count, Is.EqualTo(4 * 4));
+        }
+
+        [Test]
+        public void MaterialVariantOverlay_ConsumesFourCompactDeferredClasses()
+        {
+            const string path =
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Debug/ClusterDebug.shader";
+            string source = File.ReadAllText(path);
+
+            StringAssert.Contains("#define VIVID_DEFERRED_CLASS_VARIANT_COUNT 4u", source);
+            StringAssert.Contains("SurfaceSummaryGBuffer.hlsl", source);
+            StringAssert.Contains("VIVID_DEFERRED_CLASS_BIT_FAST_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_CLASS_BIT_CATCH_ALL", source);
+            StringAssert.DoesNotContain("VIVID_MATERIALFEATURE", source);
+        }
+
+        [Test]
         public void ResolveSettings_UsesRenderingDebuggerValues()
         {
             var data = new VividRenderingDebugSettingsData
             {
                 tileClusterDebug = TileClusterDebug.Cluster,
                 tileClusterDebugByCategory = TileClusterCategoryDebug.Punctual | TileClusterCategoryDebug.Area | TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal,
-                materialFeatureVariantDebug = MaterialFeatureVariantDebug.ClearCoat,
+                materialFeatureVariantDebug = MaterialFeatureVariantDebug.DualSlab,
                 clusterDebugMode = ClusterDebugMode.VisualizeSlice,
                 clusterDebugDistance = 6f,
             };
@@ -91,7 +125,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.Cluster));
             Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Punctual | TileClusterCategoryDebug.Area | TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal));
-            Assert.That(settings.materialFeatureVariantDebug, Is.EqualTo(MaterialFeatureVariantDebug.ClearCoat));
+            Assert.That(settings.materialFeatureVariantDebug, Is.EqualTo(MaterialFeatureVariantDebug.DualSlab));
             Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeSlice));
             Assert.That(settings.clusterDebugDistance, Is.EqualTo(6f));
         }
@@ -119,7 +153,7 @@ namespace VividRP.Editor.Tests
                 data.Reset();
                 data.tileClusterDebug = TileClusterDebug.Cluster;
                 data.tileClusterDebugByCategory = TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal;
-                data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.SSRReceive;
+                data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.CatchAll;
                 data.clusterDebugMode = ClusterDebugMode.VisualizeSlice;
                 data.clusterDebugDistance = 4f;
 
@@ -133,7 +167,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.Cluster));
                 Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal));
-                Assert.That(settings.materialFeatureVariantDebug, Is.EqualTo(MaterialFeatureVariantDebug.SSRReceive));
+                Assert.That(settings.materialFeatureVariantDebug, Is.EqualTo(MaterialFeatureVariantDebug.CatchAll));
                 Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeSlice));
                 Assert.That(settings.clusterDebugDistance, Is.EqualTo(4f));
             }

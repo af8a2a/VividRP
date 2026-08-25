@@ -144,6 +144,34 @@ namespace VividRP.Runtime.GPUDriven
                 CreateLegacyMaterialData(materialProxy, surfaceBindingIndex));
         }
 
+        internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
+            in VividMaterialData materialData,
+            uint parameterAddress,
+            uint surfaceBindingIndex)
+        {
+            if (materialData.SurfaceBindingIndex != surfaceBindingIndex)
+            {
+                throw new ArgumentException(
+                    "The StandardLit material data surface binding must match the runtime header binding.",
+                    nameof(surfaceBindingIndex));
+            }
+
+            MaterialProgramCatalog.ManifestEntry materialProgram =
+                GetCatalogedMaterialProgram(
+                    VividMaterialProgramID.StandardSingleSlab);
+            var runtimeHeader = new VividMaterialRuntimeHeader
+            {
+                ProgramID = materialProgram.ProgramID,
+                ParameterAddress = parameterAddress,
+                ResourceBindingAddress = surfaceBindingIndex,
+                Flags = GetRuntimeFlags(materialData),
+            };
+            return new GPUDrivenCompiledMaterialInstance(
+                materialProgram,
+                runtimeHeader,
+                materialData);
+        }
+
         internal static GPUDrivenCompiledMaterialInstance CompileDualSlab(
             GPUDrivenMaterialProxy materialProxy,
             uint parameterAddress,
@@ -297,6 +325,20 @@ namespace VividRP.Runtime.GPUDriven
             if (materialProxy.AlphaClip)
                 runtimeFlags |= VividMaterialRuntimeFlags.AlphaClip;
             if (materialProxy.DisableLighting)
+                runtimeFlags |= VividMaterialRuntimeFlags.Unlit;
+            return runtimeFlags;
+        }
+
+        private static VividMaterialRuntimeFlags GetRuntimeFlags(
+            in VividMaterialData materialData)
+        {
+            VividMaterialRuntimeFlags runtimeFlags = VividMaterialRuntimeFlags.None;
+            if (materialData.AlphaClipThreshold > 0.0f
+                || (materialData.RendererListID & VividRendererListID.AlphaTest) != 0)
+            {
+                runtimeFlags |= VividMaterialRuntimeFlags.AlphaClip;
+            }
+            if ((materialData.MaterialFlags & VividMaterialFlags.Unlit) != 0)
                 runtimeFlags |= VividMaterialRuntimeFlags.Unlit;
             return runtimeFlags;
         }

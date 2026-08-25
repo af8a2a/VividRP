@@ -9,7 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal const string ClusterDebugShaderName = "Hidden/VividRP/ClusterDebug";
         private const int MaterialFeatureTileSize = 8;
-        private const int MaterialFeatureVariantCount = 7;
+        private const int DeferredClassVariantCount = 4;
         private const int IndirectArgsElementCount = 4;
         private const int ClusterDebugPassIndex = 0;
         private const int MaterialFeatureVariantsOverlayPassIndex = 1;
@@ -508,10 +508,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalMaterialTileFeatureFlags.desc.Count = m_MaterialTileCount;
             m_LocalMaterialTileFeatureFlags.desc.Stride = sizeof(uint);
             m_LocalMaterialTileFeatureFlags.desc.Target = GraphicsBuffer.Target.Structured;
-            m_LocalMaterialFeatureTileList.desc.Count = m_MaterialTileCount * MaterialFeatureVariantCount;
+            m_LocalMaterialFeatureTileList.desc.Count = m_MaterialTileCount * DeferredClassVariantCount;
             m_LocalMaterialFeatureTileList.desc.Stride = sizeof(uint);
             m_LocalMaterialFeatureTileList.desc.Target = GraphicsBuffer.Target.Structured;
-            m_LocalMaterialFeatureIndirectArgs.desc.Count = MaterialFeatureVariantCount * IndirectArgsElementCount;
+            m_LocalMaterialFeatureIndirectArgs.desc.Count = DeferredClassVariantCount * IndirectArgsElementCount;
             m_LocalMaterialFeatureIndirectArgs.desc.Stride = sizeof(uint);
             m_LocalMaterialFeatureIndirectArgs.desc.Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
         }
@@ -651,8 +651,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !ReferenceEquals(m_MaterialFeatureIndirectArgs, m_LocalMaterialFeatureIndirectArgs)
                 && m_MaterialFeatureTileList?.desc != null
                 && m_MaterialFeatureIndirectArgs?.desc != null
-                && m_MaterialFeatureTileList.desc.Count >= m_MaterialTileCount * MaterialFeatureVariantCount
-                && m_MaterialFeatureIndirectArgs.desc.Count >= MaterialFeatureVariantCount * IndirectArgsElementCount;
+                && m_MaterialFeatureTileList.desc.Count >= m_MaterialTileCount * DeferredClassVariantCount
+                && m_MaterialFeatureIndirectArgs.desc.Count >= DeferredClassVariantCount * IndirectArgsElementCount;
         }
 
         private static bool HasClusteredLightingData(VividClusteredLightingData clusteredLightingData)
@@ -719,7 +719,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = new RenderGraphBufferDesc
                 {
-                    Count = MaterialFeatureVariantCount * IndirectArgsElementCount,
+                    Count = DeferredClassVariantCount * IndirectArgsElementCount,
                     Stride = sizeof(uint),
                     Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
                     Name = name

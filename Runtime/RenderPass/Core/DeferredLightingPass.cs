@@ -9,7 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private const int ClearThreadGroupSizeX = 8;
         private const int ClearThreadGroupSizeY = 8;
-        private const int MaterialFeatureVariantCount = 7;
+        private const int DeferredVariantCount = 4;
         private const int IndirectArgsElementCount = 4;
         private const string ClearDeferredLitKernelName = "ClearDeferredLit";
         private static readonly string[] DeferredLitVariantKernelNames =
@@ -17,17 +17,14 @@ namespace VividRP.Runtime.RenderPass.Core
             "DeferredLit_Variant0",
             "DeferredLit_Variant1",
             "DeferredLit_Variant2",
-            "DeferredLit_Variant3",
-            "DeferredLit_Variant4",
-            "DeferredLit_Variant5",
-            "DeferredLit_Variant6"
+            "DeferredLit_Variant3"
         };
 
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
         private static readonly int GBuffer3Id = Shader.PropertyToID("_GBuffer3");
-        private static readonly int GBuffer4Id = Shader.PropertyToID("_GBuffer4");
+        private static readonly int DiffuseIrradianceId = Shader.PropertyToID("_DiffuseIrradiance");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int GTAOTextureId = Shader.PropertyToID("_GTAOTexture");
@@ -84,7 +81,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "GBuffer3", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer3;
 
-        [RenderGraphResource(Name = "GBuffer4", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "DiffuseIrradiance", Access = AccessFlags.Read)]
+        // Keep the legacy field name as the serialized RenderGraph port key.
         private RenderGraphTexture m_GBuffer4;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
@@ -168,7 +166,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_DeferredLitCompute;
         private int m_ClearDeferredLitKernel = -1;
-        private readonly int[] m_DeferredLitVariantKernels = { -1, -1, -1, -1, -1, -1, -1 };
+        private readonly int[] m_DeferredLitVariantKernels = { -1, -1, -1, -1 };
         private int m_LightingWidth = 1;
         private int m_LightingHeight = 1;
         private int m_ClearDispatchGroupCountX = 1;
@@ -195,7 +193,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_SupportsClusteredReflectionProbes;
         private bool m_IsLogBaseBufferEnabled;
         private bool m_IsPassResourceLayoutDirty;
-        private readonly RenderGraphTexture m_LocalGBuffer4;
+        private readonly RenderGraphTexture m_LocalDiffuseIrradiance;
         private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
         private readonly RenderGraphTexture m_LocalGTAOTexture;
         private readonly RenderGraphTexture m_LocalScreenSpaceReflectionTexture;
@@ -223,12 +221,16 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(profilerName);
 
-            m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
+            m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateInput("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
-            m_LocalGBuffer4 = RenderGraphTexture.CreateColorTarget("GBuffer4", GraphicsFormat.R16G16B16A16_SFloat);
-            m_GBuffer4 = m_LocalGBuffer4;
+            m_LocalDiffuseIrradiance = RenderGraphTexture.CreateColorTarget(
+                "DiffuseIrradiance",
+                GraphicsFormat.B10G11R11_UFloatPack32);
+            m_LocalDiffuseIrradiance.desc.ClearBuffer = true;
+            m_LocalDiffuseIrradiance.desc.ClearColor = Color.clear;
+            m_GBuffer4 = m_LocalDiffuseIrradiance;
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_LocalDirectionalShadowTexture = RenderGraphTexture.CreateColorTarget("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
             m_LocalDirectionalShadowTexture.desc.ClearBuffer = true;
@@ -294,7 +296,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_ClearDeferredLitKernel = m_DeferredLitCompute.FindKernel(ClearDeferredLitKernelName);
-            for (var i = 0; i < MaterialFeatureVariantCount; i++)
+            for (var i = 0; i < DeferredVariantCount; i++)
                 m_DeferredLitVariantKernels[i] = m_DeferredLitCompute.FindKernel(DeferredLitVariantKernelNames[i]);
         }
         
@@ -359,7 +361,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 BindSkyTextureParameters(cmd, m_ClearDeferredLitKernel);
                 cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
 
-                for (var variant = 0; variant < MaterialFeatureVariantCount; variant++)
+                for (var variant = 0; variant < DeferredVariantCount; variant++)
                 {
                     var kernel = m_DeferredLitVariantKernels[variant];
                     BindSharedParameters(context, cmd, kernel);
@@ -436,19 +438,23 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer2Id, m_GBuffer2.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer3Id, m_GBuffer3.innerHandle);
             var rgDefaultResource = context.renderGraphContext.defaultResources;
-            if (ReferenceEquals(m_GBuffer4, m_LocalGBuffer4)
+            if (ReferenceEquals(m_GBuffer4, m_LocalDiffuseIrradiance)
                 || m_GBuffer4 == null
                 || !m_GBuffer4.innerHandle.IsValid())
             {
                 cmd.SetComputeTextureParam(
                     m_DeferredLitCompute,
                     kernel,
-                    GBuffer4Id,
+                    DiffuseIrradianceId,
                     rgDefaultResource.blackTexture);
             }
             else
             {
-                cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer4Id, m_GBuffer4.innerHandle);
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    DiffuseIrradianceId,
+                    m_GBuffer4.innerHandle);
             }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
             if (ReferenceEquals(m_DirectionalShadowTexture, m_LocalDirectionalShadowTexture)
@@ -584,7 +590,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool HasValidDeferredLitVariantKernels()
         {
-            for (var i = 0; i < MaterialFeatureVariantCount; i++)
+            for (var i = 0; i < DeferredVariantCount; i++)
             {
                 if (m_DeferredLitVariantKernels[i] < 0)
                     return false;
@@ -595,7 +601,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void ResetDeferredLitVariantKernels()
         {
-            for (var i = 0; i < MaterialFeatureVariantCount; i++)
+            for (var i = 0; i < DeferredVariantCount; i++)
                 m_DeferredLitVariantKernels[i] = -1;
         }
 
@@ -822,7 +828,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = new RenderGraphBufferDesc
                 {
-                    Count = MaterialFeatureVariantCount * IndirectArgsElementCount,
+                    Count = DeferredVariantCount * IndirectArgsElementCount,
                     Stride = sizeof(uint),
                     Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
                     Name = name

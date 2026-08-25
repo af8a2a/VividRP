@@ -32,7 +32,7 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.PanelIndex("Rendering"), Is.GreaterThanOrEqualTo(0));
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster"), Is.Not.Null);
-            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster -> Material Feature"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster -> Deferred Class"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Opacity"), Is.Not.Null);
@@ -183,6 +183,17 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode,
                 Is.EqualTo(VirtualTextureStatsViewMode.Auto));
+        }
+
+        [Test]
+        public void MaterialFeatureVariantDebug_UsesFourCompactDeferredClassBits()
+        {
+            Assert.That((int)MaterialFeatureVariantDebug.All, Is.EqualTo(0));
+            Assert.That((int)MaterialFeatureVariantDebug.FastSlab, Is.EqualTo(1 << 0));
+            Assert.That((int)MaterialFeatureVariantDebug.GeneralSlab, Is.EqualTo(1 << 1));
+            Assert.That((int)MaterialFeatureVariantDebug.DualSlab, Is.EqualTo(1 << 2));
+            Assert.That((int)MaterialFeatureVariantDebug.CatchAll, Is.EqualTo(1 << 3));
+            Assert.That(Enum.GetValues(typeof(MaterialFeatureVariantDebug)).Length, Is.EqualTo(5));
         }
 
         [Test]
@@ -405,7 +416,7 @@ namespace VividRP.Editor.Tests
         public void Reset_RestoresClusterDebugDefaults()
         {
             VividRenderingDebugDisplaySettings.Data.tileClusterDebug = TileClusterDebug.MaterialFeatureVariants;
-            VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.Fabric;
+            VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.GeneralSlab;
             VividRenderingDebugDisplaySettings.Data.clusterDebugMode = ClusterDebugMode.VisualizeSlice;
             VividRenderingDebugDisplaySettings.Data.clusterDebugDistance = 8f;
 
@@ -439,24 +450,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ClusterMaterialFeatureWidget_MapsDropdownIndexToEnumValue()
+        public void ClusterDeferredClassWidget_MapsDropdownIndexToEnumValue()
         {
-            var widget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster -> Material Feature")
+            var widget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster -> Deferred Class")
                 as DebugUI.EnumField;
 
             Assert.That(widget, Is.Not.Null);
-            var fabricIndex = Array.IndexOf(
+            var generalSlabIndex = Array.IndexOf(
                 widget.enumValues,
-                (int)MaterialFeatureVariantDebug.Fabric);
-            Assert.That(fabricIndex, Is.GreaterThanOrEqualTo(0));
+                (int)MaterialFeatureVariantDebug.GeneralSlab);
+            Assert.That(generalSlabIndex, Is.GreaterThanOrEqualTo(0));
 
-            widget.setIndex(fabricIndex);
+            widget.setIndex(generalSlabIndex);
 
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug,
-                Is.EqualTo(MaterialFeatureVariantDebug.Fabric));
-            Assert.That(widget.getIndex(), Is.EqualTo(fabricIndex));
-            Assert.That(widget.getter(), Is.EqualTo((int)MaterialFeatureVariantDebug.Fabric));
+                Is.EqualTo(MaterialFeatureVariantDebug.GeneralSlab));
+            Assert.That(widget.getIndex(), Is.EqualTo(generalSlabIndex));
+            Assert.That(widget.getter(), Is.EqualTo((int)MaterialFeatureVariantDebug.GeneralSlab));
         }
 
         [Test]
@@ -754,11 +765,11 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AreAnySettingsActive_TracksClusterMaterialFeatureOverrides()
+        public void AreAnySettingsActive_TracksClusterDeferredClassOverrides()
         {
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
 
-            VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.DecalReceive;
+            VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.CatchAll;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

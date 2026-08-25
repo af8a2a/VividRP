@@ -24,6 +24,7 @@ namespace VividRP.Editor.Tests
             var node = new AutoRegisteredClassificationPassNode();
 
             Assert.That(node.GetInputPortByName("m_GBuffer0"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_GBuffer1"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_MaterialTileFeatureFlags"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_MaterialFeatureTileList"), Is.Not.Null);

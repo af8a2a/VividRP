@@ -8,6 +8,7 @@ namespace VividRP.Runtime
         None,
         Tile,
         Cluster,
+        [InspectorName("Deferred Export Classes")]
         MaterialFeatureVariants
     }
 
@@ -20,14 +21,14 @@ namespace VividRP.Runtime
     public enum MaterialFeatureVariantDebug
     {
         All = 0,
-        Lit = 1 << 0,
-        Fabric = 1 << 1,
-        [InspectorName("Clear Coat")]
-        ClearCoat = 1 << 2,
-        [InspectorName("SSR Receive")]
-        SSRReceive = 1 << 3,
-        [InspectorName("Decal Receive")]
-        DecalReceive = 1 << 4,
+        [InspectorName("Fast Slab")]
+        FastSlab = 1 << 0,
+        [InspectorName("General Slab")]
+        GeneralSlab = 1 << 1,
+        [InspectorName("Dual Slab")]
+        DualSlab = 1 << 2,
+        [InspectorName("Catch All")]
+        CatchAll = 1 << 3,
     }
 
     [Flags]

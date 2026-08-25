@@ -1,3 +1,4 @@
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -20,7 +21,13 @@ namespace VividRP.Editor.Tests
             var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
             var bufferEntries = resources.Buffers.OrderBy(entry => entry.Name).ToArray();
 
-            Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "Depth", "GBuffer0" }));
+            Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "Depth", "GBuffer0", "GBuffer1" }));
+            Assert.That(
+                textureEntries.Single(entry => entry.Name == "GBuffer0").Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+            Assert.That(
+                textureEntries.Single(entry => entry.Name == "GBuffer1").Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
             Assert.That(bufferEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
                 "MaterialFeatureIndirectArgs",
@@ -43,18 +50,19 @@ namespace VividRP.Editor.Tests
                 pass.Prepare(frameData);
 
                 AssertTextureSize(pass, "m_GBuffer0", 320, 180);
+                AssertTextureSize(pass, "m_GBuffer1", 320, 180);
                 AssertTextureSize(pass, "m_DepthTexture", 320, 180);
 
                 var expectedTileCountX = (320 + 7) / 8;
                 var expectedTileCountY = (180 + 7) / 8;
                 var expectedTileCount = expectedTileCountX * expectedTileCountY;
                 AssertStructuredBuffer(pass, "m_MaterialTileFeatureFlags", expectedTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-                AssertStructuredBuffer(pass, "m_MaterialFeatureTileList", expectedTileCount * 7, sizeof(uint), GraphicsBuffer.Target.Structured);
-                AssertStructuredBuffer(pass, "m_MaterialFeatureIndirectArgs", 28, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
+                AssertStructuredBuffer(pass, "m_MaterialFeatureTileList", expectedTileCount * 4, sizeof(uint), GraphicsBuffer.Target.Structured);
+                AssertStructuredBuffer(pass, "m_MaterialFeatureIndirectArgs", 16, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
 
                 AssertImportedBuffer(pass, "m_MaterialTileFeatureFlags", expectedTileCount, sizeof(uint));
-                AssertImportedBuffer(pass, "m_MaterialFeatureTileList", expectedTileCount * 7, sizeof(uint));
-                AssertImportedBuffer(pass, "m_MaterialFeatureIndirectArgs", 28, sizeof(uint));
+                AssertImportedBuffer(pass, "m_MaterialFeatureTileList", expectedTileCount * 4, sizeof(uint));
+                AssertImportedBuffer(pass, "m_MaterialFeatureIndirectArgs", 16, sizeof(uint));
             }
             finally
             {
@@ -81,27 +89,96 @@ namespace VividRP.Editor.Tests
         public void SelectMaterialClassificationKernels_UsesWaveKernels_WhenComputeSubGroupSizeMatches()
         {
             var pass = new MaterialClassificationPass();
-            SetFieldValue(pass, "m_ClassifyMaterialFeaturesKernel", 10);
-            SetFieldValue(pass, "m_BuildMaterialFeatureIndirectArgsKernel", 20);
-            SetFieldValue(pass, "m_ClassifyMaterialFeaturesWave32Kernel", 32);
-            SetFieldValue(pass, "m_BuildMaterialFeatureIndirectArgsWave32Kernel", 33);
-            SetFieldValue(pass, "m_ClassifyMaterialFeaturesWave64Kernel", 64);
-            SetFieldValue(pass, "m_BuildMaterialFeatureIndirectArgsWave64Kernel", 65);
+            SetFieldValue(pass, "m_ClassifyDeferredExportsKernel", 10);
+            SetFieldValue(pass, "m_BuildDeferredVariantIndirectArgsKernel", 20);
+            SetFieldValue(pass, "m_ClassifyDeferredExportsWave32Kernel", 32);
+            SetFieldValue(pass, "m_BuildDeferredVariantIndirectArgsWave32Kernel", 33);
+            SetFieldValue(pass, "m_ClassifyDeferredExportsWave64Kernel", 64);
+            SetFieldValue(pass, "m_BuildDeferredVariantIndirectArgsWave64Kernel", 65);
 
             InvokeSelectMaterialClassificationKernels(pass, 64);
 
-            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyMaterialFeaturesKernel"), Is.EqualTo(64));
-            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildMaterialFeatureIndirectArgsKernel"), Is.EqualTo(65));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyDeferredExportsKernel"), Is.EqualTo(64));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildDeferredVariantIndirectArgsKernel"), Is.EqualTo(65));
 
             InvokeSelectMaterialClassificationKernels(pass, 32);
 
-            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyMaterialFeaturesKernel"), Is.EqualTo(32));
-            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildMaterialFeatureIndirectArgsKernel"), Is.EqualTo(33));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyDeferredExportsKernel"), Is.EqualTo(32));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildDeferredVariantIndirectArgsKernel"), Is.EqualTo(33));
 
             InvokeSelectMaterialClassificationKernels(pass, 16);
 
-            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyMaterialFeaturesKernel"), Is.EqualTo(10));
-            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildMaterialFeatureIndirectArgsKernel"), Is.EqualTo(20));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyDeferredExportsKernel"), Is.EqualTo(10));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildDeferredVariantIndirectArgsKernel"), Is.EqualTo(20));
+        }
+
+        [Test]
+        public void ClassificationShader_UsesDeferredExportClassOnly_ForFourVariantHierarchy()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(MaterialClassificationPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Material",
+                "MaterialClassification.compute");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+            string compactSource = string.Concat(
+                source.Where(character => !char.IsWhiteSpace(character)));
+
+            string surfaceSummaryPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "SurfaceSummaryGBuffer.hlsl");
+            Assert.That(File.Exists(surfaceSummaryPath), Is.True, surfaceSummaryPath);
+            string surfaceSummarySource = File.ReadAllText(surfaceSummaryPath);
+
+            StringAssert.Contains("SurfaceSummaryGBuffer.hlsl", source);
+            StringAssert.Contains("#define VIVID_DEFERRED_VARIANT_COUNT 4", source);
+            StringAssert.Contains("#define VIVID_DEFERRED_CLASS_BIT_FAST_SLAB (1u << 0)", surfaceSummarySource);
+            StringAssert.Contains("#define VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB (1u << 1)", surfaceSummarySource);
+            StringAssert.Contains("#define VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB (1u << 2)", surfaceSummarySource);
+            StringAssert.Contains("#define VIVID_DEFERRED_CLASS_BIT_CATCH_ALL (1u << 3)", surfaceSummarySource);
+            StringAssert.Contains("#pragma kernel ClearDeferredVariantArgs", source);
+            StringAssert.Contains("#pragma kernel ClassifyDeferredExports", source);
+            StringAssert.Contains("#pragma kernel BuildDeferredVariantIndirectArgs", source);
+            StringAssert.Contains("Texture2D<float4> _GBuffer1;", source);
+            StringAssert.Contains("VividIsSurfaceSummaryGBufferABIValid(gbuffer1.a)", source);
+            StringAssert.Contains("VividDecodeDeferredExportHeader(gbuffer0.a)", source);
+            StringAssert.Contains("VividGetDeferredExportClass(deferredExportHeader)", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_EMPTY", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_UNLIT", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_GENERAL_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_SUBSURFACE", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_CATCH_ALL", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_ERROR", source);
+            StringAssert.Contains(
+                "||deferredExportClass==VIVID_DEFERRED_EXPORT_CLASS_ERROR)"
+                + "{returnVIVID_DEFERRED_CLASS_BIT_CATCH_ALL;}",
+                compactSource);
+            StringAssert.Contains("WaveActiveBitOr(deferredClassOneHot)", source);
+            StringAssert.Contains("SelectDeferredVariant(_MaterialTileFeatureFlags[tileIndex])", source);
+            int catchAllSelection = source.IndexOf("if ((deferredClassMask & VIVID_DEFERRED_CLASS_BIT_CATCH_ALL)");
+            int dualSlabSelection = source.IndexOf("if ((deferredClassMask & VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB)");
+            int generalSlabSelection = source.IndexOf("if ((deferredClassMask & VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB)");
+            int fastSlabSelection = source.IndexOf("if ((deferredClassMask & VIVID_DEFERRED_CLASS_BIT_FAST_SLAB)");
+            Assert.That(catchAllSelection, Is.GreaterThanOrEqualTo(0));
+            Assert.That(catchAllSelection, Is.LessThan(dualSlabSelection));
+            Assert.That(dualSlabSelection, Is.LessThan(generalSlabSelection));
+            Assert.That(generalSlabSelection, Is.LessThan(fastSlabSelection));
+            StringAssert.DoesNotContain("VIVID_MATERIALFEATURE_", source);
+            StringAssert.DoesNotContain("1u << deferredExportClass", source);
+            StringAssert.DoesNotContain("VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_SSR", source);
+            StringAssert.DoesNotContain("VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_DECALS", source);
+            StringAssert.DoesNotContain("VIVID_DEFERRED_EXPORT_FLAG_HAS_DIFFUSE_IRRADIANCE", source);
         }
 
         [Test]

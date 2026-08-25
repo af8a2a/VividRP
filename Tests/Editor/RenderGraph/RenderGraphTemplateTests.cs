@@ -6,6 +6,7 @@ using NUnit.Framework;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
 using VividRP.Editor.RenderGraph;
+using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
@@ -33,6 +34,7 @@ namespace VividRP.Editor.Tests
 
                 var graph = GraphDatabase.LoadGraph<RenderGraphEditorGraph>(TempGraphAssetPath);
                 Assert.That(graph, Is.Not.Null);
+                RenderGraphDrawObjectPassMigration.Migrate(graph, TempGraphAssetPath);
 
                 var result = RenderGraphCompiler.Compile(graph);
                 var drawPasses = result.Passes
@@ -40,11 +42,12 @@ namespace VividRP.Editor.Tests
                     .ToArray();
 
                 Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(PreDepthPass).FullName)), Is.True);
-                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(GBufferPass).FullName)), Is.True);
+                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(GBufferPass).FullName)), Is.False);
                 Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(MaterialClassificationPass).FullName)), Is.True);
                 Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(DeferredLightingPass).FullName)), Is.True);
-                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(VisibilityBufferPass).FullName)), Is.False);
-                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(VisibilityBufferGBufferResolvePass).FullName)), Is.False);
+                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(VisibilityBufferPass).FullName)), Is.True);
+                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(VisibilityBufferGBufferResolvePass).FullName)), Is.True);
+                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(VisibilityBufferResolvePass).FullName)), Is.False);
                 Assert.That(drawPasses, Has.Length.EqualTo(1));
                 Assert.That(drawPasses[0].RenderListDescParameters, Has.Count.EqualTo(1));
                 Assert.That(drawPasses[0].RenderListDescParameters[0].FieldName, Is.EqualTo("m_RenderListDesc"));
@@ -52,6 +55,36 @@ namespace VividRP.Editor.Tests
                     drawPasses[0].ResourceBindings.Any(binding => binding.FieldName == "m_RenderList"),
                     Is.False);
                 Assert.That(result.RenderListDescriptors, Is.Empty);
+
+                var preDepthIndex = FindPassIndex<PreDepthPass>(result);
+                var visibilityIndex = FindPassIndex<VisibilityBufferPass>(result);
+                var resolveIndex = FindPassIndex<VisibilityBufferGBufferResolvePass>(result);
+                var classificationIndex = FindPassIndex<MaterialClassificationPass>(result);
+                var deferredIndex = FindPassIndex<DeferredLightingPass>(result);
+                Assert.That(preDepthIndex, Is.LessThan(visibilityIndex));
+                Assert.That(visibilityIndex, Is.LessThan(resolveIndex));
+                Assert.That(resolveIndex, Is.LessThan(classificationIndex));
+                Assert.That(classificationIndex, Is.LessThan(deferredIndex));
+
+                AssertPassFieldBinding(
+                    result,
+                    classificationIndex,
+                    "m_GBuffer0",
+                    resolveIndex,
+                    "m_GBuffer0");
+                AssertPassFieldBinding(
+                    result,
+                    classificationIndex,
+                    "m_GBuffer1",
+                    resolveIndex,
+                    "m_GBuffer1");
+                AssertPassFieldBinding(
+                    result,
+                    deferredIndex,
+                    "m_GBuffer4",
+                    resolveIndex,
+                    "m_GBuffer4");
+
             }
             finally
             {
@@ -102,6 +135,28 @@ namespace VividRP.Editor.Tests
             var parent = assetPath.Substring(0, separator);
             EnsureFolder(parent);
             AssetDatabase.CreateFolder(parent, assetPath.Substring(separator + 1));
+        }
+
+        private static int FindPassIndex<TPass>(RenderGraphCompilationResult result)
+        {
+            var passType = typeof(TPass);
+            return result.Passes.FindIndex(pass => pass.PassType.StartsWith(passType.FullName));
+        }
+
+        private static void AssertPassFieldBinding(
+            RenderGraphCompilationResult result,
+            int consumerPassIndex,
+            string consumerFieldName,
+            int sourcePassIndex,
+            string sourceFieldName)
+        {
+            Assert.That(consumerPassIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(sourcePassIndex, Is.GreaterThanOrEqualTo(0));
+            var binding = result.Passes[consumerPassIndex].ResourceBindings.Single(
+                candidate => candidate.FieldName == consumerFieldName);
+            Assert.That(binding.SourceKind, Is.EqualTo(RenderGraphPassBindingSourceKind.PassField));
+            Assert.That(binding.SourcePassIndex, Is.EqualTo(sourcePassIndex));
+            Assert.That(binding.SourceFieldName, Is.EqualTo(sourceFieldName));
         }
     }
 }

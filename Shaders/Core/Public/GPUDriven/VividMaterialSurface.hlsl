@@ -1,31 +1,6 @@
 #ifndef VIVIDRP_GPU_DRIVEN_MATERIAL_SURFACE_INCLUDED
 #define VIVIDRP_GPU_DRIVEN_MATERIAL_SURFACE_INCLUDED
 
-#define VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK 0u
-#define VIVID_MATERIAL_PROGRAM_KNOWN 1u
-#define VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE 2u
-
-uint VividGetMaterialProgramStatus(
-    const uint materialIndex,
-    out VividMaterialRuntimeHeader runtimeHeader,
-    out VividMaterialProgramData programData)
-{
-    runtimeHeader = (VividMaterialRuntimeHeader) 0;
-    runtimeHeader.ProgramID = VIVIDMATERIALPROGRAMID_INVALID;
-    programData = (VividMaterialProgramData) 0;
-    if (materialIndex >= _MaterialRuntimeHeaderCount)
-        return VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE;
-
-    runtimeHeader = PullMaterialRuntimeHeader(materialIndex);
-    if (runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID)
-        return VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK;
-    if (runtimeHeader.ProgramID >= _MaterialProgramCount)
-        return VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE;
-
-    programData = PullMaterialProgramData(runtimeHeader.ProgramID);
-    return VIVID_MATERIAL_PROGRAM_KNOWN;
-}
-
 bool VividIsStandardSingleSlabSurfaceProgramCompatible(
     const VividMaterialProgramData programData,
     const uint requiredCapabilities)

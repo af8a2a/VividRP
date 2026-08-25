@@ -114,9 +114,14 @@ Shader "VividRP/Material/StandardLayeredLit"
             Tags { "LightMode" = "VividVTGBuffer" }
 
             Blend One Zero
-            ZWrite [_ZWrite]
+            ZWrite Off
             ZTest Equal
             Cull [_Cull]
+            ColorMask 0 0
+            ColorMask 0 1
+            ColorMask 0 2
+            ColorMask 0 3
+            ColorMask 0 4
 
             HLSLPROGRAM
                 #pragma target 5.0
@@ -162,9 +167,14 @@ Shader "VividRP/Material/StandardLayeredLit"
             Tags { "LightMode" = "VividVTGBufferGPUDrivenDecal" }
 
             Blend One Zero
-            ZWrite [_ZWrite]
+            ZWrite Off
             ZTest Equal
             Cull [_Cull]
+            ColorMask 0 0
+            ColorMask 0 1
+            ColorMask 0 2
+            ColorMask 0 3
+            ColorMask 0 4
 
             HLSLPROGRAM
                 #pragma target 5.0

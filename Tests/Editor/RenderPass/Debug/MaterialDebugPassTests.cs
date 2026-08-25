@@ -35,10 +35,11 @@ namespace VividRP.Editor.Tests
                 "GBuffer1",
                 "GBuffer2",
                 "GBuffer3",
-                "GBuffer4",
+                "DiffuseIrradiance",
+                "VisibilityBuffer",
                 "OutputTexture",
             }));
-            Assert.That(resources.Textures.Where(entry => entry.Access == AccessFlags.Read), Has.Exactly(7).Count);
+            Assert.That(resources.Textures.Where(entry => entry.Access == AccessFlags.Read), Has.Exactly(8).Count);
             Assert.That(resources.Buffers.Select(entry => entry.Name), Is.EquivalentTo(new[]
             {
                 "MaterialTileFeatureFlags",

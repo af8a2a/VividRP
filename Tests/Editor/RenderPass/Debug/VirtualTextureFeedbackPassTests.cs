@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -155,6 +156,35 @@ namespace VividRP.Editor.Tests
             Assert.That(registrations, Has.Count.EqualTo(1));
             Assert.That(registrations.Single().PassType, Is.EqualTo(typeof(VirtualTextureFeedbackPass)));
             Assert.That(registrations.Single().NodeClassName, Is.EqualTo(nameof(VirtualTextureFeedbackPass)));
+        }
+
+        [Test]
+        public void FeedbackShaderPasses_DoNotOverwriteSurfaceSummaryAttachmentsOrDepth()
+        {
+            var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                typeof(VirtualTextureFeedbackPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            var shaderPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Material",
+                "StandardLayeredLit",
+                "StandardLayeredLit.shader");
+            var source = File.ReadAllText(shaderPath);
+
+            foreach (var passName in new[] { "VividVTGBuffer", "VividVTGBufferGPUDrivenDecal" })
+            {
+                var passStart = source.IndexOf($"Name \"{passName}\"", StringComparison.Ordinal);
+                Assert.That(passStart, Is.GreaterThanOrEqualTo(0), passName);
+                var nextPass = source.IndexOf("        Pass", passStart + passName.Length, StringComparison.Ordinal);
+                var passSource = nextPass >= 0
+                    ? source.Substring(passStart, nextPass - passStart)
+                    : source.Substring(passStart);
+
+                StringAssert.Contains("ZWrite Off", passSource, passName);
+                for (var attachmentIndex = 0; attachmentIndex < 5; attachmentIndex++)
+                    StringAssert.Contains($"ColorMask 0 {attachmentIndex}", passSource, passName);
+            }
         }
 
         private static ContextContainer CreateFrameData(int width, int height)

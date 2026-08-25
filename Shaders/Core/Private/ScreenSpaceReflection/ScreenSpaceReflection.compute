@@ -30,7 +30,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/DebugUtil.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
@@ -824,7 +824,8 @@ float PerceptualRoughnessFade(float perceptualRoughness)
 
 float3 LoadNormalWS(uint2 coordSS)
 {
-    return normalize(DecodeVividNormalOct(_GBuffer1.Load(int3(coordSS, 0)).xy));
+    return VividDecodeSurfaceSummaryNormal(
+        _GBuffer1.Load(int3(coordSS, 0)).xy);
 }
 
 bool TryLoadValidHitNormalWS(int2 hitCoordSS, float3 reflectionDirWS, out float3 hitNormalWS)
@@ -860,7 +861,7 @@ bool IsMirrorSsrReflection(float perceptualRoughness)
 
 float LoadPerceptualRoughness(uint2 coordSS)
 {
-    return GetPerceptualRoughnessFromLinearRoughness(_GBuffer1.Load(int3(coordSS, 0)).z);
+    return saturate(_GBuffer1.Load(int3(coordSS, 0)).z);
 }
 
 bool ShouldTracePixel(uint2 coordSS)
@@ -872,8 +873,11 @@ bool ShouldTracePixel(uint2 coordSS)
     if (IsRawFarDepth(deviceDepth))
         return false;
 
-    uint materialFeatures = DecodeVividMaterialFeatures(_GBuffer0.Load(int3(coordSS, 0)).a);
-    if (!HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_SSR_RECEIVE))
+    uint deferredExportHeader = VividDecodeDeferredExportHeader(
+        _GBuffer0.Load(int3(coordSS, 0)).a);
+    if (!VividHasDeferredExportFlag(
+            deferredExportHeader,
+            VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_SSR))
         return false;
 
     float perceptualRoughness = LoadPerceptualRoughness(coordSS);
@@ -1375,8 +1379,8 @@ void ScreenSpaceReflectionsTracing(
 
     float4 gbuffer1 = _GBuffer1.Load(int3(coordSS, 0));
 
-    float3 normalWS = normalize(DecodeVividNormalOct(gbuffer1.xy));
-    float perceptualRoughness = GetPerceptualRoughnessFromLinearRoughness(gbuffer1.z);
+    float3 normalWS = VividDecodeSurfaceSummaryNormal(gbuffer1.xy);
+    float perceptualRoughness = saturate(gbuffer1.z);
 
     if (perceptualRoughness >= _SsrRoughnessFadeEnd)
     {

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -27,12 +28,12 @@ namespace VividRP.Editor.Tests
                 "Color",
                 "DeferredLightingDebug",
                 "Depth",
+                "DiffuseIrradiance",
                 "DirectionalShadowTexture",
                 "GBuffer0",
                 "GBuffer1",
                 "GBuffer2",
                 "GBuffer3",
-                "GBuffer4",
                 "GTAOTexture",
                 "ScreenSpaceReflectionOutput",
                 "SkyIBLCubemap"
@@ -111,13 +112,47 @@ namespace VividRP.Editor.Tests
             Assert.That(debugTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
             Assert.That(debugTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
 
+            var gbuffer0Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer0");
             var gbuffer1Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer1");
             var gbuffer2Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer2");
+            var diffuseIrradianceTexture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer4");
+            Assert.That(gbuffer0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
             Assert.That(gbuffer1Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
             Assert.That(gbuffer2Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+            Assert.That(diffuseIrradianceTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
 
             var skyCubemap = GetFieldValue<RenderGraphTexture>(pass, "m_SkyIBLCubemap");
             Assert.That(skyCubemap.desc.Dimension, Is.EqualTo(TextureDimension.Cube));
+        }
+
+        [Test]
+        public void DeferredShader_ConsumesSurfaceSummaryFastSlabContract()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(DeferredLightingPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Material",
+                "DeferredLit.compute");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+
+            StringAssert.Contains("SurfaceSummaryGBuffer.hlsl", source);
+            StringAssert.Contains("Texture2D<float4> _DiffuseIrradiance;", source);
+            StringAssert.Contains("VividUnpackSurfaceSummaryGBuffer", source);
+            StringAssert.Contains("BuildFastSlabBSDFData", source);
+            StringAssert.Contains("VIVID_DEFERRED_CLASS_BIT_FAST_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_ERROR", source);
+            StringAssert.Contains("float3(1.0, 0.0, 1.0)", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB", source);
+            StringAssert.Contains("#pragma kernel DeferredLit_Variant3", source);
+            StringAssert.DoesNotContain("#pragma kernel DeferredLit_Variant4", source);
+            StringAssert.DoesNotContain("Texture2D<float4> _GBuffer4;", source);
+            StringAssert.DoesNotContain("GetMaterialFeatureVariantFlags", source);
         }
 
         [Test]

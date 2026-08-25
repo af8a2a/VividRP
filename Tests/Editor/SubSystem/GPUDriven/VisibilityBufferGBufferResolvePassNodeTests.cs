@@ -33,7 +33,9 @@ namespace VividRP.Editor.Tests
                            || field.Name == "m_GBuffer1"
                            || field.Name == "m_GBuffer2"
                            || field.Name == "m_GBuffer3"
-                           || field.Name == "m_GBuffer4")
+                           || field.Name == "m_GBuffer4"
+                           || field.Name == "m_LayerAux0"
+                           || field.Name == "m_LayerAux1")
                        || base.GetPassOwnedResourceOverrideEnabled(field, attr);
             }
         }
@@ -76,12 +78,16 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.HasOverrideOption("m_GBuffer2"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer3"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer4"), Is.True);
+                Assert.That(node.HasOverrideOption("m_LayerAux0"), Is.True);
+                Assert.That(node.HasOverrideOption("m_LayerAux1"), Is.True);
 
                 Assert.That(node.GetInputPortByName("m_GBuffer0_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_LayerAux0_In"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_LayerAux1_In"), Is.Null);
 
                 Assert.That(node.GetOutputPortByName("m_GBuffer0_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer1_Out"), Is.Not.Null);
@@ -90,6 +96,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     node.GetOutputPortByName("m_GBuffer4_Out"),
                     Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_LayerAux0_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_LayerAux1_Out"), Is.Not.Null);
             }
             finally
             {
@@ -114,6 +122,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     node.GetInputPortByName("m_GBuffer4_In"),
                     Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_LayerAux0_In"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_LayerAux1_In"), Is.Not.Null);
 
                 Assert.That(node.GetOutputPortByName("m_GBuffer0_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer1_Out"), Is.Not.Null);
@@ -122,6 +132,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     node.GetOutputPortByName("m_GBuffer4_Out"),
                     Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_LayerAux0_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_LayerAux1_Out"), Is.Not.Null);
             }
             finally
             {
@@ -145,6 +157,12 @@ namespace VividRP.Editor.Tests
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer0_Out"),
                     deferredNode.GetInputPortByName("m_GBuffer0"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_LayerAux0_Out"),
+                    deferredNode.GetInputPortByName("m_LayerAux0"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_LayerAux1_Out"),
+                    deferredNode.GetInputPortByName("m_LayerAux1"));
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer1_Out"),
                     deferredNode.GetInputPortByName("m_GBuffer1"));
@@ -207,6 +225,12 @@ namespace VividRP.Editor.Tests
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer0_Out"),
                     deferredNode.GetInputPortByName("m_GBuffer0"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_LayerAux0_Out"),
+                    deferredNode.GetInputPortByName("m_LayerAux0"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_LayerAux1_Out"),
+                    deferredNode.GetInputPortByName("m_LayerAux1"));
 
                 var result = RenderGraphCompiler.Compile(graph);
 

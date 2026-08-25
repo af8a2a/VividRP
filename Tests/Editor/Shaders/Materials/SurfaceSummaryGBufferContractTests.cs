@@ -121,6 +121,43 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("round(saturate(encodedHeader) * 255.0)", source);
         }
 
+        [Test]
+        public void DualSlabLayerSidecar_DeclaresFrozenEightByteExtension()
+        {
+            string source = File.ReadAllText(SurfaceSummaryAssetPath);
+            string compactSource = string.Concat(
+                source.Where(character => !char.IsWhiteSpace(character)));
+
+            StringAssert.Contains(
+                "#define VIVID_DUAL_SLAB_LAYER_SIDECAR_ABI_VERSION 1u",
+                source);
+            StringAssert.Contains(
+                "#define VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT (0.5f / 255.0f)",
+                source);
+            StringAssert.Contains("RT5 / LayerAux0 (R8G8B8A8_SRGB)", source);
+            StringAssert.Contains("RT6 / LayerAux1 (R8G8B8A8_UNORM)", source);
+            StringAssert.Contains("VividDualSlabLayerData", source);
+            StringAssert.Contains("VividPackDualSlabLayerAux0(", source);
+            StringAssert.Contains("VividPackDualSlabLayerAux1(", source);
+            StringAssert.Contains("VividUnpackDualSlabLayerSidecar(", source);
+            StringAssert.Contains("VividDualSlabLayerSidecarOutput", source);
+            StringAssert.Contains("VividPackDualSlabLayerSidecar(", source);
+            StringAssert.Contains("VividIsDualSlabLayerSidecarValid(", source);
+            StringAssert.Contains("float4 rt0 : SV_Target0;", source);
+            StringAssert.Contains("float4 rt1 : SV_Target1;", source);
+            StringAssert.Contains(
+                "returnfloat4(layerData.diffuseAlbedo,layerData.layerWeight);",
+                compactSource);
+            StringAssert.Contains(
+                "returnfloat4(VividEncodeSurfaceSummarySpecularF0(" +
+                "layerData.specularF0),layerData.perceptualRoughness);",
+                compactSource);
+            StringAssert.Contains(
+                "layerData.specularF0=VividDecodeSurfaceSummarySpecularF0(" +
+                "layerAux1.rgb);",
+                compactSource);
+        }
+
         private static void AssertDefine(
             string source,
             string identifier,

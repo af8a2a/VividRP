@@ -25,6 +25,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
         private static readonly int GBuffer3Id = Shader.PropertyToID("_GBuffer3");
         private static readonly int DiffuseIrradianceId = Shader.PropertyToID("_DiffuseIrradiance");
+        private static readonly int LayerAux0Id = Shader.PropertyToID("_LayerAux0");
+        private static readonly int LayerAux1Id = Shader.PropertyToID("_LayerAux1");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int GTAOTextureId = Shader.PropertyToID("_GTAOTexture");
@@ -84,6 +86,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "DiffuseIrradiance", Access = AccessFlags.Read)]
         // Keep the legacy field name as the serialized RenderGraph port key.
         private RenderGraphTexture m_GBuffer4;
+
+        [RenderGraphResource(Name = "LayerAux0", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_LayerAux0;
+
+        [RenderGraphResource(Name = "LayerAux1", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_LayerAux1;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -194,6 +202,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_IsLogBaseBufferEnabled;
         private bool m_IsPassResourceLayoutDirty;
         private readonly RenderGraphTexture m_LocalDiffuseIrradiance;
+        private readonly RenderGraphTexture m_LocalLayerAux0;
+        private readonly RenderGraphTexture m_LocalLayerAux1;
         private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
         private readonly RenderGraphTexture m_LocalGTAOTexture;
         private readonly RenderGraphTexture m_LocalScreenSpaceReflectionTexture;
@@ -231,6 +241,22 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalDiffuseIrradiance.desc.ClearBuffer = true;
             m_LocalDiffuseIrradiance.desc.ClearColor = Color.clear;
             m_GBuffer4 = m_LocalDiffuseIrradiance;
+            m_LocalLayerAux0 = RenderGraphTexture.CreateColorTarget(
+                "LayerAux0",
+                GraphicsFormat.R8G8B8A8_SRGB);
+            m_LocalLayerAux0.desc.ClearBuffer = true;
+            m_LocalLayerAux0.desc.ClearColor = Color.clear;
+            m_LocalLayerAux0.desc.FilterMode = FilterMode.Point;
+            m_LocalLayerAux0.desc.WrapMode = TextureWrapMode.Clamp;
+            m_LayerAux0 = m_LocalLayerAux0;
+            m_LocalLayerAux1 = RenderGraphTexture.CreateColorTarget(
+                "LayerAux1",
+                GraphicsFormat.R8G8B8A8_UNorm);
+            m_LocalLayerAux1.desc.ClearBuffer = true;
+            m_LocalLayerAux1.desc.ClearColor = Color.clear;
+            m_LocalLayerAux1.desc.FilterMode = FilterMode.Point;
+            m_LocalLayerAux1.desc.WrapMode = TextureWrapMode.Clamp;
+            m_LayerAux1 = m_LocalLayerAux1;
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_LocalDirectionalShadowTexture = RenderGraphTexture.CreateColorTarget("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
             m_LocalDirectionalShadowTexture.desc.ClearBuffer = true;
@@ -328,6 +354,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer2.Resize(width, height);
             m_GBuffer3.Resize(width, height);
             m_GBuffer4.Resize(width, height);
+            // LayerAux inputs are owned by the Resolve producer. Keep an
+            // unbound local sentinel at 1x1 and never rewrite an override's
+            // descriptor from the consumer pass.
             m_DepthTexture.Resize(width, height);
             m_GTAOTexture.Resize(width, height);
             m_ScreenSpaceReflectionTexture.Resize(width, height);
@@ -456,6 +485,20 @@ namespace VividRP.Runtime.RenderPass.Core
                     DiffuseIrradianceId,
                     m_GBuffer4.innerHandle);
             }
+            BindOptionalTexture(
+                context,
+                cmd,
+                kernel,
+                LayerAux0Id,
+                m_LayerAux0,
+                m_LocalLayerAux0);
+            BindOptionalTexture(
+                context,
+                cmd,
+                kernel,
+                LayerAux1Id,
+                m_LayerAux1,
+                m_LocalLayerAux1);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
             if (ReferenceEquals(m_DirectionalShadowTexture, m_LocalDirectionalShadowTexture)
                 || m_DirectionalShadowTexture == null
@@ -511,6 +554,33 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingDebugTextureId, m_DebugTexture.innerHandle);
+        }
+
+        private void BindOptionalTexture(
+            ComputePassContext context,
+            ComputeCommandBuffer cmd,
+            int kernel,
+            int propertyId,
+            RenderGraphTexture texture,
+            RenderGraphTexture localTexture)
+        {
+            if (ReferenceEquals(texture, localTexture)
+                || texture == null
+                || !texture.innerHandle.IsValid())
+            {
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    propertyId,
+                    context.renderGraphContext.defaultResources.blackTexture);
+                return;
+            }
+
+            cmd.SetComputeTextureParam(
+                m_DeferredLitCompute,
+                kernel,
+                propertyId,
+                texture.innerHandle);
         }
 
         private void BindIndirectLightingParameters(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)

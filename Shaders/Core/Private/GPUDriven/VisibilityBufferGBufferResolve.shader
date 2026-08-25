@@ -20,6 +20,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma editor_sync_compilation
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
+            #pragma multi_compile_local_fragment _ VIVID_DUAL_SLAB_SIDECAR_OUTPUT
             #pragma target 5.0
             #pragma require randomwrite
             #pragma use_dxc
@@ -28,7 +29,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
             #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
-                #define VIVID_VT_ENABLE_FEEDBACK_RW 1
+                #if !defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
+                    #define VIVID_VT_ENABLE_FEEDBACK_RW 1
+                #endif
             #else
                 #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
             #endif
@@ -72,8 +75,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 VividInstanceData instanceData;
                 VividMaterialData materialData;
+                VividDualSlabMaterialData dualSlabMaterialData;
                 VividSurfaceBindingData surfaceBindingData;
+                VividSurfaceBindingData topSurfaceBindingData;
                 uint isUnlit;
+                uint isDualSlab;
                 uint materialProgramFailed;
                 uint materialProgramID;
                 VividMeshletVertex vertex0;
@@ -254,7 +260,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 result.materialData = (VividMaterialData) 0;
+                result.dualSlabMaterialData = (VividDualSlabMaterialData) 0;
                 result.surfaceBindingData = (VividSurfaceBindingData) 0;
+                result.topSurfaceBindingData = (VividSurfaceBindingData) 0;
+                result.isDualSlab = 0u;
                 result.materialProgramID = VIVIDMATERIALPROGRAMID_INVALID;
                 result.materialProgramFailed = 1u;
                 VividMaterialRuntimeHeader runtimeHeader;
@@ -275,6 +284,17 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                             0u,
                             result.materialData,
                             result.surfaceBindingData);
+                    }
+                    else if (programData.SurfaceProgramID
+                        == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB)
+                    {
+                        loadedMaterialProgram = VividTryLoadDualSlabSurfaceProgram(
+                            result.instanceData.MaterialIndex,
+                            0u,
+                            result.dualSlabMaterialData,
+                            result.surfaceBindingData,
+                            result.topSurfaceBindingData);
+                        result.isDualSlab = loadedMaterialProgram ? 1u : 0u;
                     }
                     result.materialProgramFailed = loadedMaterialProgram ? 0u : 1u;
                 }
@@ -308,11 +328,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return result;
             }
 
-            VividSurfaceSummaryData ResolveSurfaceData(
+            void ResolveSurfaceData(
                 const TriangleData triangleData,
                 const VividBarycentricDerivatives barycentric,
                 const InterpolatedUV visibilityUV,
-                const float4 positionCS)
+                const float4 positionCS,
+                out VividSurfaceSummaryData surfaceData,
+                out VividDualSlabLayerData dualSlabLayerData)
             {
                 const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
                 const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
@@ -375,17 +397,28 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     dispatchedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
                         triangleData.materialProgramID,
                         triangleData.materialData,
-                        (VividDualSlabMaterialData) 0,
+                        triangleData.dualSlabMaterialData,
                         triangleData.surfaceBindingData,
-                        (VividSurfaceBindingData) 0,
+                        triangleData.topSurfaceBindingData,
                         aotContext,
                         aotSurfaceOutput);
                 }
-                const bool evaluatedAOTSingleSurface = dispatchedAOTSurface
+                const bool expectsDualSlab = triangleData.isDualSlab != 0u;
+                const bool evaluatedAOTSingleSurface = !expectsDualSlab
+                    && dispatchedAOTSurface
                     && aotSurfaceOutput.ClosureCount == 1u
                     && aotSurfaceOutput.LayerOperator == 0u;
+                const bool evaluatedAOTDualSurface = expectsDualSlab
+                    && dispatchedAOTSurface
+                    && aotSurfaceOutput.ClosureCount == 2u
+                    && (aotSurfaceOutput.LayerOperator == 1u
+                        || aotSurfaceOutput.LayerOperator == 2u);
                 const bool failedAOTSurface = triangleData.materialProgramFailed != 0u
-                    || !evaluatedAOTSingleSurface;
+                    || (!evaluatedAOTSingleSurface
+                        && !evaluatedAOTDualSurface);
+                const bool exportDualSlab = evaluatedAOTDualSurface
+                    && saturate(aotSurfaceOutput.LayerWeight)
+                        > VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT;
 
                 float3 baseColor;
                 float3 evaluatedAOTNormalWS = geometryNormalWS;
@@ -413,6 +446,25 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     metallic = aotSurfaceOutput.BaseSlab.Metallic;
                     ambientOcclusion =
                         aotSurfaceOutput.BaseSlab.AmbientOcclusion;
+                    if (exportDualSlab)
+                    {
+                        // Sidecar ABI v1 has one shared normal/AO. Blend the
+                        // two evaluated Slabs into that shared representative
+                        // so both layer-weight endpoints remain exact.
+                        const float layerWeight = saturate(
+                            aotSurfaceOutput.LayerWeight);
+                        const float3 topNormalWS = EvaluateAOTSlabNormalWS(
+                            aotSurfaceOutput.TopSlab,
+                            geometryNormalWS);
+                        evaluatedAOTNormalWS = SafeNormalize(lerp(
+                            evaluatedAOTNormalWS,
+                            topNormalWS,
+                            layerWeight));
+                        ambientOcclusion = lerp(
+                            ambientOcclusion,
+                            aotSurfaceOutput.TopSlab.AmbientOcclusion,
+                            layerWeight);
+                    }
                 }
 
                 const float3 normalWS = evaluatedAOTNormalWS;
@@ -432,8 +484,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         0xFFFFFFFFu)
                     : 0.0f;
 
-                VividSurfaceSummaryData surfaceData =
-                    (VividSurfaceSummaryData) 0;
+                surfaceData = (VividSurfaceSummaryData) 0;
+                dualSlabLayerData = (VividDualSlabLayerData) 0;
                 surfaceData.normalWS = normalWS;
                 surfaceData.perceptualRoughness = perceptualRoughness;
                 surfaceData.ambientOcclusion = ambientOcclusion;
@@ -455,10 +507,44 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 }
                 else if (isUnlit)
                 {
+                    float3 unlitColor = baseColor;
+                    if (exportDualSlab)
+                    {
+                        const float layerWeight = saturate(
+                            aotSurfaceOutput.LayerWeight);
+                        const float3 topBaseColor =
+                            aotSurfaceOutput.TopSlab.BaseColor.rgb;
+                        if (aotSurfaceOutput.LayerOperator == 1u)
+                        {
+                            unlitColor = lerp(
+                                baseColor,
+                                topBaseColor,
+                                layerWeight);
+                        }
+                        else
+                        {
+                            const float topMetallic = saturate(
+                                aotSurfaceOutput.TopSlab.Metallic);
+                            const float3 topDiffuseAlbedo = topBaseColor
+                                * (1.0f - topMetallic);
+                            const float topOpacity = saturate(
+                                max(
+                                    topDiffuseAlbedo.x,
+                                    max(
+                                        topDiffuseAlbedo.y,
+                                        topDiffuseAlbedo.z))
+                                + topMetallic);
+                            unlitColor = topBaseColor * layerWeight
+                                + baseColor * lerp(
+                                    1.0f,
+                                    1.0f - topOpacity,
+                                    layerWeight);
+                        }
+                    }
                     surfaceData.diffuseAlbedo = 0.0f;
                     surfaceData.specularF0 = 0.0f;
                     surfaceData.emissive = max(
-                        baseColor + aotSurfaceOutput.Emission,
+                        unlitColor + aotSurfaceOutput.Emission,
                         0.0f);
                     surfaceData.deferredExportHeader =
                         VividBuildDeferredExportHeader(
@@ -480,18 +566,41 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     surfaceData.emissive = max(
                         aotSurfaceOutput.Emission,
                         0.0f);
+                    if (exportDualSlab)
+                    {
+                        const float3 topBaseColor =
+                            aotSurfaceOutput.TopSlab.BaseColor.rgb;
+                        const float topMetallic = saturate(
+                            aotSurfaceOutput.TopSlab.Metallic);
+                        dualSlabLayerData.diffuseAlbedo = topBaseColor
+                            * (1.0f - topMetallic);
+                        dualSlabLayerData.specularF0 = lerp(
+                            0.04f.xxx,
+                            topBaseColor,
+                            topMetallic);
+                        dualSlabLayerData.perceptualRoughness =
+                            aotSurfaceOutput.TopSlab.PerceptualRoughness;
+                        dualSlabLayerData.layerWeight =
+                            aotSurfaceOutput.LayerWeight;
+                    }
                     surfaceData.deferredExportHeader =
                         VividBuildDeferredExportHeader(
-                            VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB,
-                            false,
+                            exportDualSlab
+                                ? VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
+                                : VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB,
+                            exportDualSlab
+                                && aotSurfaceOutput.LayerOperator == 2u,
                             hasDiffuseIrradiance,
-                            receiveSSR,
+                            receiveSSR && !exportDualSlab,
                             receiveDecals);
                 }
-                return surfaceData;
             }
 
+            #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
+            VividDualSlabLayerSidecarOutput Frag(Varyings input)
+            #else
             VividSurfaceSummaryGBufferOutput Frag(Varyings input)
+            #endif
             {
                 VividVisibilityBufferValue visibilityBufferValue;
                 VividBarycentricDerivatives barycentric;
@@ -503,16 +612,38 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         interpolatedUV))
                 {
                     discard;
+                    #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
+                    return (VividDualSlabLayerSidecarOutput) 0;
+                    #else
                     return (VividSurfaceSummaryGBufferOutput) 0;
+                    #endif
                 }
 
                 TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
-                VividSurfaceSummaryData surfaceData = ResolveSurfaceData(
+                #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
+                if (triangleData.isDualSlab == 0u)
+                    return (VividDualSlabLayerSidecarOutput) 0;
+                #endif
+                VividSurfaceSummaryData surfaceData;
+                VividDualSlabLayerData dualSlabLayerData;
+                ResolveSurfaceData(
                     triangleData,
                     barycentric,
                     interpolatedUV,
-                    input.positionCS);
+                    input.positionCS,
+                    surfaceData,
+                    dualSlabLayerData);
+                #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
+                if (VividGetDeferredExportClass(
+                        surfaceData.deferredExportHeader)
+                    != VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
+                {
+                    return (VividDualSlabLayerSidecarOutput) 0;
+                }
+                return VividPackDualSlabLayerSidecar(dualSlabLayerData);
+                #else
                 return VividPackSurfaceSummaryGBuffer(surfaceData);
+                #endif
             }
             ENDHLSL
         }

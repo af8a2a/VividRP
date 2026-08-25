@@ -34,7 +34,11 @@ namespace VividRP.Editor.Tests
 
                 var graph = GraphDatabase.LoadGraph<RenderGraphEditorGraph>(TempGraphAssetPath);
                 Assert.That(graph, Is.Not.Null);
-                RenderGraphDrawObjectPassMigration.Migrate(graph, TempGraphAssetPath);
+                Assert.That(
+                    RenderGraphDrawObjectPassMigration.Migrate(
+                        graph,
+                        TempGraphAssetPath),
+                    Is.False);
 
                 var result = RenderGraphCompiler.Compile(graph);
                 var drawPasses = result.Passes
@@ -84,6 +88,18 @@ namespace VividRP.Editor.Tests
                     "m_GBuffer4",
                     resolveIndex,
                     "m_GBuffer4");
+                AssertPassFieldBinding(
+                    result,
+                    deferredIndex,
+                    "m_LayerAux0",
+                    resolveIndex,
+                    "m_LayerAux0");
+                AssertPassFieldBinding(
+                    result,
+                    deferredIndex,
+                    "m_LayerAux1",
+                    resolveIndex,
+                    "m_LayerAux1");
 
             }
             finally
@@ -91,6 +107,24 @@ namespace VividRP.Editor.Tests
                 AssetDatabase.DeleteAsset(TempGraphAssetPath);
                 AssetDatabase.DeleteAsset(TempFolder);
             }
+        }
+
+        [Test]
+        public void StandardTemplate_PersistsDualSlabSidecarAndCurrentSchema()
+        {
+            var content = RenderGraphEditorGraph.LoadStandardGraphTemplateContent();
+
+            Assert.That(
+                Regex.Matches(content, @"m_SchemaVersion: 4").Count,
+                Is.EqualTo(3));
+            StringAssert.Contains("m_Name: LayerAux0 (R)", content);
+            StringAssert.Contains("m_Name: LayerAux1 (R)", content);
+            StringAssert.Contains("m_UniqueId: m_LayerAux0_Out", content);
+            StringAssert.Contains("m_UniqueId: m_LayerAux1_Out", content);
+            StringAssert.Contains("m_UniqueId: m_LayerAux0", content);
+            StringAssert.Contains("m_UniqueId: m_LayerAux1", content);
+            StringAssert.Contains("__option_Override_m_LayerAux0", content);
+            StringAssert.Contains("__option_Override_m_LayerAux1", content);
         }
 
         [Test]

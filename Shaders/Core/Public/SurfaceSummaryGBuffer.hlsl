@@ -7,6 +7,8 @@
 #define VIVID_SURFACE_SUMMARY_GBUFFER_ABI_VERSION 1u
 #define VIVID_SURFACE_SUMMARY_GBUFFER_ABI_TAG 3u
 #define VIVID_SURFACE_SUMMARY_GBUFFER_ABI_TAG_MASK 0x3u
+#define VIVID_DUAL_SLAB_LAYER_SIDECAR_ABI_VERSION 1u
+#define VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT (0.5f / 255.0f)
 
 #define VIVID_DEFERRED_EXPORT_CLASS_EMPTY 0u
 #define VIVID_DEFERRED_EXPORT_CLASS_UNLIT 1u
@@ -37,6 +39,13 @@
 // RT2 (R8G8B8A8_UNORM)      : SqrtEncodedSpecularF0.rgb + AmbientOcclusion.a
 // RT3 (B10G11R11_UFLOAT)    : Emissive.rgb
 // RT4 / DiffuseIrradiance   : DiffuseIrradiance.rgb
+// Optional Dual Slab sidecar:
+// Logical RT5 / LayerAux0 (R8G8B8A8_SRGB) : TopDiffuseAlbedo.rgb + LayerWeight.a
+// Logical RT6 / LayerAux1 (R8G8B8A8_UNORM): SqrtEncodedTopSpecularF0.rgb + TopPerceptualRoughness.a
+// The sidecar is emitted by a separate two-MRT draw as SV_Target0/1 so the
+// core draw can retain VT feedback UAV slots u5-u7.
+// The top slab shares the core surface normal. The vertical-layer operator is
+// encoded by VIVID_DEFERRED_EXPORT_FLAG_VERTICAL_LAYER in the core header.
 
 struct VividSurfaceSummaryData
 {
@@ -57,6 +66,20 @@ struct VividSurfaceSummaryGBufferOutput
     float4 rt2 : SV_Target2;
     float4 rt3 : SV_Target3;
     float4 rt4 : SV_Target4;
+};
+
+struct VividDualSlabLayerData
+{
+    float3 diffuseAlbedo;
+    float3 specularF0;
+    float perceptualRoughness;
+    float layerWeight;
+};
+
+struct VividDualSlabLayerSidecarOutput
+{
+    float4 rt0 : SV_Target0;
+    float4 rt1 : SV_Target1;
 };
 
 bool VividIsDeferredExportClassValid(uint exportClass)
@@ -179,6 +202,50 @@ float3 VividDecodeSurfaceSummarySpecularF0(float3 encodedSpecularF0)
     return encodedSpecularF0 * encodedSpecularF0;
 }
 
+VividDualSlabLayerData VividSanitizeDualSlabLayerData(
+    VividDualSlabLayerData layerData)
+{
+    layerData.diffuseAlbedo = saturate(layerData.diffuseAlbedo);
+    layerData.specularF0 = saturate(layerData.specularF0);
+    layerData.perceptualRoughness = saturate(layerData.perceptualRoughness);
+    layerData.layerWeight = saturate(layerData.layerWeight);
+    return layerData;
+}
+
+float4 VividPackDualSlabLayerAux0(VividDualSlabLayerData layerData)
+{
+    layerData = VividSanitizeDualSlabLayerData(layerData);
+    return float4(layerData.diffuseAlbedo, layerData.layerWeight);
+}
+
+float4 VividPackDualSlabLayerAux1(VividDualSlabLayerData layerData)
+{
+    layerData = VividSanitizeDualSlabLayerData(layerData);
+    return float4(
+        VividEncodeSurfaceSummarySpecularF0(layerData.specularF0),
+        layerData.perceptualRoughness);
+}
+
+VividDualSlabLayerData VividUnpackDualSlabLayerSidecar(
+    float4 layerAux0,
+    float4 layerAux1)
+{
+    VividDualSlabLayerData layerData;
+    layerData.diffuseAlbedo = saturate(layerAux0.rgb);
+    layerData.layerWeight = saturate(layerAux0.a);
+    layerData.specularF0 = VividDecodeSurfaceSummarySpecularF0(
+        layerAux1.rgb);
+    layerData.perceptualRoughness = saturate(layerAux1.a);
+    return layerData;
+}
+
+bool VividIsDualSlabLayerSidecarValid(float4 layerAux0)
+{
+    // ABI v1 reserves quantized alpha zero as the missing/invalid sentinel.
+    // Resolve exports Dual only above half an R8_UNorm LSB.
+    return layerAux0.a >= VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT;
+}
+
 float4 VividPackSurfaceSummaryDiffuseIrradiance(float3 diffuseIrradiance)
 {
     return float4(max(diffuseIrradiance, 0.0), 0.0);
@@ -223,6 +290,15 @@ VividSurfaceSummaryGBufferOutput VividPackSurfaceSummaryGBuffer(
     output.rt3 = float4(surfaceData.emissive, 0.0);
     output.rt4 = VividPackSurfaceSummaryDiffuseIrradiance(
         surfaceData.diffuseIrradiance);
+    return output;
+}
+
+VividDualSlabLayerSidecarOutput VividPackDualSlabLayerSidecar(
+    VividDualSlabLayerData layerData)
+{
+    VividDualSlabLayerSidecarOutput output;
+    output.rt0 = VividPackDualSlabLayerAux0(layerData);
+    output.rt1 = VividPackDualSlabLayerAux1(layerData);
     return output;
 }
 

@@ -129,6 +129,29 @@ namespace VividRP.Editor.Tests
                 AssertConnected(
                     visibilityNode.GetOutputPortByName("m_VisibilityBuffer_Out"),
                     topology.MaterialDebug.GetInputPortByName("m_VisibilityBuffer"));
+
+                var lightingSubSystem = (RenderGraphSubSystemGraph)
+                    topology.SubSystemNode.GetSubgraph();
+                AssertDualSlabSidecarConnected(
+                    topology.SubSystemNode,
+                    lightingSubSystem,
+                    resolveNode,
+                    topology.Deferred);
+                Assert.That(
+                    RenderGraphStandardOpaqueMigration.Migrate(
+                        graph,
+                        "Assets/Test.vrdg"),
+                    Is.True);
+                Assert.That(
+                    FindPass(
+                        graph.GetNodes().OfType<RenderPassNodeData>(),
+                        typeof(GBufferPass)),
+                    Is.Null);
+                Assert.That(
+                    RenderGraphStandardOpaqueMigration.Migrate(
+                        graph,
+                        "Assets/Test.vrdg"),
+                    Is.False);
             }
             finally
             {
@@ -172,7 +195,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Migrate_ReentersSchema2CurrentTopology_AndConnectsAbiMarkerInput()
+        public void Migrate_ReentersSchema3CurrentTopology_AndConnectsDualSlabSidecar()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
@@ -240,11 +263,11 @@ namespace VividRP.Editor.Tests
                     classificationNode.GetInputPortByName("m_GBuffer1").IsConnected,
                     Is.False);
 
-                graph.SchemaVersion = 2;
+                graph.SchemaVersion = 3;
                 Assert.That(
                     RenderGraphDrawObjectPassMigration.Migrate(
                         graph,
-                        "Assets/Schema2.vrdg"),
+                        "Assets/Schema3.vrdg"),
                     Is.True);
                 Assert.That(
                     graph.SchemaVersion,
@@ -252,6 +275,112 @@ namespace VividRP.Editor.Tests
                 AssertConnected(
                     GetVariableOutput(variables[1]),
                     classificationNode.GetInputPortByName("m_GBuffer1"));
+                AssertDualSlabSidecarConnected(
+                    subSystemNode,
+                    subSystem,
+                    resolveNode,
+                    deferredNode);
+                Assert.That(
+                    RenderGraphStandardOpaqueMigration.Migrate(
+                        graph,
+                        "Assets/Schema3.vrdg"),
+                    Is.False);
+                for (var index = 0; index < 2; index++)
+                {
+                    var variableName = $"LayerAux{index}";
+                    Assert.That(
+                        subSystem.GetVariables().Count(candidate =>
+                            candidate.DataType == typeof(RenderGraphTexture)
+                            && (candidate.Name == variableName
+                                || candidate.Name == $"{variableName} (R)")),
+                        Is.EqualTo(1));
+                }
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Migrate_AddsVariableNodeForExistingDualSlabInput()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var topology = CreateLegacyStandardTopology(graph);
+                var subSystem = (RenderGraphSubSystemGraph)
+                    topology.SubSystemNode.GetSubgraph();
+                var layerAux0Variable = subSystem.CreateVariable(
+                    "LayerAux0 (R)",
+                    typeof(RenderGraphTexture),
+                    new RenderGraphTexture(),
+                    VariableKind.Input);
+                var variableNodes = new List<IVariableNode>();
+                layerAux0Variable.GetNodes(variableNodes);
+                Assert.That(variableNodes, Is.Empty);
+
+                Assert.That(
+                    RenderGraphStandardOpaqueMigration.Migrate(
+                        graph,
+                        "Assets/ExistingInput.vrdg"),
+                    Is.True);
+
+                var resolveNode = FindPass(
+                    graph.GetNodes().OfType<RenderPassNodeData>(),
+                    typeof(VisibilityBufferGBufferResolvePass));
+                AssertDualSlabSidecarConnected(
+                    topology.SubSystemNode,
+                    subSystem,
+                    resolveNode,
+                    topology.Deferred);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Migrate_PreservesConflictingLocalDualSlabVariable()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var topology = CreateLegacyStandardTopology(graph);
+                var subSystem = (RenderGraphSubSystemGraph)
+                    topology.SubSystemNode.GetSubgraph();
+                var localLayerAux0 = subSystem.CreateVariable(
+                    "LayerAux0 (R)",
+                    typeof(RenderGraphTexture),
+                    new RenderGraphTexture(),
+                    VariableKind.Local);
+                subSystem.AddVariableNode(localLayerAux0, default);
+
+                Assert.That(
+                    RenderGraphStandardOpaqueMigration.Migrate(
+                        graph,
+                        "Assets/LocalCollision.vrdg"),
+                    Is.True);
+
+                Assert.That(localLayerAux0.VariableKind, Is.EqualTo(VariableKind.Local));
+                Assert.That(
+                    subSystem.GetVariables().Where(candidate =>
+                        candidate.DataType == typeof(RenderGraphTexture)
+                        && (candidate.Name == "LayerAux0"
+                            || candidate.Name == "LayerAux0 (R)")),
+                    Is.EqualTo(new[] { localLayerAux0 }));
+                Assert.That(
+                    subSystem.GetVariables().Any(candidate =>
+                        candidate.DataType == typeof(RenderGraphTexture)
+                        && (candidate.Name == "LayerAux1"
+                            || candidate.Name == "LayerAux1 (R)")),
+                    Is.False);
+                Assert.That(
+                    topology.Deferred.GetInputPortByName("m_LayerAux0").IsConnected,
+                    Is.False);
             }
             finally
             {
@@ -336,6 +465,25 @@ namespace VividRP.Editor.Tests
                 var deferredDiffuseIrradianceInput = topology.Deferred.GetInputPortByName("m_GBuffer4");
                 var diffuseIrradianceOutput = GetVariableOutput(topology.DiffuseIrradianceVariable);
                 var gBuffer1Output = GetVariableOutput(topology.GBuffer1Variable);
+                var customLayerAux0Variable = subSystem.CreateVariable(
+                    "LayerAux0 (R)",
+                    typeof(RenderGraphTexture),
+                    new RenderGraphTexture(),
+                    VariableKind.Input);
+                subSystem.AddVariableNode(customLayerAux0Variable, default);
+                Assert.That(
+                    RenderGraphSubSystemReflectionUtility.TryGetInputPortForVariable(
+                        topology.SubSystemNode,
+                        customLayerAux0Variable,
+                        out var customLayerAux0InterfaceInput),
+                    Is.True);
+                var legacyGBuffer0Output = topology.GBuffer.GetOutputPortByName("m_GBuffer0");
+                Assert.That(graph.Connect(
+                    legacyGBuffer0Output,
+                    customLayerAux0InterfaceInput), Is.True);
+                Assert.That(subSystem.Connect(
+                    gBuffer1Output,
+                    topology.Deferred.GetInputPortByName("m_LayerAux0")), Is.True);
                 Assert.That(subSystem.Connect(diffuseIrradianceOutput, classificationGBuffer1Input), Is.True);
                 Assert.That(
                     subSystem.Disconnect(diffuseIrradianceOutput, deferredDiffuseIrradianceInput),
@@ -351,6 +499,21 @@ namespace VividRP.Editor.Tests
                 AssertConnected(hzbOutput, debugVisibilityInput);
                 AssertConnected(diffuseIrradianceOutput, classificationGBuffer1Input);
                 AssertConnected(gBuffer1Output, deferredDiffuseIrradianceInput);
+                var resolveNode = FindPass(
+                    graph.GetNodes().OfType<RenderPassNodeData>(),
+                    typeof(VisibilityBufferGBufferResolvePass));
+                Assert.That(
+                    RenderGraphSubSystemReflectionUtility.TryGetInputPortForVariable(
+                        topology.SubSystemNode,
+                        customLayerAux0Variable,
+                        out var refreshedCustomLayerAux0InterfaceInput),
+                    Is.True);
+                AssertConnected(
+                    resolveNode.GetOutputPortByName("m_GBuffer0_Out"),
+                    refreshedCustomLayerAux0InterfaceInput);
+                AssertConnected(
+                    gBuffer1Output,
+                    topology.Deferred.GetInputPortByName("m_LayerAux0"));
             }
             finally
             {
@@ -497,6 +660,35 @@ namespace VividRP.Editor.Tests
             Assert.That(expectedOutput, Is.Not.Null);
             Assert.That(input, Is.Not.Null);
             Assert.That(input.FirstConnectedPort, Is.SameAs(expectedOutput));
+        }
+
+        private static void AssertDualSlabSidecarConnected(
+            ISubgraphNode subSystemNode,
+            RenderGraphSubSystemGraph subSystem,
+            RenderPassNodeData resolveNode,
+            RenderPassNodeData deferredNode)
+        {
+            for (var index = 0; index < 2; index++)
+            {
+                var variableName = $"LayerAux{index}";
+                var variable = subSystem.GetVariables().Single(candidate =>
+                    candidate.VariableKind == VariableKind.Input
+                    && candidate.DataType == typeof(RenderGraphTexture)
+                    && (candidate.Name == variableName
+                        || candidate.Name == $"{variableName} (R)"));
+                Assert.That(
+                    RenderGraphSubSystemReflectionUtility.TryGetInputPortForVariable(
+                        subSystemNode,
+                        variable,
+                        out var interfacePort),
+                    Is.True);
+                AssertConnected(
+                    resolveNode.GetOutputPortByName($"m_LayerAux{index}_Out"),
+                    interfacePort);
+                AssertConnected(
+                    GetVariableOutput(variable),
+                    deferredNode.GetInputPortByName($"m_LayerAux{index}"));
+            }
         }
 
         private sealed class LegacyStandardTopology

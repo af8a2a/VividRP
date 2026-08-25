@@ -35,6 +35,8 @@ namespace VividRP.Editor.Tests
                 "GBuffer2",
                 "GBuffer3",
                 "GTAOTexture",
+                "LayerAux0",
+                "LayerAux1",
                 "ScreenSpaceReflectionOutput",
                 "SkyIBLCubemap"
             }));
@@ -83,6 +85,8 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_GBuffer2", 511, 257);
             AssertTextureSize(pass, "m_GBuffer3", 511, 257);
             AssertTextureSize(pass, "m_GBuffer4", 511, 257);
+            AssertTextureSize(pass, "m_LayerAux0", 1, 1);
+            AssertTextureSize(pass, "m_LayerAux1", 1, 1);
             AssertTextureSize(pass, "m_DepthTexture", 511, 257);
             AssertTextureSize(pass, "m_GTAOTexture", 511, 257);
             AssertTextureSize(pass, "m_ScreenSpaceReflectionTexture", 511, 257);
@@ -116,10 +120,14 @@ namespace VividRP.Editor.Tests
             var gbuffer1Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer1");
             var gbuffer2Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer2");
             var diffuseIrradianceTexture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer4");
+            var layerAux0Texture = GetFieldValue<RenderGraphTexture>(pass, "m_LayerAux0");
+            var layerAux1Texture = GetFieldValue<RenderGraphTexture>(pass, "m_LayerAux1");
             Assert.That(gbuffer0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
             Assert.That(gbuffer1Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
             Assert.That(gbuffer2Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(diffuseIrradianceTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
+            Assert.That(layerAux0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+            Assert.That(layerAux1Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
 
             var skyCubemap = GetFieldValue<RenderGraphTexture>(pass, "m_SkyIBLCubemap");
             Assert.That(skyCubemap.desc.Dimension, Is.EqualTo(TextureDimension.Cube));
@@ -149,10 +157,136 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_ERROR", source);
             StringAssert.Contains("float3(1.0, 0.0, 1.0)", source);
             StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB", source);
             StringAssert.Contains("#pragma kernel DeferredLit_Variant3", source);
             StringAssert.DoesNotContain("#pragma kernel DeferredLit_Variant4", source);
             StringAssert.DoesNotContain("Texture2D<float4> _GBuffer4;", source);
             StringAssert.DoesNotContain("GetMaterialFeatureVariantFlags", source);
+        }
+
+        [Test]
+        public void DeferredShader_ConsumesDualSlabSidecarOnlyForDualPixels()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(DeferredLightingPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Material",
+                "DeferredLit.compute");
+
+            string source = File.ReadAllText(path);
+            string compactSource = string.Concat(
+                source.Where(character => !char.IsWhiteSpace(character)));
+
+            StringAssert.Contains("Texture2D<float4> _LayerAux0;", source);
+            StringAssert.Contains("Texture2D<float4> _LayerAux1;", source);
+            StringAssert.Contains("VividUnpackDualSlabLayerSidecar", source);
+            StringAssert.Contains("VividIsDualSlabLayerSidecarValid", source);
+            StringAssert.Contains("EvaluateDeferredDualSlabLighting", source);
+            StringAssert.Contains("VividDeferredVerticalDirectionalTransmittance", source);
+            StringAssert.Contains("VividDeferredVerticalEnvironmentTransmittance", source);
+            StringAssert.Contains("VividDeferredRecoverMetallicChannel", source);
+            StringAssert.Contains(
+                "if(deferredExportClass==VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)" +
+                "{VividDualSlabLayerDatatopLayer;" +
+                "if(!TryLoadVividDualSlabLayerData(pixelCoord,topLayer))",
+                compactSource);
+            StringAssert.Contains(
+                "_LightingDebugTexture[pixelCoord]=float4(1.0,0.0,1.0,1.0);return;",
+                compactSource);
+            StringAssert.Contains(
+                "coefficient*coefficient-0.16*max(diffuseAlbedo,0.0)",
+                compactSource);
+            StringAssert.Contains(
+                "?lerp(1.0.xxx,environmentTransmittance,layerWeight)" +
+                ":(1.0-layerWeight).xxx;",
+                compactSource);
+            StringAssert.Contains("topWeight=layerWeight.xxx", compactSource);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_FLAG_VERTICAL_LAYER", source);
+        }
+
+        [TestCase(0.75f, 0.0f)]
+        [TestCase(0.50f, 0.5f)]
+        [TestCase(0.80f, 1.0f)]
+        [TestCase(0.00f, 1.0f)]
+        public void DualSlabMetallicRecovery_ReconstructsStandardLitWorkflow(
+            float baseColor,
+            float metallic)
+        {
+            float diffuseAlbedo = baseColor * (1.0f - metallic);
+            float specularF0 = 0.04f * (1.0f - metallic)
+                + baseColor * metallic;
+
+            Assert.That(
+                RecoverDualSlabMetallicChannel(diffuseAlbedo, specularF0),
+                Is.EqualTo(metallic).Within(1e-4f));
+        }
+
+        [Test]
+        public void DualSlabMetallicRecovery_DarkColorAmbiguityIsDielectricBiased()
+        {
+            const float sharedDiffuseAlbedo = 0.006f;
+            const float sharedSpecularF0 = 0.032f;
+
+            Assert.That(
+                RecoverDualSlabMetallicChannel(
+                    sharedDiffuseAlbedo,
+                    sharedSpecularF0),
+                Is.EqualTo(0.25f).Within(1e-4f));
+        }
+
+        [Test]
+        public void Prepare_KeepsLocalDualSlabSidecarFallbacks_WhenGraphDoesNotBindThem()
+        {
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 256;
+            cameraData.actualHeight = 144;
+
+            pass.Prepare(frameData);
+
+            var localLayerAux0 = GetFieldValue<RenderGraphTexture>(pass, "m_LocalLayerAux0");
+            var localLayerAux1 = GetFieldValue<RenderGraphTexture>(pass, "m_LocalLayerAux1");
+            Assert.That(GetFieldValue<RenderGraphTexture>(pass, "m_LayerAux0"), Is.SameAs(localLayerAux0));
+            Assert.That(GetFieldValue<RenderGraphTexture>(pass, "m_LayerAux1"), Is.SameAs(localLayerAux1));
+            Assert.That(localLayerAux0.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(localLayerAux1.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(localLayerAux0.desc.Width, Is.EqualTo(1));
+            Assert.That(localLayerAux0.desc.Height, Is.EqualTo(1));
+            Assert.That(localLayerAux1.desc.Width, Is.EqualTo(1));
+            Assert.That(localLayerAux1.desc.Height, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Prepare_DoesNotResizeBoundDualSlabSidecarInputs()
+        {
+            var pass = new DeferredLightingPass();
+            var layerAux0 = RenderGraphTexture.CreateColorTarget(
+                "ExternalLayerAux0",
+                GraphicsFormat.R8G8B8A8_SRGB);
+            var layerAux1 = RenderGraphTexture.CreateColorTarget(
+                "ExternalLayerAux1",
+                GraphicsFormat.R8G8B8A8_UNorm);
+            layerAux0.desc.Width = 320;
+            layerAux0.desc.Height = 180;
+            layerAux1.desc.Width = 320;
+            layerAux1.desc.Height = 180;
+            SetFieldValue(pass, "m_LayerAux0", layerAux0);
+            SetFieldValue(pass, "m_LayerAux1", layerAux1);
+
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+
+            pass.Prepare(frameData);
+
+            AssertTextureSize(pass, "m_LayerAux0", 320, 180);
+            AssertTextureSize(pass, "m_LayerAux1", 320, 180);
         }
 
         [Test]
@@ -485,6 +619,25 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null, $"Expected private field '{fieldName}' on {nameof(DeferredLightingPass)}.");
             return field;
+        }
+
+        private static float RecoverDualSlabMetallicChannel(
+            float diffuseAlbedo,
+            float specularF0)
+        {
+            float coefficient = Mathf.Max(diffuseAlbedo + specularF0, 0.0f);
+            float discriminant = Mathf.Max(
+                coefficient * coefficient
+                    - 0.16f * Mathf.Max(diffuseAlbedo, 0.0f),
+                0.0f);
+            float root = Mathf.Sqrt(discriminant);
+            float oneMinusMetallicNear = (coefficient - root) * 12.5f;
+            float oneMinusMetallicFar = (coefficient + root) * 12.5f;
+            float oneMinusMetallic = oneMinusMetallicFar
+                    <= 1.0f + (1.0f / 255.0f)
+                ? oneMinusMetallicFar
+                : oneMinusMetallicNear;
+            return 1.0f - Mathf.Clamp01(oneMinusMetallic);
         }
 
     }

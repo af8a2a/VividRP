@@ -35,6 +35,26 @@ namespace VividRP.Editor.RenderGraph
             "m_GBuffer2",
             "m_GBuffer3",
             "m_GBuffer4",
+            "m_LayerAux0",
+            "m_LayerAux1",
+        };
+
+        private static readonly string[] s_LayerAuxVariableNames =
+        {
+            "LayerAux0",
+            "LayerAux1",
+        };
+
+        private static readonly string[] s_LayerAuxResolveOutputFieldNames =
+        {
+            "m_LayerAux0_Out",
+            "m_LayerAux1_Out",
+        };
+
+        private static readonly string[] s_LayerAuxDeferredInputFieldNames =
+        {
+            "m_LayerAux0",
+            "m_LayerAux1",
         };
 
         internal static bool Migrate(RenderGraphEditorGraph graph, string assetPath)
@@ -127,6 +147,12 @@ namespace VividRP.Editor.RenderGraph
 
             if (!hasLegacyGBuffer)
             {
+                changed |= EnsureDualSlabSidecarConnections(
+                    graph,
+                    lightingSubSystemNode,
+                    lightingSubSystem,
+                    resolveNode,
+                    deferredNode);
                 foreach (var legacyResolveNode in legacyResolveNodes)
                 {
                     graph.RemoveNode(legacyResolveNode);
@@ -161,6 +187,13 @@ namespace VividRP.Editor.RenderGraph
 
             if (visibilityNode == null || resolveNode == null)
                 return changed;
+
+            changed |= EnsureDualSlabSidecarConnections(
+                graph,
+                lightingSubSystemNode,
+                lightingSubSystem,
+                resolveNode,
+                deferredNode);
 
             var removeDisconnectedGBuffer = !hasConnectedLegacyGBuffer;
             if (removeDisconnectedGBuffer)
@@ -283,6 +316,105 @@ namespace VividRP.Editor.RenderGraph
 
             if (!removeDisconnectedGBuffer)
                 changed |= DisconnectAllNodePorts(graph, gBufferNode);
+
+            return changed;
+        }
+
+        private static bool EnsureDualSlabSidecarConnections(
+            RenderGraphEditorGraph graph,
+            ISubgraphNode lightingSubSystemNode,
+            RenderGraphSubSystemGraph lightingSubSystem,
+            RenderPassNodeData resolveNode,
+            RenderPassNodeData deferredNode)
+        {
+            if (graph == null
+                || lightingSubSystemNode == null
+                || lightingSubSystem == null
+                || resolveNode == null
+                || deferredNode == null)
+            {
+                return false;
+            }
+
+            var changed = false;
+            var refreshInterfacePorts = false;
+            var variables = new IVariable[s_LayerAuxVariableNames.Length];
+            resolveNode.DefineNode();
+            deferredNode.DefineNode();
+
+            // Preserve custom variables. A same-name Local/Output variable is not
+            // part of the standard interface and must never be repurposed.
+            for (var index = 0; index < s_LayerAuxVariableNames.Length; index++)
+            {
+                var matchingVariables = lightingSubSystem.GetVariables()
+                    .Where(variable =>
+                        variable != null
+                        && variable.DataType == typeof(RenderGraphTexture)
+                        && MatchesVariableName(
+                            variable.Name,
+                            s_LayerAuxVariableNames[index]))
+                    .ToArray();
+                if (matchingVariables.Length > 1
+                    || (matchingVariables.Length == 1
+                        && matchingVariables[0].VariableKind != VariableKind.Input))
+                {
+                    return false;
+                }
+
+                variables[index] = matchingVariables.FirstOrDefault();
+            }
+
+            for (var index = 0; index < variables.Length; index++)
+            {
+                var variable = variables[index];
+                if (variable == null)
+                {
+                    variable = lightingSubSystem.CreateVariable(
+                        $"{s_LayerAuxVariableNames[index]} (R)",
+                        typeof(RenderGraphTexture),
+                        new RenderGraphTexture(),
+                        VariableKind.Local);
+                    variable.VariableKind = VariableKind.Input;
+                    variables[index] = variable;
+                    refreshInterfacePorts = true;
+                    changed = true;
+                }
+
+                if (GetFirstVariableOutput(variable) == null)
+                {
+                    lightingSubSystem.AddVariableNode(variable, default);
+                    changed = true;
+                }
+            }
+
+            if (refreshInterfacePorts
+                && !RenderGraphSubSystemReflectionUtility.TryRefreshPorts(
+                    lightingSubSystemNode))
+            {
+                return changed;
+            }
+
+            for (var index = 0; index < variables.Length; index++)
+            {
+                var variable = variables[index];
+                if (RenderGraphSubSystemReflectionUtility.TryGetInputPortForVariable(
+                        lightingSubSystemNode,
+                        variable,
+                        out var interfacePort))
+                {
+                    changed |= ConnectIfUnconnected(
+                        graph,
+                        resolveNode.GetOutputPortByName(
+                            s_LayerAuxResolveOutputFieldNames[index]),
+                        interfacePort);
+                }
+
+                changed |= ConnectIfUnconnected(
+                    lightingSubSystem,
+                    GetFirstVariableOutput(variable),
+                    deferredNode.GetInputPortByName(
+                        s_LayerAuxDeferredInputFieldNames[index]));
+            }
 
             return changed;
         }

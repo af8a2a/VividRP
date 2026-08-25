@@ -22,6 +22,8 @@ Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
 Texture2D<float4> _GBuffer3;
 Texture2D<float4> _DiffuseIrradiance;
+Texture2D<float4> _LayerAux0;
+Texture2D<float4> _LayerAux1;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _GTAOTexture;
@@ -61,6 +63,16 @@ VividSurfaceSummaryData LoadVividSurfaceSummary(uint2 pixelCoord)
     float4 rt3 = _GBuffer3.Load(int3(pixelCoord, 0));
     float4 rt4 = _DiffuseIrradiance.Load(int3(pixelCoord, 0));
     return VividUnpackSurfaceSummaryGBuffer(rt0, rt1, rt2, rt3, rt4);
+}
+
+bool TryLoadVividDualSlabLayerData(
+    uint2 pixelCoord,
+    out VividDualSlabLayerData layerData)
+{
+    float4 layerAux0 = _LayerAux0.Load(int3(pixelCoord, 0));
+    float4 layerAux1 = _LayerAux1.Load(int3(pixelCoord, 0));
+    layerData = VividUnpackDualSlabLayerSidecar(layerAux0, layerAux1);
+    return VividIsDualSlabLayerSidecarValid(layerAux0);
 }
 
 VividGBufferSurfaceData BuildFastSlabLightingSurfaceData(
@@ -311,6 +323,374 @@ VividLightLoopOutput EvaluateDeferredLitLighting(
         screenSpaceReflectionFGD);
 }
 
+VividDirectLighting ScaleVividDeferredDirectLighting(
+    VividDirectLighting lighting,
+    float3 weight)
+{
+    lighting.diffuse *= weight;
+    lighting.specular *= weight;
+    return lighting;
+}
+
+VividIndirectLighting ScaleVividDeferredIndirectLighting(
+    VividIndirectLighting lighting,
+    float3 weight)
+{
+    lighting.diffuse *= weight;
+    lighting.specularReflected *= weight;
+    return lighting;
+}
+
+float3 VividDeferredFresnelSchlick(float3 specularF0, float cosTheta)
+{
+    float oneMinusCosTheta = 1.0 - saturate(cosTheta);
+    float fresnel = oneMinusCosTheta * oneMinusCosTheta;
+    fresnel *= fresnel * oneMinusCosTheta;
+    return lerp(saturate(specularF0), 1.0, fresnel);
+}
+
+float VividDeferredRecoverMetallicChannel(
+    float diffuseAlbedo,
+    float specularF0)
+{
+    // Standard metallic workflow:
+    // D = C * (1 - M), F0 = 0.04 * (1 - M) + C * M.
+    // Eliminating C gives a quadratic in (1 - M). Prefer the farther
+    // physically-valid root; the nearer root is the pure-metal solution.
+    // ABI v1 is intentionally dielectric-biased in the irreducibly ambiguous
+    // dark-color range where both roots are physically valid (max C <= 0.04).
+    float coefficient = max(diffuseAlbedo + specularF0, 0.0);
+    float discriminant = max(
+        coefficient * coefficient - 0.16 * max(diffuseAlbedo, 0.0),
+        0.0);
+    float root = sqrt(discriminant);
+    float oneMinusMetallicNear = (coefficient - root) * 12.5;
+    float oneMinusMetallicFar = (coefficient + root) * 12.5;
+    float oneMinusMetallic = oneMinusMetallicFar <= 1.0 + (1.0 / 255.0)
+        ? oneMinusMetallicFar
+        : oneMinusMetallicNear;
+    return 1.0 - saturate(oneMinusMetallic);
+}
+
+float VividDeferredTopLayerOpacity(VividDualSlabLayerData topLayer)
+{
+    float maxDiffuseAlbedo = max(
+        topLayer.diffuseAlbedo.x,
+        max(topLayer.diffuseAlbedo.y, topLayer.diffuseAlbedo.z));
+    // D + F0 = C + 0.04 * (1 - M). The largest channel therefore selects
+    // max(C), avoiding the ambiguous secondary root from dark color channels.
+    float3 coefficients = topLayer.diffuseAlbedo + topLayer.specularF0;
+    float diffuseChannel = topLayer.diffuseAlbedo.x;
+    float specularChannel = topLayer.specularF0.x;
+    if (coefficients.y > coefficients.x)
+    {
+        diffuseChannel = topLayer.diffuseAlbedo.y;
+        specularChannel = topLayer.specularF0.y;
+    }
+    if (coefficients.z > max(coefficients.x, coefficients.y))
+    {
+        diffuseChannel = topLayer.diffuseAlbedo.z;
+        specularChannel = topLayer.specularF0.z;
+    }
+    float metallic = VividDeferredRecoverMetallicChannel(
+        diffuseChannel,
+        specularChannel);
+    return saturate(maxDiffuseAlbedo + metallic);
+}
+
+float3 VividDeferredVerticalDirectionalTransmittance(
+    VividSurfaceSummaryData topSummary,
+    VividDualSlabLayerData topLayer,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    float3 viewFresnel = VividDeferredFresnelSchlick(
+        topSummary.specularF0,
+        dot(topSummary.normalWS, viewDirectionWS));
+    float3 lightFresnel = VividDeferredFresnelSchlick(
+        topSummary.specularF0,
+        dot(topSummary.normalWS, lightDirectionWS));
+    return saturate((1.0 - viewFresnel) * (1.0 - lightFresnel))
+        * (1.0 - VividDeferredTopLayerOpacity(topLayer));
+}
+
+float3 VividDeferredVerticalEnvironmentTransmittance(
+    VividDualSlabLayerData topLayer,
+    VividPreLightData topPreLightData)
+{
+    return saturate(1.0 - topPreLightData.specularFGD)
+        * (1.0 - VividDeferredTopLayerOpacity(topLayer));
+}
+
+VividSurfaceSummaryData BuildVividDualSlabTopSummary(
+    VividSurfaceSummaryData baseSummary,
+    VividDualSlabLayerData topLayer)
+{
+    VividSurfaceSummaryData topSummary = baseSummary;
+    topSummary.diffuseAlbedo = topLayer.diffuseAlbedo;
+    topSummary.specularF0 = topLayer.specularF0;
+    topSummary.perceptualRoughness = topLayer.perceptualRoughness;
+    topSummary.emissive = 0.0;
+    return topSummary;
+}
+
+VividLightLoopOutput EvaluateDeferredDualSlabLighting(
+    VividSurfaceSummaryData baseSummary,
+    VividDualSlabLayerData topLayer,
+    uint2 pixelCoord,
+    float3 positionWS,
+    out float3 indirectDiffuseLighting,
+    out float3 indirectSpecularLighting,
+    out float3 screenSpaceReflectionFGD)
+{
+    float layerWeight = saturate(topLayer.layerWeight);
+    bool isVerticalLayer = VividHasDeferredExportFlag(
+        baseSummary.deferredExportHeader,
+        VIVID_DEFERRED_EXPORT_FLAG_VERTICAL_LAYER);
+    baseSummary.emissive = 0.0;
+    VividSurfaceSummaryData topSummary = BuildVividDualSlabTopSummary(
+        baseSummary,
+        topLayer);
+
+    VividGBufferSurfaceData baseSurfaceData =
+        BuildFastSlabLightingSurfaceData(baseSummary);
+    VividGBufferSurfaceData topSurfaceData =
+        BuildFastSlabLightingSurfaceData(topSummary);
+    VividLitBSDFData baseBSDFData = BuildFastSlabBSDFData(baseSummary);
+    VividLitBSDFData topBSDFData = BuildFastSlabBSDFData(topSummary);
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
+    VividPreLightData basePreLightData = GetVividPreLightData(
+        viewDirectionWS,
+        baseSurfaceData,
+        baseBSDFData);
+    VividPreLightData topPreLightData = GetVividPreLightData(
+        viewDirectionWS,
+        topSurfaceData,
+        topBSDFData);
+    VividAggregateLighting baseAggregateLighting = (VividAggregateLighting)0;
+    VividAggregateLighting topAggregateLighting = (VividAggregateLighting)0;
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(
+        pixelCoord,
+        positionWS);
+
+    float3 topWeight = layerWeight.xxx;
+    float3 environmentTransmittance =
+        VividDeferredVerticalEnvironmentTransmittance(
+            topLayer,
+            topPreLightData);
+    float3 baseEnvironmentWeight = isVerticalLayer
+        ? lerp(1.0.xxx, environmentTransmittance, layerWeight)
+        : (1.0 - layerWeight).xxx;
+
+    VividIndirectLighting baseIndirectLighting =
+        EvaluateDeferredReflectionProbeIndirectLighting(
+            lightLoop,
+            EvaluateBSDF_Env(
+                positionWS,
+                viewDirectionWS,
+                basePreLightData,
+                baseSurfaceData,
+                baseBSDFData),
+            baseSurfaceData,
+            baseBSDFData,
+            basePreLightData,
+            positionWS,
+            viewDirectionWS);
+    VividIndirectLighting topIndirectLighting =
+        EvaluateDeferredReflectionProbeIndirectLighting(
+            lightLoop,
+            EvaluateBSDF_Env(
+                positionWS,
+                viewDirectionWS,
+                topPreLightData,
+                topSurfaceData,
+                topBSDFData),
+            topSurfaceData,
+            topBSDFData,
+            topPreLightData,
+            positionWS,
+            viewDirectionWS);
+    AccumulateIndirectLighting(
+        ScaleVividDeferredIndirectLighting(
+            baseIndirectLighting,
+            baseEnvironmentWeight),
+        baseAggregateLighting);
+    AccumulateIndirectLighting(
+        ScaleVividDeferredIndirectLighting(topIndirectLighting, topWeight),
+        topAggregateLighting);
+
+    [loop]
+    for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
+    {
+        DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
+        float shadowAttenuation = EvaluateDeferredDirectionalShadowAttenuation(
+            pixelCoord,
+            lightIndex,
+            directionalLight);
+        float3 baseWeight = isVerticalLayer
+            ? lerp(
+                1.0.xxx,
+                VividDeferredVerticalDirectionalTransmittance(
+                    topSummary,
+                    topLayer,
+                    viewDirectionWS,
+                    SafeNormalize(directionalLight.directionWS)),
+                layerWeight)
+            : (1.0 - layerWeight).xxx;
+        AccumulateDirectLighting(
+            ScaleVividDeferredDirectLighting(
+                EvaluateBSDF_Directional(
+                    baseSurfaceData,
+                    baseBSDFData,
+                    basePreLightData,
+                    viewDirectionWS,
+                    directionalLight,
+                    shadowAttenuation),
+                baseWeight),
+            baseAggregateLighting);
+        AccumulateDirectLighting(
+            ScaleVividDeferredDirectLighting(
+                EvaluateBSDF_Directional(
+                    topSurfaceData,
+                    topBSDFData,
+                    topPreLightData,
+                    viewDirectionWS,
+                    directionalLight,
+                    shadowAttenuation),
+                topWeight),
+            topAggregateLighting);
+    }
+
+    uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    [loop]
+    for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
+    {
+        PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(
+            lightLoop,
+            localLightIndex);
+        float3 lightDirectionWS;
+        float4 lightDistances;
+        GetVividPunctualLightVectors(
+            positionWS,
+            punctualLight,
+            lightDirectionWS,
+            lightDistances);
+        float3 baseWeight = isVerticalLayer
+            ? lerp(
+                1.0.xxx,
+                VividDeferredVerticalDirectionalTransmittance(
+                    topSummary,
+                    topLayer,
+                    viewDirectionWS,
+                    lightDirectionWS),
+                layerWeight)
+            : (1.0 - layerWeight).xxx;
+        AccumulateDirectLighting(
+            ScaleVividDeferredDirectLighting(
+                EvaluateBSDF_Punctual(
+                    baseSurfaceData,
+                    baseBSDFData,
+                    basePreLightData,
+                    positionWS,
+                    viewDirectionWS,
+                    punctualLight),
+                baseWeight),
+            baseAggregateLighting);
+        AccumulateDirectLighting(
+            ScaleVividDeferredDirectLighting(
+                EvaluateBSDF_Punctual(
+                    topSurfaceData,
+                    topBSDFData,
+                    topPreLightData,
+                    positionWS,
+                    viewDirectionWS,
+                    punctualLight),
+                topWeight),
+            topAggregateLighting);
+    }
+
+    uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+    [loop]
+    for (uint localAreaLightIndex = 0;
+        localAreaLightIndex < areaLightCount;
+        localAreaLightIndex++)
+    {
+        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(
+            lightLoop,
+            localAreaLightIndex);
+        AccumulateDirectLighting(
+            ScaleVividDeferredDirectLighting(
+                EvaluateBSDF_Area(
+                    baseSurfaceData,
+                    baseBSDFData,
+                    basePreLightData,
+                    positionWS,
+                    viewDirectionWS,
+                    areaLight),
+                baseEnvironmentWeight),
+            baseAggregateLighting);
+        AccumulateDirectLighting(
+            ScaleVividDeferredDirectLighting(
+                EvaluateBSDF_Area(
+                    topSurfaceData,
+                    topBSDFData,
+                    topPreLightData,
+                    positionWS,
+                    viewDirectionWS,
+                    areaLight),
+                topWeight),
+            topAggregateLighting);
+    }
+
+    VividLightLoopOutput baseLightLoopOutput;
+    VividLightLoopOutput topLightLoopOutput;
+    PostEvaluateBSDF(
+        baseSurfaceData,
+        baseBSDFData,
+        basePreLightData,
+        baseAggregateLighting,
+        baseLightLoopOutput);
+    PostEvaluateBSDF(
+        topSurfaceData,
+        topBSDFData,
+        topPreLightData,
+        topAggregateLighting,
+        topLightLoopOutput);
+
+    VividLightLoopOutput lightLoopOutput;
+    lightLoopOutput.diffuseLighting = max(
+        baseLightLoopOutput.diffuseLighting
+            + topLightLoopOutput.diffuseLighting,
+        0.0);
+    lightLoopOutput.specularLighting = max(
+        baseLightLoopOutput.specularLighting
+            + topLightLoopOutput.specularLighting,
+        0.0);
+    indirectDiffuseLighting = max(
+        baseBSDFData.diffuseColor
+            * baseAggregateLighting.indirect.diffuse
+            + topBSDFData.diffuseColor
+            * topAggregateLighting.indirect.diffuse,
+        0.0);
+    indirectSpecularLighting = max(
+        FinalizeVividSpecularLighting(
+            baseSurfaceData,
+            baseBSDFData,
+            basePreLightData,
+            baseAggregateLighting.indirect.specularReflected)
+            + FinalizeVividSpecularLighting(
+                topSurfaceData,
+                topBSDFData,
+                topPreLightData,
+                topAggregateLighting.indirect.specularReflected),
+        0.0);
+    screenSpaceReflectionFGD = lerp(
+        basePreLightData.specularFGD,
+        topPreLightData.specularFGD,
+        layerWeight);
+    return lightLoopOutput;
+}
+
 [numthreads(8, 8, 1)]
 void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -370,7 +750,8 @@ void DeferredLitVariant(
         return;
     }
 
-    if (deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB)
+    if (deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB
+        && deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
         return;
 
     summary.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));
@@ -380,13 +761,42 @@ void DeferredLitVariant(
     float3 indirectDiffuseLighting;
     float3 indirectSpecularLighting;
     float3 screenSpaceReflectionFGD;
-    VividLightLoopOutput lightLoopOutput = EvaluateDeferredLitLighting(
-        summary,
-        pixelCoord,
-        positionWS,
-        indirectDiffuseLighting,
-        indirectSpecularLighting,
-        screenSpaceReflectionFGD);
+    VividLightLoopOutput lightLoopOutput;
+    UNITY_BRANCH
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
+    {
+        VividDualSlabLayerData topLayer;
+        if (!TryLoadVividDualSlabLayerData(pixelCoord, topLayer))
+        {
+            float3 errorColor = VividApplyPreExposure(
+                float3(1.0, 0.0, 1.0));
+            _LightingTexture[pixelCoord] = float4(errorColor, 1.0);
+            _LightingDebugTexture[pixelCoord] = float4(
+                1.0,
+                0.0,
+                1.0,
+                1.0);
+            return;
+        }
+        lightLoopOutput = EvaluateDeferredDualSlabLighting(
+            summary,
+            topLayer,
+            pixelCoord,
+            positionWS,
+            indirectDiffuseLighting,
+            indirectSpecularLighting,
+            screenSpaceReflectionFGD);
+    }
+    else
+    {
+        lightLoopOutput = EvaluateDeferredLitLighting(
+            summary,
+            pixelCoord,
+            positionWS,
+            indirectDiffuseLighting,
+            indirectSpecularLighting,
+            screenSpaceReflectionFGD);
+    }
     float3 diffuseLighting = VividApplyPreExposure(max(lightLoopOutput.diffuseLighting, 0.0));
     float3 specularLighting = VividApplyPreExposure(max(lightLoopOutput.specularLighting, 0.0));
     float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord, summary);

@@ -179,6 +179,7 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_SSR", source);
             StringAssert.DoesNotContain("VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_DECALS", source);
             StringAssert.DoesNotContain("VIVID_DEFERRED_EXPORT_FLAG_HAS_DIFFUSE_IRRADIANCE", source);
+            StringAssert.DoesNotContain("_LayerAux", source);
         }
 
         [Test]

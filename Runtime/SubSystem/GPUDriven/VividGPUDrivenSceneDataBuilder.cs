@@ -218,6 +218,10 @@ namespace VividRP.Runtime.GPUDriven
             catch
             {
                 bindingLifecycle?.CancelSurfaceBindingUpdate();
+                // Renderability and scene buffers may already reflect the failed
+                // attempt while dependency snapshots are committed only below.
+                // Force the next frame through a complete rebuild.
+                m_HasBuiltStaticData = false;
                 throw;
             }
 
@@ -254,7 +258,8 @@ namespace VividRP.Runtime.GPUDriven
                 || m_PreviousDatabaseStructureRevision != database.StructureRevision
                 || m_PreviousDatabaseResourceRevision != database.ResourceRevision
                 || m_PreviousDatabaseInstanceRevision != database.InstanceRevision
-                || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision)
+                || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision
+                || HaveRendererRenderabilityChanged(database))
             {
                 return false;
             }
@@ -262,6 +267,29 @@ namespace VividRP.Runtime.GPUDriven
             return !HaveTrackedMeshletAssetsChanged()
                 && !HaveTrackedMaterialProxiesChanged(textureBackend)
                 && !HaveTrackedTerrainDataChanged();
+        }
+
+        private bool HaveRendererRenderabilityChanged(
+            VividMeshletRendererDatabase database)
+        {
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+            IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            if (rendererCount != m_RendererRenderability.Count)
+            {
+                return true;
+            }
+
+            for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                if (m_RendererRenderability[rendererIndex]
+                    != IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool HaveTrackedMeshletAssetsChanged()
@@ -802,6 +830,22 @@ namespace VividRP.Runtime.GPUDriven
                 }
 
                 return hasGeometry;
+            }
+
+            GPUDrivenMaterialProxy[] materialProxies = trackedResources.MaterialProxies;
+            if (materialProxies != null)
+            {
+                for (int proxyIndex = 0; proxyIndex < materialProxies.Length; proxyIndex++)
+                {
+                    GPUDrivenMaterialProxy materialProxy = materialProxies[proxyIndex];
+                    if (materialProxy != null
+                        && !GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                            materialProxy,
+                            out _))
+                    {
+                        return false;
+                    }
+                }
             }
 
             return true;
@@ -1427,10 +1471,20 @@ namespace VividRP.Runtime.GPUDriven
                     GPUDrivenMaterialProxy topSlab = definition != null
                         ? definition.TopSlab
                         : null;
-                    if (topSlab != null && !ReferenceEquals(topSlab, materialProxy))
+                    if (topSlab != null
+                        && GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                            materialProxy,
+                            out _))
                     {
                         hash = (hash ^ ComputeMaterialProxyRevision(topSlab, textureBackend))
                                * 16777619u;
+                    }
+                    else if (topSlab != null)
+                    {
+                        // Invalid nested/self-referential topology must remain
+                        // hashable so validation can report it without recursing.
+                        hash = (hash ^ GetObjectRevisionId(topSlab)) * 16777619u;
+                        hash = (hash ^ topSlab.Revision) * 16777619u;
                     }
                 }
                 return hash;

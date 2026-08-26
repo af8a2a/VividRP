@@ -70,9 +70,13 @@ namespace VividRP.Editor.Tests
                 GPUDrivenMaterialProxyBindingResult result = GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
 
                 Assert.That(result.Success, Is.True);
-                Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Not.Null);
+                GPUDrivenMaterialProxy generatedProxy = meshletRenderer.GetMaterialProxy(0);
+                Assert.That(generatedProxy, Is.Not.Null);
                 Assert.That(
-                    AssetDatabase.GetAssetPath(meshletRenderer.GetMaterialProxy(0)),
+                    generatedProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.StandardLit));
+                Assert.That(
+                    AssetDatabase.GetAssetPath(generatedProxy),
                     Is.EqualTo(
                         $"{meshGeneratedProxyFolder}/PersistentMaterial_{materialIdentifier}_GPUDriven.asset")
                 );
@@ -88,6 +92,70 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void CreateOrBindMaterialProxies_PersistsProxyAndSourceMaterialThroughPrefabRoundtrip()
+        {
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            string meshPath = TempFolder + "/PrefabMesh.asset";
+            string materialPath = TempFolder + "/PrefabMaterial.mat";
+            string prefabPath = TempFolder + "/MeshletRenderer.prefab";
+            Mesh mesh = CreateSingleSubMeshMesh("PrefabMesh");
+            AssetDatabase.CreateAsset(mesh, meshPath);
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            var material = new Material(shader);
+            AssetDatabase.CreateAsset(material, materialPath);
+            material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+            GameObject gameObject = null;
+            GameObject prefabContents = null;
+
+            try
+            {
+                gameObject = CreateMeshletRendererObject(
+                    "PrefabMeshletRenderer",
+                    mesh,
+                    material,
+                    out MeshletRenderer meshletRenderer);
+                GPUDrivenMaterialProxyBindingResult bindingResult =
+                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(
+                        meshletRenderer);
+                GPUDrivenMaterialProxy materialProxy =
+                    meshletRenderer.GetMaterialProxy(0);
+                Assert.That(bindingResult.Success, Is.True, bindingResult.ErrorMessage);
+                Assert.That(materialProxy, Is.Not.Null);
+                Assert.That(materialProxy.SourceMaterial, Is.SameAs(material));
+
+                GameObject savedPrefab = PrefabUtility.SaveAsPrefabAsset(
+                    gameObject,
+                    prefabPath);
+                Assert.That(savedPrefab, Is.Not.Null);
+                Object.DestroyImmediate(gameObject);
+                gameObject = null;
+
+                prefabContents = PrefabUtility.LoadPrefabContents(prefabPath);
+                MeshletRenderer reloadedRenderer =
+                    prefabContents.GetComponent<MeshletRenderer>();
+                Assert.That(reloadedRenderer, Is.Not.Null);
+                Assert.That(reloadedRenderer.GetMaterialProxy(0), Is.SameAs(materialProxy));
+                Assert.That(
+                    reloadedRenderer.GetMaterialProxy(0).SourceMaterial,
+                    Is.SameAs(material));
+            }
+            finally
+            {
+                if (prefabContents != null)
+                {
+                    PrefabUtility.UnloadPrefabContents(prefabContents);
+                }
+
+                if (gameObject != null)
+                {
+                    Object.DestroyImmediate(gameObject);
+                }
             }
         }
 
@@ -117,8 +185,37 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(result.Success, Is.True, result.ErrorMessage);
                 Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Null);
-                Assert.That(meshletRenderer.GetMaterialProxy(1), Is.Not.Null);
-                Assert.That(meshletRenderer.GetMaterialProxy(1).SourceMaterial, Is.SameAs(material1));
+                GPUDrivenMaterialProxy materialProxy = meshletRenderer.GetMaterialProxy(1);
+                Assert.That(materialProxy, Is.Not.Null);
+                Assert.That(materialProxy.SourceMaterial, Is.SameAs(material1));
+
+                var topSlab = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                AssetDatabase.CreateAsset(topSlab, TempFolder + "/SingleSlotTopSlab.asset");
+                var definition =
+                    ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+                definition.TopSlab = topSlab;
+                AssetDatabase.CreateAsset(
+                    definition,
+                    TempFolder + "/SingleSlotDualSlabDefinition.asset");
+                materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                materialProxy.DualSlabDefinition = definition;
+                materialProxy.LayerWeight = 0.25f;
+                EditorUtility.SetDirty(materialProxy);
+                AssetDatabase.SaveAssetIfDirty(materialProxy);
+
+                GPUDrivenMaterialProxyBindingResult reboundResult =
+                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxy(
+                        meshletRenderer,
+                        1);
+
+                Assert.That(reboundResult.Success, Is.True, reboundResult.ErrorMessage);
+                Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Null);
+                Assert.That(meshletRenderer.GetMaterialProxy(1), Is.SameAs(materialProxy));
+                Assert.That(
+                    materialProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.DualSlab));
+                Assert.That(materialProxy.DualSlabDefinition, Is.SameAs(definition));
+                Assert.That(materialProxy.LayerWeight, Is.EqualTo(0.25f).Within(0.0001f));
             }
             finally
             {
@@ -145,9 +242,17 @@ namespace VividRP.Editor.Tests
 
             GameObject gameObject = CreateMeshletRendererObject("SyncRenderer", mesh, material, out MeshletRenderer meshletRenderer);
             GPUDrivenMaterialProxy materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            GPUDrivenMaterialProxy topSlab =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            GPUDrivenDualSlabMaterialDefinition definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
 
             try
             {
+                definition.TopSlab = topSlab;
+                materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                materialProxy.DualSlabDefinition = definition;
+                materialProxy.LayerWeight = 0.4f;
                 meshletRenderer.SetMaterialProxies(new[] { materialProxy });
 
                 GPUDrivenMaterialProxySyncResult result =
@@ -158,9 +263,16 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialProxy.BaseColor.r, Is.EqualTo(0.2f).Within(0.0001f));
                 Assert.That(materialProxy.Metallic, Is.EqualTo(0.7f).Within(0.0001f));
                 Assert.That(materialProxy.Roughness, Is.EqualTo(0.9f).Within(0.0001f));
+                Assert.That(
+                    materialProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.DualSlab));
+                Assert.That(materialProxy.DualSlabDefinition, Is.SameAs(definition));
+                Assert.That(materialProxy.LayerWeight, Is.EqualTo(0.4f).Within(0.0001f));
             }
             finally
             {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topSlab);
                 Object.DestroyImmediate(materialProxy);
                 Object.DestroyImmediate(gameObject);
                 Object.DestroyImmediate(material);
@@ -169,7 +281,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AutoSync_SynchronizesIndexedProxyAndSkipsUnchangedMaterial()
+        public void AutoSync_PreservesPersistentDualTopologyAcrossForcedReimportAndSkipsUnchangedMaterial()
         {
             Shader shader = Shader.Find("VividRP/Material/StandardLit");
             if (shader == null)
@@ -179,16 +291,30 @@ namespace VividRP.Editor.Tests
 
             string materialPath = TempFolder + "/AutoSyncSource.mat";
             string proxyPath = TempFolder + "/AutoSyncProxy.asset";
+            string topSlabPath = TempFolder + "/AutoSyncTopSlab.asset";
+            string definitionPath = TempFolder + "/AutoSyncDualSlabDefinition.asset";
             var sourceMaterial = new Material(shader);
             AssetDatabase.CreateAsset(sourceMaterial, materialPath);
             sourceMaterial = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
 
+            var topSlab = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            AssetDatabase.CreateAsset(topSlab, topSlabPath);
+            topSlab = AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(topSlabPath);
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            definition.TopSlab = topSlab;
+            definition.Operator = VividDualSlabOperator.VerticalLayer;
+            AssetDatabase.CreateAsset(definition, definitionPath);
+            definition = AssetDatabase.LoadAssetAtPath<GPUDrivenDualSlabMaterialDefinition>(
+                definitionPath);
             var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
             materialProxy.SourceMaterial = sourceMaterial;
+            materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+            materialProxy.DualSlabDefinition = definition;
+            materialProxy.LayerWeight = 0.45f;
             AssetDatabase.CreateAsset(materialProxy, proxyPath);
             materialProxy = AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(proxyPath);
 
-            GPUDrivenMaterialProxyAutoSyncService.ResetForTests();
             try
             {
                 GPUDrivenMaterialProxyAutoSyncService.IndexProxyForTests(materialProxy);
@@ -215,6 +341,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialProxy.SmoothnessRemap, Is.EqualTo(new Vector2(0.2f, 0.9f)));
                 Assert.That(materialProxy.AmbientOcclusionRemap, Is.EqualTo(new Vector2(0.3f, 0.7f)));
                 Assert.That(EditorUtility.IsDirty(materialProxy), Is.True);
+                Assert.That(
+                    materialProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.DualSlab));
+                Assert.That(materialProxy.DualSlabDefinition, Is.SameAs(definition));
+                Assert.That(materialProxy.LayerWeight, Is.EqualTo(0.45f).Within(0.0001f));
 
                 changedProxyCount = GPUDrivenMaterialProxyAutoSyncService.SynchronizeMaterialNowForTests(
                     sourceMaterial,
@@ -222,10 +353,121 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(changedProxyCount, Is.Zero);
                 Assert.That(materialProxy.Revision, Is.EqualTo(synchronizedRevision));
+                Assert.That(
+                    materialProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.DualSlab));
+                Assert.That(materialProxy.DualSlabDefinition, Is.SameAs(definition));
+                Assert.That(materialProxy.LayerWeight, Is.EqualTo(0.45f).Within(0.0001f));
+
+                GPUDrivenMaterialProxyAutoSyncService.FlushPendingProxySavesForTests();
+                Assert.That(EditorUtility.IsDirty(materialProxy), Is.False);
+                AssetDatabase.ImportAsset(
+                    topSlabPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+                AssetDatabase.ImportAsset(
+                    definitionPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+                AssetDatabase.ImportAsset(
+                    proxyPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+
+                GPUDrivenMaterialProxy reloadedTopSlab =
+                    AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(topSlabPath);
+                GPUDrivenDualSlabMaterialDefinition reloadedDefinition =
+                    AssetDatabase.LoadAssetAtPath<GPUDrivenDualSlabMaterialDefinition>(definitionPath);
+                GPUDrivenMaterialProxy reloadedProxy =
+                    AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(proxyPath);
+                Assert.That(reloadedTopSlab, Is.Not.Null);
+                Assert.That(reloadedDefinition, Is.Not.Null);
+                Assert.That(reloadedProxy, Is.Not.Null);
+                Assert.That(
+                    reloadedTopSlab.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.StandardLit));
+                Assert.That(reloadedDefinition.TopSlab, Is.SameAs(reloadedTopSlab));
+                Assert.That(
+                    reloadedDefinition.Operator,
+                    Is.EqualTo(VividDualSlabOperator.VerticalLayer));
+                Assert.That(
+                    reloadedProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.DualSlab));
+                Assert.That(reloadedProxy.DualSlabDefinition, Is.SameAs(reloadedDefinition));
+                Assert.That(reloadedProxy.LayerWeight, Is.EqualTo(0.45f).Within(0.0001f));
+                Assert.That(reloadedProxy.BaseColor.r, Is.EqualTo(0.15f).Within(0.0001f));
             }
             finally
             {
-                GPUDrivenMaterialProxyAutoSyncService.ResetForTests(requestIndexRebuild: true);
+                GPUDrivenMaterialProxyAutoSyncService.FlushPendingProxySavesForTests();
+            }
+        }
+
+        [Test]
+        public void AutoSync_RebuildIndexRecoversPendingMaterialLostAcrossReload()
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            if (shader == null)
+            {
+                Assert.Ignore("VividRP/Material/StandardLit shader is not available.");
+            }
+
+            string materialPath = TempFolder + "/ReloadSource.mat";
+            string proxyPath = TempFolder + "/ReloadProxy.asset";
+            var sourceMaterial = new Material(shader);
+            AssetDatabase.CreateAsset(sourceMaterial, materialPath);
+            sourceMaterial = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            materialProxy.SourceMaterial = sourceMaterial;
+            AssetDatabase.CreateAsset(materialProxy, proxyPath);
+            materialProxy = AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(proxyPath);
+
+            try
+            {
+                var expectedBaseColor = new Color(0.2f, 0.4f, 0.6f, 1.0f);
+                sourceMaterial.SetColor("_BaseColor", expectedBaseColor);
+                EditorUtility.SetDirty(sourceMaterial);
+                AssetDatabase.SaveAssetIfDirty(sourceMaterial);
+
+                GPUDrivenMaterialProxyAutoSyncService.FlushPendingProxySavesForTests();
+                GPUDrivenMaterialProxyAutoSyncService.QueueMaterial(sourceMaterial);
+                GPUDrivenMaterialProxyAutoSyncService.ResetForTests(
+                    requestIndexRebuild: true,
+                    requeueAllSourceMaterials: true);
+                GPUDrivenMaterialProxyAutoSyncService
+                    .RebuildIndexAndSynchronizeForTests(TempFolder);
+
+                Assert.That(
+                    materialProxy.BaseColor.r,
+                    Is.EqualTo(expectedBaseColor.r).Within(0.0001f));
+                Assert.That(
+                    materialProxy.BaseColor.g,
+                    Is.EqualTo(expectedBaseColor.g).Within(0.0001f));
+                Assert.That(
+                    materialProxy.BaseColor.b,
+                    Is.EqualTo(expectedBaseColor.b).Within(0.0001f));
+                GPUDrivenMaterialProxyAutoSyncService.FlushPendingProxySavesForTests();
+                Assert.That(EditorUtility.IsDirty(materialProxy), Is.False);
+
+                AssetDatabase.ImportAsset(
+                    proxyPath,
+                    ImportAssetOptions.ForceSynchronousImport
+                    | ImportAssetOptions.ForceUpdate);
+                GPUDrivenMaterialProxy reloadedProxy =
+                    AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(proxyPath);
+                Assert.That(reloadedProxy, Is.Not.Null);
+                Assert.That(
+                    reloadedProxy.BaseColor.r,
+                    Is.EqualTo(expectedBaseColor.r).Within(0.0001f));
+                Assert.That(
+                    reloadedProxy.BaseColor.g,
+                    Is.EqualTo(expectedBaseColor.g).Within(0.0001f));
+                Assert.That(
+                    reloadedProxy.BaseColor.b,
+                    Is.EqualTo(expectedBaseColor.b).Within(0.0001f));
+            }
+            finally
+            {
+                GPUDrivenMaterialProxyAutoSyncService.ResetForTests(
+                    requestIndexRebuild: true,
+                    requeueAllSourceMaterials: true);
             }
         }
 
@@ -299,6 +541,22 @@ namespace VividRP.Editor.Tests
                 Assert.That(firstResult.Success, Is.True, firstResult.ErrorMessage);
                 Assert.That(materialProxy, Is.Not.Null);
                 Assert.That(materialProxy.SourceMaterial, Is.SameAs(firstMaterial));
+                var topSlab = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                string topSlabPath = TempFolder + "/ReboundTopSlab.asset";
+                AssetDatabase.CreateAsset(topSlab, topSlabPath);
+                topSlab = AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(topSlabPath);
+                var definition =
+                    ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+                definition.TopSlab = topSlab;
+                string definitionPath = TempFolder + "/ReboundDualSlabDefinition.asset";
+                AssetDatabase.CreateAsset(definition, definitionPath);
+                definition = AssetDatabase.LoadAssetAtPath<GPUDrivenDualSlabMaterialDefinition>(
+                    definitionPath);
+                materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                materialProxy.DualSlabDefinition = definition;
+                materialProxy.LayerWeight = 0.6f;
+                EditorUtility.SetDirty(materialProxy);
+                AssetDatabase.SaveAssetIfDirty(materialProxy);
 
                 meshletRenderer.SetSourceMaterials(new[] { secondMaterial });
                 GPUDrivenMaterialProxyBindingResult secondResult =
@@ -307,6 +565,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(secondResult.Success, Is.True, secondResult.ErrorMessage);
                 Assert.That(meshletRenderer.GetMaterialProxy(0), Is.SameAs(materialProxy));
                 Assert.That(materialProxy.SourceMaterial, Is.SameAs(secondMaterial));
+                Assert.That(
+                    materialProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.DualSlab));
+                Assert.That(materialProxy.DualSlabDefinition, Is.SameAs(definition));
+                Assert.That(materialProxy.LayerWeight, Is.EqualTo(0.6f).Within(0.0001f));
             }
             finally
             {

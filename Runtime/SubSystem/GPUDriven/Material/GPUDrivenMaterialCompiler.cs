@@ -79,6 +79,70 @@ namespace VividRP.Runtime.GPUDriven
             return s_MaterialProgramCatalog.CreateRuntimeProgramTable();
         }
 
+        internal static bool TryValidateMaterialProxy(
+            GPUDrivenMaterialProxy materialProxy,
+            out string validationMessage)
+        {
+            if (materialProxy == null)
+            {
+                validationMessage = "GPU-driven material proxy is null.";
+                return false;
+            }
+
+            switch (materialProxy.Model)
+            {
+                case GPUDrivenMaterialProxyModel.StandardLit:
+                    validationMessage = string.Empty;
+                    return true;
+                case GPUDrivenMaterialProxyModel.DualSlab:
+                    break;
+                default:
+                    validationMessage =
+                        $"GPU-driven material model '{materialProxy.Model}' is not supported.";
+                    return false;
+            }
+
+            GPUDrivenDualSlabMaterialDefinition definition =
+                materialProxy.DualSlabDefinition;
+            if (definition == null)
+            {
+                validationMessage = "Dual Slab materials require a definition.";
+                return false;
+            }
+
+            GPUDrivenMaterialProxy topSlab = definition.TopSlab;
+            if (topSlab == null)
+            {
+                validationMessage =
+                    "Dual Slab definitions require a StandardLit top-slab proxy.";
+                return false;
+            }
+            if (ReferenceEquals(topSlab, materialProxy))
+            {
+                validationMessage =
+                    "Dual Slab definitions cannot use the base proxy as their top Slab.";
+                return false;
+            }
+            if (topSlab.Model != GPUDrivenMaterialProxyModel.StandardLit)
+            {
+                validationMessage =
+                    "Dual Slab definitions require a StandardLit top-slab proxy; nested Dual Slab topology is not supported.";
+                return false;
+            }
+
+            switch (definition.Operator)
+            {
+                case VividDualSlabOperator.HorizontalMix:
+                case VividDualSlabOperator.VerticalLayer:
+                    validationMessage = string.Empty;
+                    return true;
+                default:
+                    validationMessage =
+                        $"Dual Slab operator '{definition.Operator}' is not supported.";
+                    return false;
+            }
+        }
+
         private static MaterialProgramCatalog CreateBuiltinProgramCatalog()
         {
             MaterialProgramTemplateRegistry templates =
@@ -184,18 +248,14 @@ namespace VividRP.Runtime.GPUDriven
                 throw new NotSupportedException(
                     $"GPU-driven material model '{materialProxy.Model}' is not supported by Dual Slab programs.");
             }
+            if (!TryValidateMaterialProxy(materialProxy, out string validationMessage))
+            {
+                throw new InvalidOperationException(validationMessage);
+            }
 
             GPUDrivenDualSlabMaterialDefinition definition =
                 materialProxy.DualSlabDefinition;
-            if (definition == null)
-                throw new InvalidOperationException("Dual Slab materials require a definition.");
-
             GPUDrivenMaterialProxy topSlab = definition.TopSlab;
-            if (topSlab == null || topSlab.Model != GPUDrivenMaterialProxyModel.StandardLit)
-            {
-                throw new InvalidOperationException(
-                    "Dual Slab definitions require a StandardLit top-slab proxy.");
-            }
             MaterialProgramCatalog.ManifestEntry materialProgram =
                 GetDualSlabProgram(definition.Operator);
 

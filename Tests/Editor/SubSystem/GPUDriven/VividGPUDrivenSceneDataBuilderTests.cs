@@ -275,6 +275,96 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_CullsRendererWhenBoundProxyBecomesInvalidAndRestoresWhenValid()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("DynamicProxyValidationMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "DynamicProxyValidationCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 });
+                gameObject = CreateMeshletRendererObject(
+                    "DynamicProxyValidationRenderer",
+                    mesh,
+                    new[] { material },
+                    out MeshletRenderer meshletRenderer);
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase database =
+                    VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new ThrowOnceTextureBackend();
+
+                builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend);
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+
+                materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                Assert.That(
+                    database.TryGetRendererData(
+                        meshletRenderer,
+                        out VividMeshletRendererRenderData staleRendererData),
+                    Is.True);
+                Assert.That(
+                    staleRendererData.flags & VividMeshletRendererFlags.Valid,
+                    Is.EqualTo(VividMeshletRendererFlags.Valid));
+
+                Assert.DoesNotThrow(() => builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend));
+                Assert.That(sceneData.InstanceCount, Is.Zero);
+
+                materialProxy.Model = GPUDrivenMaterialProxyModel.StandardLit;
+                textureBackend.ThrowOnNextSurfaceBinding = true;
+
+                Assert.Throws<InvalidOperationException>(() => builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend));
+
+                Assert.DoesNotThrow(() => builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend));
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                DestroyTestObjects(
+                    gameObject,
+                    null,
+                    material,
+                    mesh,
+                    meshletCollection,
+                    materialProxy);
+            }
+        }
+
+        [Test]
         public void PrimitiveSceneAdapter_BuildsRendererSectionsBridgeAndIncrementalTransformUpdate()
         {
             GameObject gameObject = null;
@@ -2591,7 +2681,7 @@ namespace VividRP.Editor.Tests
                 return false;
             }
 
-            public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
+            public virtual VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
             {
                 CreateSurfaceBindingCallCount++;
                 LastTextures = textures;
@@ -2605,6 +2695,23 @@ namespace VividRP.Editor.Tests
 
             public void Dispose()
             {
+            }
+        }
+
+        private sealed class ThrowOnceTextureBackend : CapturingTextureBackend
+        {
+            internal bool ThrowOnNextSurfaceBinding { get; set; }
+
+            public override VividSurfaceBindingData CreateSurfaceBinding(
+                in GPUDrivenSurfaceTextureSet textures)
+            {
+                if (ThrowOnNextSurfaceBinding)
+                {
+                    ThrowOnNextSurfaceBinding = false;
+                    throw new InvalidOperationException("Intentional surface binding failure.");
+                }
+
+                return base.CreateSurfaceBinding(textures);
             }
         }
 

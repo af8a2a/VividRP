@@ -32,6 +32,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Model_DefaultsToStandardLit()
+        {
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+
+            try
+            {
+                Assert.That(
+                    materialProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.StandardLit));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+            }
+        }
+
+        [Test]
         public void StreamedVirtualTexture_SwitchesToVirtualTextureAndClearsRawMapsButKeepsCommonData()
         {
             var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -282,6 +299,62 @@ namespace VividRP.Editor.Tests
                 if (maskMap != null)
                 {
                     Object.DestroyImmediate(maskMap);
+                }
+            }
+        }
+
+        [Test]
+        public void SyncFromSourceMaterial_PreservesDualSlabTopologyAndUpdatesBasePayload()
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            if (shader == null)
+            {
+                Assert.Ignore("VividRP/Material/StandardLit shader is not available.");
+            }
+
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topSlab = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            Material material = null;
+
+            try
+            {
+                material = new Material(shader);
+                material.SetColor("_BaseColor", new Color(0.3f, 0.5f, 0.7f, 1.0f));
+                material.SetFloat("_Metallic", 0.65f);
+                material.SetFloat("_Smoothness", 0.2f);
+                definition.TopSlab = topSlab;
+                materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                materialProxy.DualSlabDefinition = definition;
+                materialProxy.LayerWeight = 0.35f;
+
+                GPUDrivenMaterialProxySyncResult result =
+                    materialProxy.SyncFromSourceMaterial(material);
+
+                Assert.That(result.Success, Is.True, result.ErrorMessage);
+                Assert.That(result.Changed, Is.True);
+                Assert.That(materialProxy.SourceMaterial, Is.SameAs(material));
+                Assert.That(
+                    materialProxy.Model,
+                    Is.EqualTo(GPUDrivenMaterialProxyModel.DualSlab));
+                Assert.That(materialProxy.DualSlabDefinition, Is.SameAs(definition));
+                Assert.That(materialProxy.LayerWeight, Is.EqualTo(0.35f).Within(0.0001f));
+                Assert.That(materialProxy.BaseColor.r, Is.EqualTo(0.3f).Within(0.0001f));
+                Assert.That(materialProxy.BaseColor.g, Is.EqualTo(0.5f).Within(0.0001f));
+                Assert.That(materialProxy.BaseColor.b, Is.EqualTo(0.7f).Within(0.0001f));
+                Assert.That(materialProxy.Metallic, Is.EqualTo(0.65f).Within(0.0001f));
+                Assert.That(materialProxy.Roughness, Is.EqualTo(0.8f).Within(0.0001f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topSlab);
+
+                if (material != null)
+                {
+                    Object.DestroyImmediate(material);
                 }
             }
         }

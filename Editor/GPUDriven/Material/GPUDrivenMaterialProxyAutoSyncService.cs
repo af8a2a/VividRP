@@ -23,6 +23,7 @@ namespace VividRP.Editor.GPUDriven
         private static readonly Dictionary<EntityId, GPUDrivenMaterialProxy> s_PendingProxySaves = new();
 
         private static bool s_IndexRebuildRequested = true;
+        private static bool s_RequeueAllSourceMaterialsOnIndexRebuild = true;
         private static double s_VirtualTextureRefreshTime = double.PositiveInfinity;
         private static double s_ProxySaveTime = double.PositiveInfinity;
 
@@ -122,7 +123,9 @@ namespace VividRP.Editor.GPUDriven
             IndexProxy(materialProxy, queueSourceMaterial: false);
         }
 
-        internal static void ResetForTests(bool requestIndexRebuild = false)
+        internal static void ResetForTests(
+            bool requestIndexRebuild = false,
+            bool requeueAllSourceMaterials = false)
         {
             ClearIndex();
             s_PendingMaterialIds.Clear();
@@ -130,8 +133,21 @@ namespace VividRP.Editor.GPUDriven
             s_PendingVirtualTextureRefreshes.Clear();
             s_PendingProxySaves.Clear();
             s_IndexRebuildRequested = requestIndexRebuild;
+            s_RequeueAllSourceMaterialsOnIndexRebuild =
+                requestIndexRebuild && requeueAllSourceMaterials;
             s_VirtualTextureRefreshTime = double.PositiveInfinity;
             s_ProxySaveTime = double.PositiveInfinity;
+        }
+
+        internal static void FlushPendingProxySavesForTests()
+        {
+            ProcessPendingProxySaves();
+        }
+
+        internal static void RebuildIndexAndSynchronizeForTests(string searchFolder)
+        {
+            RebuildIndex(new[] { searchFolder });
+            ProcessPendingMaterials();
         }
 
         private static void OnChangesPublished(ref ObjectChangeEventStream stream)
@@ -346,15 +362,28 @@ namespace VividRP.Editor.GPUDriven
 
         private static void RebuildIndex()
         {
+            RebuildIndex(null);
+        }
+
+        private static void RebuildIndex(string[] searchFolders)
+        {
             s_IndexRebuildRequested = false;
+            bool requeueSourceMaterials = s_RequeueAllSourceMaterialsOnIndexRebuild;
+            s_RequeueAllSourceMaterialsOnIndexRebuild = false;
             ClearIndex();
-            string[] proxyGuids = AssetDatabase.FindAssets($"t:{nameof(GPUDrivenMaterialProxy)}");
+            string filter = $"t:{nameof(GPUDrivenMaterialProxy)}";
+            string[] proxyGuids = searchFolders is { Length: > 0 }
+                ? AssetDatabase.FindAssets(filter, searchFolders)
+                : AssetDatabase.FindAssets(filter);
             for (int guidIndex = 0; guidIndex < proxyGuids.Length; guidIndex++)
             {
                 string proxyPath = AssetDatabase.GUIDToAssetPath(proxyGuids[guidIndex]);
                 GPUDrivenMaterialProxy materialProxy =
                     AssetDatabase.LoadAssetAtPath<GPUDrivenMaterialProxy>(proxyPath);
-                IndexProxy(materialProxy, queueSourceMaterial: false);
+                // The first rebuild after a domain reload reconstructs work that
+                // was held only in memory. Ordinary import-driven rebuilds keep
+                // their precise material queue instead of resyncing every asset.
+                IndexProxy(materialProxy, requeueSourceMaterials);
             }
         }
 
@@ -442,6 +471,7 @@ namespace VividRP.Editor.GPUDriven
 
         private static void OnBeforeAssemblyReload()
         {
+            ProcessPendingProxySaves();
             ObjectChangeEvents.changesPublished -= OnChangesPublished;
             EditorApplication.update -= OnEditorUpdate;
             AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;

@@ -317,6 +317,175 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TryValidateMaterialProxy_AcceptsStandardAndBothDualSlabOperators()
+        {
+            var standardProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        standardProxy,
+                        out string standardValidationMessage),
+                    Is.True);
+                Assert.That(standardValidationMessage, Is.Empty);
+
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = topProxy;
+                baseProxy.DualSlabDefinition = definition;
+
+                VividDualSlabOperator[] operators =
+                {
+                    VividDualSlabOperator.HorizontalMix,
+                    VividDualSlabOperator.VerticalLayer,
+                };
+                foreach (VividDualSlabOperator layerOperator in operators)
+                {
+                    definition.Operator = layerOperator;
+
+                    Assert.That(
+                        GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                            baseProxy,
+                            out string validationMessage),
+                        Is.True,
+                        layerOperator.ToString());
+                    Assert.That(validationMessage, Is.Empty);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topProxy);
+                Object.DestroyImmediate(baseProxy);
+                Object.DestroyImmediate(standardProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsDualSlabWithoutDefinition()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+
+                AssertInvalidDualSlabProxy(baseProxy, "require a definition");
+            }
+            finally
+            {
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsDualSlabWithoutTopSlab()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                baseProxy.DualSlabDefinition = definition;
+
+                AssertInvalidDualSlabProxy(
+                    baseProxy,
+                    "require a StandardLit top-slab proxy");
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsSelfReferentialDualSlab()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = baseProxy;
+                baseProxy.DualSlabDefinition = definition;
+
+                AssertInvalidDualSlabProxy(
+                    baseProxy,
+                    "cannot use the base proxy as their top Slab");
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsNonStandardTopSlab()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                topProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = topProxy;
+                baseProxy.DualSlabDefinition = definition;
+
+                AssertInvalidDualSlabProxy(
+                    baseProxy,
+                    "nested Dual Slab topology is not supported");
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topProxy);
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsUnsupportedDualSlabOperator()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = topProxy;
+                definition.Operator = (VividDualSlabOperator) 99;
+                baseProxy.DualSlabDefinition = definition;
+
+                AssertInvalidDualSlabProxy(baseProxy, "operator '99' is not supported");
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topProxy);
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
         public void SceneData_AddMaterial_MaintainsIndexAlignedRuntimeHeaders()
         {
             var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -425,6 +594,26 @@ namespace VividRP.Editor.Tests
             // GenerateHLSL emits default-underlying C# enums as int, while the runtime
             // contract exposes the same 32-bit bitfields as uint.
             return signature.Replace(" int ", " uint ");
+        }
+
+        private static void AssertInvalidDualSlabProxy(
+            GPUDrivenMaterialProxy materialProxy,
+            string expectedMessageFragment)
+        {
+            Assert.That(
+                GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                    materialProxy,
+                    out string validationMessage),
+                Is.False);
+            Assert.That(validationMessage, Does.Contain(expectedMessageFragment));
+
+            System.InvalidOperationException exception =
+                Assert.Throws<System.InvalidOperationException>(() =>
+                    GPUDrivenMaterialCompiler.CompileDualSlab(
+                        materialProxy,
+                        parameterAddress: 0u,
+                        baseSurfaceBindingIndex: 0u));
+            Assert.That(exception.Message, Is.EqualTo(validationMessage));
         }
     }
 }

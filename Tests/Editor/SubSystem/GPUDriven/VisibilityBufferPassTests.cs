@@ -218,6 +218,47 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RasterizationPath_DefaultsToIndirectAndCanSelectExperimentalMeshShader()
+        {
+            var pass = new VisibilityBufferPass();
+
+            Assert.That(
+                pass.RasterizationPath,
+                Is.EqualTo(VisibilityBufferRasterizationPath.DrawProceduralIndirect));
+
+            pass.RasterizationPath = VisibilityBufferRasterizationPath.ExperimentalMeshShader;
+
+            Assert.That(
+                pass.RasterizationPath,
+                Is.EqualTo(VisibilityBufferRasterizationPath.ExperimentalMeshShader));
+        }
+
+        [Test]
+        public void RawMeshShader_UsesGpuIndirectCountsAndPerPrimitiveVisibility()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VisibilityBufferPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Runtime",
+                "Resources",
+                "VividMeshShader",
+                "VisibilityBufferMeshShader.hlsl.txt");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+
+            StringAssert.Contains("void AmplificationMain()", source);
+            StringAssert.Contains("_VisibleMeshletIndirectArgs.Load", source);
+            StringAssert.Contains("DispatchMesh(dispatchGroupCountX, dispatchGroupCountY, 1u", source);
+            StringAssert.Contains("void MeshMain(", source);
+            StringAssert.Contains("out primitives VividMeshPrimitiveOutput", source);
+            StringAssert.Contains("PackVisibilityValue(renderRequest, groupThreadID)", source);
+            StringAssert.Contains("VividVisibilityBufferFragmentOutput PixelMain", source);
+        }
+
+        [Test]
         public void VisibilityShader_WritesSharedVisibilityAttributeAbi()
         {
             UnityEditor.PackageManager.PackageInfo package =

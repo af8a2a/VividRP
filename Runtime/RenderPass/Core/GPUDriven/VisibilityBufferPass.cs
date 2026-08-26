@@ -6,15 +6,24 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
+using VividRP.Runtime.MeshShader;
 using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    public enum VisibilityBufferRasterizationPath
+    {
+        DrawProceduralIndirect = 0,
+        ExperimentalMeshShader = 1,
+    }
+
     public class VisibilityBufferPass : UnsafePass
     {
         internal const string VisibilityBufferShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferPass";
 
         private const int IndirectDrawArgsByteStride = sizeof(uint) * 4;
+        private const string MeshShaderSourceResourcePath =
+            "VividMeshShader/VisibilityBufferMeshShader.hlsl";
         private const int SpdTileSize = 64;
         private const int SpdMipTextureCount = VividGPUDrivenOcclusionHistorySystem.MaxMipCount;
         private const int SpdAtomicCounterCount = 6;
@@ -104,6 +113,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultDepth;
         private readonly RenderTargetIdentifier[] m_ColorTargets = new RenderTargetIdentifier[4];
         private readonly Material[] m_Materials = new Material[(int)VividRendererListID.Count];
+        private readonly VividMeshShaderObject[] m_MeshShaderObjects = new VividMeshShaderObject[3];
         private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
         private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
@@ -115,6 +125,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RTHandle m_CurrentOccluderDepthPyramid;
         private Camera m_Camera;
         private Matrix4x4 m_CurrentViewProjectionMatrix = Matrix4x4.identity;
+        private Matrix4x4 m_VisibilityViewProjectionMatrix = Matrix4x4.identity;
         private GraphicsBuffer m_OccludedMeshletRenderRequestsBuffer;
         private GraphicsBuffer m_OccludedMeshletRenderRequestCounterBuffer;
         private GraphicsBuffer m_OccludedMeshletIndirectDispatchArgsBuffer;
@@ -132,7 +143,26 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_OcclusionCullingEnabled;
         private bool m_OcclusionHistoryValid;
         private bool m_OcclusionObservationMode;
+        private bool m_MeshShaderInitializationAttempted;
+        private bool m_MeshShaderFailureLogged;
         private int m_FrameIndex;
+
+        [SerializeField, Tooltip("Experimental D3D12 mesh-shader path. Alpha-tested buckets continue to use DrawProceduralIndirect.")]
+        private VisibilityBufferRasterizationPath m_RasterizationPath =
+            VisibilityBufferRasterizationPath.DrawProceduralIndirect;
+
+        public VisibilityBufferRasterizationPath RasterizationPath
+        {
+            get => m_RasterizationPath;
+            set
+            {
+                if (m_RasterizationPath == value)
+                    return;
+
+                m_RasterizationPath = value;
+                DisposeMeshShaderObjects();
+            }
+        }
 
         public VisibilityBufferPass()
         {
@@ -268,6 +298,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_Camera = cameraData.camera;
             m_CurrentViewProjectionMatrix = cameraData.mainViewConstants.viewProjMatrix;
+            m_VisibilityViewProjectionMatrix = m_CurrentViewProjectionMatrix;
             m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
             m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
             int width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
@@ -311,6 +342,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
                 "VisibleMeshletIndirectArgs"
             );
+
+            if (m_RasterizationPath == VisibilityBufferRasterizationPath.ExperimentalMeshShader
+                && VividGPUDrivenSystem.HasInstance)
+            {
+                ImportMeshShaderSceneBuffers(VividGPUDrivenSystem.instance);
+            }
 
             PrepareOcclusionResources(gpuDrivenFrameData, width, height);
         }
@@ -409,6 +446,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CopyOccluderDepthKernel = -1;
             m_DownsampleOccluderDepthKernel = -1;
             ReleaseSpdGlobalAtomicBuffer();
+            DisposeMeshShaderObjects();
             ResetOcclusionFrameState();
             m_FrameIndex = 0;
             for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
@@ -521,6 +559,24 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, m_RecoveredMeshletRenderRequestsBuffer, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, m_RecoveredRendererListMeshletCountsBuffer, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, m_RecoveredMeshletIndirectDrawArgsBuffer, AccessFlags.ReadWrite);
+        }
+
+        private void ImportMeshShaderSceneBuffers(VividGPUDrivenSystem system)
+        {
+            VividGPUDrivenBufferSet buffers = system?.BufferSet;
+            if (buffers == null)
+                return;
+
+            ImportMeshShaderSceneBuffer(buffers.InstanceDataBuffer);
+            ImportMeshShaderSceneBuffer(buffers.MeshletsBuffer);
+            ImportMeshShaderSceneBuffer(buffers.SharedVertexBuffer);
+            ImportMeshShaderSceneBuffer(buffers.SharedIndexBuffer);
+        }
+
+        private void ImportMeshShaderSceneBuffer(GraphicsBuffer buffer)
+        {
+            if (buffer != null)
+                PassRecorder.ImportBufferForPass(this, buffer, AccessFlags.Read);
         }
 
         private bool CanGenerateCurrentOccluderDepthPyramid(VividGPUDrivenSystem system)
@@ -692,6 +748,20 @@ namespace VividRP.Runtime.RenderPass.Core
             if (visibleMeshletRenderRequestsBuffer == null || indirectArgsBuffer == null)
                 return;
 
+            bool meshShaderRequested = m_RasterizationPath
+                                       == VisibilityBufferRasterizationPath.ExperimentalMeshShader;
+            bool compatibleTargets = !meshShaderRequested || HasMeshShaderCompatibleTargets();
+            if (meshShaderRequested && !compatibleTargets)
+            {
+                LogMeshShaderFallback(
+                    "The bound targets must use the default four MRT formats, D32_SFloat depth, Tex2D, and no MSAA.");
+            }
+
+            bool useMeshShader = meshShaderRequested
+                                 && system != null
+                                 && compatibleTargets
+                                 && TryEnsureMeshShaderObjects();
+
             for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
             {
                 VividRendererListID batchKey = (VividRendererListID) rendererListIndex;
@@ -708,14 +778,28 @@ namespace VividRP.Runtime.RenderPass.Core
                     continue;
                 }
 
-                Material material = m_Materials[rendererListIndex];
-                if (material == null)
-                    continue;
                 if (!virtualTextureReady
                     && ((batchKey & VividRendererListID.AlphaTest) != 0))
                 {
                     continue;
                 }
+
+                if (useMeshShader
+                    && (batchKey & VividRendererListID.AlphaTest) == 0
+                    && TryDrawMeshShaderRendererList(
+                        cmd,
+                        visibleMeshletRenderRequestsBuffer,
+                        indirectArgsBuffer,
+                        system,
+                        batchKey,
+                        rendererListIndex))
+                {
+                    continue;
+                }
+
+                Material material = m_Materials[rendererListIndex];
+                if (material == null)
+                    continue;
 
                 m_DrawProperties.Clear();
                 m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);
@@ -744,6 +828,181 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
+        private bool TryDrawMeshShaderRendererList(
+            CommandBuffer cmd,
+            GraphicsBuffer visibleMeshletRenderRequestsBuffer,
+            GraphicsBuffer indirectArgsBuffer,
+            VividGPUDrivenSystem system,
+            VividRendererListID rendererListID,
+            int rendererListIndex)
+        {
+            VividGPUDrivenBufferSet buffers = system?.BufferSet;
+            VividMeshShaderObject shaderObject = ResolveMeshShaderObject(GetCullMode(rendererListID));
+            if (buffers == null || shaderObject?.IsValid != true)
+                return false;
+
+            bool queued = VividMeshShaderPlugin.TryQueueDispatch(
+                cmd,
+                shaderObject,
+                visibleMeshletRenderRequestsBuffer,
+                indirectArgsBuffer,
+                buffers.InstanceDataBuffer,
+                buffers.MeshletsBuffer,
+                buffers.SharedVertexBuffer,
+                buffers.SharedIndexBuffer,
+                (uint)rendererListIndex,
+                (uint)Mathf.Max(0, visibleMeshletRenderRequestsBuffer.count),
+                m_VisibilityViewProjectionMatrix,
+                out string error);
+            if (!queued)
+                LogMeshShaderFallback(error);
+
+            return queued;
+        }
+
+        private bool TryEnsureMeshShaderObjects()
+        {
+            if (m_MeshShaderInitializationAttempted)
+                return AreMeshShaderObjectsValid();
+
+            m_MeshShaderInitializationAttempted = true;
+            if (!VividMeshShaderPlugin.TryGetSupport(
+                    out VividMeshShaderSupportStatus supportStatus,
+                    out string supportError))
+            {
+                if (supportStatus is VividMeshShaderSupportStatus.Unknown
+                    or VividMeshShaderSupportStatus.NoDevice)
+                {
+                    m_MeshShaderInitializationAttempted = false;
+                }
+                LogMeshShaderFallback(supportError);
+                return false;
+            }
+
+            TextAsset sourceAsset = Resources.Load<TextAsset>(MeshShaderSourceResourcePath);
+            if (sourceAsset == null || string.IsNullOrWhiteSpace(sourceAsset.text))
+            {
+                LogMeshShaderFallback(
+                    $"Could not load raw HLSL resource '{MeshShaderSourceResourcePath}'.");
+                return false;
+            }
+
+            string source = sourceAsset.text;
+
+            VividMeshShaderCompareFunction depthCompare = SystemInfo.usesReversedZBuffer
+                ? VividMeshShaderCompareFunction.GreaterEqual
+                : VividMeshShaderCompareFunction.LessEqual;
+            VividMeshShaderCullMode[] cullModes =
+            {
+                VividMeshShaderCullMode.None,
+                VividMeshShaderCullMode.Front,
+                VividMeshShaderCullMode.Back,
+            };
+
+            for (int shaderIndex = 0; shaderIndex < cullModes.Length; shaderIndex++)
+            {
+                var renderState = new VividMeshShaderRenderState(cullModes[shaderIndex], depthCompare);
+                if (VividMeshShaderObject.TryCreate(
+                        source,
+                        renderState,
+                        out VividMeshShaderObject shaderObject,
+                        out string creationError))
+                {
+                    m_MeshShaderObjects[shaderIndex] = shaderObject;
+                    continue;
+                }
+
+                DisposeMeshShaderObjects();
+                m_MeshShaderInitializationAttempted = true;
+                LogMeshShaderFallback(creationError);
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool AreMeshShaderObjectsValid()
+        {
+            for (int shaderIndex = 0; shaderIndex < m_MeshShaderObjects.Length; shaderIndex++)
+            {
+                if (m_MeshShaderObjects[shaderIndex]?.IsValid != true)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private VividMeshShaderObject ResolveMeshShaderObject(CullMode cullMode)
+        {
+            int shaderIndex = cullMode switch
+            {
+                CullMode.Off => 0,
+                CullMode.Front => 1,
+                _ => 2,
+            };
+            return m_MeshShaderObjects[shaderIndex];
+        }
+
+        private void DisposeMeshShaderObjects()
+        {
+            for (int shaderIndex = 0; shaderIndex < m_MeshShaderObjects.Length; shaderIndex++)
+            {
+                m_MeshShaderObjects[shaderIndex]?.Dispose();
+                m_MeshShaderObjects[shaderIndex] = null;
+            }
+
+            m_MeshShaderInitializationAttempted = false;
+            m_MeshShaderFailureLogged = false;
+        }
+
+        private void LogMeshShaderFallback(string reason)
+        {
+            if (m_MeshShaderFailureLogged)
+                return;
+
+            m_MeshShaderFailureLogged = true;
+            Debug.LogWarning(
+                $"[VividRP] Experimental VisibilityBuffer mesh-shader path is unavailable; "
+                + $"falling back to DrawProceduralIndirect. {reason}");
+        }
+
+        private bool HasMeshShaderCompatibleTargets()
+        {
+            return HasMeshShaderCompatibleColorTarget(
+                       m_VisibilityBuffer,
+                       GraphicsFormat.R32G32_UInt)
+                   && HasMeshShaderCompatibleColorTarget(
+                       m_Attributes0,
+                       GraphicsFormat.R16G16B16A16_SFloat)
+                   && HasMeshShaderCompatibleColorTarget(
+                       m_Attributes1,
+                       GraphicsFormat.R16G16B16A16_SFloat)
+                   && HasMeshShaderCompatibleColorTarget(
+                       m_Barycentrics,
+                       GraphicsFormat.R16G16_SFloat)
+                   && m_Depth?.desc != null
+                   && m_Depth.desc.DepthBufferBits == DepthBits.Depth32
+                   && GraphicsFormatUtility.GetDepthStencilFormat(32, 0)
+                   == GraphicsFormat.D32_SFloat
+                   && HasMeshShaderCompatibleTextureLayout(m_Depth.desc);
+        }
+
+        private static bool HasMeshShaderCompatibleColorTarget(
+            RenderGraphTexture texture,
+            GraphicsFormat format)
+        {
+            return texture?.desc != null
+                   && texture.desc.ColorFormat == format
+                   && HasMeshShaderCompatibleTextureLayout(texture.desc);
+        }
+
+        private static bool HasMeshShaderCompatibleTextureLayout(RenderGraphTextureDesc desc)
+        {
+            return desc.Dimension == TextureDimension.Tex2D
+                   && desc.Slices == 1
+                   && desc.MsaaSamples == MSAASamples.None;
+        }
+
         private void BindVisibilityTargets(CommandBuffer cmd, bool clearTargets)
         {
             m_ColorTargets[0] = m_VisibilityBuffer;
@@ -769,6 +1028,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CurrentOccluderDepthPyramid = null;
             m_Camera = null;
             m_CurrentViewProjectionMatrix = Matrix4x4.identity;
+            m_VisibilityViewProjectionMatrix = Matrix4x4.identity;
             m_OccludedMeshletRenderRequestsBuffer = null;
             m_OccludedMeshletRenderRequestCounterBuffer = null;
             m_OccludedMeshletIndirectDispatchArgsBuffer = null;

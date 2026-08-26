@@ -8,8 +8,60 @@ using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.RenderGraph
 {
+    public static class VividRenderGraphMigrationUtility
+    {
+        private const int MaxMigrationPassCount = 4;
+        private const string MigrateSelectedMenuPath =
+            "VividRP/Render Graph/Migrate Selected Assets";
+
+        public static bool MigrateAsset(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath))
+                throw new System.ArgumentException("A RenderGraph asset path is required.", nameof(assetPath));
+
+            var changed = false;
+            for (var passIndex = 0; passIndex < MaxMigrationPassCount; passIndex++)
+            {
+                var graph = GraphDatabase.LoadGraph<RenderGraphEditorGraph>(assetPath);
+                if (graph == null)
+                    return changed;
+
+                if (!RenderGraphDrawObjectPassMigration.Migrate(graph, assetPath))
+                    break;
+
+                GraphDatabase.SaveGraph(graph);
+                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        [MenuItem(MigrateSelectedMenuPath)]
+        private static void MigrateSelectedAssets()
+        {
+            var migratedAssetCount = 0;
+            foreach (var selectedObject in Selection.objects)
+            {
+                var assetPath = AssetDatabase.GetAssetPath(selectedObject);
+                if (!assetPath.EndsWith(
+                        $".{RenderGraphEditorGraph.AssetExtension}",
+                        System.StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (MigrateAsset(assetPath))
+                    migratedAssetCount++;
+            }
+
+            Debug.Log($"[VividRP] Persisted RenderGraph migration for {migratedAssetCount} selected asset(s).");
+        }
+    }
+
     internal static class RenderGraphDrawObjectPassMigration
     {
+        private const int DrawObjectPassSchemaVersion = 1;
         private const string RenderListFieldName = "m_RenderList";
         private const string RenderListDescFieldName = "m_RenderListDesc";
 
@@ -45,9 +97,18 @@ namespace VividRP.Editor.RenderGraph
                 return false;
 
             var changed = false;
-            if (graph.SchemaVersion < RenderGraphEditorGraph.CurrentSchemaVersion)
+            if (graph.SchemaVersion < DrawObjectPassSchemaVersion)
             {
                 changed |= MigrateLegacyDrawObjectConnections(graph, assetPath);
+            }
+
+            // Standard opaque migration is intentionally re-entrant. GraphToolkit
+            // requires connected legacy nodes to be disconnected and persisted
+            // before they can be removed safely on the next import.
+            changed |= RenderGraphStandardOpaqueMigration.Migrate(graph, assetPath);
+
+            if (graph.SchemaVersion < RenderGraphEditorGraph.CurrentSchemaVersion)
+            {
                 graph.SchemaVersion = RenderGraphEditorGraph.CurrentSchemaVersion;
                 changed = true;
             }
@@ -165,6 +226,7 @@ namespace VividRP.Editor.RenderGraph
 
             Migrate(graph, assetPath);
             GraphDatabase.SaveGraph(graph);
+            s_PersistenceAttempts.Remove(assetPath);
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
         }
 

@@ -10,6 +10,7 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class VisibilityBufferGBufferResolvePass : UnsafePass, IAllowGlobalStateModificationPass
     {
         internal const string VisibilityBufferGBufferResolveShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve";
+        internal const string DualSlabSidecarKeyword = "VIVID_DUAL_SLAB_SIDECAR_OUTPUT";
 
         private static readonly int VisibilityBufferId = Shader.PropertyToID("_VisibilityBuffer");
         private static readonly int VisibilityBufferScaleBiasId = Shader.PropertyToID("_VisibilityBufferScaleBias");
@@ -35,39 +36,62 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(
             Name = "GBuffer0",
             Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable,
             AttachmentIndex = 0)]
         private RenderGraphTexture m_GBuffer0;
 
         [RenderGraphResource(
             Name = "GBuffer1",
             Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable,
             AttachmentIndex = 1)]
         private RenderGraphTexture m_GBuffer1;
 
         [RenderGraphResource(
             Name = "GBuffer2",
             Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable,
             AttachmentIndex = 2)]
         private RenderGraphTexture m_GBuffer2;
 
         [RenderGraphResource(
             Name = "GBuffer3",
             Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable,
             AttachmentIndex = 3)]
         private RenderGraphTexture m_GBuffer3;
 
         [RenderGraphResource(
-            Name = "GBuffer4",
+            Name = "DiffuseIrradiance",
             Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable,
             AttachmentIndex = 4)]
+        // Keep the legacy field name as the serialized RenderGraph port key.
         private RenderGraphTexture m_GBuffer4;
+
+        [RenderGraphResource(
+            Name = "LayerAux0",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable,
+            AttachmentIndex = 5)]
+        private RenderGraphTexture m_LayerAux0;
+
+        [RenderGraphResource(
+            Name = "LayerAux1",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable,
+            AttachmentIndex = 6)]
+        private RenderGraphTexture m_LayerAux1;
 
         private readonly RenderGraphTexture m_DefaultGBuffer0;
         private readonly RenderGraphTexture m_DefaultGBuffer1;
         private readonly RenderGraphTexture m_DefaultGBuffer2;
         private readonly RenderGraphTexture m_DefaultGBuffer3;
-        private readonly RenderGraphTexture m_DefaultGBuffer4;
+        private readonly RenderGraphTexture m_DefaultDiffuseIrradiance;
+        private readonly RenderGraphTexture m_DefaultLayerAux0;
+        private readonly RenderGraphTexture m_DefaultLayerAux1;
         private readonly RenderTargetIdentifier[] m_GBufferColorTargets = new RenderTargetIdentifier[5];
+        private readonly RenderTargetIdentifier[] m_DualSlabSidecarTargets = new RenderTargetIdentifier[2];
         private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
         private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
@@ -77,6 +101,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_VirtualTextureFeedbackSampleRate = 4.0f;
 
         private Material m_Material;
+        private Material m_DualSlabSidecarMaterial;
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
         private int m_FrameIndex;
 
@@ -99,18 +124,28 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R16G16_SFloat);
             m_Barycentrics.desc.FilterMode = FilterMode.Point;
 
-            m_GBuffer0 = RenderGraphTexture.CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
+            m_GBuffer0 = RenderGraphTexture.CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
             m_GBuffer1 = RenderGraphTexture.CreateColorTarget("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBuffer3.desc.EnableRandomWrite = true;
-            m_GBuffer4 = RenderGraphTexture.CreateColorTarget("GBuffer4", GraphicsFormat.R16G16B16A16_SFloat);
+            m_GBuffer4 = RenderGraphTexture.CreateColorTarget(
+                "DiffuseIrradiance",
+                GraphicsFormat.B10G11R11_UFloatPack32);
+            m_LayerAux0 = RenderGraphTexture.CreateColorTarget(
+                "LayerAux0",
+                GraphicsFormat.R8G8B8A8_SRGB);
+            m_LayerAux1 = RenderGraphTexture.CreateColorTarget(
+                "LayerAux1",
+                GraphicsFormat.R8G8B8A8_UNorm);
 
             m_DefaultGBuffer0 = m_GBuffer0;
             m_DefaultGBuffer1 = m_GBuffer1;
             m_DefaultGBuffer2 = m_GBuffer2;
             m_DefaultGBuffer3 = m_GBuffer3;
-            m_DefaultGBuffer4 = m_GBuffer4;
+            m_DefaultDiffuseIrradiance = m_GBuffer4;
+            m_DefaultLayerAux0 = m_LayerAux0;
+            m_DefaultLayerAux1 = m_LayerAux1;
         }
 
         public override void Create()
@@ -124,6 +159,11 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_Material = CoreUtils.CreateEngineMaterial(shader);
+            m_DualSlabSidecarMaterial = CoreUtils.CreateEngineMaterial(shader);
+            CoreUtils.SetKeyword(
+                m_DualSlabSidecarMaterial,
+                DualSlabSidecarKeyword,
+                true);
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -144,16 +184,40 @@ namespace VividRP.Runtime.RenderPass.Core
                 Screen.height,
                 visibilityBufferDescriptor);
 
-            ConfigurePassOwnedTarget(m_GBuffer0, m_DefaultGBuffer0, width, height, GraphicsFormat.R8G8B8A8_UNorm, false, "GBuffer0");
+            ConfigurePassOwnedTarget(m_GBuffer0, m_DefaultGBuffer0, width, height, GraphicsFormat.R8G8B8A8_SRGB, false, "GBuffer0");
             ConfigurePassOwnedTarget(m_GBuffer1, m_DefaultGBuffer1, width, height, GraphicsFormat.A2B10G10R10_UNormPack32, false, "GBuffer1");
             ConfigurePassOwnedTarget(m_GBuffer2, m_DefaultGBuffer2, width, height, GraphicsFormat.R8G8B8A8_UNorm, false, "GBuffer2");
             ConfigurePassOwnedTarget(m_GBuffer3, m_DefaultGBuffer3, width, height, GraphicsFormat.B10G11R11_UFloatPack32, true, "GBuffer3");
-            ConfigurePassOwnedTarget(m_GBuffer4, m_DefaultGBuffer4, width, height, GraphicsFormat.R16G16B16A16_SFloat, false, "GBuffer4");
+            ConfigurePassOwnedTarget(
+                m_GBuffer4,
+                m_DefaultDiffuseIrradiance,
+                width,
+                height,
+                GraphicsFormat.B10G11R11_UFloatPack32,
+                false,
+                "DiffuseIrradiance");
+            ConfigurePassOwnedTarget(
+                m_LayerAux0,
+                m_DefaultLayerAux0,
+                width,
+                height,
+                GraphicsFormat.R8G8B8A8_SRGB,
+                false,
+                "LayerAux0");
+            ConfigurePassOwnedTarget(
+                m_LayerAux1,
+                m_DefaultLayerAux1,
+                width,
+                height,
+                GraphicsFormat.R8G8B8A8_UNorm,
+                false,
+                "LayerAux1");
         }
 
         public override void Record(UnsafePassContext context)
         {
             if (m_Material == null
+                || m_DualSlabSidecarMaterial == null
                 || !m_VisibilityBuffer.innerHandle.IsValid()
                 || !m_Attributes0.innerHandle.IsValid()
                 || !m_Attributes1.innerHandle.IsValid()
@@ -162,7 +226,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_GBuffer1.innerHandle.IsValid()
                 || !m_GBuffer2.innerHandle.IsValid()
                 || !m_GBuffer3.innerHandle.IsValid()
-                || !m_GBuffer4.innerHandle.IsValid())
+                || !m_GBuffer4.innerHandle.IsValid()
+                || !m_LayerAux0.innerHandle.IsValid()
+                || !m_LayerAux1.innerHandle.IsValid())
             {
                 return;
             }
@@ -181,6 +247,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ? VividGPUDrivenSystem.instance
                 : null;
             system?.ConfigureTextureBackendKeyword(m_Material);
+            system?.ConfigureTextureBackendKeyword(m_DualSlabSidecarMaterial);
 
             bool hasFeedback = false;
             var nativeCmd = context.GetNativeCommandBuffer();
@@ -222,6 +289,15 @@ namespace VividRP.Runtime.RenderPass.Core
             CoreUtils.DrawFullScreen(nativeCmd, m_Material, m_DrawProperties, 0);
             if (hasFeedback)
                 nativeCmd.ClearRandomWriteTargets();
+
+            // VT feedback occupies u5-u7, so keep the core draw at five MRTs
+            // and emit the optional Dual Slab sidecar after releasing UAVs.
+            BindDualSlabSidecarTargets(nativeCmd);
+            CoreUtils.DrawFullScreen(
+                nativeCmd,
+                m_DualSlabSidecarMaterial,
+                m_DrawProperties,
+                0);
         }
 
         public override void Dispose()
@@ -232,6 +308,11 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
+            }
+            if (m_DualSlabSidecarMaterial != null)
+            {
+                CoreUtils.Destroy(m_DualSlabSidecarMaterial);
+                m_DualSlabSidecarMaterial = null;
             }
         }
 
@@ -254,7 +335,8 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.MsaaSamples = MSAASamples.None;
             texture.desc.FilterMode = FilterMode.Point;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.ClearBuffer = false;
+            texture.desc.ClearBuffer = true;
+            texture.desc.ClearColor = Color.clear;
             texture.desc.UseMipMap = false;
             texture.desc.AutoGenerateMips = false;
             texture.desc.MipCount = 1;
@@ -271,6 +353,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBufferColorTargets[3] = m_GBuffer3;
             m_GBufferColorTargets[4] = m_GBuffer4;
             cmd.SetRenderTarget(m_GBufferColorTargets, BuiltinRenderTextureType.None);
+        }
+
+        private void BindDualSlabSidecarTargets(CommandBuffer cmd)
+        {
+            m_DualSlabSidecarTargets[0] = m_LayerAux0;
+            m_DualSlabSidecarTargets[1] = m_LayerAux1;
+            cmd.SetRenderTarget(
+                m_DualSlabSidecarTargets,
+                BuiltinRenderTextureType.None);
         }
 
         private static int ResolveOutputWidth(

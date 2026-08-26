@@ -3,6 +3,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
@@ -271,12 +272,13 @@ float PerceptualRoughnessFade(float perceptualRoughness)
 
 float3 LoadNormalWS(uint2 coordSS)
 {
-    return normalize(DecodeVividNormalOct(_GBuffer1.Load(int3(coordSS, 0)).xy));
+    return VividDecodeSurfaceSummaryNormal(
+        _GBuffer1.Load(int3(coordSS, 0)).xy);
 }
 
 float LoadPerceptualRoughness(uint2 coordSS)
 {
-    return GetPerceptualRoughnessFromLinearRoughness(_GBuffer1.Load(int3(coordSS, 0)).z);
+    return saturate(_GBuffer1.Load(int3(coordSS, 0)).z);
 }
 
 bool HasSsrSkyTexture()

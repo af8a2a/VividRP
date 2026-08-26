@@ -33,15 +33,11 @@ namespace VividRP.Editor.Tests
                            || field.Name == "m_GBuffer1"
                            || field.Name == "m_GBuffer2"
                            || field.Name == "m_GBuffer3"
-                           || field.Name == "m_GBuffer4")
+                           || field.Name == "m_GBuffer4"
+                           || field.Name == "m_LayerAux0"
+                           || field.Name == "m_LayerAux1")
                        || base.GetPassOwnedResourceOverrideEnabled(field, attr);
             }
-        }
-
-        [Serializable]
-        private sealed class AutoRegisteredGBufferPassNode : RenderPassNodeData
-        {
-            internal override Type GetRegisteredPassType() => typeof(GBufferPass);
         }
 
         [Serializable]
@@ -82,18 +78,26 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.HasOverrideOption("m_GBuffer2"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer3"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer4"), Is.True);
+                Assert.That(node.HasOverrideOption("m_LayerAux0"), Is.True);
+                Assert.That(node.HasOverrideOption("m_LayerAux1"), Is.True);
 
                 Assert.That(node.GetInputPortByName("m_GBuffer0_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_LayerAux0_In"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_LayerAux1_In"), Is.Null);
 
                 Assert.That(node.GetOutputPortByName("m_GBuffer0_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer1_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer2_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer3_Out"), Is.Not.Null);
-                Assert.That(node.GetOutputPortByName("m_GBuffer4_Out"), Is.Not.Null);
+                Assert.That(
+                    node.GetOutputPortByName("m_GBuffer4_Out"),
+                    Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_LayerAux0_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_LayerAux1_Out"), Is.Not.Null);
             }
             finally
             {
@@ -115,13 +119,21 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Not.Null);
-                Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Not.Null);
+                Assert.That(
+                    node.GetInputPortByName("m_GBuffer4_In"),
+                    Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_LayerAux0_In"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_LayerAux1_In"), Is.Not.Null);
 
                 Assert.That(node.GetOutputPortByName("m_GBuffer0_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer1_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer2_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer3_Out"), Is.Not.Null);
-                Assert.That(node.GetOutputPortByName("m_GBuffer4_Out"), Is.Not.Null);
+                Assert.That(
+                    node.GetOutputPortByName("m_GBuffer4_Out"),
+                    Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_LayerAux0_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_LayerAux1_Out"), Is.Not.Null);
             }
             finally
             {
@@ -130,39 +142,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Compile_OrdersGBufferResolveBeforeDeferredLighting_WhenGBufferIsShared()
+        public void Compile_OrdersResolveBeforeDeferredLighting_WhenResolvedGBufferIsConsumed()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
             try
             {
-                var gbufferNode = new AutoRegisteredGBufferPassNode();
-                var resolveNode = new AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode();
+                var resolveNode = new AutoRegisteredVisibilityBufferGBufferResolvePassNode();
                 var deferredNode = new AutoRegisteredDeferredLightingPassNode();
 
                 RenderGraphTestUtility.AddTestNode(graph, deferredNode);
                 RenderGraphTestUtility.AddTestNode(graph, resolveNode);
-                RenderGraphTestUtility.AddTestNode(graph, gbufferNode);
-
-                graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer0"),
-                    resolveNode.GetInputPortByName("m_GBuffer0_In"));
-                graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer1"),
-                    resolveNode.GetInputPortByName("m_GBuffer1_In"));
-                graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer2"),
-                    resolveNode.GetInputPortByName("m_GBuffer2_In"));
-                graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer3"),
-                    resolveNode.GetInputPortByName("m_GBuffer3_In"));
-                graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer4"),
-                    resolveNode.GetInputPortByName("m_GBuffer4_In"));
 
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer0_Out"),
                     deferredNode.GetInputPortByName("m_GBuffer0"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_LayerAux0_Out"),
+                    deferredNode.GetInputPortByName("m_LayerAux0"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_LayerAux1_Out"),
+                    deferredNode.GetInputPortByName("m_LayerAux1"));
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer1_Out"),
                     deferredNode.GetInputPortByName("m_GBuffer1"));
@@ -180,7 +180,6 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(result.ExecutionOrder.Select(pass => pass.PassTypeName), Is.EqualTo(new[]
                 {
-                    nameof(GBufferPass),
                     nameof(VisibilityBufferGBufferResolvePass),
                     nameof(DeferredLightingPass),
                 }));
@@ -192,28 +191,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Compile_OrdersPreDepthGBufferVisibilityAndResolve_AsHybridDeferredChain()
+        public void Compile_OrdersPreDepthVisibilityResolveAndDeferred_AsOpaqueChain()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
             try
             {
-                var resolveNode = new AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode();
-                var gbufferNode = new AutoRegisteredGBufferPassNode();
+                var resolveNode = new AutoRegisteredVisibilityBufferGBufferResolvePassNode();
                 var preDepthNode = new AutoRegisteredPreDepthPassNode();
                 var visibilityNode = new AutoRegisteredVisibilityBufferPassNode();
+                var deferredNode = new AutoRegisteredDeferredLightingPassNode();
 
+                RenderGraphTestUtility.AddTestNode(graph, deferredNode);
                 RenderGraphTestUtility.AddTestNode(graph, resolveNode);
-                RenderGraphTestUtility.AddTestNode(graph, gbufferNode);
                 RenderGraphTestUtility.AddTestNode(graph, preDepthNode);
                 RenderGraphTestUtility.AddTestNode(graph, visibilityNode);
 
                 graph.Connect(
                     preDepthNode.GetOutputPortByName("m_DepthAttachment_Out"),
                     visibilityNode.GetInputPortByName("m_Depth_In"));
-                graph.Connect(
-                    preDepthNode.GetOutputPortByName("m_DepthAttachment_Out"),
-                    gbufferNode.GetInputPortByName("m_GBufferDepth_In"));
                 graph.Connect(
                     visibilityNode.GetOutputPortByName("m_VisibilityBuffer_Out"),
                     resolveNode.GetInputPortByName("m_VisibilityBuffer"));
@@ -227,29 +223,23 @@ namespace VividRP.Editor.Tests
                     visibilityNode.GetOutputPortByName("m_Barycentrics_Out"),
                     resolveNode.GetInputPortByName("m_Barycentrics"));
                 graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer0"),
-                    resolveNode.GetInputPortByName("m_GBuffer0_In"));
+                    resolveNode.GetOutputPortByName("m_GBuffer0_Out"),
+                    deferredNode.GetInputPortByName("m_GBuffer0"));
                 graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer1"),
-                    resolveNode.GetInputPortByName("m_GBuffer1_In"));
+                    resolveNode.GetOutputPortByName("m_LayerAux0_Out"),
+                    deferredNode.GetInputPortByName("m_LayerAux0"));
                 graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer2"),
-                    resolveNode.GetInputPortByName("m_GBuffer2_In"));
-                graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer3"),
-                    resolveNode.GetInputPortByName("m_GBuffer3_In"));
-                graph.Connect(
-                    gbufferNode.GetOutputPortByName("m_GBuffer4"),
-                    resolveNode.GetInputPortByName("m_GBuffer4_In"));
+                    resolveNode.GetOutputPortByName("m_LayerAux1_Out"),
+                    deferredNode.GetInputPortByName("m_LayerAux1"));
 
                 var result = RenderGraphCompiler.Compile(graph);
 
                 Assert.That(result.ExecutionOrder.Select(pass => pass.PassTypeName).ToArray(), Is.EqualTo(new[]
                 {
                     nameof(PreDepthPass),
-                    nameof(GBufferPass),
                     nameof(VisibilityBufferPass),
                     nameof(VisibilityBufferGBufferResolvePass),
+                    nameof(DeferredLightingPass),
                 }));
             }
             finally

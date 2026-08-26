@@ -17,7 +17,9 @@ Shader "Hidden/VividRP/MaterialDebug"
             #pragma fragment Frag
 
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
-            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
 
             #define CLASSIFY_TILE_SIZE 8
             #define VIVID_MATERIAL_DEBUG_NONE 0
@@ -44,12 +46,6 @@ Shader "Hidden/VividRP/MaterialDebug"
             #define VIVID_MATERIAL_DEBUG_COAT_MASK 21
             #define VIVID_MATERIAL_DEBUG_COAT_ROUGHNESS 22
             #define VIVID_MATERIAL_DEBUG_MATERIAL_FEATURES 23
-            #define VIVID_MATERIAL_FEATURE_DEBUG_MASK \
-                (VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC | VIVID_MATERIALFEATURE_CLEAR_COAT | VIVID_MATERIALFEATURE_SSR_RECEIVE | VIVID_MATERIALFEATURE_DECAL_RECEIVE)
-
-            static const float3 kVividMaterialDebugDielectricF0 = float3(0.04, 0.04, 0.04);
-            static const float kVividMaterialDebugClearCoatRoughness = 0.01;
-
             TEXTURE2D(_SourceTexture);
             SAMPLER(sampler_SourceTexture);
             TEXTURE2D(_CameraDepthTexture);
@@ -57,7 +53,8 @@ Shader "Hidden/VividRP/MaterialDebug"
             TEXTURE2D(_GBuffer1);
             TEXTURE2D(_GBuffer2);
             TEXTURE2D(_GBuffer3);
-            TEXTURE2D(_GBuffer4);
+            TEXTURE2D(_DiffuseIrradiance);
+            TEXTURE2D(_VisibilityBuffer);
             StructuredBuffer<uint> _MaterialTileFeatureFlags;
 
             float4 _SourceTextureScaleBias;
@@ -66,7 +63,8 @@ Shader "Hidden/VividRP/MaterialDebug"
             float4 _GBuffer1ScaleBias;
             float4 _GBuffer2ScaleBias;
             float4 _GBuffer3ScaleBias;
-            float4 _GBuffer4ScaleBias;
+            float4 _DiffuseIrradianceScaleBias;
+            float4 _VisibilityBufferScaleBias;
             int _MaterialDebugMode;
             float _MaterialDebugExposure;
             uint _MaterialTileCount;
@@ -111,31 +109,22 @@ Shader "Hidden/VividRP/MaterialDebug"
                 return saturate(0.25 + value * 0.75);
             }
 
-            float3 EvaluateMaterialIdColor(uint materialFeatures)
+            float3 EvaluateMaterialIdColor(uint materialProgramID)
             {
-                return HashColor(EncodeVividMaterialFeatureIdRaw(materialFeatures));
+                return materialProgramID == VIVIDMATERIALPROGRAMID_INVALID
+                    ? float3(1.0, 0.0, 1.0)
+                    : HashColor(materialProgramID);
             }
 
-            float3 EvaluateMaterialFeatureColor(uint materialFeatures)
+            float3 EvaluateDeferredExportHeaderColor(uint deferredExportHeader)
             {
-                float3 color = 0.0;
-
-                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_LIT))
-                    color += float3(0.0, 0.45, 1.0);
-
-                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
-                    color += float3(0.8, 0.2, 0.95);
-
-                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_CLEAR_COAT))
-                    color += float3(1.0, 0.65, 0.0);
-
-                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_SSR_RECEIVE))
-                    color += float3(0.0, 0.85, 0.6);
-
-                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_DECAL_RECEIVE))
-                    color += float3(0.9, 0.9, 0.15);
-
-                return any(color > 0.0) ? saturate(color) : HashColor(materialFeatures);
+                uint exportClass = VividGetDeferredExportClass(
+                    deferredExportHeader);
+                if (exportClass == VIVID_DEFERRED_EXPORT_CLASS_ERROR)
+                    return float3(1.0, 0.0, 1.0);
+                if (exportClass == VIVID_DEFERRED_EXPORT_CLASS_UNLIT)
+                    return float3(0.25, 0.25, 0.25);
+                return HashColor(exportClass);
             }
 
             float3 EvaluateMaterialFeatureHeatmapColor(uint featureCount)
@@ -168,8 +157,8 @@ Shader "Hidden/VividRP/MaterialDebug"
                 if (tileIndex >= _MaterialTileCount)
                     return sourceColor;
 
-                uint materialFeatures = _MaterialTileFeatureFlags[tileIndex] & VIVID_MATERIAL_FEATURE_DEBUG_MASK;
-                uint featureCount = countbits(materialFeatures);
+                uint exportClassMask = _MaterialTileFeatureFlags[tileIndex];
+                uint featureCount = countbits(exportClassMask);
                 if (featureCount == 0u)
                     return sourceColor;
 
@@ -192,36 +181,37 @@ Shader "Hidden/VividRP/MaterialDebug"
                 return IsNormalized(direction) ? direction * 0.5 + 0.5 : float3(1.0, 0.0, 0.0);
             }
 
-            float3 EvaluateDiffuseColor(VividGBufferSurfaceData surfaceData)
+            uint LoadMaterialProgramID(float2 uv)
             {
-                return surfaceData.baseColor * (1.0 - surfaceData.metallic);
-            }
+                float2 visibilityUv = ApplyScaleBias(
+                    uv,
+                    _VisibilityBufferScaleBias);
+                uint2 packedVisibility = asuint(SAMPLE_TEXTURE2D_LOD(
+                    _VisibilityBuffer,
+                    sampler_PointClamp,
+                    visibilityUv,
+                    0).xy);
+                if (!IsPackedVisibilityBufferValueValid(packedVisibility))
+                    return VIVIDMATERIALPROGRAMID_INVALID;
 
-            real Luminance(real3 linearRgb)
-            {
-                return dot(linearRgb, real3(0.2126729, 0.7151522, 0.0721750));
-            }
-
-            float3 EvaluateFresnel0(VividGBufferSurfaceData surfaceData)
-            {
-                float3 baseSpecular = lerp(kVividMaterialDebugDielectricF0, surfaceData.baseColor, surfaceData.metallic);
-                if (!HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
-                    return baseSpecular;
-
-                float luminance = Luminance(surfaceData.baseColor);
-                float3 sheenTint = lerp(luminance.xxx, surfaceData.baseColor, 0.35);
-                return lerp(baseSpecular, sheenTint, saturate(surfaceData.customData));
-            }
-
-            float EvaluateCoatMask(VividGBufferSurfaceData surfaceData)
-            {
-                return HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_CLEAR_COAT)
-                    ? saturate(surfaceData.customData)
-                    : 0.0;
+                VividVisibilityBufferValue visibility =
+                    UnpackVisibilityBufferValue(packedVisibility);
+                VividInstanceData instanceData = PullInstanceData(
+                    visibility.InstanceID);
+                VividMaterialRuntimeHeader runtimeHeader;
+                VividMaterialProgramData programData;
+                uint programStatus = VividGetMaterialProgramStatus(
+                    instanceData.MaterialIndex,
+                    runtimeHeader,
+                    programData);
+                return programStatus == VIVID_MATERIAL_PROGRAM_KNOWN
+                    ? runtimeHeader.ProgramID
+                    : VIVIDMATERIALPROGRAMID_INVALID;
             }
 
             float3 EvaluateMaterialDebugColor(
-                VividGBufferSurfaceData surfaceData,
+                VividSurfaceSummaryData surfaceData,
+                uint materialProgramID,
                 float deviceDepth,
                 float4 sourceColor)
             {
@@ -231,13 +221,13 @@ Shader "Hidden/VividRP/MaterialDebug"
                     return Linear01Depth(deviceDepth, _ZBufferParams).xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_BAKE_DIFFUSE_LIGHTING_WITH_ALBEDO_PLUS_EMISSIVE)
-                    return (surfaceData.builtinData.bakeDiffuseLighting * EvaluateDiffuseColor(surfaceData) + surfaceData.emissive) * exposureMultiplier;
+                    return (surfaceData.diffuseIrradiance * surfaceData.diffuseAlbedo + surfaceData.emissive) * exposureMultiplier;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_BASE_COLOR)
-                    return surfaceData.baseColor;
+                    return surfaceData.diffuseAlbedo;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_DIFFUSE_COLOR)
-                    return EvaluateDiffuseColor(surfaceData);
+                    return surfaceData.diffuseAlbedo;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_NORMAL_WS)
                     return EncodeDirectionDebug(surfaceData.normalWS);
@@ -246,16 +236,16 @@ Shader "Hidden/VividRP/MaterialDebug"
                     return EncodeDirectionDebug(TransformWorldToViewDir(surfaceData.normalWS, true));
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_LINEAR_ROUGHNESS)
-                    return surfaceData.linearRoughness.xxx;
+                    return (surfaceData.perceptualRoughness * surfaceData.perceptualRoughness).xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_PERCEPTUAL_ROUGHNESS)
-                    return GetPerceptualRoughnessFromLinearRoughness(surfaceData.linearRoughness).xxx;
+                    return surfaceData.perceptualRoughness.xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_SMOOTHNESS)
-                    return (1.0 - GetPerceptualRoughnessFromLinearRoughness(surfaceData.linearRoughness)).xxx;
+                    return (1.0 - surfaceData.perceptualRoughness).xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_METALLIC)
-                    return surfaceData.metallic.xxx;
+                    return 0.0;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_AMBIENT_OCCLUSION)
                     return surfaceData.ambientOcclusion.xxx;
@@ -264,42 +254,45 @@ Shader "Hidden/VividRP/MaterialDebug"
                     return surfaceData.ambientOcclusion.xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_FRESNEL0)
-                    return EvaluateFresnel0(surfaceData);
+                    return surfaceData.specularF0;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_FRESNEL90)
                     return float3(1.0, 1.0, 1.0);
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_COAT_MASK)
-                    return EvaluateCoatMask(surfaceData).xxx;
+                    return 0.0;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_COAT_ROUGHNESS)
                 {
-                    float coatRoughness = EvaluateCoatMask(surfaceData) > 0.0
-                        ? kVividMaterialDebugClearCoatRoughness
-                        : 0.0;
-                    return coatRoughness.xxx;
+                    return 0.0;
                 }
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_MATERIAL_FEATURES)
-                    return EvaluateMaterialFeatureColor(surfaceData.materialFeatures);
+                    return EvaluateDeferredExportHeaderColor(
+                        surfaceData.deferredExportHeader);
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_CUSTOM_DATA)
-                    return surfaceData.customData.xxx;
+                    return ((surfaceData.deferredExportHeader >> 4u) * (1.0 / 15.0)).xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_CUSTOM_DATA_1)
-                    return surfaceData.customData1.xxx;
+                    return (VividGetDeferredExportClass(
+                        surfaceData.deferredExportHeader) * (1.0 / 15.0)).xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_MATERIAL_ID)
-                    return EvaluateMaterialIdColor(surfaceData.materialFeatures);
+                    return EvaluateMaterialIdColor(materialProgramID);
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_EMISSIVE)
                     return surfaceData.emissive * exposureMultiplier;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_BAKED_GI)
-                    return surfaceData.builtinData.bakeDiffuseLighting * exposureMultiplier;
+                    return surfaceData.diffuseIrradiance * exposureMultiplier;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_HAS_BAKED_GI)
-                    return surfaceData.builtinData.hasBakedGI.xxx;
+                    return VividHasDeferredExportFlag(
+                        surfaceData.deferredExportHeader,
+                        VIVID_DEFERRED_EXPORT_FLAG_HAS_DIFFUSE_IRRADIANCE)
+                            ? 1.0
+                            : 0.0;
 
                 return sourceColor.rgb;
             }
@@ -323,10 +316,25 @@ Shader "Hidden/VividRP/MaterialDebug"
                 float4 rt1 = SAMPLE_TEXTURE2D_LOD(_GBuffer1, sampler_PointClamp, ApplyScaleBias(input.uv, _GBuffer1ScaleBias), 0);
                 float4 rt2 = SAMPLE_TEXTURE2D_LOD(_GBuffer2, sampler_PointClamp, ApplyScaleBias(input.uv, _GBuffer2ScaleBias), 0);
                 float4 rt3 = SAMPLE_TEXTURE2D_LOD(_GBuffer3, sampler_PointClamp, ApplyScaleBias(input.uv, _GBuffer3ScaleBias), 0);
-                float4 rt4 = SAMPLE_TEXTURE2D_LOD(_GBuffer4, sampler_PointClamp, ApplyScaleBias(input.uv, _GBuffer4ScaleBias), 0);
-                VividGBufferSurfaceData surfaceData = UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3, rt4);
+                float4 rt4 = SAMPLE_TEXTURE2D_LOD(
+                    _DiffuseIrradiance,
+                    sampler_PointClamp,
+                    ApplyScaleBias(input.uv, _DiffuseIrradianceScaleBias),
+                    0);
+                VividSurfaceSummaryData surfaceData =
+                    VividUnpackSurfaceSummaryGBuffer(rt0, rt1, rt2, rt3, rt4);
+                uint materialProgramID = _MaterialDebugMode
+                        == VIVID_MATERIAL_DEBUG_MATERIAL_ID
+                    ? LoadMaterialProgramID(input.uv)
+                    : VIVIDMATERIALPROGRAMID_INVALID;
 
-                return float4(EvaluateMaterialDebugColor(surfaceData, deviceDepth, sourceColor), sourceColor.a);
+                return float4(
+                    EvaluateMaterialDebugColor(
+                        surfaceData,
+                        materialProgramID,
+                        deviceDepth,
+                        sourceColor),
+                    sourceColor.a);
             }
             ENDHLSL
         }

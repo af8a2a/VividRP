@@ -1,23 +1,26 @@
-#pragma kernel ClearMaterialFeatureArgs
-#pragma kernel ClassifyMaterialFeatures
-#pragma kernel ClassifyMaterialFeaturesWave32 VIVID_MATERIAL_WAVE_32
-#pragma kernel ClassifyMaterialFeaturesWave64 VIVID_MATERIAL_WAVE_64
-#pragma kernel BuildMaterialFeatureIndirectArgs
-#pragma kernel BuildMaterialFeatureIndirectArgsWave32 VIVID_MATERIAL_WAVE_32
-#pragma kernel BuildMaterialFeatureIndirectArgsWave64 VIVID_MATERIAL_WAVE_64
+#pragma kernel ClearDeferredVariantArgs
+#pragma kernel ClassifyDeferredExports
+#pragma kernel ClassifyDeferredExportsWave32 VIVID_MATERIAL_WAVE_32
+#pragma kernel ClassifyDeferredExportsWave64 VIVID_MATERIAL_WAVE_64
+#pragma kernel BuildDeferredVariantIndirectArgs
+#pragma kernel BuildDeferredVariantIndirectArgsWave32 VIVID_MATERIAL_WAVE_32
+#pragma kernel BuildDeferredVariantIndirectArgsWave64 VIVID_MATERIAL_WAVE_64
 #pragma use_dxc
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_WAVE_32 UNITY_DEVICE_SUPPORTS_WAVE_64
 
 #define CLASSIFY_TILE_SIZE 8
 #define BUILD_INDIRECT_THREADS 64
 #define VIVID_MATERIAL_CLASSIFY_THREAD_COUNT (CLASSIFY_TILE_SIZE * CLASSIFY_TILE_SIZE)
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 
-#define VIVID_MATERIAL_FEATURE_VARIANT_COUNT 7
-#define VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL 6
+#define VIVID_DEFERRED_VARIANT_COUNT 4
+#define VIVID_DEFERRED_VARIANT_FAST_SLAB 0u
+#define VIVID_DEFERRED_VARIANT_GENERAL_SLAB 1u
+#define VIVID_DEFERRED_VARIANT_DUAL_SLAB 2u
+#define VIVID_DEFERRED_VARIANT_CATCH_ALL 3u
 #define VIVID_INDIRECT_ARGS_ELEMENT_COUNT 4
-#define VIVID_INVALID_MATERIAL_FEATURE_VARIANT VIVID_MATERIAL_FEATURE_VARIANT_COUNT
+#define VIVID_INVALID_DEFERRED_VARIANT VIVID_DEFERRED_VARIANT_COUNT
 
 #if defined(VIVID_MATERIAL_WAVE_64) && defined(UNITY_DEVICE_SUPPORTS_WAVE_64) && defined(UNITY_HW_WAVE_SIZE) && UNITY_HW_WAVE_SIZE == 64
 #define VIVID_MATERIAL_WAVE_SIZE 64
@@ -36,6 +39,7 @@
 #endif
 
 Texture2D<float4> _GBuffer0;
+Texture2D<float4> _GBuffer1;
 Texture2D<float> _DepthTexture;
 
 RWStructuredBuffer<uint> _MaterialTileFeatureFlags;
@@ -49,80 +53,62 @@ uint _MaterialTileCountX;
 
 #if VIVID_MATERIAL_USE_WAVE_INTRINSICS
 groupshared uint gs_TileWaveMasks[VIVID_MATERIAL_WAVES_PER_CLASSIFY_GROUP];
-groupshared uint gs_WaveVariantCounts[VIVID_MATERIAL_FEATURE_VARIANT_COUNT * VIVID_MATERIAL_WAVES_PER_BUILD_GROUP];
-groupshared uint gs_GlobalVariantOffsets[VIVID_MATERIAL_FEATURE_VARIANT_COUNT];
+groupshared uint gs_WaveVariantCounts[VIVID_DEFERRED_VARIANT_COUNT * VIVID_MATERIAL_WAVES_PER_BUILD_GROUP];
+groupshared uint gs_GlobalVariantOffsets[VIVID_DEFERRED_VARIANT_COUNT];
 #else
-groupshared uint gs_LocalVariantCounts[VIVID_MATERIAL_FEATURE_VARIANT_COUNT];
-groupshared uint gs_GlobalVariantOffsets[VIVID_MATERIAL_FEATURE_VARIANT_COUNT];
+groupshared uint gs_LocalVariantCounts[VIVID_DEFERRED_VARIANT_COUNT];
+groupshared uint gs_GlobalVariantOffsets[VIVID_DEFERRED_VARIANT_COUNT];
 groupshared uint gs_LocalTileOffsets[BUILD_INDIRECT_THREADS];
 groupshared uint gs_LocalTileVariants[BUILD_INDIRECT_THREADS];
 #endif
 
-uint GetMaterialFeatureVariantFlags(uint variant)
+uint GetDeferredClassOneHot(uint deferredExportClass)
 {
-    if (variant == 0u)
-        return VIVID_MATERIALFEATURE_LIT;
-
-    if (variant == 1u)
-        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_SSR_RECEIVE;
-
-    if (variant == 2u)
-        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_CLEAR_COAT;
-
-    if (variant == 3u)
-        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_CLEAR_COAT | VIVID_MATERIALFEATURE_SSR_RECEIVE;
-
-    if (variant == 4u)
-        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC;
-
-    if (variant == 5u)
-        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC | VIVID_MATERIALFEATURE_SSR_RECEIVE;
-
-    return VIVID_MATERIALFEATURE_DEFERRED_MASK;
-}
-
-uint SelectMaterialFeatureVariant(uint materialFeatures)
-{
-    uint deferredFeatures = materialFeatures & VIVID_MATERIALFEATURE_DEFERRED_MASK;
-
-    if (!HasVividMaterialFeature(deferredFeatures, VIVID_MATERIALFEATURE_LIT))
-        return VIVID_INVALID_MATERIAL_FEATURE_VARIANT;
-
-    [unroll]
-    for (uint variant = 0u; variant < VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL; variant++)
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_EMPTY
+        || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_UNLIT)
     {
-        uint variantFeatures = GetMaterialFeatureVariantFlags(variant);
-
-        if ((deferredFeatures & variantFeatures) == deferredFeatures)
-            return variant;
+        return 0u;
     }
 
-    return VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL;
-}
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB)
+        return VIVID_DEFERRED_CLASS_BIT_FAST_SLAB;
 
-bool IsValidMaterialFeatureMask(uint materialFeatures)
-{
-    if (!HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_LIT))
-        return false;
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_GENERAL_SLAB)
+        return VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB;
 
-    bool isFabric = HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_FABRIC);
-    bool isClearCoat = HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_CLEAR_COAT);
-    return !(isFabric && isClearCoat);
-}
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
+        return VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB;
 
-bool TryDecodeValidMaterialFeatures(float encodedMaterialFeatureId, out uint materialFeatures)
-{
-    uint rawFeatureId = (uint)min(round(saturate(encodedMaterialFeatureId) * 255.0), 255.0);
-    uint decodedFeatures = rawFeatureId & VIVID_MATERIALFEATURE_ID_MASK;
-
-    if (rawFeatureId > VIVID_MATERIALFEATURE_ID_MASK || !IsValidMaterialFeatureMask(decodedFeatures))
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_SUBSURFACE
+        || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_CATCH_ALL
+        || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_ERROR)
     {
-        materialFeatures = 0u;
-        return false;
+        return VIVID_DEFERRED_CLASS_BIT_CATCH_ALL;
     }
 
-    materialFeatures = decodedFeatures;
-    return true;
+    // Unknown values are sanitized to Error by VividDecodeDeferredExportHeader.
+    return 0u;
+}
+
+uint SelectDeferredVariant(uint deferredClassMask)
+{
+    if (deferredClassMask == 0u)
+        return VIVID_INVALID_DEFERRED_VARIANT;
+
+    if ((deferredClassMask & VIVID_DEFERRED_CLASS_BIT_CATCH_ALL) != 0u)
+        return VIVID_DEFERRED_VARIANT_CATCH_ALL;
+
+    // Fast < General < Dual: the most capable class covers a mixed tile.
+    if ((deferredClassMask & VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB) != 0u)
+        return VIVID_DEFERRED_VARIANT_DUAL_SLAB;
+
+    if ((deferredClassMask & VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB) != 0u)
+        return VIVID_DEFERRED_VARIANT_GENERAL_SLAB;
+
+    if ((deferredClassMask & VIVID_DEFERRED_CLASS_BIT_FAST_SLAB) != 0u)
+        return VIVID_DEFERRED_VARIANT_FAST_SLAB;
+
+    return VIVID_DEFERRED_VARIANT_CATCH_ALL;
 }
 
 #if VIVID_MATERIAL_USE_WAVE_INTRINSICS
@@ -131,7 +117,7 @@ uint GetWaveVariantCountIndex(uint variant, uint waveIndex)
     return variant * VIVID_MATERIAL_WAVES_PER_BUILD_GROUP + waveIndex;
 }
 
-void WriteMaterialFeatureTile(uint tileIndex, uint variant, uint globalTileOffset)
+void WriteDeferredVariantTile(uint tileIndex, uint variant, uint globalTileOffset)
 {
     uint tileY = tileIndex / _MaterialTileCountX;
     uint tileX = tileIndex - tileY * _MaterialTileCountX;
@@ -144,7 +130,7 @@ uint GetWaveVariantLocalTileOffset(uint variant, bool isLiveTile)
     uint localTileOffset = 0u;
 
     [unroll]
-    for (uint currentVariant = 0u; currentVariant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT; currentVariant++)
+    for (uint currentVariant = 0u; currentVariant < VIVID_DEFERRED_VARIANT_COUNT; currentVariant++)
     {
         bool belongsToVariant = isLiveTile && variant == currentVariant;
         uint variantLocalTileOffset = WavePrefixCountBits(belongsToVariant);
@@ -161,7 +147,7 @@ uint GetWaveVariantTileCount(uint variant, bool isLiveTile, uint targetVariant)
     uint tileCount = 0u;
 
     [unroll]
-    for (uint currentVariant = 0u; currentVariant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT; currentVariant++)
+    for (uint currentVariant = 0u; currentVariant < VIVID_DEFERRED_VARIANT_COUNT; currentVariant++)
     {
         uint currentVariantTileCount = WaveActiveCountBits(isLiveTile && variant == currentVariant);
 
@@ -177,7 +163,7 @@ void StoreWaveVariantCounts(uint variant, bool isLiveTile, uint waveIndex)
     bool isFirstLane = WaveIsFirstLane();
 
     [unroll]
-    for (uint currentVariant = 0u; currentVariant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT; currentVariant++)
+    for (uint currentVariant = 0u; currentVariant < VIVID_DEFERRED_VARIANT_COUNT; currentVariant++)
     {
         uint waveTileCount = WaveActiveCountBits(isLiveTile && variant == currentVariant);
 
@@ -208,10 +194,10 @@ uint SumPreviousWaveVariantCounts(uint variant, uint waveIndex)
     return previousWaveTileCount;
 }
 
-void WriteMaterialFeatureTileFlagsWithWaveOps(uint materialFeatures, uint3 groupId, uint groupIndex)
+void WriteDeferredClassTileMaskWithWaveOps(uint deferredClassOneHot, uint3 groupId, uint groupIndex)
 {
     uint tileIndex = groupId.y * _MaterialTileCountX + groupId.x;
-    uint waveTileMask = WaveActiveBitOr(materialFeatures);
+    uint waveTileMask = WaveActiveBitOr(deferredClassOneHot);
 
 #if VIVID_MATERIAL_WAVE_SIZE >= VIVID_MATERIAL_CLASSIFY_THREAD_COUNT
     if (WaveIsFirstLane())
@@ -237,9 +223,9 @@ void WriteMaterialFeatureTileFlagsWithWaveOps(uint materialFeatures, uint3 group
 #endif
 }
 
-void BuildMaterialFeatureIndirectArgsWithWaveOps(uint tileIndex, uint variant, uint groupIndex)
+void BuildDeferredVariantIndirectArgsWithWaveOps(uint tileIndex, uint variant, uint groupIndex)
 {
-    bool isLiveTile = tileIndex < _MaterialTileCount && variant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT;
+    bool isLiveTile = tileIndex < _MaterialTileCount && variant < VIVID_DEFERRED_VARIANT_COUNT;
     uint localTileOffset = GetWaveVariantLocalTileOffset(variant, isLiveTile);
 
 #if VIVID_MATERIAL_WAVE_SIZE >= BUILD_INDIRECT_THREADS
@@ -247,7 +233,7 @@ void BuildMaterialFeatureIndirectArgsWithWaveOps(uint tileIndex, uint variant, u
     uint variantLane = WaveGetLaneIndex();
     uint localTileCount = GetWaveVariantTileCount(variant, isLiveTile, variantLane);
 
-    if (variantLane < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+    if (variantLane < VIVID_DEFERRED_VARIANT_COUNT)
     {
         if (localTileCount > 0u)
         {
@@ -261,14 +247,14 @@ void BuildMaterialFeatureIndirectArgsWithWaveOps(uint tileIndex, uint variant, u
     if (isLiveTile)
     {
         uint globalTileOffset = globalVariantOffset + localTileOffset;
-        WriteMaterialFeatureTile(tileIndex, variant, globalTileOffset);
+        WriteDeferredVariantTile(tileIndex, variant, globalTileOffset);
     }
 #else
     uint waveIndex = groupIndex / VIVID_MATERIAL_WAVE_SIZE;
     StoreWaveVariantCounts(variant, isLiveTile, waveIndex);
     GroupMemoryBarrierWithGroupSync();
 
-    if (groupIndex < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+    if (groupIndex < VIVID_DEFERRED_VARIANT_COUNT)
     {
         uint localTileCount = SumWaveVariantCounts(groupIndex, VIVID_MATERIAL_WAVES_PER_BUILD_GROUP);
         uint globalTileOffset = 0u;
@@ -289,11 +275,11 @@ void BuildMaterialFeatureIndirectArgsWithWaveOps(uint tileIndex, uint variant, u
 
     uint previousWaveTileCount = SumPreviousWaveVariantCounts(variant, waveIndex);
     uint globalTileOffset = gs_GlobalVariantOffsets[variant] + previousWaveTileCount + localTileOffset;
-    WriteMaterialFeatureTile(tileIndex, variant, globalTileOffset);
+    WriteDeferredVariantTile(tileIndex, variant, globalTileOffset);
 #endif
 }
 #else
-void WriteMaterialFeatureTile(uint tileIndex, uint variant, uint globalTileOffset)
+void WriteDeferredVariantTile(uint tileIndex, uint variant, uint globalTileOffset)
 {
     uint tileY = tileIndex / _MaterialTileCountX;
     uint tileX = tileIndex - tileY * _MaterialTileCountX;
@@ -303,25 +289,25 @@ void WriteMaterialFeatureTile(uint tileIndex, uint variant, uint globalTileOffse
 
 void InitializeMaterialFeatureTileListBuild(uint groupIndex)
 {
-    if (groupIndex < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+    if (groupIndex < VIVID_DEFERRED_VARIANT_COUNT)
     {
         gs_LocalVariantCounts[groupIndex] = 0u;
         gs_GlobalVariantOffsets[groupIndex] = 0u;
     }
 
     gs_LocalTileOffsets[groupIndex] = 0u;
-    gs_LocalTileVariants[groupIndex] = VIVID_INVALID_MATERIAL_FEATURE_VARIANT;
+    gs_LocalTileVariants[groupIndex] = VIVID_INVALID_DEFERRED_VARIANT;
     GroupMemoryBarrierWithGroupSync();
 }
 #endif
 
-void WriteMaterialFeatureTileFlags(uint materialFeatures, uint3 groupId, uint groupIndex)
+void WriteDeferredClassTileMask(uint deferredClassOneHot, uint3 groupId, uint groupIndex)
 {
 #if VIVID_MATERIAL_USE_WAVE_INTRINSICS
-    WriteMaterialFeatureTileFlagsWithWaveOps(materialFeatures, groupId, groupIndex);
+    WriteDeferredClassTileMaskWithWaveOps(deferredClassOneHot, groupId, groupIndex);
 #else
     TileClassifaction::InitializeTileClassification(groupIndex);
-    TileClassifaction::SubmitPixelClassification(materialFeatures);
+    TileClassifaction::SubmitPixelClassification(deferredClassOneHot);
 
     if (groupIndex == 0u)
     {
@@ -331,28 +317,28 @@ void WriteMaterialFeatureTileFlags(uint materialFeatures, uint3 groupId, uint gr
 #endif
 }
 
-void BuildMaterialFeatureIndirectArgsInternal(uint tileIndex, uint groupIndex)
+void BuildDeferredVariantIndirectArgsInternal(uint tileIndex, uint groupIndex)
 {
-    uint variant = VIVID_INVALID_MATERIAL_FEATURE_VARIANT;
+    uint variant = VIVID_INVALID_DEFERRED_VARIANT;
 
     if (tileIndex < _MaterialTileCount)
-        variant = SelectMaterialFeatureVariant(_MaterialTileFeatureFlags[tileIndex]);
+        variant = SelectDeferredVariant(_MaterialTileFeatureFlags[tileIndex]);
 
 #if VIVID_MATERIAL_USE_WAVE_INTRINSICS
-    BuildMaterialFeatureIndirectArgsWithWaveOps(tileIndex, variant, groupIndex);
+    BuildDeferredVariantIndirectArgsWithWaveOps(tileIndex, variant, groupIndex);
 #else
     InitializeMaterialFeatureTileListBuild(groupIndex);
 
     uint localTileOffset = 0u;
 
-    if (variant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+    if (variant < VIVID_DEFERRED_VARIANT_COUNT)
         InterlockedAdd(gs_LocalVariantCounts[variant], 1u, localTileOffset);
 
     gs_LocalTileOffsets[groupIndex] = localTileOffset;
     gs_LocalTileVariants[groupIndex] = variant;
     GroupMemoryBarrierWithGroupSync();
 
-    if (groupIndex < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+    if (groupIndex < VIVID_DEFERRED_VARIANT_COUNT)
     {
         uint localTileCount = gs_LocalVariantCounts[groupIndex];
 
@@ -366,16 +352,16 @@ void BuildMaterialFeatureIndirectArgsInternal(uint tileIndex, uint groupIndex)
     }
     GroupMemoryBarrierWithGroupSync();
 
-    if (tileIndex >= _MaterialTileCount || variant >= VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+    if (tileIndex >= _MaterialTileCount || variant >= VIVID_DEFERRED_VARIANT_COUNT)
         return;
 
     uint globalTileOffset = gs_GlobalVariantOffsets[variant] + gs_LocalTileOffsets[groupIndex];
-    WriteMaterialFeatureTile(tileIndex, variant, globalTileOffset);
+    WriteDeferredVariantTile(tileIndex, variant, globalTileOffset);
 #endif
 }
 
-[numthreads(VIVID_MATERIAL_FEATURE_VARIANT_COUNT, 1, 1)]
-void ClearMaterialFeatureArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(VIVID_DEFERRED_VARIANT_COUNT, 1, 1)]
+void ClearDeferredVariantArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint variant = dispatchThreadId.x;
     uint argsOffset = variant * VIVID_INDIRECT_ARGS_ELEMENT_COUNT;
@@ -386,12 +372,12 @@ void ClearMaterialFeatureArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
     _MaterialFeatureIndirectArgs[argsOffset + 3u] = 0u;
 }
 
-void ClassifyMaterialFeaturesInternal(
+void ClassifyDeferredExportsInternal(
     uint3 dispatchThreadId,
     uint3 groupId,
     uint groupIndex)
 {
-    uint materialFeatures = 0u;
+    uint deferredClassOneHot = 0u;
 
     if (dispatchThreadId.x < _ClassificationWidth && dispatchThreadId.y < _ClassificationHeight)
     {
@@ -401,68 +387,73 @@ void ClassifyMaterialFeaturesInternal(
         if (deviceDepth != UNITY_RAW_FAR_CLIP_VALUE)
         {
             float4 gbuffer0 = _GBuffer0.Load(int3(pixelCoord, 0));
-            TryDecodeValidMaterialFeatures(gbuffer0.a, materialFeatures);
+            float4 gbuffer1 = _GBuffer1.Load(int3(pixelCoord, 0));
+            uint deferredExportHeader = VividIsSurfaceSummaryGBufferABIValid(gbuffer1.a)
+                ? VividDecodeDeferredExportHeader(gbuffer0.a)
+                : VIVID_DEFERRED_EXPORT_CLASS_ERROR;
+            uint deferredExportClass = VividGetDeferredExportClass(deferredExportHeader);
+            deferredClassOneHot = GetDeferredClassOneHot(deferredExportClass);
         }
     }
 
-    WriteMaterialFeatureTileFlags(materialFeatures, groupId, groupIndex);
+    WriteDeferredClassTileMask(deferredClassOneHot, groupId, groupIndex);
 }
 
-void BuildMaterialFeatureIndirectArgsInternalEntry(
+void BuildDeferredVariantIndirectArgsInternalEntry(
     uint3 dispatchThreadId,
     uint groupIndex)
 {
     uint tileIndex = dispatchThreadId.x;
-    BuildMaterialFeatureIndirectArgsInternal(tileIndex, groupIndex);
+    BuildDeferredVariantIndirectArgsInternal(tileIndex, groupIndex);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
-void ClassifyMaterialFeatures(
+void ClassifyDeferredExports(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint3 groupId : SV_GroupID,
     uint groupIndex : SV_GroupIndex)
 {
-    ClassifyMaterialFeaturesInternal(dispatchThreadId, groupId, groupIndex);
+    ClassifyDeferredExportsInternal(dispatchThreadId, groupId, groupIndex);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
-void ClassifyMaterialFeaturesWave32(
+void ClassifyDeferredExportsWave32(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint3 groupId : SV_GroupID,
     uint groupIndex : SV_GroupIndex)
 {
-    ClassifyMaterialFeaturesInternal(dispatchThreadId, groupId, groupIndex);
+    ClassifyDeferredExportsInternal(dispatchThreadId, groupId, groupIndex);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
-void ClassifyMaterialFeaturesWave64(
+void ClassifyDeferredExportsWave64(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint3 groupId : SV_GroupID,
     uint groupIndex : SV_GroupIndex)
 {
-    ClassifyMaterialFeaturesInternal(dispatchThreadId, groupId, groupIndex);
+    ClassifyDeferredExportsInternal(dispatchThreadId, groupId, groupIndex);
 }
 
 [numthreads(BUILD_INDIRECT_THREADS, 1, 1)]
-void BuildMaterialFeatureIndirectArgs(
+void BuildDeferredVariantIndirectArgs(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint groupIndex : SV_GroupIndex)
 {
-    BuildMaterialFeatureIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
+    BuildDeferredVariantIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
 }
 
 [numthreads(BUILD_INDIRECT_THREADS, 1, 1)]
-void BuildMaterialFeatureIndirectArgsWave32(
+void BuildDeferredVariantIndirectArgsWave32(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint groupIndex : SV_GroupIndex)
 {
-    BuildMaterialFeatureIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
+    BuildDeferredVariantIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
 }
 
 [numthreads(BUILD_INDIRECT_THREADS, 1, 1)]
-void BuildMaterialFeatureIndirectArgsWave64(
+void BuildDeferredVariantIndirectArgsWave64(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint groupIndex : SV_GroupIndex)
 {
-    BuildMaterialFeatureIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
+    BuildDeferredVariantIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
 }

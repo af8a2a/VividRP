@@ -786,11 +786,10 @@ namespace VividRP.Runtime
             return value switch
             {
                 MaterialFeatureVariantDebug.All => MaterialFeatureVariantDebug.All,
-                MaterialFeatureVariantDebug.Lit => MaterialFeatureVariantDebug.Lit,
-                MaterialFeatureVariantDebug.Fabric => MaterialFeatureVariantDebug.Fabric,
-                MaterialFeatureVariantDebug.ClearCoat => MaterialFeatureVariantDebug.ClearCoat,
-                MaterialFeatureVariantDebug.SSRReceive => MaterialFeatureVariantDebug.SSRReceive,
-                MaterialFeatureVariantDebug.DecalReceive => MaterialFeatureVariantDebug.DecalReceive,
+                MaterialFeatureVariantDebug.FastSlab => MaterialFeatureVariantDebug.FastSlab,
+                MaterialFeatureVariantDebug.GeneralSlab => MaterialFeatureVariantDebug.GeneralSlab,
+                MaterialFeatureVariantDebug.DualSlab => MaterialFeatureVariantDebug.DualSlab,
+                MaterialFeatureVariantDebug.CatchAll => MaterialFeatureVariantDebug.CatchAll,
                 _ => MaterialFeatureVariantDebug.All,
             };
         }
@@ -840,8 +839,8 @@ namespace VividRP.Runtime
 
             public static readonly NameAndTooltip MaterialFeatureVariantDebug = new()
             {
-                name = "Material Feature",
-                tooltip = "Select which material feature coverage is shown in the material feature variants tile view."
+                name = "Deferred Class",
+                tooltip = "Select which deferred export class is shown in the material class tile view."
             };
 
             public static readonly NameAndTooltip ClusterDebugMode = new()

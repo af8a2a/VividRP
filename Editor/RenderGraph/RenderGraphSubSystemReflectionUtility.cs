@@ -48,6 +48,24 @@ namespace VividRP.Editor.RenderGraph
             return variable != null && mappings.OutputVariables.TryGetValue(variable, out port);
         }
 
+        internal static bool TryRefreshPorts(ISubgraphNode subgraphNode)
+        {
+            if (!TryGetNodeModel(subgraphNode, out var nodeModel))
+                return false;
+
+            var method = nodeModel.GetType().GetMethod(
+                "DefineNode",
+                s_InstanceBindings,
+                null,
+                System.Type.EmptyTypes,
+                null);
+            if (method == null)
+                return false;
+
+            method.Invoke(nodeModel, null);
+            return true;
+        }
+
         private static bool TryGetPortMappings(ISubgraphNode subgraphNode, out SubgraphPortMappings mappings)
         {
             mappings = null;

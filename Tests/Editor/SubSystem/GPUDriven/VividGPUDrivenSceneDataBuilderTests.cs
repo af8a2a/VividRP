@@ -1434,9 +1434,14 @@ namespace VividRP.Editor.Tests
                 Assert.That(system.BufferSet.SharedIndexCount, Is.EqualTo(3));
                 VividMaterialData materialData = system.SceneData.Materials[0];
                 VividMaterialRuntimeHeader runtimeHeader = system.SceneData.MaterialRuntimeHeaders[0];
-                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(VividMaterialProgramID.Invalid));
+                Assert.That(
+                    runtimeHeader.ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
                 Assert.That(runtimeHeader.ParameterAddress, Is.Zero);
                 Assert.That(runtimeHeader.ResourceBindingAddress, Is.EqualTo(materialData.SurfaceBindingIndex));
+                Assert.That(
+                    runtimeHeader.Flags,
+                    Is.EqualTo(VividMaterialRuntimeFlags.AlphaClip));
                 VividSurfaceBindingData surfaceBindingData = system.SceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
                 float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
                     new Color(0.25f, 0.5f, 0.75f, 1.0f));

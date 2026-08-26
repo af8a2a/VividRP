@@ -293,16 +293,18 @@ Shader "Hidden/VividRP/ClusterDebug"
 
             #define CLASSIFY_TILE_SIZE 8
             #define VIVID_MATERIAL_FEATURE_TILE_SIZE 8u
-            #define VIVID_MATERIAL_FEATURE_VARIANT_COUNT 7u
-            #define VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL 6u
+            #define VIVID_DEFERRED_CLASS_VARIANT_COUNT 4u
             #define VIVID_INDIRECT_ARGS_ELEMENT_COUNT 4u
-            #define VIVID_MATERIAL_FEATURE_DEBUG_ALL 0u
-            #define VIVID_MATERIAL_FEATURE_DEBUG_MASK \
-                (VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC | VIVID_MATERIALFEATURE_CLEAR_COAT | VIVID_MATERIALFEATURE_SSR_RECEIVE | VIVID_MATERIALFEATURE_DECAL_RECEIVE)
+            #define VIVID_DEFERRED_CLASS_DEBUG_ALL 0u
+            #define VIVID_DEFERRED_CLASS_DEBUG_MASK \
+                (VIVID_DEFERRED_CLASS_BIT_FAST_SLAB \
+                | VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB \
+                | VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB \
+                | VIVID_DEFERRED_CLASS_BIT_CATCH_ALL)
 
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Debug.hlsl"
-            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 
             StructuredBuffer<uint> _MaterialTileFeatureFlags;
@@ -331,65 +333,46 @@ Shader "Hidden/VividRP/ClusterDebug"
                 nointerpolation uint isValid : TEXCOORD4;
             };
 
-            uint GetMaterialFeatureVariantFlags(uint variant)
+            uint GetDeferredClassBit(uint variant)
             {
                 if (variant == 0u)
-                    return VIVID_MATERIALFEATURE_LIT;
+                    return VIVID_DEFERRED_CLASS_BIT_FAST_SLAB;
 
                 if (variant == 1u)
-                    return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_SSR_RECEIVE;
+                    return VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB;
 
                 if (variant == 2u)
-                    return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_CLEAR_COAT;
+                    return VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB;
 
                 if (variant == 3u)
-                    return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_CLEAR_COAT | VIVID_MATERIALFEATURE_SSR_RECEIVE;
+                    return VIVID_DEFERRED_CLASS_BIT_CATCH_ALL;
 
-                if (variant == 4u)
-                    return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC;
-
-                if (variant == 5u)
-                    return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC | VIVID_MATERIALFEATURE_SSR_RECEIVE;
-
-                return VIVID_MATERIALFEATURE_DEFERRED_MASK;
+                return 0u;
             }
 
-            bool IsValidMaterialFeatureMask(uint materialFeatures)
+            float3 EvaluateDeferredClassColor(uint classMask)
             {
-                if (!HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_LIT))
-                    return false;
-
-                bool isFabric = HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_FABRIC);
-                bool isClearCoat = HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_CLEAR_COAT);
-                return !(isFabric && isClearCoat);
-            }
-
-            float3 EvaluateMaterialFeatureColor(uint featureMask)
-            {
-                if ((featureMask & VIVID_MATERIALFEATURE_LIT) != 0u)
+                if ((classMask & VIVID_DEFERRED_CLASS_BIT_FAST_SLAB) != 0u)
                     return float3(0.0, 0.45, 1.0);
 
-                if ((featureMask & VIVID_MATERIALFEATURE_FABRIC) != 0u)
-                    return float3(0.8, 0.2, 0.95);
+                if ((classMask & VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB) != 0u)
+                    return float3(0.25, 0.8, 0.45);
 
-                if ((featureMask & VIVID_MATERIALFEATURE_CLEAR_COAT) != 0u)
+                if ((classMask & VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB) != 0u)
                     return float3(1.0, 0.65, 0.0);
 
-                if ((featureMask & VIVID_MATERIALFEATURE_SSR_RECEIVE) != 0u)
-                    return float3(0.0, 0.85, 0.6);
-
-                if ((featureMask & VIVID_MATERIALFEATURE_DECAL_RECEIVE) != 0u)
-                    return float3(0.9, 0.9, 0.15);
+                if ((classMask & VIVID_DEFERRED_CLASS_BIT_CATCH_ALL) != 0u)
+                    return float3(0.95, 0.15, 0.65);
 
                 return float3(0.22, 0.02, 0.62);
             }
 
-            bool TryResolveMaterialFeatureVariant(uint quadIndex, out uint variant, out uint variantTileIndex)
+            bool TryResolveDeferredClassVariant(uint quadIndex, out uint variant, out uint variantTileIndex)
             {
                 variantTileIndex = quadIndex;
 
                 [unroll]
-                for (variant = 0u; variant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT; variant++)
+                for (variant = 0u; variant < VIVID_DEFERRED_CLASS_VARIANT_COUNT; variant++)
                 {
                     uint argsOffset = variant * VIVID_INDIRECT_ARGS_ELEMENT_COUNT;
                     uint tileCount = _MaterialFeatureIndirectArgs[argsOffset];
@@ -400,7 +383,7 @@ Shader "Hidden/VividRP/ClusterDebug"
                     variantTileIndex -= tileCount;
                 }
 
-                variant = VIVID_MATERIAL_FEATURE_VARIANT_COUNT;
+                variant = VIVID_DEFERRED_CLASS_VARIANT_COUNT;
                 variantTileIndex = 0u;
                 return false;
             }
@@ -450,7 +433,7 @@ Shader "Hidden/VividRP/ClusterDebug"
 
                 uint variant = 0u;
                 uint variantTileIndex = 0u;
-                if (!TryResolveMaterialFeatureVariant(quadIndex, variant, variantTileIndex))
+                if (!TryResolveDeferredClassVariant(quadIndex, variant, variantTileIndex))
                     return CreateInvalidOverlayVaryings();
 
                 uint packedTileCoord = _MaterialFeatureTileList[variant * _MaterialTileCount + variantTileIndex];
@@ -488,31 +471,34 @@ Shader "Hidden/VividRP/ClusterDebug"
                 if (input.isValid == 0u || input.tileIndex >= _MaterialTileCount)
                     return float4(0.0, 0.0, 0.0, 0.0);
 
-                uint materialFeatures = _MaterialTileFeatureFlags[input.tileIndex] & VIVID_MATERIAL_FEATURE_DEBUG_MASK;
-                if (!IsValidMaterialFeatureMask(materialFeatures))
+                uint classMask = _MaterialTileFeatureFlags[input.tileIndex]
+                    & VIVID_DEFERRED_CLASS_DEBUG_MASK;
+                uint variantClassBit = GetDeferredClassBit(input.variant);
+                if (classMask == 0u || (classMask & variantClassBit) == 0u)
                     return float4(0.0, 0.0, 0.0, 0.0);
 
-                uint selectedFeatureMask = _MaterialFeatureDebug & VIVID_MATERIAL_FEATURE_DEBUG_MASK;
-                if (selectedFeatureMask != VIVID_MATERIAL_FEATURE_DEBUG_ALL
-                    && (materialFeatures & selectedFeatureMask) == 0u)
+                uint selectedClassMask = _MaterialFeatureDebug
+                    & VIVID_DEFERRED_CLASS_DEBUG_MASK;
+                if (_MaterialFeatureDebug != VIVID_DEFERRED_CLASS_DEBUG_ALL
+                    && (selectedClassMask == 0u || (classMask & selectedClassMask) == 0u))
                 {
                     return float4(0.0, 0.0, 0.0, 0.0);
                 }
 
                 float4 overlay;
-                if (selectedFeatureMask == VIVID_MATERIAL_FEATURE_DEBUG_ALL)
+                if (_MaterialFeatureDebug == VIVID_DEFERRED_CLASS_DEBUG_ALL)
                 {
                     uint2 pixelCoord = (uint2)input.positionCS.xy;
                     overlay = OverlayHeatMap(
                         pixelCoord,
                         uint2(VIVID_MATERIAL_FEATURE_TILE_SIZE, VIVID_MATERIAL_FEATURE_TILE_SIZE),
                         input.variant + 1u,
-                        VIVID_MATERIAL_FEATURE_VARIANT_COUNT,
+                        VIVID_DEFERRED_CLASS_VARIANT_COUNT,
                         0.42);
                 }
                 else
                 {
-                    overlay = float4(EvaluateMaterialFeatureColor(selectedFeatureMask), 0.46);
+                    overlay = float4(EvaluateDeferredClassColor(selectedClassMask), 0.46);
                 }
 
                 float borderWidth = 1.25 / max(min(input.tilePixelSize.x, input.tilePixelSize.y), 1.0);

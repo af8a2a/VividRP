@@ -30,6 +30,7 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_AlphaClipPropertyId = Shader.PropertyToID("_AlphaClip");
         private static readonly int s_CutoffPropertyId = Shader.PropertyToID("_Cutoff");
         private static readonly int s_CullPropertyId = Shader.PropertyToID("_Cull");
+        private const string StandardLitShaderName = "VividRP/Material/StandardLit";
         private const string SimpleForwardShaderName = "VividRP/Material/SimpleForward";
         private static readonly EntityIdComparer s_EntityIdComparer = new();
         private static readonly EntityIdSubMeshIndexComparer s_EntityIdSubMeshIndexComparer = new();
@@ -1140,13 +1141,26 @@ namespace VividRP.Runtime.GPUDriven
             }
             else
             {
-                WarnMissingMaterialProxy(meshletRenderer, material, subMeshIndex);
                 materialData = CreateMaterialData(material, surfaceBindingIndex);
-                runtimeHeader = GPUDrivenMaterialCompiler.CreateLegacyFallbackHeader(
-                    (uint) sceneData.MaterialCount,
-                    surfaceBindingIndex);
                 sceneData.MutableSurfaceBindings.Add(
                     textureBackend.CreateSurfaceBinding(ExtractSurfaceTextures(material)));
+                if (IsStandardLitShader(material != null ? material.shader : null))
+                {
+                    GPUDrivenCompiledMaterialInstance compiledMaterial =
+                        GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                            materialData,
+                            (uint) sceneData.MaterialCount,
+                            surfaceBindingIndex);
+                    materialData = compiledMaterial.LegacyMaterialData;
+                    runtimeHeader = compiledMaterial.RuntimeHeader;
+                }
+                else
+                {
+                    WarnMissingMaterialProxy(meshletRenderer, material, subMeshIndex);
+                    runtimeHeader = GPUDrivenMaterialCompiler.CreateLegacyFallbackHeader(
+                        (uint) sceneData.MaterialCount,
+                        surfaceBindingIndex);
+                }
             }
 
             materialIndex = sceneData.AddMaterial(materialData, runtimeHeader);
@@ -1178,7 +1192,7 @@ namespace VividRP.Runtime.GPUDriven
             string rendererName = meshletRenderer != null ? meshletRenderer.name : "<unknown>";
             string materialName = material != null ? material.name : "<null>";
             Debug.LogWarning(
-                $"[VividRP] MeshletRenderer '{rendererName}' submesh {subMeshIndex} is missing a GPUDriven material proxy. Falling back to source Material '{materialName}'.",
+                $"[VividRP] MeshletRenderer '{rendererName}' submesh {subMeshIndex} uses unsupported material '{materialName}' without a GPUDriven material proxy; Visibility Deferred will resolve it as Error.",
                 meshletRenderer
             );
         }
@@ -1632,6 +1646,15 @@ namespace VividRP.Runtime.GPUDriven
             isSimpleForwardShader = string.Equals(shader.name, SimpleForwardShaderName, StringComparison.Ordinal);
             s_SimpleForwardShaderMatchCache.Add(shader, isSimpleForwardShader);
             return isSimpleForwardShader;
+        }
+
+        private static bool IsStandardLitShader(Shader shader)
+        {
+            return shader != null
+                && string.Equals(
+                    shader.name,
+                    StandardLitShaderName,
+                    StringComparison.Ordinal);
         }
 
         private static VividRendererListID GetRendererListId(Material material)

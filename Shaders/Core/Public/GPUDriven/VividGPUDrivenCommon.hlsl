@@ -20,6 +20,9 @@
 #define VIVIDMATERIALPROGRAMID_DUAL_SLAB_HORIZONTAL_MIX 1u
 #define VIVIDMATERIALPROGRAMID_DUAL_SLAB_VERTICAL_LAYER 2u
 #define VIVIDMATERIALPROGRAMID_INVALID 0xffffffffu
+#define VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK 0u
+#define VIVID_MATERIAL_PROGRAM_KNOWN 1u
+#define VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE 2u
 #define VIVIDMATERIALCOVERAGEPROGRAMID_BASE_COLOR_ALPHA 0u
 #define VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB 0u
 #define VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB 1u
@@ -495,6 +498,27 @@ VividMaterialRuntimeHeader PullMaterialRuntimeHeader(const uint materialIndex)
 VividMaterialProgramData PullMaterialProgramData(const uint programIndex)
 {
     return _MaterialPrograms[programIndex];
+}
+
+uint VividGetMaterialProgramStatus(
+    const uint materialIndex,
+    out VividMaterialRuntimeHeader runtimeHeader,
+    out VividMaterialProgramData programData)
+{
+    runtimeHeader = (VividMaterialRuntimeHeader) 0;
+    runtimeHeader.ProgramID = VIVIDMATERIALPROGRAMID_INVALID;
+    programData = (VividMaterialProgramData) 0;
+    if (materialIndex >= _MaterialRuntimeHeaderCount)
+        return VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE;
+
+    runtimeHeader = PullMaterialRuntimeHeader(materialIndex);
+    if (runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID)
+        return VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK;
+    if (runtimeHeader.ProgramID >= _MaterialProgramCount)
+        return VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE;
+
+    programData = PullMaterialProgramData(runtimeHeader.ProgramID);
+    return VIVID_MATERIAL_PROGRAM_KNOWN;
 }
 
 VividSurfaceBindingData PullSurfaceBindingData(const uint surfaceBindingIndex)

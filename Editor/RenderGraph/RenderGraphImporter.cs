@@ -10,7 +10,7 @@ using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
 {
-    [ScriptedImporter(5, RenderGraphEditorGraph.AssetExtension)]
+    [ScriptedImporter(7, RenderGraphEditorGraph.AssetExtension)]
     internal sealed class RenderGraphImporter : ScriptedImporter
     {
         public override void OnImportAsset(AssetImportContext ctx)

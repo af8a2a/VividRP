@@ -44,14 +44,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
         private static readonly int GBuffer3Id = Shader.PropertyToID("_GBuffer3");
-        private static readonly int GBuffer4Id = Shader.PropertyToID("_GBuffer4");
+        private static readonly int DiffuseIrradianceId = Shader.PropertyToID("_DiffuseIrradiance");
+        private static readonly int VisibilityBufferId = Shader.PropertyToID("_VisibilityBuffer");
         private static readonly int SourceTextureScaleBiasId = Shader.PropertyToID("_SourceTextureScaleBias");
         private static readonly int CameraDepthTextureScaleBiasId = Shader.PropertyToID("_CameraDepthTextureScaleBias");
         private static readonly int GBuffer0ScaleBiasId = Shader.PropertyToID("_GBuffer0ScaleBias");
         private static readonly int GBuffer1ScaleBiasId = Shader.PropertyToID("_GBuffer1ScaleBias");
         private static readonly int GBuffer2ScaleBiasId = Shader.PropertyToID("_GBuffer2ScaleBias");
         private static readonly int GBuffer3ScaleBiasId = Shader.PropertyToID("_GBuffer3ScaleBias");
-        private static readonly int GBuffer4ScaleBiasId = Shader.PropertyToID("_GBuffer4ScaleBias");
+        private static readonly int DiffuseIrradianceScaleBiasId = Shader.PropertyToID("_DiffuseIrradianceScaleBias");
+        private static readonly int VisibilityBufferScaleBiasId = Shader.PropertyToID("_VisibilityBufferScaleBias");
         private static readonly int MaterialDebugModeId = Shader.PropertyToID("_MaterialDebugMode");
         private static readonly int MaterialDebugExposureId = Shader.PropertyToID("_MaterialDebugExposure");
         private static readonly int MaterialTileFeatureFlagsId = Shader.PropertyToID("_MaterialTileFeatureFlags");
@@ -78,8 +80,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "GBuffer3", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer3;
 
-        [RenderGraphResource(Name = "GBuffer4", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "DiffuseIrradiance", Access = AccessFlags.Read)]
+        // Keep the legacy field name as the serialized RenderGraph port key.
         private RenderGraphTexture m_GBuffer4;
+
+        [RenderGraphResource(Name = "VisibilityBuffer", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_VisibilityBuffer;
 
         [RenderGraphResource(Name = "MaterialTileFeatureFlags", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_MaterialTileFeatureFlags;
@@ -142,7 +148,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateInput("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
-            m_GBuffer4 = RenderGraphTexture.CreateInput("GBuffer4", GraphicsFormat.R16G16B16A16_SFloat);
+            m_GBuffer4 = RenderGraphTexture.CreateInput(
+                "DiffuseIrradiance",
+                GraphicsFormat.B10G11R11_UFloatPack32);
+            m_VisibilityBuffer = RenderGraphTexture.CreateInput(
+                "VisibilityBuffer",
+                GraphicsFormat.R32G32_UInt);
+            m_VisibilityBuffer.desc.FilterMode = FilterMode.Point;
             m_MaterialTileFeatureFlags = RenderGraphBuffer.CreateStructured("MaterialTileFeatureFlags", 1, sizeof(uint));
             m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputTexture", GraphicsFormat.R8G8B8A8_UNorm);
             m_OutputTexture.desc.ClearBuffer = false;
@@ -210,7 +222,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var gBuffer1 = m_GBuffer1.innerHandle.ResolveTexture();
             var gBuffer2 = m_GBuffer2.innerHandle.ResolveTexture();
             var gBuffer3 = m_GBuffer3.innerHandle.ResolveTexture();
-            var gBuffer4 = m_GBuffer4.innerHandle.ResolveTexture();
+            var diffuseIrradiance = m_GBuffer4.innerHandle.ResolveTexture();
+            var visibilityBuffer = m_VisibilityBuffer.innerHandle.ResolveTexture();
 
             if (sourceTexture == null
                 || depthTexture == null
@@ -218,7 +231,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 || gBuffer1 == null
                 || gBuffer2 == null
                 || gBuffer3 == null
-                || gBuffer4 == null)
+                || diffuseIrradiance == null
+                || visibilityBuffer == null)
             {
                 DebugPassCameraUtility.TryPassThrough(context, m_SourceTexture, m_OutputTexture);
                 return;
@@ -241,14 +255,20 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetTexture(GBuffer1Id, gBuffer1);
             mpb.SetTexture(GBuffer2Id, gBuffer2);
             mpb.SetTexture(GBuffer3Id, gBuffer3);
-            mpb.SetTexture(GBuffer4Id, gBuffer4);
+            mpb.SetTexture(DiffuseIrradianceId, diffuseIrradiance);
+            mpb.SetTexture(VisibilityBufferId, visibilityBuffer);
             mpb.SetVector(SourceTextureScaleBiasId, m_SourceTexture.innerHandle.GetScaleBias());
             mpb.SetVector(CameraDepthTextureScaleBiasId, m_DepthTexture.innerHandle.GetScaleBias());
             mpb.SetVector(GBuffer0ScaleBiasId, m_GBuffer0.innerHandle.GetScaleBias());
             mpb.SetVector(GBuffer1ScaleBiasId, m_GBuffer1.innerHandle.GetScaleBias());
             mpb.SetVector(GBuffer2ScaleBiasId, m_GBuffer2.innerHandle.GetScaleBias());
             mpb.SetVector(GBuffer3ScaleBiasId, m_GBuffer3.innerHandle.GetScaleBias());
-            mpb.SetVector(GBuffer4ScaleBiasId, m_GBuffer4.innerHandle.GetScaleBias());
+            mpb.SetVector(
+                DiffuseIrradianceScaleBiasId,
+                m_GBuffer4.innerHandle.GetScaleBias());
+            mpb.SetVector(
+                VisibilityBufferScaleBiasId,
+                m_VisibilityBuffer.innerHandle.GetScaleBias());
             mpb.SetInt(MaterialDebugModeId, resolvedMode);
             mpb.SetFloat(MaterialDebugExposureId, resolvedExposure);
             mpb.SetVector(MaterialFeatureDebugScreenSizeId, m_MaterialFeatureDebugScreenSize);
@@ -302,6 +322,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_GBuffer2?.innerHandle.IsValid() == true
                 && m_GBuffer3?.innerHandle.IsValid() == true
                 && m_GBuffer4?.innerHandle.IsValid() == true
+                && m_VisibilityBuffer?.innerHandle.IsValid() == true
                 && m_OutputTexture?.innerHandle.IsValid() == true;
         }
 

@@ -4,13 +4,13 @@
 // Prepares the required resources for DLSS-RR:
 // 1. Extracts hit distances from path tracing output (alpha channel)
 // 2. Generates proper specular albedo using EnvBRDFApprox2 formula
-// 3. Decodes OctQuadEncoded normals and converts PerceptualSmoothness to roughness
+// 3. Decodes Surface Summary normals and perceptual roughness
 // 4. Normalizes ray directions for DLSS-RR
 //
 // IMPORTANT (Based on NVIDIA dlss_rr sample):
 // - DLSS-RR expects roughness in Normal.w as sqrt(alpha_roughness)
 //   where alpha_roughness = perceptualRoughness^2
-//   So: Normal.w = perceptualRoughness = 1 - perceptualSmoothness
+//   So: Normal.w = perceptualRoughness from Surface Summary RT1.z
 // - Hit distance for sky/miss should be 65504.0 (FP16 max)
 // - Specular albedo uses alpha_roughness (not roughness^4)
 //------------------------------------------------------------------------------
@@ -23,7 +23,7 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
 
 //------------------------------------------------------------------------------
 // Resources
@@ -32,9 +32,9 @@
 // Input textures
 Texture2D<float4> _DiffuseRadianceInput;    // RGB = diffuse radiance, A = normalized hit distance
 Texture2D<float4> _SpecularRadianceInput;   // RGB = specular radiance, A = normalized hit distance
-Texture2D<float4> _GBuffer0;                // Albedo (diffuse)
-Texture2D<float4> _GBuffer1;                // Specular + Metallic
-Texture2D<float4> _GBuffer2;                // OctQuadEncoded Normal (RG) + flags (B) + PerceptualSmoothness (A)
+Texture2D<float4> _GBuffer0;                // DiffuseAlbedo.rgb + DeferredExportHeader.a
+Texture2D<float4> _GBuffer1;                // Encoded Normal.xy + PerceptualRoughness.z + Reserved.a
+Texture2D<float4> _GBuffer2;                // SqrtEncodedSpecularF0.rgb + AmbientOcclusion.a
 Texture2D<float> _DepthTexture;             // Depth buffer
 
 // Ray direction inputs (from path tracer)
@@ -60,32 +60,6 @@ float3 _CameraPosition;         // Camera world position
 
 // DLSS-RR special constants (from NVIDIA sample)
 #define DLSS_INF_DISTANCE 65504.0f  // FP16 max - used for sky/miss
-
-//------------------------------------------------------------------------------
-// OctQuad Decoding - Matches VividRP GBuffer encoding
-//------------------------------------------------------------------------------
-
-
-//------------------------------------------------------------------------------
-// Smoothness/Roughness Conversion for DLSS-RR
-// Based on NVIDIA dlss_rr sample (primary_rgen.slang)
-//------------------------------------------------------------------------------
-
-// Convert PerceptualSmoothness to the format DLSS-RR expects
-// DLSS-RR expects sqrt(alpha_roughness) in Normal.w
-// where alpha_roughness = perceptualRoughness^2
-// So: Normal.w = perceptualRoughness = 1 - perceptualSmoothness
-float PerceptualSmoothnessToSqrtAlphaRoughness(float perceptualSmoothness)
-{
-    return 1.0 - perceptualSmoothness;
-}
-
-// Get alpha_roughness (perceptualRoughness^2) for specular calculations
-float PerceptualSmoothnessToAlphaRoughness(float perceptualSmoothness)
-{
-    float perceptualRoughness = 1.0 - perceptualSmoothness;
-    return perceptualRoughness * perceptualRoughness;
-}
 
 //------------------------------------------------------------------------------
 // EnvBRDFApprox2 - From Ray Tracing Gems Chapter 32 / NVIDIA dlss_helper.slang
@@ -174,7 +148,7 @@ void CSExtractHitDistances(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 //------------------------------------------------------------------------------
-// CSPrepareNormalRoughness - Decode OctQuad normals and convert smoothness
+// CSPrepareNormalRoughness - Decode Surface Summary normal and roughness
 // Based on NVIDIA sample: Normal.w = sqrt(alpha_roughness) = perceptualRoughness
 //------------------------------------------------------------------------------
 [numthreads(8, 8, 1)]
@@ -185,23 +159,20 @@ void CSPrepareNormalRoughness(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (pixelCoord.x >= (uint)_TextureSize.x || pixelCoord.y >= (uint)_TextureSize.y)
         return;
 
-    // Read GBuffer2: OctQuadEncoded Normal (RG) + flags (B) + PerceptualSmoothness (A)
-    float4 gbuffer2 = _GBuffer2[pixelCoord];
+    // Surface Summary RT1 stores encoded normal.xy and perceptual roughness.z.
+    float4 gbuffer1 = _GBuffer1[pixelCoord];
 
-    // Decode OctQuadEncoded normal from RG channels
-    float3 normalWS = UnpackNormalOctQuadEncode(gbuffer2.rg);
+    float3 normalWS = VividDecodeSurfaceSummaryNormal(gbuffer1.xy);
 
-    // Convert PerceptualSmoothness to sqrt(alpha_roughness) for DLSS-RR
     // Based on NVIDIA sample (primary_rgen.slang line 399):
     //   float4 normalRoughness = float4(worldNormal, sqrt(pbrMat.roughness.x));
     // Where pbrMat.roughness.x is the alpha_roughness value
-    // sqrt(alpha_roughness) = perceptualRoughness = 1 - perceptualSmoothness
-    float perceptualSmoothness = gbuffer2.a;
-    float sqrtAlphaRoughness = PerceptualSmoothnessToSqrtAlphaRoughness(perceptualSmoothness);
+    // sqrt(alpha_roughness) = perceptualRoughness.
+    float perceptualRoughness = saturate(gbuffer1.z);
 
     // Output: RGB = world-space normal [-1,1], A = sqrt(alpha_roughness)
     // DLSS-RR expects normals in [-1, 1] range (not encoded)
-    _NormalRoughnessOutput[pixelCoord] = float4(normalWS, sqrtAlphaRoughness);
+    _NormalRoughnessOutput[pixelCoord] = float4(normalWS, perceptualRoughness);
 }
 
 //------------------------------------------------------------------------------
@@ -216,28 +187,20 @@ void CSGenerateSpecularAlbedo(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (pixelCoord.x >= (uint)_TextureSize.x || pixelCoord.y >= (uint)_TextureSize.y)
         return;
 
-    // Read GBuffer data
-    float4 gbuffer0 = _GBuffer0[pixelCoord];    // Albedo
-    float4 gbuffer1 = _GBuffer1[pixelCoord];    // Specular/Metallic
-    float4 gbuffer2 = _GBuffer2[pixelCoord];    // OctQuad Normal + PerceptualSmoothness
-
-    // Decode GBuffer
-    float3 albedo = gbuffer0.rgb;
-    float metallic = gbuffer1.r;
+    // Surface Summary RT1 stores normal/roughness; RT2 stores sqrt-encoded F0/AO.
+    float4 gbuffer1 = _GBuffer1[pixelCoord];
+    float4 gbuffer2 = _GBuffer2[pixelCoord];
 
     // Decode normal and roughness
-    float3 normalWS = UnpackNormalOctQuadEncode(gbuffer2.rg);
-    float perceptualSmoothness = gbuffer2.a;
+    float3 normalWS = VividDecodeSurfaceSummaryNormal(gbuffer1.xy);
+    float perceptualRoughness = saturate(gbuffer1.z);
 
     // Get alpha_roughness for EnvBRDFApprox2
     // Based on NVIDIA sample (dlss_helper.slang line 55):
     //   Fenv = EnvironmentTerm_Rtg(pbrMat.specularColor, max(VdotN, 0.0), pbrMat.roughness.x);
     // Where pbrMat.roughness.x is alpha_roughness
-    float alphaRoughness = PerceptualSmoothnessToAlphaRoughness(perceptualSmoothness);
-
-    // For metallic workflow: specular color is derived from albedo and metallic
-    // F0 = lerp(0.04, albedo, metallic)
-    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+    float alphaRoughness = perceptualRoughness * perceptualRoughness;
+    float3 F0 = VividDecodeSurfaceSummarySpecularF0(gbuffer2.rgb);
 
     // Get view direction using camera position and world position
     float depth = _DepthTexture[pixelCoord];
@@ -296,11 +259,10 @@ void CSGenerateRayDirections(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (pixelCoord.x >= (uint)_TextureSize.x || pixelCoord.y >= (uint)_TextureSize.y)
         return;
 
-    // Read GBuffer2 for normal
-    float4 gbuffer2 = _GBuffer2[pixelCoord];
+    // Surface Summary RT1 stores encoded normal.xy.
+    float4 gbuffer1 = _GBuffer1[pixelCoord];
 
-    // Decode OctQuadEncoded normal
-    float3 normalWS = UnpackNormalOctQuadEncode(gbuffer2.rg);
+    float3 normalWS = VividDecodeSurfaceSummaryNormal(gbuffer1.xy);
 
     // Get depth and reconstruct world position
     float depth = _DepthTexture[pixelCoord];

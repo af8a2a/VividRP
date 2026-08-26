@@ -33,6 +33,7 @@ namespace VividRP.Runtime.GPUDriven
             CompiledCoverageProgram coverageProgram,
             CompiledSurfaceProgram surfaceProgram,
             CompiledTransportProgram transportProgram,
+            MaterialDeferredExportContract deferredExportContract,
             MaterialValueRequirements requirements,
             MaterialGenericLayout genericLayout,
             in MaterialProgramSelectionKey selectionKey,
@@ -47,6 +48,8 @@ namespace VividRP.Runtime.GPUDriven
                 ?? throw new ArgumentNullException(nameof(surfaceProgram));
             TransportProgram = transportProgram
                 ?? throw new ArgumentNullException(nameof(transportProgram));
+            DeferredExportContract = deferredExportContract
+                ?? throw new ArgumentNullException(nameof(deferredExportContract));
             Requirements = requirements
                 ?? throw new ArgumentNullException(nameof(requirements));
             GenericLayout = genericLayout
@@ -72,6 +75,8 @@ namespace VividRP.Runtime.GPUDriven
         internal CompiledSurfaceProgram SurfaceProgram { get; }
 
         internal CompiledTransportProgram TransportProgram { get; }
+
+        internal MaterialDeferredExportContract DeferredExportContract { get; }
 
         internal MaterialValueRequirements Requirements { get; }
 
@@ -106,6 +111,10 @@ namespace VividRP.Runtime.GPUDriven
                 SurfaceProgramMatcher.Compile(module);
             CompiledTransportProgram transportProgram =
                 CompiledTransportProgram.None;
+            MaterialProgramTopologySpecialization topology =
+                GetTopologySpecialization(module);
+            MaterialDeferredExportContract deferredExportContract =
+                MaterialDeferredExportContractLowerer.Compile(module, topology);
             MaterialValueRequirements requirements = MaterialValueRequirements.Merge(
                 coverageProgram.Requirements,
                 surfaceProgram.Requirements,
@@ -118,7 +127,7 @@ namespace VividRP.Runtime.GPUDriven
                 coverageProgram.ProgramID,
                 surfaceProgram.ProgramID,
                 transportProgram.ProgramID,
-                GetTopologySpecialization(module),
+                topology,
                 VividMaterialExecutionClass.VisibilityDeferred);
             MaterialProgramTemplate template = templates.Resolve(
                 selectionKey,
@@ -165,6 +174,7 @@ namespace VividRP.Runtime.GPUDriven
                 coverageProgram,
                 surfaceProgram,
                 transportProgram,
+                deferredExportContract,
                 requirements,
                 genericLayout,
                 selectionKey,

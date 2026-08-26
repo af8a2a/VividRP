@@ -1103,26 +1103,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CompilationContract_ProgramCatalog0To2HasFrozenAbi()
+        public void CompilationContract_BuiltinCatalogHasFrozenAbi()
         {
             Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.CanonicalIRVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.StageLIRVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.DerivativeLegalizationVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(4u));
             Assert.That(MaterialProgramContract.GenericLayoutVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.LayoutFingerprintVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.ProgramCatalogManifestVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.DeferredExportContractVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.DeferredExportFingerprintVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.ProgramCatalogManifestVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(10u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(6u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(11u));
             Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(6u));
             Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(4u));
             Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
             Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
@@ -1203,6 +1205,80 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CompilationContract_BuiltinProgramsDeclareExactDeferredExports()
+        {
+            CompiledMaterialProgram standard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    MaterialProgramContract.RuntimeAbiVersion);
+            CompiledMaterialProgram rebuiltStandard =
+                MaterialProgramPrototypeBuilder.BuildStandardSingleSlab(
+                    MaterialProgramContract.RuntimeAbiVersion);
+            CompiledMaterialProgram horizontal =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    MaterialProgramContract.RuntimeAbiVersion,
+                    VividDualSlabOperator.HorizontalMix);
+            CompiledMaterialProgram vertical =
+                MaterialProgramPrototypeBuilder.BuildDualSlab(
+                    MaterialProgramContract.RuntimeAbiVersion,
+                    VividDualSlabOperator.VerticalLayer);
+
+            const MaterialShadingModelMask builtinShadingModels =
+                MaterialShadingModelMask.StandardLit
+                | MaterialShadingModelMask.Unlit;
+            const MaterialDeferredExportPayloadFlags corePayload =
+                MaterialDeferredExportPayloadFlags.SurfaceSummary
+                | MaterialDeferredExportPayloadFlags.DiffuseIrradiance;
+            const MaterialDeferredExportPolicyFlags corePolicy =
+                MaterialDeferredExportPolicyFlags.DynamicDiffuseIrradiance
+                | MaterialDeferredExportPolicyFlags.ReceiveSsrOnFastSlab
+                | MaterialDeferredExportPolicyFlags.ReceiveDecals;
+
+            AssertDeferredExportContract(
+                standard,
+                MaterialDeferredExportSidecarAbi.None,
+                builtinShadingModels,
+                MaterialDeferredExportLitClass.FastSlab,
+                1u,
+                MaterialDeferredExportTopology.None,
+                corePayload,
+                corePolicy);
+            AssertDeferredExportContract(
+                horizontal,
+                MaterialDeferredExportSidecarAbi.DualSlabV1,
+                builtinShadingModels,
+                MaterialDeferredExportLitClass.DualSlab,
+                2u,
+                MaterialDeferredExportTopology.HorizontalMix,
+                corePayload
+                    | MaterialDeferredExportPayloadFlags.DualSlabSidecar
+                    | MaterialDeferredExportPayloadFlags.SharedNormalAndAmbientOcclusion,
+                corePolicy
+                    | MaterialDeferredExportPolicyFlags.FastSlabWhenSidecarEmpty);
+            AssertDeferredExportContract(
+                vertical,
+                MaterialDeferredExportSidecarAbi.DualSlabV1,
+                builtinShadingModels,
+                MaterialDeferredExportLitClass.DualSlab,
+                2u,
+                MaterialDeferredExportTopology.VerticalLayer,
+                corePayload
+                    | MaterialDeferredExportPayloadFlags.DualSlabSidecar
+                    | MaterialDeferredExportPayloadFlags.SharedNormalAndAmbientOcclusion,
+                corePolicy
+                    | MaterialDeferredExportPolicyFlags.FastSlabWhenSidecarEmpty);
+
+            Assert.That(
+                rebuiltStandard.DeferredExportContract.Fingerprint,
+                Is.EqualTo(standard.DeferredExportContract.Fingerprint));
+            Assert.That(
+                horizontal.DeferredExportContract.Fingerprint,
+                Is.Not.EqualTo(standard.DeferredExportContract.Fingerprint));
+            Assert.That(
+                vertical.DeferredExportContract.Fingerprint,
+                Is.Not.EqualTo(horizontal.DeferredExportContract.Fingerprint));
+        }
+
+        [Test]
         public void CompilationContract_CanonicalModulesShareCompiledIdentity()
         {
             MaterialIRModule firstModule =
@@ -1263,6 +1339,12 @@ namespace VividRP.Editor.Tests
             AssertRuntimeProgramData(
                 compiledUnlitOnly.RuntimeData,
                 new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u });
+            Assert.That(
+                compiledUnlitOnly.DeferredExportContract.ShadingModels,
+                Is.EqualTo(MaterialShadingModelMask.Unlit));
+            Assert.That(
+                compiledUnlitOnly.DeferredExportContract.LitClass,
+                Is.EqualTo(MaterialDeferredExportLitClass.None));
             Assert.That(compiledUnlitOnly.SemanticHash, Is.Not.EqualTo(prototype.SemanticHash));
             Assert.That(compiledUnlitOnly.CompiledHash, Is.Not.EqualTo(prototype.CompiledHash));
             MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
@@ -3231,6 +3313,37 @@ namespace VividRP.Editor.Tests
             CollectionAssert.AreEqual(
                 expected,
                 GetRuntimeProgramDataWords(runtimeData));
+        }
+
+        private static void AssertDeferredExportContract(
+            CompiledMaterialProgram program,
+            MaterialDeferredExportSidecarAbi sidecarAbi,
+            MaterialShadingModelMask shadingModels,
+            MaterialDeferredExportLitClass litClass,
+            uint expectedClosureCount,
+            MaterialDeferredExportTopology topology,
+            MaterialDeferredExportPayloadFlags payloadFlags,
+            MaterialDeferredExportPolicyFlags policyFlags)
+        {
+            MaterialDeferredExportContract contract = program.DeferredExportContract;
+            Assert.That(contract, Is.Not.Null);
+            Assert.That(
+                contract.Version,
+                Is.EqualTo(MaterialProgramContract.DeferredExportContractVersion));
+            Assert.That(
+                contract.SurfaceSummaryAbi,
+                Is.EqualTo(MaterialDeferredExportSurfaceSummaryAbi.SurfaceSummaryV1));
+            Assert.That(contract.DualSlabSidecarAbi, Is.EqualTo(sidecarAbi));
+            Assert.That(contract.ShadingModels, Is.EqualTo(shadingModels));
+            Assert.That(contract.LitClass, Is.EqualTo(litClass));
+            Assert.That(contract.ExpectedClosureCount, Is.EqualTo(expectedClosureCount));
+            Assert.That(contract.Topology, Is.EqualTo(topology));
+            Assert.That(contract.PayloadFlags, Is.EqualTo(payloadFlags));
+            Assert.That(contract.PolicyFlags, Is.EqualTo(policyFlags));
+            Assert.That(
+                contract.Fingerprint.Version,
+                Is.EqualTo(MaterialProgramContract.DeferredExportFingerprintVersion));
+            Assert.That(contract.Fingerprint.Value, Is.Not.Zero);
         }
 
         private static uint[] GetRuntimeProgramDataWords(

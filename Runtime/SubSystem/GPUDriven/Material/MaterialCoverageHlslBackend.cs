@@ -450,7 +450,7 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(catalog.RuntimeTableLength.ToString(CultureInfo.InvariantCulture))
                 .AppendLine("u");
             builder.Append("#elif ").AppendLine(expectedContract);
-            builder.AppendLine("#error Material Surface and Coverage dispatchers use different frozen catalog manifests.");
+            builder.AppendLine("#error Material dispatchers use different frozen catalog manifests.");
             builder.AppendLine("#endif");
         }
     }

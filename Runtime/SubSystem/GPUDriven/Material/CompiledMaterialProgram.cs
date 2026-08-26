@@ -1716,6 +1716,9 @@ namespace VividRP.Runtime.GPUDriven
         internal CompiledTransportProgram TransportProgram =>
             Lowering.TransportProgram;
 
+        internal MaterialDeferredExportContract DeferredExportContract =>
+            Lowering.DeferredExportContract;
+
         internal CompiledMaterialLayout MaterialLayout =>
             Lowering.MaterialLayout;
 

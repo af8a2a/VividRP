@@ -10,18 +10,20 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint ClosureExpressionVersion = 1u;
         internal const uint StageLIRVersion = 1u;
         internal const uint DerivativeLegalizationVersion = 1u;
-        internal const uint ProgramLoweringVersion = 3u;
+        internal const uint ProgramLoweringVersion = 4u;
         internal const uint GenericLayoutVersion = 1u;
         internal const uint LayoutFingerprintVersion = 1u;
-        internal const uint ProgramCatalogVersion = 2u;
-        internal const uint ProgramCatalogManifestVersion = 1u;
+        internal const uint DeferredExportContractVersion = 1u;
+        internal const uint DeferredExportFingerprintVersion = 1u;
+        internal const uint ProgramCatalogVersion = 3u;
+        internal const uint ProgramCatalogManifestVersion = 2u;
         internal const uint SurfaceHlslArtifactVersion = 3u;
-        internal const uint SurfaceHlslBackendVersion = 3u;
+        internal const uint SurfaceHlslBackendVersion = 4u;
         internal const uint CoverageHlslArtifactVersion = 1u;
         internal const uint CoverageHlslBackendVersion = 1u;
         internal const uint SemanticHashVersion = 4u;
-        internal const uint CompiledHashVersion = 5u;
-        internal const uint CompilerVersion = 10u;
+        internal const uint CompiledHashVersion = 6u;
+        internal const uint CompilerVersion = 11u;
         internal const uint NativeTemplateBackendVersion = 6u;
         internal const uint VerifierVersion = 3u;
         internal const uint RuntimeAbiVersion = 1u;
@@ -341,6 +343,9 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialProgramHashUtility.Add(
                     ref hash,
                     entry.LayoutFingerprint.Value);
+                AddDeferredExportContract(
+                    ref hash,
+                    entry.Program.DeferredExportContract);
                 AddRuntimeData(ref hash, entry.RuntimeData);
                 MaterialProgramHashUtility.Add(
                     ref hash,
@@ -382,6 +387,15 @@ namespace VividRP.Runtime.GPUDriven
                 ref hash,
                 (uint) runtimeData.CapabilityFlags);
         }
+
+        private static void AddDeferredExportContract(
+            ref ulong hash,
+            MaterialDeferredExportContract contract)
+        {
+            MaterialProgramHashUtility.Add(ref hash, contract.Fingerprint.Version);
+            MaterialProgramHashUtility.Add(ref hash, contract.Fingerprint.Value);
+            MaterialDeferredExportContractHashBuilder.AddPayload(ref hash, contract);
+        }
     }
 
     internal static class CompiledMaterialProgramHashBuilder
@@ -417,6 +431,9 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialProgramContract.ProgramCatalogVersion);
 
             AddSelectionKey(ref hash, lowering.SelectionKey);
+            AddDeferredExportContract(
+                ref hash,
+                lowering.DeferredExportContract);
             AddGenericLayout(ref hash, lowering.GenericLayout);
             AddNativeLayoutSchema(ref hash, lowering.Template);
             MaterialProgramHashUtility.Add(
@@ -489,6 +506,15 @@ namespace VividRP.Runtime.GPUDriven
             MaterialProgramHashUtility.Add(
                 ref hash,
                 (uint) selectionKey.ExecutionClass);
+        }
+
+        private static void AddDeferredExportContract(
+            ref ulong hash,
+            MaterialDeferredExportContract contract)
+        {
+            MaterialProgramHashUtility.Add(ref hash, contract.Fingerprint.Version);
+            MaterialProgramHashUtility.Add(ref hash, contract.Fingerprint.Value);
+            MaterialDeferredExportContractHashBuilder.AddPayload(ref hash, contract);
         }
 
         private static void AddGenericLayout(

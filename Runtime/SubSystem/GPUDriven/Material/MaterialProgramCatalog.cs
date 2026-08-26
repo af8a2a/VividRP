@@ -532,6 +532,19 @@ namespace VividRP.Runtime.GPUDriven
                     "A cataloged material program carries a stale layout fingerprint.",
                     parameterName);
             }
+            MaterialDeferredExportContract expectedDeferredExport =
+                MaterialDeferredExportContractLowerer.Compile(
+                    program.Module,
+                    lowering.SelectionKey.Topology);
+            if (!lowering.DeferredExportContract.PayloadEquals(
+                    expectedDeferredExport)
+                || lowering.DeferredExportContract.Fingerprint
+                    != expectedDeferredExport.Fingerprint)
+            {
+                throw new ArgumentException(
+                    "A cataloged material program carries a stale Deferred Export contract.",
+                    parameterName);
+            }
             ValidateRuntimeContract(program, lowering.Template, parameterName);
         }
 
@@ -626,6 +639,13 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             if (!left.SurfaceHlsl.PayloadEquals(right.SurfaceHlsl))
                 return false;
+            if (!left.DeferredExportContract.PayloadEquals(
+                    right.DeferredExportContract)
+                || left.DeferredExportContract.Fingerprint
+                    != right.DeferredExportContract.Fingerprint)
+            {
+                return false;
+            }
             if (left.Lowering.SelectionKey != right.Lowering.SelectionKey
                 || left.Lowering.LayoutFingerprint
                     != right.Lowering.LayoutFingerprint)

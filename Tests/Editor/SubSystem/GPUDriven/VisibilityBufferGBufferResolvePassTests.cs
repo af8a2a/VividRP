@@ -274,11 +274,29 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "EvaluateAOTSlabNormalWS(aotSurfaceOutput.BaseSlab,",
                 compactSource);
-            StringAssert.Contains("aotSurfaceOutput.ClosureCount == 1u", source);
-            StringAssert.Contains("aotSurfaceOutput.LayerOperator == 0u", source);
-            StringAssert.Contains("aotSurfaceOutput.ClosureCount == 2u", source);
-            StringAssert.Contains("aotSurfaceOutput.LayerOperator == 1u", source);
-            StringAssert.Contains("aotSurfaceOutput.LayerOperator == 2u", source);
+            StringAssert.Contains("VividAOTDeferredExportContract", source);
+            StringAssert.Contains("deferredExportContract.ExpectedClosureCount", source);
+            StringAssert.Contains("deferredExportContract.LitClass", source);
+            StringAssert.Contains("deferredExportContract.Topology", source);
+            StringAssert.Contains(
+                "VIVID_SURFACE_SUMMARY_GBUFFER_ABI_VERSION",
+                source);
+            StringAssert.Contains(
+                "VIVID_DUAL_SLAB_LAYER_SIDECAR_ABI_VERSION",
+                source);
+            StringAssert.Contains("VividAOTDeferredExportHasShadingModel", source);
+            StringAssert.Contains("VividAOTDeferredExportHasPayload", source);
+            StringAssert.Contains("VividAOTDeferredExportHasPolicy", source);
+            StringAssert.DoesNotContain("aotSurfaceOutput.ClosureCount == 1u", source);
+            StringAssert.DoesNotContain("aotSurfaceOutput.ClosureCount == 2u", source);
+            StringAssert.Contains(
+                "expectedLayerOperator = deferredExportContract.Topology",
+                source);
+            StringAssert.Contains(
+                "aotSurfaceOutput.LayerOperator == expectedLayerOperator",
+                source);
+            StringAssert.DoesNotContain("aotSurfaceOutput.LayerOperator == 1u", source);
+            StringAssert.DoesNotContain("aotSurfaceOutput.LayerOperator == 2u", source);
             StringAssert.Contains("aotSurfaceOutput.Emission", source);
             StringAssert.Contains("VividEvaluateAOTSlabSurfaceDetail", surfaceProgramSource);
             StringAssert.DoesNotContain("VividEvaluateSlabSurfaceDetailGrad", source);
@@ -313,14 +331,28 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "result.materialProgramFailed=1u;",
                 compactSource);
+            StringAssert.DoesNotContain("programData.CapabilityFlags", source);
             StringAssert.Contains(
-                "(programData.CapabilityFlags&VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT)!=0u"
-                + "&&(runtimeHeader.Flags&VIVIDMATERIALRUNTIMEFLAGS_UNLIT)!=0u",
+                "constboolsupportsUnlit=VividAOTDeferredExportHasShadingModel("
+                + "deferredExportContract,"
+                + "VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_UNLIT);",
+                compactSource);
+            StringAssert.Contains(
+                "(triangleData.materialRuntimeFlags"
+                + "&VIVIDMATERIALRUNTIMEFLAGS_UNLIT)!=0u",
+                compactSource);
+            StringAssert.Contains(
+                "constboolinvalidRuntimeUnlit=runtimeRequestsUnlit"
+                + "&&!supportsUnlit;",
+                compactSource);
+            StringAssert.Contains(
+                "constboolisUnlit=!failedAOTSurface&&supportsUnlit"
+                + "&&(!supportsLit||runtimeRequestsUnlit);",
                 compactSource);
             StringAssert.Contains("triangleData.materialProgramFailed", source);
             StringAssert.Contains(
                 "constboolfailedAOTSurface=triangleData.materialProgramFailed!=0u"
-                + "||(!evaluatedAOTSingleSurface&&!evaluatedAOTDualSurface);",
+                + "||!evaluatedAOTSurface||invalidRuntimeUnlit;",
                 compactSource);
             StringAssert.Contains(
                 "VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB",
@@ -357,7 +389,8 @@ namespace VividRP.Editor.Tests
                 "aotSurfaceOutput.TopSlab.AmbientOcclusion",
                 source);
             StringAssert.Contains(
-                "exportDualSlab&&aotSurfaceOutput.LayerOperator==2u",
+                "deferredExportContract.Topology"
+                + "==VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER",
                 compactSource);
             StringAssert.Contains(
                 "saturate(aotSurfaceOutput.LayerWeight)>" +
@@ -369,8 +402,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "surfaceData.emissive=float3(1.0f,0.0f,1.0f);",
                 compactSource);
-            StringAssert.Contains("constboolreceiveSSR=true;", compactSource);
-            StringAssert.Contains("constboolreceiveDecals=true;", compactSource);
+            StringAssert.Contains("VividAOTDeferredExportHasPolicy", source);
             StringAssert.Contains(
                 "VividBuildDeferredExportHeader(",
                 source);

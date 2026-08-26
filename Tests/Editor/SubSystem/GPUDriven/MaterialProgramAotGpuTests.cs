@@ -380,6 +380,8 @@ namespace VividRP.Editor.Tests
                 surfaceContext.PositionCS = input.positionCS;
                 VividAOTSurfaceProgramOutput surfaceOutput =
                     (VividAOTSurfaceProgramOutput) 0;
+                VividAOTDeferredExportContract deferredExportContract =
+                    (VividAOTDeferredExportContract) 0;
                 const bool surfaceSucceeded = payloadLoaded
                     && VividTryEvaluateAOTSurfaceProgram(
                         runtimeHeader.ProgramID,
@@ -388,6 +390,7 @@ namespace VividRP.Editor.Tests
                         surfaceBinding,
                         (VividSurfaceBindingData) 0,
                         surfaceContext,
+                        deferredExportContract,
                         surfaceOutput);
 
                 const uint outputIndex = (uint) input.positionCS.x;

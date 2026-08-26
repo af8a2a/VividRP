@@ -352,6 +352,8 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                     geometryTangentToWorld[0],
                     geometryTangentSign);
                 aotContext.PositionCS = input.positionCS;
+                VividAOTDeferredExportContract deferredExportContract =
+                    (VividAOTDeferredExportContract) 0;
                 VividAOTSurfaceProgramOutput aotSurfaceOutput =
                     (VividAOTSurfaceProgramOutput) 0;
                 bool dispatchedAOTSurface = false;
@@ -365,6 +367,7 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                         surfaceBindingData,
                         topSurfaceBindingData,
                         aotContext,
+                        deferredExportContract,
                         aotSurfaceOutput);
                 }
                 const bool evaluatedAOTSingleSurface = dispatchedAOTSurface

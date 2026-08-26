@@ -143,6 +143,89 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SameSurfaceArtifactDifferentShadingMasks_EmitExactCoexistingContracts()
+        {
+            CompiledMaterialProgram lit = CompiledMaterialProgram.Compile(
+                BuildSingleSlabModule(
+                    alternateDeclarationOrder: false,
+                    useGeneralSurfaceMath: false,
+                    shadingModels: MaterialShadingModelMask.StandardLit),
+                MaterialProgramContract.RuntimeAbiVersion);
+            CompiledMaterialProgram unlit = CompiledMaterialProgram.Compile(
+                BuildSingleSlabModule(
+                    alternateDeclarationOrder: false,
+                    useGeneralSurfaceMath: false,
+                    shadingModels: MaterialShadingModelMask.Unlit),
+                MaterialProgramContract.RuntimeAbiVersion);
+            CompiledMaterialProgram selectable = CompiledMaterialProgram.Compile(
+                BuildSingleSlabModule(
+                    alternateDeclarationOrder: false,
+                    useGeneralSurfaceMath: false,
+                    shadingModels: MaterialShadingModelMask.StandardLit
+                    | MaterialShadingModelMask.Unlit),
+                MaterialProgramContract.RuntimeAbiVersion);
+
+            Assert.That(
+                unlit.Lowering.SelectionKey.Topology,
+                Is.EqualTo(lit.Lowering.SelectionKey.Topology));
+            Assert.That(
+                selectable.Lowering.SelectionKey.Topology,
+                Is.EqualTo(lit.Lowering.SelectionKey.Topology));
+            Assert.That(unlit.SurfaceHlsl.EntryPoint, Is.EqualTo(lit.SurfaceHlsl.EntryPoint));
+            Assert.That(
+                selectable.SurfaceHlsl.EntryPoint,
+                Is.EqualTo(lit.SurfaceHlsl.EntryPoint));
+            Assert.That(unlit.SurfaceHlsl.PayloadEquals(lit.SurfaceHlsl), Is.True);
+            Assert.That(selectable.SurfaceHlsl.PayloadEquals(lit.SurfaceHlsl), Is.True);
+            Assert.That(unlit.CompiledHash, Is.Not.EqualTo(lit.CompiledHash));
+            Assert.That(selectable.CompiledHash, Is.Not.EqualTo(lit.CompiledHash));
+            Assert.That(selectable.CompiledHash, Is.Not.EqualTo(unlit.CompiledHash));
+
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram("P0.Lit", lit),
+                MaterialProgramCatalogBakeSlot.ForProgram("P1.Unlit", unlit),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P2.RuntimeSelectable",
+                    selectable));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 0u).Program,
+                Is.SameAs(lit));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 1u).Program,
+                Is.SameAs(unlit));
+            Assert.That(
+                catalog.GetEntry((VividMaterialProgramID) 2u).Program,
+                Is.SameAs(selectable));
+
+            string source = MaterialSurfaceHlslSourceBuilder.BuildSource(catalog);
+            int case0 = source.IndexOf("        case 0u:", StringComparison.Ordinal);
+            int case1 = source.IndexOf("        case 1u:", StringComparison.Ordinal);
+            int case2 = source.IndexOf("        case 2u:", StringComparison.Ordinal);
+            Assert.That(case0, Is.GreaterThanOrEqualTo(0));
+            Assert.That(case1, Is.GreaterThan(case0));
+            Assert.That(case2, Is.GreaterThan(case1));
+            AssertDispatcherDeferredExportContract(
+                Slice(source, case0, case1),
+                shadingModelMask: 1u,
+                litClass: 2u,
+                sidecarAbi: 0u,
+                policyFlags: 7u);
+            AssertDispatcherDeferredExportContract(
+                Slice(source, case1, case2),
+                shadingModelMask: 2u,
+                litClass: 0u,
+                sidecarAbi: 0u,
+                policyFlags: 4u);
+            AssertDispatcherDeferredExportContract(
+                source.Substring(case2),
+                shadingModelMask: 3u,
+                litClass: 2u,
+                sidecarAbi: 0u,
+                policyFlags: 7u);
+        }
+
+        [Test]
         public void DualSlabCrossSlabBaseColorResourceMapping_IsRejected()
         {
             NotSupportedException exception = Assert.Throws<NotSupportedException>(() =>
@@ -202,6 +285,10 @@ namespace VividRP.Editor.Tests
                     $"#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION "
                     + $"{MaterialProgramContract.SurfaceHlslBackendVersion}u"));
             Assert.That(sorted, Does.Contain("bool VividTryEvaluateAOTSurfaceProgram("));
+            Assert.That(
+                sorted,
+                Does.Contain(
+                    "out VividAOTDeferredExportContract deferredExportContract"));
             Assert.That(sorted, Does.Contain("switch (programID)"));
 
             int standardEntry = sorted.IndexOf(
@@ -227,11 +314,56 @@ namespace VividRP.Editor.Tests
                 Slice(sorted, case0, case1),
                 Does.Contain(standard.SurfaceHlsl.EntryPoint));
             Assert.That(
+                Slice(sorted, case0, case1),
+                Does.Contain("deferredExportContract.LitClass = 2u;"));
+            Assert.That(
+                Slice(sorted, case0, case1),
+                Does.Contain("deferredExportContract.DualSlabSidecarAbi = 0u;"));
+            Assert.That(
+                Slice(sorted, case0, case1),
+                Does.Contain("deferredExportContract.ShadingModelMask = 3u;"));
+            Assert.That(
+                Slice(sorted, case0, case1),
+                Does.Contain("deferredExportContract.ExpectedClosureCount = 1u;"));
+            Assert.That(
+                Slice(sorted, case0, case1),
+                Does.Contain("deferredExportContract.Topology = 0u;"));
+            Assert.That(
+                Slice(sorted, case0, case1),
+                Does.Contain("deferredExportContract.PayloadFlags = 3u;"));
+            Assert.That(
+                Slice(sorted, case0, case1),
+                Does.Contain("deferredExportContract.PolicyFlags = 7u;"));
+            Assert.That(
                 Slice(sorted, case1, case2),
                 Does.Contain(horizontal.SurfaceHlsl.EntryPoint));
             Assert.That(
+                Slice(sorted, case1, case2),
+                Does.Contain("deferredExportContract.LitClass = 4u;"));
+            Assert.That(
+                Slice(sorted, case1, case2),
+                Does.Contain("deferredExportContract.DualSlabSidecarAbi = 1u;"));
+            Assert.That(
+                Slice(sorted, case1, case2),
+                Does.Contain("deferredExportContract.ShadingModelMask = 3u;"));
+            Assert.That(
+                Slice(sorted, case1, case2),
+                Does.Contain("deferredExportContract.ExpectedClosureCount = 2u;"));
+            Assert.That(
+                Slice(sorted, case1, case2),
+                Does.Contain("deferredExportContract.Topology = 1u;"));
+            Assert.That(
+                Slice(sorted, case1, case2),
+                Does.Contain("deferredExportContract.PayloadFlags = 15u;"));
+            Assert.That(
+                Slice(sorted, case1, case2),
+                Does.Contain("deferredExportContract.PolicyFlags = 15u;"));
+            Assert.That(
                 sorted.Substring(case2),
                 Does.Contain(vertical.SurfaceHlsl.EntryPoint));
+            Assert.That(
+                sorted.Substring(case2),
+                Does.Contain("deferredExportContract.Topology = 2u;"));
 
             Assert.That(sorted, Does.Contain("output.LayerOperator = 1u;"));
             Assert.That(sorted, Does.Contain("output.LayerOperator = 2u;"));
@@ -249,13 +381,13 @@ namespace VividRP.Editor.Tests
             MaterialSurfaceHlslArtifact artifact = program.SurfaceHlsl;
 
             Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(4u));
             Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(10u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(6u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(11u));
             Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(6u));
-            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(3u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.SurfaceHlslArtifactVersion));
             Assert.That(artifact.BackendVersion, Is.EqualTo(
@@ -343,7 +475,10 @@ namespace VividRP.Editor.Tests
 
         private static MaterialIRModule BuildSingleSlabModule(
             bool alternateDeclarationOrder,
-            bool useGeneralSurfaceMath)
+            bool useGeneralSurfaceMath,
+            MaterialShadingModelMask shadingModels =
+                MaterialShadingModelMask.StandardLit
+                | MaterialShadingModelMask.Unlit)
         {
             var valueIR = new MaterialValueIR();
             MaterialValue baseColor;
@@ -417,8 +552,7 @@ namespace VividRP.Editor.Tests
                 surfaceClosure,
                 ClosureTopologyBudget.Prototype,
                 MaterialFeatureMask.AlphaClip,
-                MaterialShadingModelMask.StandardLit
-                | MaterialShadingModelMask.Unlit);
+                shadingModels);
         }
 
         private static MaterialIRModule BuildCrossSlabResourceModule()
@@ -677,6 +811,45 @@ namespace VividRP.Editor.Tests
                     identifierEnd - identifierStart));
                 searchOffset = identifierEnd;
             }
+        }
+
+        private static void AssertDispatcherDeferredExportContract(
+            string caseSource,
+            uint shadingModelMask,
+            uint litClass,
+            uint sidecarAbi,
+            uint policyFlags)
+        {
+            Assert.That(
+                caseSource,
+                Does.Contain("deferredExportContract.Version = 1u;"));
+            Assert.That(
+                caseSource,
+                Does.Contain("deferredExportContract.SurfaceSummaryAbi = 1u;"));
+            Assert.That(
+                caseSource,
+                Does.Contain(
+                    $"deferredExportContract.DualSlabSidecarAbi = {sidecarAbi}u;"));
+            Assert.That(
+                caseSource,
+                Does.Contain(
+                    $"deferredExportContract.ShadingModelMask = {shadingModelMask}u;"));
+            Assert.That(
+                caseSource,
+                Does.Contain($"deferredExportContract.LitClass = {litClass}u;"));
+            Assert.That(
+                caseSource,
+                Does.Contain("deferredExportContract.ExpectedClosureCount = 1u;"));
+            Assert.That(
+                caseSource,
+                Does.Contain("deferredExportContract.Topology = 0u;"));
+            Assert.That(
+                caseSource,
+                Does.Contain("deferredExportContract.PayloadFlags = 3u;"));
+            Assert.That(
+                caseSource,
+                Does.Contain(
+                    $"deferredExportContract.PolicyFlags = {policyFlags}u;"));
         }
 
         private static int CountOccurrences(string value, string pattern)

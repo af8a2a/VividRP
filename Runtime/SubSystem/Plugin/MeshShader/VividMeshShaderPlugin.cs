@@ -1,6 +1,5 @@
 using System;
 using System.Runtime.InteropServices;
-using System.Text;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -45,7 +44,7 @@ namespace VividRP.Runtime.MeshShader
     }
 
     /// <summary>
-    /// Immutable raw-HLSL shader object owned by the native mesh-shader plugin.
+    /// Immutable precompiled-DXIL shader object owned by the native mesh-shader plugin.
     /// Frame resources are deliberately kept out of this object.
     /// </summary>
     internal sealed class VividMeshShaderObject : IDisposable
@@ -53,49 +52,85 @@ namespace VividRP.Runtime.MeshShader
         private ulong m_NativeHandle;
 
         private VividMeshShaderObject(
-            string source,
+            VividMeshShaderProgramAsset programAsset,
             VividMeshShaderRenderState renderState,
             ulong nativeHandle)
         {
-            Source = source;
+            ProgramAsset = programAsset;
             RenderState = renderState;
             m_NativeHandle = nativeHandle;
         }
 
-        internal string Source { get; }
+        internal VividMeshShaderProgramAsset ProgramAsset { get; }
         internal VividMeshShaderRenderState RenderState { get; }
         internal ulong NativeHandle => m_NativeHandle;
         internal bool IsValid => m_NativeHandle != 0;
 
         internal static bool TryCreate(
-            string source,
+            VividMeshShaderProgramAsset programAsset,
             in VividMeshShaderRenderState renderState,
             out VividMeshShaderObject shaderObject,
             out string error)
         {
             shaderObject = null;
             error = null;
-            if (string.IsNullOrWhiteSpace(source))
+            if (programAsset == null)
             {
-                error = "Mesh shader HLSL source is empty.";
+                error = "The precompiled mesh-shader program asset is missing.";
                 return false;
             }
 
-            var desc = new VividMeshShaderPlugin.NativeShaderObjectDesc
+            if (programAsset.RootLayoutVersion != VividMeshShaderProgramAsset.CurrentRootLayoutVersion)
             {
-                StructSize = (uint)Marshal.SizeOf<VividMeshShaderPlugin.NativeShaderObjectDesc>(),
-                AbiVersion = VividMeshShaderPlugin.AbiVersion,
-                SourceUtf8 = source,
-                SourceLength = (uint)Encoding.UTF8.GetByteCount(source),
-                AmplificationEntryUtf8 = "AmplificationMain",
-                MeshEntryUtf8 = "MeshMain",
-                PixelEntryUtf8 = "PixelMain",
-                RenderState = VividMeshShaderPlugin.CreateNativeRenderState(renderState),
-            };
+                error = $"Mesh-shader root-layout mismatch: "
+                        + $"program={programAsset.RootLayoutVersion}, "
+                        + $"runtime={VividMeshShaderProgramAsset.CurrentRootLayoutVersion}.";
+                return false;
+            }
 
+            byte[] amplificationDxil = programAsset.AmplificationDxilBytes;
+            byte[] meshDxil = programAsset.MeshDxilBytes;
+            byte[] pixelDxil = programAsset.PixelDxilBytes;
+            if (amplificationDxil == null || amplificationDxil.Length == 0
+                || meshDxil == null || meshDxil.Length == 0
+                || pixelDxil == null || pixelDxil.Length == 0)
+            {
+                error = "The precompiled mesh-shader program does not contain AS, MS, and PS DXIL.";
+                return false;
+            }
+
+            GCHandle amplificationHandle = default;
+            GCHandle meshHandle = default;
+            GCHandle pixelHandle = default;
             try
             {
-                ulong handle = VividMeshShaderPlugin.CreateShaderObject(ref desc);
+                amplificationHandle = GCHandle.Alloc(amplificationDxil, GCHandleType.Pinned);
+                meshHandle = GCHandle.Alloc(meshDxil, GCHandleType.Pinned);
+                pixelHandle = GCHandle.Alloc(pixelDxil, GCHandleType.Pinned);
+
+                var desc = new VividMeshShaderPlugin.NativeShaderObjectDxilDesc
+                {
+                    StructSize = (uint)Marshal.SizeOf<VividMeshShaderPlugin.NativeShaderObjectDxilDesc>(),
+                    AbiVersion = VividMeshShaderPlugin.AbiVersion,
+                    AmplificationShader = new VividMeshShaderPlugin.NativeBytecode
+                    {
+                        Data = amplificationHandle.AddrOfPinnedObject(),
+                        Size = (ulong)amplificationDxil.LongLength,
+                    },
+                    MeshShader = new VividMeshShaderPlugin.NativeBytecode
+                    {
+                        Data = meshHandle.AddrOfPinnedObject(),
+                        Size = (ulong)meshDxil.LongLength,
+                    },
+                    PixelShader = new VividMeshShaderPlugin.NativeBytecode
+                    {
+                        Data = pixelHandle.AddrOfPinnedObject(),
+                        Size = (ulong)pixelDxil.LongLength,
+                    },
+                    RenderState = VividMeshShaderPlugin.CreateNativeRenderState(renderState),
+                };
+
+                ulong handle = VividMeshShaderPlugin.CreateShaderObjectFromDxil(ref desc);
                 if (handle == 0)
                 {
                     error = VividMeshShaderPlugin.GetLastErrorMessage(
@@ -103,13 +138,22 @@ namespace VividRP.Runtime.MeshShader
                     return false;
                 }
 
-                shaderObject = new VividMeshShaderObject(source, renderState, handle);
+                shaderObject = new VividMeshShaderObject(programAsset, renderState, handle);
                 return true;
             }
             catch (Exception exception) when (VividMeshShaderPlugin.IsPluginLoadException(exception))
             {
                 error = exception.Message;
                 return false;
+            }
+            finally
+            {
+                if (pixelHandle.IsAllocated)
+                    pixelHandle.Free();
+                if (meshHandle.IsAllocated)
+                    meshHandle.Free();
+                if (amplificationHandle.IsAllocated)
+                    amplificationHandle.Free();
             }
         }
 
@@ -142,10 +186,13 @@ namespace VividRP.Runtime.MeshShader
         private const uint DxgiFormatD32Float = 40;
         private const int NativeRenderStateDescSize = 52;
         private const int NativeShaderObjectDescSize = 104;
+        private const int NativeBytecodeSize = 16;
+        private const int NativeShaderObjectDxilDescSize = 112;
         private const int NativeDispatchDescSize = 136;
 
         private static IntPtr s_RenderEvent;
         private static int s_DispatchEventId = -1;
+        private static int s_StateBoundaryEventId = -1;
         private static ulong s_DispatchFailureBaseline;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -187,6 +234,24 @@ namespace VividRP.Runtime.MeshShader
             [MarshalAs(UnmanagedType.LPUTF8Str)]
             internal string PixelEntryUtf8;
 
+            internal NativeRenderStateDesc RenderState;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct NativeBytecode
+        {
+            internal IntPtr Data;
+            internal ulong Size;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct NativeShaderObjectDxilDesc
+        {
+            internal uint StructSize;
+            internal uint AbiVersion;
+            internal NativeBytecode AmplificationShader;
+            internal NativeBytecode MeshShader;
+            internal NativeBytecode PixelShader;
             internal NativeRenderStateDesc RenderState;
         }
 
@@ -266,6 +331,9 @@ namespace VividRP.Runtime.MeshShader
         [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_CreateShaderObject")]
         internal static extern ulong CreateShaderObject(ref NativeShaderObjectDesc desc);
 
+        [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_CreateShaderObjectFromDxil")]
+        internal static extern ulong CreateShaderObjectFromDxil(ref NativeShaderObjectDxilDesc desc);
+
         [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_DestroyShaderObject")]
         internal static extern void DestroyShaderObject(ulong handle);
 
@@ -280,6 +348,9 @@ namespace VividRP.Runtime.MeshShader
 
         [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_GetDispatchEventId")]
         private static extern int GetDispatchEventId();
+
+        [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_GetStateBoundaryEventId")]
+        private static extern int GetStateBoundaryEventId();
 
         internal static NativeRenderStateDesc CreateNativeRenderState(
             in VividMeshShaderRenderState renderState)
@@ -310,6 +381,7 @@ namespace VividRP.Runtime.MeshShader
             error = null;
             s_RenderEvent = IntPtr.Zero;
             s_DispatchEventId = -1;
+            s_StateBoundaryEventId = -1;
             s_DispatchFailureBaseline = 0;
 
             if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Direct3D12)
@@ -343,7 +415,10 @@ namespace VividRP.Runtime.MeshShader
 
                 s_RenderEvent = GetRenderEventFunc();
                 s_DispatchEventId = GetDispatchEventId();
-                if (s_RenderEvent == IntPtr.Zero || s_DispatchEventId < 0)
+                s_StateBoundaryEventId = GetStateBoundaryEventId();
+                if (s_RenderEvent == IntPtr.Zero
+                    || s_DispatchEventId < 0
+                    || s_StateBoundaryEventId < 0)
                 {
                     error = "The native mesh-shader render event is unavailable.";
                     return false;
@@ -375,6 +450,9 @@ namespace VividRP.Runtime.MeshShader
         {
             error = null;
             if (cmd == null
+                || s_RenderEvent == IntPtr.Zero
+                || s_DispatchEventId < 0
+                || s_StateBoundaryEventId < 0
                 || shaderObject?.IsValid != true
                 || visibleRequests == null
                 || indirectArgs == null
@@ -452,12 +530,33 @@ namespace VividRP.Runtime.MeshShader
             }
         }
 
+        internal static void QueueStateBoundary(CommandBuffer cmd)
+        {
+            if (cmd == null)
+                throw new ArgumentNullException(nameof(cmd));
+            if (s_RenderEvent == IntPtr.Zero || s_StateBoundaryEventId < 0)
+                throw new InvalidOperationException(
+                    "The mesh-shader command-list boundary is unavailable.");
+
+            cmd.IssuePluginEventAndData(
+                s_RenderEvent,
+                s_StateBoundaryEventId,
+                IntPtr.Zero);
+        }
+
         private static bool HasExpectedAbiLayout()
         {
             return Marshal.SizeOf<NativeRenderStateDesc>() == NativeRenderStateDescSize
                    && Marshal.SizeOf<NativeShaderObjectDesc>() == NativeShaderObjectDescSize
                    && Marshal.OffsetOf<NativeShaderObjectDesc>(nameof(NativeShaderObjectDesc.SourceUtf8)).ToInt64() == 8
                    && Marshal.OffsetOf<NativeShaderObjectDesc>(nameof(NativeShaderObjectDesc.RenderState)).ToInt64() == 48
+                   && Marshal.SizeOf<NativeBytecode>() == NativeBytecodeSize
+                   && Marshal.OffsetOf<NativeBytecode>(nameof(NativeBytecode.Size)).ToInt64() == 8
+                   && Marshal.SizeOf<NativeShaderObjectDxilDesc>() == NativeShaderObjectDxilDescSize
+                   && Marshal.OffsetOf<NativeShaderObjectDxilDesc>(nameof(NativeShaderObjectDxilDesc.AmplificationShader)).ToInt64() == 8
+                   && Marshal.OffsetOf<NativeShaderObjectDxilDesc>(nameof(NativeShaderObjectDxilDesc.MeshShader)).ToInt64() == 24
+                   && Marshal.OffsetOf<NativeShaderObjectDxilDesc>(nameof(NativeShaderObjectDxilDesc.PixelShader)).ToInt64() == 40
+                   && Marshal.OffsetOf<NativeShaderObjectDxilDesc>(nameof(NativeShaderObjectDxilDesc.RenderState)).ToInt64() == 56
                    && Marshal.SizeOf<NativeDispatchDesc>() == NativeDispatchDescSize
                    && Marshal.OffsetOf<NativeDispatchDesc>(nameof(NativeDispatchDesc.ShaderHandle)).ToInt64() == 8
                    && Marshal.OffsetOf<NativeDispatchDesc>(nameof(NativeDispatchDesc.VisibleRequests)).ToInt64() == 16

@@ -22,8 +22,8 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string VisibilityBufferShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferPass";
 
         private const int IndirectDrawArgsByteStride = sizeof(uint) * 4;
-        private const string MeshShaderSourceResourcePath =
-            "VividMeshShader/VisibilityBufferMeshShader.hlsl";
+        private const string MeshShaderProgramResourcePath =
+            "VividMeshShader/VisibilityBufferMeshShader";
         private const int SpdTileSize = 64;
         private const int SpdMipTextureCount = VividGPUDrivenOcclusionHistorySystem.MaxMipCount;
         private const int SpdAtomicCounterCount = 6;
@@ -762,9 +762,11 @@ namespace VividRP.Runtime.RenderPass.Core
                                  && compatibleTargets
                                  && TryEnsureMeshShaderObjects();
 
+            bool meshShaderStateDirty = false;
             for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
             {
                 VividRendererListID batchKey = (VividRendererListID) rendererListIndex;
+                bool alphaTest = (batchKey & VividRendererListID.AlphaTest) != 0;
                 if (m_PrimitiveDrawSet?.IsBuilt == true)
                 {
                     if (!m_PrimitiveDrawSet.TryGetBucket(batchKey, out VividPrimitiveDrawBucket bucket)
@@ -778,14 +780,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     continue;
                 }
 
-                if (!virtualTextureReady
-                    && ((batchKey & VividRendererListID.AlphaTest) != 0))
-                {
+                if (!virtualTextureReady && alphaTest)
                     continue;
-                }
 
                 if (useMeshShader
-                    && (batchKey & VividRendererListID.AlphaTest) == 0
+                    && !alphaTest
                     && TryDrawMeshShaderRendererList(
                         cmd,
                         visibleMeshletRenderRequestsBuffer,
@@ -794,12 +793,19 @@ namespace VividRP.Runtime.RenderPass.Core
                         batchKey,
                         rendererListIndex))
                 {
+                    meshShaderStateDirty = true;
                     continue;
                 }
 
                 Material material = m_Materials[rendererListIndex];
                 if (material == null)
                     continue;
+
+                if (meshShaderStateDirty)
+                {
+                    QueueMeshShaderStateBoundary(cmd);
+                    meshShaderStateDirty = false;
+                }
 
                 m_DrawProperties.Clear();
                 m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);
@@ -826,6 +832,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     rendererListIndex * IndirectDrawArgsByteStride,
                     m_DrawProperties);
             }
+
+            if (meshShaderStateDirty)
+                QueueMeshShaderStateBoundary(cmd);
+        }
+
+        private static void QueueMeshShaderStateBoundary(CommandBuffer cmd)
+        {
+            VividMeshShaderPlugin.QueueStateBoundary(cmd);
         }
 
         private bool TryDrawMeshShaderRendererList(
@@ -879,15 +893,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 return false;
             }
 
-            TextAsset sourceAsset = Resources.Load<TextAsset>(MeshShaderSourceResourcePath);
-            if (sourceAsset == null || string.IsNullOrWhiteSpace(sourceAsset.text))
+            VividMeshShaderProgramAsset programAsset =
+                Resources.Load<VividMeshShaderProgramAsset>(MeshShaderProgramResourcePath);
+            if (programAsset == null)
             {
                 LogMeshShaderFallback(
-                    $"Could not load raw HLSL resource '{MeshShaderSourceResourcePath}'.");
+                    $"Could not load precompiled mesh-shader program "
+                    + $"'{MeshShaderProgramResourcePath}'.");
                 return false;
             }
-
-            string source = sourceAsset.text;
 
             VividMeshShaderCompareFunction depthCompare = SystemInfo.usesReversedZBuffer
                 ? VividMeshShaderCompareFunction.GreaterEqual
@@ -903,7 +917,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 var renderState = new VividMeshShaderRenderState(cullModes[shaderIndex], depthCompare);
                 if (VividMeshShaderObject.TryCreate(
-                        source,
+                        programAsset,
                         renderState,
                         out VividMeshShaderObject shaderObject,
                         out string creationError))

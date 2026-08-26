@@ -2,12 +2,14 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
+using VividRP.Runtime.MeshShader;
 using VividRP.Runtime.RenderPass.Core;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.PrimitiveScene;
@@ -234,17 +236,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RawMeshShader_UsesGpuIndirectCountsAndPerPrimitiveVisibility()
+        public void MeshShaderHlsl_UsesGpuIndirectCountsAndPerPrimitiveVisibility()
         {
             UnityEditor.PackageManager.PackageInfo package =
                 UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VisibilityBufferPass).Assembly);
             Assert.That(package, Is.Not.Null);
             string path = Path.Combine(
                 package.resolvedPath,
-                "Runtime",
-                "Resources",
-                "VividMeshShader",
-                "VisibilityBufferMeshShader.hlsl.txt");
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferMeshShader.hlsl");
 
             Assert.That(File.Exists(path), Is.True, path);
             string source = File.ReadAllText(path);
@@ -254,8 +257,70 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("DispatchMesh(dispatchGroupCountX, dispatchGroupCountY, 1u", source);
             StringAssert.Contains("void MeshMain(", source);
             StringAssert.Contains("out primitives VividMeshPrimitiveOutput", source);
-            StringAssert.Contains("PackVisibilityValue(renderRequest, groupThreadID)", source);
+            StringAssert.Contains(
+                "Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl",
+                source);
+            StringAssert.Contains("VividMeshletDecode.hlsli", source);
+            StringAssert.Contains("VividVisibilityBuffer.hlsl", source);
+            StringAssert.Contains("PackVisibilityBufferValue(visibilityBufferValue)", source);
             StringAssert.Contains("VividVisibilityBufferFragmentOutput PixelMain", source);
+            StringAssert.DoesNotContain("struct VividInstanceData", source);
+            StringAssert.DoesNotContain("struct VividMeshletRenderRequestPacked", source);
+        }
+
+        [Test]
+        public void MeshShaderDxilInterop_MatchesNativeX64Layout()
+        {
+            Assert.That(IntPtr.Size, Is.EqualTo(8));
+            Assert.That(Marshal.SizeOf<VividMeshShaderPlugin.NativeBytecode>(), Is.EqualTo(16));
+            Assert.That(
+                Marshal.OffsetOf<VividMeshShaderPlugin.NativeBytecode>(
+                    nameof(VividMeshShaderPlugin.NativeBytecode.Size)).ToInt64(),
+                Is.EqualTo(8));
+            Assert.That(
+                Marshal.SizeOf<VividMeshShaderPlugin.NativeShaderObjectDxilDesc>(),
+                Is.EqualTo(112));
+            Assert.That(
+                Marshal.OffsetOf<VividMeshShaderPlugin.NativeShaderObjectDxilDesc>(
+                    nameof(VividMeshShaderPlugin.NativeShaderObjectDxilDesc.AmplificationShader)).ToInt64(),
+                Is.EqualTo(8));
+            Assert.That(
+                Marshal.OffsetOf<VividMeshShaderPlugin.NativeShaderObjectDxilDesc>(
+                    nameof(VividMeshShaderPlugin.NativeShaderObjectDxilDesc.MeshShader)).ToInt64(),
+                Is.EqualTo(24));
+            Assert.That(
+                Marshal.OffsetOf<VividMeshShaderPlugin.NativeShaderObjectDxilDesc>(
+                    nameof(VividMeshShaderPlugin.NativeShaderObjectDxilDesc.PixelShader)).ToInt64(),
+                Is.EqualTo(40));
+            Assert.That(
+                Marshal.OffsetOf<VividMeshShaderPlugin.NativeShaderObjectDxilDesc>(
+                    nameof(VividMeshShaderPlugin.NativeShaderObjectDxilDesc.RenderState)).ToInt64(),
+                Is.EqualTo(56));
+        }
+
+        [Test]
+        public void MeshShaderObject_RejectsMissingProgramBeforeCallingNativePlugin()
+        {
+            var renderState = new VividMeshShaderRenderState(
+                VividMeshShaderCullMode.Back,
+                VividMeshShaderCompareFunction.GreaterEqual);
+
+            bool created = VividMeshShaderObject.TryCreate(
+                null,
+                renderState,
+                out VividMeshShaderObject shaderObject,
+                out string error);
+
+            Assert.That(created, Is.False);
+            Assert.That(shaderObject, Is.Null);
+            StringAssert.Contains("program asset is missing", error);
+        }
+
+        [Test]
+        public void MeshShaderStateBoundary_RejectsMissingCommandBufferBeforeCallingNativePlugin()
+        {
+            Assert.Throws<ArgumentNullException>(
+                () => VividMeshShaderPlugin.QueueStateBoundary(null));
         }
 
         [Test]

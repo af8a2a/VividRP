@@ -1,0 +1,12 @@
+{
+  "source": "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/VisibilityBufferMeshShader.hlsl",
+  "amplificationEntry": "AmplificationMain",
+  "amplificationProfile": "as_6_5",
+  "meshEntry": "MeshMain",
+  "meshProfile": "ms_6_5",
+  "pixelEntry": "PixelMain",
+  "pixelProfile": "ps_6_5",
+  "rootLayoutVersion": 1,
+  "debug": false,
+  "disableOptimizations": false
+}

@@ -104,6 +104,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Material m_DualSlabSidecarMaterial;
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
         private int m_FrameIndex;
+        private bool m_RequiresDualSlabSidecar;
 
         public VisibilityBufferGBufferResolvePass()
         {
@@ -169,6 +170,9 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_RequiresDualSlabSidecar = frameData
+                .GetOrCreate<VividGPUDrivenFrameData>()
+                .requiresDualSlabSidecar;
             m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
             VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
@@ -196,19 +200,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.B10G11R11_UFloatPack32,
                 false,
                 "DiffuseIrradiance");
+            // Preserve the static RenderGraph ports while avoiding two
+            // full-resolution allocations on frames without Dual Slab pixels.
             ConfigurePassOwnedTarget(
                 m_LayerAux0,
                 m_DefaultLayerAux0,
-                width,
-                height,
+                m_RequiresDualSlabSidecar ? width : 1,
+                m_RequiresDualSlabSidecar ? height : 1,
                 GraphicsFormat.R8G8B8A8_SRGB,
                 false,
                 "LayerAux0");
             ConfigurePassOwnedTarget(
                 m_LayerAux1,
                 m_DefaultLayerAux1,
-                width,
-                height,
+                m_RequiresDualSlabSidecar ? width : 1,
+                m_RequiresDualSlabSidecar ? height : 1,
                 GraphicsFormat.R8G8B8A8_UNorm,
                 false,
                 "LayerAux1");
@@ -290,6 +296,9 @@ namespace VividRP.Runtime.RenderPass.Core
             if (hasFeedback)
                 nativeCmd.ClearRandomWriteTargets();
 
+            if (!m_RequiresDualSlabSidecar)
+                return;
+
             // VT feedback occupies u5-u7, so keep the core draw at five MRTs
             // and emit the optional Dual Slab sidecar after releasing UAVs.
             BindDualSlabSidecarTargets(nativeCmd);
@@ -304,6 +313,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_VirtualTextureFrameData = null;
             m_FrameIndex = 0;
+            m_RequiresDualSlabSidecar = false;
             if (m_Material != null)
             {
                 CoreUtils.Destroy(m_Material);

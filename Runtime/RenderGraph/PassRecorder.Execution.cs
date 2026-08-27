@@ -226,11 +226,13 @@ namespace VividRP.Runtime
             GraphicsBuffer visibleMeshletRenderRequestsBuffer,
             GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer,
             PrimitiveScene.VividPrimitiveDrawSet primitiveDrawSet = null,
-            PrimitiveScene.VividPrimitiveDrawSet primitiveShadowDrawSet = null)
+            PrimitiveScene.VividPrimitiveDrawSet primitiveShadowDrawSet = null,
+            bool requiresDualSlabSidecar = false)
         {
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
             gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer = visibleMeshletRenderRequestsBuffer;
             gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer = visibleMeshletIndirectDrawArgsBuffer;
+            gpuDrivenFrameData.requiresDualSlabSidecar = requiresDualSlabSidecar;
             gpuDrivenFrameData.primitiveDrawSet = primitiveDrawSet;
             gpuDrivenFrameData.primitiveShadowDrawSet = primitiveShadowDrawSet;
             gpuDrivenFrameData.ResetOcclusion();

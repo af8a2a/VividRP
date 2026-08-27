@@ -113,6 +113,8 @@ namespace VividRP.Editor.Tests
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             cameraData.actualWidth = 1920;
             cameraData.actualHeight = 1080;
+            frameData.GetOrCreate<VividGPUDrivenFrameData>()
+                .requiresDualSlabSidecar = true;
 
             pass.Prepare(frameData);
 
@@ -140,6 +142,43 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 layerAux1Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+        }
+
+        [Test]
+        public void Prepare_AdaptsDefaultDualSlabSidecarAcrossFrames()
+        {
+            var pass = new VisibilityBufferGBufferResolvePass();
+            var layerAux0Texture = GetTextureField(pass, "m_LayerAux0");
+            var layerAux1Texture = GetTextureField(pass, "m_LayerAux1");
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var gpuDrivenFrameData =
+                frameData.GetOrCreate<VividGPUDrivenFrameData>();
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+
+            pass.Prepare(frameData);
+
+            Assert.That(layerAux0Texture.desc.Width, Is.EqualTo(1));
+            Assert.That(layerAux0Texture.desc.Height, Is.EqualTo(1));
+            Assert.That(layerAux1Texture.desc.Width, Is.EqualTo(1));
+            Assert.That(layerAux1Texture.desc.Height, Is.EqualTo(1));
+
+            gpuDrivenFrameData.requiresDualSlabSidecar = true;
+            pass.Prepare(frameData);
+
+            Assert.That(layerAux0Texture.desc.Width, Is.EqualTo(1920));
+            Assert.That(layerAux0Texture.desc.Height, Is.EqualTo(1080));
+            Assert.That(layerAux1Texture.desc.Width, Is.EqualTo(1920));
+            Assert.That(layerAux1Texture.desc.Height, Is.EqualTo(1080));
+
+            gpuDrivenFrameData.requiresDualSlabSidecar = false;
+            pass.Prepare(frameData);
+
+            Assert.That(layerAux0Texture.desc.Width, Is.EqualTo(1));
+            Assert.That(layerAux0Texture.desc.Height, Is.EqualTo(1));
+            Assert.That(layerAux1Texture.desc.Width, Is.EqualTo(1));
+            Assert.That(layerAux1Texture.desc.Height, Is.EqualTo(1));
         }
 
         [Test]
@@ -187,6 +226,45 @@ namespace VividRP.Editor.Tests
             Assert.That(externalGBuffer0.desc.Width, Is.EqualTo(320));
             Assert.That(externalGBuffer0.desc.Height, Is.EqualTo(240));
             Assert.That(externalGBuffer0.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        [Test]
+        public void Prepare_LeavesOverriddenDualSlabSidecarOwnerManaged()
+        {
+            var pass = new VisibilityBufferGBufferResolvePass();
+            var externalLayerAux0 = new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 320,
+                    Height = 240,
+                    ColorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                }
+            };
+            var externalLayerAux1 = new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 640,
+                    Height = 360,
+                    ColorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                }
+            };
+
+            SetTextureField(pass, "m_LayerAux0", externalLayerAux0);
+            SetTextureField(pass, "m_LayerAux1", externalLayerAux1);
+
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+
+            pass.Prepare(frameData);
+
+            Assert.That(externalLayerAux0.desc.Width, Is.EqualTo(320));
+            Assert.That(externalLayerAux0.desc.Height, Is.EqualTo(240));
+            Assert.That(externalLayerAux1.desc.Width, Is.EqualTo(640));
+            Assert.That(externalLayerAux1.desc.Height, Is.EqualTo(360));
         }
 
         [Test]
@@ -454,10 +532,14 @@ namespace VividRP.Editor.Tests
             var bindSidecarIndex = compactSource.IndexOf(
                 "BindDualSlabSidecarTargets(nativeCmd);",
                 global::System.StringComparison.Ordinal);
+            var adaptiveReturnIndex = compactSource.IndexOf(
+                "if(!m_RequiresDualSlabSidecar)return;",
+                global::System.StringComparison.Ordinal);
             Assert.That(bindCoreIndex, Is.GreaterThanOrEqualTo(0));
             Assert.That(drawCoreIndex, Is.GreaterThan(bindCoreIndex));
             Assert.That(clearFeedbackIndex, Is.GreaterThan(drawCoreIndex));
-            Assert.That(bindSidecarIndex, Is.GreaterThan(clearFeedbackIndex));
+            Assert.That(adaptiveReturnIndex, Is.GreaterThan(clearFeedbackIndex));
+            Assert.That(bindSidecarIndex, Is.GreaterThan(adaptiveReturnIndex));
             StringAssert.Contains(
                 "m_DualSlabSidecarMaterial,DualSlabSidecarKeyword,true",
                 compactSource);

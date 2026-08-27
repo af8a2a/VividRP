@@ -259,6 +259,13 @@ namespace VividRP.Editor.Tests
                     sceneData.DualSlabMaterials[0].LayerOperator,
                     Is.EqualTo(VividDualSlabOperator.VerticalLayer));
                 Assert.That(sceneData.DualSlabMaterials[0].LayerWeight, Is.EqualTo(0.6f));
+                Assert.That(sceneData.RequiresDualSlabSidecar(0u), Is.True);
+
+                VividMaterialRuntimeHeader unlitHeader =
+                    sceneData.MaterialRuntimeHeaders[0];
+                unlitHeader.Flags |= VividMaterialRuntimeFlags.Unlit;
+                sceneData.MutableMaterialRuntimeHeaders[0] = unlitHeader;
+                Assert.That(sceneData.RequiresDualSlabSidecar(0u), Is.False);
             }
             finally
             {
@@ -1198,6 +1205,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     runtimeHeader.Flags,
                     Is.EqualTo(VividMaterialRuntimeFlags.AlphaClip | VividMaterialRuntimeFlags.Unlit));
+                Assert.That(sceneData.RequiresDualSlabSidecar(0u), Is.False);
                 float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
                     materialProxy.BaseColor);
                 Assert.That(materialData.AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));

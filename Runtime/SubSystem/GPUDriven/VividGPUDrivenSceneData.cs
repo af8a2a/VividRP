@@ -127,6 +127,41 @@ namespace VividRP.Runtime.GPUDriven
                 && (m_ShadowRendererBatchMask & (1u << batchIndex)) != 0;
         }
 
+        internal bool RequiresDualSlabSidecar(uint materialIndex)
+        {
+            if (materialIndex >= (uint) m_MaterialRuntimeHeaders.Count)
+                return false;
+
+            VividMaterialRuntimeHeader runtimeHeader =
+                m_MaterialRuntimeHeaders[(int) materialIndex];
+            if ((runtimeHeader.Flags & VividMaterialRuntimeFlags.Unlit) != 0
+                || runtimeHeader.ProgramID == VividMaterialProgramID.Invalid)
+            {
+                return false;
+            }
+
+            uint programIndex = (uint) runtimeHeader.ProgramID;
+            if (programIndex >= (uint) m_MaterialPrograms.Count)
+                return false;
+
+            VividMaterialProgramData program = m_MaterialPrograms[(int) programIndex];
+            return program.Version == GPUDrivenMaterialCompiler.ProgramVersion
+                && program.SurfaceProgramID == VividMaterialSurfaceProgramID.DualSlab;
+        }
+
+        internal bool HasDualSlabSidecarMaterial()
+        {
+            for (uint materialIndex = 0u;
+                 materialIndex < (uint) m_MaterialRuntimeHeaders.Count;
+                 materialIndex++)
+            {
+                if (RequiresDualSlabSidecar(materialIndex))
+                    return true;
+            }
+
+            return false;
+        }
+
         internal List<VividInstanceData> MutableInstances => m_Instances;
 
         internal IReadOnlyList<VividGPUDrivenInstanceSourceData> InstanceSources => m_InstanceSources;

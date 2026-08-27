@@ -225,9 +225,9 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ProductionShaders_ResolveClassifyAndLightMaterialPrograms_EndToEndOnGpu()
         {
-            const int width = 32;
+            const int width = 40;
             const int height = 8;
-            const int tileCount = 4;
+            const int tileCount = 5;
             const int variantCount = 4;
 
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
@@ -321,6 +321,7 @@ namespace VividRP.Editor.Tests
                     hideFlags = HideFlags.HideAndDontSave,
                 });
                 sidecarMaterial.EnableKeyword("VIVID_DUAL_SLAB_SIDECAR_OUTPUT");
+                sidecarMaterial.EnableKeyword("VIVID_DUAL_SLAB_SIDECAR_TILED");
 
                 RenderTexture visibility = TrackObject(CreateRenderTexture(
                     width,
@@ -439,9 +440,10 @@ namespace VividRP.Editor.Tests
                     Color.clear,
                     "SkyTexture"));
 
-                // Four 8x8 tiles exercise lit P0, unlit P0, the production
-                // catalog's generic P3 payload, and a table-known P4 that is
-                // deliberately absent from the frozen dispatcher.
+                // Five 8x8 tiles exercise lit P0, unlit P0, the production
+                // catalog's generic P3 payload, a table-known P4 that is
+                // deliberately absent from the frozen dispatcher, and P1
+                // through the tile-adaptive Dual Slab sidecar path.
                 VividMaterialProgramData[] runtimePrograms =
                     GPUDrivenMaterialCompiler.CreateRuntimeProgramTable();
                 Assert.That(
@@ -484,6 +486,14 @@ namespace VividRP.Editor.Tests
                         ResourceBindingAddress = 3u,
                         Flags = VividMaterialRuntimeFlags.None,
                     },
+                    new()
+                    {
+                        ProgramID =
+                            VividMaterialProgramID.DualSlabHorizontalMix,
+                        ParameterAddress = 0u,
+                        ResourceBindingAddress = 4u,
+                        Flags = VividMaterialRuntimeFlags.None,
+                    },
                 };
                 VividMaterialData[] materialData =
                 {
@@ -503,9 +513,15 @@ namespace VividRP.Editor.Tests
                         new float4(1.0f),
                         float3.zero,
                         metallic: 1.0f),
+                    CreatePixelLoopMaterialData(
+                        new float4(1.0f),
+                        float3.zero,
+                        metallic: 0.0f),
                 };
                 VividSurfaceBindingData[] surfaceBindings =
                 {
+                    CreateUnboundSurfaceBinding(),
+                    CreateUnboundSurfaceBinding(),
                     CreateUnboundSurfaceBinding(),
                     CreateUnboundSurfaceBinding(),
                     CreateUnboundSurfaceBinding(),
@@ -517,6 +533,7 @@ namespace VividRP.Editor.Tests
                     CreatePixelLoopInstance(1u),
                     CreatePixelLoopInstance(2u),
                     CreatePixelLoopInstance(3u),
+                    CreatePixelLoopInstance(4u),
                 };
                 var meshlet = new VividMeshlet
                 {
@@ -550,7 +567,34 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer materialBuffer = TrackBuffer(
                     CreateStructuredBuffer(materialData));
                 GraphicsBuffer dualSlabMaterialBuffer = TrackBuffer(
-                    CreateStructuredBuffer(new VividDualSlabMaterialData[1]));
+                    CreateStructuredBuffer(new[]
+                    {
+                        new VividDualSlabMaterialData
+                        {
+                            BaseAlbedoColor = new float4(
+                                0.8f,
+                                0.2f,
+                                0.1f,
+                                1.0f),
+                            BaseRoughness = 0.75f,
+                            BaseMetallic = 0.0f,
+                            TopAlbedoColor = new float4(
+                                0.2f,
+                                0.8f,
+                                0.4f,
+                                1.0f),
+                            TopRoughness = 0.25f,
+                            TopMetallic = 0.0f,
+                            Emission = new float4(
+                                0.02f,
+                                0.03f,
+                                0.04f,
+                                0.0f),
+                            LayerOperator =
+                                VividDualSlabOperator.HorizontalMix,
+                            LayerWeight = 0.5f,
+                        },
+                    }));
                 GraphicsBuffer runtimeHeaderBuffer = TrackBuffer(
                     CreateStructuredBuffer(runtimeHeaders));
                 GraphicsBuffer programBuffer = TrackBuffer(
@@ -584,6 +628,17 @@ namespace VividRP.Editor.Tests
                         GraphicsBuffer.Target.Structured
                             | GraphicsBuffer.Target.IndirectArguments,
                         variantCount * 4,
+                        sizeof(uint)));
+                GraphicsBuffer dualSlabSidecarTileList = TrackBuffer(
+                    new GraphicsBuffer(
+                        GraphicsBuffer.Target.Structured,
+                        tileCount,
+                        sizeof(uint)));
+                GraphicsBuffer dualSlabSidecarIndirectArgs = TrackBuffer(
+                    new GraphicsBuffer(
+                        GraphicsBuffer.Target.Structured
+                            | GraphicsBuffer.Target.IndirectArguments,
+                        4,
                         sizeof(uint)));
                 GraphicsBuffer preExposureBuffer = TrackBuffer(
                     CreateStructuredBuffer(new[]
@@ -720,16 +775,18 @@ namespace VividRP.Editor.Tests
                     MeshTopology.Triangles,
                     3,
                     1);
-                commandBuffer.SetRenderTarget(
-                    new RenderTargetIdentifier[] { layerAux0, layerAux1 },
-                    BuiltinRenderTextureType.None);
-                commandBuffer.DrawProcedural(
-                    Matrix4x4.identity,
+                DispatchTileAdaptiveDualSlabSidecar(
+                    commandBuffer,
+                    classificationCompute,
                     sidecarMaterial,
-                    0,
-                    MeshTopology.Triangles,
-                    3,
-                    1);
+                    width,
+                    height,
+                    gbuffer0,
+                    gbuffer1,
+                    layerAux0,
+                    layerAux1,
+                    dualSlabSidecarTileList,
+                    dualSlabSidecarIndirectArgs);
 
                 DispatchMaterialClassification(
                     commandBuffer,
@@ -785,26 +842,40 @@ namespace VividRP.Editor.Tests
                 uint[] featureFlags = new uint[tileCount];
                 uint[] tileList = new uint[tileCount * variantCount];
                 uint[] indirectArgs = new uint[variantCount * 4];
+                uint[] sidecarTileList = new uint[tileCount];
+                uint[] sidecarIndirectArgs = new uint[4];
                 materialTileFeatureFlags.GetData(featureFlags);
                 materialFeatureTileList.GetData(tileList);
                 materialFeatureIndirectArgs.GetData(indirectArgs);
+                dualSlabSidecarTileList.GetData(sidecarTileList);
+                dualSlabSidecarIndirectArgs.GetData(sidecarIndirectArgs);
+
+                Assert.That(
+                    sidecarIndirectArgs,
+                    Is.EqualTo(new uint[] { 3u, 1u, 0u, 0u }),
+                    "Tile-adaptive sidecar must issue one triangle instance.");
+                Assert.That(
+                    sidecarTileList[0],
+                    Is.EqualTo(4u),
+                    "The production classifier must append the fifth tile.");
 
                 Assert.That(
                     featureFlags,
-                    Is.EqualTo(new uint[] { 1u, 0u, 1u, 8u }));
+                    Is.EqualTo(new uint[] { 1u, 0u, 1u, 8u, 4u }));
                 Assert.That(
                     indirectArgs,
                     Is.EqualTo(new uint[]
                     {
                         2u, 1u, 1u, 0u,
                         0u, 1u, 1u, 0u,
-                        0u, 1u, 1u, 0u,
+                        1u, 1u, 1u, 0u,
                         1u, 1u, 1u, 0u,
                     }));
                 Assert.That(
                     new[] { tileList[0], tileList[1] },
                     Is.EquivalentTo(new uint[] { 0u, 2u }));
-                Assert.That(tileList[12], Is.EqualTo(3u));
+                Assert.That(tileList[tileCount * 2], Is.EqualTo(4u));
+                Assert.That(tileList[tileCount * 3], Is.EqualTo(3u));
 
                 Texture2D gbuffer0Readback = TrackObject(ReadRenderTexture(
                     gbuffer0,
@@ -814,6 +885,12 @@ namespace VividRP.Editor.Tests
                     TextureFormat.RGBAFloat));
                 Texture2D gbuffer3Readback = TrackObject(ReadRenderTexture(
                     gbuffer3,
+                    TextureFormat.RGBAFloat));
+                Texture2D layerAux0Readback = TrackObject(ReadRenderTexture(
+                    layerAux0,
+                    TextureFormat.RGBAFloat));
+                Texture2D layerAux1Readback = TrackObject(ReadRenderTexture(
+                    layerAux1,
                     TextureFormat.RGBAFloat));
                 Texture2D lightingReadback = TrackObject(ReadRenderTexture(
                     lighting,
@@ -838,6 +915,10 @@ namespace VividRP.Editor.Tests
                     gbuffer0Readback.GetPixel(28, 4),
                     0x0F,
                     "dispatcher-miss Deferred Export header");
+                AssertDeferredExportHeader(
+                    gbuffer0Readback.GetPixel(36, 4),
+                    0x84,
+                    "Dual Slab Deferred Export header");
                 Assert.That(
                     gbuffer1Readback.GetPixel(4, 4).a,
                     Is.EqualTo(1.0f).Within(0.001f),
@@ -850,6 +931,22 @@ namespace VividRP.Editor.Tests
                     gbuffer3Readback.GetPixel(20, 4),
                     new Color(0.05f, 0.1f, 0.15f, 1.0f),
                     "generic P3 IR emission reached the production GBuffer");
+                AssertColor(
+                    layerAux0Readback.GetPixel(31, 4),
+                    Color.clear,
+                    "Tile-adaptive sidecar must not touch a non-Dual tile");
+                Assert.That(
+                    layerAux0Readback.GetPixel(32, 4).a,
+                    Is.EqualTo(0.5f).Within(0.01f),
+                    "The indirect sidecar draw must cover the first Dual tile pixel.");
+                Assert.That(
+                    layerAux0Readback.GetPixel(39, 4).a,
+                    Is.EqualTo(0.5f).Within(0.01f),
+                    "The indirect sidecar draw must cover the resolve boundary.");
+                Assert.That(
+                    layerAux1Readback.GetPixel(36, 4).a,
+                    Is.EqualTo(0.25f).Within(0.01f),
+                    "The indirect sidecar draw must export top-slab roughness.");
 
                 AssertColor(
                     lightingReadback.GetPixel(4, 4),
@@ -867,6 +964,10 @@ namespace VividRP.Editor.Tests
                     lightingReadback.GetPixel(28, 4),
                     new Color(1.0f, 0.0f, 1.0f, 1.0f),
                     "dispatcher miss classified and lit through CatchAll");
+                AssertColor(
+                    lightingReadback.GetPixel(36, 4),
+                    new Color(0.02f, 0.03f, 0.04f, 1.0f),
+                    "Deferred Dual Slab must consume the tile-adaptive sidecar");
                 AssertColor(
                     debugReadback.GetPixel(4, 4),
                     new Color(0.0f, 0.0f, 0.0f, 1.0f),
@@ -1205,7 +1306,7 @@ namespace VividRP.Editor.Tests
             VividVisibilityBufferFragmentOutput Frag(Varyings input)
             {
                 VividVisibilityBufferValue value;
-                value.InstanceID = min((uint) input.positionCS.x / 8u, 3u);
+                value.InstanceID = min((uint) input.positionCS.x / 8u, 4u);
                 value.MeshletID = 0u;
                 value.IndexID = 0u;
                 return PackVividVisibilityBufferFragmentOutput(
@@ -1393,6 +1494,92 @@ namespace VividRP.Editor.Tests
                 Property("_MaterialFeatureIndirectArgs"),
                 indirectArgs);
             commandBuffer.DispatchCompute(compute, buildKernel, 1, 1, 1);
+        }
+
+        private static void DispatchTileAdaptiveDualSlabSidecar(
+            CommandBuffer commandBuffer,
+            ComputeShader compute,
+            Material sidecarMaterial,
+            int width,
+            int height,
+            RenderTexture gbuffer0,
+            RenderTexture gbuffer1,
+            RenderTexture layerAux0,
+            RenderTexture layerAux1,
+            GraphicsBuffer tileList,
+            GraphicsBuffer indirectArgs)
+        {
+            int clearKernel = compute.FindKernel(
+                "ClearDualSlabSidecarDrawArgs");
+            int classifyKernel = compute.FindKernel(
+                "ClassifyDualSlabSidecarTiles");
+            int Property(string name) => Shader.PropertyToID(name);
+
+            commandBuffer.SetRenderTarget(
+                new RenderTargetIdentifier[] { layerAux0, layerAux1 },
+                BuiltinRenderTextureType.None);
+            commandBuffer.ClearRenderTarget(
+                clearDepth: false,
+                clearColor: true,
+                backgroundColor: Color.clear);
+
+            commandBuffer.SetComputeBufferParam(
+                compute,
+                clearKernel,
+                Property("_MaterialFeatureIndirectArgs"),
+                indirectArgs);
+            commandBuffer.DispatchCompute(compute, clearKernel, 1, 1, 1);
+
+            commandBuffer.SetComputeIntParam(
+                compute,
+                Property("_ClassificationWidth"),
+                width);
+            commandBuffer.SetComputeIntParam(
+                compute,
+                Property("_ClassificationHeight"),
+                height);
+            commandBuffer.SetComputeTextureParam(
+                compute,
+                classifyKernel,
+                Property("_GBuffer0"),
+                gbuffer0);
+            commandBuffer.SetComputeTextureParam(
+                compute,
+                classifyKernel,
+                Property("_GBuffer1"),
+                gbuffer1);
+            commandBuffer.SetComputeBufferParam(
+                compute,
+                classifyKernel,
+                Property("_MaterialFeatureTileList"),
+                tileList);
+            commandBuffer.SetComputeBufferParam(
+                compute,
+                classifyKernel,
+                Property("_MaterialFeatureIndirectArgs"),
+                indirectArgs);
+            commandBuffer.DispatchCompute(
+                compute,
+                classifyKernel,
+                (width + 7) / 8,
+                (height + 7) / 8,
+                1);
+
+            sidecarMaterial.SetBuffer("_DualSlabSidecarTileList", tileList);
+            sidecarMaterial.SetVector(
+                "_DualSlabSidecarScreenSize",
+                new Vector4(
+                    width,
+                    height,
+                    1.0f / width,
+                    1.0f / height));
+            commandBuffer.DrawProceduralIndirect(
+                Matrix4x4.identity,
+                sidecarMaterial,
+                0,
+                MeshTopology.Triangles,
+                indirectArgs,
+                0);
         }
 
         private static void DispatchDeferredLighting(

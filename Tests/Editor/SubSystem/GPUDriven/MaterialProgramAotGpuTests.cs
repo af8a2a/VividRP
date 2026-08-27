@@ -1205,7 +1205,7 @@ namespace VividRP.Editor.Tests
             VividVisibilityBufferFragmentOutput Frag(Varyings input)
             {
                 VividVisibilityBufferValue value;
-                value.InstanceID = min((uint) input.positionCS.x / 8u, 2u);
+                value.InstanceID = min((uint) input.positionCS.x / 8u, 3u);
                 value.MeshletID = 0u;
                 value.IndexID = 0u;
                 return PackVividVisibilityBufferFragmentOutput(

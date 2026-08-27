@@ -299,6 +299,19 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void MeshShaderRenderState_MatchesUnityD3D12FrontFaceConvention()
+        {
+            var renderState = new VividMeshShaderRenderState(
+                VividMeshShaderCullMode.Back,
+                VividMeshShaderCompareFunction.GreaterEqual);
+
+            VividMeshShaderPlugin.NativeRenderStateDesc nativeRenderState =
+                VividMeshShaderPlugin.CreateNativeRenderState(renderState);
+
+            Assert.That(nativeRenderState.FrontCounterClockwise, Is.EqualTo(1u));
+        }
+
+        [Test]
         public void MeshShaderObject_RejectsMissingProgramBeforeCallingNativePlugin()
         {
             var renderState = new VividMeshShaderRenderState(

@@ -43,6 +43,20 @@ namespace VividRP.Runtime.MeshShader
         internal VividMeshShaderCompareFunction DepthCompare { get; }
     }
 
+    internal readonly struct VividMeshShaderDispatch
+    {
+        internal VividMeshShaderDispatch(
+            VividMeshShaderObject shaderObject,
+            uint rendererListIndex)
+        {
+            ShaderObject = shaderObject;
+            RendererListIndex = rendererListIndex;
+        }
+
+        internal VividMeshShaderObject ShaderObject { get; }
+        internal uint RendererListIndex { get; }
+    }
+
     /// <summary>
     /// Immutable precompiled-DXIL shader object owned by the native mesh-shader plugin.
     /// Frame resources are deliberately kept out of this object.
@@ -177,7 +191,7 @@ namespace VividRP.Runtime.MeshShader
 
     internal static class VividMeshShaderPlugin
     {
-        internal const uint AbiVersion = 1;
+        internal const uint AbiVersion = 2;
 
         private const string NativeLibrary = "VividMeshShader";
         private const uint DxgiFormatR16G16B16A16Float = 10;
@@ -189,6 +203,7 @@ namespace VividRP.Runtime.MeshShader
         private const int NativeBytecodeSize = 16;
         private const int NativeShaderObjectDxilDescSize = 112;
         private const int NativeDispatchDescSize = 136;
+        private const int MaxDispatchBatchCount = 64;
 
         private static IntPtr s_RenderEvent;
         private static int s_DispatchEventId = -1;
@@ -337,8 +352,10 @@ namespace VividRP.Runtime.MeshShader
         [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_DestroyShaderObject")]
         internal static extern void DestroyShaderObject(ulong handle);
 
-        [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_CreateDispatchRequest")]
-        private static extern IntPtr CreateDispatchRequest(ref NativeDispatchDesc desc);
+        [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_CreateDispatchBatchRequest")]
+        private static extern IntPtr CreateDispatchBatchRequest(
+            [In] NativeDispatchDesc[] descs,
+            uint dispatchCount);
 
         [DllImport(NativeLibrary, CallingConvention = CallingConvention.StdCall, EntryPoint = "VMS_DestroyDispatchRequest")]
         private static extern void DestroyDispatchRequest(IntPtr request);
@@ -358,7 +375,7 @@ namespace VividRP.Runtime.MeshShader
             return new NativeRenderStateDesc
             {
                 CullMode = (uint)renderState.CullMode,
-                FrontCounterClockwise = 0,
+                FrontCounterClockwise = 1,
                 DepthEnable = 1,
                 DepthWrite = 1,
                 DepthCompare = (uint)renderState.DepthCompare,
@@ -434,16 +451,16 @@ namespace VividRP.Runtime.MeshShader
             }
         }
 
-        internal static bool TryQueueDispatch(
+        internal static bool TryQueueDispatchBatch(
             CommandBuffer cmd,
-            VividMeshShaderObject shaderObject,
+            VividMeshShaderDispatch[] dispatches,
+            int dispatchCount,
             GraphicsBuffer visibleRequests,
             GraphicsBuffer indirectArgs,
             GraphicsBuffer instances,
             GraphicsBuffer meshlets,
             GraphicsBuffer vertices,
             GraphicsBuffer indices,
-            uint rendererListIndex,
             uint maxRequestCount,
             in Matrix4x4 viewProjection,
             out string error)
@@ -453,7 +470,10 @@ namespace VividRP.Runtime.MeshShader
                 || s_RenderEvent == IntPtr.Zero
                 || s_DispatchEventId < 0
                 || s_StateBoundaryEventId < 0
-                || shaderObject?.IsValid != true
+                || dispatches == null
+                || dispatchCount <= 0
+                || dispatchCount > dispatches.Length
+                || dispatchCount > MaxDispatchBatchCount
                 || visibleRequests == null
                 || indirectArgs == null
                 || instances == null
@@ -466,6 +486,15 @@ namespace VividRP.Runtime.MeshShader
                 return false;
             }
 
+            for (int dispatchIndex = 0; dispatchIndex < dispatchCount; dispatchIndex++)
+            {
+                if (dispatches[dispatchIndex].ShaderObject?.IsValid != true)
+                {
+                    error = "A mesh-shader batch entry is invalid.";
+                    return false;
+                }
+            }
+
             IntPtr request = IntPtr.Zero;
             try
             {
@@ -476,26 +505,40 @@ namespace VividRP.Runtime.MeshShader
                     return false;
                 }
 
-                var desc = new NativeDispatchDesc
+                IntPtr visibleRequestsPtr = visibleRequests.GetNativeBufferPtr();
+                IntPtr indirectArgsPtr = indirectArgs.GetNativeBufferPtr();
+                IntPtr instancesPtr = instances.GetNativeBufferPtr();
+                IntPtr meshletsPtr = meshlets.GetNativeBufferPtr();
+                IntPtr verticesPtr = vertices.GetNativeBufferPtr();
+                IntPtr indicesPtr = indices.GetNativeBufferPtr();
+                var nativeDispatches = new NativeDispatchDesc[dispatchCount];
+                for (int dispatchIndex = 0; dispatchIndex < dispatchCount; dispatchIndex++)
                 {
-                    StructSize = (uint)Marshal.SizeOf<NativeDispatchDesc>(),
-                    AbiVersion = AbiVersion,
-                    ShaderHandle = shaderObject.NativeHandle,
-                    VisibleRequests = visibleRequests.GetNativeBufferPtr(),
-                    IndirectArgs = indirectArgs.GetNativeBufferPtr(),
-                    Instances = instances.GetNativeBufferPtr(),
-                    Meshlets = meshlets.GetNativeBufferPtr(),
-                    Vertices = vertices.GetNativeBufferPtr(),
-                    Indices = indices.GetNativeBufferPtr(),
-                    RendererListIndex = rendererListIndex,
-                    MaxRequestCount = maxRequestCount,
-                    ViewProjectionColumnMajor = NativeMatrix4x4.FromUnityMatrix(viewProjection),
-                };
+                    VividMeshShaderDispatch dispatch = dispatches[dispatchIndex];
+                    nativeDispatches[dispatchIndex] = new NativeDispatchDesc
+                    {
+                        StructSize = (uint)Marshal.SizeOf<NativeDispatchDesc>(),
+                        AbiVersion = AbiVersion,
+                        ShaderHandle = dispatch.ShaderObject.NativeHandle,
+                        VisibleRequests = visibleRequestsPtr,
+                        IndirectArgs = indirectArgsPtr,
+                        Instances = instancesPtr,
+                        Meshlets = meshletsPtr,
+                        Vertices = verticesPtr,
+                        Indices = indicesPtr,
+                        RendererListIndex = dispatch.RendererListIndex,
+                        MaxRequestCount = maxRequestCount,
+                        ViewProjectionColumnMajor = NativeMatrix4x4.FromUnityMatrix(viewProjection),
+                    };
+                }
 
-                request = CreateDispatchRequest(ref desc);
+                request = CreateDispatchBatchRequest(
+                    nativeDispatches,
+                    (uint)dispatchCount);
                 if (request == IntPtr.Zero)
                 {
-                    error = GetLastErrorMessage("Could not allocate a native mesh-shader dispatch request.");
+                    error = GetLastErrorMessage(
+                        "Could not allocate a native mesh-shader dispatch batch.");
                     return false;
                 }
 

@@ -42,6 +42,24 @@ namespace VividRP.Runtime
         private static bool s_HasMeshletShadowPass;
         private static int s_EditModeFrameIndex;
 
+        internal static bool UsesExperimentalMeshShaderRasterization
+        {
+            get
+            {
+                foreach (IRenderPass pass in s_RenderPasses)
+                {
+                    if (pass is VisibilityBufferPass visibilityBufferPass
+                        && visibilityBufferPass.RasterizationPath
+                        == VisibilityBufferRasterizationPath.ExperimentalMeshShader)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
 #if UNITY_EDITOR
         private sealed class RenderGizmosPassData
         {

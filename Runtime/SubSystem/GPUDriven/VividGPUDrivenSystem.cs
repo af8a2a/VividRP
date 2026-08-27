@@ -925,7 +925,8 @@ namespace VividRP.Runtime.GPUDriven
                 resources = PipelineResourceManager.Get<VividRPCoreResources>();
             }
             bool occlusionObservationMode = !ReferenceEquals(cullingCamera, camera);
-            bool occlusionFeatureSupported = asset.EnableGPUDrivenOcclusionCulling
+            bool occlusionFeatureSupported = !PassRecorder.UsesExperimentalMeshShaderRasterization
+                && asset.EnableGPUDrivenOcclusionCulling
                 && !camera.stereoEnabled
                 && !cullingCamera.stereoEnabled
                 && resources?.GPUMeshletCullingCompute != null;

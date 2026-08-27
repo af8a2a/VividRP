@@ -26,6 +26,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma use_dxc
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividPostSurfaceSummary.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
             #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
@@ -520,118 +521,46 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         0xFFFFFFFFu)
                     : 0.0f;
 
-                surfaceData = (VividSurfaceSummaryData) 0;
-                dualSlabLayerData = (VividDualSlabLayerData) 0;
-                surfaceData.normalWS = normalWS;
-                surfaceData.perceptualRoughness = perceptualRoughness;
-                surfaceData.ambientOcclusion = ambientOcclusion;
-                surfaceData.diffuseIrradiance = diffuseIrradiance;
+                VividPostSurfaceSummaryInput postSurfaceInput =
+                    (VividPostSurfaceSummaryInput) 0;
+                postSurfaceInput.baseColor = baseColor;
+                postSurfaceInput.topBaseColor =
+                    aotSurfaceOutput.TopSlab.BaseColor.rgb;
+                postSurfaceInput.normalWS = normalWS;
+                postSurfaceInput.perceptualRoughness = perceptualRoughness;
+                postSurfaceInput.metallic = metallic;
+                postSurfaceInput.ambientOcclusion = ambientOcclusion;
+                postSurfaceInput.emissive = aotSurfaceOutput.Emission;
+                postSurfaceInput.diffuseIrradiance = diffuseIrradiance;
+                postSurfaceInput.topPerceptualRoughness =
+                    aotSurfaceOutput.TopSlab.PerceptualRoughness;
+                postSurfaceInput.topMetallic =
+                    aotSurfaceOutput.TopSlab.Metallic;
+                postSurfaceInput.layerWeight = aotSurfaceOutput.LayerWeight;
+                postSurfaceInput.failedSurface = failedAOTSurface ? 1u : 0u;
+                postSurfaceInput.unlitSurface = isUnlit ? 1u : 0u;
+                postSurfaceInput.hasVisibleTopLayer =
+                    hasVisibleTopLayer ? 1u : 0u;
+                postSurfaceInput.exportDualSlab = exportDualSlab ? 1u : 0u;
+                postSurfaceInput.horizontalMix =
+                    deferredExportContract.Topology
+                        == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_HORIZONTAL_MIX
+                    ? 1u
+                    : 0u;
+                postSurfaceInput.verticalLayer =
+                    deferredExportContract.Topology
+                        == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER
+                    ? 1u
+                    : 0u;
+                postSurfaceInput.hasDiffuseIrradiance =
+                    hasDiffuseIrradiance ? 1u : 0u;
+                postSurfaceInput.receiveSSR = receiveSSR ? 1u : 0u;
+                postSurfaceInput.receiveDecals = receiveDecals ? 1u : 0u;
 
-                UNITY_BRANCH
-                if (failedAOTSurface)
-                {
-                    surfaceData.diffuseAlbedo = float3(1.0f, 0.0f, 1.0f);
-                    surfaceData.specularF0 = 0.0f;
-                    surfaceData.emissive = float3(1.0f, 0.0f, 1.0f);
-                    surfaceData.deferredExportHeader =
-                        VividBuildDeferredExportHeader(
-                            VIVID_DEFERRED_EXPORT_CLASS_ERROR,
-                            false,
-                            false,
-                            false,
-                            false);
-                }
-                else if (isUnlit)
-                {
-                    float3 unlitColor = baseColor;
-                    if (hasVisibleTopLayer)
-                    {
-                        const float layerWeight = saturate(
-                            aotSurfaceOutput.LayerWeight);
-                        const float3 topBaseColor =
-                            aotSurfaceOutput.TopSlab.BaseColor.rgb;
-                        if (deferredExportContract.Topology
-                            == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_HORIZONTAL_MIX)
-                        {
-                            unlitColor = lerp(
-                                baseColor,
-                                topBaseColor,
-                                layerWeight);
-                        }
-                        else
-                        {
-                            const float topMetallic = saturate(
-                                aotSurfaceOutput.TopSlab.Metallic);
-                            const float3 topDiffuseAlbedo = topBaseColor
-                                * (1.0f - topMetallic);
-                            const float topOpacity = saturate(
-                                max(
-                                    topDiffuseAlbedo.x,
-                                    max(
-                                        topDiffuseAlbedo.y,
-                                        topDiffuseAlbedo.z))
-                                + topMetallic);
-                            unlitColor = topBaseColor * layerWeight
-                                + baseColor * lerp(
-                                    1.0f,
-                                    1.0f - topOpacity,
-                                    layerWeight);
-                        }
-                    }
-                    surfaceData.diffuseAlbedo = 0.0f;
-                    surfaceData.specularF0 = 0.0f;
-                    surfaceData.emissive = max(
-                        unlitColor + aotSurfaceOutput.Emission,
-                        0.0f);
-                    surfaceData.deferredExportHeader =
-                        VividBuildDeferredExportHeader(
-                            VIVID_DEFERRED_EXPORT_CLASS_UNLIT,
-                            false,
-                            false,
-                            false,
-                            receiveDecals);
-                }
-                else
-                {
-                    const float saturatedMetallic = saturate(metallic);
-                    surfaceData.diffuseAlbedo = baseColor
-                        * (1.0f - saturatedMetallic);
-                    surfaceData.specularF0 = lerp(
-                        0.04f.xxx,
-                        baseColor,
-                        saturatedMetallic);
-                    surfaceData.emissive = max(
-                        aotSurfaceOutput.Emission,
-                        0.0f);
-                    if (exportDualSlab)
-                    {
-                        const float3 topBaseColor =
-                            aotSurfaceOutput.TopSlab.BaseColor.rgb;
-                        const float topMetallic = saturate(
-                            aotSurfaceOutput.TopSlab.Metallic);
-                        dualSlabLayerData.diffuseAlbedo = topBaseColor
-                            * (1.0f - topMetallic);
-                        dualSlabLayerData.specularF0 = lerp(
-                            0.04f.xxx,
-                            topBaseColor,
-                            topMetallic);
-                        dualSlabLayerData.perceptualRoughness =
-                            aotSurfaceOutput.TopSlab.PerceptualRoughness;
-                        dualSlabLayerData.layerWeight =
-                            aotSurfaceOutput.LayerWeight;
-                    }
-                    surfaceData.deferredExportHeader =
-                        VividBuildDeferredExportHeader(
-                            exportDualSlab
-                                ? VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
-                                : VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB,
-                            exportDualSlab
-                                && deferredExportContract.Topology
-                                    == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER,
-                            hasDiffuseIrradiance,
-                            receiveSSR && !exportDualSlab,
-                            receiveDecals);
-                }
+                VividPostSurfaceSummaryOutput postSurfaceOutput =
+                    VividPostSurfaceSummary(postSurfaceInput);
+                surfaceData = postSurfaceOutput.surfaceData;
+                dualSlabLayerData = postSurfaceOutput.dualSlabLayerData;
             }
 
             #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)

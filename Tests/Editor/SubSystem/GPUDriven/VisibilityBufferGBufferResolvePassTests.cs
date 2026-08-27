@@ -322,13 +322,40 @@ namespace VividRP.Editor.Tests
                 "VividMaterialSurface.hlsl");
             Assert.That(File.Exists(surfaceProgramPath), Is.True, surfaceProgramPath);
             string surfaceProgramSource = File.ReadAllText(surfaceProgramPath);
+            string surfaceSummaryPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "SurfaceSummaryGBuffer.hlsl");
+            Assert.That(File.Exists(surfaceSummaryPath), Is.True, surfaceSummaryPath);
+            string surfaceSummarySource = File.ReadAllText(surfaceSummaryPath);
+            string postSurfaceSummaryPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividPostSurfaceSummary.hlsl");
+            Assert.That(
+                File.Exists(postSurfaceSummaryPath),
+                Is.True,
+                postSurfaceSummaryPath);
+            string postSurfaceSummarySource =
+                File.ReadAllText(postSurfaceSummaryPath);
             string compactSource = string.Concat(
                 source.Where(character => !char.IsWhiteSpace(character)));
+            string compactPostSurfaceSummarySource = string.Concat(
+                postSurfaceSummarySource.Where(
+                    character => !char.IsWhiteSpace(character)));
 
             StringAssert.Contains("SurfaceSummaryGBuffer.hlsl", source);
             StringAssert.Contains("VividMaterialSurface.hlsl", source);
             StringAssert.Contains("VividMaterialSurfaceAOT.generated.hlsl", surfaceProgramSource);
             StringAssert.Contains("VividSurfaceSummaryData", source);
+            StringAssert.Contains("VividPostSurfaceSummaryInput", source);
+            StringAssert.Contains("VividPostSurfaceSummaryOutput", source);
+            StringAssert.Contains("VividPostSurfaceSummary(postSurfaceInput)", source);
             StringAssert.Contains("VividSurfaceSummaryGBufferOutput", source);
             StringAssert.Contains("VividPackSurfaceSummaryGBuffer(", source);
             StringAssert.Contains("VividDualSlabLayerSidecarOutput", source);
@@ -436,30 +463,49 @@ namespace VividRP.Editor.Tests
                 "VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB",
                 compactSource);
             StringAssert.Contains(
-                "surfaceData.diffuseAlbedo=baseColor*(1.0f-saturatedMetallic);",
-                compactSource);
+                "output.surfaceData.diffuseAlbedo=input.baseColor"
+                + "*(1.0f-saturatedMetallic);",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains(
-                "surfaceData.specularF0=lerp(0.04f.xxx,baseColor,saturatedMetallic);",
-                compactSource);
+                "output.surfaceData.specularF0=lerp("
+                + "0.04f.xxx,input.baseColor,saturatedMetallic);",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains(
-                "surfaceData.perceptualRoughness=perceptualRoughness;",
-                compactSource);
+                "output.surfaceData.perceptualRoughness="
+                + "input.perceptualRoughness;",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains(
-                "surfaceData.ambientOcclusion=ambientOcclusion;",
-                compactSource);
+                "output.surfaceData.ambientOcclusion=input.ambientOcclusion;",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains("SampleVividProbeVolume(", source);
             StringAssert.Contains("VividHasProbeVolumeGI()", source);
             StringAssert.Contains(
-                "surfaceData.diffuseIrradiance=diffuseIrradiance;",
-                compactSource);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_UNLIT", source);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB", source);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB", source);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_ERROR", source);
-            StringAssert.Contains("dualSlabLayerData.diffuseAlbedo", source);
-            StringAssert.Contains("dualSlabLayerData.specularF0", source);
-            StringAssert.Contains("dualSlabLayerData.perceptualRoughness", source);
-            StringAssert.Contains("dualSlabLayerData.layerWeight", source);
+                "output.surfaceData.diffuseIrradiance=input.diffuseIrradiance;",
+                compactPostSurfaceSummarySource);
+            StringAssert.Contains(
+                "VIVID_DEFERRED_EXPORT_CLASS_UNLIT",
+                surfaceSummarySource);
+            StringAssert.Contains(
+                "VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB",
+                surfaceSummarySource);
+            StringAssert.Contains(
+                "VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB",
+                surfaceSummarySource);
+            StringAssert.Contains(
+                "VIVID_DEFERRED_EXPORT_CLASS_ERROR",
+                surfaceSummarySource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.diffuseAlbedo",
+                postSurfaceSummarySource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.specularF0",
+                postSurfaceSummarySource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.perceptualRoughness",
+                postSurfaceSummarySource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.layerWeight",
+                postSurfaceSummarySource);
             StringAssert.Contains(
                 "EvaluateAOTSlabNormalWS(aotSurfaceOutput.TopSlab,",
                 compactSource);
@@ -467,21 +513,25 @@ namespace VividRP.Editor.Tests
                 "aotSurfaceOutput.TopSlab.AmbientOcclusion",
                 source);
             StringAssert.Contains(
-                "deferredExportContract.Topology"
-                + "==VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER",
+                "postSurfaceInput.verticalLayer="
+                + "deferredExportContract.Topology"
+                + "==VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER?1u:0u;",
                 compactSource);
             StringAssert.Contains(
                 "saturate(aotSurfaceOutput.LayerWeight)>" +
                 "VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT",
                 compactSource);
             StringAssert.Contains(
-                "surfaceData.diffuseAlbedo=float3(1.0f,0.0f,1.0f);",
-                compactSource);
+                "output.surfaceData.diffuseAlbedo=float3(1.0f,0.0f,1.0f);",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains(
-                "surfaceData.emissive=float3(1.0f,0.0f,1.0f);",
-                compactSource);
+                "output.surfaceData.emissive=float3(1.0f,0.0f,1.0f);",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains("VividAOTDeferredExportHasPolicy", source);
             StringAssert.Contains(
+                "VividBuildDeferredExportHeader(",
+                postSurfaceSummarySource);
+            StringAssert.DoesNotContain(
                 "VividBuildDeferredExportHeader(",
                 source);
             StringAssert.DoesNotContain(

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -8,7 +9,10 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.RenderPass.Core;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
@@ -27,6 +31,8 @@ namespace VividRP.Editor.Tests
             TemporaryFolder + "/MaterialProgramAotGpuTest.shader";
         private const string VisibilityInputShaderPath =
             TemporaryFolder + "/VisibilityDeferredPixelLoopInput.shader";
+        private const string VisibilityShaderPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/VisibilityBufferPass.shader";
         private const string ResolveShaderPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/VisibilityBufferGBufferResolve.shader";
         private const string ClassificationComputePath =
@@ -223,7 +229,394 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ProductionShaders_ResolveClassifyAndLightMaterialPrograms_EndToEndOnGpu()
+        public void ProductionRenderGraph_VisibilityResolveClassifyAndLight_EndToEndOnGpu()
+        {
+            const int width = 8;
+            const int height = 8;
+            const int variantCount = 4;
+
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+                Assert.Ignore("A graphics device is required for the production RenderGraph pixel-loop validation.");
+            if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Direct3D12)
+            {
+                Assert.Ignore(
+                    "The production RenderGraph pixel-loop validation requires Direct3D 12, DXC, and Shader Model 6.6.");
+            }
+            if (!SystemInfo.SupportsTextureFormat(TextureFormat.RGBAFloat))
+            {
+                Assert.Ignore(
+                    "The production RenderGraph pixel-loop validation requires RGBA32F readback support.");
+            }
+
+            EnsureTemporaryFolder();
+            RequireShaderModel66();
+            AssertUsableShader(
+                AssetDatabase.LoadAssetAtPath<Shader>(VisibilityShaderPath),
+                "production Visibility Buffer");
+            AssertUsableShader(
+                AssetDatabase.LoadAssetAtPath<Shader>(ResolveShaderPath),
+                "production Visibility Buffer GBuffer Resolve");
+
+            VividRPCoreResources resources =
+                PipelineResourceManager.Get<VividRPCoreResources>();
+            AssertUsableComputeShader(
+                resources.MaterialClassificationCompute,
+                "production Material Classification resource");
+            AssertUsableComputeShader(
+                resources.DeferredLitCompute,
+                "production Deferred Lit resource");
+
+            var buffers = new List<GraphicsBuffer>();
+            var objects = new List<Object>();
+            CommandBuffer commandBuffer = null;
+            UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph = null;
+            RenderGraphData graphAsset = null;
+            RTHandle gbuffer0CaptureHandle = null;
+            RTHandle lightingCaptureHandle = null;
+            RTHandle debugCaptureHandle = null;
+            bool frameCommitted = false;
+            int previousEnableProbeVolumes = Shader.GetGlobalInt(
+                "_EnableProbeVolumes");
+
+            GraphicsBuffer TrackBuffer(GraphicsBuffer buffer)
+            {
+                buffers.Add(buffer);
+                return buffer;
+            }
+
+            T TrackObject<T>(T value)
+                where T : Object
+            {
+                objects.Add(value);
+                return value;
+            }
+
+            try
+            {
+                PassRecorder.Dispose();
+                VividGPUDrivenSystem.Shutdown();
+
+                VividMaterialProgramData[] runtimePrograms =
+                    GPUDrivenMaterialCompiler.CreateRuntimeProgramTable();
+                VividMaterialRuntimeHeader[] runtimeHeaders =
+                {
+                    new()
+                    {
+                        ProgramID = VividMaterialProgramID.StandardSingleSlab,
+                        ParameterAddress = 0u,
+                        ResourceBindingAddress = 0u,
+                        Flags = VividMaterialRuntimeFlags.None,
+                    },
+                };
+                VividMaterialData[] materialData =
+                {
+                    CreatePixelLoopMaterialData(
+                        new float4(1.0f),
+                        new float3(0.125f, 0.25f, 0.5f),
+                        metallic: 0.0f),
+                };
+                VividSurfaceBindingData[] surfaceBindings =
+                {
+                    CreateUnboundSurfaceBinding(),
+                };
+                VividInstanceData[] instances =
+                {
+                    CreatePixelLoopInstance(0u),
+                };
+                var meshlet = new VividMeshlet
+                {
+                    VertexOffset = 0u,
+                    TriangleOffset = 0u,
+                    BoundingSphere = new float4(0.0f, 0.0f, 0.0f, 4.0f),
+                };
+                meshlet.VertexCount = 3u;
+                meshlet.TriangleCount = 1u;
+                VividMeshletVertex[] vertices =
+                {
+                    VividMeshletVertexPacking.Pack(
+                        new float3(-1.0f, -1.0f, 0.0f),
+                        new float3(0.0f, 0.0f, 1.0f),
+                        new float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        new float2(0.0f, 0.0f)),
+                    VividMeshletVertexPacking.Pack(
+                        new float3(3.0f, -1.0f, 0.0f),
+                        new float3(0.0f, 0.0f, 1.0f),
+                        new float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        new float2(2.0f, 0.0f)),
+                    VividMeshletVertexPacking.Pack(
+                        new float3(-1.0f, 3.0f, 0.0f),
+                        new float3(0.0f, 0.0f, 1.0f),
+                        new float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        new float2(0.0f, 2.0f)),
+                };
+
+                GraphicsBuffer instanceBuffer = TrackBuffer(
+                    CreateStructuredBuffer(instances));
+                GraphicsBuffer materialBuffer = TrackBuffer(
+                    CreateStructuredBuffer(materialData));
+                GraphicsBuffer dualSlabMaterialBuffer = TrackBuffer(
+                    CreateStructuredBuffer(new VividDualSlabMaterialData[1]));
+                GraphicsBuffer runtimeHeaderBuffer = TrackBuffer(
+                    CreateStructuredBuffer(runtimeHeaders));
+                GraphicsBuffer programBuffer = TrackBuffer(
+                    CreateStructuredBuffer(runtimePrograms));
+                GraphicsBuffer surfaceBindingBuffer = TrackBuffer(
+                    CreateStructuredBuffer(surfaceBindings));
+                GraphicsBuffer terrainMaterialBuffer = TrackBuffer(
+                    CreateStructuredBuffer(new VividTerrainMaterialData[1]));
+                GraphicsBuffer terrainLayerBuffer = TrackBuffer(
+                    CreateStructuredBuffer(new VividTerrainLayerGPUData[1]));
+                GraphicsBuffer meshLodNodeBuffer = TrackBuffer(
+                    CreateStructuredBuffer(new VividMeshLODNode[1]));
+                GraphicsBuffer meshletBuffer = TrackBuffer(
+                    CreateStructuredBuffer(new[] { meshlet }));
+                GraphicsBuffer vertexBuffer = TrackBuffer(
+                    CreateStructuredBuffer(vertices));
+                GraphicsBuffer indexBuffer = TrackBuffer(CreateRawBuffer(
+                    new[] { 0x00020100u }));
+                GraphicsBuffer visibleRequests = TrackBuffer(
+                    CreateStructuredBuffer(new[]
+                    {
+                        new VividMeshletRenderRequestPacked
+                        {
+                            InstanceID_LOD = 0u,
+                            MeshletID = 0u,
+                        },
+                    }));
+                GraphicsBuffer indirectDrawArgs = TrackBuffer(
+                    new GraphicsBuffer(
+                        GraphicsBuffer.Target.Raw
+                            | GraphicsBuffer.Target.IndirectArguments,
+                        (int) VividRendererListID.Count * 4,
+                        sizeof(uint)));
+                var drawArgs = new uint[(int) VividRendererListID.Count * 4];
+                int cullOffArgsOffset = (int) VividRendererListID.CullOff * 4;
+                drawArgs[cullOffArgsOffset] = 3u;
+                drawArgs[cullOffArgsOffset + 1] = 1u;
+                indirectDrawArgs.SetData(drawArgs);
+                GraphicsBuffer preExposureBuffer = TrackBuffer(
+                    CreateStructuredBuffer(new[]
+                    {
+                        new float4(1.0f, 0.0f, 0.0f, 0.0f),
+                    }));
+                GraphicsBuffer ambientProbeBuffer = TrackBuffer(
+                    CreateStructuredBuffer(new float4[7]));
+
+                RenderTexture gbuffer0Capture = TrackObject(CreateRenderTexture(
+                    width,
+                    height,
+                    GraphicsFormat.R8G8B8A8_SRGB,
+                    "RenderGraphGBuffer0Capture"));
+                RenderTexture lightingCapture = TrackObject(CreateRenderTexture(
+                    width,
+                    height,
+                    GraphicsFormat.R16G16B16A16_SFloat,
+                    "RenderGraphLightingCapture",
+                    enableRandomWrite: true));
+                RenderTexture debugCapture = TrackObject(CreateRenderTexture(
+                    width,
+                    height,
+                    GraphicsFormat.R16G16B16A16_SFloat,
+                    "RenderGraphLightingDebugCapture",
+                    enableRandomWrite: true));
+                gbuffer0CaptureHandle = RTHandles.Alloc(gbuffer0Capture);
+                lightingCaptureHandle = RTHandles.Alloc(lightingCapture);
+                debugCaptureHandle = RTHandles.Alloc(debugCapture);
+
+                graphAsset = CreateProductionPixelLoopRenderGraph();
+                var cameraObject = TrackObject(new GameObject(
+                    "Vivid Production RenderGraph Pixel Loop Camera"));
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.enabled = false;
+                camera.targetTexture = lightingCapture;
+                camera.transform.position = new Vector3(0.0f, 0.0f, -1.0f);
+                camera.transform.rotation = Quaternion.identity;
+                camera.orthographic = true;
+                camera.orthographicSize = 1.0f;
+                camera.nearClipPlane = 0.1f;
+                camera.farClipPlane = 10.0f;
+
+                commandBuffer = new CommandBuffer
+                {
+                    name = "Vivid Production RenderGraph Pixel Loop GPU Test",
+                };
+                renderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph(
+                    "Vivid Production RenderGraph Pixel Loop GPU Test");
+
+                PassRecorder.InitializeContext(
+                    default,
+                    camera,
+                    default,
+                    graphAsset,
+                    pipelineFrameIndex: 1);
+                PassRecorder.PrepareFrame(graphAsset, commandBuffer);
+                Graphics.ExecuteCommandBuffer(commandBuffer);
+                commandBuffer.Clear();
+
+                IReadOnlyList<IRenderPass> compiledPasses =
+                    GetCompiledRenderPasses();
+                Assert.That(compiledPasses, Has.Count.EqualTo(4));
+                Assert.That(compiledPasses[0], Is.TypeOf<VisibilityBufferPass>());
+                Assert.That(
+                    compiledPasses[1],
+                    Is.TypeOf<VisibilityBufferGBufferResolvePass>());
+                Assert.That(
+                    compiledPasses[2],
+                    Is.TypeOf<MaterialClassificationPass>());
+                Assert.That(compiledPasses[3], Is.TypeOf<DeferredLightingPass>());
+                PassRecorder.GetFrameData().GetOrCreate<VividSkyData>().Reset();
+                PassRecorder.GetFrameData()
+                    .GetOrCreate<VividScreenSpaceReflectionData>()
+                    .Reset();
+                PassRecorder.GetFrameData()
+                    .GetOrCreate<VividClusteredLightingData>()
+                    .Reset();
+                PassRecorder.ImportTexture(
+                    GetPrivateField<RenderGraphTexture>(
+                        compiledPasses[1],
+                        "m_GBuffer0"),
+                    gbuffer0CaptureHandle);
+                PassRecorder.ImportTexture(
+                    GetPrivateField<RenderGraphTexture>(
+                        compiledPasses[3],
+                        "m_ColorTexture"),
+                    lightingCaptureHandle);
+                PassRecorder.ImportTexture(
+                    GetPrivateField<RenderGraphTexture>(
+                        compiledPasses[3],
+                        "m_DebugTexture"),
+                    debugCaptureHandle);
+
+                PassRecorder.SetGPUDrivenFrameData(
+                    visibleRequests,
+                    indirectDrawArgs);
+                BindProductionPixelLoopGlobals(
+                    commandBuffer,
+                    instanceBuffer,
+                    materialBuffer,
+                    dualSlabMaterialBuffer,
+                    runtimeHeaderBuffer,
+                    programBuffer,
+                    surfaceBindingBuffer,
+                    terrainMaterialBuffer,
+                    terrainLayerBuffer,
+                    meshLodNodeBuffer,
+                    meshletBuffer,
+                    vertexBuffer,
+                    indexBuffer,
+                    preExposureBuffer,
+                    ambientProbeBuffer,
+                    runtimePrograms.Length);
+                Graphics.ExecuteCommandBuffer(commandBuffer);
+                commandBuffer.Clear();
+
+                var renderGraphParameters = new RenderGraphParameters
+                {
+                    commandBuffer = commandBuffer,
+                    currentFrameIndex = 1,
+                    executionId = default,
+                    invalidContextForTesting = true,
+                };
+                bool recorded = VividRenderPipeline.TryRecordAndExecuteRenderGraph(
+                    renderGraph,
+                    renderGraphParameters,
+                    () => PassRecorder.RecordRenderGraph(
+                        renderGraph,
+                        default,
+                        graphAsset,
+                        enableAsyncCompute: false),
+                    PassRecorder.AbortFrame);
+                Assert.That(recorded, Is.True, "The production RenderGraph failed to record.");
+
+                Graphics.ExecuteCommandBuffer(commandBuffer);
+                PassRecorder.CommitFrame();
+                frameCommitted = true;
+
+                var classificationPass =
+                    (MaterialClassificationPass) compiledPasses[2];
+                GraphicsBuffer featureFlagsBuffer = GetPrivateField<GraphicsBuffer>(
+                    classificationPass,
+                    "m_MaterialTileFeatureFlagsBuffer");
+                GraphicsBuffer tileListBuffer = GetPrivateField<GraphicsBuffer>(
+                    classificationPass,
+                    "m_MaterialFeatureTileListBuffer");
+                GraphicsBuffer indirectArgsBuffer = GetPrivateField<GraphicsBuffer>(
+                    classificationPass,
+                    "m_MaterialFeatureIndirectArgsBuffer");
+                var featureFlags = new uint[1];
+                var tileList = new uint[variantCount];
+                var indirectArgs = new uint[variantCount * 4];
+                featureFlagsBuffer.GetData(featureFlags);
+                tileListBuffer.GetData(tileList);
+                indirectArgsBuffer.GetData(indirectArgs);
+                Assert.That(featureFlags, Is.EqualTo(new uint[] { 1u }));
+                Assert.That(tileList[0], Is.EqualTo(0u));
+                Assert.That(
+                    indirectArgs,
+                    Is.EqualTo(new uint[]
+                    {
+                        1u, 1u, 1u, 0u,
+                        0u, 1u, 1u, 0u,
+                        0u, 1u, 1u, 0u,
+                        0u, 1u, 1u, 0u,
+                    }));
+
+                Texture2D gbuffer0Readback = TrackObject(ReadRenderTexture(
+                    gbuffer0Capture,
+                    TextureFormat.RGBAFloat));
+                Texture2D lightingReadback = TrackObject(ReadRenderTexture(
+                    lightingCapture,
+                    TextureFormat.RGBAFloat));
+                Texture2D debugReadback = TrackObject(ReadRenderTexture(
+                    debugCapture,
+                    TextureFormat.RGBAFloat));
+                AssertDeferredExportHeader(
+                    gbuffer0Readback.GetPixel(4, 4),
+                    0xC2,
+                    "Production Visibility and Resolve must emit the StandardLit Deferred Export header.");
+                AssertColor(
+                    lightingReadback.GetPixel(4, 4),
+                    new Color(0.125f, 0.25f, 0.5f, 1.0f),
+                    "Production Deferred must preserve emission after classifying the lit tile.");
+                AssertColor(
+                    debugReadback.GetPixel(4, 4),
+                    new Color(0.0f, 0.0f, 0.0f, 1.0f),
+                    "Production Deferred FastSlab dispatch must shade the classified tile.");
+            }
+            finally
+            {
+                if (!frameCommitted)
+                    PassRecorder.AbortFrame();
+                PassRecorder.Dispose();
+                ClearProductionPixelLoopGlobals();
+                Shader.SetGlobalInt(
+                    "_EnableProbeVolumes",
+                    previousEnableProbeVolumes);
+                VividGPUDrivenSystem.Shutdown();
+                renderGraph?.Cleanup();
+                commandBuffer?.Dispose();
+                gbuffer0CaptureHandle?.Release();
+                lightingCaptureHandle?.Release();
+                debugCaptureHandle?.Release();
+                foreach (GraphicsBuffer buffer in buffers)
+                    buffer?.Dispose();
+                RenderTexture.active = null;
+                foreach (Object value in objects)
+                {
+                    if (value is RenderTexture renderTexture
+                        && renderTexture.IsCreated())
+                    {
+                        renderTexture.Release();
+                    }
+                    Object.DestroyImmediate(value);
+                }
+                if (graphAsset != null)
+                    Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
+        public void ProductionShaders_SyntheticVisibility_ResolveClassifyAndLightGpuContract()
         {
             const int width = 40;
             const int height = 8;
@@ -1017,6 +1410,234 @@ namespace VividRP.Editor.Tests
                     "_EnableProbeVolumes",
                     previousEnableProbeVolumes);
             }
+        }
+
+        private static RenderGraphData CreateProductionPixelLoopRenderGraph()
+        {
+            RenderGraphPassResourceBinding Input(
+                string fieldName,
+                RenderGraphResourceKind resourceKind,
+                int sourcePassIndex,
+                string sourceFieldName)
+            {
+                return new RenderGraphPassResourceBinding
+                {
+                    FieldName = fieldName,
+                    ResourceKind = resourceKind,
+                    SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                    ConnectionKind = RenderGraphPassBindingConnectionKind.Input,
+                    SourcePassIndex = sourcePassIndex,
+                    SourceFieldName = sourceFieldName,
+                };
+            }
+
+            RenderGraphPassDefinition Pass<T>(string name)
+                where T : IRenderPass
+            {
+                return new RenderGraphPassDefinition
+                {
+                    PassType = typeof(T).AssemblyQualifiedName,
+                    PassName = name,
+                };
+            }
+
+            void AddInputs(
+                RenderGraphPassDefinition pass,
+                RenderGraphResourceKind resourceKind,
+                int sourcePassIndex,
+                params (string Field, string SourceField)[] fields)
+            {
+                foreach ((string field, string sourceField) in fields)
+                {
+                    pass.ResourceBindings.Add(Input(
+                        field,
+                        resourceKind,
+                        sourcePassIndex,
+                        sourceField));
+                }
+            }
+
+            var graph = ScriptableObject.CreateInstance<RenderGraphData>();
+            graph.hideFlags = HideFlags.HideAndDontSave;
+            graph.ImportVersion = 1;
+
+            graph.Passes.Add(Pass<VisibilityBufferPass>(
+                "Production Visibility Buffer"));
+
+            RenderGraphPassDefinition resolve =
+                Pass<VisibilityBufferGBufferResolvePass>(
+                    "Production Visibility GBuffer Resolve");
+            AddInputs(
+                resolve,
+                RenderGraphResourceKind.Texture,
+                0,
+                ("m_VisibilityBuffer", "m_VisibilityBuffer"),
+                ("m_Attributes0", "m_Attributes0"),
+                ("m_Attributes1", "m_Attributes1"),
+                ("m_Barycentrics", "m_Barycentrics"));
+            graph.Passes.Add(resolve);
+
+            RenderGraphPassDefinition classification =
+                Pass<MaterialClassificationPass>(
+                    "Production Material Classification");
+            AddInputs(
+                classification,
+                RenderGraphResourceKind.Texture,
+                1,
+                ("m_GBuffer0", "m_GBuffer0"),
+                ("m_GBuffer1", "m_GBuffer1"));
+            classification.ResourceBindings.Add(Input(
+                "m_DepthTexture",
+                RenderGraphResourceKind.Texture,
+                0,
+                "m_Depth"));
+            graph.Passes.Add(classification);
+
+            RenderGraphPassDefinition deferred = Pass<DeferredLightingPass>(
+                "Production Deferred Lighting");
+            AddInputs(
+                deferred,
+                RenderGraphResourceKind.Texture,
+                1,
+                ("m_GBuffer0", "m_GBuffer0"),
+                ("m_GBuffer1", "m_GBuffer1"),
+                ("m_GBuffer2", "m_GBuffer2"),
+                ("m_GBuffer3", "m_GBuffer3"),
+                ("m_GBuffer4", "m_GBuffer4"),
+                ("m_LayerAux0", "m_LayerAux0"),
+                ("m_LayerAux1", "m_LayerAux1"));
+            deferred.ResourceBindings.Add(Input(
+                "m_DepthTexture",
+                RenderGraphResourceKind.Texture,
+                0,
+                "m_Depth"));
+            AddInputs(
+                deferred,
+                RenderGraphResourceKind.Buffer,
+                2,
+                ("m_MaterialTileFeatureFlags", "m_MaterialTileFeatureFlags"),
+                ("m_MaterialFeatureTileList", "m_MaterialFeatureTileList"),
+                ("m_MaterialFeatureIndirectArgs", "m_MaterialFeatureIndirectArgs"));
+            graph.Passes.Add(deferred);
+            return graph;
+        }
+
+        private static void BindProductionPixelLoopGlobals(
+            CommandBuffer commandBuffer,
+            GraphicsBuffer instanceBuffer,
+            GraphicsBuffer materialBuffer,
+            GraphicsBuffer dualSlabMaterialBuffer,
+            GraphicsBuffer runtimeHeaderBuffer,
+            GraphicsBuffer programBuffer,
+            GraphicsBuffer surfaceBindingBuffer,
+            GraphicsBuffer terrainMaterialBuffer,
+            GraphicsBuffer terrainLayerBuffer,
+            GraphicsBuffer meshLodNodeBuffer,
+            GraphicsBuffer meshletBuffer,
+            GraphicsBuffer vertexBuffer,
+            GraphicsBuffer indexBuffer,
+            GraphicsBuffer preExposureBuffer,
+            GraphicsBuffer ambientProbeBuffer,
+            int programCount)
+        {
+            commandBuffer.SetGlobalBuffer("_InstanceData", instanceBuffer);
+            commandBuffer.SetGlobalInt("_InstanceDataCount", 1);
+            commandBuffer.SetGlobalBuffer("_MaterialData", materialBuffer);
+            commandBuffer.SetGlobalInt("_MaterialDataCount", 1);
+            commandBuffer.SetGlobalBuffer(
+                "_DualSlabMaterialData",
+                dualSlabMaterialBuffer);
+            commandBuffer.SetGlobalInt("_DualSlabMaterialDataCount", 1);
+            commandBuffer.SetGlobalBuffer(
+                "_MaterialRuntimeHeaders",
+                runtimeHeaderBuffer);
+            commandBuffer.SetGlobalInt("_MaterialRuntimeHeaderCount", 1);
+            commandBuffer.SetGlobalBuffer("_MaterialPrograms", programBuffer);
+            commandBuffer.SetGlobalInt("_MaterialProgramCount", programCount);
+            commandBuffer.SetGlobalBuffer(
+                "_SurfaceBindingData",
+                surfaceBindingBuffer);
+            commandBuffer.SetGlobalInt("_SurfaceBindingDataCount", 1);
+            commandBuffer.SetGlobalBuffer(
+                "_TerrainMaterialData",
+                terrainMaterialBuffer);
+            commandBuffer.SetGlobalInt("_TerrainMaterialDataCount", 1);
+            commandBuffer.SetGlobalBuffer("_TerrainLayerData", terrainLayerBuffer);
+            commandBuffer.SetGlobalInt("_TerrainLayerDataCount", 1);
+            commandBuffer.SetGlobalBuffer("_MeshLODNodes", meshLodNodeBuffer);
+            commandBuffer.SetGlobalInt("_MeshLODNodeCount", 1);
+            commandBuffer.SetGlobalBuffer("_Meshlets", meshletBuffer);
+            commandBuffer.SetGlobalInt("_MeshletCount", 1);
+            commandBuffer.SetGlobalBuffer("_SharedVertexBuffer", vertexBuffer);
+            commandBuffer.SetGlobalBuffer("_SharedIndexBuffer", indexBuffer);
+            commandBuffer.SetGlobalBuffer(
+                "_VividAutoExposurePreExposureBuffer",
+                preExposureBuffer);
+            commandBuffer.SetGlobalBuffer(
+                "_VividAmbientProbeData",
+                ambientProbeBuffer);
+            commandBuffer.SetGlobalInt("_EnableProbeVolumes", 0);
+        }
+
+        private static void ClearProductionPixelLoopGlobals()
+        {
+            foreach (string name in new[]
+                     {
+                         "_InstanceData",
+                         "_MaterialData",
+                         "_DualSlabMaterialData",
+                         "_MaterialRuntimeHeaders",
+                         "_MaterialPrograms",
+                         "_SurfaceBindingData",
+                         "_TerrainMaterialData",
+                         "_TerrainLayerData",
+                         "_MeshLODNodes",
+                         "_Meshlets",
+                         "_SharedVertexBuffer",
+                         "_SharedIndexBuffer",
+                         "_VividAutoExposurePreExposureBuffer",
+                         "_VividAmbientProbeData",
+                     })
+            {
+                Shader.SetGlobalBuffer(name, (GraphicsBuffer) null);
+            }
+            foreach (string name in new[]
+                     {
+                         "_InstanceDataCount",
+                         "_MaterialDataCount",
+                         "_DualSlabMaterialDataCount",
+                         "_MaterialRuntimeHeaderCount",
+                         "_MaterialProgramCount",
+                         "_SurfaceBindingDataCount",
+                         "_TerrainMaterialDataCount",
+                         "_TerrainLayerDataCount",
+                         "_MeshLODNodeCount",
+                         "_MeshletCount",
+                     })
+            {
+                Shader.SetGlobalInt(name, 0);
+            }
+        }
+
+        private static IReadOnlyList<IRenderPass> GetCompiledRenderPasses()
+        {
+            FieldInfo field = typeof(PassRecorder).GetField(
+                "s_RenderPasses",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(field, Is.Not.Null);
+            return (IReadOnlyList<IRenderPass>) field.GetValue(null);
+        }
+
+        private static T GetPrivateField<T>(object owner, string fieldName)
+            where T : class
+        {
+            FieldInfo field = owner.GetType().GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+            var value = field.GetValue(owner) as T;
+            Assert.That(value, Is.Not.Null, fieldName);
+            return value;
         }
 
         private static GraphicsBuffer CreateStructuredBuffer<T>(T[] data)

@@ -8,10 +8,10 @@
 #ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_VERSION 2u
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0xCB9B26DEu
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0x35DABAE7u
-#define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH 3u
-#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 2u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0xCB9B26DEu || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0x35DABAE7u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 3u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0x9241A604u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0xA0497B27u
+#define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH 4u
+#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 2u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0x9241A604u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0xA0497B27u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 4u
 #error Material dispatchers use different frozen catalog manifests.
 #endif
 
@@ -403,6 +403,64 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_CA72DA7B47B3DB3C(
     return output;
 }
 
+// Surface AOT HLSL artifact v3, backend v4.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_82117A7EE1DF9D99(
+    const VividMaterialData materialParameters,
+    const VividSurfaceBindingData surfaceBinding0,
+    const VividAOTSurfaceContext context)
+{
+    const float vivid_v0000 = asfloat(0x3F000000u);
+    const float3 vivid_v0001 = float3(asfloat(0x3D4CCCCDu), asfloat(0x3DCCCCCDu), asfloat(0x3E19999Au));
+    const float4 vivid_v0002 = float4(asfloat(0x3F000000u), asfloat(0x3E800000u), asfloat(0x3F400000u), asfloat(0x3F800000u));
+    const float2 vivid_v0003 = context.UV0;
+    const float3 vivid_v0004 = context.GeometryNormalWS;
+    const float4 vivid_v0005 = context.GeometryTangentWS;
+    const float vivid_v0006 = materialParameters.Metallic;
+    const float vivid_v0007 = materialParameters.Roughness;
+    const float3 vivid_v0008 = materialParameters.Emission.xyz;
+    const float4 vivid_v0009 = materialParameters.AlbedoColor;
+    const float2 vivid_v0011 = context.UV0Ddx;
+    const float2 vivid_v0012 = context.UV0Ddy;
+    const float3 vivid_v0013 = (vivid_v0001 + vivid_v0008);
+    const float vivid_v0014 = (vivid_v0000 * vivid_v0006);
+    const float vivid_v0015 = (1.0f - vivid_v0007);
+    const VividSlabMaterialData vivid_sample_slab_16 = VividCreateSlabMaterialData(materialParameters);
+    const float2 vivid_sample_uv_16 = vivid_v0003 * vivid_sample_slab_16.TextureTilingOffset.xy + vivid_sample_slab_16.TextureTilingOffset.zw;
+    const float2 vivid_sample_ddx_16 = vivid_v0011 * vivid_sample_slab_16.TextureTilingOffset.xy;
+    const float2 vivid_sample_ddy_16 = vivid_v0012 * vivid_sample_slab_16.TextureTilingOffset.xy;
+    const VividSurfaceSampleContext vivid_sample_context_16 = VividCreateSurfaceSampleContextGrad(surfaceBinding0, vivid_sample_uv_16, vivid_sample_ddx_16, vivid_sample_ddy_16, context.PositionCS);
+    const float4 vivid_v0016 = VividSampleBaseColorGrad(surfaceBinding0, vivid_sample_context_16);
+    const float vivid_v0017 = saturate(vivid_v0014);
+    const float4 vivid_v0018 = (vivid_v0009 * vivid_v0016);
+    const float4 vivid_v0019 = (vivid_v0002 * vivid_v0018);
+
+    VividAOTSurfaceProgramOutput output = (VividAOTSurfaceProgramOutput) 0;
+    output.BaseSlab.BaseColor = vivid_v0019;
+    output.BaseSlab.PerceptualRoughness = vivid_v0015;
+    output.BaseSlab.Metallic = vivid_v0017;
+    output.BaseSlab.NormalWS = vivid_v0004;
+    output.BaseSlab.TangentWS = vivid_v0005;
+    output.BaseSlab.FeatureMask = 7u;
+    const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
+        vivid_sample_slab_16,
+        surfaceBinding0,
+        vivid_sample_context_16,
+        true,
+        true,
+        output.BaseSlab.BaseColor.rgb,
+        output.BaseSlab.PerceptualRoughness,
+        output.BaseSlab.Metallic);
+    output.BaseSlab.PerceptualRoughness = vivid_base_slab_detail.PerceptualRoughness;
+    output.BaseSlab.Metallic = vivid_base_slab_detail.Metallic;
+    output.BaseSlab.NormalTS = vivid_base_slab_detail.NormalTS;
+    output.BaseSlab.AmbientOcclusion = vivid_base_slab_detail.AmbientOcclusion;
+    output.BaseSlab.HasNormal = vivid_base_slab_detail.HasNormal;
+    output.ClosureCount = 1u;
+    output.LayerOperator = 0u;
+    output.Emission = vivid_v0013;
+    return output;
+}
+
 bool VividTryEvaluateAOTSurfaceProgram(
     const uint programID,
     const VividMaterialData materialParameters,
@@ -462,6 +520,21 @@ bool VividTryEvaluateAOTSurfaceProgram(
                 dualSlabMaterialParameters,
                 surfaceBinding0,
                 surfaceBinding1,
+                context);
+            return true;
+        case 3u:
+            deferredExportContract.Version = 1u;
+            deferredExportContract.SurfaceSummaryAbi = 1u;
+            deferredExportContract.DualSlabSidecarAbi = 0u;
+            deferredExportContract.ShadingModelMask = 3u;
+            deferredExportContract.LitClass = 2u;
+            deferredExportContract.ExpectedClosureCount = 1u;
+            deferredExportContract.Topology = 0u;
+            deferredExportContract.PayloadFlags = 3u;
+            deferredExportContract.PolicyFlags = 7u;
+            output = VividEvaluateAOTSurface_82117A7EE1DF9D99(
+                materialParameters,
+                surfaceBinding0,
                 context);
             return true;
         default:

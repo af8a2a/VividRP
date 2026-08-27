@@ -8,10 +8,10 @@
 #ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_VERSION 2u
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0xCB9B26DEu
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0x35DABAE7u
-#define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH 3u
-#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 2u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0xCB9B26DEu || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0x35DABAE7u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 3u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0x9241A604u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0xA0497B27u
+#define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH 4u
+#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 2u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0x9241A604u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0xA0497B27u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 4u
 #error Material dispatchers use different frozen catalog manifests.
 #endif
 
@@ -72,6 +72,35 @@ VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_BE64FF731EB867CE(
     VividMaterialCoverageEvaluation output;
     output.Coverage = vivid_v0008;
     output.AlphaClipThreshold = vivid_v0001;
+    return output;
+}
+
+// Coverage AOT HLSL artifact v1, backend v1.
+VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_75DC5ECFAFE94492(
+    const VividMaterialData materialParameters,
+    const VividSurfaceBindingData surfaceBinding0,
+    const VividAOTCoverageContext context)
+{
+    const float vivid_v0000 = asfloat(0x3F000000u);
+    const float2 vivid_v0001 = context.UV0;
+    const float vivid_v0002 = materialParameters.AlphaClipThreshold;
+    const float4 vivid_v0003 = materialParameters.AlbedoColor;
+    const float2 vivid_v0005 = context.UV0Ddx;
+    const float2 vivid_v0006 = context.UV0Ddy;
+    const VividSlabMaterialData vivid_sample_slab_7 = VividCreateSlabMaterialData(materialParameters);
+    const float2 vivid_sample_uv_7 = vivid_v0001 * vivid_sample_slab_7.TextureTilingOffset.xy + vivid_sample_slab_7.TextureTilingOffset.zw;
+    const float2 vivid_sample_ddx_7 = vivid_v0005 * vivid_sample_slab_7.TextureTilingOffset.xy;
+    const float2 vivid_sample_ddy_7 = vivid_v0006 * vivid_sample_slab_7.TextureTilingOffset.xy;
+    const VividSurfaceSampleContext vivid_sample_context_7 = VividCreateSurfaceSampleContextGrad(surfaceBinding0, vivid_sample_uv_7, vivid_sample_ddx_7, vivid_sample_ddy_7);
+    const float4 vivid_v0007 = VividSampleBaseColorGrad(surfaceBinding0, vivid_sample_context_7);
+    const float4 vivid_v0008 = (vivid_v0003 * vivid_v0007);
+    const float vivid_v0009 = vivid_v0008.w;
+    const float vivid_v0010 = (vivid_v0000 * vivid_v0009);
+    const float vivid_v0011 = saturate(vivid_v0010);
+
+    VividMaterialCoverageEvaluation output;
+    output.Coverage = vivid_v0011;
+    output.AlphaClipThreshold = vivid_v0002;
     return output;
 }
 
@@ -138,6 +167,23 @@ bool VividTryEvaluateAOTCoverageProgram(
                 PullDualSlabMaterialData(runtimeHeader.ParameterAddress),
                 PullSurfaceBindingData(bindingAddress),
                 PullSurfaceBindingData(bindingAddress + 1u),
+                context);
+            return true;
+        }
+        case 3u:
+        {
+            if (programData.ParameterLayoutID
+                    != VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA
+                || programData.ResourceLayoutID
+                    != VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING
+                || runtimeHeader.ParameterAddress >= _MaterialDataCount
+                || runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount)
+            {
+                return false;
+            }
+            output = VividEvaluateAOTCoverage_75DC5ECFAFE94492(
+                PullMaterialData(runtimeHeader.ParameterAddress),
+                PullSurfaceBindingData(runtimeHeader.ResourceBindingAddress),
                 context);
             return true;
         }

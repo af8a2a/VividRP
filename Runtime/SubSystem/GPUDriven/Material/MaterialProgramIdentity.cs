@@ -29,6 +29,7 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint RuntimeAbiVersion = 1u;
 
         internal const int BuiltinProgramCount = 3;
+        internal const int ProductionCatalogProgramCount = 4;
     }
 
     internal enum MaterialProgramBackendKind : uint

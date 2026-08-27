@@ -96,6 +96,43 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ProductionCatalog_CoexistsSameTopologyWithDistinctCompiledPayload()
+        {
+            MaterialProgramCatalog catalog =
+                GPUDrivenMaterialCompiler.ProgramCatalog;
+            MaterialProgramCatalog.ManifestEntry standard =
+                catalog.GetEntry(VividMaterialProgramID.StandardSingleSlab);
+            MaterialProgramCatalog.ManifestEntry generic = catalog.GetEntry(
+                (VividMaterialProgramID)
+                    MaterialProgramContract.BuiltinProgramCount);
+
+            Assert.That(
+                catalog.RuntimeTableLength,
+                Is.EqualTo(
+                    MaterialProgramContract.ProductionCatalogProgramCount));
+            Assert.That(generic.StableName, Is.EqualTo("P3.GenericSingleSlabProof"));
+            Assert.That((uint) generic.ProgramID, Is.EqualTo(3u));
+            Assert.That(
+                generic.Program.Lowering.SelectionKey,
+                Is.EqualTo(standard.Program.Lowering.SelectionKey));
+            Assert.That(
+                generic.LayoutFingerprint,
+                Is.EqualTo(standard.LayoutFingerprint));
+            Assert.That(
+                generic.Program.CompiledHash,
+                Is.Not.EqualTo(standard.Program.CompiledHash));
+            Assert.That(
+                generic.Program.Module.SemanticHash,
+                Is.Not.EqualTo(standard.Program.Module.SemanticHash));
+            Assert.That(
+                generic.Program.CoverageHlsl.EntryPoint,
+                Is.Not.EqualTo(standard.Program.CoverageHlsl.EntryPoint));
+            Assert.That(
+                generic.Program.SurfaceHlsl.EntryPoint,
+                Is.Not.EqualTo(standard.Program.SurfaceHlsl.EntryPoint));
+        }
+
+        [Test]
         public void CompileStandardSingleSlab_ProducesProgram0AndLegacyCompatibleData()
         {
             var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -222,7 +259,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(firstCompiled.LegacyMaterialData.Metallic, Is.Not.EqualTo(secondCompiled.LegacyMaterialData.Metallic));
 
                 var sceneData = new VividGPUDrivenSceneData();
-                Assert.That(sceneData.MaterialProgramCount, Is.EqualTo(3));
+                Assert.That(
+                    sceneData.MaterialProgramCount,
+                    Is.EqualTo(
+                        MaterialProgramContract.ProductionCatalogProgramCount));
                 VividMaterialProgramData program = sceneData.MaterialPrograms[0];
                 Assert.That(program.Version, Is.EqualTo(GPUDrivenMaterialCompiler.ProgramVersion));
                 Assert.That(

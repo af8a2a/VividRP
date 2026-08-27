@@ -9,7 +9,6 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
-using IRMaterialParameter = VividRP.Runtime.GPUDriven.MaterialParameter;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
@@ -34,7 +33,8 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Material/MaterialClassification.compute";
         private const string DeferredLitComputePath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/DeferredLit.compute";
-        private const uint CustomProgramIndex = 3u;
+        private const uint GenericProofProgramIndex =
+            (uint) MaterialProgramContract.BuiltinProgramCount;
 
         [TearDown]
         public void TearDown()
@@ -62,7 +62,9 @@ namespace VividRP.Editor.Tests
 
             EnsureTemporaryFolder();
             RequireShaderModel66();
-            CompiledMaterialProgram customProgram = BuildCustomSingleSlabProgram();
+            CompiledMaterialProgram customProgram =
+                GPUDrivenMaterialCompiler.GetMaterialProgram(
+                    (VividMaterialProgramID) GenericProofProgramIndex);
             CompiledMaterialProgram builtinProgram =
                 GPUDrivenMaterialCompiler.GetMaterialProgram(
                     VividMaterialProgramID.StandardSingleSlab);
@@ -80,7 +82,8 @@ namespace VividRP.Editor.Tests
                 MaterialProgramCatalogBakeSlot.ForProgram(
                     "P3.NonBuiltinCoverageAndSurfaceGpuTest",
                     customProgram));
-            var customProgramID = (VividMaterialProgramID) CustomProgramIndex;
+            var customProgramID =
+                (VividMaterialProgramID) GenericProofProgramIndex;
             MaterialProgramCatalog.ManifestEntry catalogEntry =
                 catalog.GetEntry(customProgramID);
             Assert.That(catalogEntry.ProgramID, Is.EqualTo(customProgramID));
@@ -222,9 +225,9 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ProductionShaders_ResolveClassifyAndLightMaterialPrograms_EndToEndOnGpu()
         {
-            const int width = 24;
+            const int width = 32;
             const int height = 8;
-            const int tileCount = 3;
+            const int tileCount = 4;
             const int variantCount = 4;
 
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
@@ -436,10 +439,15 @@ namespace VividRP.Editor.Tests
                     Color.clear,
                     "SkyTexture"));
 
-                // Three 8x8 tiles exercise lit P0, unlit P0, and a table-known
-                // P3 that is deliberately absent from the frozen dispatcher.
+                // Four 8x8 tiles exercise lit P0, unlit P0, the production
+                // catalog's generic P3 payload, and a table-known P4 that is
+                // deliberately absent from the frozen dispatcher.
                 VividMaterialProgramData[] runtimePrograms =
                     GPUDrivenMaterialCompiler.CreateRuntimeProgramTable();
+                Assert.That(
+                    runtimePrograms,
+                    Has.Length.EqualTo(
+                        MaterialProgramContract.ProductionCatalogProgramCount));
                 uint dispatcherMissProgramIndex = (uint) runtimePrograms.Length;
                 Array.Resize(ref runtimePrograms, runtimePrograms.Length + 1);
                 runtimePrograms[dispatcherMissProgramIndex] = runtimePrograms[0];
@@ -463,9 +471,17 @@ namespace VividRP.Editor.Tests
                     new()
                     {
                         ProgramID =
-                            (VividMaterialProgramID) dispatcherMissProgramIndex,
+                            (VividMaterialProgramID) GenericProofProgramIndex,
                         ParameterAddress = 2u,
                         ResourceBindingAddress = 2u,
+                        Flags = VividMaterialRuntimeFlags.None,
+                    },
+                    new()
+                    {
+                        ProgramID =
+                            (VividMaterialProgramID) dispatcherMissProgramIndex,
+                        ParameterAddress = 3u,
+                        ResourceBindingAddress = 3u,
                         Flags = VividMaterialRuntimeFlags.None,
                     },
                 };
@@ -483,9 +499,14 @@ namespace VividRP.Editor.Tests
                         new float4(1.0f),
                         float3.zero,
                         metallic: 1.0f),
+                    CreatePixelLoopMaterialData(
+                        new float4(1.0f),
+                        float3.zero,
+                        metallic: 1.0f),
                 };
                 VividSurfaceBindingData[] surfaceBindings =
                 {
+                    CreateUnboundSurfaceBinding(),
                     CreateUnboundSurfaceBinding(),
                     CreateUnboundSurfaceBinding(),
                     CreateUnboundSurfaceBinding(),
@@ -495,6 +516,7 @@ namespace VividRP.Editor.Tests
                     CreatePixelLoopInstance(0u),
                     CreatePixelLoopInstance(1u),
                     CreatePixelLoopInstance(2u),
+                    CreatePixelLoopInstance(3u),
                 };
                 var meshlet = new VividMeshlet
                 {
@@ -767,24 +789,31 @@ namespace VividRP.Editor.Tests
                 materialFeatureTileList.GetData(tileList);
                 materialFeatureIndirectArgs.GetData(indirectArgs);
 
-                Assert.That(featureFlags, Is.EqualTo(new uint[] { 1u, 0u, 8u }));
+                Assert.That(
+                    featureFlags,
+                    Is.EqualTo(new uint[] { 1u, 0u, 1u, 8u }));
                 Assert.That(
                     indirectArgs,
                     Is.EqualTo(new uint[]
                     {
-                        1u, 1u, 1u, 0u,
+                        2u, 1u, 1u, 0u,
                         0u, 1u, 1u, 0u,
                         0u, 1u, 1u, 0u,
                         1u, 1u, 1u, 0u,
                     }));
-                Assert.That(tileList[0], Is.EqualTo(0u));
-                Assert.That(tileList[9], Is.EqualTo(2u));
+                Assert.That(
+                    new[] { tileList[0], tileList[1] },
+                    Is.EquivalentTo(new uint[] { 0u, 2u }));
+                Assert.That(tileList[12], Is.EqualTo(3u));
 
                 Texture2D gbuffer0Readback = TrackObject(ReadRenderTexture(
                     gbuffer0,
                     TextureFormat.RGBAFloat));
                 Texture2D gbuffer1Readback = TrackObject(ReadRenderTexture(
                     gbuffer1,
+                    TextureFormat.RGBAFloat));
+                Texture2D gbuffer3Readback = TrackObject(ReadRenderTexture(
+                    gbuffer3,
                     TextureFormat.RGBAFloat));
                 Texture2D lightingReadback = TrackObject(ReadRenderTexture(
                     lighting,
@@ -803,12 +832,24 @@ namespace VividRP.Editor.Tests
                     "Unlit Deferred Export header");
                 AssertDeferredExportHeader(
                     gbuffer0Readback.GetPixel(20, 4),
+                    0xC2,
+                    "generic P3 Deferred Export header");
+                AssertDeferredExportHeader(
+                    gbuffer0Readback.GetPixel(28, 4),
                     0x0F,
                     "dispatcher-miss Deferred Export header");
                 Assert.That(
                     gbuffer1Readback.GetPixel(4, 4).a,
                     Is.EqualTo(1.0f).Within(0.001f),
                     "Resolve must emit a valid Surface Summary GBuffer ABI tag.");
+                Assert.That(
+                    gbuffer1Readback.GetPixel(20, 4).a,
+                    Is.EqualTo(1.0f).Within(0.001f),
+                    "The generic P3 must emit the same frozen Surface Summary ABI tag.");
+                AssertColor(
+                    gbuffer3Readback.GetPixel(20, 4),
+                    new Color(0.05f, 0.1f, 0.15f, 1.0f),
+                    "generic P3 IR emission reached the production GBuffer");
 
                 AssertColor(
                     lightingReadback.GetPixel(4, 4),
@@ -820,6 +861,10 @@ namespace VividRP.Editor.Tests
                     "Unlit Resolve export preserved by Deferred clear");
                 AssertColor(
                     lightingReadback.GetPixel(20, 4),
+                    new Color(0.185f, 0.13625f, 0.545f, 1.0f),
+                    "generic P3 emission plus transformed Surface deferred lighting");
+                AssertColor(
+                    lightingReadback.GetPixel(28, 4),
                     new Color(1.0f, 0.0f, 1.0f, 1.0f),
                     "dispatcher miss classified and lit through CatchAll");
                 AssertColor(
@@ -832,6 +877,10 @@ namespace VividRP.Editor.Tests
                     "Unlit tile must not enter a Deferred lighting variant");
                 AssertColor(
                     debugReadback.GetPixel(20, 4),
+                    new Color(0.0f, 0.0f, 0.0f, 1.0f),
+                    "generic P3 shares FastSlab lighting without a handwritten branch");
+                AssertColor(
+                    debugReadback.GetPixel(28, 4),
                     new Color(1.0f, 0.0f, 1.0f, 1.0f),
                     "CatchAll must fail closed in Deferred lighting");
             }
@@ -867,62 +916,6 @@ namespace VividRP.Editor.Tests
                     "_EnableProbeVolumes",
                     previousEnableProbeVolumes);
             }
-        }
-
-        private static CompiledMaterialProgram BuildCustomSingleSlabProgram()
-        {
-            var values = new MaterialValueIR();
-            MaterialValue uv = values.ExternalInput(MaterialExternalInput.UV0);
-            MaterialValue texture = values.TextureResource(MaterialTextureResource.BaseColor);
-            MaterialValue sample = values.TextureSampleGrad(
-                texture,
-                uv,
-                values.Ddx(uv),
-                values.Ddy(uv));
-            MaterialValue sampledBaseColor = values.Multiply(
-                sample,
-                values.Parameter(IRMaterialParameter.BaseColor));
-            MaterialValue surfaceBaseColor = values.Multiply(
-                sampledBaseColor,
-                values.Constant(new float4(0.5f, 0.25f, 0.75f, 1.0f)));
-            MaterialValue coverage = values.Saturate(values.Multiply(
-                values.Swizzle(sampledBaseColor, MaterialSwizzleMask.W),
-                values.Constant(0.5f)));
-            MaterialValue roughness = values.OneMinus(
-                values.Parameter(IRMaterialParameter.Roughness));
-            MaterialValue metallic = values.Saturate(values.Multiply(
-                values.Parameter(IRMaterialParameter.Metallic),
-                values.Constant(0.5f)));
-            MaterialValue alphaClipThreshold =
-                values.Parameter(IRMaterialParameter.AlphaClipThreshold);
-            MaterialValue emission = values.Add(
-                values.Parameter(IRMaterialParameter.Emission),
-                values.Constant(new float3(0.05f, 0.1f, 0.15f)));
-            MaterialValue normal =
-                values.ExternalInput(MaterialExternalInput.GeometryNormalWS);
-            MaterialValue tangent =
-                values.ExternalInput(MaterialExternalInput.GeometryTangentWS);
-            var closures = new ClosureExpressionGraph(values);
-            MaterialClosure surfaceClosure = closures.Slab(
-                surfaceBaseColor,
-                roughness,
-                metallic,
-                normal,
-                tangent,
-                ClosureFeatureMask.BaseColorTexture
-                | ClosureFeatureMask.NormalTexture
-                | ClosureFeatureMask.MaskTexture);
-            var module = new MaterialIRModule(
-                values,
-                new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
-                closures,
-                surfaceClosure,
-                ClosureTopologyBudget.Prototype,
-                MaterialFeatureMask.AlphaClip,
-                MaterialShadingModelMask.StandardLit | MaterialShadingModelMask.Unlit);
-            return CompiledMaterialProgram.Compile(
-                module,
-                GPUDrivenMaterialCompiler.ProgramVersion);
         }
 
         private static GraphicsBuffer CreateStructuredBuffer<T>(T[] data)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
+using Unity.Mathematics;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -1857,6 +1858,53 @@ namespace VividRP.Runtime.GPUDriven
             var closureGraph = new ClosureExpressionGraph(valueIR);
             MaterialClosure surfaceClosure = closureGraph.Slab(
                 baseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                SupportedSlabFeatures);
+            var module = new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
+                closureGraph,
+                surfaceClosure,
+                ClosureTopologyBudget.Prototype,
+                SupportedMaterialFeatures,
+                SupportedShadingModels);
+            return CompiledMaterialProgram.Compile(module, programVersion);
+        }
+
+        internal static CompiledMaterialProgram BuildGenericSingleSlabProof(
+            uint programVersion)
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue baseColor = BuildSampledBaseColor(
+                valueIR,
+                MaterialTextureResource.BaseColor,
+                MaterialParameter.BaseColor);
+            MaterialValue surfaceBaseColor = valueIR.Multiply(
+                baseColor,
+                valueIR.Constant(new float4(0.5f, 0.25f, 0.75f, 1.0f)));
+            MaterialValue coverage = valueIR.Saturate(valueIR.Multiply(
+                valueIR.Swizzle(baseColor, MaterialSwizzleMask.W),
+                valueIR.Constant(0.5f)));
+            MaterialValue roughness = valueIR.OneMinus(
+                valueIR.Parameter(MaterialParameter.Roughness));
+            MaterialValue metallic = valueIR.Saturate(valueIR.Multiply(
+                valueIR.Parameter(MaterialParameter.Metallic),
+                valueIR.Constant(0.5f)));
+            MaterialValue alphaClipThreshold =
+                valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+            MaterialValue emission = valueIR.Add(
+                valueIR.Parameter(MaterialParameter.Emission),
+                valueIR.Constant(new float3(0.05f, 0.1f, 0.15f)));
+            MaterialValue normal =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            var closureGraph = new ClosureExpressionGraph(valueIR);
+            MaterialClosure surfaceClosure = closureGraph.Slab(
+                surfaceBaseColor,
                 roughness,
                 metallic,
                 normal,

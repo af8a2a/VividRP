@@ -57,7 +57,7 @@ namespace VividRP.Runtime.GPUDriven
 
         [NoAutoStaticsCleanup]
         private static readonly MaterialProgramCatalog s_MaterialProgramCatalog =
-            CreateBuiltinProgramCatalog();
+            CreateProductionProgramCatalog();
 
         internal static MaterialProgramCatalog ProgramCatalog =>
             s_MaterialProgramCatalog;
@@ -143,7 +143,7 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        private static MaterialProgramCatalog CreateBuiltinProgramCatalog()
+        private static MaterialProgramCatalog CreateProductionProgramCatalog()
         {
             MaterialProgramTemplateRegistry templates =
                 MaterialProgramBuiltinCatalog.Templates;
@@ -165,7 +165,10 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialProgramPrototypeBuilder.BuildDualSlab(
                     ProgramVersion,
                     VividDualSlabOperator.VerticalLayer);
-            return MaterialProgramCatalog.Bake(
+            CompiledMaterialProgram genericSingleSlabProof =
+                MaterialProgramPrototypeBuilder.BuildGenericSingleSlabProof(
+                    ProgramVersion);
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
                 templates,
                 MaterialProgramCatalogBakeSlot.ForProgram(
                     "P0.StandardSingleSlab",
@@ -175,7 +178,17 @@ namespace VividRP.Runtime.GPUDriven
                     horizontal),
                 MaterialProgramCatalogBakeSlot.ForProgram(
                     "P2.DualSlabVerticalLayer",
-                    vertical));
+                    vertical),
+                MaterialProgramCatalogBakeSlot.ForProgram(
+                    "P3.GenericSingleSlabProof",
+                    genericSingleSlabProof));
+            if (catalog.RuntimeTableLength
+                != MaterialProgramContract.ProductionCatalogProgramCount)
+            {
+                throw new InvalidOperationException(
+                    "The production material catalog does not match its frozen program count.");
+            }
+            return catalog;
         }
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(

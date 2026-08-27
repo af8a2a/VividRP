@@ -72,6 +72,27 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetInputPortByName("m_Attributes0"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_Attributes1"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_Barycentrics"), Is.Not.Null);
+                Assert.That(
+                    node.GetInputPortByName("m_DualSlabSidecarTileList"),
+                    Is.Null);
+                Assert.That(
+                    node.GetOutputPortByName("m_DualSlabSidecarTileList"),
+                    Is.Null);
+                Assert.That(
+                    node.GetInputPortByName(
+                        "m_DualSlabSidecarIndirectDrawArgs"),
+                    Is.Null);
+                Assert.That(
+                    node.GetOutputPortByName(
+                        "m_DualSlabSidecarIndirectDrawArgs"),
+                    Is.Null);
+                Assert.That(
+                    node.HasOverrideOption("m_DualSlabSidecarTileList"),
+                    Is.False);
+                Assert.That(
+                    node.HasOverrideOption(
+                        "m_DualSlabSidecarIndirectDrawArgs"),
+                    Is.False);
 
                 Assert.That(node.HasOverrideOption("m_GBuffer0"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer1"), Is.True);

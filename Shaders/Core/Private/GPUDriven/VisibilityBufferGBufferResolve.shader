@@ -21,6 +21,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
             #pragma multi_compile_local_fragment _ VIVID_DUAL_SLAB_SIDECAR_OUTPUT
+            #pragma multi_compile_local_vertex _ VIVID_DUAL_SLAB_SIDECAR_TILED
             #pragma target 5.0
             #pragma require randomwrite
             #pragma use_dxc
@@ -54,9 +55,16 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             float4 _VisibilityBufferAttributes1ScaleBias;
             float4 _VisibilityBufferBarycentricsScaleBias;
 
+            #if defined(VIVID_DUAL_SLAB_SIDECAR_TILED)
+            #define VIVID_DUAL_SLAB_SIDECAR_TILE_SIZE 8u
+            StructuredBuffer<uint> _DualSlabSidecarTileList;
+            float4 _DualSlabSidecarScreenSize;
+            #endif
+
             struct Attributes
             {
                 uint vertexID : SV_VertexID;
+                uint instanceID : SV_InstanceID;
             };
 
             struct Varyings
@@ -99,8 +107,34 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             Varyings Vert(Attributes input)
             {
                 Varyings output;
+                #if defined(VIVID_DUAL_SLAB_SIDECAR_TILED)
+                const uint packedTileCoord =
+                    _DualSlabSidecarTileList[input.instanceID];
+                const uint2 tileCoord = uint2(
+                    packedTileCoord & 0xFFFFu,
+                    packedTileCoord >> 16u);
+                const float2 tileMinPixel = float2(
+                    tileCoord * VIVID_DUAL_SLAB_SIDECAR_TILE_SIZE);
+                const float2 localUV = float2(
+                    (input.vertexID << 1u) & 2u,
+                    input.vertexID & 2u);
+                output.uv = (tileMinPixel
+                    + localUV * VIVID_DUAL_SLAB_SIDECAR_TILE_SIZE)
+                    * _DualSlabSidecarScreenSize.zw;
+
+                output.positionCS = float4(
+                    output.uv.x * 2.0f - 1.0f,
+                    1.0f - output.uv.y * 2.0f,
+                    UNITY_NEAR_CLIP_VALUE,
+                    1.0f);
+                #ifdef UNITY_PRETRANSFORM_TO_DISPLAY_ORIENTATION
+                output.positionCS = ApplyPretransformRotation(
+                    output.positionCS);
+                #endif
+                #else
                 output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
                 output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
+                #endif
                 return output;
             }
 

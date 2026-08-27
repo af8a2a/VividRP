@@ -33,8 +33,13 @@ namespace VividRP.Editor.Tests
                 entry => entry.Name == "LayerAux0");
             var layerAux1Entry = resources.Textures.Single(
                 entry => entry.Name == "LayerAux1");
+            var sidecarTileListEntry = resources.Buffers.Single(
+                entry => entry.Name == "DualSlabSidecarTileList");
+            var sidecarIndirectArgsEntry = resources.Buffers.Single(
+                entry => entry.Name == "DualSlabSidecarIndirectDrawArgs");
 
             Assert.That(resources.Textures, Has.Length.EqualTo(11));
+            Assert.That(resources.Buffers, Has.Length.EqualTo(2));
             Assert.That(visibilityEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(visibilityEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32_UInt));
             Assert.That(attributes0Entry.Access, Is.EqualTo(AccessFlags.Read));
@@ -92,6 +97,18 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(Color.clear));
             Assert.That(layerAux0Entry.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(layerAux1Entry.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(sidecarTileListEntry.IsTransient, Is.True);
+            Assert.That(sidecarTileListEntry.Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(
+                sidecarTileListEntry.Buffer.desc.Target,
+                Is.EqualTo(GraphicsBuffer.Target.Structured));
+            Assert.That(sidecarIndirectArgsEntry.IsTransient, Is.True);
+            Assert.That(sidecarIndirectArgsEntry.Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(
+                sidecarIndirectArgsEntry.Buffer.desc.Target,
+                Is.EqualTo(
+                    GraphicsBuffer.Target.Structured
+                    | GraphicsBuffer.Target.IndirectArguments));
         }
 
         [Test]
@@ -179,6 +196,40 @@ namespace VividRP.Editor.Tests
             Assert.That(layerAux0Texture.desc.Height, Is.EqualTo(1));
             Assert.That(layerAux1Texture.desc.Width, Is.EqualTo(1));
             Assert.That(layerAux1Texture.desc.Height, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Prepare_ResizesDualSlabSidecarTileScratchForResolveExtent()
+        {
+            var pass = new VisibilityBufferGBufferResolvePass();
+            var visibilityTexture = GetTextureField(pass, "m_VisibilityBuffer");
+            var tileList = GetBufferField(
+                pass,
+                "m_DualSlabSidecarTileList");
+            var indirectArgs = GetBufferField(
+                pass,
+                "m_DualSlabSidecarIndirectDrawArgs");
+            visibilityTexture.desc.Width = 17;
+            visibilityTexture.desc.Height = 9;
+
+            var frameData = new ContextContainer();
+            frameData.GetOrCreate<VividGPUDrivenFrameData>()
+                .requiresDualSlabSidecar = true;
+
+            pass.Prepare(frameData);
+
+            Assert.That(
+                tileList.desc.Count,
+                Is.EqualTo(6),
+                "17x9 at 8x8 must allocate a 3x2 tile list.");
+            Assert.That(tileList.desc.Stride, Is.EqualTo(sizeof(uint)));
+            Assert.That(indirectArgs.desc.Count, Is.EqualTo(4));
+            Assert.That(indirectArgs.desc.Stride, Is.EqualTo(sizeof(uint)));
+            Assert.That(
+                indirectArgs.desc.Target,
+                Is.EqualTo(
+                    GraphicsBuffer.Target.Structured
+                    | GraphicsBuffer.Target.IndirectArguments));
         }
 
         [Test]
@@ -540,7 +591,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolvePass_SplitsCoreAndDualSidecarTargetsAroundFeedbackUavs()
+        public void ResolvePass_UsesTileAdaptiveDualSidecarAfterFeedbackUavs()
         {
             var pass = new VisibilityBufferGBufferResolvePass();
             var coreTargets = typeof(VisibilityBufferGBufferResolvePass).GetField(
@@ -569,6 +620,14 @@ namespace VividRP.Editor.Tests
             string compactSource = string.Concat(
                 File.ReadAllText(sourcePath)
                     .Where(character => !char.IsWhiteSpace(character)));
+            string shaderPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferGBufferResolve.shader");
+            string shaderSource = File.ReadAllText(shaderPath);
 
             var bindCoreIndex = compactSource.IndexOf(
                 "BindGBufferTargets(nativeCmd);",
@@ -585,14 +644,57 @@ namespace VividRP.Editor.Tests
             var adaptiveReturnIndex = compactSource.IndexOf(
                 "if(!m_RequiresDualSlabSidecar)return;",
                 global::System.StringComparison.Ordinal);
+            var clearSidecarIndex = compactSource.IndexOf(
+                "CoreUtils.ClearRenderTarget(nativeCmd,"
+                + "ClearFlag.Color,Color.clear);",
+                global::System.StringComparison.Ordinal);
+            var classifyTilesIndex = compactSource.IndexOf(
+                "ClassifyDualSlabSidecarTiles(nativeCmd);",
+                global::System.StringComparison.Ordinal);
+            var indirectDrawIndex = compactSource.IndexOf(
+                "nativeCmd.DrawProceduralIndirect(",
+                global::System.StringComparison.Ordinal);
             Assert.That(bindCoreIndex, Is.GreaterThanOrEqualTo(0));
             Assert.That(drawCoreIndex, Is.GreaterThan(bindCoreIndex));
             Assert.That(clearFeedbackIndex, Is.GreaterThan(drawCoreIndex));
             Assert.That(adaptiveReturnIndex, Is.GreaterThan(clearFeedbackIndex));
             Assert.That(bindSidecarIndex, Is.GreaterThan(adaptiveReturnIndex));
+            Assert.That(clearSidecarIndex, Is.GreaterThan(bindSidecarIndex));
+            Assert.That(classifyTilesIndex, Is.GreaterThan(clearSidecarIndex));
+            Assert.That(indirectDrawIndex, Is.GreaterThan(classifyTilesIndex));
             StringAssert.Contains(
                 "m_DualSlabSidecarMaterial,DualSlabSidecarKeyword,true",
                 compactSource);
+            StringAssert.Contains(
+                "m_DualSlabSidecarTiledMaterial,"
+                + "DualSlabSidecarKeyword,true",
+                compactSource);
+            StringAssert.Contains(
+                "m_DualSlabSidecarTiledMaterial,"
+                + "DualSlabSidecarTiledKeyword,true",
+                compactSource);
+            StringAssert.Contains(
+                "if(!CanUseTileAdaptiveSidecarResolve())"
+                + "{CoreUtils.DrawFullScreen(nativeCmd,"
+                + "m_DualSlabSidecarMaterial,m_DrawProperties,0);return;}",
+                compactSource);
+            StringAssert.Contains("_DualSlabSidecarTileList", shaderSource);
+            StringAssert.Contains("SV_InstanceID", shaderSource);
+            StringAssert.Contains(
+                "VIVID_DUAL_SLAB_SIDECAR_TILED",
+                shaderSource);
+            StringAssert.Contains(
+                "VIVID_DUAL_SLAB_SIDECAR_TILE_SIZE",
+                shaderSource);
+            StringAssert.Contains(
+                "_DualSlabSidecarTileList[input.instanceID]",
+                shaderSource);
+            StringAssert.Contains(
+                "(input.vertexID << 1u) & 2u",
+                shaderSource);
+            StringAssert.Contains(
+                "1.0f - output.uv.y * 2.0f",
+                shaderSource);
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName)
@@ -601,6 +703,18 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (RenderGraphTexture) field.GetValue(pass);
+        }
+
+        private static RenderGraphBuffer GetBufferField(
+            VisibilityBufferGBufferResolvePass pass,
+            string fieldName)
+        {
+            var field = typeof(VisibilityBufferGBufferResolvePass).GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            return (RenderGraphBuffer) field.GetValue(pass);
         }
 
         private static void SetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName, RenderGraphTexture value)

@@ -148,6 +148,12 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("#pragma kernel ClearDeferredVariantArgs", source);
             StringAssert.Contains("#pragma kernel ClassifyDeferredExports", source);
             StringAssert.Contains("#pragma kernel BuildDeferredVariantIndirectArgs", source);
+            StringAssert.Contains(
+                "#pragma kernel ClearDualSlabSidecarDrawArgs",
+                source);
+            StringAssert.Contains(
+                "#pragma kernel ClassifyDualSlabSidecarTiles",
+                source);
             StringAssert.Contains("Texture2D<float4> _GBuffer1;", source);
             StringAssert.Contains("VividIsSurfaceSummaryGBufferABIValid(gbuffer1.a)", source);
             StringAssert.Contains("VividDecodeDeferredExportHeader(gbuffer0.a)", source);
@@ -180,6 +186,18 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_DECALS", source);
             StringAssert.DoesNotContain("VIVID_DEFERRED_EXPORT_FLAG_HAS_DIFFUSE_IRRADIANCE", source);
             StringAssert.DoesNotContain("_LayerAux", source);
+            StringAssert.Contains(
+                "_MaterialFeatureIndirectArgs[0u]=3u;"
+                + "_MaterialFeatureIndirectArgs[1u]=0u;",
+                compactSource);
+            StringAssert.Contains(
+                "InterlockedAdd(_MaterialFeatureIndirectArgs[1u],"
+                + "1u,tileOffset);",
+                compactSource);
+            StringAssert.Contains(
+                "_MaterialFeatureTileList[tileOffset]="
+                + "TileClassifaction::PackTileCoord(groupId.xy);",
+                compactSource);
         }
 
         [Test]

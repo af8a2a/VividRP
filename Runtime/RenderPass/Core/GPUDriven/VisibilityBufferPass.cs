@@ -66,11 +66,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public uint Counter5;
         }
 
-        [RenderGraphResource(Name = "VisibleMeshletRenderRequests", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_VisibleMeshletRenderRequests;
-
-        [RenderGraphResource(Name = "VisibleMeshletIndirectArgs", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_VisibleMeshletIndirectArgs;
+        private GraphicsBuffer m_VisibleMeshletRenderRequests;
+        private GraphicsBuffer m_VisibleMeshletIndirectArgs;
 
         [RenderGraphResource(
             Name = "VisibilityBuffer",
@@ -169,19 +166,6 @@ namespace VividRP.Runtime.RenderPass.Core
         public VisibilityBufferPass()
         {
             profilingSampler = new ProfilingSampler(nameof(VisibilityBufferPass));
-
-            m_VisibleMeshletRenderRequests = RenderGraphBuffer.CreateStructured(
-                "VisibleMeshletRenderRequests",
-                1,
-                sizeof(uint) * 2,
-                GraphicsBuffer.Target.Structured
-            );
-            m_VisibleMeshletIndirectArgs = RenderGraphBuffer.CreateStructured(
-                "VisibleMeshletIndirectArgs",
-                4,
-                sizeof(uint),
-                GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments
-            );
 
             m_VisibilityBuffer = new RenderGraphTexture
             {
@@ -332,18 +316,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 visibleMeshletIndirectDrawArgsBuffer ??= fallbackVisibleMeshletIndirectDrawArgsBuffer;
             }
 
-            UpdateImportedBuffer(
-                m_VisibleMeshletRenderRequests,
-                visibleMeshletRenderRequestsBuffer,
-                GraphicsBuffer.Target.Structured,
-                "VisibleMeshletRenderRequests"
-            );
-            UpdateImportedBuffer(
-                m_VisibleMeshletIndirectArgs,
-                visibleMeshletIndirectDrawArgsBuffer,
-                GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
-                "VisibleMeshletIndirectArgs"
-            );
+            m_VisibleMeshletRenderRequests = visibleMeshletRenderRequestsBuffer;
+            m_VisibleMeshletIndirectArgs = visibleMeshletIndirectDrawArgsBuffer;
+            // if (PassRecorder.IsPassTextureImportActive)
+            // {
+            //     if (m_VisibleMeshletRenderRequests != null)
+            //     {
+            //         PassRecorder.ImportBufferForPass(
+            //             this,
+            //             m_VisibleMeshletRenderRequests,
+            //             AccessFlags.Read);
+            //     }
+            //
+            //     if (m_VisibleMeshletIndirectArgs != null)
+            //     {
+            //         PassRecorder.ImportBufferForPass(
+            //             this,
+            //             m_VisibleMeshletIndirectArgs,
+            //             AccessFlags.Read);
+            //     }
+            // }
 
             if (m_RasterizationPath == VisibilityBufferRasterizationPath.ExperimentalMeshShader
                 && VividGPUDrivenSystem.HasInstance)
@@ -366,8 +358,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var nativeCmd = context.GetNativeCommandBuffer();
             BindVisibilityTargets(nativeCmd, false);
 
-            GraphicsBuffer visibleMeshletRenderRequestsBuffer = m_VisibleMeshletRenderRequests?.ImportedGraphicsBuffer;
-            GraphicsBuffer visibleMeshletIndirectArgsBuffer = m_VisibleMeshletIndirectArgs?.ImportedGraphicsBuffer;
+            GraphicsBuffer visibleMeshletRenderRequestsBuffer = m_VisibleMeshletRenderRequests;
+            GraphicsBuffer visibleMeshletIndirectArgsBuffer = m_VisibleMeshletIndirectArgs;
             bool hasGPUDrivenDraws = visibleMeshletRenderRequestsBuffer != null
                                      && visibleMeshletIndirectArgsBuffer != null;
 
@@ -444,6 +436,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_VirtualTextureFrameData = null;
             m_PrimitiveDrawSet = null;
+            m_VisibleMeshletRenderRequests = null;
+            m_VisibleMeshletIndirectArgs = null;
             m_MeshletCullingCompute = null;
             m_CopyOccluderDepthKernel = -1;
             m_DownsampleOccluderDepthKernel = -1;
@@ -1162,28 +1156,5 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Height = height;
         }
 
-        private static void UpdateImportedBuffer(
-            RenderGraphBuffer renderGraphBuffer,
-            GraphicsBuffer graphicsBuffer,
-            GraphicsBuffer.Target fallbackTarget,
-            string name)
-        {
-            if (renderGraphBuffer == null)
-                return;
-
-            renderGraphBuffer.desc.Name = name;
-
-            if (graphicsBuffer == null)
-            {
-                renderGraphBuffer.desc.Target = fallbackTarget;
-                renderGraphBuffer.ClearImportedBuffer();
-                return;
-            }
-
-            renderGraphBuffer.desc.Count = Mathf.Max(1, graphicsBuffer.count);
-            renderGraphBuffer.desc.Stride = Mathf.Max(1, graphicsBuffer.stride);
-            renderGraphBuffer.desc.Target = graphicsBuffer.target;
-            renderGraphBuffer.SetImportedBuffer(graphicsBuffer);
-        }
     }
 }

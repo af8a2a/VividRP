@@ -19,7 +19,7 @@ namespace VividRP.Editor.Tests
     public class VisibilityBufferPassTests
     {
         [Test]
-        public void Initialize_RegistersMeshletBuffersFourVisibilityTargetsAndDepth()
+        public void Initialize_RegistersFourVisibilityTargetsAndDepthWithoutGPUDrivenBufferPorts()
         {
             IRenderPass renderPass = new VisibilityBufferPass();
 
@@ -29,11 +29,8 @@ namespace VividRP.Editor.Tests
             var attributes1Entry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes1");
             var barycentricsEntry = resources.Textures.Single(entry => entry.Name == "VisibilityBufferBarycentrics");
             var depthEntry = resources.Textures.Single(entry => entry.Name == "Depth");
-            var visibleMeshletRequestsEntry = resources.Buffers.Single(entry => entry.Name == "VisibleMeshletRenderRequests");
-            var indirectArgsEntry = resources.Buffers.Single(entry => entry.Name == "VisibleMeshletIndirectArgs");
-
             Assert.That(resources.Textures, Has.Length.EqualTo(5));
-            Assert.That(resources.Buffers, Has.Length.EqualTo(2));
+            Assert.That(resources.Buffers, Is.Empty);
             Assert.That(resources.RenderLists, Is.Empty);
             Assert.That(renderPass, Is.InstanceOf<UnsafePass>());
 
@@ -60,17 +57,10 @@ namespace VividRP.Editor.Tests
             Assert.That(depthEntry.IsDepthAttachment, Is.True);
             Assert.That(depthEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.Depth32));
 
-            Assert.That(visibleMeshletRequestsEntry.Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(visibleMeshletRequestsEntry.Buffer.desc.Target, Is.EqualTo(GraphicsBuffer.Target.Structured));
-
-            Assert.That(indirectArgsEntry.Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(
-                indirectArgsEntry.Buffer.desc.Target,
-                Is.EqualTo(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments));
         }
 
         [Test]
-        public void Prepare_ResizesDefaultOutputs_AndLeavesGPUDrivenBuffersUnbound_WhenFrameDataDoesNotProvideThem()
+        public void Prepare_ResizesDefaultOutputs_AndLeavesGPUDrivenBuffersNull_WhenFrameDataDoesNotProvideThem()
         {
             VividGPUDrivenSystem.Shutdown();
 
@@ -102,8 +92,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(barycentricsTexture.desc.Height, Is.EqualTo(576));
                 Assert.That(depthTexture.desc.Width, Is.EqualTo(1024));
                 Assert.That(depthTexture.desc.Height, Is.EqualTo(576));
-                Assert.That(renderRequestsBuffer.HasImportedBuffer, Is.False);
-                Assert.That(indirectArgsBuffer.HasImportedBuffer, Is.False);
+                Assert.That(renderRequestsBuffer, Is.Null);
+                Assert.That(indirectArgsBuffer, Is.Null);
             }
             finally
             {
@@ -217,6 +207,44 @@ namespace VividRP.Editor.Tests
             Assert.That(bucketFilter, Is.GreaterThan(drawSetBranch));
             Assert.That(zeroBucketFilter, Is.GreaterThan(bucketFilter));
             Assert.That(legacyFallback, Is.GreaterThan(zeroBucketFilter));
+        }
+
+        [Test]
+        public void Prepare_UsesGPUDrivenBuffersDirectlyFromFrameData()
+        {
+            VividGPUDrivenSystem.Shutdown();
+            using var renderRequestsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                1,
+                sizeof(uint) * 2);
+            using var indirectArgsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
+                4,
+                sizeof(uint));
+            var pass = new VisibilityBufferPass();
+
+            try
+            {
+                var frameData = new ContextContainer();
+                VividGPUDrivenFrameData gpuDrivenFrameData =
+                    frameData.GetOrCreate<VividGPUDrivenFrameData>();
+                gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer = renderRequestsBuffer;
+                gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer = indirectArgsBuffer;
+
+                pass.Prepare(frameData);
+
+                Assert.That(
+                    GetBufferField(pass, "m_VisibleMeshletRenderRequests"),
+                    Is.SameAs(renderRequestsBuffer));
+                Assert.That(
+                    GetBufferField(pass, "m_VisibleMeshletIndirectArgs"),
+                    Is.SameAs(indirectArgsBuffer));
+            }
+            finally
+            {
+                pass.Dispose();
+                VividGPUDrivenSystem.Shutdown();
+            }
         }
 
         [Test]
@@ -513,12 +541,13 @@ namespace VividRP.Editor.Tests
             field.SetValue(pass, value);
         }
 
-        private static RenderGraphBuffer GetBufferField(VisibilityBufferPass pass, string fieldName)
+        private static GraphicsBuffer GetBufferField(VisibilityBufferPass pass, string fieldName)
         {
             var field = typeof(VisibilityBufferPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.That(field, Is.Not.Null);
-            return (RenderGraphBuffer)field.GetValue(pass);
+            return (GraphicsBuffer)field.GetValue(pass);
         }
+
     }
 }

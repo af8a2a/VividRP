@@ -505,12 +505,25 @@ namespace VividRP.Runtime.MeshShader
                     return false;
                 }
 
+                // SetData/SetBufferData may rotate a buffer's backing D3D12 resource
+                // while keeping the managed wrapper, so resolve every resource here.
                 IntPtr visibleRequestsPtr = visibleRequests.GetNativeBufferPtr();
                 IntPtr indirectArgsPtr = indirectArgs.GetNativeBufferPtr();
                 IntPtr instancesPtr = instances.GetNativeBufferPtr();
                 IntPtr meshletsPtr = meshlets.GetNativeBufferPtr();
                 IntPtr verticesPtr = vertices.GetNativeBufferPtr();
                 IntPtr indicesPtr = indices.GetNativeBufferPtr();
+                if (visibleRequestsPtr == IntPtr.Zero
+                    || indirectArgsPtr == IntPtr.Zero
+                    || instancesPtr == IntPtr.Zero
+                    || meshletsPtr == IntPtr.Zero
+                    || verticesPtr == IntPtr.Zero
+                    || indicesPtr == IntPtr.Zero)
+                {
+                    error = "A mesh-shader GraphicsBuffer has no native D3D12 resource.";
+                    return false;
+                }
+
                 var nativeDispatches = new NativeDispatchDesc[dispatchCount];
                 for (int dispatchIndex = 0; dispatchIndex < dispatchCount; dispatchIndex++)
                 {

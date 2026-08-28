@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -14,6 +15,8 @@ namespace VividRP.Editor.Tests.GPUDriven
     internal sealed class MaterialGraphEditorTests
     {
         private const string TestGraphFolder = "Assets/Temp/VividRPMaterialGraphTests";
+        private const string ImporterScriptPath =
+            "Packages/Custom_URP/Editor/GPUDriven/Material/MaterialGraphImporter.cs";
 
         [Test]
         public void StandardSingleSlabGraph_MatchesBuiltinCompiledProgram()
@@ -140,6 +143,22 @@ namespace VividRP.Editor.Tests.GPUDriven
                 BuildStandardSingleSlabGraph(graph);
                 GraphDatabase.SaveGraph(graph);
                 AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+
+                var importer = AssetImporter.GetAtPath(assetPath) as MaterialGraphImporter;
+                Assert.That(importer, Is.Not.Null);
+                MonoScript importerScript =
+                    AssetDatabase.LoadAssetAtPath<MonoScript>(ImporterScriptPath);
+                Assert.That(importerScript, Is.Not.Null);
+                Assert.That(importerScript.GetClass(), Is.EqualTo(typeof(MaterialGraphImporter)));
+                Assert.That(
+                    Path.GetFileNameWithoutExtension(
+                        AssetDatabase.GetAssetPath(importerScript)),
+                    Is.EqualTo(nameof(MaterialGraphImporter)));
+                using var serializedImporter = new SerializedObject(importer);
+                SerializedProperty importerScriptProperty =
+                    serializedImporter.FindProperty("m_Script");
+                Assert.That(importerScriptProperty, Is.Not.Null);
+                Assert.That(importerScriptProperty.objectReferenceValue, Is.EqualTo(importerScript));
 
                 MaterialGraphImportAsset asset =
                     AssetDatabase.LoadAssetAtPath<MaterialGraphImportAsset>(assetPath);

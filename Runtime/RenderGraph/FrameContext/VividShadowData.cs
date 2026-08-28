@@ -198,7 +198,8 @@ namespace VividRP.Runtime
             if (!isCSMActive
                 || mainLightVisibleIndex < 0
                 || mainLightVisibleIndex >= cullingResults.visibleLights.Length
-                || cascadeCount <= 0)
+                || cascadeCount <= 0
+                || !cullingResults.GetShadowCasterBounds(mainLightVisibleIndex, out _))
             {
                 return;
             }

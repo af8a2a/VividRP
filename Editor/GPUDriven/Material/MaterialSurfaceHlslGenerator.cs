@@ -148,8 +148,7 @@ namespace VividRP.Editor
         {
             try
             {
-                MaterialSurfaceHlslGenerator.GenerateAll();
-                MaterialCoverageHlslGenerator.GenerateAll();
+                MaterialProgramCatalogBaker.BakeAll();
             }
             catch (Exception exception)
             {
@@ -167,8 +166,7 @@ namespace VividRP.Editor
         {
             try
             {
-                MaterialSurfaceHlslGenerator.GenerateAll();
-                MaterialCoverageHlslGenerator.GenerateAll();
+                MaterialProgramCatalogBaker.BakeAll();
             }
             catch (Exception exception)
             {

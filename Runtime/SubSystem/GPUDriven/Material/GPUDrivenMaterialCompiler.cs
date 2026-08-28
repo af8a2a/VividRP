@@ -76,7 +76,34 @@ namespace VividRP.Runtime.GPUDriven
 
         internal static VividMaterialProgramData[] CreateRuntimeProgramTable()
         {
-            return s_MaterialProgramCatalog.CreateRuntimeProgramTable();
+            MaterialProgramCatalogAsset frozenCatalog =
+                MaterialProgramCatalogAsset.LoadDefault();
+            if (frozenCatalog == null)
+                return s_MaterialProgramCatalog.CreateRuntimeProgramTable();
+            if (frozenCatalog.Matches(s_MaterialProgramCatalog, out _))
+                return frozenCatalog.CreateRuntimeProgramTable();
+
+            // During an editor domain reload the delayed baker may not have updated
+            // the asset yet. Player builds are strict; the build preprocessor bakes
+            // the catalog before content is packed.
+            if (Application.isEditor)
+                return s_MaterialProgramCatalog.CreateRuntimeProgramTable();
+            return CreateRuntimeProgramTable(frozenCatalog);
+        }
+
+        internal static VividMaterialProgramData[] CreateRuntimeProgramTable(
+            MaterialProgramCatalogAsset frozenCatalog)
+        {
+            if (frozenCatalog == null)
+                throw new ArgumentNullException(nameof(frozenCatalog));
+            if (!frozenCatalog.Matches(
+                    s_MaterialProgramCatalog,
+                    out string failure))
+            {
+                throw new InvalidOperationException(
+                    $"Frozen Material Program Catalog is stale: {failure}");
+            }
+            return frozenCatalog.CreateRuntimeProgramTable();
         }
 
         internal static bool TryValidateMaterialProxy(

@@ -1,0 +1,97 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 617444a824ed9ed4ba8893f61605f9cb, type: 3}
+  m_Name: VividMaterialProgramCatalog
+  m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.GPUDriven.MaterialProgramCatalogAsset
+  m_AssetSchemaVersion: 1
+  m_ProgramCatalogVersion: 3
+  m_ManifestVersion: 2
+  m_RuntimeAbiVersion: 1
+  m_ManifestHashVersion: 2
+  m_ManifestHash: 11549898129256064516
+  m_Slots:
+  - m_ProgramID: 0
+    m_StableName: P0.StandardSingleSlab
+    m_IsReserved: 0
+    m_CompiledHashVersion: 6
+    m_CompiledHash: 8851551474658735965
+    m_LayoutFingerprintVersion: 1
+    m_LayoutFingerprint: 9656787919339570309
+    m_DeferredExportFingerprintVersion: 1
+    m_DeferredExportFingerprint: 5888118281072226784
+    m_CoveragePayloadHash: 7478674352511511534
+    m_SurfacePayloadHash: 1288476404774087461
+    m_RuntimeVersion: 1
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 0
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 0
+    m_ResourceLayoutID: 0
+    m_CapabilityFlags: 7
+    m_ExecutionClass: 0
+  - m_ProgramID: 1
+    m_StableName: P1.DualSlabHorizontalMix
+    m_IsReserved: 0
+    m_CompiledHashVersion: 6
+    m_CompiledHash: 7757566201632722506
+    m_LayoutFingerprintVersion: 1
+    m_LayoutFingerprint: 10226178297536332919
+    m_DeferredExportFingerprintVersion: 1
+    m_DeferredExportFingerprint: 12898365168916497089
+    m_CoveragePayloadHash: 17727778935427307162
+    m_SurfacePayloadHash: 8342589515784662258
+    m_RuntimeVersion: 1
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 1
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 1
+    m_ResourceLayoutID: 1
+    m_CapabilityFlags: 7
+    m_ExecutionClass: 0
+  - m_ProgramID: 2
+    m_StableName: P2.DualSlabVerticalLayer
+    m_IsReserved: 0
+    m_CompiledHashVersion: 6
+    m_CompiledHash: 6342762262226108038
+    m_LayoutFingerprintVersion: 1
+    m_LayoutFingerprint: 10226178297536332919
+    m_DeferredExportFingerprintVersion: 1
+    m_DeferredExportFingerprint: 12268790991064211538
+    m_CoveragePayloadHash: 17727778935427307162
+    m_SurfacePayloadHash: 4360321795050157187
+    m_RuntimeVersion: 1
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 1
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 1
+    m_ResourceLayoutID: 1
+    m_CapabilityFlags: 7
+    m_ExecutionClass: 0
+  - m_ProgramID: 3
+    m_StableName: P3.GenericSingleSlabProof
+    m_IsReserved: 0
+    m_CompiledHashVersion: 6
+    m_CompiledHash: 1733903339899143714
+    m_LayoutFingerprintVersion: 1
+    m_LayoutFingerprint: 9656787919339570309
+    m_DeferredExportFingerprintVersion: 1
+    m_DeferredExportFingerprint: 5888118281072226784
+    m_CoveragePayloadHash: 9523865824555214407
+    m_SurfacePayloadHash: 1523191165705972128
+    m_RuntimeVersion: 1
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 0
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 0
+    m_ResourceLayoutID: 0
+    m_CapabilityFlags: 7
+    m_ExecutionClass: 0

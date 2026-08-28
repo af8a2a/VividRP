@@ -534,20 +534,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void LegacyMeshletShadowPass_RecordsNoCullingOrDrawCommands()
-        {
-            string source = ReadRuntimeSource(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "MeshletShadowPass.cs");
-
-            StringAssert.DoesNotContain("CullShadowCascades", source);
-            StringAssert.DoesNotContain("DrawProceduralIndirect", source);
-            StringAssert.DoesNotContain("RegisterMeshletShadowPass", source);
-        }
-
-        [Test]
         public void CSMShadowPass_UsesPerCascadeSplitDataWithoutBatchShadowCulling()
         {
             string csmSource = ReadRuntimeSource(

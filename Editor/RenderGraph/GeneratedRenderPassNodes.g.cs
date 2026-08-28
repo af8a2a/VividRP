@@ -105,9 +105,6 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class MaterialDebugPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class MeshletShadowPass : RenderPassNodeData { }
-
-    [Serializable]
     internal sealed class MotionVectorPass : RenderPassNodeData { }
 
     [Serializable]

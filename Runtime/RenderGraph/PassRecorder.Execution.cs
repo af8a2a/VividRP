@@ -772,11 +772,6 @@ namespace VividRP.Runtime
 
                     indexedPasses[passIndex] = pass;
                     indexedPassTypes[passIndex] = passType;
-                    // Keep legacy MeshletShadowPass instances only as resource-binding forwarders.
-                    // CSMShadowPass owns all shadow culling and rendering work now.
-                    if (pass is MeshletShadowPass)
-                        continue;
-
                     var accessOverrides = BuildResourceAccessOverrides(passType, passDef);
                     if (accessOverrides != null && accessOverrides.Count > 0)
                         s_PassResourceAccessOverrides[pass] = accessOverrides;

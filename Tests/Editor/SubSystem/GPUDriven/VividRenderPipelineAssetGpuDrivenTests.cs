@@ -452,7 +452,7 @@ namespace VividRP.Editor.Tests
                 "private VividPrimitiveDrawSet ScheduleShadowDrawSet(",
                 "internal VividPrimitiveDrawSet CompleteShadowDrawSet(");
 
-            StringAssert.Contains("PassRecorder.HasMeshletShadowPass", schedule);
+            StringAssert.Contains("PassRecorder.HasCascadedShadowCasterPass", schedule);
             StringAssert.Contains("shadowData.isCSMActive", schedule);
             StringAssert.Contains("shadowData.viewMatrices", schedule);
             StringAssert.Contains("shadowData.projMatrices", schedule);
@@ -486,40 +486,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void MeshletShadowRecord_CompletesDrawSetImmediatelyBeforeShadowGpuCull()
+        public void CSMShadowRecord_CompletesDrawSetImmediatelyBeforeShadowGpuCull()
         {
             string source = ReadRuntimeSource(
                 "Runtime",
                 "RenderPass",
                 "Core",
-                "MeshletShadowPass.cs");
-            string record = SliceSource(
+                "CSMShadowPass.cs");
+            string prepareMeshletDraws = SliceSource(
                 source,
-                "public override void Record(",
-                "public override void Dispose()");
+                "private bool TryPrepareMeshletShadowDraws(",
+                "private void DrawMeshletShadowCascade(");
 
-            int buildContexts = record.IndexOf("BuildShadowCullingContext(");
-            int complete = record.IndexOf("system.CompleteShadowDrawSet(");
-            int gpuCull = record.IndexOf("system.CullShadowCascades(");
+            int buildContexts = prepareMeshletDraws.IndexOf("BuildShadowCullingContext(");
+            int complete = prepareMeshletDraws.IndexOf("system.CompleteShadowDrawSet(");
+            int gpuCull = prepareMeshletDraws.IndexOf("system.CullShadowCascades(");
 
             Assert.That(buildContexts, Is.GreaterThanOrEqualTo(0));
             Assert.That(complete, Is.GreaterThan(buildContexts));
             Assert.That(gpuCull, Is.GreaterThan(complete));
-            StringAssert.Contains("m_PrimitiveShadowDrawSet", record);
+            StringAssert.Contains("m_PrimitiveShadowDrawSet", prepareMeshletDraws);
         }
 
         [Test]
-        public void MeshletShadowPass_UsesUnifiedMatricesForCullingAndRasterization()
+        public void CSMShadowPass_DrawsUnityAndMeshletCastersWithUnifiedMatrices()
         {
             string source = ReadRuntimeSource(
                 "Runtime",
                 "RenderPass",
                 "Core",
-                "MeshletShadowPass.cs");
+                "CSMShadowPass.cs");
             string record = SliceSource(
                 source,
                 "public override void Record(",
-                "public override void Dispose()");
+                "private void PrepareMeshletRendering(");
             string buildCullingContext = SliceSource(
                 source,
                 "private void BuildShadowCullingContext(",
@@ -529,6 +529,22 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("m_ShadowData.projMatrices", record);
             StringAssert.Contains("m_ShadowData.viewMatrices", buildCullingContext);
             StringAssert.Contains("m_ShadowData.projMatrices", buildCullingContext);
+            StringAssert.Contains("nativeCmd.DrawRendererList(rendererList)", record);
+            StringAssert.Contains("DrawMeshletShadowCascade(", record);
+        }
+
+        [Test]
+        public void LegacyMeshletShadowPass_RecordsNoCullingOrDrawCommands()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "MeshletShadowPass.cs");
+
+            StringAssert.DoesNotContain("CullShadowCascades", source);
+            StringAssert.DoesNotContain("DrawProceduralIndirect", source);
+            StringAssert.DoesNotContain("RegisterMeshletShadowPass", source);
         }
 
         [Test]

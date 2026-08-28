@@ -104,7 +104,7 @@ namespace VividRP.Runtime
             Vector3 splitRatios = csmSettings.GetCascadeSplitRatios();
             Vector4 borderRatios = csmSettings.GetCascadeBorderRatios();
             Bounds primitiveShadowCasterBounds = default;
-            bool hasPrimitiveShadowCasterBounds = PassRecorder.HasMeshletShadowPass
+            bool hasPrimitiveShadowCasterBounds = PassRecorder.HasCascadedShadowCasterPass
                 && VividGPUDrivenSystem.TryGetPrimitiveShadowCasterBounds(
                     cameraData?.camera,
                     out primitiveShadowCasterBounds);

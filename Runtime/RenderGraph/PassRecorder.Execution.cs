@@ -39,7 +39,6 @@ namespace VividRP.Runtime
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
         private static bool s_HasCascadedShadowCasterPass;
-        private static bool s_HasMeshletShadowPass;
         private static int s_EditModeFrameIndex;
 
         internal static bool UsesExperimentalMeshShaderRasterization
@@ -394,7 +393,6 @@ namespace VividRP.Runtime
             s_CurrentImportVersion = 0;
             s_IsCompiled = false;
             s_HasCascadedShadowCasterPass = false;
-            s_HasMeshletShadowPass = false;
             RenderPassProfilingUtility.Clear();
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -609,16 +607,9 @@ namespace VividRP.Runtime
 
         internal static bool HasCascadedShadowCasterPass => s_HasCascadedShadowCasterPass;
 
-        internal static bool HasMeshletShadowPass => s_HasMeshletShadowPass;
-
         internal static void RegisterCascadedShadowCasterPass()
         {
             s_HasCascadedShadowCasterPass = true;
-        }
-
-        internal static void RegisterMeshletShadowPass()
-        {
-            s_HasMeshletShadowPass = true;
         }
 
         internal static bool HasRenderGizmoPrePostProcessBoundary(IReadOnlyList<IRenderPass> renderPasses)
@@ -779,12 +770,17 @@ namespace VividRP.Runtime
                         renderLists,
                         accelerationStructures);
 
+                    indexedPasses[passIndex] = pass;
+                    indexedPassTypes[passIndex] = passType;
+                    // Keep legacy MeshletShadowPass instances only as resource-binding forwarders.
+                    // CSMShadowPass owns all shadow culling and rendering work now.
+                    if (pass is MeshletShadowPass)
+                        continue;
+
                     var accessOverrides = BuildResourceAccessOverrides(passType, passDef);
                     if (accessOverrides != null && accessOverrides.Count > 0)
                         s_PassResourceAccessOverrides[pass] = accessOverrides;
 
-                    indexedPasses[passIndex] = pass;
-                    indexedPassTypes[passIndex] = passType;
                     s_PassIndices[pass] = s_RenderPasses.Count;
                     s_RenderPasses.Add(pass);
                     s_RuntimePassDefinitions.Add(passDef);

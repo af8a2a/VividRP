@@ -2,18 +2,44 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
     public sealed class CSMShadowPass : UnsafePass
     {
+        internal const string ShadowCasterShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass";
+
         private const int AtlasGridSize = 2; // 2x2 grid for up to 4 cascades
+        private const int RendererListCount = (int)VividRendererListID.Count;
+
+        private static readonly int s_CullId = Shader.PropertyToID("_Cull");
+        private static readonly int s_UnityIndirectDrawArgsId = Shader.PropertyToID("unity_IndirectDrawArgs");
+        private static readonly int s_UnityBaseCommandIdId = Shader.PropertyToID("unity_BaseCommandID");
         private static readonly int ShadowBiasId = Shader.PropertyToID("_ShadowBias");
+        private static readonly int s_VisibleMeshletRenderRequestsId = Shader.PropertyToID("_VisibleMeshletRenderRequests");
+        private static readonly string s_AlphaTestKeyword = "_ALPHATEST_ON";
 
         [RenderGraphResource(Name = "CSMShadowAtlas", Access = AccessFlags.Write)]
         private RenderGraphTexture m_ShadowAtlas;
 
+        private readonly Material[] m_Materials = new Material[RendererListCount];
+        private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
+        private readonly ShadowDrawingSettings[] m_ShadowDrawSettings =
+            new ShadowDrawingSettings[VividShadowData.MaxCascadeCount];
+        private readonly VividGPUCullingContext[] m_ShadowCullingContexts =
+            new VividGPUCullingContext[VividShadowData.MaxCascadeCount];
+        private readonly float[] m_VirtualTextureSpaceParams =
+            new float[VirtualTextureSpaceShaderParams.IntCount];
+        private readonly float[] m_VirtualTextureMipOffsets =
+            new float[VirtualTextureFeedbackProcessor.MaxMipCount];
+        private readonly Vector4[] m_VirtualTextureLayerFallbacks =
+            new Vector4[VTStackDesc.MaxLayerCount];
+
         private bool m_IsActive;
+        private bool m_MeshletRenderingActive;
         private int m_CascadeCount;
         private int m_AtlasResolution;
         private int m_CascadeResolution;
@@ -22,11 +48,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_SlopeScaleDepthBias;
         private ShaderVariablesGlobal m_CameraShaderGlobals;
 
-        private readonly ShadowDrawingSettings[] m_ShadowDrawSettings = new ShadowDrawingSettings[VividShadowData.MaxCascadeCount];
-
         private CullingResults m_CullingResults;
         private ScriptableRenderContext m_RenderContext;
         private VividShadowData m_ShadowData;
+        private Camera m_LODCamera;
+        private VividVirtualTextureFrameData m_VirtualTextureFrameData;
+        private VividPrimitiveDrawSet m_PrimitiveShadowDrawSet;
+        private int m_FrameIndex;
 
         public CSMShadowPass()
         {
@@ -46,17 +74,36 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Create()
         {
             PassRecorder.RegisterCascadedShadowCasterPass();
+            Shader shader = Shader.Find(ShadowCasterShaderName);
+            if (shader == null)
+            {
+                Debug.LogWarning($"[VividRP] Could not find shader '{ShadowCasterShaderName}' for {nameof(CSMShadowPass)}.");
+                return;
+            }
+
+            for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
+            {
+                Material material = CoreUtils.CreateEngineMaterial(shader);
+                material.name = $"{nameof(CSMShadowPass)}_{(VividRendererListID)rendererListIndex}";
+                ConfigureMaterial(material, (VividRendererListID)rendererListIndex);
+                m_Materials[rendererListIndex] = material;
+            }
         }
 
         public override void Prepare(ContextContainer frameData)
         {
             m_IsActive = false;
+            m_MeshletRenderingActive = false;
             m_CascadeCount = 0;
             m_MainLightVisibleIndex = -1;
             m_HasUnityShadowCasters = false;
             m_SlopeScaleDepthBias = 0.0f;
             m_CameraShaderGlobals = default;
             m_ShadowData = null;
+            m_LODCamera = null;
+            m_VirtualTextureFrameData = null;
+            m_PrimitiveShadowDrawSet = null;
+            m_FrameIndex = 0;
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
             if (!shadowData.isCSMActive
@@ -100,6 +147,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 settings.objectsFilter = ShadowObjectsFilter.AllObjects;
                 m_ShadowDrawSettings[i] = settings;
             }
+
+            PrepareMeshletRendering(frameData, cameraData);
         }
 
         public override void Record(UnsafePassContext context)
@@ -110,8 +159,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (!m_IsActive || !m_ShadowAtlas.innerHandle.IsValid())
                     return;
 
-                nativeCmd.SetRenderTarget(m_ShadowAtlas.innerHandle,RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                // nativeCmd.ClearRenderTarget(true, false, Color.clear);
+                bool canDrawMeshlets = TryPrepareMeshletShadowDraws(
+                    nativeCmd,
+                    out VividGPUDrivenSystem gpuDrivenSystem,
+                    out GraphicsBuffer requestsBuffer,
+                    out GraphicsBuffer argsBuffer,
+                    out bool virtualTextureReady);
+
+                nativeCmd.SetRenderTarget(
+                    m_ShadowAtlas.innerHandle,
+                    RenderBufferLoadAction.DontCare,
+                    RenderBufferStoreAction.Store);
                 nativeCmd.SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias);
 
                 for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)
@@ -135,6 +193,17 @@ namespace VividRP.Runtime.RenderPass.Core
                         var rendererList = m_RenderContext.CreateShadowRendererList(ref settings);
                         nativeCmd.DrawRendererList(rendererList);
                     }
+
+                    if (canDrawMeshlets)
+                    {
+                        DrawMeshletShadowCascade(
+                            nativeCmd,
+                            gpuDrivenSystem,
+                            requestsBuffer,
+                            argsBuffer,
+                            virtualTextureReady,
+                            cascadeIndex);
+                    }
                 }
 
                 nativeCmd.SetGlobalDepthBias(0.0f, 0.0f);
@@ -144,6 +213,214 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_CameraShaderGlobals._VividCameraProjection);
                 ConstantBuffer.PushGlobal(nativeCmd, m_CameraShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
             }
+        }
+
+        private void PrepareMeshletRendering(
+            ContextContainer frameData,
+            VividCameraData cameraData)
+        {
+            if (m_Materials[0] == null
+                || cameraData?.camera == null
+                || !VividGPUDrivenSystem.HasInstance)
+            {
+                return;
+            }
+
+            var system = VividGPUDrivenSystem.instance;
+            if (!system.IsAvailable
+                || system.SceneData == null
+                || system.SceneData.InstanceCount == 0)
+            {
+                return;
+            }
+
+            m_LODCamera = cameraData.camera;
+            m_FrameIndex = cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
+            m_PrimitiveShadowDrawSet = frameData
+                .GetOrCreate<VividGPUDrivenFrameData>()
+                .primitiveShadowDrawSet;
+            m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
+            VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
+            m_MeshletRenderingActive = true;
+        }
+
+        private bool TryPrepareMeshletShadowDraws(
+            CommandBuffer nativeCmd,
+            out VividGPUDrivenSystem system,
+            out GraphicsBuffer requestsBuffer,
+            out GraphicsBuffer argsBuffer,
+            out bool virtualTextureReady)
+        {
+            system = null;
+            requestsBuffer = null;
+            argsBuffer = null;
+            virtualTextureReady = false;
+            if (!m_MeshletRenderingActive
+                || m_ShadowData == null
+                || m_LODCamera == null
+                || !VividGPUDrivenSystem.HasInstance)
+            {
+                return false;
+            }
+
+            system = VividGPUDrivenSystem.instance;
+            if (!system.IsAvailable
+                || system.SceneData == null
+                || system.SceneData.InstanceCount == 0)
+            {
+                return false;
+            }
+
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            if (resources == null
+                || resources.GPUInstanceCullingCompute == null
+                || resources.MeshletListBuildCompute == null
+                || resources.GPUMeshletCullingCompute == null
+                || resources.FixupVisibleMeshletIndirectDrawArgsCompute == null)
+            {
+                return false;
+            }
+
+            for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
+                system.ConfigureTextureBackendKeyword(m_Materials[materialIndex]);
+
+            virtualTextureReady = !system.UsesVirtualTexture
+                || GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
+                    nativeCmd,
+                    m_VirtualTextureFrameData,
+                    m_VirtualTextureSpaceParams,
+                    m_VirtualTextureMipOffsets,
+                    m_VirtualTextureLayerFallbacks,
+                    m_FrameIndex,
+                    feedbackSampleRate: 1,
+                    out _);
+
+            // Keep shadow LOD selection synchronized with the main camera while deriving
+            // frustum planes from the unified cascade matrices.
+            m_LODCamera.BuildLODSelectionContext(out var lodContext);
+            for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)
+            {
+                BuildShadowCullingContext(
+                    cascadeIndex,
+                    out m_ShadowCullingContexts[cascadeIndex]);
+            }
+
+            VividPrimitiveDrawSet shadowDrawSet = system.CompleteShadowDrawSet(
+                m_PrimitiveShadowDrawSet,
+                m_LODCamera,
+                m_FrameIndex);
+            system.CullShadowCascades(
+                nativeCmd,
+                m_ShadowCullingContexts,
+                m_CascadeCount,
+                lodContext,
+                resources.GPUInstanceCullingCompute,
+                resources.MeshletListBuildCompute,
+                resources.GPUMeshletCullingCompute,
+                resources.FixupVisibleMeshletIndirectDrawArgsCompute,
+                shadowDrawSet);
+
+            requestsBuffer = system.GetShadowVisibleMeshletRenderRequestsBuffer(0);
+            argsBuffer = system.GetShadowVisibleMeshletIndirectDrawArgsBuffer(0);
+            return requestsBuffer != null && argsBuffer != null;
+        }
+
+        private void DrawMeshletShadowCascade(
+            CommandBuffer nativeCmd,
+            VividGPUDrivenSystem system,
+            GraphicsBuffer requestsBuffer,
+            GraphicsBuffer argsBuffer,
+            bool virtualTextureReady,
+            int cascadeIndex)
+        {
+            for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
+            {
+                VividRendererListID batchKey = (VividRendererListID)rendererListIndex;
+                if (!system.IsShadowRendererBatchActive(batchKey))
+                    continue;
+
+                Material material = m_Materials[rendererListIndex];
+                if (material == null)
+                    continue;
+                if (!virtualTextureReady
+                    && (batchKey & VividRendererListID.AlphaTest) != 0)
+                {
+                    continue;
+                }
+
+                m_DrawProperties.Clear();
+                m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, requestsBuffer);
+                m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, argsBuffer);
+                int commandIndex = VividGPUDrivenCullingBuffers.GetIndirectDrawArgsCommandIndex(
+                    cascadeIndex,
+                    rendererListIndex);
+                m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, commandIndex);
+                nativeCmd.DrawProceduralIndirect(
+                    Matrix4x4.identity,
+                    material,
+                    0,
+                    MeshTopology.Triangles,
+                    argsBuffer,
+                    VividGPUDrivenCullingBuffers.GetIndirectDrawArgsByteOffset(
+                        cascadeIndex,
+                        rendererListIndex),
+                    m_DrawProperties);
+            }
+        }
+
+        private void BuildShadowCullingContext(
+            int cascadeIndex,
+            out VividGPUCullingContext cullingContext)
+        {
+            var viewMatrix = m_ShadowData.viewMatrices[cascadeIndex];
+            var projMatrix = m_ShadowData.projMatrices[cascadeIndex];
+            var invViewMatrix = viewMatrix.inverse;
+            Vector4 col0 = invViewMatrix.GetColumn(0);
+            Vector4 col1 = invViewMatrix.GetColumn(1);
+            Vector4 col3 = invViewMatrix.GetColumn(3);
+            var cullingSphereWS = m_ShadowData.cascadeSpheres[cascadeIndex];
+            cullingSphereWS.w = Mathf.Sqrt(Mathf.Max(0.0f, cullingSphereWS.w));
+
+            VividGPUDrivenCullingContextUtility.Build(
+                viewMatrix,
+                projMatrix,
+                cameraPositionWS: new Vector3(col3.x, col3.y, col3.z),
+                cameraRightWS: new Vector3(col0.x, col0.y, col0.z),
+                cameraUpWS: new Vector3(col1.x, col1.y, col1.z),
+                pixelSize: new Vector2(m_CascadeResolution, m_CascadeResolution),
+                isPerspective: false,
+                passMask: VividInstancePassMask.Shadows,
+                cullingSphereWS: cullingSphereWS,
+                // Directional shadow vertices are pancaked onto the raster near plane, so
+                // rejecting their bounds against that plane would remove valid casters.
+                cullAgainstNearPlane: false,
+                cullingContext: out cullingContext,
+                lodSelectionContext: out _);
+        }
+
+        private static void ConfigureMaterial(Material material, VividRendererListID rendererListID)
+        {
+            if (material == null)
+                return;
+
+            material.SetFloat(s_CullId, (float)GetCullMode(rendererListID));
+            CoreUtils.SetKeyword(
+                material,
+                s_AlphaTestKeyword,
+                (rendererListID & VividRendererListID.AlphaTest) != 0);
+        }
+
+        private static CullMode GetCullMode(VividRendererListID rendererListID)
+        {
+            if ((rendererListID & VividRendererListID.CullFront) != 0)
+                return CullMode.Front;
+
+            if ((rendererListID & VividRendererListID.CullOff) != 0)
+                return CullMode.Off;
+
+            return CullMode.Back;
         }
 
         // Shadow caster shaders read Vivid's redirected global matrices rather than Unity's transient view/projection state.
@@ -211,13 +488,27 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
+            for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
+            {
+                if (m_Materials[materialIndex] == null)
+                    continue;
+
+                CoreUtils.Destroy(m_Materials[materialIndex]);
+                m_Materials[materialIndex] = null;
+            }
+
             m_IsActive = false;
+            m_MeshletRenderingActive = false;
             m_MainLightVisibleIndex = -1;
             m_HasUnityShadowCasters = false;
             m_CascadeCount = 0;
             m_SlopeScaleDepthBias = 0.0f;
             m_CameraShaderGlobals = default;
             m_ShadowData = null;
+            m_LODCamera = null;
+            m_VirtualTextureFrameData = null;
+            m_PrimitiveShadowDrawSet = null;
+            m_FrameIndex = 0;
         }
     }
 }

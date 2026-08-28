@@ -126,7 +126,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Compile_CachesMeshletShadowPassPresence_UntilRecorderIsDisposed()
+        public void Compile_LegacyMeshletShadowPass_DoesNotRegisterUnifiedShadowRendering()
         {
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
             graphAsset.Passes.Add(new RenderGraphPassDefinition
@@ -136,19 +136,79 @@ namespace VividRP.Editor.Tests
 
             try
             {
-                Assert.That(PassRecorder.HasMeshletShadowPass, Is.False);
+                Assert.That(PassRecorder.HasCascadedShadowCasterPass, Is.False);
 
                 Compile(graphAsset);
 
-                Assert.That(PassRecorder.HasMeshletShadowPass, Is.True);
-                Assert.That(
-                    PassRecorder.HasCascadedShadowCasterPass,
-                    Is.False,
-                    "A Meshlet-only shadow graph must not schedule Unity Renderer shadow culling.");
+                Assert.That(PassRecorder.HasCascadedShadowCasterPass, Is.False);
+                Assert.That(GetCompiledPasses(), Is.Empty);
 
                 PassRecorder.Dispose();
 
-                Assert.That(PassRecorder.HasMeshletShadowPass, Is.False);
+                Assert.That(PassRecorder.HasCascadedShadowCasterPass, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
+        public void Compile_LegacyMeshletShadowPass_ForwardsAtlasWithoutRecordingASecondPass()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<CSMShadowPass>(),
+            });
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<MeshletShadowPass>(),
+                ResourceBindings =
+                {
+                    new RenderGraphPassResourceBinding
+                    {
+                        FieldName = "m_CSMShadowAtlas",
+                        ResourceKind = RenderGraphResourceKind.Texture,
+                        SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                        SourcePassIndex = 0,
+                        SourceFieldName = "m_ShadowAtlas",
+                        ConnectionKind = RenderGraphPassBindingConnectionKind.Input,
+                    },
+                },
+            });
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<CSMShadowResolvePass>(),
+                ResourceBindings =
+                {
+                    new RenderGraphPassResourceBinding
+                    {
+                        FieldName = "m_CSMShadowAtlas",
+                        ResourceKind = RenderGraphResourceKind.Texture,
+                        SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                        SourcePassIndex = 1,
+                        SourceFieldName = "m_CSMShadowAtlas",
+                        ConnectionKind = RenderGraphPassBindingConnectionKind.Input,
+                    },
+                },
+            });
+
+            try
+            {
+                Compile(graphAsset);
+
+                var passes = GetCompiledPasses();
+                Assert.That(
+                    passes.Select(pass => pass.GetType()),
+                    Is.EqualTo(new[]
+                    {
+                        typeof(CSMShadowPass),
+                        typeof(CSMShadowResolvePass),
+                    }));
+                Assert.That(
+                    GetTextureField(passes[1], "m_CSMShadowAtlas"),
+                    Is.SameAs(GetTextureField(passes[0], "m_ShadowAtlas")));
             }
             finally
             {

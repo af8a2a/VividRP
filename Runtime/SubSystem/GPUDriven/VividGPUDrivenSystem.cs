@@ -574,7 +574,7 @@ namespace VividRP.Runtime.GPUDriven
             VividShadowData shadowData,
             int frameIndex)
         {
-            if (!PassRecorder.HasMeshletShadowPass
+            if (!PassRecorder.HasCascadedShadowCasterPass
                 || camera == null
                 || shadowData == null
                 || !shadowData.isCSMActive

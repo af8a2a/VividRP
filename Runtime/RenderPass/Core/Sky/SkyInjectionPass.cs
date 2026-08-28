@@ -35,6 +35,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalShadowTexture = RenderGraphTexture.CreateInput("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
             m_LocalCSMShadowAtlas = RenderGraphTexture.CreateInput("CSMShadowAtlas", GraphicsFormat.None, DepthBits.Depth16);
             m_LocalCSMShadowAtlas.desc.IsShadowMap = true;
+            m_LocalCSMShadowAtlas.desc.Dimension = TextureDimension.Tex2DArray;
+            m_LocalCSMShadowAtlas.desc.Slices = VividShadowData.MaxCascadeCount;
             m_CSMShadowAtlas = m_LocalCSMShadowAtlas;
         }
 

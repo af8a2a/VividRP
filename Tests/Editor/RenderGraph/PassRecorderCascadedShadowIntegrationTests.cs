@@ -3,6 +3,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -88,9 +89,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     GetTextureField(csmResolvePass, "m_DirectionalShadowTexture"),
                     Is.SameAs(GetTextureField(directionalShadowPass, "m_DirectionalShadowTexture")));
+                var shadowMapArray = GetTextureField(csmShadowPass, "m_ShadowAtlas");
                 Assert.That(
                     GetTextureField(csmResolvePass, "m_CSMShadowAtlas"),
-                    Is.SameAs(GetTextureField(csmShadowPass, "m_ShadowAtlas")));
+                    Is.SameAs(shadowMapArray));
+                Assert.That(shadowMapArray.desc.Dimension, Is.EqualTo(TextureDimension.Tex2DArray));
+                Assert.That(shadowMapArray.desc.Slices, Is.EqualTo(VividShadowData.MaxCascadeCount));
             }
             finally
             {

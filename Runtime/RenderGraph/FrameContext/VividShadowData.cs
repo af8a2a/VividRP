@@ -7,7 +7,7 @@ namespace VividRP.Runtime
     public class VividShadowData : ContextItem
     {
         public const int MaxCascadeCount = 4;
-        private const int AtlasGridSize = 2;
+        private const int LegacyCascadeResolutionDivisor = 2;
         private const int FrustumPlaneCount = 6;
         private const float CascadeBlendCullingFactor = 0.6f;
         private const float MinCascadeRange = 0.001f;
@@ -16,7 +16,6 @@ namespace VividRP.Runtime
         public bool isCSMActive;
         public int cascadeCount;
         public float maxShadowDistance;
-        public int atlasResolution;
         public int cascadeResolution;
         public float normalBias;
 
@@ -29,7 +28,6 @@ namespace VividRP.Runtime
         public readonly Matrix4x4[] projMatrices = new Matrix4x4[MaxCascadeCount];
         public readonly Matrix4x4[] viewProjMatrices = new Matrix4x4[MaxCascadeCount];
         public readonly Vector4[] cascadeSpheres = new Vector4[MaxCascadeCount];
-        public readonly Vector4[] cascadeAtlasScaleOffsets = new Vector4[MaxCascadeCount];
         public readonly float[] cascadeWorldTexelSizes = new float[MaxCascadeCount];
         public readonly float[] cascadeBorders = new float[MaxCascadeCount];
         internal readonly ShadowSplitData[] splitData = new ShadowSplitData[MaxCascadeCount];
@@ -42,7 +40,6 @@ namespace VividRP.Runtime
             isCSMActive = false;
             cascadeCount = 0;
             maxShadowDistance = 0f;
-            atlasResolution = 0;
             cascadeResolution = 0;
             normalBias = 0f;
             mainLightVisibleIndex = -1;
@@ -56,7 +53,6 @@ namespace VividRP.Runtime
                 projMatrices[i] = Matrix4x4.identity;
                 viewProjMatrices[i] = Matrix4x4.identity;
                 cascadeSpheres[i] = Vector4.zero;
-                cascadeAtlasScaleOffsets[i] = Vector4.zero;
                 cascadeWorldTexelSizes[i] = 0f;
                 cascadeBorders[i] = 0f;
                 splitData[i] = default;
@@ -88,8 +84,14 @@ namespace VividRP.Runtime
 
             mainLightVisibleIndex = lightData.mainLightIndex;
             cascadeCount = Mathf.Clamp(csmSettings.cascadeCount.value, 1, MaxCascadeCount);
-            atlasResolution = Mathf.Max(AtlasGridSize, additionalLightData.resolvedShadowAtlasResolution);
-            cascadeResolution = Mathf.Max(1, atlasResolution / AtlasGridSize);
+            // Preserve the per-cascade texel density of the previous 2x2 layout while
+            // storing each cascade in its own texture-array slice.
+            int configuredShadowResolution = Mathf.Max(
+                LegacyCascadeResolutionDivisor,
+                additionalLightData.resolvedShadowAtlasResolution);
+            cascadeResolution = Mathf.Max(
+                1,
+                configuredShadowResolution / LegacyCascadeResolutionDivisor);
             maxShadowDistance = csmSettings.maxShadowDistance.value;
             normalBias = Mathf.Max(0.0f, additionalLightData.normalBias);
             slopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
@@ -164,29 +166,7 @@ namespace VividRP.Runtime
                 cascadeBorders[cascadeIndex] = borderRatios[cascadeIndex];
             }
 
-            ComputeAtlasLayout();
             isCSMActive = true;
-        }
-
-        /// <summary>
-        /// Computes the atlas scale and offset for each cascade in a 2x2 grid layout.
-        /// </summary>
-        public void ComputeAtlasLayout()
-        {
-            float scale = atlasResolution > 0 ? (float)cascadeResolution / atlasResolution : 0f;
-            for (int i = 0; i < MaxCascadeCount; i++)
-            {
-                if (i < cascadeCount)
-                {
-                    float offsetX = (i % 2) * scale;
-                    float offsetY = (i / 2) * scale;
-                    cascadeAtlasScaleOffsets[i] = new Vector4(scale, scale, offsetX, offsetY);
-                }
-                else
-                {
-                    cascadeAtlasScaleOffsets[i] = Vector4.zero;
-                }
-            }
         }
 
         private static bool TryResolveVisibleMainDirectionalLight(

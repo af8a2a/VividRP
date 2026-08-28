@@ -509,7 +509,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CSMShadowPass_DrawsUnityAndMeshletCastersWithUnifiedMatrices()
+        public void CSMShadowPass_DrawsUnityAndMeshletCastersWithOneMatrixArrayAndPerCascadeSlices()
         {
             string source = ReadRuntimeSource(
                 "Runtime",
@@ -525,8 +525,16 @@ namespace VividRP.Editor.Tests
                 "private void BuildShadowCullingContext(",
                 "private static void ConfigureMaterial(");
 
-            StringAssert.Contains("m_ShadowData.viewMatrices", record);
-            StringAssert.Contains("m_ShadowData.projMatrices", record);
+            StringAssert.Contains("m_ShadowAtlas.desc.Dimension = TextureDimension.Tex2DArray", source);
+            StringAssert.Contains("m_ShadowAtlas.desc.Slices = VividShadowData.MaxCascadeCount", source);
+            StringAssert.Contains("SetGlobalMatrixArray(", record);
+            StringAssert.Contains("ShadowViewProjectionMatricesId", record);
+            StringAssert.Contains("depthSlice: cascadeIndex", record);
+            StringAssert.Contains("SetGlobalInt(ShadowCascadeIndexId, cascadeIndex)", record);
+            StringAssert.DoesNotContain("SetViewProjectionMatrices", record);
+            StringAssert.DoesNotContain("ConstantBuffer.PushGlobal", record);
+            StringAssert.DoesNotContain("SetViewport", record);
+            StringAssert.DoesNotContain("EnableScissorRect", record);
             StringAssert.Contains("m_ShadowData.viewMatrices", buildCullingContext);
             StringAssert.Contains("m_ShadowData.projMatrices", buildCullingContext);
             StringAssert.Contains("nativeCmd.DrawRendererList(rendererList)", record);

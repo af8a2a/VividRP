@@ -60,6 +60,11 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     float4 _VividSHC;
 CBUFFER_END
 
+#if defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
+float4x4 _VividShadowVP[4];
+int _VividShadowCascadeIndex;
+#endif
+
 #define _Time _VividTime
 #define _SinTime _VividSinTime
 #define _CosTime _VividCosTime
@@ -82,7 +87,11 @@ CBUFFER_END
 #define unity_MatrixV _VividMatrixV
 #define unity_MatrixInvV _VividMatrixInvV
 #define unity_MatrixInvP _VividMatrixInvP
+#if defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
+#define unity_MatrixVP _VividShadowVP[_VividShadowCascadeIndex]
+#else
 #define unity_MatrixVP _VividMatrixVP
+#endif
 #define unity_MatrixInvVP _VividMatrixInvVP
 #define _PrevViewProjMatrix _VividPrevViewProjMatrix
 #define _NonJitteredViewProjMatrix _VividNonJitteredViewProjMatrix

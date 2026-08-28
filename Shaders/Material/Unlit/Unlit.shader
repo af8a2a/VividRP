@@ -96,6 +96,7 @@ Shader "VividRP/Material/Unlit"
                 #pragma vertex Vert
                 #pragma fragment FragShadow
 
+                #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
                 #define VIVIDRP_UNLIT_SHADOW_CASTER_PASS 1
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/Unlit/UnlitPass.hlsl"
             ENDHLSL

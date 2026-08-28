@@ -13,7 +13,7 @@
 
 Texture2D<float> _CameraDepth;
 Texture2D<float> _DirectionalShadowTexture;
-Texture2D<float> _CSMShadowAtlas;
+Texture2DArray<float> _CSMShadowAtlas;
 Texture2D<float> _VBufferMaxZ;
 Texture3D<float4> _VBufferDensity;
 Texture3D<float> _VBufferAnisotropy;
@@ -36,11 +36,9 @@ float4 _VBufferPrevDepthDecodingParams;
 float4 _VBufferPrevCameraPositionWS;
 float4x4 _CSMViewProjMatrices[4];
 float4 _CSMCascadeSpheres[4];
-float4 _CSMAtlasScaleOffsets[4];
 int _CSMCascadeCount;
 float _CSMMaxShadowDistance;
 float _CSMNormalBias;
-int _CSMAtlasResolution;
 int _CSMCascadeResolution;
 float4 _CSMCascadeWorldTexelSizes;
 float4 _CSMCascadeBorders;
@@ -142,12 +140,6 @@ float3 TransformWorldToShadowCoord(float3 positionWS, int cascadeIndex)
     return mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0)).xyz;
 }
 
-float2 RemapToAtlasUV(float2 shadowUV, int cascadeIndex)
-{
-    float4 scaleOffset = _CSMAtlasScaleOffsets[cascadeIndex];
-    return shadowUV * scaleOffset.xy + scaleOffset.zw;
-}
-
 float GetCascadeWorldTexelSize(int cascadeIndex)
 {
     return max(_CSMCascadeWorldTexelSizes[cascadeIndex], 0.0);
@@ -158,29 +150,36 @@ float ApplyShadowComparisonDepthBias(float shadowDepth)
     return shadowDepth + kFixedUniformDepthBias;
 }
 
-void GetCascadeAtlasBounds(int cascadeIndex, out float2 cascadeMinUV, out float2 cascadeMaxUV, out float2 texelSize)
+void GetCascadeShadowMapBounds(out float2 cascadeMinUV, out float2 cascadeMaxUV, out float2 texelSize)
 {
-    texelSize = 1.0 / max((float)_CSMAtlasResolution, 1.0);
-    float4 scaleOffset = _CSMAtlasScaleOffsets[cascadeIndex];
-    cascadeMinUV = scaleOffset.zw + texelSize * 0.5;
-    cascadeMaxUV = scaleOffset.zw + scaleOffset.xy - texelSize * 0.5;
+    texelSize = 1.0 / max((float)_CSMCascadeResolution, 1.0);
+    cascadeMinUV = texelSize * 0.5;
+    cascadeMaxUV = 1.0 - cascadeMinUV;
 }
 
-float2 ClampShadowAtlasUV(float2 atlasUV, int cascadeIndex)
+float2 ClampShadowMapUV(float2 shadowUV)
 {
     float2 cascadeMinUV;
     float2 cascadeMaxUV;
     float2 texelSize;
-    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
-    return clamp(atlasUV, cascadeMinUV, cascadeMaxUV);
+    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
+    return clamp(shadowUV, cascadeMinUV, cascadeMaxUV);
 }
 
-float SampleShadowPCF3x3(float2 atlasUV, float depth, int cascadeIndex)
+float SampleCSMShadowMap(float2 shadowUV, float depth, int cascadeIndex)
+{
+    return _CSMShadowAtlas.SampleCmpLevelZero(
+        sampler_CSMShadowAtlas,
+        float3(shadowUV, cascadeIndex),
+        depth);
+}
+
+float SampleShadowPCF3x3(float2 shadowUV, float depth, int cascadeIndex)
 {
     float2 cascadeMinUV, cascadeMaxUV, texelSize;
-    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
 
-    float2 texCoord = atlasUV / texelSize + 0.5;
+    float2 texCoord = shadowUV / texelSize + 0.5;
     float2 texCoordFloor = floor(texCoord);
     float2 s = texCoord - texCoordFloor;
     float2 base = (texCoordFloor - 0.5) * texelSize;
@@ -196,20 +195,20 @@ float SampleShadowPCF3x3(float2 atlasUV, float depth, int cascadeIndex)
     float v1 = s.y / vw1 + 1.0;
 
     float shadow = 0.0;
-    shadow += uw0 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw1 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw0 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw1 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw0 * vw0 * SampleCSMShadowMap(clamp(base + float2(u0, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw1 * vw0 * SampleCSMShadowMap(clamp(base + float2(u1, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw0 * vw1 * SampleCSMShadowMap(clamp(base + float2(u0, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw1 * vw1 * SampleCSMShadowMap(clamp(base + float2(u1, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
 
     return shadow / 16.0;
 }
 
-float SampleShadowPCF5x5(float2 atlasUV, float depth, int cascadeIndex)
+float SampleShadowPCF5x5(float2 shadowUV, float depth, int cascadeIndex)
 {
     float2 cascadeMinUV, cascadeMaxUV, texelSize;
-    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
 
-    float2 texCoord = atlasUV / texelSize + 0.5;
+    float2 texCoord = shadowUV / texelSize + 0.5;
     float2 texCoordFloor = floor(texCoord);
     float2 s = texCoord - texCoordFloor;
     float2 base = (texCoordFloor - 0.5) * texelSize;
@@ -229,23 +228,23 @@ float SampleShadowPCF5x5(float2 atlasUV, float depth, int cascadeIndex)
     float v2 = s.y / vw2 + 2.0;
 
     float shadow = 0.0;
-    shadow += uw0 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw1 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw2 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw0 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw1 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw2 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw0 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw1 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
-    shadow += uw2 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw0 * vw0 * SampleCSMShadowMap(clamp(base + float2(u0, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw1 * vw0 * SampleCSMShadowMap(clamp(base + float2(u1, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw2 * vw0 * SampleCSMShadowMap(clamp(base + float2(u2, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw0 * vw1 * SampleCSMShadowMap(clamp(base + float2(u0, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw1 * vw1 * SampleCSMShadowMap(clamp(base + float2(u1, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw2 * vw1 * SampleCSMShadowMap(clamp(base + float2(u2, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw0 * vw2 * SampleCSMShadowMap(clamp(base + float2(u0, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw1 * vw2 * SampleCSMShadowMap(clamp(base + float2(u1, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
+    shadow += uw2 * vw2 * SampleCSMShadowMap(clamp(base + float2(u2, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth, cascadeIndex);
 
     return shadow / 144.0;
 }
 
-float SampleShadowPCF7x7(float2 atlasUV, float depth, int cascadeIndex)
+float SampleShadowPCF7x7(float2 shadowUV, float depth, int cascadeIndex)
 {
     float2 cascadeMinUV, cascadeMaxUV, texelSize;
-    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
 
     float shadow = 0.0;
 
@@ -256,28 +255,28 @@ float SampleShadowPCF7x7(float2 atlasUV, float depth, int cascadeIndex)
         for (int i = 0; i < 4; i++)
         {
             float2 offset = float2(i * 2.0 - 3.0, j * 2.0 - 3.0) * texelSize;
-            float2 sampleUV = clamp(atlasUV + offset, cascadeMinUV, cascadeMaxUV);
-            shadow += _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, sampleUV, depth);
+            float2 sampleUV = clamp(shadowUV + offset, cascadeMinUV, cascadeMaxUV);
+            shadow += SampleCSMShadowMap(sampleUV, depth, cascadeIndex);
         }
     }
 
     return shadow / 16.0;
 }
 
-float EvaluateCSMShadow(float2 atlasUV, float receiverDepth, int cascadeIndex)
+float EvaluateCSMShadow(float2 shadowUV, float receiverDepth, int cascadeIndex)
 {
     switch (_CSMShadowQuality)
     {
         case kCSMShadowQualityLow:
-            return SampleShadowPCF3x3(atlasUV, receiverDepth, cascadeIndex);
+            return SampleShadowPCF3x3(shadowUV, receiverDepth, cascadeIndex);
         case kCSMShadowQualityMedium:
-            return SampleShadowPCF5x5(atlasUV, receiverDepth, cascadeIndex);
+            return SampleShadowPCF5x5(shadowUV, receiverDepth, cascadeIndex);
         case kCSMShadowQualityHigh:
         case kCSMShadowQualityVeryHigh:
         case kCSMShadowQualityUnreal:
-            return SampleShadowPCF7x7(atlasUV, receiverDepth, cascadeIndex);
+            return SampleShadowPCF7x7(shadowUV, receiverDepth, cascadeIndex);
         default:
-            return SampleShadowPCF5x5(atlasUV, receiverDepth, cascadeIndex);
+            return SampleShadowPCF5x5(shadowUV, receiverDepth, cascadeIndex);
     }
 }
 
@@ -316,8 +315,8 @@ bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeInd
 
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
     shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
-    float2 atlasUV = ClampShadowAtlasUV(RemapToAtlasUV(shadowCoord.xy, cascadeIndex), cascadeIndex);
-    shadow = EvaluateCSMShadow(atlasUV, shadowCoord.z, cascadeIndex);
+    float2 shadowUV = ClampShadowMapUV(shadowCoord.xy);
+    shadow = EvaluateCSMShadow(shadowUV, shadowCoord.z, cascadeIndex);
     return true;
 }
 
@@ -334,8 +333,8 @@ bool TryEvaluateCascadeBlendShadow(float3 positionWS, float3 normalWS, int casca
 
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
     shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
-    float2 atlasUV = ClampShadowAtlasUV(RemapToAtlasUV(shadowCoord.xy, cascadeIndex), cascadeIndex);
-    shadow = EvaluateCSMShadow(atlasUV, shadowCoord.z, cascadeIndex);
+    float2 shadowUV = ClampShadowMapUV(shadowCoord.xy);
+    shadow = EvaluateCSMShadow(shadowUV, shadowCoord.z, cascadeIndex);
     return true;
 }
 

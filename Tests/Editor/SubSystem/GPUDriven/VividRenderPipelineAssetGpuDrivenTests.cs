@@ -440,7 +440,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ShadowDrawSetScheduling_UsesMeshletPassCascadeUnionAndShadowSemantics()
+        public void ShadowDrawSetScheduling_UsesUnifiedCascadeMatricesAndShadowSemantics()
         {
             string source = ReadRuntimeSource(
                 "Runtime",
@@ -454,8 +454,8 @@ namespace VividRP.Editor.Tests
 
             StringAssert.Contains("PassRecorder.HasMeshletShadowPass", schedule);
             StringAssert.Contains("shadowData.isCSMActive", schedule);
-            StringAssert.Contains("shadowData.primitiveCullingViewMatrices", schedule);
-            StringAssert.Contains("shadowData.primitiveCullingProjMatrices", schedule);
+            StringAssert.Contains("shadowData.viewMatrices", schedule);
+            StringAssert.Contains("shadowData.projMatrices", schedule);
             StringAssert.Contains("VividInstancePassMask.Shadows", schedule);
             StringAssert.Contains("cullAgainstNearPlane: false", schedule);
             StringAssert.Contains("m_ShadowPrimitiveDrawSetSystem.Schedule(", schedule);
@@ -509,7 +509,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void MeshletShadowPass_UsesPrimitiveMatricesForCullingAndFinalMatricesForRasterization()
+        public void MeshletShadowPass_UsesUnifiedMatricesForCullingAndRasterization()
         {
             string source = ReadRuntimeSource(
                 "Runtime",
@@ -527,14 +527,32 @@ namespace VividRP.Editor.Tests
 
             StringAssert.Contains("m_ShadowData.viewMatrices", record);
             StringAssert.Contains("m_ShadowData.projMatrices", record);
-            StringAssert.Contains(
-                "m_ShadowData.primitiveCullingViewMatrices",
-                buildCullingContext);
-            StringAssert.Contains(
-                "m_ShadowData.primitiveCullingProjMatrices",
-                buildCullingContext);
-            StringAssert.DoesNotContain("m_ShadowData.viewMatrices", buildCullingContext);
-            StringAssert.DoesNotContain("m_ShadowData.projMatrices", buildCullingContext);
+            StringAssert.Contains("m_ShadowData.viewMatrices", buildCullingContext);
+            StringAssert.Contains("m_ShadowData.projMatrices", buildCullingContext);
+        }
+
+        [Test]
+        public void CSMShadowPass_UsesPerCascadeSplitDataWithoutBatchShadowCulling()
+        {
+            string csmSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string recorderSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderGraph",
+                "PassRecorder.Execution.cs");
+            string shadowDataSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderGraph",
+                "FrameContext",
+                "VividShadowData.cs");
+
+            StringAssert.Contains("settings.splitData = shadowData.splitData[i]", csmSource);
+            StringAssert.Contains("settings.splitIndex = -1", csmSource);
+            StringAssert.DoesNotContain("CullShadowCasters", recorderSource);
+            StringAssert.DoesNotContain("CullShadowCasters", shadowDataSource);
         }
 
         [Test]

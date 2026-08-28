@@ -194,14 +194,6 @@ namespace VividRP.Runtime
             {
                 shadowData.Update(cullingResults, lightData, cameraData);
             }
-
-            using (RenderPassProfilingUtility.InitializeContextShadowCasterCullingMarker.Auto())
-            {
-                // Unity schedules renderer shadow-culling jobs here. Start them before subsystem
-                // and pass preparation, but skip Meshlet-only graphs that never consume the results.
-                if (s_HasCascadedShadowCasterPass)
-                    shadowData.ScheduleShadowCasterCulling(context, cullingResults);
-            }
         }
 
         private static int ResolveFrameIndex()

@@ -280,8 +280,8 @@ namespace VividRP.Runtime.RenderPass.Core
             int cascadeIndex,
             out VividGPUCullingContext cullingContext)
         {
-            var viewMatrix = m_ShadowData.primitiveCullingViewMatrices[cascadeIndex];
-            var projMatrix = m_ShadowData.primitiveCullingProjMatrices[cascadeIndex];
+            var viewMatrix = m_ShadowData.viewMatrices[cascadeIndex];
+            var projMatrix = m_ShadowData.projMatrices[cascadeIndex];
             var invViewMatrix = viewMatrix.inverse;
             Vector4 col0 = invViewMatrix.GetColumn(0);
             Vector4 col1 = invViewMatrix.GetColumn(1);

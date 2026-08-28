@@ -18,6 +18,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_AtlasResolution;
         private int m_CascadeResolution;
         private int m_MainLightVisibleIndex = -1;
+        private bool m_HasUnityShadowCasters;
         private float m_SlopeScaleDepthBias;
         private ShaderVariablesGlobal m_CameraShaderGlobals;
 
@@ -52,6 +53,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = false;
             m_CascadeCount = 0;
             m_MainLightVisibleIndex = -1;
+            m_HasUnityShadowCasters = false;
             m_SlopeScaleDepthBias = 0.0f;
             m_CameraShaderGlobals = default;
             m_ShadowData = null;
@@ -71,6 +73,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RenderContext = renderingData.context;
             m_CameraShaderGlobals = ResolveCameraShaderGlobals(frameData, cameraData);
             m_MainLightVisibleIndex = shadowData.mainLightVisibleIndex;
+            m_HasUnityShadowCasters = shadowData.hasUnityShadowCasters;
             m_CascadeCount = Mathf.Min(shadowData.cascadeCount, VividShadowData.MaxCascadeCount);
             m_AtlasResolution = shadowData.atlasResolution;
             m_CascadeResolution = shadowData.cascadeResolution;
@@ -84,12 +87,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShadowAtlas.desc.Height = m_AtlasResolution;
 
             // Configure ShadowDrawingSettings per cascade
-            for (int i = 0; i < m_CascadeCount; i++)
+            for (int i = 0; i < m_CascadeCount && m_HasUnityShadowCasters; i++)
             {
                 var settings = new ShadowDrawingSettings(
                     m_CullingResults,
                     m_MainLightVisibleIndex);
-                settings.splitIndex = i;
+#pragma warning disable CS0618 // Intentionally use the non-batched path without CullShadowCasters.
+                settings.splitData = shadowData.splitData[i];
+#pragma warning restore CS0618
+                settings.splitIndex = -1;
                 settings.useRenderingLayerMaskTest = false;
                 settings.objectsFilter = ShadowObjectsFilter.AllObjects;
                 m_ShadowDrawSettings[i] = settings;
@@ -123,9 +129,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
                     nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowData.shadowCasterState);
 
-                    var settings = m_ShadowDrawSettings[cascadeIndex];
-                    var rendererList = m_RenderContext.CreateShadowRendererList(ref settings);
-                    nativeCmd.DrawRendererList(rendererList);
+                    if (m_HasUnityShadowCasters)
+                    {
+                        var settings = m_ShadowDrawSettings[cascadeIndex];
+                        var rendererList = m_RenderContext.CreateShadowRendererList(ref settings);
+                        nativeCmd.DrawRendererList(rendererList);
+                    }
                 }
 
                 nativeCmd.SetGlobalDepthBias(0.0f, 0.0f);
@@ -204,6 +213,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_IsActive = false;
             m_MainLightVisibleIndex = -1;
+            m_HasUnityShadowCasters = false;
             m_CascadeCount = 0;
             m_SlopeScaleDepthBias = 0.0f;
             m_CameraShaderGlobals = default;

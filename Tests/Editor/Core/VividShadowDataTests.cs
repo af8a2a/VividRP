@@ -47,10 +47,6 @@ namespace VividRP.Editor.Tests
                 shadowData.viewMatrices[cascadeIndex] = Matrix4x4.zero;
                 shadowData.projMatrices[cascadeIndex] = Matrix4x4.zero;
                 shadowData.viewProjMatrices[cascadeIndex] = Matrix4x4.zero;
-                shadowData.unityCullingViewMatrices[cascadeIndex] = Matrix4x4.zero;
-                shadowData.unityCullingProjMatrices[cascadeIndex] = Matrix4x4.zero;
-                shadowData.primitiveCullingViewMatrices[cascadeIndex] = Matrix4x4.zero;
-                shadowData.primitiveCullingProjMatrices[cascadeIndex] = Matrix4x4.zero;
                 shadowData.cascadeSpheres[cascadeIndex] = Vector4.one;
                 shadowData.cascadeAtlasScaleOffsets[cascadeIndex] = Vector4.one;
                 shadowData.cascadeWorldTexelSizes[cascadeIndex] = 1.0f;
@@ -76,10 +72,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(shadowData.viewMatrices[cascadeIndex], Is.EqualTo(Matrix4x4.identity));
                 Assert.That(shadowData.projMatrices[cascadeIndex], Is.EqualTo(Matrix4x4.identity));
                 Assert.That(shadowData.viewProjMatrices[cascadeIndex], Is.EqualTo(Matrix4x4.identity));
-                Assert.That(shadowData.unityCullingViewMatrices[cascadeIndex], Is.EqualTo(Matrix4x4.identity));
-                Assert.That(shadowData.unityCullingProjMatrices[cascadeIndex], Is.EqualTo(Matrix4x4.identity));
-                Assert.That(shadowData.primitiveCullingViewMatrices[cascadeIndex], Is.EqualTo(Matrix4x4.identity));
-                Assert.That(shadowData.primitiveCullingProjMatrices[cascadeIndex], Is.EqualTo(Matrix4x4.identity));
                 Assert.That(shadowData.cascadeSpheres[cascadeIndex], Is.EqualTo(Vector4.zero));
                 Assert.That(shadowData.cascadeAtlasScaleOffsets[cascadeIndex], Is.EqualTo(Vector4.zero));
                 Assert.That(shadowData.cascadeWorldTexelSizes[cascadeIndex], Is.Zero);
@@ -91,7 +83,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void TryGetCascadeDepthRange_UsesCameraNearPlaneShadowDistanceAndOrderedSplits()
         {
-            var cameraObject = new GameObject("Fallback Cascade Depth Camera");
+            var cameraObject = new GameObject("Manual Cascade Depth Camera");
             try
             {
                 Camera camera = cameraObject.AddComponent<Camera>();
@@ -146,10 +138,10 @@ namespace VividRP.Editor.Tests
 
         [TestCase(false)]
         [TestCase(true)]
-        public void TryBuildFallbackCascadeMatrices_ContainsCameraSliceAndCasterDepth(bool orthographic)
+        public void TryBuildCascadeMatrices_ContainsCameraSliceAndCasterDepth(bool orthographic)
         {
-            var cameraObject = new GameObject("Fallback Cascade Camera");
-            var lightObject = new GameObject("Fallback Cascade Light");
+            var cameraObject = new GameObject("Manual Cascade Camera");
+            var lightObject = new GameObject("Manual Cascade Light");
             try
             {
                 Camera camera = cameraObject.AddComponent<Camera>();
@@ -176,7 +168,7 @@ namespace VividRP.Editor.Tests
                     new Vector3(60.0f, 40.0f, 80.0f));
 
                 Assert.That(
-                    shadowData.TryBuildFallbackCascadeMatrices(
+                    shadowData.TryBuildCascadeMatrices(
                         cameraData,
                         light,
                         casterBounds,
@@ -283,103 +275,38 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void TryBuildCascadeMatrixUnion_ContainsBothOrthographicClipVolumes()
+        public void TryCombineShadowCasterBounds_EncapsulatesUnityAndPrimitiveBounds()
         {
-            Quaternion lightRotation = Quaternion.Euler(48.0f, -32.0f, 7.0f);
-            Matrix4x4 unityViewMatrix = BuildDirectionalViewMatrix(
-                new Vector3(-4.0f, 6.0f, -3.0f),
-                lightRotation);
-            Matrix4x4 unityProjectionMatrix = Matrix4x4.Ortho(
-                -9.0f,
-                9.0f,
-                -5.0f,
-                5.0f,
-                0.0f,
-                28.0f);
-            Matrix4x4 primitiveViewMatrix = BuildDirectionalViewMatrix(
-                new Vector3(5.0f, 1.0f, 4.0f),
-                lightRotation);
-            Matrix4x4 primitiveProjectionMatrix = Matrix4x4.Ortho(
-                -4.0f,
-                4.0f,
-                -11.0f,
-                11.0f,
-                0.0f,
-                42.0f);
+            var unityBounds = new Bounds(
+                new Vector3(-4.0f, 2.0f, 0.0f),
+                new Vector3(6.0f, 8.0f, 10.0f));
+            var primitiveBounds = new Bounds(
+                new Vector3(5.0f, -3.0f, 4.0f),
+                new Vector3(4.0f, 2.0f, 6.0f));
 
             Assert.That(
-                VividShadowData.TryBuildCascadeMatrixUnion(
-                    unityViewMatrix,
-                    unityProjectionMatrix,
-                    primitiveViewMatrix,
-                    primitiveProjectionMatrix,
-                    1024,
-                    out Matrix4x4 unionViewMatrix,
-                    out Matrix4x4 unionProjectionMatrix),
+                VividShadowData.TryCombineShadowCasterBounds(
+                    true,
+                    unityBounds,
+                    true,
+                    primitiveBounds,
+                    out Bounds combinedBounds),
                 Is.True);
-
-            Assert.That(
-                Mathf.Abs(unionProjectionMatrix.m00),
-                Is.EqualTo(Mathf.Abs(unionProjectionMatrix.m11)).Within(1e-6f));
-            AssertClipVolumeIsContained(
-                unityViewMatrix,
-                unityProjectionMatrix,
-                unionViewMatrix,
-                unionProjectionMatrix);
-            AssertClipVolumeIsContained(
-                primitiveViewMatrix,
-                primitiveProjectionMatrix,
-                unionViewMatrix,
-                unionProjectionMatrix);
+            AssertVectorApproximately(combinedBounds.min, new Vector3(-7.0f, -4.0f, -5.0f));
+            AssertVectorApproximately(combinedBounds.max, new Vector3(7.0f, 6.0f, 7.0f));
         }
 
         [Test]
-        public void TryBuildCascadeMatrixUnion_RejectsDegenerateSourceMatrix()
+        public void TryCombineShadowCasterBounds_RejectsMissingSources()
         {
             Assert.That(
-                VividShadowData.TryBuildCascadeMatrixUnion(
-                    Matrix4x4.zero,
-                    Matrix4x4.identity,
-                    Matrix4x4.identity,
-                    Matrix4x4.Ortho(-1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 10.0f),
-                    1024,
-                    out _,
+                VividShadowData.TryCombineShadowCasterBounds(
+                    false,
+                    default,
+                    false,
+                    default,
                     out _),
                 Is.False);
-        }
-
-        private static Matrix4x4 BuildDirectionalViewMatrix(
-            Vector3 position,
-            Quaternion rotation)
-        {
-            return Matrix4x4.Scale(new Vector3(1.0f, 1.0f, -1.0f))
-                * Matrix4x4.TRS(position, rotation, Vector3.one).inverse;
-        }
-
-        private static void AssertClipVolumeIsContained(
-            Matrix4x4 sourceViewMatrix,
-            Matrix4x4 sourceProjectionMatrix,
-            Matrix4x4 targetViewMatrix,
-            Matrix4x4 targetProjectionMatrix)
-        {
-            Matrix4x4 inverseSourceViewProjection =
-                (sourceProjectionMatrix * sourceViewMatrix).inverse;
-            Matrix4x4 targetViewProjection = targetProjectionMatrix * targetViewMatrix;
-            for (int cornerIndex = 0; cornerIndex < 8; cornerIndex++)
-            {
-                Vector4 worldCorner = inverseSourceViewProjection * new Vector4(
-                    (cornerIndex & 1) == 0 ? -1.0f : 1.0f,
-                    (cornerIndex & 2) == 0 ? -1.0f : 1.0f,
-                    (cornerIndex & 4) == 0 ? -1.0f : 1.0f,
-                    1.0f);
-                worldCorner /= worldCorner.w;
-                Vector4 targetClip = targetViewProjection * worldCorner;
-                targetClip /= targetClip.w;
-
-                Assert.That(targetClip.x, Is.InRange(-1.001f, 1.001f));
-                Assert.That(targetClip.y, Is.InRange(-1.001f, 1.001f));
-                Assert.That(targetClip.z, Is.InRange(-1.001f, 1.001f));
-            }
         }
 
         private static void AssertCameraSliceIsContained(
@@ -422,6 +349,13 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.y, Is.EqualTo(expected.y).Within(1e-6f));
             Assert.That(actual.z, Is.EqualTo(expected.z).Within(1e-6f));
             Assert.That(actual.w, Is.EqualTo(expected.w).Within(1e-6f));
+        }
+
+        private static void AssertVectorApproximately(Vector3 actual, Vector3 expected)
+        {
+            Assert.That(actual.x, Is.EqualTo(expected.x).Within(1e-6f));
+            Assert.That(actual.y, Is.EqualTo(expected.y).Within(1e-6f));
+            Assert.That(actual.z, Is.EqualTo(expected.z).Within(1e-6f));
         }
     }
 }

@@ -321,6 +321,20 @@ namespace VividRP.Runtime.GPUDriven
             return visibleMeshletRenderRequestsBuffer != null && visibleMeshletIndirectDrawArgsBuffer != null;
         }
 
+        internal static bool TryGetPrimitiveShadowCasterBounds(Camera camera, out Bounds worldBounds)
+        {
+            worldBounds = default;
+            VividGPUDrivenSystem currentInstance = RawInstance;
+            return camera != null
+                && currentInstance != null
+                && !currentInstance.m_IsDisposed
+                && currentInstance.IsAvailable
+                && currentInstance.PrimitiveScene.TryGetWorldBounds(
+                    VividInstancePassMask.Shadows,
+                    unchecked((uint) camera.cullingMask),
+                    out worldBounds);
+        }
+
         internal static bool TryGetVirtualTextureAllocationId(out int allocationId)
         {
             VividGPUDrivenSystem currentInstance = RawInstance;

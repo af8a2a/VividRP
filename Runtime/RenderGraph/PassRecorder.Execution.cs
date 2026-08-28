@@ -192,7 +192,7 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.InitializeContextShadowDataUpdateMarker.Auto())
             {
-                shadowData.Update(cullingResults, lightData);
+                shadowData.Update(cullingResults, lightData, cameraData);
             }
 
             using (RenderPassProfilingUtility.InitializeContextShadowCasterCullingMarker.Auto())

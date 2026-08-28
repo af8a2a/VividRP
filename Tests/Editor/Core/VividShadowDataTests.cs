@@ -53,7 +53,7 @@ namespace VividRP.Editor.Tests
                 shadowData.splitData[cascadeIndex].shadowCascadeBlendCullingFactor = 1.0f;
             }
 
-            shadowData.Update(default, null);
+            shadowData.Update(default, null, null);
 
             Assert.That(shadowData.isCSMActive, Is.False);
             Assert.That(shadowData.cascadeCount, Is.Zero);
@@ -75,6 +75,234 @@ namespace VividRP.Editor.Tests
                 Assert.That(shadowData.cascadeWorldTexelSizes[cascadeIndex], Is.Zero);
                 Assert.That(shadowData.cascadeBorders[cascadeIndex], Is.Zero);
                 Assert.That(shadowData.splitData[cascadeIndex].shadowCascadeBlendCullingFactor, Is.Zero);
+            }
+        }
+
+        [Test]
+        public void TryGetCascadeDepthRange_UsesCameraNearPlaneShadowDistanceAndOrderedSplits()
+        {
+            var cameraObject = new GameObject("Fallback Cascade Depth Camera");
+            try
+            {
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.nearClipPlane = 0.5f;
+                camera.farClipPlane = 200.0f;
+                var cameraData = new VividCameraData();
+                cameraData.SetCamera(camera);
+                cameraData.CacheCameraFrameProperties(camera);
+
+                var splitRatios = new Vector3(0.1f, 0.3f, 0.6f);
+                float shadowRange = 100.0f - camera.nearClipPlane;
+                for (int cascadeIndex = 0; cascadeIndex < 4; cascadeIndex++)
+                {
+                    Assert.That(
+                        VividShadowData.TryGetCascadeDepthRange(
+                            cameraData,
+                            100.0f,
+                            cascadeIndex,
+                            4,
+                            splitRatios,
+                            out float nearDistance,
+                            out float farDistance),
+                        Is.True);
+
+                    float expectedNearRatio = cascadeIndex switch
+                    {
+                        0 => 0.0f,
+                        1 => splitRatios.x,
+                        2 => splitRatios.y,
+                        _ => splitRatios.z,
+                    };
+                    float expectedFarRatio = cascadeIndex switch
+                    {
+                        0 => splitRatios.x,
+                        1 => splitRatios.y,
+                        2 => splitRatios.z,
+                        _ => 1.0f,
+                    };
+                    Assert.That(
+                        nearDistance,
+                        Is.EqualTo(camera.nearClipPlane + expectedNearRatio * shadowRange).Within(1e-5f));
+                    Assert.That(
+                        farDistance,
+                        Is.EqualTo(camera.nearClipPlane + expectedFarRatio * shadowRange).Within(1e-5f));
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void TryBuildFallbackCascadeMatrices_ContainsCameraSliceAndCasterDepth(bool orthographic)
+        {
+            var cameraObject = new GameObject("Fallback Cascade Camera");
+            var lightObject = new GameObject("Fallback Cascade Light");
+            try
+            {
+                Camera camera = cameraObject.AddComponent<Camera>();
+                camera.transform.SetPositionAndRotation(
+                    new Vector3(3.0f, 2.0f, -4.0f),
+                    Quaternion.Euler(8.0f, 25.0f, 0.0f));
+                camera.nearClipPlane = 0.3f;
+                camera.farClipPlane = 100.0f;
+                camera.aspect = 16.0f / 9.0f;
+                camera.fieldOfView = 65.0f;
+                camera.orthographic = orthographic;
+                camera.orthographicSize = 8.0f;
+
+                Light light = lightObject.AddComponent<Light>();
+                light.type = LightType.Directional;
+                light.transform.rotation = Quaternion.Euler(50.0f, -30.0f, 12.0f);
+
+                var cameraData = new VividCameraData();
+                cameraData.SetCamera(camera);
+                cameraData.CacheCameraFrameProperties(camera);
+                var shadowData = new VividShadowData();
+                var casterBounds = new Bounds(
+                    camera.transform.position + camera.transform.forward * 18.0f,
+                    new Vector3(60.0f, 40.0f, 80.0f));
+
+                Assert.That(
+                    shadowData.TryBuildFallbackCascadeMatrices(
+                        cameraData,
+                        light,
+                        casterBounds,
+                        1.0f,
+                        35.0f,
+                        1024,
+                        3.0f,
+                        out Matrix4x4 viewMatrix,
+                        out Matrix4x4 projectionMatrix,
+                        out var cascadeSplitData),
+                    Is.True);
+                Assert.That(
+                    VividShadowData.IsCascadeDataUsable(
+                        viewMatrix,
+                        projectionMatrix,
+                        cascadeSplitData),
+                    Is.True);
+                Assert.That(cascadeSplitData.cullingPlaneCount, Is.EqualTo(6));
+                Matrix4x4 expectedCullingMatrix = projectionMatrix * viewMatrix;
+                for (int elementIndex = 0; elementIndex < 16; elementIndex++)
+                {
+                    Assert.That(
+                        cascadeSplitData.cullingMatrix[elementIndex],
+                        Is.EqualTo(expectedCullingMatrix[elementIndex]).Within(1e-5f));
+                }
+
+                Vector4 sphere = cascadeSplitData.cullingSphere;
+                var sphereCenter = new Vector3(sphere.x, sphere.y, sphere.z);
+                AssertCameraSliceIsContained(
+                    camera,
+                    viewMatrix,
+                    projectionMatrix,
+                    sphereCenter,
+                    sphere.w,
+                    1.0f);
+                AssertCameraSliceIsContained(
+                    camera,
+                    viewMatrix,
+                    projectionMatrix,
+                    sphereCenter,
+                    sphere.w,
+                    35.0f);
+
+                Vector3 casterMinimum = casterBounds.min;
+                Vector3 casterMaximum = casterBounds.max;
+                for (int cornerIndex = 0; cornerIndex < 8; cornerIndex++)
+                {
+                    var corner = new Vector3(
+                        (cornerIndex & 1) == 0 ? casterMinimum.x : casterMaximum.x,
+                        (cornerIndex & 2) == 0 ? casterMinimum.y : casterMaximum.y,
+                        (cornerIndex & 4) == 0 ? casterMinimum.z : casterMaximum.z);
+                    Vector4 clip = projectionMatrix * viewMatrix * new Vector4(
+                        corner.x,
+                        corner.y,
+                        corner.z,
+                        1.0f);
+                    float clipDepth = clip.z / clip.w;
+                    Assert.That(clipDepth, Is.InRange(-1.001f, 1.001f));
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+                Object.DestroyImmediate(lightObject);
+            }
+        }
+
+        [Test]
+        public void IsCascadeDataUsable_RejectsNonFiniteOrDegenerateUnityResults()
+        {
+            var splitData = new UnityEngine.Rendering.ShadowSplitData
+            {
+                cullingMatrix = Matrix4x4.identity,
+                cullingSphere = new Vector4(0.0f, 0.0f, 0.0f, 10.0f),
+            };
+
+            Assert.That(
+                VividShadowData.IsCascadeDataUsable(
+                    Matrix4x4.identity,
+                    Matrix4x4.Ortho(-1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 10.0f),
+                    splitData),
+                Is.True);
+            Assert.That(
+                VividShadowData.IsCascadeDataUsable(
+                    Matrix4x4.zero,
+                    Matrix4x4.identity,
+                    splitData),
+                Is.False);
+            splitData.cullingMatrix = Matrix4x4.zero;
+            Assert.That(
+                VividShadowData.IsCascadeDataUsable(
+                    Matrix4x4.identity,
+                    Matrix4x4.identity,
+                    splitData),
+                Is.False);
+            splitData.cullingMatrix = Matrix4x4.identity;
+            splitData.cullingSphere = new Vector4(0.0f, 0.0f, 0.0f, float.NaN);
+            Assert.That(
+                VividShadowData.IsCascadeDataUsable(
+                    Matrix4x4.identity,
+                    Matrix4x4.identity,
+                    splitData),
+                Is.False);
+        }
+
+        private static void AssertCameraSliceIsContained(
+            Camera camera,
+            Matrix4x4 lightViewMatrix,
+            Matrix4x4 lightProjectionMatrix,
+            Vector3 sphereCenter,
+            float sphereRadius,
+            float viewDistance)
+        {
+            var corners = new Vector3[4];
+            camera.CalculateFrustumCorners(
+                new Rect(0.0f, 0.0f, 1.0f, 1.0f),
+                viewDistance,
+                Camera.MonoOrStereoscopicEye.Mono,
+                corners);
+            for (int cornerIndex = 0; cornerIndex < corners.Length; cornerIndex++)
+            {
+                Vector3 worldCorner = camera.transform.TransformPoint(corners[cornerIndex]);
+                Assert.That(
+                    Vector3.Distance(worldCorner, sphereCenter),
+                    Is.LessThanOrEqualTo(sphereRadius + 1e-3f));
+                Vector4 clip = lightProjectionMatrix * lightViewMatrix * new Vector4(
+                    worldCorner.x,
+                    worldCorner.y,
+                    worldCorner.z,
+                    1.0f);
+                float clipX = clip.x / clip.w;
+                float clipY = clip.y / clip.w;
+                float clipZ = clip.z / clip.w;
+                Assert.That(clipX, Is.InRange(-1.001f, 1.001f));
+                Assert.That(clipY, Is.InRange(-1.001f, 1.001f));
+                Assert.That(clipZ, Is.InRange(-1.001f, 1.001f));
             }
         }
 

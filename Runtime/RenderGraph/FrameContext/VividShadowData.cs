@@ -22,12 +22,19 @@ namespace VividRP.Runtime
         public float normalBias;
 
         internal int mainLightVisibleIndex = -1;
+        internal bool hasUnityShadowCasters;
         internal float slopeScaleDepthBias;
         internal Vector4 shadowCasterState;
 
+        // Final matrices used to rasterize and sample the shared shadow atlas.
         public readonly Matrix4x4[] viewMatrices = new Matrix4x4[MaxCascadeCount];
         public readonly Matrix4x4[] projMatrices = new Matrix4x4[MaxCascadeCount];
         public readonly Matrix4x4[] viewProjMatrices = new Matrix4x4[MaxCascadeCount];
+        // Unity's matrices correspond to splitData; PrimitiveScene culling uses its own matrices.
+        internal readonly Matrix4x4[] unityCullingViewMatrices = new Matrix4x4[MaxCascadeCount];
+        internal readonly Matrix4x4[] unityCullingProjMatrices = new Matrix4x4[MaxCascadeCount];
+        internal readonly Matrix4x4[] primitiveCullingViewMatrices = new Matrix4x4[MaxCascadeCount];
+        internal readonly Matrix4x4[] primitiveCullingProjMatrices = new Matrix4x4[MaxCascadeCount];
         public readonly Vector4[] cascadeSpheres = new Vector4[MaxCascadeCount];
         public readonly Vector4[] cascadeAtlasScaleOffsets = new Vector4[MaxCascadeCount];
         public readonly float[] cascadeWorldTexelSizes = new float[MaxCascadeCount];
@@ -46,6 +53,7 @@ namespace VividRP.Runtime
             cascadeResolution = 0;
             normalBias = 0f;
             mainLightVisibleIndex = -1;
+            hasUnityShadowCasters = false;
             slopeScaleDepthBias = 0f;
             shadowCasterState = Vector4.zero;
 
@@ -54,6 +62,10 @@ namespace VividRP.Runtime
                 viewMatrices[i] = Matrix4x4.identity;
                 projMatrices[i] = Matrix4x4.identity;
                 viewProjMatrices[i] = Matrix4x4.identity;
+                unityCullingViewMatrices[i] = Matrix4x4.identity;
+                unityCullingProjMatrices[i] = Matrix4x4.identity;
+                primitiveCullingViewMatrices[i] = Matrix4x4.identity;
+                primitiveCullingProjMatrices[i] = Matrix4x4.identity;
                 cascadeSpheres[i] = Vector4.zero;
                 cascadeAtlasScaleOffsets[i] = Vector4.zero;
                 cascadeWorldTexelSizes[i] = 0f;
@@ -93,84 +105,130 @@ namespace VividRP.Runtime
             normalBias = Mathf.Max(0.0f, additionalLightData.normalBias);
             slopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
             shadowCasterState = BuildShadowCasterState(lightData.mainVisibleLight);
+            hasUnityShadowCasters = mainLightVisibleIndex >= 0
+                && mainLightVisibleIndex < cullingResults.visibleLights.Length
+                && cullingResults.GetShadowCasterBounds(mainLightVisibleIndex, out _);
 
             Vector3 splitRatios = csmSettings.GetCascadeSplitRatios();
             Vector4 borderRatios = csmSettings.GetCascadeBorderRatios();
-            bool primitiveBoundsResolved = false;
-            bool hasPrimitiveShadowCasterBounds = false;
             Bounds primitiveShadowCasterBounds = default;
+            bool hasPrimitiveShadowCasterBounds = PassRecorder.HasMeshletShadowPass
+                && VividGPUDrivenSystem.TryGetPrimitiveShadowCasterBounds(
+                    cameraData?.camera,
+                    out primitiveShadowCasterBounds);
             for (int cascadeIndex = 0; cascadeIndex < cascadeCount; cascadeIndex++)
             {
-                bool success = cullingResults.ComputeDirectionalShadowMatricesAndCullingPrimitives(
-                    mainLightVisibleIndex,
-                    cascadeIndex,
-                    cascadeCount,
-                    splitRatios,
-                    cascadeResolution,
-                    QualitySettings.shadowNearPlaneOffset,
-                    out Matrix4x4 cascadeViewMatrix,
-                    out Matrix4x4 cascadeProjectionMatrix,
-                    out ShadowSplitData cascadeSplitData);
+                Matrix4x4 unityViewMatrix = Matrix4x4.identity;
+                Matrix4x4 unityProjectionMatrix = Matrix4x4.identity;
+                ShadowSplitData unitySplitData = default;
+                bool hasUnityCascade = hasUnityShadowCasters
+                    && cullingResults.ComputeDirectionalShadowMatricesAndCullingPrimitives(
+                        mainLightVisibleIndex,
+                        cascadeIndex,
+                        cascadeCount,
+                        splitRatios,
+                        cascadeResolution,
+                        QualitySettings.shadowNearPlaneOffset,
+                        out unityViewMatrix,
+                        out unityProjectionMatrix,
+                        out unitySplitData)
+                    && IsCascadeDataUsable(
+                        unityViewMatrix,
+                        unityProjectionMatrix,
+                        unitySplitData);
 
-                bool usedFallback = !success
-                    || !IsCascadeDataUsable(
-                        cascadeViewMatrix,
-                        cascadeProjectionMatrix,
-                        cascadeSplitData);
-                if (usedFallback)
+                Matrix4x4 primitiveViewMatrix = Matrix4x4.identity;
+                Matrix4x4 primitiveProjectionMatrix = Matrix4x4.identity;
+                ShadowSplitData primitiveSplitData = default;
+                bool hasPrimitiveCascade = hasPrimitiveShadowCasterBounds
+                    && TryGetCascadeDepthRange(
+                        cameraData,
+                        maxShadowDistance,
+                        cascadeIndex,
+                        cascadeCount,
+                        splitRatios,
+                        out float cascadeNearDistance,
+                        out float cascadeFarDistance)
+                    && TryBuildFallbackCascadeMatrices(
+                        cameraData,
+                        light,
+                        primitiveShadowCasterBounds,
+                        cascadeNearDistance,
+                        cascadeFarDistance,
+                        cascadeResolution,
+                        QualitySettings.shadowNearPlaneOffset,
+                        out primitiveViewMatrix,
+                        out primitiveProjectionMatrix,
+                        out primitiveSplitData);
+                if (hasPrimitiveCascade)
                 {
-                    if (!primitiveBoundsResolved)
-                    {
-                        primitiveBoundsResolved = true;
-                        hasPrimitiveShadowCasterBounds = PassRecorder.HasMeshletShadowPass
-                            && VividGPUDrivenSystem.TryGetPrimitiveShadowCasterBounds(
-                                cameraData?.camera,
-                                out primitiveShadowCasterBounds);
-                    }
+                    StabilizeCascadeProjection(
+                        ref primitiveProjectionMatrix,
+                        primitiveViewMatrix,
+                        cascadeResolution);
+                    SetFallbackCullingPlanes(
+                        ref primitiveSplitData,
+                        primitiveProjectionMatrix * primitiveViewMatrix);
+                    primitiveCullingViewMatrices[cascadeIndex] = primitiveViewMatrix;
+                    primitiveCullingProjMatrices[cascadeIndex] = primitiveProjectionMatrix;
+                }
 
-                    if (!hasPrimitiveShadowCasterBounds
-                        || !TryGetCascadeDepthRange(
-                            cameraData,
-                            maxShadowDistance,
-                            cascadeIndex,
-                            cascadeCount,
-                            splitRatios,
-                            out float cascadeNearDistance,
-                            out float cascadeFarDistance)
-                        || !TryBuildFallbackCascadeMatrices(
-                            cameraData,
-                            light,
-                            primitiveShadowCasterBounds,
-                            cascadeNearDistance,
-                            cascadeFarDistance,
-                            cascadeResolution,
-                            QualitySettings.shadowNearPlaneOffset,
-                            out cascadeViewMatrix,
-                            out cascadeProjectionMatrix,
-                            out cascadeSplitData))
-                    {
-                        Reset();
-                        return;
-                    }
+                if (!hasUnityCascade && !hasPrimitiveCascade)
+                {
+                    Reset();
+                    return;
+                }
+
+                if (hasUnityCascade)
+                {
+                    unityCullingViewMatrices[cascadeIndex] = unityViewMatrix;
+                    unityCullingProjMatrices[cascadeIndex] = unityProjectionMatrix;
+                }
+
+                Matrix4x4 cascadeViewMatrix;
+                Matrix4x4 cascadeProjectionMatrix;
+                if (hasUnityCascade
+                    && hasPrimitiveCascade
+                    && TryBuildCascadeMatrixUnion(
+                        unityCullingViewMatrices[cascadeIndex],
+                        unityCullingProjMatrices[cascadeIndex],
+                        primitiveCullingViewMatrices[cascadeIndex],
+                        primitiveCullingProjMatrices[cascadeIndex],
+                        cascadeResolution,
+                        out cascadeViewMatrix,
+                        out cascadeProjectionMatrix))
+                {
+                    splitData[cascadeIndex] = unitySplitData;
+                }
+                else if (hasUnityCascade)
+                {
+                    cascadeViewMatrix = unityCullingViewMatrices[cascadeIndex];
+                    cascadeProjectionMatrix = unityCullingProjMatrices[cascadeIndex];
+                    StabilizeCascadeProjection(
+                        ref cascadeProjectionMatrix,
+                        cascadeViewMatrix,
+                        cascadeResolution);
+                    splitData[cascadeIndex] = unitySplitData;
+                }
+                else
+                {
+                    cascadeViewMatrix = primitiveCullingViewMatrices[cascadeIndex];
+                    cascadeProjectionMatrix = primitiveCullingProjMatrices[cascadeIndex];
+                    splitData[cascadeIndex] = primitiveSplitData;
+                }
+
+                if (!hasPrimitiveCascade)
+                {
+                    primitiveCullingViewMatrices[cascadeIndex] = cascadeViewMatrix;
+                    primitiveCullingProjMatrices[cascadeIndex] = cascadeProjectionMatrix;
                 }
 
                 viewMatrices[cascadeIndex] = cascadeViewMatrix;
                 projMatrices[cascadeIndex] = cascadeProjectionMatrix;
-                splitData[cascadeIndex] = cascadeSplitData;
 
                 // Match HDRP/Unity's directional cascade overlap. Higher values cull more
                 // casters, which causes blend regions to lose moving occluders.
                 splitData[cascadeIndex].shadowCascadeBlendCullingFactor = CascadeBlendCullingFactor;
-                StabilizeCascadeProjection(
-                    ref projMatrices[cascadeIndex],
-                    viewMatrices[cascadeIndex],
-                    cascadeResolution);
-                if (usedFallback)
-                {
-                    SetFallbackCullingPlanes(
-                        ref splitData[cascadeIndex],
-                        projMatrices[cascadeIndex] * viewMatrices[cascadeIndex]);
-                }
 
                 Vector4 sphere = splitData[cascadeIndex].cullingSphere;
                 viewProjMatrices[cascadeIndex] = BuildWorldToShadowMatrix(
@@ -199,6 +257,7 @@ namespace VividRP.Runtime
                 || mainLightVisibleIndex < 0
                 || mainLightVisibleIndex >= cullingResults.visibleLights.Length
                 || cascadeCount <= 0
+                || !hasUnityShadowCasters
                 || !cullingResults.GetShadowCasterBounds(mainLightVisibleIndex, out _))
             {
                 return;
@@ -415,6 +474,142 @@ namespace VividRP.Runtime
                 ref cascadeSplitData,
                 projectionMatrix * viewMatrix);
             return IsCascadeDataUsable(viewMatrix, projectionMatrix, cascadeSplitData);
+        }
+
+        internal static bool TryBuildCascadeMatrixUnion(
+            Matrix4x4 unityViewMatrix,
+            Matrix4x4 unityProjectionMatrix,
+            Matrix4x4 primitiveViewMatrix,
+            Matrix4x4 primitiveProjectionMatrix,
+            int shadowResolution,
+            out Matrix4x4 unionViewMatrix,
+            out Matrix4x4 unionProjectionMatrix)
+        {
+            unionViewMatrix = Matrix4x4.identity;
+            unionProjectionMatrix = Matrix4x4.identity;
+            if (shadowResolution <= 0
+                || !IsFinite(unityViewMatrix)
+                || !IsFinite(unityProjectionMatrix)
+                || !IsFinite(primitiveViewMatrix)
+                || !IsFinite(primitiveProjectionMatrix))
+            {
+                return false;
+            }
+
+            Vector3 minimum = new Vector3(
+                float.PositiveInfinity,
+                float.PositiveInfinity,
+                float.PositiveInfinity);
+            Vector3 maximum = new Vector3(
+                float.NegativeInfinity,
+                float.NegativeInfinity,
+                float.NegativeInfinity);
+            if (!TryEncapsulateClipVolume(
+                    unityViewMatrix,
+                    unityProjectionMatrix,
+                    primitiveViewMatrix,
+                    ref minimum,
+                    ref maximum)
+                || !TryEncapsulateClipVolume(
+                    primitiveViewMatrix,
+                    primitiveProjectionMatrix,
+                    primitiveViewMatrix,
+                    ref minimum,
+                    ref maximum))
+            {
+                return false;
+            }
+
+            Vector3 size = maximum - minimum;
+            if (!IsFinite(minimum)
+                || !IsFinite(maximum)
+                || !IsFinite(size)
+                || size.x < 0.0f
+                || size.y < 0.0f
+                || size.z < 0.0f)
+            {
+                return false;
+            }
+
+            float projectionRadius = Mathf.Max(
+                Mathf.Max(size.x, size.y) * 0.5f,
+                MinCascadeRadius);
+            if (shadowResolution > 2)
+                projectionRadius *= shadowResolution / (float) (shadowResolution - 2);
+
+            float worldTexelSize = 2.0f * projectionRadius / shadowResolution;
+            float depthPadding = Mathf.Max(worldTexelSize, MinCascadeRange);
+            float depthRange = Mathf.Max(size.z + 2.0f * depthPadding, MinCascadeRange);
+            Vector3 center = minimum + size * 0.5f;
+            if (!IsFinite(center))
+                return false;
+
+            Matrix4x4 recenterMatrix = Matrix4x4.Translate(new Vector3(
+                -center.x,
+                -center.y,
+                -maximum.z - depthPadding));
+
+            unionViewMatrix = recenterMatrix * primitiveViewMatrix;
+            unionProjectionMatrix = Matrix4x4.Ortho(
+                -projectionRadius,
+                projectionRadius,
+                -projectionRadius,
+                projectionRadius,
+                0.0f,
+                depthRange);
+            StabilizeCascadeProjection(
+                ref unionProjectionMatrix,
+                unionViewMatrix,
+                shadowResolution);
+
+            float viewDeterminant = unionViewMatrix.determinant;
+            float projectionDeterminant = unionProjectionMatrix.determinant;
+            return IsFinite(unionViewMatrix)
+                && IsFinite(unionProjectionMatrix)
+                && float.IsFinite(viewDeterminant)
+                && float.IsFinite(projectionDeterminant)
+                && viewDeterminant != 0.0f
+                && projectionDeterminant != 0.0f;
+        }
+
+        private static bool TryEncapsulateClipVolume(
+            Matrix4x4 viewMatrix,
+            Matrix4x4 projectionMatrix,
+            Matrix4x4 targetViewMatrix,
+            ref Vector3 minimum,
+            ref Vector3 maximum)
+        {
+            Matrix4x4 inverseViewProjectionMatrix =
+                (projectionMatrix * viewMatrix).inverse;
+            if (!IsFinite(inverseViewProjectionMatrix))
+                return false;
+
+            for (int cornerIndex = 0; cornerIndex < 8; cornerIndex++)
+            {
+                Vector4 worldCorner = inverseViewProjectionMatrix * new Vector4(
+                    (cornerIndex & 1) == 0 ? -1.0f : 1.0f,
+                    (cornerIndex & 2) == 0 ? -1.0f : 1.0f,
+                    (cornerIndex & 4) == 0 ? -1.0f : 1.0f,
+                    1.0f);
+                if (!float.IsFinite(worldCorner.w)
+                    || Mathf.Abs(worldCorner.w) <= 1e-6f)
+                {
+                    return false;
+                }
+
+                Vector3 worldPosition = new Vector3(
+                    worldCorner.x / worldCorner.w,
+                    worldCorner.y / worldCorner.w,
+                    worldCorner.z / worldCorner.w);
+                Vector3 targetViewPosition = targetViewMatrix.MultiplyPoint3x4(worldPosition);
+                if (!IsFinite(worldPosition) || !IsFinite(targetViewPosition))
+                    return false;
+
+                minimum = Vector3.Min(minimum, targetViewPosition);
+                maximum = Vector3.Max(maximum, targetViewPosition);
+            }
+
+            return true;
         }
 
         internal static bool TryGetCascadeDepthRange(

@@ -454,8 +454,8 @@ namespace VividRP.Editor.Tests
 
             StringAssert.Contains("PassRecorder.HasMeshletShadowPass", schedule);
             StringAssert.Contains("shadowData.isCSMActive", schedule);
-            StringAssert.Contains("shadowData.viewMatrices", schedule);
-            StringAssert.Contains("shadowData.projMatrices", schedule);
+            StringAssert.Contains("shadowData.primitiveCullingViewMatrices", schedule);
+            StringAssert.Contains("shadowData.primitiveCullingProjMatrices", schedule);
             StringAssert.Contains("VividInstancePassMask.Shadows", schedule);
             StringAssert.Contains("cullAgainstNearPlane: false", schedule);
             StringAssert.Contains("m_ShadowPrimitiveDrawSetSystem.Schedule(", schedule);
@@ -506,6 +506,35 @@ namespace VividRP.Editor.Tests
             Assert.That(complete, Is.GreaterThan(buildContexts));
             Assert.That(gpuCull, Is.GreaterThan(complete));
             StringAssert.Contains("m_PrimitiveShadowDrawSet", record);
+        }
+
+        [Test]
+        public void MeshletShadowPass_UsesPrimitiveMatricesForCullingAndFinalMatricesForRasterization()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "MeshletShadowPass.cs");
+            string record = SliceSource(
+                source,
+                "public override void Record(",
+                "public override void Dispose()");
+            string buildCullingContext = SliceSource(
+                source,
+                "private void BuildShadowCullingContext(",
+                "private static void ConfigureMaterial(");
+
+            StringAssert.Contains("m_ShadowData.viewMatrices", record);
+            StringAssert.Contains("m_ShadowData.projMatrices", record);
+            StringAssert.Contains(
+                "m_ShadowData.primitiveCullingViewMatrices",
+                buildCullingContext);
+            StringAssert.Contains(
+                "m_ShadowData.primitiveCullingProjMatrices",
+                buildCullingContext);
+            StringAssert.DoesNotContain("m_ShadowData.viewMatrices", buildCullingContext);
+            StringAssert.DoesNotContain("m_ShadowData.projMatrices", buildCullingContext);
         }
 
         [Test]

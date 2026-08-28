@@ -588,8 +588,8 @@ namespace VividRP.Runtime.GPUDriven
                 VividShadowData.MaxCascadeCount);
             return m_ShadowPrimitiveDrawSetSystem.Schedule(
                 camera,
-                shadowData.viewMatrices,
-                shadowData.projMatrices,
+                shadowData.primitiveCullingViewMatrices,
+                shadowData.primitiveCullingProjMatrices,
                 cascadeCount,
                 VividInstancePassMask.Shadows,
                 cullAgainstNearPlane: false,

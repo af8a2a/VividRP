@@ -43,6 +43,19 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TryLoadGraphFromGraphObject_IgnoresNonRenderGraphAsset()
+        {
+            var graphModel = new TestGraphModel("Assets/Vivid Material Graph.vmatg");
+
+            bool result = RenderGraphEditorWindowReflectionUtility.TryLoadGraphFromGraphObject(
+                graphModel,
+                out RenderGraphEditorGraph graph);
+
+            Assert.That(result, Is.False);
+            Assert.That(graph, Is.Null);
+        }
+
+        [Test]
         public void EnumerateGraphToolkitWindowIds_UsesWindowHash_WhenLayoutContainsWindowHash()
         {
             const string windowHash = "86326f9e0df0066193401606dc91f9d3";
@@ -149,6 +162,26 @@ namespace VividRP.Editor.Tests
             {
                 return null;
             }
+        }
+
+        private sealed class TestGraphModel
+        {
+            internal TestGraphModel(string filePath)
+            {
+                GraphObject = new TestGraphObject(filePath);
+            }
+
+            public TestGraphObject GraphObject { get; }
+        }
+
+        private sealed class TestGraphObject
+        {
+            internal TestGraphObject(string filePath)
+            {
+                FilePath = filePath;
+            }
+
+            public string FilePath { get; }
         }
 
         private sealed class TestGraphInfo

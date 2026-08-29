@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -194,6 +195,136 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void CompileStandardSingleSlab_UsesCatalogedMaterialGraphProgram()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graph = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            try
+            {
+                VividMaterialProgramID genericProgramID =
+                    (VividMaterialProgramID)
+                        MaterialProgramContract.BuiltinProgramCount;
+                CompiledMaterialProgram genericProgram =
+                    GPUDrivenMaterialCompiler.GetMaterialProgram(genericProgramID);
+                graph.Apply(
+                    CreateCompilationResult(genericProgram),
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    GPUDrivenMaterialCompiler.ProgramCatalog);
+                proxy.MaterialGraph = graph;
+
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        proxy,
+                        out string validationMessage),
+                    Is.True,
+                    validationMessage);
+                GPUDrivenCompiledMaterialInstance compiled =
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        proxy,
+                        parameterAddress: 5u,
+                        surfaceBindingIndex: 7u);
+
+                Assert.That(compiled.ProgramID, Is.EqualTo(genericProgramID));
+                Assert.That(
+                    compiled.CatalogProgram,
+                    Is.SameAs(GPUDrivenMaterialCompiler.ProgramCatalog.GetEntry(
+                        genericProgramID)));
+                Assert.That(
+                    compiled.MaterialProgram.CompiledHash,
+                    Is.EqualTo(genericProgram.CompiledHash));
+                Assert.That(compiled.RuntimeHeader.ParameterAddress, Is.EqualTo(5u));
+                Assert.That(
+                    compiled.RuntimeHeader.ResourceBindingAddress,
+                    Is.EqualTo(7u));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graph);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsStaleMaterialGraphCatalogBinding()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graph = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            try
+            {
+                MaterialProgramCatalog production =
+                    GPUDrivenMaterialCompiler.ProgramCatalog;
+                MaterialProgramCatalog staleCatalog = MaterialProgramCatalog.Bake(
+                    production.Templates,
+                    MaterialProgramCatalogBakeSlot.ForProgram(
+                        "P0.StandardSingleSlab",
+                        production.GetMaterialProgram(
+                            VividMaterialProgramID.StandardSingleSlab)),
+                    MaterialProgramCatalogBakeSlot.ForProgram(
+                        "P1.DualSlabHorizontalMix",
+                        production.GetMaterialProgram(
+                            VividMaterialProgramID.DualSlabHorizontalMix)),
+                    MaterialProgramCatalogBakeSlot.ForProgram(
+                        "P2.DualSlabVerticalLayer",
+                        production.GetMaterialProgram(
+                            VividMaterialProgramID.DualSlabVerticalLayer)),
+                    MaterialProgramCatalogBakeSlot.ForProgram(
+                        "P3.GenericSingleSlabProof",
+                        production.GetMaterialProgram(
+                            (VividMaterialProgramID)
+                                MaterialProgramContract.BuiltinProgramCount)),
+                    MaterialProgramCatalogBakeSlot.Reserved("P4.Reserved"));
+                graph.Apply(
+                    CreateCompilationResult(production.GetMaterialProgram(
+                        VividMaterialProgramID.StandardSingleSlab)),
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    staleCatalog);
+                proxy.MaterialGraph = graph;
+
+                bool valid = GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                    proxy,
+                    out string validationMessage);
+
+                Assert.That(valid, Is.False);
+                Assert.That(validationMessage, Does.Contain("stale"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graph);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsGraphTopologyIncompatibleWithProxy()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graph = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            try
+            {
+                CompiledMaterialProgram dualProgram =
+                    GPUDrivenMaterialCompiler.GetMaterialProgram(
+                        VividMaterialProgramID.DualSlabHorizontalMix);
+                graph.Apply(
+                    CreateCompilationResult(dualProgram),
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    GPUDrivenMaterialCompiler.ProgramCatalog);
+                proxy.MaterialGraph = graph;
+
+                bool valid = GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                    proxy,
+                    out string validationMessage);
+
+                Assert.That(valid, Is.False);
+                Assert.That(validationMessage, Does.Contain("not compatible"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graph);
                 Object.DestroyImmediate(proxy);
             }
         }
@@ -618,6 +749,18 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(topProxy);
                 Object.DestroyImmediate(baseProxy);
             }
+        }
+
+        private static MaterialGraphCompilationResult CreateCompilationResult(
+            CompiledMaterialProgram program)
+        {
+            return new MaterialGraphCompilationResult(
+                program,
+                program.Module,
+                new MaterialGraphProvenance(
+                    new Dictionary<string, HashSet<int>>(),
+                    new Dictionary<string, HashSet<int>>()),
+                System.Array.Empty<MaterialGraphDiagnostic>());
         }
 
         private static string GetHlslStructSignature(string source, string structName)

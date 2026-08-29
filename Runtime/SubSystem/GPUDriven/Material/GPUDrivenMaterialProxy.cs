@@ -32,6 +32,9 @@ namespace VividRP.Runtime.GPUDriven
         private Material m_SourceMaterial;
 
         [SerializeField]
+        private MaterialGraphImportAsset m_MaterialGraph;
+
+        [SerializeField]
         private GPUDrivenMaterialProxyModel m_Model = GPUDrivenMaterialProxyModel.StandardLit;
 
         [SerializeField]
@@ -107,6 +110,12 @@ namespace VividRP.Runtime.GPUDriven
         {
             get => m_SourceMaterial;
             set => SetValue(ref m_SourceMaterial, value);
+        }
+
+        public MaterialGraphImportAsset MaterialGraph
+        {
+            get => m_MaterialGraph;
+            set => SetValue(ref m_MaterialGraph, value);
         }
 
         public GPUDrivenMaterialProxyModel Model

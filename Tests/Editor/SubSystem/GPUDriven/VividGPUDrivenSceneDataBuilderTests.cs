@@ -1138,7 +1138,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Build_UsesMaterialProxyData_WhenProxyIsAssigned()
+        public void Build_UsesMaterialProxyAndCatalogedGraphProgram_WhenAssigned()
         {
             GameObject gameObject = null;
             Mesh mesh = null;
@@ -1147,6 +1147,7 @@ namespace VividRP.Editor.Tests
             Texture2D bumpMap = null;
             VividMeshletCollectionAsset meshletCollection = null;
             GPUDrivenMaterialProxy materialProxy = null;
+            MaterialGraphImportAsset materialGraph = null;
 
             try
             {
@@ -1155,7 +1156,19 @@ namespace VividRP.Editor.Tests
                 baseMap = new Texture2D(1, 1);
                 bumpMap = new Texture2D(1, 1);
                 materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialGraph =
+                    ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+                VividMaterialProgramID genericProgramID =
+                    (VividMaterialProgramID)
+                        MaterialProgramContract.BuiltinProgramCount;
+                materialGraph.Apply(
+                    CreateCompilationResult(
+                        GPUDrivenMaterialCompiler.GetMaterialProgram(
+                            genericProgramID)),
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    GPUDrivenMaterialCompiler.ProgramCatalog);
                 materialProxy.SourceMaterial = material;
+                materialProxy.MaterialGraph = materialGraph;
                 materialProxy.BaseMap = baseMap;
                 materialProxy.BaseColor = new Color(0.8f, 0.6f, 0.4f, 1.0f);
                 materialProxy.TextureTilingOffset = new Vector4(4.0f, 5.0f, 0.25f, 0.5f);
@@ -1199,7 +1212,7 @@ namespace VividRP.Editor.Tests
                 VividMaterialData materialData = sceneData.Materials[0];
                 VividMaterialRuntimeHeader runtimeHeader = sceneData.MaterialRuntimeHeaders[0];
                 VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
-                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(genericProgramID));
                 Assert.That(runtimeHeader.ParameterAddress, Is.Zero);
                 Assert.That(runtimeHeader.ResourceBindingAddress, Is.EqualTo(materialData.SurfaceBindingIndex));
                 Assert.That(
@@ -1232,6 +1245,11 @@ namespace VividRP.Editor.Tests
             finally
             {
                 DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy);
+
+                if (materialGraph != null)
+                {
+                    Object.DestroyImmediate(materialGraph);
+                }
 
                 if (baseMap != null)
                 {
@@ -2374,6 +2392,18 @@ namespace VividRP.Editor.Tests
             {
                 DestroyTestObjects(gameObject, null, material, mesh, meshletCollection);
             }
+        }
+
+        private static MaterialGraphCompilationResult CreateCompilationResult(
+            CompiledMaterialProgram program)
+        {
+            return new MaterialGraphCompilationResult(
+                program,
+                program.Module,
+                new MaterialGraphProvenance(
+                    new Dictionary<string, HashSet<int>>(),
+                    new Dictionary<string, HashSet<int>>()),
+                Array.Empty<MaterialGraphDiagnostic>());
         }
 
         private static GameObject CreateMeshletRendererObject(

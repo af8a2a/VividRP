@@ -6,9 +6,11 @@ using System.Reflection;
 using NUnit.Framework;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
+using UnityEngine;
 using VividRP.Editor.GPUDriven;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime.GPUDriven;
+using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests.GPUDriven
 {
@@ -171,7 +173,38 @@ namespace VividRP.Editor.Tests.GPUDriven
                 Assert.That(asset.ProgramVersion, Is.EqualTo(GPUDrivenMaterialCompiler.ProgramVersion));
                 Assert.That(asset.SemanticHash, Is.EqualTo(expected.SemanticHash.ToString()));
                 Assert.That(asset.CompiledHash, Is.EqualTo(expected.CompiledHash.ToString()));
+                Assert.That(asset.IsCataloged, Is.True);
+                Assert.That(
+                    asset.ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                Assert.That(
+                    asset.CatalogManifestHash,
+                    Is.EqualTo(GPUDrivenMaterialCompiler.ProgramCatalog.ManifestHash));
+                Assert.That(asset.CompiledProgramHash, Is.EqualTo(expected.CompiledHash));
+                Assert.That(
+                    asset.LayoutFingerprint,
+                    Is.EqualTo(expected.Lowering.LayoutFingerprint));
+                Assert.That(asset.ContentVersion, Is.Not.Zero);
                 Assert.That(asset.Diagnostics, Is.Empty);
+
+                var proxy =
+                    ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                try
+                {
+                    proxy.MaterialGraph = asset;
+                    GPUDrivenCompiledMaterialInstance compiled =
+                        GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                            proxy,
+                            parameterAddress: 2u,
+                            surfaceBindingIndex: 3u);
+                    Assert.That(
+                        compiled.ProgramID,
+                        Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                }
+                finally
+                {
+                    Object.DestroyImmediate(proxy);
+                }
             }
             finally
             {

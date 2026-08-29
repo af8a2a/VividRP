@@ -1448,6 +1448,12 @@ namespace VividRP.Runtime.GPUDriven
             {
                 uint hash = 2166136261u;
                 hash = (hash ^ materialProxy.Revision) * 16777619u;
+                MaterialGraphImportAsset materialGraph =
+                    materialProxy.MaterialGraph;
+                hash = (hash ^ GetObjectRevisionId(materialGraph)) * 16777619u;
+                hash = (hash ^ (materialGraph != null
+                    ? materialGraph.ContentVersion
+                    : 0u)) * 16777619u;
                 if (UsesVirtualTexturePayload(materialProxy, textureBackend))
                 {
                     VividVirtualTextureAsset asset = materialProxy.StreamedVirtualTexture;

@@ -217,6 +217,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void MaterialGraphSetter_IncrementsRevision_WhenBindingChanges()
+        {
+            var materialProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var materialGraph =
+                ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+
+            try
+            {
+                uint initialRevision = materialProxy.Revision;
+
+                materialProxy.MaterialGraph = materialGraph;
+
+                Assert.That(materialProxy.MaterialGraph, Is.SameAs(materialGraph));
+                Assert.That(materialProxy.Revision, Is.GreaterThan(initialRevision));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialGraph);
+                Object.DestroyImmediate(materialProxy);
+            }
+        }
+
+        [Test]
         public void SyncFromSourceMaterial_MapsStandardLitCoreProperties_WhenMaterialIsSupported()
         {
             Shader shader = Shader.Find("VividRP/Material/StandardLit");

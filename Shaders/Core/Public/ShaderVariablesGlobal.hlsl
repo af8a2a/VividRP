@@ -61,7 +61,9 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
 CBUFFER_END
 
 #if defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
-float4x4 _VividShadowVP[4];
+CBUFFER_START(ShaderVariablesShadowMatrices)
+    float4x4 _VividShadowVP[4];
+CBUFFER_END
 int _VividShadowCascadeIndex;
 #endif
 

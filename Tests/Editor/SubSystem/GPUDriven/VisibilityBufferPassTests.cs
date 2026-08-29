@@ -471,6 +471,19 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("clip(-1.0f)", shadowSource);
             StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", visibilitySource);
             StringAssert.Contains("VividEvaluateBaseColorAlphaCoverage", shadowSource);
+            StringAssert.Contains("#pragma shader_feature_local_fragment _ALPHATEST_ON", shadowSource);
+            int shadowVaryings = shadowSource.IndexOf("struct Varyings");
+            int shadowFragment = shadowSource.IndexOf("void Frag(Varyings input)");
+            Assert.That(shadowVaryings, Is.GreaterThanOrEqualTo(0));
+            Assert.That(shadowFragment, Is.GreaterThan(shadowVaryings));
+            string shadowVertexInterface = shadowSource.Substring(
+                shadowVaryings,
+                shadowFragment - shadowVaryings);
+            StringAssert.Contains(
+                "nointerpolation uint instanceIndex : TEXCOORD0;",
+                shadowVertexInterface);
+            StringAssert.Contains("float2 uv0 : TEXCOORD1;", shadowVertexInterface);
+            StringAssert.DoesNotContain("#ifdef _ALPHATEST_ON", shadowVertexInterface);
             int visibilityDdx = visibilitySource.IndexOf("ddx(input.uv0)");
             int visibilityDdy = visibilitySource.IndexOf("ddy(input.uv0)");
             int visibilityProgram = visibilitySource.IndexOf("VividEvaluateCoverageProgram");

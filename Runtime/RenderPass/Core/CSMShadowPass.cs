@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -18,7 +19,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int s_UnityIndirectDrawArgsId = Shader.PropertyToID("unity_IndirectDrawArgs");
         private static readonly int s_UnityBaseCommandIdId = Shader.PropertyToID("unity_BaseCommandID");
         private static readonly int ShadowBiasId = Shader.PropertyToID("_ShadowBias");
-        private static readonly int ShadowViewProjectionMatricesId = Shader.PropertyToID("_VividShadowVP");
+        private static readonly int ShadowMatricesConstantBufferId =
+            Shader.PropertyToID("ShaderVariablesShadowMatrices");
         private static readonly int ShadowCascadeIndexId = Shader.PropertyToID("_VividShadowCascadeIndex");
         private static readonly int s_VisibleMeshletRenderRequestsId = Shader.PropertyToID("_VisibleMeshletRenderRequests");
         private static readonly string s_AlphaTestKeyword = "_ALPHATEST_ON";
@@ -32,8 +34,7 @@ namespace VividRP.Runtime.RenderPass.Core
             new ShadowDrawingSettings[VividShadowData.MaxCascadeCount];
         private readonly VividGPUCullingContext[] m_ShadowCullingContexts =
             new VividGPUCullingContext[VividShadowData.MaxCascadeCount];
-        private readonly Matrix4x4[] m_ShadowViewProjectionMatrices =
-            new Matrix4x4[VividShadowData.MaxCascadeCount];
+        private ShadowMatricesConstantBuffer m_ShadowMatrices;
         private readonly float[] m_VirtualTextureSpaceParams =
             new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_VirtualTextureMipOffsets =
@@ -131,13 +132,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShadowAtlas.desc.Width = m_CascadeResolution;
             m_ShadowAtlas.desc.Height = m_CascadeResolution;
 
-            for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
+            m_ShadowMatrices = new ShadowMatricesConstantBuffer
             {
-                m_ShadowViewProjectionMatrices[i] = i < m_CascadeCount
-                    ? GL.GetGPUProjectionMatrix(shadowData.projMatrices[i], true)
-                        * shadowData.viewMatrices[i]
-                    : Matrix4x4.identity;
-            }
+                Cascade0 = BuildShadowViewProjectionMatrix(shadowData, m_CascadeCount, 0),
+                Cascade1 = BuildShadowViewProjectionMatrix(shadowData, m_CascadeCount, 1),
+                Cascade2 = BuildShadowViewProjectionMatrix(shadowData, m_CascadeCount, 2),
+                Cascade3 = BuildShadowViewProjectionMatrix(shadowData, m_CascadeCount, 3),
+            };
 
             // Configure ShadowDrawingSettings per cascade
             for (int i = 0; i < m_CascadeCount && m_HasUnityShadowCasters; i++)
@@ -170,11 +171,13 @@ namespace VividRP.Runtime.RenderPass.Core
                     out VividGPUDrivenSystem gpuDrivenSystem,
                     out GraphicsBuffer requestsBuffer,
                     out GraphicsBuffer argsBuffer,
-                    out bool virtualTextureReady);
+                    out bool virtualTextureReady,
+                    out VirtualTextureSpaceBinding virtualTextureBinding);
 
-                nativeCmd.SetGlobalMatrixArray(
-                    ShadowViewProjectionMatricesId,
-                    m_ShadowViewProjectionMatrices);
+                ConstantBuffer.PushGlobal(
+                    nativeCmd,
+                    m_ShadowMatrices,
+                    ShadowMatricesConstantBufferId);
                 nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowData.shadowCasterState);
                 nativeCmd.SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias);
 
@@ -183,8 +186,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     CoreUtils.SetRenderTarget(
                         nativeCmd,
                         m_ShadowAtlas.innerHandle,
-                        RenderBufferLoadAction.DontCare,
-                        RenderBufferStoreAction.Store,
                         ClearFlag.Depth,
                         Color.black,
                         depthSlice: cascadeIndex);
@@ -205,6 +206,7 @@ namespace VividRP.Runtime.RenderPass.Core
                             requestsBuffer,
                             argsBuffer,
                             virtualTextureReady,
+                            virtualTextureBinding,
                             cascadeIndex);
                     }
                 }
@@ -249,12 +251,14 @@ namespace VividRP.Runtime.RenderPass.Core
             out VividGPUDrivenSystem system,
             out GraphicsBuffer requestsBuffer,
             out GraphicsBuffer argsBuffer,
-            out bool virtualTextureReady)
+            out bool virtualTextureReady,
+            out VirtualTextureSpaceBinding virtualTextureBinding)
         {
             system = null;
             requestsBuffer = null;
             argsBuffer = null;
             virtualTextureReady = false;
+            virtualTextureBinding = default;
             if (!m_MeshletRenderingActive
                 || m_ShadowData == null
                 || m_LODCamera == null
@@ -293,7 +297,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_VirtualTextureLayerFallbacks,
                     m_FrameIndex,
                     feedbackSampleRate: 1,
-                    out _);
+                    out virtualTextureBinding);
 
             // Keep shadow LOD selection synchronized with the main camera while deriving
             // frustum planes from the unified cascade matrices.
@@ -331,6 +335,7 @@ namespace VividRP.Runtime.RenderPass.Core
             GraphicsBuffer requestsBuffer,
             GraphicsBuffer argsBuffer,
             bool virtualTextureReady,
+            in VirtualTextureSpaceBinding virtualTextureBinding,
             int cascadeIndex)
         {
             for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
@@ -351,6 +356,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DrawProperties.Clear();
                 m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, requestsBuffer);
                 m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, argsBuffer);
+                if (system.UsesVirtualTexture && virtualTextureReady)
+                {
+                    GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(
+                        m_DrawProperties,
+                        virtualTextureBinding,
+                        m_VirtualTextureSpaceParams,
+                        m_VirtualTextureMipOffsets,
+                        m_VirtualTextureLayerFallbacks,
+                        m_FrameIndex,
+                        m_VirtualTextureFrameData.AdaptiveMipBias);
+                }
+                m_DrawProperties.SetInteger(ShadowCascadeIndexId, cascadeIndex);
                 int commandIndex = VividGPUDrivenCullingBuffers.GetIndirectDrawArgsCommandIndex(
                     cascadeIndex,
                     rendererListIndex);
@@ -398,6 +415,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 lodSelectionContext: out _);
         }
 
+        private static Matrix4x4 BuildShadowViewProjectionMatrix(
+            VividShadowData shadowData,
+            int cascadeCount,
+            int cascadeIndex)
+        {
+            return cascadeIndex < cascadeCount
+                ? GL.GetGPUProjectionMatrix(shadowData.projMatrices[cascadeIndex], true)
+                    * shadowData.viewMatrices[cascadeIndex]
+                : Matrix4x4.identity;
+        }
+
         private static void ConfigureMaterial(Material material, VividRendererListID rendererListID)
         {
             if (material == null)
@@ -443,8 +471,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VirtualTextureFrameData = null;
             m_PrimitiveShadowDrawSet = null;
             m_FrameIndex = 0;
-            for (int i = 0; i < m_ShadowViewProjectionMatrices.Length; i++)
-                m_ShadowViewProjectionMatrices[i] = Matrix4x4.identity;
+            m_ShadowMatrices = default;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ShadowMatricesConstantBuffer
+        {
+            public Matrix4x4 Cascade0;
+            public Matrix4x4 Cascade1;
+            public Matrix4x4 Cascade2;
+            public Matrix4x4 Cascade3;
         }
     }
 }

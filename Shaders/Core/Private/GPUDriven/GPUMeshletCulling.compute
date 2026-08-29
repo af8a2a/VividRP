@@ -383,7 +383,9 @@ bool TryResolveCulledMeshlet(
 
     const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
     const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
-    rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
+    rendererListIndex = min(
+        GetRendererListID(instanceData, materialData, (uint) cullingContext.PassMask),
+        VIVIDRENDERERLISTID_COUNT - 1u);
     const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
     boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
 

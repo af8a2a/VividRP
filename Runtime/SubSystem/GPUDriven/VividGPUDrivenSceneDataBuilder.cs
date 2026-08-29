@@ -1528,6 +1528,11 @@ namespace VividRP.Runtime.GPUDriven
                 flags |= VividInstanceFlags.FlipWindingOrder;
             }
 
+            if (trackedData.shadowCastingMode == ShadowCastingMode.TwoSided)
+            {
+                flags |= VividInstanceFlags.TwoSidedShadows;
+            }
+
             return flags;
         }
 

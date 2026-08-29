@@ -62,7 +62,9 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
             continue;
         }
 
-        const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
+        const uint rendererListIndex = min(
+            GetRendererListID(instanceData, materialData, (uint) cullingContext.PassMask),
+            VIVIDRENDERERLISTID_COUNT - 1u);
 
         [loop]
         for (uint meshletIndex = 0u; meshletIndex < meshLODNode.MeshletCount; ++meshletIndex)

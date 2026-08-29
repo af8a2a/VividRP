@@ -6,6 +6,7 @@
 
 #define VIVIDINSTANCEFLAGS_DISABLED 1u
 #define VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER 2u
+#define VIVIDINSTANCEFLAGS_TWO_SIDED_SHADOWS 4u
 
 #define VIVIDSURFACEBINDINGFLAGS_BASE_COLOR 1u
 #define VIVIDSURFACEBINDINGFLAGS_NORMAL 2u
@@ -534,11 +535,20 @@ float GetScreenBoundRadiusSq(const VividGPULODSelectionContext lodSelectionConte
     return max(dot(screenUp, screenUp), dot(screenRight, screenRight));
 }
 
-uint GetRendererListID(const VividInstanceData instanceData, const VividMaterialData materialData)
+uint GetRendererListID(
+    const VividInstanceData instanceData,
+    const VividMaterialData materialData,
+    const uint passMask)
 {
     uint rendererListID = materialData.RendererListID;
 
-    if ((instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u &&
+    if ((passMask & VIVIDINSTANCEPASSMASK_SHADOWS) != 0u &&
+        (instanceData.Flags & VIVIDINSTANCEFLAGS_TWO_SIDED_SHADOWS) != 0u)
+    {
+        rendererListID &= ~VIVIDRENDERERLISTID_CULL_FRONT;
+        rendererListID |= VIVIDRENDERERLISTID_CULL_OFF;
+    }
+    else if ((instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u &&
         (rendererListID & VIVIDRENDERERLISTID_CULL_OFF) == 0u)
     {
         if ((rendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u)
@@ -552,6 +562,11 @@ uint GetRendererListID(const VividInstanceData instanceData, const VividMaterial
     }
 
     return rendererListID;
+}
+
+uint GetRendererListID(const VividInstanceData instanceData, const VividMaterialData materialData)
+{
+    return GetRendererListID(instanceData, materialData, VIVIDINSTANCEPASSMASK_MAIN);
 }
 
 float3 GetViewForwardDir(const float4x4 viewMatrix)

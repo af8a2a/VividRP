@@ -22,6 +22,7 @@ namespace VividRP.Runtime.GPUDriven
         None = 0,
         Disabled = 1 << 0,
         FlipWindingOrder = 1 << 1,
+        TwoSidedShadows = 1 << 2,
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]

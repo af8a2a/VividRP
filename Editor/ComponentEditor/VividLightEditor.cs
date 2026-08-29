@@ -87,7 +87,7 @@ namespace VividRP.Editor
         private const float k_MinBoxSpotLightHandleValue = 0.0001f;
         private static readonly GUIContent s_CSMShadowLabel = EditorGUIUtility.TrTextContent("CSM Shadow");
         private static readonly GUIContent s_ScreenSpaceShadowQualityLabel = EditorGUIUtility.TrTextContent("Screen Space Quality", "Quality tier used by the screen-space CSM resolve for this directional light.");
-        private static readonly GUIContent s_ShadowAtlasResolutionLabel = EditorGUIUtility.TrTextContent("Atlas Resolution", "Fixed resolution used for the full 2x2 CSM atlas rendered by this directional light.");
+        private static readonly GUIContent s_ShadowMapResolutionLabel = EditorGUIUtility.TrTextContent("Cascade Resolution", "Width and height of each cascade slice in the CSM texture array.");
         private static readonly GUIContent s_DepthBiasLabel = EditorGUIUtility.TrTextContent("Depth Bias", "Constant depth bias applied while rendering cascaded shadow maps for this directional light.");
         private static readonly GUIContent s_NormalBiasLabel = EditorGUIUtility.TrTextContent("Normal Bias", "Normal-based bias applied while rendering and resolving cascaded shadow maps for this directional light.");
         private static readonly GUIContent s_SlopeBiasLabel = EditorGUIUtility.TrTextContent("Slope-Scale Depth Bias", "Slope-scale depth bias applied while rasterizing cascaded shadow maps for this directional light.");
@@ -157,20 +157,20 @@ namespace VividRP.Editor
             (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh,
             (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal
         };
-        private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels =
+        private static readonly GUIContent[] s_ShadowMapResolutionOptionLabels =
         {
+            EditorGUIUtility.TrTextContent("512"),
             EditorGUIUtility.TrTextContent("1024"),
             EditorGUIUtility.TrTextContent("2048"),
-            EditorGUIUtility.TrTextContent("4096"),
-            EditorGUIUtility.TrTextContent("8192")
+            EditorGUIUtility.TrTextContent("4096")
         };
 
-        private static readonly int[] s_ShadowAtlasResolutionOptionValues =
+        private static readonly int[] s_ShadowMapResolutionOptionValues =
         {
+            512,
             1024,
             2048,
-            4096,
-            8192
+            4096
         };
         private static readonly GUIContent[] s_GeneralLightTypeOptionLabels =
         {
@@ -742,7 +742,7 @@ namespace VividRP.Editor
                 DrawDirectionalScreenSpaceShadowQualityField();
                 DrawDirectionalPCSSFields();
                 DrawDirectionalBendSSSFields();
-                DrawDirectionalShadowAtlasResolutionField();
+                DrawDirectionalShadowMapResolutionField();
                 EditorGUILayout.Slider(m_SerializedLight.depthBias, 0.0f, 10.0f, s_DepthBiasLabel);
                 EditorGUILayout.Slider(m_SerializedLight.normalBias, 0.0f, 10.0f, s_NormalBiasLabel);
                 EditorGUILayout.Slider(m_SerializedLight.slopeBias, 0.0f, 5.0f, s_SlopeBiasLabel);
@@ -862,18 +862,18 @@ namespace VividRP.Editor
             }
         }
 
-        private void DrawDirectionalShadowAtlasResolutionField()
+        private void DrawDirectionalShadowMapResolutionField()
         {
-            var property = m_SerializedLight.shadowAtlasResolution;
+            var property = m_SerializedLight.shadowMapResolution;
             var oldMixedValue = EditorGUI.showMixedValue;
             EditorGUI.showMixedValue = property.hasMultipleDifferentValues;
 
             EditorGUI.BeginChangeCheck();
             var resolution = EditorGUILayout.IntPopup(
-                s_ShadowAtlasResolutionLabel,
+                s_ShadowMapResolutionLabel,
                 property.intValue,
-                s_ShadowAtlasResolutionOptionLabels,
-                s_ShadowAtlasResolutionOptionValues);
+                s_ShadowMapResolutionOptionLabels,
+                s_ShadowMapResolutionOptionValues);
             if (EditorGUI.EndChangeCheck())
                 property.intValue = resolution;
 

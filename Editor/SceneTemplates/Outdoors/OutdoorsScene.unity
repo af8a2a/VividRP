@@ -628,7 +628,7 @@ MonoBehaviour:
   m_RayTracedShadowSunAngularDiameter: 0.5
   m_MigratedRayTracedShadowSunAngularDiameter: 1
   m_ScreenSpaceShadowQuality: 0
-  m_ShadowAtlasResolution: 4096
+  m_ShadowMapResolution: 2048
   m_DepthBias: 1
   m_NormalBias: 1
   m_SlopeBias: 2.5
@@ -797,7 +797,7 @@ MonoBehaviour:
   m_RayTracedShadowSunAngularDiameter: 0.5
   m_MigratedRayTracedShadowSunAngularDiameter: 1
   m_ScreenSpaceShadowQuality: 0
-  m_ShadowAtlasResolution: 4096
+  m_ShadowMapResolution: 2048
   m_DepthBias: 1
   m_NormalBias: 1
   m_SlopeBias: 2.5

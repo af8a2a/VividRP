@@ -7,7 +7,6 @@ namespace VividRP.Runtime
     public class VividShadowData : ContextItem
     {
         public const int MaxCascadeCount = 4;
-        private const int LegacyCascadeResolutionDivisor = 2;
         private const int FrustumPlaneCount = 6;
         private const float CascadeBlendCullingFactor = 0.6f;
         private const float MinCascadeRange = 0.001f;
@@ -84,14 +83,7 @@ namespace VividRP.Runtime
 
             mainLightVisibleIndex = lightData.mainLightIndex;
             cascadeCount = Mathf.Clamp(csmSettings.cascadeCount.value, 1, MaxCascadeCount);
-            // Preserve the per-cascade texel density of the previous 2x2 layout while
-            // storing each cascade in its own texture-array slice.
-            int configuredShadowResolution = Mathf.Max(
-                LegacyCascadeResolutionDivisor,
-                additionalLightData.resolvedShadowAtlasResolution);
-            cascadeResolution = Mathf.Max(
-                1,
-                configuredShadowResolution / LegacyCascadeResolutionDivisor);
+            cascadeResolution = Mathf.Max(1, additionalLightData.resolvedShadowMapResolution);
             maxShadowDistance = csmSettings.maxShadowDistance.value;
             normalBias = Mathf.Max(0.0f, additionalLightData.normalBias);
             slopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);

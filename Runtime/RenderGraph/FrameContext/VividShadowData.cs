@@ -61,7 +61,8 @@ namespace VividRP.Runtime
         internal void Update(
             CullingResults cullingResults,
             VividLightData lightData,
-            VividCameraData cameraData)
+            VividCameraData cameraData,
+            float cullingShadowDistance = float.PositiveInfinity)
         {
             // ContextContainer is shared by all cameras. Always clear the previous camera's data,
             // including inactive and failed shadow configurations.
@@ -84,7 +85,11 @@ namespace VividRP.Runtime
             mainLightVisibleIndex = lightData.mainLightIndex;
             cascadeCount = Mathf.Clamp(csmSettings.cascadeCount.value, 1, MaxCascadeCount);
             cascadeResolution = Mathf.Max(1, additionalLightData.resolvedShadowMapResolution);
-            maxShadowDistance = csmSettings.maxShadowDistance.value;
+            // Manual cascades must use the same effective distance that produced CullingResults.
+            // The volume value is only an upper bound and can exceed QualitySettings.shadowDistance.
+            maxShadowDistance = float.IsFinite(cullingShadowDistance)
+                ? Mathf.Min(csmSettings.maxShadowDistance.value, Mathf.Max(0.0f, cullingShadowDistance))
+                : csmSettings.maxShadowDistance.value;
             normalBias = Mathf.Max(0.0f, additionalLightData.normalBias);
             slopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
             shadowCasterState = BuildShadowCasterState(lightData.mainVisibleLight);

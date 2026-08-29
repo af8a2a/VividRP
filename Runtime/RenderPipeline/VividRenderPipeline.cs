@@ -257,7 +257,13 @@ namespace VividRP.Runtime
                     camera.scaledPixelWidth > 0 ? camera.scaledPixelWidth : camera.pixelWidth,
                     camera.scaledPixelHeight > 0 ? camera.scaledPixelHeight : camera.pixelHeight);
                 cameraHistoryFrameActive = true;
-                PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset, frameIndex);
+                PassRecorder.InitializeContext(
+                    context,
+                    camera,
+                    cullingResults,
+                    graphAsset,
+                    frameIndex,
+                    cullingParameters.shadowDistance);
                 var cameraData = PassRecorder.GetFrameData().Get<VividCameraData>();
                 cameraHistory.SetReferenceSize(
                     cameraData?.actualWidth ?? camera.pixelWidth,

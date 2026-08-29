@@ -78,7 +78,8 @@ namespace VividRP.Runtime
             Camera camera,
             CullingResults cullingResults,
             RenderGraphData graphAsset,
-            int pipelineFrameIndex = -1)
+            int pipelineFrameIndex = -1,
+            float cullingShadowDistance = float.PositiveInfinity)
         {
             using var initializeContextScope = RenderPassProfilingUtility.InitializeContextMarker.Auto();
 
@@ -191,7 +192,7 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.InitializeContextShadowDataUpdateMarker.Auto())
             {
-                shadowData.Update(cullingResults, lightData, cameraData);
+                shadowData.Update(cullingResults, lightData, cameraData, cullingShadowDistance);
             }
         }
 

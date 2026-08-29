@@ -104,6 +104,70 @@ namespace VividRP.Editor.Tests.GPUDriven
         }
 
         [Test]
+        public void PreviewCostViewModel_UsesCompiledProgramAndFrozenCatalog()
+        {
+            MaterialGraphEditorGraph graph = CreateGraph();
+            try
+            {
+                BuildStandardSingleSlabGraph(graph);
+
+                MaterialGraphPreviewCostViewModel viewModel =
+                    MaterialGraphPreviewCostViewModel.Build(graph);
+
+                Assert.That(
+                    viewModel.Status,
+                    Is.EqualTo(MaterialGraphPreviewStatus.Ready));
+                Assert.That(viewModel.CanPreview, Is.True);
+                Assert.That(
+                    viewModel.ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                Assert.That(viewModel.CompiledHash, Is.Not.Empty);
+                Assert.That(viewModel.SemanticHash, Is.Not.Empty);
+                Assert.That(viewModel.ClosureCount, Is.EqualTo(1));
+                Assert.That(viewModel.OperatorCount, Is.Zero);
+                Assert.That(viewModel.Metrics, Has.Count.EqualTo(10));
+                Assert.That(viewModel.Metrics.Any(metric => metric.IsExceeded), Is.False);
+                Assert.That(viewModel.Stages, Has.Count.EqualTo(2));
+                Assert.That(viewModel.Diagnostics, Is.Empty);
+            }
+            finally
+            {
+                DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void PreviewCostViewModel_ReportsCompileErrorWithoutInventingCost()
+        {
+            MaterialGraphEditorGraph graph = CreateGraph();
+            try
+            {
+                AddNode<MaterialOutputNode>(graph);
+
+                MaterialGraphPreviewCostViewModel viewModel =
+                    MaterialGraphPreviewCostViewModel.Build(graph);
+
+                Assert.That(
+                    viewModel.Status,
+                    Is.EqualTo(MaterialGraphPreviewStatus.CompileError));
+                Assert.That(viewModel.CanPreview, Is.False);
+                Assert.That(
+                    viewModel.ProgramID,
+                    Is.EqualTo(VividMaterialProgramID.Invalid));
+                Assert.That(viewModel.Metrics, Is.Empty);
+                Assert.That(viewModel.Stages, Is.Empty);
+                Assert.That(
+                    viewModel.Diagnostics.Any(diagnostic =>
+                        diagnostic.Contains(MaterialGraphDiagnosticCodes.MissingNode)),
+                    Is.True);
+            }
+            finally
+            {
+                DeleteGraph(graph);
+            }
+        }
+
+        [Test]
         public void MaterialGraphFactory_OnlyExposesMaterialNodes()
         {
             Type factoryType = Type.GetType(

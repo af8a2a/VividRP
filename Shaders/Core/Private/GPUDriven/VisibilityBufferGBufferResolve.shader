@@ -201,8 +201,19 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 const float3 autoNormalWS = cross(
                     SafeNormalize(triangleData.positionWS0 - triangleData.positionWS1),
                     SafeNormalize(triangleData.positionWS2 - triangleData.positionWS0));
-                const float3 viewForwardDirWS = GetViewForwardDir(UNITY_MATRIX_V);
-                return dot(autoNormalWS, viewForwardDirWS) < 0.0f ? -1.0f : 1.0f;
+                float3 viewRayDirectionWS = GetViewForwardDir(UNITY_MATRIX_V);
+                if (unity_OrthoParams.w == 0.0f)
+                {
+                    const float3 triangleCenterWS = (
+                        triangleData.positionWS0
+                        + triangleData.positionWS1
+                        + triangleData.positionWS2) / 3.0f;
+                    const float3 cameraToTriangleWS = triangleCenterWS - _WorldSpaceCameraPos;
+                    if (dot(cameraToTriangleWS, cameraToTriangleWS) > 1e-8f)
+                        viewRayDirectionWS = cameraToTriangleWS;
+                }
+
+                return dot(autoNormalWS, viewRayDirectionWS) < 0.0f ? -1.0f : 1.0f;
             }
 
             bool TryLoadVisibilityData(

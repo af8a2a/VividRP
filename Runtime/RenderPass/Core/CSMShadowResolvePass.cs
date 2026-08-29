@@ -59,6 +59,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CSMBendLightCoordinateId = Shader.PropertyToID("_CSMBendLightCoordinate");
         private static readonly int CSMBendWaveOffsetId = Shader.PropertyToID("_CSMBendWaveOffset");
         private static readonly int CSMBendDepthTextureSizeId = Shader.PropertyToID("_CSMBendDepthTextureSize");
+        private static readonly int CSMBendViewProjMatrixId = Shader.PropertyToID("_CSMBendViewProjMatrix");
+        private static readonly int CSMBendMaxRayDistanceId = Shader.PropertyToID("_CSMBendMaxRayDistance");
         private static readonly int CSMBendSurfaceThicknessId = Shader.PropertyToID("_CSMBendSurfaceThickness");
         private static readonly int CSMBendBilinearThresholdId = Shader.PropertyToID("_CSMBendBilinearThreshold");
         private static readonly int CSMBendShadowContrastId = Shader.PropertyToID("_CSMBendShadowContrast");
@@ -102,6 +104,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 float surfaceThickness,
                 float bilinearThreshold,
                 float shadowContrast,
+                float maxRayDistance = VividAdditionalLightData.DefaultDirLightBendSSSMaxRayDistance,
                 bool ignoreEdgePixels = false,
                 bool usePrecisionOffset = false,
                 bool bilinearSamplingOffsetMode = false)
@@ -109,6 +112,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 SurfaceThickness = surfaceThickness;
                 BilinearThreshold = bilinearThreshold;
                 ShadowContrast = shadowContrast;
+                MaxRayDistance = maxRayDistance;
                 IgnoreEdgePixels = ignoreEdgePixels;
                 UsePrecisionOffset = usePrecisionOffset;
                 BilinearSamplingOffsetMode = bilinearSamplingOffsetMode;
@@ -119,6 +123,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public float BilinearThreshold { get; }
 
             public float ShadowContrast { get; }
+
+            public float MaxRayDistance { get; }
 
             public bool IgnoreEdgePixels { get; }
 
@@ -169,6 +175,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_DispatchGroupCountY = 1;
         private int m_TileCountX = 1;
         private int m_TileCountY = 1;
+        private Matrix4x4 m_ViewProjMatrix = Matrix4x4.identity;
         private Matrix4x4 m_InvViewProjMatrix = Matrix4x4.identity;
         private BendDispatchList m_BendDispatchList;
         private BendQualitySettings m_BendQualitySettings = ResolveBendQualitySettings(
@@ -264,6 +271,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LightDirectionWS = Vector4.zero;
             m_BendDispatchList = CreateEmptyBendDispatchList();
             m_BendDepthTextureSize = Vector4.zero;
+            m_ViewProjMatrix = Matrix4x4.identity;
+            m_InvViewProjMatrix = Matrix4x4.identity;
             m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
             m_BendQualitySettings = ResolveBendQualitySettings(m_ShadowQuality);
             m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
@@ -298,7 +307,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_IsActive = true;
-            m_InvViewProjMatrix = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true).inverse;
+            m_ViewProjMatrix = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
+            m_InvViewProjMatrix = m_ViewProjMatrix.inverse;
 
             m_CascadeCount = shadowData.cascadeCount;
             m_MaxShadowDistance = shadowData.maxShadowDistance;
@@ -341,6 +351,7 @@ namespace VividRP.Runtime.RenderPass.Core
                             additionalLightData.dirLightBendSSSSurfaceThickness,
                             additionalLightData.dirLightBendSSSBilinearThreshold,
                             additionalLightData.dirLightBendSSSShadowContrast,
+                            additionalLightData.dirLightBendSSSMaxRayDistance,
                             additionalLightData.dirLightBendSSSIgnoreEdgePixels,
                             additionalLightData.dirLightBendSSSUsePrecisionOffset,
                             additionalLightData.dirLightBendSSSBilinearSamplingOffsetMode);
@@ -353,7 +364,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     m_BendDispatchList = BuildBendDispatchList(
                         m_BendDispatches,
-                        cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true) * m_LightDirectionWS,
+                        m_ViewProjMatrix * m_LightDirectionWS,
                         new Vector2Int(width, height),
                         Vector2Int.zero,
                         new Vector2Int(width, height));
@@ -421,6 +432,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FrameIndex = 0;
             m_BendDispatchList = CreateEmptyBendDispatchList();
             m_BendDepthTextureSize = Vector4.zero;
+            m_ViewProjMatrix = Matrix4x4.identity;
+            m_InvViewProjMatrix = Matrix4x4.identity;
             m_CascadeWorldTexelSizes = Vector4.zero;
             m_CascadeBorders = Vector4.zero;
         }
@@ -502,6 +515,10 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ResolveCompute, CSMOutputHeightId, m_DirectionalShadowTexture.desc.Height);
             cmd.SetComputeVectorParam(m_ResolveCompute, CSMBendLightCoordinateId, m_BendDispatchList.LightCoordinate);
             cmd.SetComputeVectorParam(m_ResolveCompute, CSMBendDepthTextureSizeId, m_BendDepthTextureSize);
+            cmd.SetComputeMatrixParam(m_ResolveCompute, CSMBendViewProjMatrixId, m_ViewProjMatrix);
+            cmd.SetComputeMatrixParam(m_ResolveCompute, CSMInvViewProjMatrixId, m_InvViewProjMatrix);
+            cmd.SetComputeVectorParam(m_ResolveCompute, CSMLightDirectionWSId, m_LightDirectionWS);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMBendMaxRayDistanceId, m_BendQualitySettings.MaxRayDistance);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMBendSurfaceThicknessId, m_BendQualitySettings.SurfaceThickness);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMBendBilinearThresholdId, m_BendQualitySettings.BilinearThreshold);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMBendShadowContrastId, m_BendQualitySettings.ShadowContrast);
@@ -591,6 +608,7 @@ namespace VividRP.Runtime.RenderPass.Core
                         VividAdditionalLightData.DefaultDirLightBendSSSSurfaceThickness,
                         VividAdditionalLightData.DefaultDirLightBendSSSBilinearThreshold,
                         VividAdditionalLightData.DefaultDirLightBendSSSShadowContrast,
+                        VividAdditionalLightData.DefaultDirLightBendSSSMaxRayDistance,
                         VividAdditionalLightData.DefaultDirLightBendSSSIgnoreEdgePixels,
                         VividAdditionalLightData.DefaultDirLightBendSSSUsePrecisionOffset,
                         VividAdditionalLightData.DefaultDirLightBendSSSBilinearSamplingOffsetMode),

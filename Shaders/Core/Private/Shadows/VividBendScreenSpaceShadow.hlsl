@@ -109,6 +109,15 @@ struct DispatchParameters
                                         // If 'PointBorderSampler' is an Unnormalized sampler, then this value can be hard-coded to 1.
                                         // The 'USE_HALF_PIXEL_OFFSET' macro might need to be defined if sampling at exact pixel coordinates isn't precise (e.g., if odd patterns appear in the shadow).
 
+    // VividRP world-space trace limit. Bend's original SAMPLE_COUNT is a fixed pixel length, which changes
+    // its world-space reach as camera distance changes. These values project a fixed world-space endpoint
+    // and use SAMPLE_COUNT only as the upper bound on work.
+    float2 DepthTextureSize;
+    float4x4 ViewProjMatrix;
+    float4x4 InvViewProjMatrix;
+    float3 LightDirectionWS;
+    float MaxRayDistance;
+
     // Texture2D DepthTexture;           // Original bend_sss_gpu.ush field. VividRP uses global _DepthTexture so this header can be included from Unity compute kernels.
     // SamplerState PointBorderSampler;  // Original bend_sss_gpu.ush field. VividRP emulates Clamp-To-Border-Color in SampleDepthTexture().
 };
@@ -143,6 +152,35 @@ struct DispatchParameters
             return inParameters.FarDepthValue;
 
         return _DepthTexture.SampleLevel(sampler_PointClamp, uv, 0).r;
+    }
+
+    static float ComputeWorldSpaceMaxSampleCount(
+        struct DispatchParameters inParameters,
+        float2 pixelCenter,
+        float deviceDepth)
+    {
+        float lightDirectionLengthSq = dot(inParameters.LightDirectionWS, inParameters.LightDirectionWS);
+        if (inParameters.MaxRayDistance <= 0.0 || lightDirectionLengthSq <= 1.0e-8)
+            return 0.0;
+
+        float2 uv = pixelCenter * inParameters.InvDepthTextureSize;
+        float3 receiverPositionWS = ComputeWorldSpacePosition(uv, deviceDepth, inParameters.InvViewProjMatrix);
+        float3 lightDirectionWS = inParameters.LightDirectionWS * rsqrt(lightDirectionLengthSq);
+        float3 rayEndPositionWS = receiverPositionWS + lightDirectionWS * inParameters.MaxRayDistance;
+        float4 receiverClip = mul(inParameters.ViewProjMatrix, float4(receiverPositionWS, 1.0));
+        float4 rayEndClip = mul(inParameters.ViewProjMatrix, float4(rayEndPositionWS, 1.0));
+
+        if (abs(receiverClip.w) <= 1.0e-6
+            || abs(rayEndClip.w) <= 1.0e-6
+            || receiverClip.w * rayEndClip.w <= 0.0)
+        {
+            return (float)SAMPLE_COUNT;
+        }
+
+        float2 receiverNDC = receiverClip.xy / receiverClip.w;
+        float2 rayEndNDC = rayEndClip.xy / rayEndClip.w;
+        float2 projectedRay = abs(rayEndNDC - receiverNDC) * (0.5 * inParameters.DepthTextureSize);
+        return min(max(projectedRay.x, projectedRay.y), (float)SAMPLE_COUNT);
     }
 
     // Gets the start pixel coordinates for the pixels in the wavefront
@@ -209,7 +247,7 @@ struct DispatchParameters
     groupshared bool LdsEarlyOut;
 
     #define DEBUG_HIT_UV (0)
-    #define PACKED_HIT_INDEX (1 && !DEBUG_HIT_UV)
+    #define PACKED_HIT_INDEX ((SAMPLE_COUNT <= 127) && !DEBUG_HIT_UV)
 
 #if DEBUG_HIT_UV
     groupshared float2 UVData[READ_COUNT * WAVE_SIZE];
@@ -397,6 +435,10 @@ struct DispatchParameters
             return;
 
         float start_depth = sampling_depth[0];
+        float max_sample_count = ComputeWorldSpaceMaxSampleCount(
+            inParameters,
+            write_xy + 0.5,
+            start_depth);
 
         // lerp away from far depth by a tiny fraction?
         if (inParameters.UsePrecisionOffset)
@@ -438,6 +480,8 @@ struct DispatchParameters
         [unroll] for (i = 0; i < HARD_SHADOW_SAMPLES; i++)
         {
             float depth_delta = abs(start_depth - DepthData[sample_index + i] * depth_scale);
+            float sample_coverage = saturate(max_sample_count - (float)i);
+            depth_delta = lerp(1.0, depth_delta, sample_coverage);
 
         #if TRACK_HIT_UV && PACKED_HIT_INDEX
             uint depth_delta_packed = (asuint(depth_delta) & 0xffffff80) | (i + 1);
@@ -459,40 +503,19 @@ struct DispatchParameters
         #endif
         }
 
-        // Brute force go!
-        // The main shadow samples, averaged in to a set of 4 shadow values
-        [unroll] for (i = HARD_SHADOW_SAMPLES; i < SAMPLE_COUNT - FADE_OUT_SAMPLES; i++)
+        // The remaining samples are averaged into four values. Move the fade window with the projected
+        // world-space endpoint so the transition occupies a stable fraction of the world-space ray.
+        float fade_sample_count = max(
+            max_sample_count * ((float)FADE_OUT_SAMPLES / (float)SAMPLE_COUNT),
+            1.0);
+        float fade_start = max_sample_count - fade_sample_count;
+
+        [unroll] for (i = HARD_SHADOW_SAMPLES; i < SAMPLE_COUNT; i++)
         {
-            float depth_delta = abs(start_depth - DepthData[sample_index + i] * depth_scale);
-
-        #if TRACK_HIT_UV && PACKED_HIT_INDEX
-            uint depth_delta_packed = (asuint(depth_delta) & 0xffffff80) | (i + 1);
-            shadow_value_packed[i & 3] = min(shadow_value_packed[i & 3], depth_delta_packed);
-        #else
-            // Do the same as the hard_shadow code above, but this will accumulate to 4 separate values.
-            // By using 4 values, the average shadow can be taken, which can help soften single-pixel shadows.
-            shadow_value[i & 3] = min(shadow_value[i & 3], depth_delta);
-        #endif
-
-        #if TRACK_HIT_UV && !PACKED_HIT_INDEX
-            if (depth_delta < hit_shadow)
-            {
-                hit_shadow = depth_delta;
-                hit_index = i + 1;
-            #if DEBUG_HIT_UV
-                hit_uv = UVData[sample_index + i];
-            #endif
-            }
-        #endif
-        }
-
-        // Final fade out samples
-        [unroll] for (i = SAMPLE_COUNT - FADE_OUT_SAMPLES; i < SAMPLE_COUNT; i++)
-        {
-            // Add the fade value to these samples
-            const float fade_out = (float)(i + 1 - (SAMPLE_COUNT - FADE_OUT_SAMPLES)) / (float)(FADE_OUT_SAMPLES + 1) * 0.75;
-
+            float sample_coverage = saturate(max_sample_count - (float)i);
+            float fade_out = saturate(((float)(i + 1) - fade_start) / (fade_sample_count + 1.0)) * 0.75;
             float depth_delta = abs(start_depth - DepthData[sample_index + i] * depth_scale) + fade_out;
+            depth_delta = lerp(1.0, depth_delta, sample_coverage);
 
         #if TRACK_HIT_UV && PACKED_HIT_INDEX
             uint depth_delta_packed = (asuint(depth_delta) & 0xffffff80) | (i + 1);

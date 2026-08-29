@@ -101,6 +101,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_DirLightPCSSBlockerSampleCountLabel = EditorGUIUtility.TrTextContent("Blocker Sample Count", "Controls the number of samples used to determine average blocker distance. Higher values reduce noise at additional cost.");
         private static readonly GUIContent s_DirLightPCSSFilterSampleCountLabel = EditorGUIUtility.TrTextContent("Filter Sample Count", "Controls the number of samples used to filter the penumbra. Higher values reduce noise at additional cost.");
         private static readonly GUIContent s_BendSSSSettingsLabel = EditorGUIUtility.TrTextContent("Bend SSS");
+        private static readonly GUIContent s_DirLightBendSSSMaxRayDistanceLabel = EditorGUIUtility.TrTextContent("Max Ray Distance", "Maximum Bend screen-space shadow trace distance in world units. A world-space limit keeps contact-shadow extent stable as camera distance changes.");
         private static readonly GUIContent s_DirLightBendSSSSurfaceThicknessLabel = EditorGUIUtility.TrTextContent("Surface Thickness", "Assumed screen-space caster thickness as a percentage of non-linear depth remaining to the far plane.");
         private static readonly GUIContent s_DirLightBendSSSBilinearThresholdLabel = EditorGUIUtility.TrTextContent("Bilinear Threshold", "Depth-difference threshold used to stop interpolation across detected edges.");
         private static readonly GUIContent s_DirLightBendSSSShadowContrastLabel = EditorGUIUtility.TrTextContent("Shadow Contrast", "Contrast boost applied to Bend screen-space shadow samples. Values greater than one darken contact transitions.");
@@ -839,6 +840,11 @@ namespace VividRP.Editor
 
             using (new EditorGUI.IndentLevelScope())
             {
+                EditorGUILayout.Slider(
+                    m_SerializedLight.dirLightBendSSSMaxRayDistance,
+                    VividAdditionalLightData.MinDirLightBendSSSMaxRayDistance,
+                    VividAdditionalLightData.MaxDirLightBendSSSMaxRayDistance,
+                    s_DirLightBendSSSMaxRayDistanceLabel);
                 EditorGUILayout.Slider(
                     m_SerializedLight.dirLightBendSSSSurfaceThickness,
                     VividAdditionalLightData.MinDirLightBendSSSSurfaceThickness,

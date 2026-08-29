@@ -172,6 +172,7 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.dirLightPCSSMinFilterMaxAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.dirLightPCSSBlockerSearchAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.dirLightPCSSBlockerSamplingClumpExponent, Is.Not.Null);
+            Assert.That(serializedLight.dirLightBendSSSMaxRayDistance, Is.Not.Null);
             Assert.That(serializedLight.dirLightBendSSSSurfaceThickness, Is.Not.Null);
             Assert.That(serializedLight.dirLightBendSSSBilinearThreshold, Is.Not.Null);
             Assert.That(serializedLight.dirLightBendSSSShadowContrast, Is.Not.Null);
@@ -566,6 +567,9 @@ namespace VividRP.Editor.Tests
                 additionalData.dirLightPCSSBlockerSamplingClumpExponent,
                 Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSBlockerSamplingClumpExponent));
             Assert.That(
+                additionalData.dirLightBendSSSMaxRayDistance,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSMaxRayDistance));
+            Assert.That(
                 additionalData.dirLightBendSSSSurfaceThickness,
                 Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSSurfaceThickness));
             Assert.That(
@@ -631,6 +635,7 @@ namespace VividRP.Editor.Tests
             additionalData.dirLightPCSSMinFilterMaxAngularDiameter = -1.0f;
             additionalData.dirLightPCSSBlockerSearchAngularDiameter = -1.0f;
             additionalData.dirLightPCSSBlockerSamplingClumpExponent = 999.0f;
+            additionalData.dirLightBendSSSMaxRayDistance = 999.0f;
             additionalData.dirLightBendSSSSurfaceThickness = 999.0f;
             additionalData.dirLightBendSSSBilinearThreshold = -1.0f;
             additionalData.dirLightBendSSSShadowContrast = -1.0f;
@@ -663,6 +668,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 additionalData.dirLightPCSSBlockerSamplingClumpExponent,
                 Is.EqualTo(VividAdditionalLightData.MaxDirLightPCSSBlockerSamplingClumpExponent));
+            Assert.That(
+                additionalData.dirLightBendSSSMaxRayDistance,
+                Is.EqualTo(VividAdditionalLightData.MaxDirLightBendSSSMaxRayDistance));
             Assert.That(
                 additionalData.dirLightBendSSSSurfaceThickness,
                 Is.EqualTo(VividAdditionalLightData.MaxDirLightBendSSSSurfaceThickness));

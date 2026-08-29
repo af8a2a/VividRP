@@ -715,6 +715,9 @@ namespace VividRP.Runtime
         internal const float MinDirLightPCSSBlockerSamplingClumpExponent = 1.0f;
         internal const float MaxDirLightPCSSBlockerSamplingClumpExponent = 6.0f;
         internal const float DefaultDirLightPCSSBlockerSamplingClumpExponent = 2.0f;
+        internal const float MinDirLightBendSSSMaxRayDistance = 0.0f;
+        internal const float MaxDirLightBendSSSMaxRayDistance = 10.0f;
+        internal const float DefaultDirLightBendSSSMaxRayDistance = 0.5f;
         internal const float MinDirLightBendSSSSurfaceThickness = 0.0f;
         internal const float MaxDirLightBendSSSSurfaceThickness = 0.05f;
         internal const float DefaultDirLightBendSSSSurfaceThickness = 0.004f;
@@ -813,6 +816,9 @@ namespace VividRP.Runtime
 
         [SerializeField, Range(MinDirLightPCSSBlockerSamplingClumpExponent, MaxDirLightPCSSBlockerSamplingClumpExponent)]
         private float m_DirLightPCSSBlockerSamplingClumpExponent = DefaultDirLightPCSSBlockerSamplingClumpExponent;
+
+        [SerializeField, Range(MinDirLightBendSSSMaxRayDistance, MaxDirLightBendSSSMaxRayDistance)]
+        private float m_DirLightBendSSSMaxRayDistance = DefaultDirLightBendSSSMaxRayDistance;
 
         [SerializeField, Range(MinDirLightBendSSSSurfaceThickness, MaxDirLightBendSSSSurfaceThickness)]
         private float m_DirLightBendSSSSurfaceThickness = DefaultDirLightBendSSSSurfaceThickness;
@@ -1183,6 +1189,17 @@ namespace VividRP.Runtime
                 MinDirLightPCSSBlockerSamplingClumpExponent,
                 MaxDirLightPCSSBlockerSamplingClumpExponent,
                 DefaultDirLightPCSSBlockerSamplingClumpExponent);
+        }
+
+        public float dirLightBendSSSMaxRayDistance
+        {
+            get => m_DirLightBendSSSMaxRayDistance;
+            set => SetClampedFloat(
+                ref m_DirLightBendSSSMaxRayDistance,
+                value,
+                MinDirLightBendSSSMaxRayDistance,
+                MaxDirLightBendSSSMaxRayDistance,
+                DefaultDirLightBendSSSMaxRayDistance);
         }
 
         public float dirLightBendSSSSurfaceThickness
@@ -1844,6 +1861,11 @@ namespace VividRP.Runtime
                 MinDirLightPCSSBlockerSamplingClumpExponent,
                 MaxDirLightPCSSBlockerSamplingClumpExponent,
                 DefaultDirLightPCSSBlockerSamplingClumpExponent);
+            m_DirLightBendSSSMaxRayDistance = SanitizeClampedFloat(
+                m_DirLightBendSSSMaxRayDistance,
+                MinDirLightBendSSSMaxRayDistance,
+                MaxDirLightBendSSSMaxRayDistance,
+                DefaultDirLightBendSSSMaxRayDistance);
             m_DirLightBendSSSSurfaceThickness = SanitizeClampedFloat(
                 m_DirLightBendSSSSurfaceThickness,
                 MinDirLightBendSSSSurfaceThickness,

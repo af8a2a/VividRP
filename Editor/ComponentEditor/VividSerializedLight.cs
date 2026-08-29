@@ -31,6 +31,7 @@ namespace VividRP.Editor
         internal SerializedProperty dirLightPCSSMinFilterMaxAngularDiameter { get; }
         internal SerializedProperty dirLightPCSSBlockerSearchAngularDiameter { get; }
         internal SerializedProperty dirLightPCSSBlockerSamplingClumpExponent { get; }
+        internal SerializedProperty dirLightBendSSSMaxRayDistance { get; }
         internal SerializedProperty dirLightBendSSSSurfaceThickness { get; }
         internal SerializedProperty dirLightBendSSSBilinearThreshold { get; }
         internal SerializedProperty dirLightBendSSSShadowContrast { get; }
@@ -105,6 +106,7 @@ namespace VividRP.Editor
             dirLightPCSSMinFilterMaxAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSMinFilterMaxAngularDiameter");
             dirLightPCSSBlockerSearchAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSearchAngularDiameter");
             dirLightPCSSBlockerSamplingClumpExponent = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSamplingClumpExponent");
+            dirLightBendSSSMaxRayDistance = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSMaxRayDistance");
             dirLightBendSSSSurfaceThickness = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSSurfaceThickness");
             dirLightBendSSSBilinearThreshold = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSBilinearThreshold");
             dirLightBendSSSShadowContrast = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSShadowContrast");

@@ -121,6 +121,9 @@ namespace VividRP.Editor.Tests
             Assert.That(medium.ShadowContrast, Is.LessThanOrEqualTo(high.ShadowContrast));
             Assert.That(high.ShadowContrast, Is.EqualTo(veryHigh.ShadowContrast).Within(0.001f));
             Assert.That(veryHigh.ShadowContrast, Is.EqualTo(unreal.ShadowContrast).Within(0.001f));
+            Assert.That(
+                unreal.MaxRayDistance,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSMaxRayDistance).Within(0.001f));
             Assert.That(unreal.IgnoreEdgePixels, Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSIgnoreEdgePixels));
             Assert.That(unreal.UsePrecisionOffset, Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSUsePrecisionOffset));
             Assert.That(

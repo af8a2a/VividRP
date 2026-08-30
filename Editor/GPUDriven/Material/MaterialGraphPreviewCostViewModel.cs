@@ -129,7 +129,7 @@ namespace VividRP.Editor.GPUDriven
 
             return Build(
                 MaterialGraphEditorCompiler.Compile(graph),
-                GPUDrivenMaterialCompiler.ProgramCatalog,
+                MaterialProgramCatalogBaker.CurrentCatalog,
                 GPUDrivenMaterialCompiler.ProgramVersion);
         }
 
@@ -220,7 +220,7 @@ namespace VividRP.Editor.GPUDriven
                     result.Module,
                     lowering.CoverageProgram,
                     lowering.SurfaceProgram,
-                    lowering.MaterialLayout,
+                    lowering.GenericLayout,
                     MaterialProgramCostBudget.Prototype);
             }
             catch (ArgumentException)

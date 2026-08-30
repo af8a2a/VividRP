@@ -451,9 +451,15 @@ namespace VividRP.Runtime.GPUDriven
             int comparison = string.CompareOrdinal(
                 left.Declaration.Symbol,
                 right.Declaration.Symbol);
-            if (comparison != 0)
-                return comparison;
-            return ((int) left.Declaration.Type).CompareTo((int) right.Declaration.Type);
+            if (comparison == 0)
+            {
+                comparison = ((int) left.Declaration.Type).CompareTo(
+                    (int) right.Declaration.Type);
+            }
+            return comparison != 0
+                ? comparison
+                : ((int) left.Declaration.SampleClass).CompareTo(
+                    (int) right.Declaration.SampleClass);
         }
 
         private static int[] BuildCanonicalNodes(
@@ -767,6 +773,7 @@ namespace VividRP.Runtime.GPUDriven
                     values.ResourceDeclarations[i];
                 writer.WriteString(declaration.Symbol);
                 writer.WriteUInt32((uint) declaration.Type);
+                writer.WriteUInt32((uint) declaration.SampleClass);
             }
 
             writer.WriteUInt32((uint) values.Nodes.Count);

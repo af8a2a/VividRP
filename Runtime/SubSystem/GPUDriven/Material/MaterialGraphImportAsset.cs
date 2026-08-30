@@ -43,6 +43,12 @@ namespace VividRP.Runtime.GPUDriven
         private ulong m_LayoutFingerprint;
 
         [SerializeField]
+        private uint m_ArtifactSetHashVersion;
+
+        [SerializeField]
+        private ulong m_ArtifactSetHash;
+
+        [SerializeField]
         private string[] m_Diagnostics = Array.Empty<string>();
 
         [SerializeField]
@@ -76,6 +82,11 @@ namespace VividRP.Runtime.GPUDriven
                 m_LayoutFingerprintVersion,
                 m_LayoutFingerprint);
 
+        internal MaterialProgramArtifactSetHash ArtifactSetHash =>
+            new MaterialProgramArtifactSetHash(
+                m_ArtifactSetHashVersion,
+                m_ArtifactSetHash);
+
         internal IReadOnlyList<string> Diagnostics => m_Diagnostics;
 
         internal uint ContentVersion => m_ContentVersion;
@@ -90,6 +101,99 @@ namespace VividRP.Runtime.GPUDriven
             if (catalog == null)
                 throw new ArgumentNullException(nameof(catalog));
 
+            MaterialProgramCatalog.ManifestEntry catalogEntry = null;
+            bool isCataloged = result.Program != null
+                && catalog.TryGetCatalogedProgram(result.Program, out catalogEntry);
+            Apply(
+                result,
+                programVersion,
+                catalog.ManifestHash,
+                MaterialProgramArtifactSetHashBuilder.Compute(
+                    catalog.ManifestHash),
+                isCataloged,
+                catalogEntry?.ProgramID ?? VividMaterialProgramID.Invalid);
+        }
+
+        internal void Apply(
+            MaterialGraphCompilationResult result,
+            uint programVersion,
+            MaterialProgramCatalogAsset frozenCatalog)
+        {
+            if (result == null)
+                throw new ArgumentNullException(nameof(result));
+            if (frozenCatalog == null)
+                throw new ArgumentNullException(nameof(frozenCatalog));
+            if (!frozenCatalog.IsCommitted
+                || !frozenCatalog.ArtifactSetHash.IsValid)
+            {
+                throw new InvalidOperationException(
+                    "Frozen Material Program Catalog has not committed a valid artifact set.");
+            }
+
+            MaterialProgramCatalogAsset.Slot match = null;
+            if (result.Program != null)
+            {
+                for (int slotIndex = 0;
+                     slotIndex < frozenCatalog.Slots.Count;
+                     slotIndex++)
+                {
+                    MaterialProgramCatalogAsset.Slot candidate =
+                        frozenCatalog.Slots[slotIndex];
+                    if (candidate == null
+                        || !candidate.MatchesCompiledProgram(result.Program))
+                    {
+                        continue;
+                    }
+                    if (match != null)
+                    {
+                        throw new InvalidOperationException(
+                            "Frozen Material Program Catalog contains duplicate compiled payloads.");
+                    }
+                    match = candidate;
+                }
+            }
+            Apply(
+                result,
+                programVersion,
+                frozenCatalog.ManifestHash,
+                frozenCatalog.ArtifactSetHash,
+                match != null,
+                match?.ProgramID ?? VividMaterialProgramID.Invalid);
+        }
+
+        internal void ApplyFailure(uint programVersion, string diagnostic)
+        {
+            if (string.IsNullOrEmpty(diagnostic))
+                throw new ArgumentException(
+                    "A failure diagnostic is required.",
+                    nameof(diagnostic));
+
+            m_Succeeded = false;
+            m_ProgramVersion = programVersion;
+            m_SemanticHash = string.Empty;
+            m_CompiledHash = string.Empty;
+            m_IsCataloged = false;
+            m_ProgramID = (uint) VividMaterialProgramID.Invalid;
+            m_CatalogManifestHashVersion = 0u;
+            m_CatalogManifestHash = 0ul;
+            m_CompiledHashVersion = 0u;
+            m_CompiledHashValue = 0ul;
+            m_LayoutFingerprintVersion = 0u;
+            m_LayoutFingerprint = 0ul;
+            m_ArtifactSetHashVersion = 0u;
+            m_ArtifactSetHash = 0ul;
+            m_Diagnostics = new[] { diagnostic };
+            RecomputeContentVersion();
+        }
+
+        private void Apply(
+            MaterialGraphCompilationResult result,
+            uint programVersion,
+            in MaterialProgramCatalogManifestHash manifestHash,
+            in MaterialProgramArtifactSetHash artifactSetHash,
+            bool isCataloged,
+            VividMaterialProgramID programID)
+        {
             m_Succeeded = result.Succeeded;
             m_ProgramVersion = programVersion;
             m_SemanticHash = result.Program != null
@@ -99,14 +203,13 @@ namespace VividRP.Runtime.GPUDriven
                 ? result.Program.CompiledHash.ToString()
                 : string.Empty;
 
-            MaterialProgramCatalogManifestHash manifestHash = catalog.ManifestHash;
-            m_CatalogManifestHashVersion = manifestHash.Version;
-            m_CatalogManifestHash = manifestHash.Value;
-            MaterialProgramCatalog.ManifestEntry catalogEntry = null;
-            m_IsCataloged = result.Program != null
-                && catalog.TryGetCatalogedProgram(result.Program, out catalogEntry);
-            m_ProgramID = catalogEntry != null
-                ? (uint) catalogEntry.ProgramID
+            MaterialProgramCatalogManifestHash effectiveManifestHash =
+                result.Succeeded ? manifestHash : default;
+            m_CatalogManifestHashVersion = effectiveManifestHash.Version;
+            m_CatalogManifestHash = effectiveManifestHash.Value;
+            m_IsCataloged = result.Program != null && isCataloged;
+            m_ProgramID = m_IsCataloged
+                ? (uint) programID
                 : (uint) VividMaterialProgramID.Invalid;
 
             CompiledMaterialProgramHash compiledHash = result.Program != null
@@ -120,6 +223,10 @@ namespace VividRP.Runtime.GPUDriven
                     : default;
             m_LayoutFingerprintVersion = layoutFingerprint.Version;
             m_LayoutFingerprint = layoutFingerprint.Value;
+            MaterialProgramArtifactSetHash effectiveArtifactSetHash =
+                result.Succeeded ? artifactSetHash : default;
+            m_ArtifactSetHashVersion = effectiveArtifactSetHash.Version;
+            m_ArtifactSetHash = effectiveArtifactSetHash.Value;
 
             int diagnosticCount = result.Diagnostics.Count
                 + (result.Succeeded && !m_IsCataloged ? 1 : 0);
@@ -141,6 +248,11 @@ namespace VividRP.Runtime.GPUDriven
                     "MAT-CATALOG: Compiled program is not present in the frozen Material Program Catalog.";
             }
 
+            RecomputeContentVersion();
+        }
+
+        private void RecomputeContentVersion()
+        {
             ulong contentHash = MaterialProgramHashUtility.OffsetBasis;
             MaterialProgramHashUtility.Add(ref contentHash, m_Succeeded);
             MaterialProgramHashUtility.Add(ref contentHash, m_ProgramVersion);
@@ -156,6 +268,20 @@ namespace VividRP.Runtime.GPUDriven
                 ref contentHash,
                 m_LayoutFingerprintVersion);
             MaterialProgramHashUtility.Add(ref contentHash, m_LayoutFingerprint);
+            MaterialProgramHashUtility.Add(
+                ref contentHash,
+                m_ArtifactSetHashVersion);
+            MaterialProgramHashUtility.Add(ref contentHash, m_ArtifactSetHash);
+            int diagnosticCount = m_Diagnostics?.Length ?? 0;
+            MaterialProgramHashUtility.Add(ref contentHash, diagnosticCount);
+            for (int diagnosticIndex = 0;
+                 diagnosticIndex < diagnosticCount;
+                 diagnosticIndex++)
+            {
+                MaterialProgramHashUtility.Add(
+                    ref contentHash,
+                    m_Diagnostics[diagnosticIndex] ?? string.Empty);
+            }
             m_ContentVersion = (uint) (contentHash ^ (contentHash >> 32));
             if (m_ContentVersion == 0u)
                 m_ContentVersion = 1u;

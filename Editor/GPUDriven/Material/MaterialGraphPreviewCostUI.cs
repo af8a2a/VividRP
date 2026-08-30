@@ -490,8 +490,8 @@ namespace VividRP.Editor.GPUDriven
 
         private void BindProgramData(VividMaterialProgramID programID)
         {
-            MaterialProgramCatalog.ManifestEntry entry =
-                GPUDrivenMaterialCompiler.GetCatalogedMaterialProgram(programID);
+            MaterialProgramRuntimeBinding program =
+                GPUDrivenMaterialCompiler.GetRuntimeProgramBinding(programID);
             var legacy = new VividMaterialData
             {
                 AlbedoColor = new float4(0.42f, 0.55f, 0.72f, 1.0f),
@@ -510,11 +510,11 @@ namespace VividRP.Editor.GPUDriven
                 TopMetallic = Mathf.Clamp01(legacy.Metallic * 0.35f),
                 LayerWeight = 0.5f,
             };
-            bool isDual = entry.Program.Lowering.SelectionKey.Topology
+            bool isDual = program.Topology
                 != MaterialProgramTopologySpecialization.SingleSlab;
             uint4[] parameterLanes =
-                GPUDrivenMaterialCompiler.CreateGenericParameterLanes(
-                    entry,
+                GPUDrivenMaterialCompiler.CreatePreviewParameterLanes(
+                    program,
                     legacy,
                     dual,
                     isDual);
@@ -526,7 +526,7 @@ namespace VividRP.Editor.GPUDriven
             if (parameterLanes.Length > 0)
                 m_ParameterBuffer.SetData(parameterLanes);
 
-            int resourceCount = entry.Program.Lowering.GenericLayout.ResourceCount;
+            int resourceCount = program.ResourceCount;
             var resources = new VividMaterialResourceData[Mathf.Max(1, resourceCount)];
             for (int resourceIndex = 0;
                  resourceIndex < resourceCount;

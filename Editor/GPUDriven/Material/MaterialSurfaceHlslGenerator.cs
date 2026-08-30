@@ -1,12 +1,10 @@
 using System;
 using System.IO;
-using System.Text;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.Callbacks;
 using UnityEngine;
-using Unity.Scripting.LifecycleManagement;
 using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor
@@ -16,63 +14,20 @@ namespace VividRP.Editor
         private const string GeneratedRelativePath =
             "Shaders/Core/Public/GPUDriven/VividMaterialSurfaceAOT.generated.hlsl";
 
-        [NoAutoStaticsCleanup]
-        private static bool s_IsGenerating;
-
         internal static string GeneratedPath =>
             VividPackagePathUtility.GetPreferredAssetPath(GeneratedRelativePath);
 
         internal static string GenerateAll()
         {
-            return Generate(GetBuiltinCatalog(), GeneratedPath);
-        }
-
-        internal static string Generate(
-            MaterialProgramCatalog catalog,
-            string generatedPath)
-        {
-            if (catalog == null)
-                throw new ArgumentNullException(nameof(catalog));
-            if (string.IsNullOrEmpty(generatedPath))
-                throw new ArgumentException("A generated HLSL path is required.", nameof(generatedPath));
-            if (s_IsGenerating)
-                return generatedPath;
-
-            s_IsGenerating = true;
-            try
-            {
-                string source = BuildSource(catalog);
-                string directory = Path.GetDirectoryName(generatedPath);
-                if (!string.IsNullOrEmpty(directory))
-                    Directory.CreateDirectory(directory);
-
-                bool sourceChanged = !File.Exists(generatedPath)
-                    || !string.Equals(
-                        File.ReadAllText(generatedPath),
-                        source,
-                        StringComparison.Ordinal);
-                if (sourceChanged)
-                {
-                    File.WriteAllText(
-                        generatedPath,
-                        source,
-                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-                    AssetDatabase.ImportAsset(
-                        generatedPath,
-                        ImportAssetOptions.ForceSynchronousImport);
-                }
-
-                return generatedPath;
-            }
-            finally
-            {
-                s_IsGenerating = false;
-            }
+            MaterialProgramCatalogBaker.BakeAll();
+            return GeneratedPath;
         }
 
         internal static bool IsSynchronized()
         {
-            return IsSynchronized(GetBuiltinCatalog(), GeneratedPath);
+            return IsSynchronized(
+                MaterialProgramCatalogBaker.CurrentCatalog,
+                GeneratedPath);
         }
 
         internal static bool IsSynchronized(
@@ -88,10 +43,21 @@ namespace VividRP.Editor
 
             try
             {
+                string stampPath = Path.Combine(
+                        Path.GetDirectoryName(generatedPath) ?? string.Empty,
+                        MaterialProgramArtifactSetHlslContract
+                            .PublishedStampFileName)
+                    .Replace('\\', '/');
                 return string.Equals(
                         File.ReadAllText(generatedPath),
-                    BuildSource(catalog),
-                    StringComparison.Ordinal);
+                        BuildSource(catalog),
+                        StringComparison.Ordinal)
+                    && File.Exists(stampPath)
+                    && string.Equals(
+                        File.ReadAllText(stampPath),
+                        MaterialProgramCatalogHlslStampSourceBuilder.BuildSource(
+                            catalog),
+                        StringComparison.Ordinal);
             }
             catch (Exception)
             {
@@ -101,18 +67,13 @@ namespace VividRP.Editor
 
         internal static string BuildSource()
         {
-            return BuildSource(GetBuiltinCatalog());
+            return BuildSource(MaterialProgramCatalogBaker.CurrentCatalog);
         }
 
         internal static string BuildSource(
             MaterialProgramCatalog catalog)
         {
             return MaterialSurfaceHlslSourceBuilder.BuildSource(catalog);
-        }
-
-        internal static MaterialProgramCatalog GetBuiltinCatalog()
-        {
-            return GPUDrivenMaterialCompiler.ProgramCatalog;
         }
 
         [MenuItem("VividRP/GPU Driven/Generate AOT Surface HLSL")]
@@ -166,7 +127,8 @@ namespace VividRP.Editor
         {
             try
             {
-                MaterialProgramCatalogBaker.BakeAll();
+                MaterialProgramCatalogBaker.BakeAll(
+                    synchronizeGraphImports: true);
             }
             catch (Exception exception)
             {

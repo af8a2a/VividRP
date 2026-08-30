@@ -2,6 +2,14 @@ using System;
 
 namespace VividRP.Runtime.GPUDriven
 {
+    internal enum MaterialTextureSampleClass
+    {
+        Raw = 0,
+        Color = 1,
+        Normal = 2,
+        Mask = 3,
+    }
+
     internal readonly struct MaterialParameterDeclaration :
         IEquatable<MaterialParameterDeclaration>
     {
@@ -56,18 +64,30 @@ namespace VividRP.Runtime.GPUDriven
         IEquatable<MaterialResourceDeclaration>
     {
         internal MaterialResourceDeclaration(string symbol, MaterialValueType type)
+            : this(symbol, type, MaterialTextureSampleClass.Raw)
+        {
+        }
+
+        internal MaterialResourceDeclaration(
+            string symbol,
+            MaterialValueType type,
+            MaterialTextureSampleClass sampleClass)
         {
             Symbol = symbol;
             Type = type;
+            SampleClass = sampleClass;
         }
 
         internal string Symbol { get; }
 
         internal MaterialValueType Type { get; }
 
+        internal MaterialTextureSampleClass SampleClass { get; }
+
         public bool Equals(MaterialResourceDeclaration other)
         {
             return Type == other.Type
+                && SampleClass == other.SampleClass
                 && string.Equals(Symbol, other.Symbol, StringComparison.Ordinal);
         }
 
@@ -83,7 +103,8 @@ namespace VividRP.Runtime.GPUDriven
                 int hashCode = Symbol != null
                     ? StringComparer.Ordinal.GetHashCode(Symbol)
                     : 0;
-                return (hashCode * 397) ^ (int) Type;
+                hashCode = (hashCode * 397) ^ (int) Type;
+                return (hashCode * 397) ^ (int) SampleClass;
             }
         }
 
@@ -102,6 +123,8 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
+    // Compatibility boundary for the authored StandardLit/DualSlab fields. Generic
+    // program identity and Frozen runtime descriptors use declarations directly.
     internal static class MaterialNativeTemplateDeclarationAdapter
     {
         private static readonly MaterialParameterDeclaration s_BaseColorParameter =
@@ -124,17 +147,35 @@ namespace VividRP.Runtime.GPUDriven
             new("Emission", MaterialValueType.Float3);
 
         private static readonly MaterialResourceDeclaration s_BaseColorTexture =
-            new("BaseColor", MaterialValueType.Texture2D);
+            new(
+                "BaseColor",
+                MaterialValueType.Texture2D,
+                MaterialTextureSampleClass.Color);
         private static readonly MaterialResourceDeclaration s_TopBaseColorTexture =
-            new("TopBaseColor", MaterialValueType.Texture2D);
+            new(
+                "TopBaseColor",
+                MaterialValueType.Texture2D,
+                MaterialTextureSampleClass.Color);
         private static readonly MaterialResourceDeclaration s_BaseNormalTexture =
-            new("BaseNormal", MaterialValueType.Texture2D);
+            new(
+                "BaseNormal",
+                MaterialValueType.Texture2D,
+                MaterialTextureSampleClass.Normal);
         private static readonly MaterialResourceDeclaration s_BaseMaskTexture =
-            new("BaseMask", MaterialValueType.Texture2D);
+            new(
+                "BaseMask",
+                MaterialValueType.Texture2D,
+                MaterialTextureSampleClass.Mask);
         private static readonly MaterialResourceDeclaration s_TopNormalTexture =
-            new("TopNormal", MaterialValueType.Texture2D);
+            new(
+                "TopNormal",
+                MaterialValueType.Texture2D,
+                MaterialTextureSampleClass.Normal);
         private static readonly MaterialResourceDeclaration s_TopMaskTexture =
-            new("TopMask", MaterialValueType.Texture2D);
+            new(
+                "TopMask",
+                MaterialValueType.Texture2D,
+                MaterialTextureSampleClass.Mask);
 
         internal static MaterialParameterDeclaration GetParameter(
             MaterialParameter parameter)
@@ -240,6 +281,13 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return true;
+        }
+
+        internal static bool IsTopSlabTexture(MaterialTextureResource resource)
+        {
+            return resource == MaterialTextureResource.TopBaseColor
+                || resource == MaterialTextureResource.TopNormal
+                || resource == MaterialTextureResource.TopMask;
         }
     }
 }

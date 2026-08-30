@@ -197,6 +197,15 @@ float4 VividSampleMaskGrad(
         : 1.0f.xxxx;
 }
 
+// Raw is a semantic sampling class. It currently reuses the mask layer as its
+// physical no-color-space carrier so VT color conversion is never applied.
+float4 VividSampleRawGrad(
+    const VividSurfaceBindingData bindingData,
+    const VividSurfaceSampleContext context)
+{
+    return VividSampleMaskGrad(bindingData, context);
+}
+
 float4 VividSampleBaseColorGrad(
     const VividSurfaceBindingData bindingData,
     const float2 uv,
@@ -225,6 +234,16 @@ float4 VividSampleMaskGrad(
 {
     VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(bindingData, uv, uvDdx, uvDdy);
     return VividSampleMaskGrad(bindingData, context);
+}
+
+float4 VividSampleRawGrad(
+    const VividSurfaceBindingData bindingData,
+    const float2 uv,
+    const float2 uvDdx,
+    const float2 uvDdy)
+{
+    VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(bindingData, uv, uvDdx, uvDdy);
+    return VividSampleRawGrad(bindingData, context);
 }
 
 float4 VividSampleBaseColor(const VividSurfaceBindingData bindingData, const float2 uv)

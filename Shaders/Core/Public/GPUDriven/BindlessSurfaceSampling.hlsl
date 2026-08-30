@@ -149,6 +149,16 @@ float4 VividSampleMaskGrad(
     return 1.0f.xxxx;
 }
 
+// Raw is a semantic sampling class. It currently reuses the mask resource as
+// its physical no-color-space carrier, without exposing that carrier choice to
+// generated material programs.
+float4 VividSampleRawGrad(
+    const VividSurfaceBindingData bindingData,
+    const VividSurfaceSampleContext context)
+{
+    return VividSampleMaskGrad(bindingData, context);
+}
+
 float4 VividSampleMaskGrad(
     const VividSurfaceBindingData bindingData,
     const float2 uv,
@@ -157,6 +167,16 @@ float4 VividSampleMaskGrad(
 {
     VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(bindingData, uv, uvDdx, uvDdy);
     return VividSampleMaskGrad(bindingData, context);
+}
+
+float4 VividSampleRawGrad(
+    const VividSurfaceBindingData bindingData,
+    const float2 uv,
+    const float2 uvDdx,
+    const float2 uvDdy)
+{
+    VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(bindingData, uv, uvDdx, uvDdy);
+    return VividSampleRawGrad(bindingData, context);
 }
 
 #endif // VIVIDRP_BINDLESS_SURFACE_SAMPLING_INCLUDED

@@ -113,6 +113,34 @@ namespace VividRP.Editor.GPUDriven
     }
 
     [Serializable]
+    [Node("Material/Input", "", "Named Parameter")]
+    internal sealed class MaterialNamedParameterNode : MaterialGraphEditorNode
+    {
+        internal const string SymbolOptionName = "Symbol";
+        internal const string TypeOptionName = "Type";
+
+        protected override void OnDefineOptions(IOptionDefinitionContext context)
+        {
+            context.AddOption<string>(SymbolOptionName)
+                .WithDefaultValue("Parameter");
+            context.AddOption<MaterialValueType>(TypeOptionName)
+                .WithDefaultValue(MaterialValueType.Float);
+        }
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            AddValueOutput(context);
+        }
+
+        internal MaterialParameterDeclaration GetDeclaration()
+        {
+            return new MaterialParameterDeclaration(
+                GetOptionValue(this, SymbolOptionName, "Parameter"),
+                GetOptionValue(this, TypeOptionName, MaterialValueType.Float));
+        }
+    }
+
+    [Serializable]
     [Node("Material/Input", "", "External Input")]
     internal sealed class MaterialExternalInputNode : MaterialGraphEditorNode
     {
@@ -161,6 +189,41 @@ namespace VividRP.Editor.GPUDriven
                 this,
                 ResourceOptionName,
                 MaterialTextureResource.BaseColor);
+        }
+    }
+
+    [Serializable]
+    [Node("Material/Input", "", "Named Texture Resource")]
+    internal sealed class MaterialNamedTextureResourceNode : MaterialGraphEditorNode
+    {
+        internal const string SymbolOptionName = "Symbol";
+        internal const string TypeOptionName = "Type";
+        internal const string SampleClassOptionName = "Sample Class";
+
+        protected override void OnDefineOptions(IOptionDefinitionContext context)
+        {
+            context.AddOption<string>(SymbolOptionName)
+                .WithDefaultValue("Texture");
+            context.AddOption<MaterialValueType>(TypeOptionName)
+                .WithDefaultValue(MaterialValueType.Texture2D);
+            context.AddOption<MaterialTextureSampleClass>(SampleClassOptionName)
+                .WithDefaultValue(MaterialTextureSampleClass.Raw);
+        }
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            AddValueOutput(context);
+        }
+
+        internal MaterialResourceDeclaration GetDeclaration()
+        {
+            return new MaterialResourceDeclaration(
+                GetOptionValue(this, SymbolOptionName, "Texture"),
+                GetOptionValue(this, TypeOptionName, MaterialValueType.Texture2D),
+                GetOptionValue(
+                    this,
+                    SampleClassOptionName,
+                    MaterialTextureSampleClass.Raw));
         }
     }
 
@@ -300,11 +363,18 @@ namespace VividRP.Editor.GPUDriven
     [Node("Material/Closure", "", "Standard Slab")]
     internal sealed class MaterialStandardSlabNode : MaterialGraphEditorNode
     {
+        internal const string FeatureMaskOptionName = "Features";
         internal const string BaseColorPortName = "BaseColor";
         internal const string RoughnessPortName = "Roughness";
         internal const string MetallicPortName = "Metallic";
         internal const string NormalPortName = "Normal";
         internal const string TangentPortName = "Tangent";
+
+        protected override void OnDefineOptions(IOptionDefinitionContext context)
+        {
+            context.AddOption<ClosureFeatureMask>(FeatureMaskOptionName)
+                .WithDefaultValue(MaterialGraphDefaults.StandardSlabFeatures);
+        }
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
         {
@@ -314,6 +384,14 @@ namespace VividRP.Editor.GPUDriven
             context.AddInputPort<MaterialGraphValuePort>(NormalPortName).Build();
             context.AddInputPort<MaterialGraphValuePort>(TangentPortName).Build();
             AddClosureOutput(context);
+        }
+
+        internal ClosureFeatureMask GetFeatureMask()
+        {
+            return GetOptionValue(
+                this,
+                FeatureMaskOptionName,
+                MaterialGraphDefaults.StandardSlabFeatures);
         }
     }
 
@@ -355,10 +433,20 @@ namespace VividRP.Editor.GPUDriven
     [Node("Material", "", "Material Output")]
     internal sealed class MaterialOutputNode : MaterialGraphEditorNode
     {
+        internal const string MaterialFeaturesOptionName = "Material Features";
+        internal const string ShadingModelsOptionName = "Shading Models";
         internal const string SurfacePortName = "Surface";
         internal const string CoveragePortName = "Coverage";
         internal const string AlphaClipThresholdPortName = "AlphaClipThreshold";
         internal const string EmissionPortName = "Emission";
+
+        protected override void OnDefineOptions(IOptionDefinitionContext context)
+        {
+            context.AddOption<MaterialFeatureMask>(MaterialFeaturesOptionName)
+                .WithDefaultValue(MaterialGraphDefaults.StandardMaterialFeatures);
+            context.AddOption<MaterialShadingModelMask>(ShadingModelsOptionName)
+                .WithDefaultValue(MaterialGraphDefaults.StandardShadingModels);
+        }
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
         {
@@ -366,6 +454,22 @@ namespace VividRP.Editor.GPUDriven
             context.AddInputPort<MaterialGraphValuePort>(CoveragePortName).Build();
             context.AddInputPort<MaterialGraphValuePort>(AlphaClipThresholdPortName).Build();
             context.AddInputPort<MaterialGraphValuePort>(EmissionPortName).Build();
+        }
+
+        internal MaterialFeatureMask GetMaterialFeatures()
+        {
+            return GetOptionValue(
+                this,
+                MaterialFeaturesOptionName,
+                MaterialGraphDefaults.StandardMaterialFeatures);
+        }
+
+        internal MaterialShadingModelMask GetShadingModels()
+        {
+            return GetOptionValue(
+                this,
+                ShadingModelsOptionName,
+                MaterialGraphDefaults.StandardShadingModels);
         }
     }
 }

@@ -27,7 +27,7 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
             #include "UnityCG.cginc"
             #include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl"
 
-            #define VIVID_MATERIAL_PROGRAM_VERSION 2u
+            #define VIVID_MATERIAL_PROGRAM_VERSION 3u
             #define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES 2u
             #define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS 2u
 

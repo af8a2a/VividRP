@@ -250,11 +250,15 @@ namespace VividRP.Runtime.GPUDriven
 
         internal void ClearMaterials()
         {
+            VividMaterialProgramData[] runtimePrograms =
+                GPUDrivenMaterialCompiler.CreateRuntimeProgramTable();
             m_Materials.Clear();
             m_DualSlabMaterials.Clear();
             m_MaterialParameterLanes.Clear();
             m_MaterialResources.Clear();
             m_MaterialRuntimeHeaders.Clear();
+            m_MaterialPrograms.Clear();
+            m_MaterialPrograms.AddRange(runtimePrograms);
         }
 
         internal int AddMaterial(
@@ -292,12 +296,12 @@ namespace VividRP.Runtime.GPUDriven
                         nameof(runtimeHeader));
                 }
 
-                MaterialGenericLayout genericLayout =
-                    GPUDrivenMaterialCompiler.GetMaterialProgram(
-                        runtimeHeader.ProgramID).Lowering.GenericLayout;
+                MaterialProgramRuntimeBinding programBinding =
+                    GPUDrivenMaterialCompiler.GetRuntimeProgramBinding(
+                        runtimeHeader.ProgramID);
                 uint parameterLaneAddress = runtimeHeader.ParameterAddress;
                 uint parameterLaneCount =
-                    (uint) (genericLayout.ParameterStrideInWords / 4);
+                    (uint) (programBinding.ParameterStrideInWords / 4);
                 if (parameterLaneAddress > (uint) m_MaterialParameterLanes.Count
                     || parameterLaneCount
                         > (uint) m_MaterialParameterLanes.Count - parameterLaneAddress)
@@ -308,7 +312,7 @@ namespace VividRP.Runtime.GPUDriven
                 }
 
                 uint resourceBindingAddress = runtimeHeader.ResourceBindingAddress;
-                uint resourceRecordCount = (uint) genericLayout.ResourceCount;
+                uint resourceRecordCount = (uint) programBinding.ResourceCount;
                 if (resourceBindingAddress > (uint) m_MaterialResources.Count
                     || resourceRecordCount
                         > (uint) m_MaterialResources.Count - resourceBindingAddress)

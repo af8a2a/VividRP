@@ -118,6 +118,8 @@ namespace VividRP.Runtime.GPUDriven
             MaterialValueType constantType,
             float4 constant,
             int semantic,
+            in MaterialParameterDeclaration parameterDeclaration,
+            in MaterialResourceDeclaration resourceDeclaration,
             MaterialGraphValue[] operands)
         {
             NodeId = nodeId;
@@ -125,6 +127,8 @@ namespace VividRP.Runtime.GPUDriven
             ConstantType = constantType;
             Constant = constant;
             Semantic = semantic;
+            ParameterDeclaration = parameterDeclaration;
+            ResourceDeclaration = resourceDeclaration;
             Operands = operands ?? Array.Empty<MaterialGraphValue>();
         }
 
@@ -138,6 +142,10 @@ namespace VividRP.Runtime.GPUDriven
 
         internal int Semantic { get; }
 
+        internal MaterialParameterDeclaration ParameterDeclaration { get; }
+
+        internal MaterialResourceDeclaration ResourceDeclaration { get; }
+
         internal IReadOnlyList<MaterialGraphValue> Operands { get; }
     }
 
@@ -147,12 +155,14 @@ namespace VividRP.Runtime.GPUDriven
             string nodeId,
             MaterialGraphClosureOpcode opcode,
             MaterialGraphValue[] values,
-            MaterialGraphClosure[] closures)
+            MaterialGraphClosure[] closures,
+            ClosureFeatureMask features)
         {
             NodeId = nodeId;
             Opcode = opcode;
             Values = values ?? Array.Empty<MaterialGraphValue>();
             Closures = closures ?? Array.Empty<MaterialGraphClosure>();
+            Features = features;
         }
 
         internal string NodeId { get; }
@@ -162,6 +172,8 @@ namespace VividRP.Runtime.GPUDriven
         internal IReadOnlyList<MaterialGraphValue> Values { get; }
 
         internal IReadOnlyList<MaterialGraphClosure> Closures { get; }
+
+        internal ClosureFeatureMask Features { get; }
     }
 
     internal sealed class MaterialGraphOutputNode
@@ -171,13 +183,17 @@ namespace VividRP.Runtime.GPUDriven
             MaterialGraphClosure surface,
             MaterialGraphValue coverage,
             MaterialGraphValue alphaClipThreshold,
-            MaterialGraphValue emission)
+            MaterialGraphValue emission,
+            MaterialFeatureMask materialFeatures,
+            MaterialShadingModelMask shadingModels)
         {
             NodeId = nodeId;
             Surface = surface;
             Coverage = coverage;
             AlphaClipThreshold = alphaClipThreshold;
             Emission = emission;
+            MaterialFeatures = materialFeatures;
+            ShadingModels = shadingModels;
         }
 
         internal string NodeId { get; }
@@ -189,6 +205,25 @@ namespace VividRP.Runtime.GPUDriven
         internal MaterialGraphValue AlphaClipThreshold { get; }
 
         internal MaterialGraphValue Emission { get; }
+
+        internal MaterialFeatureMask MaterialFeatures { get; }
+
+        internal MaterialShadingModelMask ShadingModels { get; }
+    }
+
+    internal static class MaterialGraphDefaults
+    {
+        internal const ClosureFeatureMask StandardSlabFeatures =
+            ClosureFeatureMask.BaseColorTexture
+            | ClosureFeatureMask.NormalTexture
+            | ClosureFeatureMask.MaskTexture;
+
+        internal const MaterialFeatureMask StandardMaterialFeatures =
+            MaterialFeatureMask.AlphaClip;
+
+        internal const MaterialShadingModelMask StandardShadingModels =
+            MaterialShadingModelMask.StandardLit
+            | MaterialShadingModelMask.Unlit;
     }
 
     // UI-independent source model. A future GraphToolkit asset adapts its stable
@@ -271,20 +306,59 @@ namespace VividRP.Runtime.GPUDriven
             string nodeId,
             MaterialParameter parameter)
         {
+            MaterialParameterDeclaration declaration =
+                MaterialNativeTemplateDeclarationAdapter.GetParameter(parameter);
+            return Parameter(nodeId, declaration);
+        }
+
+        internal MaterialGraphValue Parameter(
+            string nodeId,
+            string symbol,
+            MaterialValueType type)
+        {
+            return Parameter(
+                nodeId,
+                new MaterialParameterDeclaration(symbol, type));
+        }
+
+        internal MaterialGraphValue Parameter(
+            string nodeId,
+            in MaterialParameterDeclaration declaration)
+        {
             return AddValue(
                 nodeId,
                 MaterialGraphValueOpcode.Parameter,
-                semantic: (int) parameter);
+                parameterDeclaration: declaration);
         }
 
         internal MaterialGraphValue TextureResource(
             string nodeId,
             MaterialTextureResource resource)
         {
+            MaterialResourceDeclaration declaration =
+                MaterialNativeTemplateDeclarationAdapter.GetTexture(resource);
+            return TextureResource(nodeId, declaration);
+        }
+
+        internal MaterialGraphValue TextureResource(
+            string nodeId,
+            string symbol,
+            MaterialValueType type,
+            MaterialTextureSampleClass sampleClass = MaterialTextureSampleClass.Raw)
+        {
+            return TextureResource(
+                nodeId,
+                new MaterialResourceDeclaration(symbol, type, sampleClass));
+        }
+
+        internal MaterialGraphValue TextureResource(
+            string nodeId,
+            in MaterialResourceDeclaration declaration)
+        {
             return AddValue(
                 nodeId,
                 MaterialGraphValueOpcode.TextureResource,
-                semantic: (int) resource);
+                resourceDeclaration: declaration);
         }
 
         internal MaterialGraphValue TextureSample(
@@ -467,13 +541,16 @@ namespace VividRP.Runtime.GPUDriven
             MaterialGraphValue roughness,
             MaterialGraphValue metallic,
             MaterialGraphValue normal,
-            MaterialGraphValue tangent)
+            MaterialGraphValue tangent,
+            ClosureFeatureMask features =
+                MaterialGraphDefaults.StandardSlabFeatures)
         {
             return AddClosure(
                 nodeId,
                 MaterialGraphClosureOpcode.Slab,
                 new[] { baseColor, roughness, metallic, normal, tangent },
-                null);
+                null,
+                features);
         }
 
         internal MaterialGraphClosure HorizontalMix(
@@ -486,7 +563,8 @@ namespace VividRP.Runtime.GPUDriven
                 nodeId,
                 MaterialGraphClosureOpcode.HorizontalMix,
                 new[] { weight },
-                new[] { background, foreground });
+                new[] { background, foreground },
+                ClosureFeatureMask.None);
         }
 
         internal MaterialGraphClosure VerticalLayer(
@@ -499,7 +577,8 @@ namespace VividRP.Runtime.GPUDriven
                 nodeId,
                 MaterialGraphClosureOpcode.VerticalLayer,
                 new[] { weight },
-                new[] { bottom, top });
+                new[] { bottom, top },
+                ClosureFeatureMask.None);
         }
 
         internal void Output(
@@ -507,7 +586,11 @@ namespace VividRP.Runtime.GPUDriven
             MaterialGraphClosure surface,
             MaterialGraphValue coverage,
             MaterialGraphValue alphaClipThreshold,
-            MaterialGraphValue emission)
+            MaterialGraphValue emission,
+            MaterialFeatureMask materialFeatures =
+                MaterialGraphDefaults.StandardMaterialFeatures,
+            MaterialShadingModelMask shadingModels =
+                MaterialGraphDefaults.StandardShadingModels)
         {
             string validatedId = ReserveNodeId(nodeId);
             m_OutputNodes.Add(new MaterialGraphOutputNode(
@@ -515,7 +598,9 @@ namespace VividRP.Runtime.GPUDriven
                 surface,
                 coverage,
                 alphaClipThreshold,
-                emission));
+                emission,
+                materialFeatures,
+                shadingModels));
         }
 
         private MaterialGraphValue AddConstant(
@@ -553,6 +638,8 @@ namespace VividRP.Runtime.GPUDriven
             MaterialValueType constantType = default,
             float4 constant = default,
             int semantic = default,
+            MaterialParameterDeclaration parameterDeclaration = default,
+            MaterialResourceDeclaration resourceDeclaration = default,
             MaterialGraphValue[] operands = null)
         {
             string validatedId = ReserveNodeId(nodeId);
@@ -564,6 +651,8 @@ namespace VividRP.Runtime.GPUDriven
                     constantType,
                     constant,
                     semantic,
+                    parameterDeclaration,
+                    resourceDeclaration,
                     operands));
             return new MaterialGraphValue(this, validatedId);
         }
@@ -572,12 +661,18 @@ namespace VividRP.Runtime.GPUDriven
             string nodeId,
             MaterialGraphClosureOpcode opcode,
             MaterialGraphValue[] values,
-            MaterialGraphClosure[] closures)
+            MaterialGraphClosure[] closures,
+            ClosureFeatureMask features)
         {
             string validatedId = ReserveNodeId(nodeId);
             m_ClosureNodes.Add(
                 validatedId,
-                new MaterialGraphClosureNode(validatedId, opcode, values, closures));
+                new MaterialGraphClosureNode(
+                    validatedId,
+                    opcode,
+                    values,
+                    closures,
+                    features));
             return new MaterialGraphClosure(this, validatedId);
         }
 

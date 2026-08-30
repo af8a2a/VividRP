@@ -58,11 +58,17 @@ namespace VividRP.Editor.GPUDriven
                 case MaterialParameterNode parameter:
                     graph.Parameter(nodeId, parameter.GetParameter());
                     return;
+                case MaterialNamedParameterNode namedParameter:
+                    graph.Parameter(nodeId, namedParameter.GetDeclaration());
+                    return;
                 case MaterialExternalInputNode externalInput:
                     graph.ExternalInput(nodeId, externalInput.GetInput());
                     return;
                 case MaterialTextureResourceNode textureResource:
                     graph.TextureResource(nodeId, textureResource.GetResource());
+                    return;
+                case MaterialNamedTextureResourceNode namedTextureResource:
+                    graph.TextureResource(nodeId, namedTextureResource.GetDeclaration());
                     return;
                 case MaterialConstantNode constant:
                     AddConstant(graph, nodeId, constant);
@@ -92,7 +98,8 @@ namespace VividRP.Editor.GPUDriven
                         GetValueInput(graph, slab, MaterialStandardSlabNode.RoughnessPortName),
                         GetValueInput(graph, slab, MaterialStandardSlabNode.MetallicPortName),
                         GetValueInput(graph, slab, MaterialStandardSlabNode.NormalPortName),
-                        GetValueInput(graph, slab, MaterialStandardSlabNode.TangentPortName));
+                        GetValueInput(graph, slab, MaterialStandardSlabNode.TangentPortName),
+                        slab.GetFeatureMask());
                     return;
                 case MaterialHorizontalMixNode horizontalMix:
                     graph.HorizontalMix(
@@ -135,7 +142,9 @@ namespace VividRP.Editor.GPUDriven
                             graph,
                             output,
                             MaterialOutputNode.AlphaClipThresholdPortName),
-                        GetValueInput(graph, output, MaterialOutputNode.EmissionPortName));
+                        GetValueInput(graph, output, MaterialOutputNode.EmissionPortName),
+                        output.GetMaterialFeatures(),
+                        output.GetShadingModels());
                     return;
             }
         }

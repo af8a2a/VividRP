@@ -28,10 +28,25 @@ namespace VividRP.Runtime.GPUDriven
             in VividMaterialData legacyMaterialData,
             in VividDualSlabMaterialData dualSlabMaterialData,
             uint4[] parameterLanes)
+            : this(
+                new MaterialProgramRuntimeBinding(catalogProgram),
+                runtimeHeader,
+                legacyMaterialData,
+                dualSlabMaterialData,
+                parameterLanes)
         {
-            CatalogProgram = catalogProgram
-                ?? throw new ArgumentNullException(nameof(catalogProgram));
-            if (runtimeHeader.ProgramID != catalogProgram.ProgramID)
+        }
+
+        internal GPUDrivenCompiledMaterialInstance(
+            MaterialProgramRuntimeBinding programBinding,
+            in VividMaterialRuntimeHeader runtimeHeader,
+            in VividMaterialData legacyMaterialData,
+            in VividDualSlabMaterialData dualSlabMaterialData,
+            uint4[] parameterLanes)
+        {
+            ProgramBinding = programBinding
+                ?? throw new ArgumentNullException(nameof(programBinding));
+            if (runtimeHeader.ProgramID != programBinding.ProgramID)
             {
                 throw new ArgumentException(
                     "The runtime header ProgramID must match its cataloged material program.",
@@ -44,11 +59,17 @@ namespace VividRP.Runtime.GPUDriven
                 ?? throw new ArgumentNullException(nameof(parameterLanes));
         }
 
-        internal MaterialProgramCatalog.ManifestEntry CatalogProgram { get; }
+        internal MaterialProgramRuntimeBinding ProgramBinding { get; }
 
-        internal CompiledMaterialProgram MaterialProgram => CatalogProgram.Program;
+        internal MaterialProgramCatalog.ManifestEntry CatalogProgram =>
+            ProgramBinding.CatalogProgram;
 
-        internal VividMaterialProgramID ProgramID => CatalogProgram.ProgramID;
+        internal CompiledMaterialProgram MaterialProgram =>
+            CatalogProgram?.Program
+            ?? throw new InvalidOperationException(
+                "Frozen runtime-only material programs do not retain compiler IR.");
+
+        internal VividMaterialProgramID ProgramID => ProgramBinding.ProgramID;
 
         internal VividMaterialRuntimeHeader RuntimeHeader { get; }
 
@@ -85,19 +106,50 @@ namespace VividRP.Runtime.GPUDriven
             return s_MaterialProgramCatalog.GetMaterialProgram(programID);
         }
 
+        internal static MaterialProgramRuntimeBinding GetRuntimeProgramBinding(
+            VividMaterialProgramID programID)
+        {
+            MaterialProgramCatalogAsset frozenCatalog =
+                MaterialProgramCatalogAsset.LoadDefault();
+            if (frozenCatalog == null)
+            {
+                return new MaterialProgramRuntimeBinding(
+                    s_MaterialProgramCatalog.GetEntry(programID));
+            }
+            return GetRuntimeProgramBinding(programID, frozenCatalog);
+        }
+
+        internal static MaterialProgramRuntimeBinding GetRuntimeProgramBinding(
+            VividMaterialProgramID programID,
+            MaterialProgramCatalogAsset frozenCatalog)
+        {
+            if (frozenCatalog == null)
+                throw new ArgumentNullException(nameof(frozenCatalog));
+            if (!frozenCatalog.ExtendsBuiltinCatalog(
+                    s_MaterialProgramCatalog,
+                    out string failure))
+            {
+                throw new InvalidOperationException(
+                    $"Frozen Material Program Catalog is stale: {failure}");
+            }
+            if (!frozenCatalog.TryGetSlot(
+                    programID,
+                    out MaterialProgramCatalogAsset.Slot slot)
+                || slot.IsReserved)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(programID),
+                    programID,
+                    null);
+            }
+            return new MaterialProgramRuntimeBinding(slot);
+        }
+
         internal static VividMaterialProgramData[] CreateRuntimeProgramTable()
         {
             MaterialProgramCatalogAsset frozenCatalog =
                 MaterialProgramCatalogAsset.LoadDefault();
             if (frozenCatalog == null)
-                return s_MaterialProgramCatalog.CreateRuntimeProgramTable();
-            if (frozenCatalog.Matches(s_MaterialProgramCatalog, out _))
-                return frozenCatalog.CreateRuntimeProgramTable();
-
-            // During an editor domain reload the delayed baker may not have updated
-            // the asset yet. Player builds are strict; the build preprocessor bakes
-            // the catalog before content is packed.
-            if (Application.isEditor)
                 return s_MaterialProgramCatalog.CreateRuntimeProgramTable();
             return CreateRuntimeProgramTable(frozenCatalog);
         }
@@ -107,7 +159,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (frozenCatalog == null)
                 throw new ArgumentNullException(nameof(frozenCatalog));
-            if (!frozenCatalog.Matches(
+            if (!frozenCatalog.ExtendsBuiltinCatalog(
                     s_MaterialProgramCatalog,
                     out string failure))
             {
@@ -123,19 +175,42 @@ namespace VividRP.Runtime.GPUDriven
         {
             return TryResolveMaterialProgram(
                 materialProxy,
+                MaterialProgramCatalogAsset.LoadDefault(),
+                out _,
+                out validationMessage);
+        }
+
+        internal static bool TryValidateMaterialProxy(
+            GPUDrivenMaterialProxy materialProxy,
+            MaterialProgramCatalogAsset frozenCatalog,
+            out string validationMessage)
+        {
+            return TryResolveMaterialProgram(
+                materialProxy,
+                frozenCatalog,
                 out _,
                 out validationMessage);
         }
 
         private static bool TryResolveMaterialProgram(
             GPUDrivenMaterialProxy materialProxy,
-            out MaterialProgramCatalog.ManifestEntry materialProgram,
+            MaterialProgramCatalogAsset frozenCatalog,
+            out MaterialProgramRuntimeBinding materialProgram,
             out string validationMessage)
         {
             materialProgram = null;
             if (materialProxy == null)
             {
                 validationMessage = "GPU-driven material proxy is null.";
+                return false;
+            }
+            if (frozenCatalog != null
+                && !frozenCatalog.ExtendsBuiltinCatalog(
+                    s_MaterialProgramCatalog,
+                    out string frozenCatalogFailure))
+            {
+                validationMessage =
+                    $"The Frozen Material Program Catalog is incompatible: {frozenCatalogFailure}";
                 return false;
             }
 
@@ -205,12 +280,14 @@ namespace VividRP.Runtime.GPUDriven
             MaterialGraphImportAsset graph = materialProxy.MaterialGraph;
             if (graph == null)
             {
-                materialProgram = materialProxy.Model
+                MaterialProgramCatalog.ManifestEntry builtinProgram =
+                    materialProxy.Model
                     == GPUDrivenMaterialProxyModel.StandardLit
                         ? GetCatalogedMaterialProgram(
                             VividMaterialProgramID.StandardSingleSlab)
                         : GetDualSlabProgram(
                             materialProxy.DualSlabDefinition.Operator);
+                materialProgram = new MaterialProgramRuntimeBinding(builtinProgram);
             }
             else
             {
@@ -233,31 +310,57 @@ namespace VividRP.Runtime.GPUDriven
                         "The assigned Material Graph is not present in the Frozen Material Program Catalog.";
                     return false;
                 }
-                if (graph.CatalogManifestHash
-                    != s_MaterialProgramCatalog.ManifestHash)
+                MaterialProgramCatalogManifestHash expectedManifestHash =
+                    frozenCatalog != null
+                        ? frozenCatalog.ManifestHash
+                        : s_MaterialProgramCatalog.ManifestHash;
+                MaterialProgramArtifactSetHash expectedArtifactSetHash =
+                    frozenCatalog != null
+                        ? frozenCatalog.ArtifactSetHash
+                        : MaterialProgramArtifactSetHashBuilder.Compute(
+                            s_MaterialProgramCatalog);
+                if (graph.CatalogManifestHash != expectedManifestHash
+                    || graph.ArtifactSetHash != expectedArtifactSetHash)
                 {
                     validationMessage =
-                        "The assigned Material Graph was imported against a stale Frozen Material Program Catalog. Reimport the graph.";
+                        "The assigned Material Graph was imported against a stale or unpublished Material Program artifact set. Reimport the graph.";
                     return false;
                 }
 
+                MaterialProgramCatalog.ManifestEntry builtinEntry = null;
+                MaterialProgramCatalogAsset.Slot frozenSlot = null;
+                if (frozenCatalog != null)
+                {
+                    frozenCatalog.TryGetSlot(graph.ProgramID, out frozenSlot);
+                }
+                else
+                {
+                    uint builtinIndex = (uint) graph.ProgramID;
+                    if (builtinIndex
+                        < (uint) s_MaterialProgramCatalog.RuntimeTableLength)
+                    {
+                        builtinEntry =
+                            s_MaterialProgramCatalog.Slots[(int) builtinIndex];
+                    }
+                }
+
                 uint programIndex = (uint) graph.ProgramID;
-                if (programIndex >= (uint) s_MaterialProgramCatalog.RuntimeTableLength)
+                if (builtinEntry == null && frozenSlot == null)
                 {
                     validationMessage =
                         $"The assigned Material Graph references unknown ProgramID {programIndex}.";
                     return false;
                 }
-                materialProgram =
-                    s_MaterialProgramCatalog.Slots[(int) programIndex];
-                if (materialProgram == null)
+                if (frozenSlot != null && frozenSlot.IsReserved)
                 {
                     validationMessage =
                         $"The assigned Material Graph references reserved ProgramID {programIndex}.";
                     return false;
                 }
-                if (graph.CompiledProgramHash
-                        != materialProgram.Program.CompiledHash
+                materialProgram = builtinEntry != null
+                    ? new MaterialProgramRuntimeBinding(builtinEntry)
+                    : new MaterialProgramRuntimeBinding(frozenSlot);
+                if (graph.CompiledProgramHash != materialProgram.CompiledHash
                     || graph.LayoutFingerprint
                         != materialProgram.LayoutFingerprint)
                 {
@@ -267,12 +370,80 @@ namespace VividRP.Runtime.GPUDriven
                 }
             }
 
-            if (materialProgram.Program.Lowering.SelectionKey.Topology
-                    != expectedTopology)
+            if (materialProgram.Topology != expectedTopology)
             {
                 validationMessage =
                     $"Material Graph ProgramID {(uint) materialProgram.ProgramID} is not compatible with proxy model '{materialProxy.Model}'.";
                 materialProgram = null;
+                return false;
+            }
+
+            GPUDrivenMaterialProxy topSlabProxy =
+                materialProxy.Model == GPUDrivenMaterialProxyModel.DualSlab
+                    ? materialProxy.DualSlabDefinition.TopSlab
+                    : null;
+            if (!TryValidateDeclarationBindings(
+                    materialProgram,
+                    materialProxy,
+                    topSlabProxy,
+                    out validationMessage))
+            {
+                materialProgram = null;
+                return false;
+            }
+
+            validationMessage = string.Empty;
+            return true;
+        }
+
+        private static bool TryValidateDeclarationBindings(
+            MaterialProgramRuntimeBinding materialProgram,
+            GPUDrivenMaterialProxy materialProxy,
+            GPUDrivenMaterialProxy topSlabProxy,
+            out string validationMessage)
+        {
+            try
+            {
+                for (int bindingIndex = 0;
+                     bindingIndex < materialProgram.ParameterBindings.Count;
+                     bindingIndex++)
+                {
+                    ResolveProxyParameter(
+                        materialProgram.ParameterBindings[bindingIndex].Declaration,
+                        materialProxy,
+                        topSlabProxy);
+                }
+
+                for (int bindingIndex = 0;
+                     bindingIndex < materialProgram.ResourceBindings.Count;
+                     bindingIndex++)
+                {
+                    MaterialResourceDeclaration declaration = materialProgram
+                        .ResourceBindings[bindingIndex]
+                        .Declaration;
+                    if (materialProxy.TryGetTextureOverride(declaration, out _))
+                        continue;
+                    if (!MaterialNativeTemplateDeclarationAdapter.TryGetTexture(
+                            declaration,
+                            out MaterialTextureResource compatibilityResource))
+                    {
+                        validationMessage =
+                            $"Material resource '{declaration.Symbol}' ({declaration.Type}) has no texture override on proxy '{materialProxy.name}'.";
+                        return false;
+                    }
+                    if (MaterialNativeTemplateDeclarationAdapter.IsTopSlabTexture(
+                            compatibilityResource)
+                        && topSlabProxy == null)
+                    {
+                        validationMessage =
+                            $"StandardLit compatibility resource '{declaration.Symbol}' requires a top-slab proxy.";
+                        return false;
+                    }
+                }
+            }
+            catch (InvalidOperationException exception)
+            {
+                validationMessage = exception.Message;
                 return false;
             }
 
@@ -346,6 +517,21 @@ namespace VividRP.Runtime.GPUDriven
             uint resourceBindingAddress,
             uint legacySurfaceBindingIndex)
         {
+            return CompileStandardSingleSlab(
+                materialProxy,
+                parameterAddress,
+                resourceBindingAddress,
+                legacySurfaceBindingIndex,
+                MaterialProgramCatalogAsset.LoadDefault());
+        }
+
+        internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
+            GPUDrivenMaterialProxy materialProxy,
+            uint parameterAddress,
+            uint resourceBindingAddress,
+            uint legacySurfaceBindingIndex,
+            MaterialProgramCatalogAsset frozenCatalog)
+        {
             if (materialProxy == null)
                 throw new ArgumentNullException(nameof(materialProxy));
 
@@ -356,7 +542,8 @@ namespace VividRP.Runtime.GPUDriven
             }
             if (!TryResolveMaterialProgram(
                     materialProxy,
-                    out MaterialProgramCatalog.ManifestEntry materialProgram,
+                    frozenCatalog,
+                    out MaterialProgramRuntimeBinding materialProgram,
                     out string validationMessage))
             {
                 throw new InvalidOperationException(validationMessage);
@@ -378,9 +565,8 @@ namespace VividRP.Runtime.GPUDriven
                 default,
                 CreateGenericParameterLanes(
                     materialProgram,
-                    legacyMaterialData,
-                    default,
-                    isDualSlab: false));
+                    materialProxy,
+                    null));
         }
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
@@ -457,7 +643,8 @@ namespace VividRP.Runtime.GPUDriven
             }
             if (!TryResolveMaterialProgram(
                     materialProxy,
-                    out MaterialProgramCatalog.ManifestEntry materialProgram,
+                    MaterialProgramCatalogAsset.LoadDefault(),
+                    out MaterialProgramRuntimeBinding materialProgram,
                     out string validationMessage))
             {
                 throw new InvalidOperationException(validationMessage);
@@ -509,9 +696,8 @@ namespace VividRP.Runtime.GPUDriven
                 dualSlabMaterialData,
                 CreateGenericParameterLanes(
                     materialProgram,
-                    legacyMaterialData,
-                    dualSlabMaterialData,
-                    isDualSlab: true));
+                    materialProxy,
+                    topSlab));
         }
 
         internal static uint4[] CreateGenericParameterLanes(
@@ -520,32 +706,86 @@ namespace VividRP.Runtime.GPUDriven
             in VividDualSlabMaterialData dualSlabMaterialData,
             bool isDualSlab)
         {
-            MaterialGenericLayout layout =
-                materialProgram.Program.Lowering.GenericLayout;
-            int laneCount = layout.ParameterStrideInWords / 4;
-            var words = new uint[layout.ParameterStrideInWords];
-            MaterialNativeTemplateLayoutSchema schema =
-                materialProgram.Program.Lowering.Template.LayoutSchema;
+            return CreateGenericParameterLanes(
+                new MaterialProgramRuntimeBinding(materialProgram),
+                legacyMaterialData,
+                dualSlabMaterialData,
+                isDualSlab);
+        }
+
+        internal static uint4[] CreateGenericParameterLanes(
+            MaterialProgramRuntimeBinding materialProgram,
+            in VividMaterialData legacyMaterialData,
+            in VividDualSlabMaterialData dualSlabMaterialData,
+            bool isDualSlab)
+        {
+            VividMaterialData legacyCopy = legacyMaterialData;
+            VividDualSlabMaterialData dualSlabCopy = dualSlabMaterialData;
+            return CreateGenericParameterLanes(
+                materialProgram,
+                declaration => ResolveCompatibilityParameter(
+                    declaration,
+                    legacyCopy,
+                    dualSlabCopy,
+                    isDualSlab));
+        }
+
+        internal static uint4[] CreateGenericParameterLanes(
+            MaterialProgramRuntimeBinding materialProgram,
+            GPUDrivenMaterialProxy materialProxy,
+            GPUDrivenMaterialProxy topSlabProxy)
+        {
+            if (materialProxy == null)
+                throw new ArgumentNullException(nameof(materialProxy));
+            return CreateGenericParameterLanes(
+                materialProgram,
+                declaration => ResolveProxyParameter(
+                    declaration,
+                    materialProxy,
+                    topSlabProxy));
+        }
+
+        internal static uint4[] CreatePreviewParameterLanes(
+            MaterialProgramRuntimeBinding materialProgram,
+            in VividMaterialData legacyMaterialData,
+            in VividDualSlabMaterialData dualSlabMaterialData,
+            bool isDualSlab)
+        {
+            VividMaterialData legacyCopy = legacyMaterialData;
+            VividDualSlabMaterialData dualSlabCopy = dualSlabMaterialData;
+            return CreateGenericParameterLanes(
+                materialProgram,
+                declaration =>
+                    MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                        declaration,
+                        out _)
+                        ? ResolveCompatibilityParameter(
+                            declaration,
+                            legacyCopy,
+                            dualSlabCopy,
+                            isDualSlab)
+                        : GetNeutralPreviewValue(declaration.Type));
+        }
+
+        private static uint4[] CreateGenericParameterLanes(
+            MaterialProgramRuntimeBinding materialProgram,
+            Func<MaterialParameterDeclaration, float4> resolveParameter)
+        {
+            if (materialProgram == null)
+                throw new ArgumentNullException(nameof(materialProgram));
+            if (resolveParameter == null)
+                throw new ArgumentNullException(nameof(resolveParameter));
+            int laneCount = materialProgram.ParameterStrideInWords / 4;
+            var words = new uint[materialProgram.ParameterStrideInWords];
             for (int bindingIndex = 0;
-                 bindingIndex < layout.ParameterBindings.Count;
+                 bindingIndex < materialProgram.ParameterBindings.Count;
                  bindingIndex++)
             {
-                MaterialGenericParameterBinding genericBinding =
-                    layout.ParameterBindings[bindingIndex];
-                if (!schema.TryGetParameterBinding(
-                        genericBinding.Declaration,
-                        out MaterialNativeParameterBinding nativeBinding))
-                {
-                    throw new InvalidOperationException(
-                        $"Catalog program '{materialProgram.StableName}' has no runtime source for parameter '{genericBinding.Declaration.Symbol}'.");
-                }
+                MaterialRuntimeParameterBindingDescriptor binding =
+                    materialProgram.ParameterBindings[bindingIndex];
 
-                float4 value = GetRuntimeParameterValue(
-                    nativeBinding.Target,
-                    legacyMaterialData,
-                    dualSlabMaterialData,
-                    isDualSlab);
-                WriteParameterWords(words, genericBinding, value);
+                float4 value = resolveParameter(binding.Declaration);
+                WriteParameterWords(words, binding, value);
             }
 
             var lanes = new uint4[laneCount];
@@ -563,7 +803,7 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void WriteParameterWords(
             uint[] words,
-            in MaterialGenericParameterBinding binding,
+            in MaterialRuntimeParameterBindingDescriptor binding,
             in float4 value)
         {
             uint4 bits = math.asuint(value);
@@ -571,37 +811,124 @@ namespace VividRP.Runtime.GPUDriven
                 words[binding.WordOffset + wordIndex] = bits[wordIndex];
         }
 
-        private static float4 GetRuntimeParameterValue(
-            MaterialRuntimeParameter parameter,
+        private static float4 ResolveCompatibilityParameter(
+            in MaterialParameterDeclaration declaration,
             in VividMaterialData legacy,
             in VividDualSlabMaterialData dual,
             bool isDualSlab)
         {
+            if (!MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                    declaration,
+                    out MaterialParameter parameter))
+            {
+                throw new InvalidOperationException(
+                    $"Material parameter '{declaration.Symbol}' requires an instance override; legacy material data only supplies StandardLit declarations.");
+            }
             switch (parameter)
             {
-                case MaterialRuntimeParameter.BaseColor:
+                case MaterialParameter.BaseColor:
                     return isDualSlab ? dual.BaseAlbedoColor : legacy.AlbedoColor;
-                case MaterialRuntimeParameter.TopBaseColor:
+                case MaterialParameter.TopBaseColor:
                     return dual.TopAlbedoColor;
-                case MaterialRuntimeParameter.Emission:
+                case MaterialParameter.Emission:
                     return isDualSlab ? dual.Emission : legacy.Emission;
-                case MaterialRuntimeParameter.Roughness:
+                case MaterialParameter.Roughness:
                     return new float4(isDualSlab ? dual.BaseRoughness : legacy.Roughness);
-                case MaterialRuntimeParameter.TopRoughness:
+                case MaterialParameter.TopRoughness:
                     return new float4(dual.TopRoughness);
-                case MaterialRuntimeParameter.Metallic:
+                case MaterialParameter.Metallic:
                     return new float4(isDualSlab ? dual.BaseMetallic : legacy.Metallic);
-                case MaterialRuntimeParameter.TopMetallic:
+                case MaterialParameter.TopMetallic:
                     return new float4(dual.TopMetallic);
-                case MaterialRuntimeParameter.LayerWeight:
+                case MaterialParameter.LayerWeight:
                     return new float4(dual.LayerWeight);
-                case MaterialRuntimeParameter.AlphaClipThreshold:
+                case MaterialParameter.AlphaClipThreshold:
                     return new float4(isDualSlab
                         ? dual.AlphaClipThreshold
                         : legacy.AlphaClipThreshold);
                 default:
                     throw new NotSupportedException(
-                        $"Generic material parameter packing does not support runtime source '{parameter}'.");
+                        $"StandardLit compatibility does not supply material parameter '{declaration.Symbol}'.");
+            }
+        }
+
+        private static float4 ResolveProxyParameter(
+            in MaterialParameterDeclaration declaration,
+            GPUDrivenMaterialProxy materialProxy,
+            GPUDrivenMaterialProxy topSlabProxy)
+        {
+            if (materialProxy.TryGetParameterOverride(
+                    declaration,
+                    out Vector4 overrideValue))
+            {
+                return ToFloat4(overrideValue);
+            }
+
+            if (!MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                    declaration,
+                    out MaterialParameter parameter))
+            {
+                throw new InvalidOperationException(
+                    $"Material parameter '{declaration.Symbol}' ({declaration.Type}) has no value on proxy '{materialProxy.name}'. Add a declaration-matched parameter override.");
+            }
+
+            switch (parameter)
+            {
+                case MaterialParameter.BaseColor:
+                    return ConvertMaterialColorForGPU(materialProxy.BaseColor);
+                case MaterialParameter.TopBaseColor:
+                    return ConvertMaterialColorForGPU(
+                        RequireTopSlabProxy(topSlabProxy, declaration).BaseColor);
+                case MaterialParameter.Roughness:
+                    return new float4(materialProxy.Roughness);
+                case MaterialParameter.TopRoughness:
+                    return new float4(
+                        RequireTopSlabProxy(topSlabProxy, declaration).Roughness);
+                case MaterialParameter.Metallic:
+                    return new float4(materialProxy.Metallic);
+                case MaterialParameter.TopMetallic:
+                    return new float4(
+                        RequireTopSlabProxy(topSlabProxy, declaration).Metallic);
+                case MaterialParameter.LayerWeight:
+                    return new float4(materialProxy.LayerWeight);
+                case MaterialParameter.AlphaClipThreshold:
+                    return new float4(
+                        materialProxy.AlphaClip ? materialProxy.Cutoff : 0.0f);
+                case MaterialParameter.Emission:
+                    return ConvertMaterialColorForGPU(materialProxy.EmissionColor);
+                default:
+                    throw new NotSupportedException(
+                        $"StandardLit compatibility does not supply material parameter '{declaration.Symbol}'.");
+            }
+        }
+
+        private static GPUDrivenMaterialProxy RequireTopSlabProxy(
+            GPUDrivenMaterialProxy topSlabProxy,
+            in MaterialParameterDeclaration declaration)
+        {
+            if (topSlabProxy != null)
+                return topSlabProxy;
+            throw new InvalidOperationException(
+                $"Material parameter '{declaration.Symbol}' requires a top-slab proxy.");
+        }
+
+        private static float4 GetNeutralPreviewValue(MaterialValueType type)
+        {
+            switch (type)
+            {
+                case MaterialValueType.Bool:
+                    return new float4(1.0f, 0.0f, 0.0f, 0.0f);
+                case MaterialValueType.Float:
+                    return new float4(0.5f, 0.0f, 0.0f, 0.0f);
+                case MaterialValueType.Float2:
+                    return new float4(0.5f, 0.5f, 0.0f, 0.0f);
+                case MaterialValueType.Float3:
+                    return new float4(0.5f, 0.5f, 0.5f, 0.0f);
+                case MaterialValueType.Float4:
+                    return new float4(1.0f);
+                default:
+                    throw new NotSupportedException(
+                        $"Material preview cannot provide a value for parameter type '{type}'.");
             }
         }
 

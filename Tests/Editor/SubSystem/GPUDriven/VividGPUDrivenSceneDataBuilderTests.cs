@@ -1337,6 +1337,182 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(
+            (int)MaterialTextureSampleClass.Raw,
+            VividSurfaceBindingFlags.Mask)]
+        [TestCase(
+            (int)MaterialTextureSampleClass.Color,
+            VividSurfaceBindingFlags.BaseColor)]
+        [TestCase(
+            (int)MaterialTextureSampleClass.Normal,
+            VividSurfaceBindingFlags.Normal)]
+        [TestCase(
+            (int)MaterialTextureSampleClass.Mask,
+            VividSurfaceBindingFlags.Mask)]
+        public void NamedTextureOverride_UsesSampleClassPhysicalCarrier(
+            int sampleClassValue,
+            VividSurfaceBindingFlags expectedFlag)
+        {
+            var sampleClass = (MaterialTextureSampleClass)sampleClassValue;
+            GPUDrivenMaterialProxy materialProxy = null;
+            Texture2D texture = null;
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<
+                    GPUDrivenMaterialProxy>();
+                texture = new Texture2D(1, 1);
+                var textureOverride = new GPUDrivenMaterialTextureOverride(
+                    "ArtistPattern",
+                    texture,
+                    new Vector4(2.0f, 3.0f, 0.25f, 0.5f));
+                var declaration = new MaterialResourceDeclaration(
+                    "ArtistPattern",
+                    MaterialValueType.Texture2D,
+                    sampleClass);
+                var expectedBinding = new VividSurfaceBindingData
+                {
+                    BaseColorResource = sampleClass
+                        == MaterialTextureSampleClass.Color
+                            ? 41u
+                            : VividSurfaceBindingData.InvalidResource,
+                    NormalResource = sampleClass
+                        == MaterialTextureSampleClass.Normal
+                            ? 41u
+                            : VividSurfaceBindingData.InvalidResource,
+                    MaskResource = sampleClass
+                            == MaterialTextureSampleClass.Raw
+                        || sampleClass == MaterialTextureSampleClass.Mask
+                            ? 41u
+                            : VividSurfaceBindingData.InvalidResource,
+                    Flags = expectedFlag,
+                };
+                using var textureBackend = new SentinelTextureBackend(
+                    expectedBinding);
+
+                VividMaterialResourceData resource =
+                    VividGPUDrivenSceneDataBuilder.CreateTextureOverrideResource(
+                        declaration,
+                        textureOverride,
+                        materialProxy,
+                        null,
+                        textureBackend);
+
+                Assert.That(textureBackend.LastTextures.BaseColor,
+                    sampleClass == MaterialTextureSampleClass.Color
+                        ? Is.SameAs(texture)
+                        : Is.Null);
+                Assert.That(textureBackend.LastTextures.Normal,
+                    sampleClass == MaterialTextureSampleClass.Normal
+                        ? Is.SameAs(texture)
+                        : Is.Null);
+                Assert.That(textureBackend.LastTextures.Mask,
+                    sampleClass == MaterialTextureSampleClass.Raw
+                        || sampleClass == MaterialTextureSampleClass.Mask
+                            ? Is.SameAs(texture)
+                            : Is.Null);
+                Assert.That(resource.SurfaceBinding.Flags,
+                    Is.EqualTo(expectedFlag));
+                Assert.That(resource.TextureTilingOffset,
+                    Is.EqualTo(new float4(2.0f, 3.0f, 0.25f, 0.5f)));
+            }
+            finally
+            {
+                DestroyTestObjects(null, null, materialProxy, texture);
+            }
+        }
+
+        [Test]
+        public void NamedTextureOverride_RejectsRawTextureOnVirtualTextureBackend()
+        {
+            GPUDrivenMaterialProxy materialProxy = null;
+            Texture2D texture = null;
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<
+                    GPUDrivenMaterialProxy>();
+                texture = new Texture2D(1, 1);
+                var textureOverride = new GPUDrivenMaterialTextureOverride(
+                    "ArtistPattern",
+                    texture,
+                    Vector4.one);
+                var declaration = new MaterialResourceDeclaration(
+                    "ArtistPattern",
+                    MaterialValueType.Texture2D);
+                using var textureBackend = new CapturingVirtualTextureBackend();
+
+                NotSupportedException exception = Assert.Throws<
+                    NotSupportedException>(() =>
+                        VividGPUDrivenSceneDataBuilder.CreateTextureOverrideResource(
+                            declaration,
+                            textureOverride,
+                            materialProxy,
+                            null,
+                            textureBackend));
+
+                Assert.That(exception.Message,
+                    Does.Contain("Virtual Texture backend"));
+                Assert.That(textureBackend.CreateSurfaceBindingCallCount,
+                    Is.Zero);
+            }
+            finally
+            {
+                DestroyTestObjects(null, null, materialProxy, texture);
+            }
+        }
+
+        [Test]
+        public void NamedVirtualTextureOverride_UsesStreamedAssetOnVirtualTextureBackend()
+        {
+            GPUDrivenMaterialProxy materialProxy = null;
+            VividVirtualTextureAsset virtualTexture = null;
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<
+                    GPUDrivenMaterialProxy>();
+                virtualTexture = ScriptableObject.CreateInstance<
+                    VividVirtualTextureAsset>();
+                GPUDrivenMaterialTextureOverride textureOverride =
+                    GPUDrivenMaterialTextureOverride.ForVirtualTexture(
+                        "ArtistPattern",
+                        virtualTexture,
+                        new Vector4(2.0f, 3.0f, 0.25f, 0.5f));
+                var declaration = new MaterialResourceDeclaration(
+                    "ArtistPattern",
+                    MaterialValueType.Texture2D,
+                    MaterialTextureSampleClass.Raw);
+                using var textureBackend =
+                    new CapturingVirtualTextureBackend();
+
+                VividMaterialResourceData resource =
+                    VividGPUDrivenSceneDataBuilder.CreateTextureOverrideResource(
+                        declaration,
+                        textureOverride,
+                        materialProxy,
+                        null,
+                        textureBackend);
+
+                Assert.That(
+                    textureBackend.CreateSurfaceBindingCallCount,
+                    Is.EqualTo(1));
+                Assert.That(
+                    textureBackend.LastTextures.StreamedVirtualTexture,
+                    Is.SameAs(virtualTexture));
+                Assert.That(textureBackend.LastTextures.BaseColor, Is.Null);
+                Assert.That(textureBackend.LastTextures.Normal, Is.Null);
+                Assert.That(textureBackend.LastTextures.Mask, Is.Null);
+                Assert.That(
+                    resource.TextureTilingOffset,
+                    Is.EqualTo(new float4(2.0f, 3.0f, 0.25f, 0.5f)));
+            }
+            finally
+            {
+                if (virtualTexture != null)
+                    Object.DestroyImmediate(virtualTexture);
+                if (materialProxy != null)
+                    Object.DestroyImmediate(materialProxy);
+            }
+        }
+
         [Test]
         public void Build_LegacyDualPayload_SelectsResourcesForEachTextureBackend()
         {
@@ -2733,7 +2909,8 @@ namespace VividRP.Editor.Tests
             {
             }
 
-            public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
+            public virtual bool CanUseStreamedVirtualTexture(
+                VividVirtualTextureAsset asset)
             {
                 return false;
             }
@@ -2779,6 +2956,29 @@ namespace VividRP.Editor.Tests
             public int VirtualTextureSpaceId => 1;
 
             public int VirtualTextureAllocationId => 1;
+
+            public override bool CanUseStreamedVirtualTexture(
+                VividVirtualTextureAsset asset)
+            {
+                return asset != null;
+            }
+        }
+
+        private sealed class SentinelTextureBackend : CapturingTextureBackend
+        {
+            private readonly VividSurfaceBindingData m_Binding;
+
+            internal SentinelTextureBackend(in VividSurfaceBindingData binding)
+            {
+                m_Binding = binding;
+            }
+
+            public override VividSurfaceBindingData CreateSurfaceBinding(
+                in GPUDrivenSurfaceTextureSet textures)
+            {
+                base.CreateSurfaceBinding(textures);
+                return m_Binding;
+            }
         }
 
     }

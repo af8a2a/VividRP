@@ -118,15 +118,6 @@ namespace VividRP.Runtime.GPUDriven
     internal static class MaterialGraphCompiler
     {
         private const string OutputPort = "Out";
-        private const ClosureFeatureMask StandardSlabFeatures =
-            ClosureFeatureMask.BaseColorTexture
-            | ClosureFeatureMask.NormalTexture
-            | ClosureFeatureMask.MaskTexture;
-        private const MaterialFeatureMask StandardMaterialFeatures =
-            MaterialFeatureMask.AlphaClip;
-        private const MaterialShadingModelMask StandardShadingModels =
-            MaterialShadingModelMask.StandardLit
-            | MaterialShadingModelMask.Unlit;
 
         internal static MaterialGraphCompilationResult Compile(
             MaterialGraph graph,
@@ -256,8 +247,8 @@ namespace VividRP.Runtime.GPUDriven
                         m_Closures,
                         surface,
                         ClosureTopologyBudget.Prototype,
-                        StandardMaterialFeatures,
-                        StandardShadingModels);
+                        output.MaterialFeatures,
+                        output.ShadingModels);
                 }
                 catch (MaterialIRVerificationException exception)
                 {
@@ -408,9 +399,9 @@ namespace VividRP.Runtime.GPUDriven
                     case MaterialGraphValueOpcode.ExternalInput:
                         return m_Values.ExternalInput((MaterialExternalInput) node.Semantic);
                     case MaterialGraphValueOpcode.Parameter:
-                        return m_Values.Parameter((MaterialParameter) node.Semantic);
+                        return m_Values.Parameter(node.ParameterDeclaration);
                     case MaterialGraphValueOpcode.TextureResource:
-                        return m_Values.TextureResource((MaterialTextureResource) node.Semantic);
+                        return m_Values.TextureResource(node.ResourceDeclaration);
                     case MaterialGraphValueOpcode.TextureSample:
                     {
                         MaterialValue ddx = m_Values.Ddx(operands[1]);
@@ -601,7 +592,7 @@ namespace VividRP.Runtime.GPUDriven
                                 values[2],
                                 values[3],
                                 values[4],
-                                StandardSlabFeatures);
+                                node.Features);
                             break;
                         case MaterialGraphClosureOpcode.HorizontalMix:
                             closure = m_Closures.HorizontalMix(

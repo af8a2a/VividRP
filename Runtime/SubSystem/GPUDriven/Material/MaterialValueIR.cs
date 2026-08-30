@@ -827,7 +827,7 @@ namespace VividRP.Runtime.GPUDriven
             in MaterialResourceDeclaration declaration)
         {
             RequireMutable();
-            ValidateDeclaration(declaration.Symbol, declaration.Type, isResource: true);
+            ValidateResourceDeclaration(declaration);
             for (int i = 0; i < m_ResourceDeclarations.Count; i++)
             {
                 MaterialResourceDeclaration existing = m_ResourceDeclarations[i];
@@ -836,7 +836,8 @@ namespace VividRP.Runtime.GPUDriven
                 if (string.Equals(existing.Symbol, declaration.Symbol, StringComparison.Ordinal))
                 {
                     throw new ArgumentException(
-                        $"Material resource '{declaration.Symbol}' is already declared as {existing.Type}.",
+                        $"Material resource '{declaration.Symbol}' is already declared as "
+                        + $"{existing.Type}/{existing.SampleClass}.",
                         nameof(declaration));
                 }
             }
@@ -868,7 +869,7 @@ namespace VividRP.Runtime.GPUDriven
         private void AddPredeclaredResource(
             in MaterialResourceDeclaration declaration)
         {
-            ValidateDeclaration(declaration.Symbol, declaration.Type, isResource: true);
+            ValidateResourceDeclaration(declaration);
             for (int i = 0; i < m_ResourceDeclarations.Count; i++)
             {
                 if (string.Equals(
@@ -882,6 +883,23 @@ namespace VividRP.Runtime.GPUDriven
                 }
             }
             m_ResourceDeclarations.Add(declaration);
+        }
+
+        private static void ValidateResourceDeclaration(
+            in MaterialResourceDeclaration declaration)
+        {
+            ValidateDeclaration(
+                declaration.Symbol,
+                declaration.Type,
+                isResource: true);
+            if ((uint) declaration.SampleClass
+                > (uint) MaterialTextureSampleClass.Mask)
+            {
+                throw new ArgumentException(
+                    $"Material resource '{declaration.Symbol}' has unsupported "
+                    + $"sample class {declaration.SampleClass}.",
+                    nameof(declaration));
+            }
         }
 
         private static void ValidateDeclaration(

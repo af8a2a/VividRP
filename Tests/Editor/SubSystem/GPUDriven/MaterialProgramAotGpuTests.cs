@@ -25,6 +25,8 @@ namespace VividRP.Editor.Tests
             TemporaryFolder + "/VividMaterialCoverageAOT.generated.hlsl";
         private const string SurfaceIncludePath =
             TemporaryFolder + "/VividMaterialSurfaceAOT.generated.hlsl";
+        private const string CatalogAssetPath =
+            TemporaryFolder + "/VividMaterialProgramCatalog.asset";
         private const string CapabilityShaderPath =
             TemporaryFolder + "/MaterialProgramAotGpuCapability.shader";
         private const string ShaderPath =
@@ -94,8 +96,11 @@ namespace VividRP.Editor.Tests
                 catalog.GetEntry(customProgramID);
             Assert.That(catalogEntry.ProgramID, Is.EqualTo(customProgramID));
 
-            MaterialCoverageHlslGenerator.Generate(catalog, CoverageIncludePath);
-            MaterialSurfaceHlslGenerator.Generate(catalog, SurfaceIncludePath);
+            MaterialProgramCatalogBaker.Bake(
+                catalog,
+                CatalogAssetPath,
+                SurfaceIncludePath,
+                CoverageIncludePath);
             File.WriteAllText(ShaderPath, BuildTestShaderSource());
             AssetDatabase.ImportAsset(ShaderPath, ImportAssetOptions.ForceSynchronousImport);
 

@@ -241,6 +241,91 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ParameterOverride_IsDeclarationAddressedAndTracksRevision()
+        {
+            var materialProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            try
+            {
+                uint initialRevision = materialProxy.Revision;
+                var initialValue = new Vector4(0.1f, 0.2f, 0.3f, 0.4f);
+
+                materialProxy.SetParameterOverride(
+                    "UserTint",
+                    GPUDrivenMaterialParameterType.Float4,
+                    initialValue);
+
+                Assert.That(materialProxy.ParameterOverrides, Has.Count.EqualTo(1));
+                Assert.That(
+                    materialProxy.ParameterOverrides[0].Symbol,
+                    Is.EqualTo("UserTint"));
+                Assert.That(
+                    materialProxy.ParameterOverrides[0].Type,
+                    Is.EqualTo(GPUDrivenMaterialParameterType.Float4));
+                Assert.That(
+                    materialProxy.ParameterOverrides[0].Value,
+                    Is.EqualTo(initialValue));
+                Assert.That(materialProxy.Revision, Is.GreaterThan(initialRevision));
+
+                uint addedRevision = materialProxy.Revision;
+                var replacementValue = new Vector4(0.9f, 0.8f, 0.7f, 0.6f);
+                materialProxy.SetParameterOverride(
+                    "UserTint",
+                    GPUDrivenMaterialParameterType.Float4,
+                    replacementValue);
+
+                Assert.That(materialProxy.ParameterOverrides, Has.Count.EqualTo(1));
+                Assert.That(
+                    materialProxy.ParameterOverrides[0].Value,
+                    Is.EqualTo(replacementValue));
+                Assert.That(materialProxy.Revision, Is.GreaterThan(addedRevision));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+            }
+        }
+
+        [Test]
+        public void VirtualTextureOverride_ReplacesTexture2DBySymbolAndTracksRevision()
+        {
+            var materialProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var texture = new Texture2D(1, 1);
+            var virtualTexture =
+                ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            try
+            {
+                materialProxy.SetTextureOverride("UserTexture", texture);
+                uint textureRevision = materialProxy.Revision;
+
+                materialProxy.SetVirtualTextureOverride(
+                    "UserTexture",
+                    virtualTexture,
+                    new Vector4(2.0f, 3.0f, 0.25f, 0.5f));
+
+                Assert.That(materialProxy.TextureOverrides, Has.Count.EqualTo(1));
+                Assert.That(
+                    materialProxy.TextureOverrides[0].Symbol,
+                    Is.EqualTo("UserTexture"));
+                Assert.That(materialProxy.TextureOverrides[0].Texture, Is.Null);
+                Assert.That(
+                    materialProxy.TextureOverrides[0].StreamedVirtualTexture,
+                    Is.SameAs(virtualTexture));
+                Assert.That(
+                    materialProxy.TextureOverrides[0].TilingOffset,
+                    Is.EqualTo(new Vector4(2.0f, 3.0f, 0.25f, 0.5f)));
+                Assert.That(materialProxy.Revision, Is.GreaterThan(textureRevision));
+            }
+            finally
+            {
+                Object.DestroyImmediate(virtualTexture);
+                Object.DestroyImmediate(texture);
+                Object.DestroyImmediate(materialProxy);
+            }
+        }
+
+        [Test]
         public void SyncFromSourceMaterial_MapsStandardLitCoreProperties_WhenMaterialIsSupported()
         {
             Shader shader = Shader.Find("VividRP/Material/StandardLit");

@@ -3,15 +3,20 @@
 #ifndef VIVID_MATERIAL_COVERAGE_AOT_GENERATED_INCLUDED
 #define VIVID_MATERIAL_COVERAGE_AOT_GENERATED_INCLUDED
 
-#define VIVID_MATERIAL_COVERAGE_HLSL_BACKEND_VERSION 2u
+#define VIVID_MATERIAL_COVERAGE_HLSL_BACKEND_VERSION 4u
+
+// Expected Material Program artifact set: v2 0x3024BA3AAAA74616
+#include "VividMaterialProgramCatalogStamp.generated.hlsl"
+#if !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_INCLUDED)
+#error Missing published Material Program Catalog stamp for Coverage dispatcher.
+#elif !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V00000002_H3024BA3AAAA74616)
+#error Coverage dispatcher does not match the published Material Program Catalog artifact set.
+#endif
 
 #ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
-#define VIVID_MATERIAL_CATALOG_MANIFEST_VERSION 3u
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0x3E14D387u
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0x348D9F37u
-#define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH 4u
-#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 3u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0x3E14D387u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0x348D9F37u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 4u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H0698794F592B0F0E_N00000004 1
+#elif !defined(VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H0698794F592B0F0E_N00000004)
 #error Material dispatchers use different frozen catalog manifests.
 #endif
 
@@ -22,8 +27,8 @@ struct VividAOTCoverageContext
     float2 UV0Ddy;
 };
 
-// Coverage AOT HLSL artifact v2, backend v2.
-VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_EB76486B44BE5E07(
+// Coverage AOT HLSL artifact v2, backend v4.
+VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_7131E668DB097FA6(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTCoverageContext context)
@@ -50,8 +55,8 @@ VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_EB76486B44BE5E07(
     return output;
 }
 
-// Coverage AOT HLSL artifact v2, backend v2.
-VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_24219A5B171B1B75(
+// Coverage AOT HLSL artifact v2, backend v4.
+VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_A7089B81BD16E6DC(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTCoverageContext context)
@@ -78,8 +83,8 @@ VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_24219A5B171B1B75(
     return output;
 }
 
-// Coverage AOT HLSL artifact v2, backend v2.
-VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_616C4B1614B06FFA(
+// Coverage AOT HLSL artifact v2, backend v4.
+VividMaterialCoverageEvaluation VividEvaluateAOTCoverage_D9DC10E466293683(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTCoverageContext context)
@@ -131,7 +136,7 @@ bool VividTryEvaluateAOTCoverageProgram(
                 || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
                 || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
                 return false;
-            output = VividEvaluateAOTCoverage_EB76486B44BE5E07(
+            output = VividEvaluateAOTCoverage_7131E668DB097FA6(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -150,7 +155,7 @@ bool VividTryEvaluateAOTCoverageProgram(
                 || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
                 || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
                 return false;
-            output = VividEvaluateAOTCoverage_24219A5B171B1B75(
+            output = VividEvaluateAOTCoverage_A7089B81BD16E6DC(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -169,7 +174,7 @@ bool VividTryEvaluateAOTCoverageProgram(
                 || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
                 || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
                 return false;
-            output = VividEvaluateAOTCoverage_24219A5B171B1B75(
+            output = VividEvaluateAOTCoverage_A7089B81BD16E6DC(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -188,7 +193,7 @@ bool VividTryEvaluateAOTCoverageProgram(
                 || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
                 || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
                 return false;
-            output = VividEvaluateAOTCoverage_616C4B1614B06FFA(
+            output = VividEvaluateAOTCoverage_D9DC10E466293683(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);

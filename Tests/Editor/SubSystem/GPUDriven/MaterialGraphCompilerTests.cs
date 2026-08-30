@@ -20,6 +20,21 @@ namespace VividRP.Editor.Tests.GPUDriven
                 GPUDrivenMaterialCompiler.ProgramVersion);
 
             AssertProgramParity(result, expected);
+            Assert.That(
+                result.Module.ClosureGraph.GetNode(result.Module.SurfaceClosure)
+                    .Slab.Features,
+                Is.EqualTo(
+                    ClosureFeatureMask.BaseColorTexture
+                    | ClosureFeatureMask.NormalTexture
+                    | ClosureFeatureMask.MaskTexture));
+            Assert.That(
+                result.Module.MaterialFeatures,
+                Is.EqualTo(MaterialFeatureMask.AlphaClip));
+            Assert.That(
+                result.Module.ShadingModels,
+                Is.EqualTo(
+                    MaterialShadingModelMask.StandardLit
+                    | MaterialShadingModelMask.Unlit));
         }
 
         [TestCase(VividDualSlabOperator.HorizontalMix)]
@@ -51,6 +66,92 @@ namespace VividRP.Editor.Tests.GPUDriven
                 GPUDrivenMaterialCompiler.ProgramVersion);
 
             AssertProgramParity(result, expected);
+        }
+
+        [Test]
+        public void NamedDeclarations_ReachIRWithoutEnumSemanticMapping()
+        {
+            var graph = new MaterialGraph();
+            SingleSlabSource source = AddSingleSlabSource(graph);
+            MaterialGraphValue customTint = graph.Parameter(
+                "CustomTint",
+                "CustomTint",
+                MaterialValueType.Float4);
+            MaterialGraphValue customTexture = graph.TextureResource(
+                "CustomTexture",
+                "CustomAlbedo",
+                MaterialValueType.Texture2D);
+            MaterialGraphValue customUv = graph.ExternalInput(
+                "CustomUV",
+                MaterialExternalInput.UV0);
+            MaterialGraphValue customSample = graph.TextureSample(
+                "CustomSample",
+                customTexture,
+                customUv);
+            MaterialGraphValue tintedBaseColor = graph.Multiply(
+                "TintedBaseColor",
+                source.BaseColor,
+                customTint);
+            MaterialGraphValue customBaseColor = graph.Multiply(
+                "CustomBaseColor",
+                tintedBaseColor,
+                customSample);
+            MaterialGraphClosure slab = graph.Slab(
+                "Slab",
+                customBaseColor,
+                source.Roughness,
+                source.Metallic,
+                source.Normal,
+                source.Tangent,
+                ClosureFeatureMask.BaseColorTexture);
+            graph.Output(
+                "Output",
+                slab,
+                source.Coverage,
+                source.AlphaClipThreshold,
+                source.Emission,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
+
+            MaterialGraphCompilationResult result = MaterialGraphCompiler.Compile(
+                graph,
+                GPUDrivenMaterialCompiler.ProgramVersion);
+
+            Assert.That(result.Succeeded, Is.True, DiagnosticsToString(result));
+            Assert.That(
+                result.Module.ClosureGraph.GetNode(result.Module.SurfaceClosure)
+                    .Slab.Features,
+                Is.EqualTo(ClosureFeatureMask.BaseColorTexture));
+            Assert.That(
+                result.Module.MaterialFeatures,
+                Is.EqualTo(MaterialFeatureMask.AlphaClip));
+            Assert.That(
+                result.Module.ShadingModels,
+                Is.EqualTo(MaterialShadingModelMask.StandardLit));
+            Assert.That(
+                result.Program.Module.ClosureGraph.GetNode(
+                    result.Program.Module.SurfaceClosure).Slab.Features,
+                Is.EqualTo(ClosureFeatureMask.BaseColorTexture));
+            Assert.That(
+                result.Program.Module.MaterialFeatures,
+                Is.EqualTo(MaterialFeatureMask.AlphaClip));
+            Assert.That(
+                result.Program.Module.ShadingModels,
+                Is.EqualTo(MaterialShadingModelMask.StandardLit));
+            Assert.That(
+                result.Module.Values.ParameterDeclarations,
+                Does.Contain(new MaterialParameterDeclaration(
+                    "CustomTint",
+                    MaterialValueType.Float4)));
+            Assert.That(
+                result.Module.Values.ResourceDeclarations,
+                Does.Contain(new MaterialResourceDeclaration(
+                    "CustomAlbedo",
+                    MaterialValueType.Texture2D)));
+            Assert.That(
+                result.Module.Values.ResourceDeclarations.Count(declaration =>
+                    declaration.Type == MaterialValueType.Texture2D),
+                Is.EqualTo(2));
         }
 
         [Test]
@@ -326,13 +427,16 @@ namespace VividRP.Editor.Tests.GPUDriven
                 roughness,
                 metallic,
                 source.Normal,
-                source.Tangent);
+                source.Tangent,
+                ClosureFeatureMask.BaseColorTexture);
             graph.Output(
                 "Output",
                 slab,
                 coverage,
                 source.AlphaClipThreshold,
-                emission);
+                emission,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
             return graph;
         }
 

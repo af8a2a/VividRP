@@ -123,27 +123,22 @@ namespace VividRP.Runtime.GPUDriven
                     "Surface AOT HLSL requires VisibilityResolve Stage LIR with VisibilityBuffer derivatives.");
             }
 
-            MaterialNativeTemplateLayoutSchema schema =
-                lowering.Template.LayoutSchema;
             MaterialGenericLayout genericLayout = lowering.GenericLayout;
             MaterialSurfaceHlslPhysicalContract physicalContract =
                 MaterialSurfaceHlslPhysicalContract.GenericRuntime;
             ValidateResourceUses(stageLIR);
 
             var bodyBuilder = new StringBuilder(Math.Max(2048, stageLIR.NodeCount * 96));
-            AppendNodes(bodyBuilder, stageLIR, schema, genericLayout);
+            AppendNodes(bodyBuilder, stageLIR, genericLayout);
             AppendOutput(
                 bodyBuilder,
                 module,
                 stageLIR,
-                schema,
                 genericLayout,
                 lowering.SelectionKey.Topology);
             string bodySource = MaterialSurfaceHlslArtifact.NormalizeLineEndings(
                 bodyBuilder.ToString());
-            ulong bindingHash = ComputeGenericBindingHash(
-                genericLayout,
-                schema);
+            ulong bindingHash = ComputeGenericBindingHash(genericLayout);
             ulong codeHash = ComputeCodeHash(
                 bodySource,
                 lowering.SelectionKey.Topology,
@@ -209,13 +204,11 @@ namespace VividRP.Runtime.GPUDriven
         private static void AppendNodes(
             StringBuilder builder,
             MaterialStageLIR stageLIR,
-            MaterialNativeTemplateLayoutSchema schema,
             MaterialGenericLayout genericLayout)
         {
             AppendStageNodes(
                 builder,
                 stageLIR,
-                schema,
                 genericLayout,
                 includePositionCS: true);
         }
@@ -223,7 +216,6 @@ namespace VividRP.Runtime.GPUDriven
         internal static void AppendStageNodes(
             StringBuilder builder,
             MaterialStageLIR stageLIR,
-            MaterialNativeTemplateLayoutSchema schema,
             MaterialGenericLayout genericLayout,
             bool includePositionCS)
         {
@@ -231,8 +223,6 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(builder));
             if (stageLIR == null)
                 throw new ArgumentNullException(nameof(stageLIR));
-            if (schema == null)
-                throw new ArgumentNullException(nameof(schema));
             if (genericLayout == null)
                 throw new ArgumentNullException(nameof(genericLayout));
             for (int nodeIndex = 0; nodeIndex < stageLIR.Nodes.Count; nodeIndex++)
@@ -248,7 +238,6 @@ namespace VividRP.Runtime.GPUDriven
                         stageLIR,
                         node,
                         nodeIndex,
-                        schema,
                         genericLayout,
                         includePositionCS);
                     continue;
@@ -262,7 +251,6 @@ namespace VividRP.Runtime.GPUDriven
                     .Append(GetNodeExpression(
                         stageLIR,
                         node,
-                        schema,
                         genericLayout))
                     .AppendLine(";");
             }
@@ -272,7 +260,6 @@ namespace VividRP.Runtime.GPUDriven
         private static string GetNodeExpression(
             MaterialStageLIR stageLIR,
             in MaterialStageLIRNode node,
-            MaterialNativeTemplateLayoutSchema schema,
             MaterialGenericLayout genericLayout)
         {
             switch (node.Opcode)
@@ -327,7 +314,6 @@ namespace VividRP.Runtime.GPUDriven
             MaterialStageLIR stageLIR,
             in MaterialStageLIRNode sample,
             int sampleIndex,
-            MaterialNativeTemplateLayoutSchema schema,
             MaterialGenericLayout genericLayout,
             bool includePositionCS)
         {
@@ -335,18 +321,14 @@ namespace VividRP.Runtime.GPUDriven
             if (!stageLIR.Values.TryGetResourceDeclaration(
                     resourceNode.Semantic,
                     out MaterialResourceDeclaration declaration)
-                || !schema.TryGetResourceBinding(
-                    declaration,
-                    out MaterialNativeResourceBinding binding)
                 || !genericLayout.TryGetResourceBinding(
                     declaration,
                     out MaterialGenericResourceBinding genericBinding))
             {
                 throw new NotSupportedException(
-                    $"Surface texture declaration @{resourceNode.Semantic} has no native binding.");
+                    $"Surface texture declaration @{resourceNode.Semantic} has no generic binding.");
             }
 
-            string sampleFunction = GetResourceSampleFunction(binding.Target);
             string resourceName = $"vivid_sample_resource_{sampleIndex}";
             string surfaceBinding = $"vivid_sample_binding_{sampleIndex}";
             string contextName = $"vivid_sample_context_{sampleIndex}";
@@ -394,16 +376,35 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine(");");
             builder.Append("    const float4 ")
                 .Append(GetValueName(sampleIndex)).Append(" = ")
-                .Append(sampleFunction).Append('(')
+                .Append(GetTextureSampleFunction(declaration.SampleClass))
+                .Append('(')
                 .Append(surfaceBinding).Append(", ")
                 .Append(contextName).AppendLine(");");
+        }
+
+        private static string GetTextureSampleFunction(
+            MaterialTextureSampleClass sampleClass)
+        {
+            switch (sampleClass)
+            {
+                case MaterialTextureSampleClass.Raw:
+                    return "VividSampleRawGrad";
+                case MaterialTextureSampleClass.Mask:
+                    return "VividSampleMaskGrad";
+                case MaterialTextureSampleClass.Color:
+                    return "VividSampleBaseColorGrad";
+                case MaterialTextureSampleClass.Normal:
+                    return "VividSampleNormalGrad";
+                default:
+                    throw new NotSupportedException(
+                        $"Surface texture sample class '{sampleClass}' is not supported.");
+            }
         }
 
         private static void AppendOutput(
             StringBuilder builder,
             MaterialIRModule module,
             MaterialStageLIR stageLIR,
-            MaterialNativeTemplateLayoutSchema schema,
             MaterialGenericLayout genericLayout,
             MaterialProgramTopologySpecialization topology)
         {
@@ -417,7 +418,6 @@ namespace VividRP.Runtime.GPUDriven
                 AppendSlabOutput(
                     builder,
                     stageLIR,
-                    schema,
                     genericLayout,
                     root.Slab,
                     "BaseSlab");
@@ -449,14 +449,12 @@ namespace VividRP.Runtime.GPUDriven
                 AppendSlabOutput(
                     builder,
                     stageLIR,
-                    schema,
                     genericLayout,
                     module.ClosureGraph.Nodes[root.Operand0].Slab,
                     "BaseSlab");
                 AppendSlabOutput(
                     builder,
                     stageLIR,
-                    schema,
                     genericLayout,
                     module.ClosureGraph.Nodes[root.Operand1].Slab,
                     "TopSlab");
@@ -482,7 +480,6 @@ namespace VividRP.Runtime.GPUDriven
         private static void AppendSlabOutput(
             StringBuilder builder,
             MaterialStageLIR stageLIR,
-            MaterialNativeTemplateLayoutSchema schema,
             MaterialGenericLayout genericLayout,
             in ClosureSlabExpression slab,
             string field)
@@ -497,33 +494,45 @@ namespace VividRP.Runtime.GPUDriven
             AppendOutputAssignment(builder, stageLIR, field, "Metallic", slab.Metallic);
             AppendOutputAssignment(builder, stageLIR, field, "NormalWS", slab.Normal);
             AppendOutputAssignment(builder, stageLIR, field, "TangentWS", slab.Tangent);
+
+            ClosureFeatureMask detailFeatures = slab.Features
+                & (ClosureFeatureMask.NormalTexture
+                   | ClosureFeatureMask.MaskTexture);
+            int sampleIndex = -1;
+            bool hasUnambiguousDetailCarrier = detailFeatures
+                    != ClosureFeatureMask.None
+                && TryFindSlabDetailCarrierSampleIndex(
+                    stageLIR,
+                    slab,
+                    out sampleIndex);
+            ClosureFeatureMask emittedFeatures = hasUnambiguousDetailCarrier
+                ? slab.Features
+                : slab.Features & ~detailFeatures;
             builder.Append("    output.").Append(field).Append(".FeatureMask = ")
-                .Append(((uint) slab.Features).ToString(CultureInfo.InvariantCulture))
+                .Append(((uint) emittedFeatures).ToString(CultureInfo.InvariantCulture))
                 .AppendLine("u;");
 
-            int sampleIndex = FindSlabBaseColorSampleIndex(stageLIR, slab);
+            if (!hasUnambiguousDetailCarrier)
+            {
+                builder.Append("    output.").Append(field)
+                    .AppendLine(".NormalTS = float3(0.0f, 0.0f, 1.0f);");
+                builder.Append("    output.").Append(field)
+                    .AppendLine(".AmbientOcclusion = 1.0f;");
+                builder.Append("    output.").Append(field)
+                    .AppendLine(".HasNormal = false;");
+                return;
+            }
             MaterialStageLIRNode sample = stageLIR.Nodes[sampleIndex];
             MaterialStageLIRNode resource = stageLIR.Nodes[sample.Operand0];
             if (!stageLIR.Values.TryGetResourceDeclaration(
                     resource.Semantic,
                     out MaterialResourceDeclaration declaration)
-                || !schema.TryGetResourceBinding(
-                    declaration,
-                    out MaterialNativeResourceBinding binding)
                 || !genericLayout.TryGetResourceBinding(
                     declaration,
                     out _))
             {
                 throw new NotSupportedException(
-                    $"Slab base-color declaration @{resource.Semantic} has no native binding.");
-            }
-            MaterialTextureResource expectedTarget = field == "BaseSlab"
-                ? MaterialTextureResource.BaseColor
-                : MaterialTextureResource.TopBaseColor;
-            if (binding.Target != expectedTarget)
-            {
-                throw new NotSupportedException(
-                    $"{field} base-color sample maps to '{binding.Target}', expected '{expectedTarget}'.");
+                    $"Slab base-color declaration @{resource.Semantic} has no generic binding.");
             }
 
             string surfaceBinding = $"vivid_sample_binding_{sampleIndex}";
@@ -562,30 +571,29 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(detailName).AppendLine(".HasNormal;");
         }
 
-        private static int FindSlabBaseColorSampleIndex(
+        private static bool TryFindSlabDetailCarrierSampleIndex(
             MaterialStageLIR stageLIR,
-            in ClosureSlabExpression slab)
+            in ClosureSlabExpression slab,
+            out int sampleIndex)
         {
-            int sampleIndex = -1;
+            sampleIndex = -1;
+            int sampleCount = 0;
             var visited = new bool[stageLIR.NodeCount];
             FindTextureSampleGrad(
                 stageLIR,
                 stageLIR.GetValue(slab.BaseColor).Index,
                 visited,
-                ref sampleIndex);
-            if (sampleIndex < 0)
-            {
-                throw new NotSupportedException(
-                    "Slab base color must depend on one explicit-gradient texture sample.");
-            }
-            return sampleIndex;
+                ref sampleIndex,
+                ref sampleCount);
+            return sampleCount == 1;
         }
 
         private static void FindTextureSampleGrad(
             MaterialStageLIR stageLIR,
             int nodeIndex,
             bool[] visited,
-            ref int sampleIndex)
+            ref int sampleIndex,
+            ref int sampleCount)
         {
             if (visited[nodeIndex])
                 return;
@@ -594,12 +602,8 @@ namespace VividRP.Runtime.GPUDriven
             MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
             if (node.Opcode == MaterialStageLIROpcode.TextureSampleGrad)
             {
-                if (sampleIndex >= 0 && sampleIndex != nodeIndex)
-                {
-                    throw new NotSupportedException(
-                        "Slab base color may depend on only one texture sample in the native AOT adapter.");
-                }
                 sampleIndex = nodeIndex;
+                sampleCount++;
                 return;
             }
 
@@ -609,7 +613,8 @@ namespace VividRP.Runtime.GPUDriven
                     stageLIR,
                     node.GetOperand(operandIndex),
                     visited,
-                    ref sampleIndex);
+                    ref sampleIndex,
+                    ref sampleCount);
             }
         }
 
@@ -669,26 +674,6 @@ namespace VividRP.Runtime.GPUDriven
                 "{0}(parameterAddress, {1}u)",
                 loader,
                 binding.WordOffset);
-        }
-
-        private static string GetResourceSampleFunction(
-            MaterialTextureResource target)
-        {
-            switch (target)
-            {
-                case MaterialTextureResource.BaseColor:
-                case MaterialTextureResource.TopBaseColor:
-                    return "VividSampleBaseColorGrad";
-                case MaterialTextureResource.BaseNormal:
-                case MaterialTextureResource.TopNormal:
-                    return "VividSampleNormalGrad";
-                case MaterialTextureResource.BaseMask:
-                case MaterialTextureResource.TopMask:
-                    return "VividSampleMaskGrad";
-                default:
-                    throw new NotSupportedException(
-                        $"Surface texture target '{target}' is not supported by HLSL codegen.");
-            }
         }
 
         private static string GetStageInputExpression(MaterialStageInput input)
@@ -899,74 +884,11 @@ namespace VividRP.Runtime.GPUDriven
             return GetValueName(nodeIndex);
         }
 
-        internal static ulong ComputeBindingHash(MaterialNativeTemplateLayoutSchema schema)
-        {
-            ulong hash = MaterialProgramHashUtility.OffsetBasis;
-            MaterialProgramHashUtility.Add(ref hash, (uint) schema.ParameterLayout.LayoutID);
-            MaterialProgramHashUtility.Add(ref hash, schema.ParameterLayout.Stride);
-            MaterialProgramHashUtility.Add(
-                ref hash,
-                schema.ParameterLayout.Bindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < schema.ParameterLayout.Bindings.Count;
-                 bindingIndex++)
-            {
-                MaterialParameterLayoutBinding binding =
-                    schema.ParameterLayout.Bindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Parameter);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Type);
-                MaterialProgramHashUtility.Add(ref hash, binding.ByteOffset);
-            }
-            MaterialProgramHashUtility.Add(ref hash, schema.ParameterBindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < schema.ParameterBindings.Count;
-                 bindingIndex++)
-            {
-                MaterialNativeParameterBinding binding =
-                    schema.ParameterBindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, binding.Declaration.Symbol);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Declaration.Type);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Target);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Conversion);
-            }
-            MaterialProgramHashUtility.Add(ref hash, (uint) schema.ResourceLayout.LayoutID);
-            MaterialProgramHashUtility.Add(ref hash, schema.ResourceLayout.RecordStride);
-            MaterialProgramHashUtility.Add(ref hash, schema.ResourceLayout.RecordCount);
-            MaterialProgramHashUtility.Add(
-                ref hash,
-                schema.ResourceLayout.Bindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < schema.ResourceLayout.Bindings.Count;
-                 bindingIndex++)
-            {
-                MaterialResourceLayoutBinding binding =
-                    schema.ResourceLayout.Bindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Resource);
-                MaterialProgramHashUtility.Add(ref hash, binding.RecordOffset);
-                MaterialProgramHashUtility.Add(ref hash, binding.ByteOffset);
-            }
-            MaterialProgramHashUtility.Add(ref hash, schema.ResourceBindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < schema.ResourceBindings.Count;
-                 bindingIndex++)
-            {
-                MaterialNativeResourceBinding binding =
-                    schema.ResourceBindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, binding.Declaration.Symbol);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Declaration.Type);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Target);
-            }
-            return hash;
-        }
-
         internal static ulong ComputeGenericBindingHash(
-            MaterialGenericLayout layout,
-            MaterialNativeTemplateLayoutSchema schema)
+            MaterialGenericLayout layout)
         {
             if (layout == null)
                 throw new ArgumentNullException(nameof(layout));
-            if (schema == null)
-                throw new ArgumentNullException(nameof(schema));
 
             ulong hash = MaterialProgramHashUtility.OffsetBasis;
             MaterialProgramHashUtility.Add(ref hash, layout.Version);
@@ -990,16 +912,6 @@ namespace VividRP.Runtime.GPUDriven
                     (int) binding.Declaration.Type);
                 MaterialProgramHashUtility.Add(ref hash, binding.WordOffset);
                 MaterialProgramHashUtility.Add(ref hash, binding.WordCount);
-                if (!schema.TryGetParameterBinding(
-                        binding.Declaration,
-                        out MaterialNativeParameterBinding nativeBinding))
-                {
-                    throw new InvalidOperationException(
-                        $"Generic parameter '{binding.Declaration.Symbol}' has no runtime source mapping.");
-                }
-                MaterialProgramHashUtility.Add(
-                    ref hash,
-                    (int) nativeBinding.Target);
             }
 
             MaterialProgramHashUtility.Add(ref hash, layout.ResourceCount);
@@ -1015,17 +927,10 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialProgramHashUtility.Add(
                     ref hash,
                     (int) binding.Declaration.Type);
-                MaterialProgramHashUtility.Add(ref hash, binding.Slot);
-                if (!schema.TryGetResourceBinding(
-                        binding.Declaration,
-                        out MaterialNativeResourceBinding nativeBinding))
-                {
-                    throw new InvalidOperationException(
-                        $"Generic resource '{binding.Declaration.Symbol}' has no runtime source mapping.");
-                }
                 MaterialProgramHashUtility.Add(
                     ref hash,
-                    (int) nativeBinding.Target);
+                    (int) binding.Declaration.SampleClass);
+                MaterialProgramHashUtility.Add(ref hash, binding.Slot);
             }
             return hash;
         }
@@ -1070,6 +975,12 @@ namespace VividRP.Runtime.GPUDriven
             builder.Append("#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION ")
                 .Append(MaterialProgramContract.SurfaceHlslBackendVersion)
                 .AppendLine("u");
+            builder.AppendLine();
+            MaterialProgramArtifactSetHlslContract.AppendExpectedArtifactSet(
+                builder,
+                catalog,
+                "SURFACE",
+                "Surface");
             builder.AppendLine();
             MaterialProgramCatalogHlslContract.Append(builder, catalog);
             builder.AppendLine();

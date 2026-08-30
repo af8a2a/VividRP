@@ -129,9 +129,15 @@ namespace VividRP.Runtime.GPUDriven
                 transportProgram.ProgramID,
                 topology,
                 VividMaterialExecutionClass.VisibilityDeferred);
+            VividMaterialProgramCapabilities requiredCapabilities =
+                VividMaterialProgramCapabilities.LegacyGBufferExport;
+            if ((module.MaterialFeatures & MaterialFeatureMask.AlphaClip) != 0)
+                requiredCapabilities |= VividMaterialProgramCapabilities.AlphaClip;
+            if ((module.ShadingModels & MaterialShadingModelMask.Unlit) != 0)
+                requiredCapabilities |= VividMaterialProgramCapabilities.Unlit;
             MaterialProgramTemplate template = templates.Resolve(
                 selectionKey,
-                requirements);
+                requiredCapabilities);
             if (template.RuntimeAbiVersion != programVersion)
             {
                 throw new NotSupportedException(
@@ -145,14 +151,7 @@ namespace VividRP.Runtime.GPUDriven
                 template.LayoutSchema);
             MaterialProgramLayoutFingerprint layoutFingerprint =
                 MaterialProgramLayoutFingerprintBuilder.Compute(
-                    genericLayout,
-                    template.LayoutSchema);
-            VividMaterialProgramCapabilities requiredCapabilities =
-                VividMaterialProgramCapabilities.LegacyGBufferExport;
-            if ((module.MaterialFeatures & MaterialFeatureMask.AlphaClip) != 0)
-                requiredCapabilities |= VividMaterialProgramCapabilities.AlphaClip;
-            if ((module.ShadingModels & MaterialShadingModelMask.Unlit) != 0)
-                requiredCapabilities |= VividMaterialProgramCapabilities.Unlit;
+                    genericLayout);
             if ((requiredCapabilities & ~template.Capabilities) != 0)
             {
                 throw new NotSupportedException(

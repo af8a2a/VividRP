@@ -261,6 +261,170 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CompileStandardSingleSlab_PacksNamedParameterOverrideByDeclaration()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graphAsset = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            var catalogAsset = ScriptableObject.CreateInstance<MaterialProgramCatalogAsset>();
+            try
+            {
+                MaterialGraphCompilationResult compilation =
+                    CompileNamedParameterProgram();
+                MaterialProgramCatalog catalog = CreateExtendedCatalog(
+                    "P4.NamedParameter",
+                    compilation.Program);
+                catalogAsset.Apply(catalog);
+                graphAsset.Apply(
+                    compilation,
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    catalog);
+                proxy.MaterialGraph = graphAsset;
+                var value = new Vector4(0.125f, 0.375f, 0.625f, 0.875f);
+                proxy.SetParameterOverride(
+                    "UserTint",
+                    GPUDrivenMaterialParameterType.Float4,
+                    value);
+
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        proxy,
+                        catalogAsset,
+                        out string validationMessage),
+                    Is.True,
+                    validationMessage);
+                GPUDrivenCompiledMaterialInstance compiled =
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        proxy,
+                        parameterAddress: 3u,
+                        resourceBindingAddress: 7u,
+                        legacySurfaceBindingIndex: 11u,
+                        frozenCatalog: catalogAsset);
+                var declaration = new MaterialParameterDeclaration(
+                    "UserTint",
+                    MaterialValueType.Float4);
+                Assert.That(
+                    MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                        declaration,
+                        out _),
+                    Is.False);
+                Assert.That(
+                    compilation.Program.Lowering.GenericLayout
+                        .TryGetParameterBinding(
+                            declaration,
+                            out MaterialGenericParameterBinding binding),
+                    Is.True);
+
+                AssertParameterValue(compiled, binding, value);
+                Assert.That(
+                    (uint) compiled.ProgramID,
+                    Is.EqualTo((uint) MaterialProgramContract.ProductionCatalogProgramCount));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalogAsset);
+                Object.DestroyImmediate(graphAsset);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void CompileStandardSingleSlab_RejectsNamedParameterOverrideTypeMismatch()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graphAsset = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            var catalogAsset = ScriptableObject.CreateInstance<MaterialProgramCatalogAsset>();
+            try
+            {
+                MaterialGraphCompilationResult compilation =
+                    CompileNamedParameterProgram();
+                MaterialProgramCatalog catalog = CreateExtendedCatalog(
+                    "P4.NamedParameter",
+                    compilation.Program);
+                catalogAsset.Apply(catalog);
+                graphAsset.Apply(
+                    compilation,
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    catalog);
+                proxy.MaterialGraph = graphAsset;
+                proxy.SetParameterOverride(
+                    "UserTint",
+                    GPUDrivenMaterialParameterType.Float3,
+                    Vector4.one);
+
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        proxy,
+                        catalogAsset,
+                        out string validationMessage),
+                    Is.False);
+                Assert.That(validationMessage, Does.Contain("UserTint"));
+                Assert.That(validationMessage, Does.Contain("Float3"));
+                Assert.That(validationMessage, Does.Contain("Float4"));
+                System.InvalidOperationException exception = Assert.Throws<
+                    System.InvalidOperationException>(() =>
+                        GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                            proxy,
+                            parameterAddress: 0u,
+                            resourceBindingAddress: 0u,
+                            legacySurfaceBindingIndex: 0u,
+                            frozenCatalog: catalogAsset));
+                Assert.That(exception.Message, Is.EqualTo(validationMessage));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalogAsset);
+                Object.DestroyImmediate(graphAsset);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void CompileStandardSingleSlab_RejectsMissingNamedParameterOverride()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graphAsset = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            var catalogAsset = ScriptableObject.CreateInstance<MaterialProgramCatalogAsset>();
+            try
+            {
+                MaterialGraphCompilationResult compilation =
+                    CompileNamedParameterProgram();
+                MaterialProgramCatalog catalog = CreateExtendedCatalog(
+                    "P4.NamedParameter",
+                    compilation.Program);
+                catalogAsset.Apply(catalog);
+                graphAsset.Apply(
+                    compilation,
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    catalog);
+                proxy.MaterialGraph = graphAsset;
+
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        proxy,
+                        catalogAsset,
+                        out string validationMessage),
+                    Is.False);
+                Assert.That(validationMessage, Does.Contain("UserTint"));
+                Assert.That(validationMessage, Does.Contain("no value"));
+                System.InvalidOperationException exception = Assert.Throws<
+                    System.InvalidOperationException>(() =>
+                        GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                            proxy,
+                            parameterAddress: 0u,
+                            resourceBindingAddress: 0u,
+                            legacySurfaceBindingIndex: 0u,
+                            frozenCatalog: catalogAsset));
+                Assert.That(exception.Message, Is.EqualTo(validationMessage));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalogAsset);
+                Object.DestroyImmediate(graphAsset);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
         public void TryValidateMaterialProxy_RejectsStaleMaterialGraphCatalogBinding()
         {
             var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -787,6 +951,94 @@ namespace VividRP.Editor.Tests
                     new Dictionary<string, HashSet<int>>(),
                     new Dictionary<string, HashSet<int>>()),
                 System.Array.Empty<MaterialGraphDiagnostic>());
+        }
+
+        private static MaterialGraphCompilationResult CompileNamedParameterProgram()
+        {
+            var graph = new MaterialGraph();
+            MaterialGraphValue tint = graph.Parameter(
+                "UserTint",
+                "UserTint",
+                MaterialValueType.Float4);
+            MaterialGraphValue normal = graph.ExternalInput(
+                "GeometryNormal",
+                MaterialExternalInput.GeometryNormalWS);
+            MaterialGraphValue tangent = graph.ExternalInput(
+                "GeometryTangent",
+                MaterialExternalInput.GeometryTangentWS);
+            MaterialGraphClosure slab = graph.Slab(
+                "Slab",
+                tint,
+                graph.Constant("Roughness", 0.5f),
+                graph.Constant("Metallic", 0.0f),
+                normal,
+                tangent);
+            graph.Output(
+                "Output",
+                slab,
+                graph.Swizzle("Coverage", tint, MaterialSwizzleMask.W),
+                graph.Constant("AlphaClipThreshold", 0.0f),
+                graph.Constant("Emission", new float3(0.0f)));
+
+            MaterialGraphCompilationResult compilation =
+                MaterialGraphCompiler.Compile(
+                    graph,
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            Assert.That(
+                compilation.Succeeded,
+                Is.True,
+                string.Join("\n", compilation.Diagnostics));
+            return compilation;
+        }
+
+        private static MaterialProgramCatalog CreateExtendedCatalog(
+            string customStableName,
+            CompiledMaterialProgram customProgram)
+        {
+            MaterialProgramCatalog production =
+                GPUDrivenMaterialCompiler.ProgramCatalog;
+            var slots = new List<MaterialProgramCatalogBakeSlot>(
+                production.RuntimeTableLength + 1);
+            for (int slotIndex = 0;
+                 slotIndex < production.RuntimeTableLength;
+                 slotIndex++)
+            {
+                MaterialProgramCatalog.ManifestEntry entry =
+                    production.Slots[slotIndex];
+                slots.Add(entry == null
+                    ? MaterialProgramCatalogBakeSlot.Reserved(
+                        $"P{slotIndex}.Reserved")
+                    : MaterialProgramCatalogBakeSlot.ForProgram(
+                        entry.StableName,
+                        entry.Program));
+            }
+            slots.Add(MaterialProgramCatalogBakeSlot.ForProgram(
+                customStableName,
+                customProgram));
+            return MaterialProgramCatalog.Bake(
+                production.Templates,
+                slots.ToArray());
+        }
+
+        private static void AssertParameterValue(
+            GPUDrivenCompiledMaterialInstance compiled,
+            in MaterialGenericParameterBinding binding,
+            Vector4 expected)
+        {
+            uint4 expectedBits = math.asuint(new float4(
+                expected.x,
+                expected.y,
+                expected.z,
+                expected.w));
+            for (int wordIndex = 0; wordIndex < binding.WordCount; wordIndex++)
+            {
+                int absoluteWord = binding.WordOffset + wordIndex;
+                uint4 lane = compiled.ParameterLanes[absoluteWord / 4];
+                Assert.That(
+                    lane[absoluteWord % 4],
+                    Is.EqualTo(expectedBits[wordIndex]),
+                    $"Parameter word {wordIndex}");
+            }
         }
 
         private static string GetHlslStructSignature(string source, string structName)

@@ -3,15 +3,20 @@
 #ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 #define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 
-#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 5u
+#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 7u
+
+// Expected Material Program artifact set: v2 0x3024BA3AAAA74616
+#include "VividMaterialProgramCatalogStamp.generated.hlsl"
+#if !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_INCLUDED)
+#error Missing published Material Program Catalog stamp for Surface dispatcher.
+#elif !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V00000002_H3024BA3AAAA74616)
+#error Surface dispatcher does not match the published Material Program Catalog artifact set.
+#endif
 
 #ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
-#define VIVID_MATERIAL_CATALOG_MANIFEST_VERSION 3u
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0x3E14D387u
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0x348D9F37u
-#define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH 4u
-#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 3u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0x3E14D387u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0x348D9F37u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 4u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H0698794F592B0F0E_N00000004 1
+#elif !defined(VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H0698794F592B0F0E_N00000004)
 #error Material dispatchers use different frozen catalog manifests.
 #endif
 
@@ -187,8 +192,8 @@ struct VividAOTSurfaceProgramOutput
     uint LayerOperator;
 };
 
-// Surface AOT HLSL artifact v4, backend v5.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_09A22006CB295347(
+// Surface AOT HLSL artifact v4, backend v7.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_94F184352819ABFE(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -239,8 +244,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_09A22006CB295347(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v5.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_337BBB8AC4DBB6FA(
+// Surface AOT HLSL artifact v4, backend v7.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_0379535EBBA6A9CB(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -325,8 +330,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_337BBB8AC4DBB6FA(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v5.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_1AC9F20550648A1A(
+// Surface AOT HLSL artifact v4, backend v7.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_C7F2CC72789B59DB(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -411,8 +416,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_1AC9F20550648A1A(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v5.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_3FA009788988936A(
+// Surface AOT HLSL artifact v4, backend v7.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_097E3A6D8F8336F2(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -450,21 +455,10 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_3FA009788988936A(
     output.BaseSlab.Metallic = vivid_v0017;
     output.BaseSlab.NormalWS = vivid_v0004;
     output.BaseSlab.TangentWS = vivid_v0005;
-    output.BaseSlab.FeatureMask = 7u;
-    const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
-        vivid_sample_slab_16,
-        vivid_sample_binding_16,
-        vivid_sample_context_16,
-        true,
-        true,
-        output.BaseSlab.BaseColor.rgb,
-        output.BaseSlab.PerceptualRoughness,
-        output.BaseSlab.Metallic);
-    output.BaseSlab.PerceptualRoughness = vivid_base_slab_detail.PerceptualRoughness;
-    output.BaseSlab.Metallic = vivid_base_slab_detail.Metallic;
-    output.BaseSlab.NormalTS = vivid_base_slab_detail.NormalTS;
-    output.BaseSlab.AmbientOcclusion = vivid_base_slab_detail.AmbientOcclusion;
-    output.BaseSlab.HasNormal = vivid_base_slab_detail.HasNormal;
+    output.BaseSlab.FeatureMask = 1u;
+    output.BaseSlab.NormalTS = float3(0.0f, 0.0f, 1.0f);
+    output.BaseSlab.AmbientOcclusion = 1.0f;
+    output.BaseSlab.HasNormal = false;
     output.ClosureCount = 1u;
     output.LayerOperator = 0u;
     output.Emission = vivid_v0013;
@@ -506,7 +500,7 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 0u;
             deferredExportContract.PayloadFlags = 3u;
             deferredExportContract.PolicyFlags = 7u;
-            output = VividEvaluateAOTSurface_09A22006CB295347(
+            output = VividEvaluateAOTSurface_94F184352819ABFE(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -530,7 +524,7 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 1u;
             deferredExportContract.PayloadFlags = 15u;
             deferredExportContract.PolicyFlags = 15u;
-            output = VividEvaluateAOTSurface_337BBB8AC4DBB6FA(
+            output = VividEvaluateAOTSurface_0379535EBBA6A9CB(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -554,7 +548,7 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 2u;
             deferredExportContract.PayloadFlags = 15u;
             deferredExportContract.PolicyFlags = 15u;
-            output = VividEvaluateAOTSurface_1AC9F20550648A1A(
+            output = VividEvaluateAOTSurface_C7F2CC72789B59DB(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -572,13 +566,13 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Version = 1u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 0u;
-            deferredExportContract.ShadingModelMask = 3u;
+            deferredExportContract.ShadingModelMask = 1u;
             deferredExportContract.LitClass = 2u;
             deferredExportContract.ExpectedClosureCount = 1u;
             deferredExportContract.Topology = 0u;
             deferredExportContract.PayloadFlags = 3u;
             deferredExportContract.PolicyFlags = 7u;
-            output = VividEvaluateAOTSurface_3FA009788988936A(
+            output = VividEvaluateAOTSurface_097E3A6D8F8336F2(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);

@@ -113,7 +113,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VisibilityBuffer.desc.FilterMode = FilterMode.Point;
             m_Attributes0 = RenderGraphTexture.CreateInput(
                 "VisibilityBufferAttributes0",
-                GraphicsFormat.R16G16B16A16_SFloat);
+                GraphicsFormat.R32G32B32A32_SFloat);
             m_Attributes0.desc.FilterMode = FilterMode.Point;
             m_Attributes1 = RenderGraphTexture.CreateInput(
                 "VisibilityBufferAttributes1",

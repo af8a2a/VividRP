@@ -40,7 +40,7 @@ namespace VividRP.Editor.Tests
             Assert.That(attributes0Entry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(
                 attributes0Entry.Texture.desc.ColorFormat,
-                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(attributes1Entry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(
                 attributes1Entry.Texture.desc.ColorFormat,

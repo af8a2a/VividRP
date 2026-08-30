@@ -194,6 +194,7 @@ namespace VividRP.Runtime.MeshShader
         internal const uint AbiVersion = 2;
 
         private const string NativeLibrary = "VividMeshShader";
+        private const uint DxgiFormatR32G32B32A32Float = 2;
         private const uint DxgiFormatR16G16B16A16Float = 10;
         private const uint DxgiFormatR32G32Uint = 17;
         private const uint DxgiFormatR16G16Float = 34;
@@ -381,7 +382,7 @@ namespace VividRP.Runtime.MeshShader
                 DepthCompare = (uint)renderState.DepthCompare,
                 RenderTargetCount = 4,
                 RenderTargetFormat0 = DxgiFormatR32G32Uint,
-                RenderTargetFormat1 = DxgiFormatR16G16B16A16Float,
+                RenderTargetFormat1 = DxgiFormatR32G32B32A32Float,
                 RenderTargetFormat2 = DxgiFormatR16G16B16A16Float,
                 RenderTargetFormat3 = DxgiFormatR16G16Float,
                 DepthStencilFormat = DxgiFormatD32Float,

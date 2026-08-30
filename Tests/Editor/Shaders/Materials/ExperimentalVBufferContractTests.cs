@@ -26,7 +26,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes0")
                     .Texture.desc.ColorFormat,
-                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(
                 resources.Textures.Single(entry => entry.Name == "VisibilityBufferAttributes1")
                     .Texture.desc.ColorFormat,

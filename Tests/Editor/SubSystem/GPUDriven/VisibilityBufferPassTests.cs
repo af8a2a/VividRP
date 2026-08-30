@@ -41,7 +41,7 @@ namespace VividRP.Editor.Tests
             Assert.That(attributes0Entry.AttachmentIndex, Is.EqualTo(1));
             Assert.That(
                 attributes0Entry.Texture.desc.ColorFormat,
-                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(attributes1Entry.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(attributes1Entry.AttachmentIndex, Is.EqualTo(2));
             Assert.That(
@@ -327,7 +327,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void MeshShaderRenderState_MatchesUnityD3D12FrontFaceConvention()
+        public void MeshShaderRenderState_MatchesUnityD3D12VisibilityState()
         {
             var renderState = new VividMeshShaderRenderState(
                 VividMeshShaderCullMode.Back,
@@ -337,6 +337,8 @@ namespace VividRP.Editor.Tests
                 VividMeshShaderPlugin.CreateNativeRenderState(renderState);
 
             Assert.That(nativeRenderState.FrontCounterClockwise, Is.EqualTo(1u));
+            Assert.That(nativeRenderState.RenderTargetFormat1, Is.EqualTo(2u));
+            Assert.That(nativeRenderState.RenderTargetFormat2, Is.EqualTo(10u));
         }
 
         [Test]

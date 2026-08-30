@@ -185,7 +185,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 desc = RenderGraphTextureDesc.CreateColorTarget(
                     1,
                     1,
-                    GraphicsFormat.R16G16B16A16_SFloat)
+                    GraphicsFormat.R32G32B32A32_SFloat)
             };
             m_Attributes0.desc.Name = "VisibilityBufferAttributes0";
             m_Attributes0.desc.FilterMode = FilterMode.Point;
@@ -1051,7 +1051,7 @@ namespace VividRP.Runtime.RenderPass.Core
                        GraphicsFormat.R32G32_UInt)
                    && HasMeshShaderCompatibleColorTarget(
                        m_Attributes0,
-                       GraphicsFormat.R16G16B16A16_SFloat)
+                       GraphicsFormat.R32G32B32A32_SFloat)
                    && HasMeshShaderCompatibleColorTarget(
                        m_Attributes1,
                        GraphicsFormat.R16G16B16A16_SFloat)

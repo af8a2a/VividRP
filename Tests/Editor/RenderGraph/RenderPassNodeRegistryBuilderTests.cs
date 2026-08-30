@@ -1,150 +1,80 @@
 using System;
 using System.Linq;
 using NUnit.Framework;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.RenderGraphModule;
+using UnityEditor;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Experimental.Material;
 
 namespace VividRP.Editor.Tests
 {
-    public class RenderPassNodeRegistryBuilderTests
+    public class RenderPassNodeRegistryIntegrationTests
     {
         [Test]
-        public void BuildRegistrations_IncludesAutoRegistrablePassType()
+        public void GeneratedRegistry_MapsKnownPassInBothDirections()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                new[] { typeof(FullScreenPass) });
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(FullScreenPass));
 
-            Assert.That(registrations, Has.Count.EqualTo(1));
-            Assert.That(registrations[0].NodeClassName, Is.EqualTo("FullScreenPass"));
-            Assert.That(registrations[0].PassType, Is.EqualTo(typeof(FullScreenPass)));
+            Assert.That(nodeType, Is.Not.Null);
+            Assert.That(nodeType.Name, Is.EqualTo(nameof(FullScreenPass)));
+            Assert.That(nodeType.Namespace, Is.EqualTo("VividRP.Editor.RenderGraph.Generated"));
+            Assert.That(typeof(RenderPassNodeData).IsAssignableFrom(nodeType), Is.True);
+            Assert.That(RenderPassNodeRegistry.GetPassType(nodeType), Is.EqualTo(typeof(FullScreenPass)));
         }
 
         [Test]
-        public void BuildRegistrations_ExcludesAbstractPassTypes()
+        public void GeneratedRegistry_ExcludesAbstractPassTypes()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                new[] { typeof(RasterPass) });
-
-            Assert.That(registrations, Is.Empty);
+            Assert.That(RenderPassNodeRegistry.GetNodeType(typeof(RasterPass)), Is.Null);
         }
 
         [Test]
-        public void BuildRegistrations_ExcludesObsoletePassTypes()
+        public void GeneratedRegistry_ExcludesObsoletePassTypes()
         {
 #pragma warning disable CS0618
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                new[] { typeof(DeprecatedPass) },
-                includeTestAssemblies: true);
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(ExperimentalVisibilityBufferPass));
 #pragma warning restore CS0618
 
-            Assert.That(registrations, Is.Empty);
+            Assert.That(nodeType, Is.Null);
         }
 
         [Test]
-        public void BuildRegistrations_GeneratesDistinctNodeNames_WhenPassNamesCollide()
+        public void GeneratedRegistry_AllGeneratedNodesRoundTrip()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                new[]
-                {
-                    typeof(NameCollisionA.CollisionPass),
-                    typeof(NameCollisionB.CollisionPass),
-                },
-                includeTestAssemblies: true);
+            var generatedNodeTypes = TypeCache.GetTypesDerivedFrom<RenderPassNodeData>()
+                .Where(type => type.Namespace == "VividRP.Editor.RenderGraph.Generated")
+                .ToArray();
 
-            var nodeClassNames = registrations.Select(item => item.NodeClassName).ToArray();
-
-            Assert.That(registrations, Has.Count.EqualTo(2));
-            Assert.That(nodeClassNames.Distinct().Count(), Is.EqualTo(2));
-            Assert.That(nodeClassNames.Count(name => name.EndsWith("CollisionPass", StringComparison.Ordinal)), Is.EqualTo(2));
+            Assert.That(generatedNodeTypes, Is.Not.Empty);
+            foreach (var nodeType in generatedNodeTypes)
+            {
+                var passType = RenderPassNodeRegistry.GetPassType(nodeType);
+                Assert.That(passType, Is.Not.Null, nodeType.FullName);
+                Assert.That(RenderPassNodeRegistry.GetNodeType(passType), Is.EqualTo(nodeType), nodeType.FullName);
+            }
         }
 
         [Test]
-        public void BuildSource_AndParseExistingClassNames_RoundTripClassNames()
+        public void GeneratedRegistry_CoversEveryEligibleRuntimePass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                new[] { typeof(FullScreenPass) });
+            var runtimeAssembly = typeof(IRenderPass).Assembly;
+            var eligiblePassTypes = TypeCache.GetTypesDerivedFrom<IRenderPass>()
+                .Where(type =>
+                    type.Assembly == runtimeAssembly
+                    && type.IsClass
+                    && !type.IsAbstract
+                    && !type.ContainsGenericParameters
+                    && type.IsVisible
+                    && type.GetCustomAttributes(typeof(ObsoleteAttribute), inherit: false).Length == 0
+                    && type.GetConstructor(Type.EmptyTypes) != null)
+                .ToArray();
 
-            var source = RenderPassNodeRegistryBuilder.BuildSource(registrations);
-            var parsed = RenderPassNodeRegistryBuilder.ParseExistingClassNames(source);
-
-            Assert.That(parsed, Is.EqualTo(registrations.Select(item => item.NodeClassName).ToArray()));
-        }
-
-        [Test]
-        public void BuildSource_GeneratesEmptyMarkerClasses()
-        {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                new[] { typeof(FullScreenPass) });
-
-            var source = RenderPassNodeRegistryBuilder.BuildSource(registrations);
-
-            Assert.That(source, Does.Contain("internal sealed class FullScreenPass : RenderPassNodeData { }"));
-            Assert.That(source, Does.Not.Contain("RegisteredPassTypeName"));
-        }
-
-        private static class NameCollisionA
-        {
-            public sealed class CollisionPass : RasterPass
+            Assert.That(eligiblePassTypes, Is.Not.Empty);
+            foreach (var passType in eligiblePassTypes)
             {
-                public override void Create()
-                {
-                }
-
-                public override void Prepare(ContextContainer frameData)
-                {
-                }
-
-                public override void Record(RasterPassContext context)
-                {
-                }
-
-                public override void Dispose()
-                {
-                }
-            }
-        }
-
-        [Obsolete("Only used to verify deprecated pass filtering.")]
-        public sealed class DeprecatedPass : RasterPass
-        {
-            public override void Create()
-            {
-            }
-
-            public override void Prepare(ContextContainer frameData)
-            {
-            }
-
-            public override void Record(RasterPassContext context)
-            {
-            }
-
-            public override void Dispose()
-            {
-            }
-        }
-
-        private static class NameCollisionB
-        {
-            public sealed class CollisionPass : RasterPass
-            {
-                public override void Create()
-                {
-                }
-
-                public override void Prepare(ContextContainer frameData)
-                {
-                }
-
-                public override void Record(RasterPassContext context)
-                {
-                }
-
-                public override void Dispose()
-                {
-                }
+                var nodeType = RenderPassNodeRegistry.GetNodeType(passType);
+                Assert.That(nodeType, Is.Not.Null, passType.FullName);
+                Assert.That(RenderPassNodeRegistry.GetPassType(nodeType), Is.EqualTo(passType), passType.FullName);
             }
         }
     }

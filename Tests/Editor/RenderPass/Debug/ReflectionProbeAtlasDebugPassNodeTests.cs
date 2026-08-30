@@ -92,14 +92,11 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesReflectionProbeAtlasDebugPass()
+        public void GeneratedNodeRegistry_IncludesReflectionProbeAtlasDebugPass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                new[] { typeof(ReflectionProbeAtlasDebugPass) });
-
             Assert.That(
-                registrations.Select(registration => registration.PassType),
-                Contains.Item(typeof(ReflectionProbeAtlasDebugPass)));
+                RenderPassNodeRegistry.GetNodeType(typeof(ReflectionProbeAtlasDebugPass)),
+                Is.Not.Null);
         }
     }
 }

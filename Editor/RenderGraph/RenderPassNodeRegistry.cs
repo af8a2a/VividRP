@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEditor;
-using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
 {
@@ -39,34 +37,9 @@ namespace VividRP.Editor.RenderGraph
 
         internal static void Rebuild()
         {
-            var passTypes = TypeCache.GetTypesDerivedFrom<IRenderPass>();
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(passTypes);
-
-            var nodeTypes = TypeCache.GetTypesDerivedFrom<RenderPassNodeData>();
-            var nodeTypesByName = new Dictionary<string, Type>(StringComparer.Ordinal);
-            foreach (var nodeType in nodeTypes)
-            {
-                if (nodeType.IsAbstract || nodeType.ContainsGenericParameters)
-                    continue;
-
-                nodeTypesByName[nodeType.Name] = nodeType;
-            }
-
             var nodeToPass = new Dictionary<Type, Type>();
             var passToNode = new Dictionary<Type, Type>();
-
-            foreach (var registration in registrations)
-            {
-                var passType = registration.PassType;
-                if (passType == null)
-                    continue;
-
-                if (!nodeTypesByName.TryGetValue(registration.NodeClassName, out var nodeType))
-                    continue;
-
-                nodeToPass[nodeType] = passType;
-                passToNode[passType] = nodeType;
-            }
+            GeneratedRenderPassNodeRegistry.Populate(nodeToPass, passToNode);
 
             s_NodeToPass = nodeToPass;
             s_PassToNode = passToNode;

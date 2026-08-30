@@ -55,11 +55,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesReGIRGridBuildPass()
+        public void GeneratedNodeRegistry_IncludesReGIRGridBuildPass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(ReGIRGridBuildPass) });
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(ReGIRGridBuildPass));
 
-            Assert.That(registrations.Select(registration => registration.NodeClassName), Contains.Item(nameof(ReGIRGridBuildPass)));
+            Assert.That(nodeType, Is.Not.Null);
+            Assert.That(nodeType.Name, Is.EqualTo(nameof(ReGIRGridBuildPass)));
         }
 
         [Test]

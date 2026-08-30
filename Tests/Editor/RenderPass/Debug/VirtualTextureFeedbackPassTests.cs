@@ -149,13 +149,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesVirtualTextureFeedbackPass()
+        public void GeneratedNodeRegistry_IncludesVirtualTextureFeedbackPass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(VirtualTextureFeedbackPass) });
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(VirtualTextureFeedbackPass));
 
-            Assert.That(registrations, Has.Count.EqualTo(1));
-            Assert.That(registrations.Single().PassType, Is.EqualTo(typeof(VirtualTextureFeedbackPass)));
-            Assert.That(registrations.Single().NodeClassName, Is.EqualTo(nameof(VirtualTextureFeedbackPass)));
+            Assert.That(nodeType, Is.Not.Null);
+            Assert.That(nodeType.Name, Is.EqualTo(nameof(VirtualTextureFeedbackPass)));
+            Assert.That(RenderPassNodeRegistry.GetPassType(nodeType), Is.EqualTo(typeof(VirtualTextureFeedbackPass)));
         }
 
         [Test]

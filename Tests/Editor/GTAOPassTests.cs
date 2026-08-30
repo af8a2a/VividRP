@@ -362,11 +362,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesGTAOPass()
+        public void GeneratedNodeRegistry_IncludesGTAOPass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(GTAOPass) });
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(GTAOPass));
 
-            Assert.That(registrations.Select(registration => registration.NodeClassName), Does.Contain(nameof(GTAOPass)));
+            Assert.That(nodeType, Is.Not.Null);
+            Assert.That(nodeType.Name, Is.EqualTo(nameof(GTAOPass)));
         }
 
         [Test]

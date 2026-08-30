@@ -28,11 +28,17 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
             #define VIVID_VISIBILITY_BUFFER_DEBUG_WIREFRAME 4
             #define VIVID_VISIBILITY_BUFFER_DEBUG_BARYCENTRIC 5
 
+            #define VIVID_VISIBILITY_ATTRIBUTE_COMPARISON_DISABLED 0
+            #define VIVID_VISIBILITY_ATTRIBUTE_COMPARISON_ATTRIBUTES0_ERROR 1
+
             TYPED_TEXTURE2D(float2, _VisibilityBuffer);
+            TEXTURE2D(_VisibilityBufferAttributes0);
             StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
             ByteAddressBuffer _SharedIndexBuffer;
 
             float4 _VisibilityBufferScaleBias;
+            float4 _VisibilityBufferAttributes0ScaleBias;
+            int _AttributeComparisonMode;
             int _VisualizationMode;
             float _DebugExposure;
             float _WireframeThickness;
@@ -121,6 +127,54 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
                     _ScreenSize.zw);
             }
 
+            float4 ResolveAttributes0Error(
+                VividVisibilityBufferValue value,
+                float4 positionCS,
+                float2 uv)
+            {
+                const VividBarycentricDerivatives barycentric =
+                    ResolveDebugBarycentric(value, positionCS);
+                const VividDecodedMeshlet meshlet = PullMeshletData(
+                    value.MeshletID);
+                const uint3 indices = uint3(
+                    PullDebugIndex(meshlet, value.IndexID + 0u),
+                    PullDebugIndex(meshlet, value.IndexID + 1u),
+                    PullDebugIndex(meshlet, value.IndexID + 2u));
+                const VividDecodedMeshletVertex vertex0 =
+                    DecodeVividMeshletVertex(
+                        _SharedVertexBuffer[meshlet.VertexOffset + indices.x]);
+                const VividDecodedMeshletVertex vertex1 =
+                    DecodeVividMeshletVertex(
+                        _SharedVertexBuffer[meshlet.VertexOffset + indices.y]);
+                const VividDecodedMeshletVertex vertex2 =
+                    DecodeVividMeshletVertex(
+                        _SharedVertexBuffer[meshlet.VertexOffset + indices.z]);
+                const float3 reconstructedU = InterpolateWithBarycentric(
+                    barycentric,
+                    vertex0.UV.x,
+                    vertex1.UV.x,
+                    vertex2.UV.x);
+                const float3 reconstructedV = InterpolateWithBarycentric(
+                    barycentric,
+                    vertex0.UV.y,
+                    vertex1.UV.y,
+                    vertex2.UV.y);
+                const float4 reconstructedAttributes0 = float4(
+                    reconstructedU.x,
+                    reconstructedV.x,
+                    reconstructedU.y,
+                    reconstructedV.y);
+                const float2 attributes0Uv = ApplyScaleBias(
+                    uv,
+                    _VisibilityBufferAttributes0ScaleBias);
+                const float4 storedAttributes0 = SAMPLE_TEXTURE2D_LOD(
+                    _VisibilityBufferAttributes0,
+                    sampler_PointClamp,
+                    attributes0Uv,
+                    0);
+                return abs(reconstructedAttributes0 - storedAttributes0);
+            }
+
             uint ResolveClusterLODLevel(VividVisibilityBufferValue value)
             {
                 if (value.InstanceID >= _InstanceDataCount || _MeshLODNodeCount == 0u)
@@ -165,6 +219,16 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
                     return 0;
 
                 float exposureMultiplier = exp2(_DebugExposure);
+                if (_AttributeComparisonMode
+                    == VIVID_VISIBILITY_ATTRIBUTE_COMPARISON_ATTRIBUTES0_ERROR)
+                {
+                    return saturate(
+                        ResolveAttributes0Error(
+                            value,
+                            input.positionCS,
+                            input.uv)
+                        * exposureMultiplier);
+                }
                 if (_VisualizationMode == VIVID_VISIBILITY_BUFFER_DEBUG_BARYCENTRIC)
                 {
                     VividBarycentricDerivatives barycentric = ResolveDebugBarycentric(

@@ -190,7 +190,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveShader_ConsumesHardwareBarycentricsAndVisibilityUvDerivatives()
+        public void ResolveShader_ReconstructsBarycentricsAndVisibilityUvDerivatives()
         {
             UnityEditor.PackageManager.PackageInfo package =
                 UnityEditor.PackageManager.PackageInfo.FindForAssembly(
@@ -206,16 +206,36 @@ namespace VividRP.Editor.Tests
 
             Assert.That(File.Exists(path), Is.True, path);
             string source = File.ReadAllText(path);
+            string compactSource = string.Concat(
+                source.Where(character => !char.IsWhiteSpace(character)));
 
             StringAssert.Contains("_VisibilityBufferBarycentrics", source);
-            StringAssert.Contains("DecodeVividVisibilityBufferBarycentrics", source);
             StringAssert.Contains("_VisibilityBufferAttributes0", source);
             StringAssert.Contains("_VisibilityBufferAttributes1", source);
-            StringAssert.Contains("interpolatedUV.uv = attributes0.xy;", source);
-            StringAssert.Contains("interpolatedUV.ddx = attributes0.zw;", source);
-            StringAssert.Contains("interpolatedUV.ddy = attributes1.xy;", source);
-            StringAssert.DoesNotContain("CalculateFullBarycentric(", source);
-            StringAssert.DoesNotContain("clipPosition", source);
+            StringAssert.Contains("CalculateFullBarycentric(", source);
+            StringAssert.Contains("InterpolateUV(", source);
+            StringAssert.Contains("TransformWorldToHClip(", source);
+            StringAssert.DoesNotContain(
+                "SAMPLE_TEXTURE2D_LOD(_VisibilityBufferAttributes0,",
+                compactSource);
+            StringAssert.DoesNotContain(
+                "SAMPLE_TEXTURE2D_LOD(_VisibilityBufferAttributes1,",
+                compactSource);
+            StringAssert.DoesNotContain(
+                "SAMPLE_TEXTURE2D_LOD(_VisibilityBufferBarycentrics,",
+                compactSource);
+
+            string barycentricPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividBarycentric.hlsl");
+            Assert.That(File.Exists(barycentricPath), Is.True, barycentricPath);
+            string barycentricSource = File.ReadAllText(barycentricPath);
+            StringAssert.Contains("pixelStepNDC.y *= -1.0f;", barycentricSource);
+            StringAssert.Contains("result.ddy *= pixelStepNDC.y;", barycentricSource);
         }
 
         [Test]

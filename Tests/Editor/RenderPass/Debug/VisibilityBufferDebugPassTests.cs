@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -14,17 +15,23 @@ namespace VividRP.Editor.Tests
     public sealed class VisibilityBufferDebugPassTests
     {
         [Test]
-        public void Initialize_RegistersVisibilityInputAndColorOutput()
+        public void Initialize_RegistersVisibilityInputsAndColorOutput()
         {
             IRenderPass renderPass = new VisibilityBufferDebugPass();
 
             var resources = renderPass.Initialize();
             var visibilityEntry = resources.Textures.Single(entry => entry.Name == "VisibilityBuffer");
+            var attributes0Entry = resources.Textures.Single(
+                entry => entry.Name == "VisibilityBufferAttributes0");
             var outputEntry = resources.Textures.Single(entry => entry.Name == "OutputTexture");
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(2));
+            Assert.That(resources.Textures, Has.Length.EqualTo(3));
             Assert.That(visibilityEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(visibilityEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32_UInt));
+            Assert.That(attributes0Entry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                attributes0Entry.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(outputEntry.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(outputEntry.AttachmentIndex, Is.EqualTo(0));
             Assert.That(outputEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
@@ -44,10 +51,44 @@ namespace VividRP.Editor.Tests
                     {
                         FieldName = "m_VisualizationMode",
                         Value = (int)VisibilityBufferDebugVisualizationMode.ClusterLOD,
+                    },
+                    new()
+                    {
+                        FieldName = "m_AttributeComparisonMode",
+                        Value = (int)VisibilityBufferAttributeComparisonMode.Attributes0Error,
                     }
                 });
 
             Assert.That(pass.VisualizationMode, Is.EqualTo(VisibilityBufferDebugVisualizationMode.ClusterLOD));
+            Assert.That(
+                pass.AttributeComparisonMode,
+                Is.EqualTo(VisibilityBufferAttributeComparisonMode.Attributes0Error));
+        }
+
+        [Test]
+        public void Shader_Attributes0ComparisonUsesReconstructedUvAndDdx()
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(VisibilityBufferDebugPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            string path = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "Debug",
+                "VisibilityBufferDebug.shader");
+
+            Assert.That(File.Exists(path), Is.True, path);
+            string source = File.ReadAllText(path);
+
+            StringAssert.Contains("_VisibilityBufferAttributes0", source);
+            StringAssert.Contains("ResolveAttributes0Error(", source);
+            StringAssert.Contains("InterpolateWithBarycentric(", source);
+            StringAssert.Contains(
+                "abs(reconstructedAttributes0 - storedAttributes0)",
+                source);
         }
 
         [Test]

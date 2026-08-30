@@ -13,6 +13,8 @@ namespace VividRP.Editor.Tests
             "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBufferResolve.shader";
         private const string SurfaceProgramAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl";
+        private const string SurfaceAotAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurfaceAOT.generated.hlsl";
 
         [Test]
         public void ClosureBackend_UsesSharedVisibilityBufferAbi()
@@ -42,6 +44,7 @@ namespace VividRP.Editor.Tests
         {
             string source = File.ReadAllText(ResolveAssetPath);
             string surfaceProgramSource = File.ReadAllText(SurfaceProgramAssetPath);
+            string surfaceAotSource = File.ReadAllText(SurfaceAotAssetPath);
             string compactSource = string.Concat(
                 source.Where(character => !char.IsWhiteSpace(character)));
 
@@ -51,10 +54,12 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VIVID_MATERIAL_PROGRAM_KNOWN", source);
             StringAssert.Contains("VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE", source);
             StringAssert.Contains("VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK", source);
-            StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
-            StringAssert.Contains("VividTryLoadDualSlabSurfaceProgram", source);
+            StringAssert.DoesNotContain("VividTryLoadStandardSingleSlabSurfaceProgram", source);
+            StringAssert.DoesNotContain("VividTryLoadDualSlabSurfaceProgram", source);
             StringAssert.Contains("VividMaterialSurfaceAOT.generated.hlsl", surfaceProgramSource);
             StringAssert.Contains("VividTryEvaluateAOTSurfaceProgram", source);
+            StringAssert.Contains("VividLoadMaterialFloat", surfaceAotSource);
+            StringAssert.Contains("PullMaterialResourceData", surfaceAotSource);
             StringAssert.Contains("VividAOTSurfaceContext", source);
             StringAssert.Contains("aotSurfaceOutput.BaseSlab", source);
             StringAssert.Contains("aotSurfaceOutput.TopSlab", source);

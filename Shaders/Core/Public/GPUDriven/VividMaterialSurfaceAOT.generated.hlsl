@@ -3,15 +3,15 @@
 #ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 #define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 
-#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 4u
+#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 5u
 
 #ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
-#define VIVID_MATERIAL_CATALOG_MANIFEST_VERSION 2u
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0x9241A604u
-#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0xA0497B27u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_VERSION 3u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0x3E14D387u
+#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0x348D9F37u
 #define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH 4u
-#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 2u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0x9241A604u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0xA0497B27u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 4u
+#elif VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != 3u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0x3E14D387u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0x348D9F37u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != 4u
 #error Material dispatchers use different frozen catalog manifests.
 #endif
 
@@ -187,27 +187,29 @@ struct VividAOTSurfaceProgramOutput
     uint LayerOperator;
 };
 
-// Surface AOT HLSL artifact v3, backend v4.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_047872FF3202941A(
-    const VividMaterialData materialParameters,
-    const VividSurfaceBindingData surfaceBinding0,
+// Surface AOT HLSL artifact v4, backend v5.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_09A22006CB295347(
+    const uint parameterAddress,
+    const uint resourceAddress,
     const VividAOTSurfaceContext context)
 {
     const float2 vivid_v0000 = context.UV0;
     const float3 vivid_v0001 = context.GeometryNormalWS;
     const float4 vivid_v0002 = context.GeometryTangentWS;
-    const float vivid_v0003 = materialParameters.Metallic;
-    const float vivid_v0004 = materialParameters.Roughness;
-    const float3 vivid_v0005 = materialParameters.Emission.xyz;
-    const float4 vivid_v0006 = materialParameters.AlbedoColor;
+    const float vivid_v0003 = VividLoadMaterialFloat(parameterAddress, 11u);
+    const float vivid_v0004 = VividLoadMaterialFloat(parameterAddress, 12u);
+    const float3 vivid_v0005 = VividLoadMaterialFloat3(parameterAddress, 8u);
+    const float4 vivid_v0006 = VividLoadMaterialFloat4(parameterAddress, 4u);
     const float2 vivid_v0008 = context.UV0Ddx;
     const float2 vivid_v0009 = context.UV0Ddy;
-    const VividSlabMaterialData vivid_sample_slab_10 = VividCreateSlabMaterialData(materialParameters);
+    const VividMaterialResourceData vivid_sample_resource_10 = PullMaterialResourceData(resourceAddress + 0u);
+    const VividSurfaceBindingData vivid_sample_binding_10 = vivid_sample_resource_10.SurfaceBinding;
+    const VividSlabMaterialData vivid_sample_slab_10 = VividCreateSlabMaterialData(vivid_sample_resource_10);
     const float2 vivid_sample_uv_10 = vivid_v0000 * vivid_sample_slab_10.TextureTilingOffset.xy + vivid_sample_slab_10.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_10 = vivid_v0008 * vivid_sample_slab_10.TextureTilingOffset.xy;
     const float2 vivid_sample_ddy_10 = vivid_v0009 * vivid_sample_slab_10.TextureTilingOffset.xy;
-    const VividSurfaceSampleContext vivid_sample_context_10 = VividCreateSurfaceSampleContextGrad(surfaceBinding0, vivid_sample_uv_10, vivid_sample_ddx_10, vivid_sample_ddy_10, context.PositionCS);
-    const float4 vivid_v0010 = VividSampleBaseColorGrad(surfaceBinding0, vivid_sample_context_10);
+    const VividSurfaceSampleContext vivid_sample_context_10 = VividCreateSurfaceSampleContextGrad(vivid_sample_binding_10, vivid_sample_uv_10, vivid_sample_ddx_10, vivid_sample_ddy_10, context.PositionCS);
+    const float4 vivid_v0010 = VividSampleBaseColorGrad(vivid_sample_binding_10, vivid_sample_context_10);
     const float4 vivid_v0011 = (vivid_v0006 * vivid_v0010);
 
     VividAOTSurfaceProgramOutput output = (VividAOTSurfaceProgramOutput) 0;
@@ -219,7 +221,7 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_047872FF3202941A(
     output.BaseSlab.FeatureMask = 7u;
     const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
         vivid_sample_slab_10,
-        surfaceBinding0,
+        vivid_sample_binding_10,
         vivid_sample_context_10,
         true,
         true,
@@ -237,38 +239,41 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_047872FF3202941A(
     return output;
 }
 
-// Surface AOT HLSL artifact v3, backend v4.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_A27C9402B2D2E998(
-    const VividDualSlabMaterialData materialParameters,
-    const VividSurfaceBindingData surfaceBinding0,
-    const VividSurfaceBindingData surfaceBinding1,
+// Surface AOT HLSL artifact v4, backend v5.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_337BBB8AC4DBB6FA(
+    const uint parameterAddress,
+    const uint resourceAddress,
     const VividAOTSurfaceContext context)
 {
     const float2 vivid_v0000 = context.UV0;
     const float3 vivid_v0001 = context.GeometryNormalWS;
     const float4 vivid_v0002 = context.GeometryTangentWS;
-    const float vivid_v0003 = materialParameters.LayerWeight;
-    const float vivid_v0004 = materialParameters.BaseMetallic;
-    const float vivid_v0005 = materialParameters.BaseRoughness;
-    const float vivid_v0006 = materialParameters.TopMetallic;
-    const float vivid_v0007 = materialParameters.TopRoughness;
-    const float3 vivid_v0008 = materialParameters.Emission.xyz;
-    const float4 vivid_v0009 = materialParameters.BaseAlbedoColor;
-    const float4 vivid_v0010 = materialParameters.TopAlbedoColor;
+    const float vivid_v0003 = VividLoadMaterialFloat(parameterAddress, 11u);
+    const float vivid_v0004 = VividLoadMaterialFloat(parameterAddress, 12u);
+    const float vivid_v0005 = VividLoadMaterialFloat(parameterAddress, 13u);
+    const float vivid_v0006 = VividLoadMaterialFloat(parameterAddress, 20u);
+    const float vivid_v0007 = VividLoadMaterialFloat(parameterAddress, 21u);
+    const float3 vivid_v0008 = VividLoadMaterialFloat3(parameterAddress, 8u);
+    const float4 vivid_v0009 = VividLoadMaterialFloat4(parameterAddress, 4u);
+    const float4 vivid_v0010 = VividLoadMaterialFloat4(parameterAddress, 16u);
     const float2 vivid_v0013 = context.UV0Ddx;
     const float2 vivid_v0014 = context.UV0Ddy;
-    const VividSlabMaterialData vivid_sample_slab_15 = VividGetBaseSlabMaterialData(materialParameters);
+    const VividMaterialResourceData vivid_sample_resource_15 = PullMaterialResourceData(resourceAddress + 0u);
+    const VividSurfaceBindingData vivid_sample_binding_15 = vivid_sample_resource_15.SurfaceBinding;
+    const VividSlabMaterialData vivid_sample_slab_15 = VividCreateSlabMaterialData(vivid_sample_resource_15);
     const float2 vivid_sample_uv_15 = vivid_v0000 * vivid_sample_slab_15.TextureTilingOffset.xy + vivid_sample_slab_15.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_15 = vivid_v0013 * vivid_sample_slab_15.TextureTilingOffset.xy;
     const float2 vivid_sample_ddy_15 = vivid_v0014 * vivid_sample_slab_15.TextureTilingOffset.xy;
-    const VividSurfaceSampleContext vivid_sample_context_15 = VividCreateSurfaceSampleContextGrad(surfaceBinding0, vivid_sample_uv_15, vivid_sample_ddx_15, vivid_sample_ddy_15, context.PositionCS);
-    const float4 vivid_v0015 = VividSampleBaseColorGrad(surfaceBinding0, vivid_sample_context_15);
-    const VividSlabMaterialData vivid_sample_slab_16 = VividGetTopSlabMaterialData(materialParameters);
+    const VividSurfaceSampleContext vivid_sample_context_15 = VividCreateSurfaceSampleContextGrad(vivid_sample_binding_15, vivid_sample_uv_15, vivid_sample_ddx_15, vivid_sample_ddy_15, context.PositionCS);
+    const float4 vivid_v0015 = VividSampleBaseColorGrad(vivid_sample_binding_15, vivid_sample_context_15);
+    const VividMaterialResourceData vivid_sample_resource_16 = PullMaterialResourceData(resourceAddress + 1u);
+    const VividSurfaceBindingData vivid_sample_binding_16 = vivid_sample_resource_16.SurfaceBinding;
+    const VividSlabMaterialData vivid_sample_slab_16 = VividCreateSlabMaterialData(vivid_sample_resource_16);
     const float2 vivid_sample_uv_16 = vivid_v0000 * vivid_sample_slab_16.TextureTilingOffset.xy + vivid_sample_slab_16.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_16 = vivid_v0013 * vivid_sample_slab_16.TextureTilingOffset.xy;
     const float2 vivid_sample_ddy_16 = vivid_v0014 * vivid_sample_slab_16.TextureTilingOffset.xy;
-    const VividSurfaceSampleContext vivid_sample_context_16 = VividCreateSurfaceSampleContextGrad(surfaceBinding1, vivid_sample_uv_16, vivid_sample_ddx_16, vivid_sample_ddy_16, context.PositionCS);
-    const float4 vivid_v0016 = VividSampleBaseColorGrad(surfaceBinding1, vivid_sample_context_16);
+    const VividSurfaceSampleContext vivid_sample_context_16 = VividCreateSurfaceSampleContextGrad(vivid_sample_binding_16, vivid_sample_uv_16, vivid_sample_ddx_16, vivid_sample_ddy_16, context.PositionCS);
+    const float4 vivid_v0016 = VividSampleBaseColorGrad(vivid_sample_binding_16, vivid_sample_context_16);
     const float4 vivid_v0017 = (vivid_v0009 * vivid_v0015);
     const float4 vivid_v0018 = (vivid_v0010 * vivid_v0016);
 
@@ -281,7 +286,7 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_A27C9402B2D2E998(
     output.BaseSlab.FeatureMask = 7u;
     const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
         vivid_sample_slab_15,
-        surfaceBinding0,
+        vivid_sample_binding_15,
         vivid_sample_context_15,
         true,
         true,
@@ -301,7 +306,7 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_A27C9402B2D2E998(
     output.TopSlab.FeatureMask = 7u;
     const VividEvaluatedSlabSurface vivid_top_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
         vivid_sample_slab_16,
-        surfaceBinding1,
+        vivid_sample_binding_16,
         vivid_sample_context_16,
         true,
         true,
@@ -320,38 +325,41 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_A27C9402B2D2E998(
     return output;
 }
 
-// Surface AOT HLSL artifact v3, backend v4.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_CA72DA7B47B3DB3C(
-    const VividDualSlabMaterialData materialParameters,
-    const VividSurfaceBindingData surfaceBinding0,
-    const VividSurfaceBindingData surfaceBinding1,
+// Surface AOT HLSL artifact v4, backend v5.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_1AC9F20550648A1A(
+    const uint parameterAddress,
+    const uint resourceAddress,
     const VividAOTSurfaceContext context)
 {
     const float2 vivid_v0000 = context.UV0;
     const float3 vivid_v0001 = context.GeometryNormalWS;
     const float4 vivid_v0002 = context.GeometryTangentWS;
-    const float vivid_v0003 = materialParameters.LayerWeight;
-    const float vivid_v0004 = materialParameters.BaseMetallic;
-    const float vivid_v0005 = materialParameters.BaseRoughness;
-    const float vivid_v0006 = materialParameters.TopMetallic;
-    const float vivid_v0007 = materialParameters.TopRoughness;
-    const float3 vivid_v0008 = materialParameters.Emission.xyz;
-    const float4 vivid_v0009 = materialParameters.BaseAlbedoColor;
-    const float4 vivid_v0010 = materialParameters.TopAlbedoColor;
+    const float vivid_v0003 = VividLoadMaterialFloat(parameterAddress, 11u);
+    const float vivid_v0004 = VividLoadMaterialFloat(parameterAddress, 12u);
+    const float vivid_v0005 = VividLoadMaterialFloat(parameterAddress, 13u);
+    const float vivid_v0006 = VividLoadMaterialFloat(parameterAddress, 20u);
+    const float vivid_v0007 = VividLoadMaterialFloat(parameterAddress, 21u);
+    const float3 vivid_v0008 = VividLoadMaterialFloat3(parameterAddress, 8u);
+    const float4 vivid_v0009 = VividLoadMaterialFloat4(parameterAddress, 4u);
+    const float4 vivid_v0010 = VividLoadMaterialFloat4(parameterAddress, 16u);
     const float2 vivid_v0013 = context.UV0Ddx;
     const float2 vivid_v0014 = context.UV0Ddy;
-    const VividSlabMaterialData vivid_sample_slab_15 = VividGetBaseSlabMaterialData(materialParameters);
+    const VividMaterialResourceData vivid_sample_resource_15 = PullMaterialResourceData(resourceAddress + 0u);
+    const VividSurfaceBindingData vivid_sample_binding_15 = vivid_sample_resource_15.SurfaceBinding;
+    const VividSlabMaterialData vivid_sample_slab_15 = VividCreateSlabMaterialData(vivid_sample_resource_15);
     const float2 vivid_sample_uv_15 = vivid_v0000 * vivid_sample_slab_15.TextureTilingOffset.xy + vivid_sample_slab_15.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_15 = vivid_v0013 * vivid_sample_slab_15.TextureTilingOffset.xy;
     const float2 vivid_sample_ddy_15 = vivid_v0014 * vivid_sample_slab_15.TextureTilingOffset.xy;
-    const VividSurfaceSampleContext vivid_sample_context_15 = VividCreateSurfaceSampleContextGrad(surfaceBinding0, vivid_sample_uv_15, vivid_sample_ddx_15, vivid_sample_ddy_15, context.PositionCS);
-    const float4 vivid_v0015 = VividSampleBaseColorGrad(surfaceBinding0, vivid_sample_context_15);
-    const VividSlabMaterialData vivid_sample_slab_16 = VividGetTopSlabMaterialData(materialParameters);
+    const VividSurfaceSampleContext vivid_sample_context_15 = VividCreateSurfaceSampleContextGrad(vivid_sample_binding_15, vivid_sample_uv_15, vivid_sample_ddx_15, vivid_sample_ddy_15, context.PositionCS);
+    const float4 vivid_v0015 = VividSampleBaseColorGrad(vivid_sample_binding_15, vivid_sample_context_15);
+    const VividMaterialResourceData vivid_sample_resource_16 = PullMaterialResourceData(resourceAddress + 1u);
+    const VividSurfaceBindingData vivid_sample_binding_16 = vivid_sample_resource_16.SurfaceBinding;
+    const VividSlabMaterialData vivid_sample_slab_16 = VividCreateSlabMaterialData(vivid_sample_resource_16);
     const float2 vivid_sample_uv_16 = vivid_v0000 * vivid_sample_slab_16.TextureTilingOffset.xy + vivid_sample_slab_16.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_16 = vivid_v0013 * vivid_sample_slab_16.TextureTilingOffset.xy;
     const float2 vivid_sample_ddy_16 = vivid_v0014 * vivid_sample_slab_16.TextureTilingOffset.xy;
-    const VividSurfaceSampleContext vivid_sample_context_16 = VividCreateSurfaceSampleContextGrad(surfaceBinding1, vivid_sample_uv_16, vivid_sample_ddx_16, vivid_sample_ddy_16, context.PositionCS);
-    const float4 vivid_v0016 = VividSampleBaseColorGrad(surfaceBinding1, vivid_sample_context_16);
+    const VividSurfaceSampleContext vivid_sample_context_16 = VividCreateSurfaceSampleContextGrad(vivid_sample_binding_16, vivid_sample_uv_16, vivid_sample_ddx_16, vivid_sample_ddy_16, context.PositionCS);
+    const float4 vivid_v0016 = VividSampleBaseColorGrad(vivid_sample_binding_16, vivid_sample_context_16);
     const float4 vivid_v0017 = (vivid_v0009 * vivid_v0015);
     const float4 vivid_v0018 = (vivid_v0010 * vivid_v0016);
 
@@ -364,7 +372,7 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_CA72DA7B47B3DB3C(
     output.BaseSlab.FeatureMask = 7u;
     const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
         vivid_sample_slab_15,
-        surfaceBinding0,
+        vivid_sample_binding_15,
         vivid_sample_context_15,
         true,
         true,
@@ -384,7 +392,7 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_CA72DA7B47B3DB3C(
     output.TopSlab.FeatureMask = 7u;
     const VividEvaluatedSlabSurface vivid_top_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
         vivid_sample_slab_16,
-        surfaceBinding1,
+        vivid_sample_binding_16,
         vivid_sample_context_16,
         true,
         true,
@@ -403,10 +411,10 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_CA72DA7B47B3DB3C(
     return output;
 }
 
-// Surface AOT HLSL artifact v3, backend v4.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_82117A7EE1DF9D99(
-    const VividMaterialData materialParameters,
-    const VividSurfaceBindingData surfaceBinding0,
+// Surface AOT HLSL artifact v4, backend v5.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_3FA009788988936A(
+    const uint parameterAddress,
+    const uint resourceAddress,
     const VividAOTSurfaceContext context)
 {
     const float vivid_v0000 = asfloat(0x3F000000u);
@@ -415,21 +423,23 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_82117A7EE1DF9D99(
     const float2 vivid_v0003 = context.UV0;
     const float3 vivid_v0004 = context.GeometryNormalWS;
     const float4 vivid_v0005 = context.GeometryTangentWS;
-    const float vivid_v0006 = materialParameters.Metallic;
-    const float vivid_v0007 = materialParameters.Roughness;
-    const float3 vivid_v0008 = materialParameters.Emission.xyz;
-    const float4 vivid_v0009 = materialParameters.AlbedoColor;
+    const float vivid_v0006 = VividLoadMaterialFloat(parameterAddress, 11u);
+    const float vivid_v0007 = VividLoadMaterialFloat(parameterAddress, 12u);
+    const float3 vivid_v0008 = VividLoadMaterialFloat3(parameterAddress, 8u);
+    const float4 vivid_v0009 = VividLoadMaterialFloat4(parameterAddress, 4u);
     const float2 vivid_v0011 = context.UV0Ddx;
     const float2 vivid_v0012 = context.UV0Ddy;
     const float3 vivid_v0013 = (vivid_v0001 + vivid_v0008);
     const float vivid_v0014 = (vivid_v0000 * vivid_v0006);
     const float vivid_v0015 = (1.0f - vivid_v0007);
-    const VividSlabMaterialData vivid_sample_slab_16 = VividCreateSlabMaterialData(materialParameters);
+    const VividMaterialResourceData vivid_sample_resource_16 = PullMaterialResourceData(resourceAddress + 0u);
+    const VividSurfaceBindingData vivid_sample_binding_16 = vivid_sample_resource_16.SurfaceBinding;
+    const VividSlabMaterialData vivid_sample_slab_16 = VividCreateSlabMaterialData(vivid_sample_resource_16);
     const float2 vivid_sample_uv_16 = vivid_v0003 * vivid_sample_slab_16.TextureTilingOffset.xy + vivid_sample_slab_16.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_16 = vivid_v0011 * vivid_sample_slab_16.TextureTilingOffset.xy;
     const float2 vivid_sample_ddy_16 = vivid_v0012 * vivid_sample_slab_16.TextureTilingOffset.xy;
-    const VividSurfaceSampleContext vivid_sample_context_16 = VividCreateSurfaceSampleContextGrad(surfaceBinding0, vivid_sample_uv_16, vivid_sample_ddx_16, vivid_sample_ddy_16, context.PositionCS);
-    const float4 vivid_v0016 = VividSampleBaseColorGrad(surfaceBinding0, vivid_sample_context_16);
+    const VividSurfaceSampleContext vivid_sample_context_16 = VividCreateSurfaceSampleContextGrad(vivid_sample_binding_16, vivid_sample_uv_16, vivid_sample_ddx_16, vivid_sample_ddy_16, context.PositionCS);
+    const float4 vivid_v0016 = VividSampleBaseColorGrad(vivid_sample_binding_16, vivid_sample_context_16);
     const float vivid_v0017 = saturate(vivid_v0014);
     const float4 vivid_v0018 = (vivid_v0009 * vivid_v0016);
     const float4 vivid_v0019 = (vivid_v0002 * vivid_v0018);
@@ -443,7 +453,7 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_82117A7EE1DF9D99(
     output.BaseSlab.FeatureMask = 7u;
     const VividEvaluatedSlabSurface vivid_base_slab_detail = VividEvaluateAOTSlabSurfaceDetail(
         vivid_sample_slab_16,
-        surfaceBinding0,
+        vivid_sample_binding_16,
         vivid_sample_context_16,
         true,
         true,
@@ -462,20 +472,31 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_82117A7EE1DF9D99(
 }
 
 bool VividTryEvaluateAOTSurfaceProgram(
-    const uint programID,
-    const VividMaterialData materialParameters,
-    const VividDualSlabMaterialData dualSlabMaterialParameters,
-    const VividSurfaceBindingData surfaceBinding0,
-    const VividSurfaceBindingData surfaceBinding1,
+    const VividMaterialRuntimeHeader runtimeHeader,
+    const VividMaterialProgramData programData,
     const VividAOTSurfaceContext context,
     out VividAOTDeferredExportContract deferredExportContract,
     out VividAOTSurfaceProgramOutput output)
 {
     deferredExportContract = (VividAOTDeferredExportContract) 0;
     output = (VividAOTSurfaceProgramOutput) 0;
-    switch (programID)
+    if (programData.Version != VIVID_MATERIAL_PROGRAM_VERSION
+        || programData.ParameterLayoutID
+            != VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES
+        || programData.ResourceLayoutID
+            != VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS)
+        return false;
+    switch (runtimeHeader.ProgramID)
     {
         case 0u:
+        {
+            const uint parameterLaneCount = 4u;
+            const uint resourceCount = 1u;
+            if (runtimeHeader.ParameterAddress > _MaterialParameterDataCount
+                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress
+                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
+                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
+                return false;
             deferredExportContract.Version = 1u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 0u;
@@ -485,12 +506,21 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 0u;
             deferredExportContract.PayloadFlags = 3u;
             deferredExportContract.PolicyFlags = 7u;
-            output = VividEvaluateAOTSurface_047872FF3202941A(
-                materialParameters,
-                surfaceBinding0,
+            output = VividEvaluateAOTSurface_09A22006CB295347(
+                runtimeHeader.ParameterAddress,
+                runtimeHeader.ResourceBindingAddress,
                 context);
             return true;
+        }
         case 1u:
+        {
+            const uint parameterLaneCount = 6u;
+            const uint resourceCount = 2u;
+            if (runtimeHeader.ParameterAddress > _MaterialParameterDataCount
+                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress
+                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
+                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
+                return false;
             deferredExportContract.Version = 1u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 1u;
@@ -500,13 +530,21 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 1u;
             deferredExportContract.PayloadFlags = 15u;
             deferredExportContract.PolicyFlags = 15u;
-            output = VividEvaluateAOTSurface_A27C9402B2D2E998(
-                dualSlabMaterialParameters,
-                surfaceBinding0,
-                surfaceBinding1,
+            output = VividEvaluateAOTSurface_337BBB8AC4DBB6FA(
+                runtimeHeader.ParameterAddress,
+                runtimeHeader.ResourceBindingAddress,
                 context);
             return true;
+        }
         case 2u:
+        {
+            const uint parameterLaneCount = 6u;
+            const uint resourceCount = 2u;
+            if (runtimeHeader.ParameterAddress > _MaterialParameterDataCount
+                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress
+                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
+                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
+                return false;
             deferredExportContract.Version = 1u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 1u;
@@ -516,13 +554,21 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 2u;
             deferredExportContract.PayloadFlags = 15u;
             deferredExportContract.PolicyFlags = 15u;
-            output = VividEvaluateAOTSurface_CA72DA7B47B3DB3C(
-                dualSlabMaterialParameters,
-                surfaceBinding0,
-                surfaceBinding1,
+            output = VividEvaluateAOTSurface_1AC9F20550648A1A(
+                runtimeHeader.ParameterAddress,
+                runtimeHeader.ResourceBindingAddress,
                 context);
             return true;
+        }
         case 3u:
+        {
+            const uint parameterLaneCount = 4u;
+            const uint resourceCount = 1u;
+            if (runtimeHeader.ParameterAddress > _MaterialParameterDataCount
+                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress
+                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
+                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
+                return false;
             deferredExportContract.Version = 1u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 0u;
@@ -532,11 +578,12 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 0u;
             deferredExportContract.PayloadFlags = 3u;
             deferredExportContract.PolicyFlags = 7u;
-            output = VividEvaluateAOTSurface_82117A7EE1DF9D99(
-                materialParameters,
-                surfaceBinding0,
+            output = VividEvaluateAOTSurface_3FA009788988936A(
+                runtimeHeader.ParameterAddress,
+                runtimeHeader.ResourceBindingAddress,
                 context);
             return true;
+        }
         default:
             return false;
     }

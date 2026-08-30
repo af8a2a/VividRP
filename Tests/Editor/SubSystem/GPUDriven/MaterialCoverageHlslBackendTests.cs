@@ -18,18 +18,15 @@ namespace VividRP.Editor.Tests
 
             AssertArtifact(
                 standard.CoverageHlsl,
-                MaterialSurfaceHlslPhysicalContract.LegacySingleSlab,
-                "VividMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedSampleCount: 1);
             AssertArtifact(
                 horizontal.CoverageHlsl,
-                MaterialSurfaceHlslPhysicalContract.DualSlab,
-                "VividDualSlabMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedSampleCount: 1);
             AssertArtifact(
                 vertical.CoverageHlsl,
-                MaterialSurfaceHlslPhysicalContract.DualSlab,
-                "VividDualSlabMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedSampleCount: 1);
 
             Assert.That(
@@ -88,12 +85,10 @@ namespace VividRP.Editor.Tests
             Assert.That(sorted, Does.Contain("programData.ResourceLayoutID"));
             Assert.That(sorted, Does.Contain("runtimeHeader.ParameterAddress"));
             Assert.That(sorted, Does.Contain("runtimeHeader.ResourceBindingAddress"));
-            Assert.That(sorted, Does.Contain("_MaterialDataCount"));
-            Assert.That(sorted, Does.Contain("_DualSlabMaterialDataCount"));
-            Assert.That(sorted, Does.Contain("_SurfaceBindingDataCount"));
-            Assert.That(sorted, Does.Contain("PullMaterialData("));
-            Assert.That(sorted, Does.Contain("PullDualSlabMaterialData("));
-            Assert.That(sorted, Does.Contain("PullSurfaceBindingData("));
+            Assert.That(sorted, Does.Contain("_MaterialParameterDataCount"));
+            Assert.That(sorted, Does.Contain("_MaterialResourceDataCount"));
+            Assert.That(sorted, Does.Contain("VividLoadMaterialFloat("));
+            Assert.That(sorted, Does.Contain("PullMaterialResourceData("));
             Assert.That(
                 sorted,
                 Does.Contain("#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO"));
@@ -210,8 +205,8 @@ namespace VividRP.Editor.Tests
             CompiledMaterialProgram program = BuildStandard();
             MaterialCoverageHlslArtifact artifact = program.CoverageHlsl;
 
-            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(2u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.CoverageHlslArtifactVersion));
             Assert.That(artifact.BackendVersion, Is.EqualTo(
@@ -344,7 +339,6 @@ namespace VividRP.Editor.Tests
         private static void AssertArtifact(
             MaterialCoverageHlslArtifact artifact,
             MaterialSurfaceHlslPhysicalContract expectedPhysicalContract,
-            string expectedParameterType,
             int expectedSampleCount)
         {
             Assert.That(artifact, Is.Not.Null);
@@ -355,11 +349,12 @@ namespace VividRP.Editor.Tests
             Assert.That(artifact.Source, Does.Contain(
                 $"VividMaterialCoverageEvaluation {artifact.EntryPoint}("));
             Assert.That(artifact.Source, Does.Contain(
-                $"    const {expectedParameterType} materialParameters,"));
+                "    const uint parameterAddress,"));
+            Assert.That(artifact.Source, Does.Contain(
+                "    const uint resourceAddress,"));
             Assert.That(artifact.Source, Does.Contain("output.Coverage ="));
             Assert.That(artifact.Source, Does.Contain("output.AlphaClipThreshold ="));
-            if (expectedPhysicalContract == MaterialSurfaceHlslPhysicalContract.DualSlab)
-                Assert.That(artifact.Source, Does.Contain("surfaceBinding1"));
+            Assert.That(artifact.Source, Does.Contain("VividLoadMaterial"));
 
             AssertExplicitGradientContract(artifact.Source, expectedSampleCount);
         }

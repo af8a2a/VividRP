@@ -109,8 +109,8 @@ namespace VividRP.Editor.Tests
             var material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             GraphicsBuffer runtimeHeaderBuffer = null;
             GraphicsBuffer programBuffer = null;
-            GraphicsBuffer materialBuffer = null;
-            GraphicsBuffer surfaceBindingBuffer = null;
+            GraphicsBuffer materialParameterBuffer = null;
+            GraphicsBuffer materialResourceBuffer = null;
             var target = new RenderTexture(
                 3,
                 1,
@@ -141,45 +141,46 @@ namespace VividRP.Editor.Tests
                 };
                 VividMaterialProgramData[] runtimePrograms =
                     catalog.CreateRuntimeProgramTable();
-                VividMaterialData[] materialParameters =
+                var materialParameters = new VividMaterialData
                 {
-                    new VividMaterialData
-                    {
-                        AlbedoColor = new float4(0.8f, 0.6f, 0.4f, 0.8f),
-                        TextureTilingOffset = new float4(1.0f, 1.0f, 0.0f, 0.0f),
-                        Emission = new float4(0.1f, 0.2f, 0.3f, 0.0f),
-                        MetallicSmoothnessRemap = new float4(0.0f, 1.0f, 0.0f, 1.0f),
-                        AmbientOcclusionRemap = new float4(0.0f, 1.0f, 0.0f, 0.0f),
-                        NormalsStrength = 1.0f,
-                        Roughness = 0.25f,
-                        Metallic = 0.6f,
-                        AlphaClipThreshold = 0.3f,
-                    },
+                    AlbedoColor = new float4(0.8f, 0.6f, 0.4f, 0.8f),
+                    TextureTilingOffset = new float4(1.0f, 1.0f, 0.0f, 0.0f),
+                    Emission = new float4(0.1f, 0.2f, 0.3f, 0.0f),
+                    MetallicSmoothnessRemap = new float4(0.0f, 1.0f, 0.0f, 1.0f),
+                    AmbientOcclusionRemap = new float4(0.0f, 1.0f, 0.0f, 0.0f),
+                    NormalsStrength = 1.0f,
+                    Roughness = 0.25f,
+                    Metallic = 0.6f,
+                    AlphaClipThreshold = 0.3f,
                 };
-                VividSurfaceBindingData[] surfaceBindings =
+                var surfaceBinding = new VividSurfaceBindingData
                 {
-                    new VividSurfaceBindingData
-                    {
-                        BaseColorResource = VividSurfaceBindingData.InvalidResource,
-                        NormalResource = VividSurfaceBindingData.InvalidResource,
-                        MaskResource = VividSurfaceBindingData.InvalidResource,
-                        Flags = VividSurfaceBindingFlags.None,
-                        UVScaleBias = new float4(1.0f, 1.0f, 0.0f, 0.0f),
-                    },
+                    BaseColorResource = VividSurfaceBindingData.InvalidResource,
+                    NormalResource = VividSurfaceBindingData.InvalidResource,
+                    MaskResource = VividSurfaceBindingData.InvalidResource,
+                    Flags = VividSurfaceBindingFlags.None,
+                    UVScaleBias = new float4(1.0f, 1.0f, 0.0f, 0.0f),
+                };
+                uint4[] parameterLanes = CreateGenericParameterLanes(
+                    customProgramID,
+                    materialParameters);
+                VividMaterialResourceData[] materialResources =
+                {
+                    CreateMaterialResource(materialParameters, surfaceBinding),
                 };
 
                 runtimeHeaderBuffer = CreateStructuredBuffer(runtimeHeaders);
                 programBuffer = CreateStructuredBuffer(runtimePrograms);
-                materialBuffer = CreateStructuredBuffer(materialParameters);
-                surfaceBindingBuffer = CreateStructuredBuffer(surfaceBindings);
+                materialParameterBuffer = CreateStructuredBuffer(parameterLanes);
+                materialResourceBuffer = CreateStructuredBuffer(materialResources);
                 material.SetBuffer("_MaterialRuntimeHeaders", runtimeHeaderBuffer);
                 material.SetInt("_MaterialRuntimeHeaderCount", runtimeHeaders.Length);
                 material.SetBuffer("_MaterialPrograms", programBuffer);
                 material.SetInt("_MaterialProgramCount", runtimePrograms.Length);
-                material.SetBuffer("_MaterialData", materialBuffer);
-                material.SetInt("_MaterialDataCount", materialParameters.Length);
-                material.SetBuffer("_SurfaceBindingData", surfaceBindingBuffer);
-                material.SetInt("_SurfaceBindingDataCount", surfaceBindings.Length);
+                material.SetBuffer("_MaterialParameterData", materialParameterBuffer);
+                material.SetInt("_MaterialParameterDataCount", parameterLanes.Length);
+                material.SetBuffer("_MaterialResourceData", materialResourceBuffer);
+                material.SetInt("_MaterialResourceDataCount", materialResources.Length);
 
                 target.Create();
                 commandBuffer.SetRenderTarget(target);
@@ -218,8 +219,8 @@ namespace VividRP.Editor.Tests
                 commandBuffer.Dispose();
                 runtimeHeaderBuffer?.Dispose();
                 programBuffer?.Dispose();
-                materialBuffer?.Dispose();
-                surfaceBindingBuffer?.Dispose();
+                materialParameterBuffer?.Dispose();
+                materialResourceBuffer?.Dispose();
                 RenderTexture.active = null;
                 target.Release();
                 Object.DestroyImmediate(readback);
@@ -319,6 +320,13 @@ namespace VividRP.Editor.Tests
                 {
                     CreateUnboundSurfaceBinding(),
                 };
+                uint4[] materialParameterLanes = CreateGenericParameterLanes(
+                    VividMaterialProgramID.StandardSingleSlab,
+                    materialData[0]);
+                VividMaterialResourceData[] materialResources =
+                {
+                    CreateMaterialResource(materialData[0], surfaceBindings[0]),
+                };
                 VividInstanceData[] instances =
                 {
                     CreatePixelLoopInstance(0u),
@@ -356,6 +364,10 @@ namespace VividRP.Editor.Tests
                     CreateStructuredBuffer(materialData));
                 GraphicsBuffer dualSlabMaterialBuffer = TrackBuffer(
                     CreateStructuredBuffer(new VividDualSlabMaterialData[1]));
+                GraphicsBuffer materialParameterBuffer = TrackBuffer(
+                    CreateStructuredBuffer(materialParameterLanes));
+                GraphicsBuffer materialResourceBuffer = TrackBuffer(
+                    CreateStructuredBuffer(materialResources));
                 GraphicsBuffer runtimeHeaderBuffer = TrackBuffer(
                     CreateStructuredBuffer(runtimeHeaders));
                 GraphicsBuffer programBuffer = TrackBuffer(
@@ -495,6 +507,8 @@ namespace VividRP.Editor.Tests
                     instanceBuffer,
                     materialBuffer,
                     dualSlabMaterialBuffer,
+                    materialParameterBuffer,
+                    materialResourceBuffer,
                     runtimeHeaderBuffer,
                     programBuffer,
                     surfaceBindingBuffer,
@@ -506,7 +520,9 @@ namespace VividRP.Editor.Tests
                     indexBuffer,
                     preExposureBuffer,
                     ambientProbeBuffer,
-                    runtimePrograms.Length);
+                    runtimePrograms.Length,
+                    materialParameterLanes.Length,
+                    materialResources.Length);
                 Graphics.ExecuteCommandBuffer(commandBuffer);
                 commandBuffer.Clear();
 
@@ -859,7 +875,7 @@ namespace VividRP.Editor.Tests
                     new()
                     {
                         ProgramID = VividMaterialProgramID.StandardSingleSlab,
-                        ParameterAddress = 1u,
+                        ParameterAddress = 4u,
                         ResourceBindingAddress = 1u,
                         Flags = VividMaterialRuntimeFlags.Unlit,
                     },
@@ -867,7 +883,7 @@ namespace VividRP.Editor.Tests
                     {
                         ProgramID =
                             (VividMaterialProgramID) GenericProofProgramIndex,
-                        ParameterAddress = 2u,
+                        ParameterAddress = 8u,
                         ResourceBindingAddress = 2u,
                         Flags = VividMaterialRuntimeFlags.None,
                     },
@@ -875,7 +891,7 @@ namespace VividRP.Editor.Tests
                     {
                         ProgramID =
                             (VividMaterialProgramID) dispatcherMissProgramIndex,
-                        ParameterAddress = 3u,
+                        ParameterAddress = 12u,
                         ResourceBindingAddress = 3u,
                         Flags = VividMaterialRuntimeFlags.None,
                     },
@@ -883,7 +899,7 @@ namespace VividRP.Editor.Tests
                     {
                         ProgramID =
                             VividMaterialProgramID.DualSlabHorizontalMix,
-                        ParameterAddress = 0u,
+                        ParameterAddress = 16u,
                         ResourceBindingAddress = 4u,
                         Flags = VividMaterialRuntimeFlags.None,
                     },
@@ -919,6 +935,68 @@ namespace VividRP.Editor.Tests
                     CreateUnboundSurfaceBinding(),
                     CreateUnboundSurfaceBinding(),
                     CreateUnboundSurfaceBinding(),
+                };
+                var dualSlabMaterialData = new VividDualSlabMaterialData
+                {
+                    BaseAlbedoColor = new float4(
+                        0.8f,
+                        0.2f,
+                        0.1f,
+                        1.0f),
+                    BaseRoughness = 0.75f,
+                    BaseMetallic = 0.0f,
+                    TopAlbedoColor = new float4(
+                        0.2f,
+                        0.8f,
+                        0.4f,
+                        1.0f),
+                    TopRoughness = 0.25f,
+                    TopMetallic = 0.0f,
+                    Emission = new float4(
+                        0.02f,
+                        0.03f,
+                        0.04f,
+                        0.0f),
+                    LayerOperator = VividDualSlabOperator.HorizontalMix,
+                    LayerWeight = 0.5f,
+                };
+                var materialParameterLanes = new List<uint4>();
+                materialParameterLanes.AddRange(CreateGenericParameterLanes(
+                    VividMaterialProgramID.StandardSingleSlab,
+                    materialData[0]));
+                materialParameterLanes.AddRange(CreateGenericParameterLanes(
+                    VividMaterialProgramID.StandardSingleSlab,
+                    materialData[1]));
+                materialParameterLanes.AddRange(CreateGenericParameterLanes(
+                    (VividMaterialProgramID) GenericProofProgramIndex,
+                    materialData[2]));
+                materialParameterLanes.AddRange(CreateGenericParameterLanes(
+                    VividMaterialProgramID.StandardSingleSlab,
+                    materialData[3]));
+                materialParameterLanes.AddRange(CreateGenericParameterLanes(
+                    VividMaterialProgramID.DualSlabHorizontalMix,
+                    materialData[4],
+                    dualSlabMaterialData));
+                VividMaterialResourceData[] materialResources =
+                {
+                    CreateMaterialResource(materialData[0], surfaceBindings[0]),
+                    CreateMaterialResource(materialData[1], surfaceBindings[1]),
+                    CreateMaterialResource(materialData[2], surfaceBindings[2]),
+                    CreateMaterialResource(materialData[3], surfaceBindings[3]),
+                    CreateMaterialResource(
+                        surfaceBindings[4],
+                        dualSlabMaterialData.BaseTextureTilingOffset,
+                        dualSlabMaterialData.BaseMetallicSmoothnessRemap,
+                        dualSlabMaterialData.BaseAmbientOcclusionRemap,
+                        dualSlabMaterialData.BaseNormalsStrength,
+                        dualSlabMaterialData.BaseMaskMode),
+                    CreateMaterialResource(
+                        surfaceBindings[5],
+                        dualSlabMaterialData.TopTextureTilingOffset,
+                        dualSlabMaterialData.TopMetallicSmoothnessRemap,
+                        dualSlabMaterialData.TopAmbientOcclusionRemap,
+                        dualSlabMaterialData.TopNormalsStrength,
+                        dualSlabMaterialData.TopMaskMode),
                 };
                 VividInstanceData[] instances =
                 {
@@ -960,34 +1038,11 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer materialBuffer = TrackBuffer(
                     CreateStructuredBuffer(materialData));
                 GraphicsBuffer dualSlabMaterialBuffer = TrackBuffer(
-                    CreateStructuredBuffer(new[]
-                    {
-                        new VividDualSlabMaterialData
-                        {
-                            BaseAlbedoColor = new float4(
-                                0.8f,
-                                0.2f,
-                                0.1f,
-                                1.0f),
-                            BaseRoughness = 0.75f,
-                            BaseMetallic = 0.0f,
-                            TopAlbedoColor = new float4(
-                                0.2f,
-                                0.8f,
-                                0.4f,
-                                1.0f),
-                            TopRoughness = 0.25f,
-                            TopMetallic = 0.0f,
-                            Emission = new float4(
-                                0.02f,
-                                0.03f,
-                                0.04f,
-                                0.0f),
-                            LayerOperator =
-                                VividDualSlabOperator.HorizontalMix,
-                            LayerWeight = 0.5f,
-                        },
-                    }));
+                    CreateStructuredBuffer(new[] { dualSlabMaterialData }));
+                GraphicsBuffer materialParameterBuffer = TrackBuffer(
+                    CreateStructuredBuffer(materialParameterLanes.ToArray()));
+                GraphicsBuffer materialResourceBuffer = TrackBuffer(
+                    CreateStructuredBuffer(materialResources));
                 GraphicsBuffer runtimeHeaderBuffer = TrackBuffer(
                     CreateStructuredBuffer(runtimeHeaders));
                 GraphicsBuffer programBuffer = TrackBuffer(
@@ -1064,6 +1119,8 @@ namespace VividRP.Editor.Tests
                     instanceBuffer,
                     materialBuffer,
                     dualSlabMaterialBuffer,
+                    materialParameterBuffer,
+                    materialResourceBuffer,
                     runtimeHeaderBuffer,
                     programBuffer,
                     surfaceBindingBuffer,
@@ -1076,7 +1133,9 @@ namespace VividRP.Editor.Tests
                     instances.Length,
                     materialData.Length,
                     runtimePrograms.Length,
-                    surfaceBindings.Length);
+                    surfaceBindings.Length,
+                    materialParameterLanes.Count,
+                    materialResources.Length);
                 BindPixelLoopResolveMaterial(
                     sidecarMaterial,
                     visibility,
@@ -1086,6 +1145,8 @@ namespace VividRP.Editor.Tests
                     instanceBuffer,
                     materialBuffer,
                     dualSlabMaterialBuffer,
+                    materialParameterBuffer,
+                    materialResourceBuffer,
                     runtimeHeaderBuffer,
                     programBuffer,
                     surfaceBindingBuffer,
@@ -1098,7 +1159,9 @@ namespace VividRP.Editor.Tests
                     instances.Length,
                     materialData.Length,
                     runtimePrograms.Length,
-                    surfaceBindings.Length);
+                    surfaceBindings.Length,
+                    materialParameterLanes.Count,
+                    materialResources.Length);
 
                 commandBuffer.SetGlobalVector(
                     Shader.PropertyToID("_VividScreenSize"),
@@ -1527,6 +1590,8 @@ namespace VividRP.Editor.Tests
             GraphicsBuffer instanceBuffer,
             GraphicsBuffer materialBuffer,
             GraphicsBuffer dualSlabMaterialBuffer,
+            GraphicsBuffer materialParameterBuffer,
+            GraphicsBuffer materialResourceBuffer,
             GraphicsBuffer runtimeHeaderBuffer,
             GraphicsBuffer programBuffer,
             GraphicsBuffer surfaceBindingBuffer,
@@ -1538,7 +1603,9 @@ namespace VividRP.Editor.Tests
             GraphicsBuffer indexBuffer,
             GraphicsBuffer preExposureBuffer,
             GraphicsBuffer ambientProbeBuffer,
-            int programCount)
+            int programCount,
+            int materialParameterLaneCount,
+            int materialResourceCount)
         {
             commandBuffer.SetGlobalBuffer("_InstanceData", instanceBuffer);
             commandBuffer.SetGlobalInt("_InstanceDataCount", 1);
@@ -1548,6 +1615,18 @@ namespace VividRP.Editor.Tests
                 "_DualSlabMaterialData",
                 dualSlabMaterialBuffer);
             commandBuffer.SetGlobalInt("_DualSlabMaterialDataCount", 1);
+            commandBuffer.SetGlobalBuffer(
+                "_MaterialParameterData",
+                materialParameterBuffer);
+            commandBuffer.SetGlobalInt(
+                "_MaterialParameterDataCount",
+                materialParameterLaneCount);
+            commandBuffer.SetGlobalBuffer(
+                "_MaterialResourceData",
+                materialResourceBuffer);
+            commandBuffer.SetGlobalInt(
+                "_MaterialResourceDataCount",
+                materialResourceCount);
             commandBuffer.SetGlobalBuffer(
                 "_MaterialRuntimeHeaders",
                 runtimeHeaderBuffer);
@@ -1586,6 +1665,8 @@ namespace VividRP.Editor.Tests
                          "_InstanceData",
                          "_MaterialData",
                          "_DualSlabMaterialData",
+                         "_MaterialParameterData",
+                         "_MaterialResourceData",
                          "_MaterialRuntimeHeaders",
                          "_MaterialPrograms",
                          "_SurfaceBindingData",
@@ -1606,6 +1687,8 @@ namespace VividRP.Editor.Tests
                          "_InstanceDataCount",
                          "_MaterialDataCount",
                          "_DualSlabMaterialDataCount",
+                         "_MaterialParameterDataCount",
+                         "_MaterialResourceDataCount",
                          "_MaterialRuntimeHeaderCount",
                          "_MaterialProgramCount",
                          "_SurfaceBindingDataCount",
@@ -1689,6 +1772,61 @@ namespace VividRP.Editor.Tests
                 MaskResource = VividSurfaceBindingData.InvalidResource,
                 Flags = VividSurfaceBindingFlags.None,
                 UVScaleBias = new float4(1.0f, 1.0f, 0.0f, 0.0f),
+            };
+        }
+
+        private static uint4[] CreateGenericParameterLanes(
+            VividMaterialProgramID programID,
+            in VividMaterialData materialData)
+        {
+            return GPUDrivenMaterialCompiler.CreateGenericParameterLanes(
+                GPUDrivenMaterialCompiler.GetCatalogedMaterialProgram(programID),
+                materialData,
+                default,
+                isDualSlab: false);
+        }
+
+        private static uint4[] CreateGenericParameterLanes(
+            VividMaterialProgramID programID,
+            in VividMaterialData materialData,
+            in VividDualSlabMaterialData dualSlabMaterialData)
+        {
+            return GPUDrivenMaterialCompiler.CreateGenericParameterLanes(
+                GPUDrivenMaterialCompiler.GetCatalogedMaterialProgram(programID),
+                materialData,
+                dualSlabMaterialData,
+                isDualSlab: true);
+        }
+
+        private static VividMaterialResourceData CreateMaterialResource(
+            in VividMaterialData materialData,
+            in VividSurfaceBindingData surfaceBinding)
+        {
+            return CreateMaterialResource(
+                surfaceBinding,
+                materialData.TextureTilingOffset,
+                materialData.MetallicSmoothnessRemap,
+                materialData.AmbientOcclusionRemap,
+                materialData.NormalsStrength,
+                0u);
+        }
+
+        private static VividMaterialResourceData CreateMaterialResource(
+            in VividSurfaceBindingData surfaceBinding,
+            float4 textureTilingOffset,
+            float4 metallicSmoothnessRemap,
+            float4 ambientOcclusionRemap,
+            float normalsStrength,
+            uint maskMode)
+        {
+            return new VividMaterialResourceData
+            {
+                SurfaceBinding = surfaceBinding,
+                TextureTilingOffset = textureTilingOffset,
+                MetallicSmoothnessRemap = metallicSmoothnessRemap,
+                AmbientOcclusionRemap = ambientOcclusionRemap,
+                NormalsStrength = normalsStrength,
+                MaskMode = maskMode,
             };
         }
 
@@ -1953,6 +2091,8 @@ namespace VividRP.Editor.Tests
             GraphicsBuffer instanceBuffer,
             GraphicsBuffer materialBuffer,
             GraphicsBuffer dualSlabMaterialBuffer,
+            GraphicsBuffer materialParameterBuffer,
+            GraphicsBuffer materialResourceBuffer,
             GraphicsBuffer runtimeHeaderBuffer,
             GraphicsBuffer programBuffer,
             GraphicsBuffer surfaceBindingBuffer,
@@ -1965,7 +2105,9 @@ namespace VividRP.Editor.Tests
             int instanceCount,
             int materialCount,
             int programCount,
-            int bindingCount)
+            int bindingCount,
+            int materialParameterLaneCount,
+            int materialResourceCount)
         {
             material.DisableKeyword(
                 "VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE");
@@ -1995,6 +2137,18 @@ namespace VividRP.Editor.Tests
                 "_DualSlabMaterialData",
                 dualSlabMaterialBuffer);
             material.SetInt("_DualSlabMaterialDataCount", 1);
+            material.SetBuffer(
+                "_MaterialParameterData",
+                materialParameterBuffer);
+            material.SetInt(
+                "_MaterialParameterDataCount",
+                materialParameterLaneCount);
+            material.SetBuffer(
+                "_MaterialResourceData",
+                materialResourceBuffer);
+            material.SetInt(
+                "_MaterialResourceDataCount",
+                materialResourceCount);
             material.SetBuffer(
                 "_MaterialRuntimeHeaders",
                 runtimeHeaderBuffer);
@@ -2658,27 +2812,13 @@ namespace VividRP.Editor.Tests
                         coverageContext,
                         coverage);
 
-                VividMaterialData materialParameters = (VividMaterialData) 0;
-                VividSurfaceBindingData surfaceBinding =
-                    (VividSurfaceBindingData) 0;
                 const bool payloadLoaded =
                     runtimeHeader.ProgramID < _MaterialProgramCount
                     && programData.Version == VIVID_MATERIAL_PROGRAM_VERSION
-                    && programData.SurfaceProgramID
-                        == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
                     && programData.ParameterLayoutID
-                        == VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA
+                        == VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES
                     && programData.ResourceLayoutID
-                        == VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING
-                    && runtimeHeader.ParameterAddress < _MaterialDataCount
-                    && runtimeHeader.ResourceBindingAddress < _SurfaceBindingDataCount;
-                if (payloadLoaded)
-                {{
-                    materialParameters = PullMaterialData(
-                        runtimeHeader.ParameterAddress);
-                    surfaceBinding = PullSurfaceBindingData(
-                        runtimeHeader.ResourceBindingAddress);
-                }}
+                        == VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS;
 
                 VividAOTSurfaceContext surfaceContext;
                 surfaceContext.UV0 = coverageContext.UV0;
@@ -2693,11 +2833,8 @@ namespace VividRP.Editor.Tests
                     (VividAOTDeferredExportContract) 0;
                 const bool surfaceSucceeded = payloadLoaded
                     && VividTryEvaluateAOTSurfaceProgram(
-                        runtimeHeader.ProgramID,
-                        materialParameters,
-                        (VividDualSlabMaterialData) 0,
-                        surfaceBinding,
-                        (VividSurfaceBindingData) 0,
+                        runtimeHeader,
+                        programData,
                         surfaceContext,
                         deferredExportContract,
                         surfaceOutput);

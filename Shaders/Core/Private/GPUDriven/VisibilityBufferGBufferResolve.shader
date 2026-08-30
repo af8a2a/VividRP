@@ -84,13 +84,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 VividInstanceData instanceData;
                 VividMaterialData materialData;
-                VividDualSlabMaterialData dualSlabMaterialData;
-                VividSurfaceBindingData surfaceBindingData;
-                VividSurfaceBindingData topSurfaceBindingData;
                 uint materialRuntimeFlags;
                 uint isDualSlab;
                 uint materialProgramFailed;
                 uint materialProgramID;
+                VividMaterialRuntimeHeader materialRuntimeHeader;
+                VividMaterialProgramData materialProgramData;
                 VividMeshletVertex vertex0;
                 VividMeshletVertex vertex1;
                 VividMeshletVertex vertex2;
@@ -295,13 +294,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 result.materialData = (VividMaterialData) 0;
-                result.dualSlabMaterialData = (VividDualSlabMaterialData) 0;
-                result.surfaceBindingData = (VividSurfaceBindingData) 0;
-                result.topSurfaceBindingData = (VividSurfaceBindingData) 0;
                 result.isDualSlab = 0u;
                 result.materialRuntimeFlags = 0u;
                 result.materialProgramID = VIVIDMATERIALPROGRAMID_INVALID;
                 result.materialProgramFailed = 1u;
+                result.materialRuntimeHeader = (VividMaterialRuntimeHeader) 0;
+                result.materialProgramData = (VividMaterialProgramData) 0;
                 VividMaterialRuntimeHeader runtimeHeader;
                 VividMaterialProgramData programData;
                 const uint programStatus = VividGetMaterialProgramStatus(
@@ -312,25 +310,25 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 if (programStatus == VIVID_MATERIAL_PROGRAM_KNOWN)
                 {
                     result.materialProgramID = runtimeHeader.ProgramID;
-                    if (programData.SurfaceProgramID
-                        == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB)
+                    result.materialRuntimeHeader = runtimeHeader;
+                    result.materialProgramData = programData;
+                    loadedMaterialProgram = programData.ParameterLayoutID
+                            == VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES
+                        && programData.ResourceLayoutID
+                            == VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS
+                        && (programData.SurfaceProgramID
+                                == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
+                            || programData.SurfaceProgramID
+                                == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB);
+                    result.isDualSlab = loadedMaterialProgram
+                        && programData.SurfaceProgramID
+                            == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB
+                        ? 1u
+                        : 0u;
+                    if (result.instanceData.MaterialIndex < _MaterialDataCount)
                     {
-                        loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
-                            result.instanceData.MaterialIndex,
-                            0u,
-                            result.materialData,
-                            result.surfaceBindingData);
-                    }
-                    else if (programData.SurfaceProgramID
-                        == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB)
-                    {
-                        loadedMaterialProgram = VividTryLoadDualSlabSurfaceProgram(
-                            result.instanceData.MaterialIndex,
-                            0u,
-                            result.dualSlabMaterialData,
-                            result.surfaceBindingData,
-                            result.topSurfaceBindingData);
-                        result.isDualSlab = loadedMaterialProgram ? 1u : 0u;
+                        result.materialData = PullMaterialData(
+                            result.instanceData.MaterialIndex);
                     }
                     result.materialProgramFailed = loadedMaterialProgram ? 0u : 1u;
                     result.materialRuntimeFlags = loadedMaterialProgram
@@ -424,11 +422,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     && triangleData.materialProgramFailed == 0u)
                 {
                     dispatchedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
-                        triangleData.materialProgramID,
-                        triangleData.materialData,
-                        triangleData.dualSlabMaterialData,
-                        triangleData.surfaceBindingData,
-                        triangleData.topSurfaceBindingData,
+                        triangleData.materialRuntimeHeader,
+                        triangleData.materialProgramData,
                         aotContext,
                         deferredExportContract,
                         aotSurfaceOutput);

@@ -20,24 +20,21 @@ namespace VividRP.Editor.Tests
             AssertArtifact(
                 standard.SurfaceHlsl,
                 MaterialProgramTopologySpecialization.SingleSlab,
-                MaterialSurfaceHlslPhysicalContract.LegacySingleSlab,
-                "VividMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedClosureCount: 1u,
                 expectedLayerOperator: 0u,
                 expectedSampleCount: 1);
             AssertArtifact(
                 horizontal.SurfaceHlsl,
                 MaterialProgramTopologySpecialization.HorizontalMix,
-                MaterialSurfaceHlslPhysicalContract.DualSlab,
-                "VividDualSlabMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedClosureCount: 2u,
                 expectedLayerOperator: 1u,
                 expectedSampleCount: 2);
             AssertArtifact(
                 vertical.SurfaceHlsl,
                 MaterialProgramTopologySpecialization.VerticalLayer,
-                MaterialSurfaceHlslPhysicalContract.DualSlab,
-                "VividDualSlabMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedClosureCount: 2u,
                 expectedLayerOperator: 2u,
                 expectedSampleCount: 2);
@@ -289,7 +286,9 @@ namespace VividRP.Editor.Tests
                 sorted,
                 Does.Contain(
                     "out VividAOTDeferredExportContract deferredExportContract"));
-            Assert.That(sorted, Does.Contain("switch (programID)"));
+            Assert.That(sorted, Does.Contain("switch (runtimeHeader.ProgramID)"));
+            Assert.That(sorted, Does.Contain("_MaterialParameterDataCount"));
+            Assert.That(sorted, Does.Contain("_MaterialResourceDataCount"));
 
             int standardEntry = sorted.IndexOf(
                 standard.SurfaceHlsl.EntryPoint,
@@ -380,14 +379,14 @@ namespace VividRP.Editor.Tests
             CompiledMaterialProgram program = BuildStandard();
             MaterialSurfaceHlslArtifact artifact = program.SurfaceHlsl;
 
-            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(6u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(11u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(6u));
-            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(3u));
+            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(7u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(12u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(7u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(4u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.SurfaceHlslArtifactVersion));
             Assert.That(artifact.BackendVersion, Is.EqualTo(
@@ -644,7 +643,6 @@ namespace VividRP.Editor.Tests
             MaterialSurfaceHlslArtifact artifact,
             MaterialProgramTopologySpecialization expectedTopology,
             MaterialSurfaceHlslPhysicalContract expectedPhysicalContract,
-            string expectedParameterType,
             uint expectedClosureCount,
             uint expectedLayerOperator,
             int expectedSampleCount)
@@ -658,13 +656,14 @@ namespace VividRP.Editor.Tests
             Assert.That(artifact.Source, Does.Contain(
                 $"VividAOTSurfaceProgramOutput {artifact.EntryPoint}("));
             Assert.That(artifact.Source, Does.Contain(
-                $"    const {expectedParameterType} materialParameters,"));
+                "    const uint parameterAddress,"));
+            Assert.That(artifact.Source, Does.Contain(
+                "    const uint resourceAddress,"));
             Assert.That(artifact.Source, Does.Contain(
                 $"output.ClosureCount = {expectedClosureCount}u;"));
             Assert.That(artifact.Source, Does.Contain(
                 $"output.LayerOperator = {expectedLayerOperator}u;"));
-            if (expectedPhysicalContract == MaterialSurfaceHlslPhysicalContract.DualSlab)
-                Assert.That(artifact.Source, Does.Contain("surfaceBinding1"));
+            Assert.That(artifact.Source, Does.Contain("VividLoadMaterial"));
 
             AssertExplicitGradientContract(artifact.Source, expectedSampleCount);
             AssertAotDetailContract(artifact.Source, expectedSampleCount);

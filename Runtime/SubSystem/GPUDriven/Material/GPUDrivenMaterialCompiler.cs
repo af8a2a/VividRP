@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -12,7 +13,12 @@ namespace VividRP.Runtime.GPUDriven
             MaterialProgramCatalog.ManifestEntry catalogProgram,
             in VividMaterialRuntimeHeader runtimeHeader,
             in VividMaterialData legacyMaterialData)
-            : this(catalogProgram, runtimeHeader, legacyMaterialData, default)
+            : this(
+                catalogProgram,
+                runtimeHeader,
+                legacyMaterialData,
+                default,
+                Array.Empty<uint4>())
         {
         }
 
@@ -20,7 +26,8 @@ namespace VividRP.Runtime.GPUDriven
             MaterialProgramCatalog.ManifestEntry catalogProgram,
             in VividMaterialRuntimeHeader runtimeHeader,
             in VividMaterialData legacyMaterialData,
-            in VividDualSlabMaterialData dualSlabMaterialData)
+            in VividDualSlabMaterialData dualSlabMaterialData,
+            uint4[] parameterLanes)
         {
             CatalogProgram = catalogProgram
                 ?? throw new ArgumentNullException(nameof(catalogProgram));
@@ -33,6 +40,8 @@ namespace VividRP.Runtime.GPUDriven
             RuntimeHeader = runtimeHeader;
             LegacyMaterialData = legacyMaterialData;
             DualSlabMaterialData = dualSlabMaterialData;
+            ParameterLanes = parameterLanes
+                ?? throw new ArgumentNullException(nameof(parameterLanes));
         }
 
         internal MaterialProgramCatalog.ManifestEntry CatalogProgram { get; }
@@ -46,6 +55,8 @@ namespace VividRP.Runtime.GPUDriven
         internal VividMaterialData LegacyMaterialData { get; }
 
         internal VividDualSlabMaterialData DualSlabMaterialData { get; }
+
+        internal IReadOnlyList<uint4> ParameterLanes { get; }
     }
 
     internal static class GPUDrivenMaterialCompiler
@@ -130,23 +141,13 @@ namespace VividRP.Runtime.GPUDriven
 
             MaterialProgramTopologySpecialization expectedTopology =
                 MaterialProgramTopologySpecialization.SingleSlab;
-            VividMaterialParameterLayoutID expectedParameterLayout;
-            VividMaterialResourceLayoutID expectedResourceLayout;
             switch (materialProxy.Model)
             {
                 case GPUDrivenMaterialProxyModel.StandardLit:
                     expectedTopology =
                         MaterialProgramTopologySpecialization.SingleSlab;
-                    expectedParameterLayout =
-                        VividMaterialParameterLayoutID.LegacyMaterialData;
-                    expectedResourceLayout =
-                        VividMaterialResourceLayoutID.LegacySurfaceBinding;
                     break;
                 case GPUDrivenMaterialProxyModel.DualSlab:
-                    expectedParameterLayout =
-                        VividMaterialParameterLayoutID.DualSlabMaterialData;
-                    expectedResourceLayout =
-                        VividMaterialResourceLayoutID.DualSurfaceBinding;
                     break;
                 default:
                     validationMessage =
@@ -266,11 +267,8 @@ namespace VividRP.Runtime.GPUDriven
                 }
             }
 
-            VividMaterialProgramData runtimeData = materialProgram.RuntimeData;
             if (materialProgram.Program.Lowering.SelectionKey.Topology
-                    != expectedTopology
-                || runtimeData.ParameterLayoutID != expectedParameterLayout
-                || runtimeData.ResourceLayoutID != expectedResourceLayout)
+                    != expectedTopology)
             {
                 validationMessage =
                     $"Material Graph ProgramID {(uint) materialProgram.ProgramID} is not compatible with proxy model '{materialProxy.Model}'.";
@@ -335,6 +333,19 @@ namespace VividRP.Runtime.GPUDriven
             uint parameterAddress,
             uint surfaceBindingIndex)
         {
+            return CompileStandardSingleSlab(
+                materialProxy,
+                parameterAddress,
+                surfaceBindingIndex,
+                surfaceBindingIndex);
+        }
+
+        internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
+            GPUDrivenMaterialProxy materialProxy,
+            uint parameterAddress,
+            uint resourceBindingAddress,
+            uint legacySurfaceBindingIndex)
+        {
             if (materialProxy == null)
                 throw new ArgumentNullException(nameof(materialProxy));
 
@@ -354,13 +365,22 @@ namespace VividRP.Runtime.GPUDriven
             {
                 ProgramID = materialProgram.ProgramID,
                 ParameterAddress = parameterAddress,
-                ResourceBindingAddress = surfaceBindingIndex,
+                ResourceBindingAddress = resourceBindingAddress,
                 Flags = GetRuntimeFlags(materialProxy),
             };
+            VividMaterialData legacyMaterialData = CreateLegacyMaterialData(
+                materialProxy,
+                legacySurfaceBindingIndex);
             return new GPUDrivenCompiledMaterialInstance(
                 materialProgram,
                 runtimeHeader,
-                CreateLegacyMaterialData(materialProxy, surfaceBindingIndex));
+                legacyMaterialData,
+                default,
+                CreateGenericParameterLanes(
+                    materialProgram,
+                    legacyMaterialData,
+                    default,
+                    isDualSlab: false));
         }
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
@@ -368,11 +388,24 @@ namespace VividRP.Runtime.GPUDriven
             uint parameterAddress,
             uint surfaceBindingIndex)
         {
-            if (materialData.SurfaceBindingIndex != surfaceBindingIndex)
+            return CompileStandardSingleSlab(
+                materialData,
+                parameterAddress,
+                surfaceBindingIndex,
+                surfaceBindingIndex);
+        }
+
+        internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
+            in VividMaterialData materialData,
+            uint parameterAddress,
+            uint resourceBindingAddress,
+            uint legacySurfaceBindingIndex)
+        {
+            if (materialData.SurfaceBindingIndex != legacySurfaceBindingIndex)
             {
                 throw new ArgumentException(
                     "The StandardLit material data surface binding must match the runtime header binding.",
-                    nameof(surfaceBindingIndex));
+                    nameof(legacySurfaceBindingIndex));
             }
 
             MaterialProgramCatalog.ManifestEntry materialProgram =
@@ -382,19 +415,38 @@ namespace VividRP.Runtime.GPUDriven
             {
                 ProgramID = materialProgram.ProgramID,
                 ParameterAddress = parameterAddress,
-                ResourceBindingAddress = surfaceBindingIndex,
+                ResourceBindingAddress = resourceBindingAddress,
                 Flags = GetRuntimeFlags(materialData),
             };
             return new GPUDrivenCompiledMaterialInstance(
                 materialProgram,
                 runtimeHeader,
-                materialData);
+                materialData,
+                default,
+                CreateGenericParameterLanes(
+                    materialProgram,
+                    materialData,
+                    default,
+                    isDualSlab: false));
         }
 
         internal static GPUDrivenCompiledMaterialInstance CompileDualSlab(
             GPUDrivenMaterialProxy materialProxy,
             uint parameterAddress,
             uint baseSurfaceBindingIndex)
+        {
+            return CompileDualSlab(
+                materialProxy,
+                parameterAddress,
+                baseSurfaceBindingIndex,
+                baseSurfaceBindingIndex);
+        }
+
+        internal static GPUDrivenCompiledMaterialInstance CompileDualSlab(
+            GPUDrivenMaterialProxy materialProxy,
+            uint parameterAddress,
+            uint resourceBindingAddress,
+            uint legacyBaseSurfaceBindingIndex)
         {
             if (materialProxy == null)
                 throw new ArgumentNullException(nameof(materialProxy));
@@ -418,7 +470,7 @@ namespace VividRP.Runtime.GPUDriven
             {
                 ProgramID = materialProgram.ProgramID,
                 ParameterAddress = parameterAddress,
-                ResourceBindingAddress = baseSurfaceBindingIndex,
+                ResourceBindingAddress = resourceBindingAddress,
                 Flags = GetRuntimeFlags(materialProxy),
             };
             VividSlabMaterialData baseSlab = CreateSlabMaterialData(materialProxy);
@@ -447,11 +499,110 @@ namespace VividRP.Runtime.GPUDriven
                 AlphaClipThreshold = materialProxy.AlphaClip ? materialProxy.Cutoff : 0.0f,
                 Padding0 = 0u,
             };
+            VividMaterialData legacyMaterialData = CreateLegacyMaterialData(
+                materialProxy,
+                legacyBaseSurfaceBindingIndex);
             return new GPUDrivenCompiledMaterialInstance(
                 materialProgram,
                 runtimeHeader,
-                CreateLegacyMaterialData(materialProxy, baseSurfaceBindingIndex),
-                dualSlabMaterialData);
+                legacyMaterialData,
+                dualSlabMaterialData,
+                CreateGenericParameterLanes(
+                    materialProgram,
+                    legacyMaterialData,
+                    dualSlabMaterialData,
+                    isDualSlab: true));
+        }
+
+        internal static uint4[] CreateGenericParameterLanes(
+            MaterialProgramCatalog.ManifestEntry materialProgram,
+            in VividMaterialData legacyMaterialData,
+            in VividDualSlabMaterialData dualSlabMaterialData,
+            bool isDualSlab)
+        {
+            MaterialGenericLayout layout =
+                materialProgram.Program.Lowering.GenericLayout;
+            int laneCount = layout.ParameterStrideInWords / 4;
+            var words = new uint[layout.ParameterStrideInWords];
+            MaterialNativeTemplateLayoutSchema schema =
+                materialProgram.Program.Lowering.Template.LayoutSchema;
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.ParameterBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialGenericParameterBinding genericBinding =
+                    layout.ParameterBindings[bindingIndex];
+                if (!schema.TryGetParameterBinding(
+                        genericBinding.Declaration,
+                        out MaterialNativeParameterBinding nativeBinding))
+                {
+                    throw new InvalidOperationException(
+                        $"Catalog program '{materialProgram.StableName}' has no runtime source for parameter '{genericBinding.Declaration.Symbol}'.");
+                }
+
+                float4 value = GetRuntimeParameterValue(
+                    nativeBinding.Target,
+                    legacyMaterialData,
+                    dualSlabMaterialData,
+                    isDualSlab);
+                WriteParameterWords(words, genericBinding, value);
+            }
+
+            var lanes = new uint4[laneCount];
+            for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+            {
+                int wordOffset = laneIndex * 4;
+                lanes[laneIndex] = new uint4(
+                    words[wordOffset],
+                    words[wordOffset + 1],
+                    words[wordOffset + 2],
+                    words[wordOffset + 3]);
+            }
+            return lanes;
+        }
+
+        private static void WriteParameterWords(
+            uint[] words,
+            in MaterialGenericParameterBinding binding,
+            in float4 value)
+        {
+            uint4 bits = math.asuint(value);
+            for (int wordIndex = 0; wordIndex < binding.WordCount; wordIndex++)
+                words[binding.WordOffset + wordIndex] = bits[wordIndex];
+        }
+
+        private static float4 GetRuntimeParameterValue(
+            MaterialRuntimeParameter parameter,
+            in VividMaterialData legacy,
+            in VividDualSlabMaterialData dual,
+            bool isDualSlab)
+        {
+            switch (parameter)
+            {
+                case MaterialRuntimeParameter.BaseColor:
+                    return isDualSlab ? dual.BaseAlbedoColor : legacy.AlbedoColor;
+                case MaterialRuntimeParameter.TopBaseColor:
+                    return dual.TopAlbedoColor;
+                case MaterialRuntimeParameter.Emission:
+                    return isDualSlab ? dual.Emission : legacy.Emission;
+                case MaterialRuntimeParameter.Roughness:
+                    return new float4(isDualSlab ? dual.BaseRoughness : legacy.Roughness);
+                case MaterialRuntimeParameter.TopRoughness:
+                    return new float4(dual.TopRoughness);
+                case MaterialRuntimeParameter.Metallic:
+                    return new float4(isDualSlab ? dual.BaseMetallic : legacy.Metallic);
+                case MaterialRuntimeParameter.TopMetallic:
+                    return new float4(dual.TopMetallic);
+                case MaterialRuntimeParameter.LayerWeight:
+                    return new float4(dual.LayerWeight);
+                case MaterialRuntimeParameter.AlphaClipThreshold:
+                    return new float4(isDualSlab
+                        ? dual.AlphaClipThreshold
+                        : legacy.AlphaClipThreshold);
+                default:
+                    throw new NotSupportedException(
+                        $"Generic material parameter packing does not support runtime source '{parameter}'.");
+            }
         }
 
         private static MaterialProgramCatalog.ManifestEntry GetDualSlabProgram(

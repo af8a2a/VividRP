@@ -41,6 +41,25 @@ namespace VividRP.Editor.Tests.GPUDriven
                 Assert.That(asset.ManifestHash, Is.EqualTo(catalog.ManifestHash));
                 Assert.That(asset.Slots,
                     Has.Count.EqualTo(catalog.RuntimeTableLength));
+                for (int programIndex = 0;
+                     programIndex < catalog.RuntimeTableLength;
+                     programIndex++)
+                {
+                    MaterialProgramCatalog.ManifestEntry entry =
+                        catalog.Slots[programIndex];
+                    if (entry == null)
+                        continue;
+                    Assert.That(
+                        asset.Slots[programIndex].ParameterStrideInWords,
+                        Is.EqualTo((uint) entry.Program.Lowering.GenericLayout
+                            .ParameterStrideInWords),
+                        $"Program {programIndex} parameter stride");
+                    Assert.That(
+                        asset.Slots[programIndex].ResourceCount,
+                        Is.EqualTo((uint) entry.Program.Lowering.GenericLayout
+                            .ResourceCount),
+                        $"Program {programIndex} resource count");
+                }
 
                 AssertRuntimeTablesEqual(
                     catalog.CreateRuntimeProgramTable(),

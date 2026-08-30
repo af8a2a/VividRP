@@ -116,6 +116,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         LegacyMaterialData = 0,
         DualSlabMaterialData = 1,
+        GenericParameterLanes = 2,
     }
 
     [GenerateHLSL(PackingRules.Exact)]
@@ -123,6 +124,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         LegacySurfaceBinding = 0,
         DualSurfaceBinding = 1,
+        GenericResourceRecords = 2,
     }
 
     [GenerateHLSL(PackingRules.Exact)]
@@ -267,6 +269,20 @@ namespace VividRP.Runtime.GPUDriven
         public float4 UVScaleBias;
 
         public const uint InvalidResource = uint.MaxValue;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMaterialResourceData
+    {
+        public VividSurfaceBindingData SurfaceBinding;
+        public float4 TextureTilingOffset;
+        public float4 MetallicSmoothnessRemap;
+        public float4 AmbientOcclusionRemap;
+
+        public float NormalsStrength;
+        public uint MaskMode;
+        public uint Padding0;
+        public uint Padding1;
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]

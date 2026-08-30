@@ -173,6 +173,8 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialParameterLaneCount, Is.EqualTo(4));
+                Assert.That(sceneData.MaterialResourceCount, Is.EqualTo(1));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(sceneData.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(sceneData.MeshletCount, Is.EqualTo(1));
@@ -248,6 +250,8 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
                 Assert.That(sceneData.DualSlabMaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialParameterLaneCount, Is.EqualTo(6));
+                Assert.That(sceneData.MaterialResourceCount, Is.EqualTo(2));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(2));
                 Assert.That(
                     sceneData.MaterialRuntimeHeaders[0].ProgramID,
@@ -1208,6 +1212,8 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
                 Assert.That(sceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialParameterLaneCount, Is.EqualTo(4));
+                Assert.That(sceneData.MaterialResourceCount, Is.EqualTo(1));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 VividMaterialData materialData = sceneData.Materials[0];
                 VividMaterialRuntimeHeader runtimeHeader = sceneData.MaterialRuntimeHeaders[0];
@@ -1229,6 +1235,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(surfaceBindingData.BaseColorResource, Is.EqualTo(15u));
                 Assert.That(surfaceBindingData.NormalResource, Is.EqualTo(14u));
                 Assert.That(surfaceBindingData.MaskResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(
+                    sceneData.MaterialResources[0].SurfaceBinding.BaseColorResource,
+                    Is.EqualTo(surfaceBindingData.BaseColorResource));
+                Assert.That(
+                    sceneData.MaterialResources[0].TextureTilingOffset,
+                    Is.EqualTo(materialData.TextureTilingOffset));
                 Assert.That(materialData.NormalsStrength, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialData.Metallic, Is.EqualTo(0.75f).Within(0.0001f));
                 Assert.That(materialData.Roughness, Is.EqualTo(0.35f).Within(0.0001f));
@@ -1539,9 +1551,13 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(system.SceneData.MaterialCount, Is.EqualTo(1));
                 Assert.That(system.SceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
+                Assert.That(system.SceneData.MaterialParameterLaneCount, Is.EqualTo(4));
+                Assert.That(system.SceneData.MaterialResourceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.InstanceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MaterialParameterLaneCount, Is.EqualTo(4));
+                Assert.That(system.BufferSet.MaterialResourceCount, Is.EqualTo(1));
                 Assert.That(
                     system.BufferSet.MaterialProgramCount,
                     Is.EqualTo(

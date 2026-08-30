@@ -560,9 +560,9 @@ namespace VividRP.Runtime.GPUDriven
                 || runtimeData.SurfaceProgramID != key.SurfaceProgramID
                 || runtimeData.TransportProgramID != key.TransportProgramID
                 || runtimeData.ParameterLayoutID
-                    != template.LayoutSchema.ParameterLayout.LayoutID
+                    != VividMaterialParameterLayoutID.GenericParameterLanes
                 || runtimeData.ResourceLayoutID
-                    != template.LayoutSchema.ResourceLayout.LayoutID
+                    != VividMaterialResourceLayoutID.GenericResourceRecords
                 || runtimeData.ExecutionClass != key.ExecutionClass
                 || runtimeData.CapabilityFlags != template.Capabilities
                 || !ReferenceEquals(

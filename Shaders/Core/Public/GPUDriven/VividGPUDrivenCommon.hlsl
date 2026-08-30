@@ -15,7 +15,7 @@
 #define VIVIDMATERIALFLAGS_TERRAIN 2u
 #define VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE 4u
 
-#define VIVID_MATERIAL_PROGRAM_VERSION 1u
+#define VIVID_MATERIAL_PROGRAM_VERSION 2u
 #define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB 0u
 #define VIVIDMATERIALPROGRAMID_DUAL_SLAB_HORIZONTAL_MIX 1u
 #define VIVIDMATERIALPROGRAMID_DUAL_SLAB_VERTICAL_LAYER 2u
@@ -29,8 +29,10 @@
 #define VIVIDMATERIALTRANSPORTPROGRAMID_NONE 0u
 #define VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA 0u
 #define VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA 1u
+#define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES 2u
 #define VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING 0u
 #define VIVIDMATERIALRESOURCELAYOUTID_DUAL_SURFACE_BINDING 1u
+#define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS 2u
 #define VIVIDDUALSLABOPERATOR_HORIZONTAL_MIX 0u
 #define VIVIDDUALSLABOPERATOR_VERTICAL_LAYER 1u
 #define VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT 1u
@@ -160,6 +162,19 @@ struct VividSurfaceBindingData
     uint Flags;
 
     float4 UVScaleBias;
+};
+
+struct VividMaterialResourceData
+{
+    VividSurfaceBindingData SurfaceBinding;
+    float4 TextureTilingOffset;
+    float4 MetallicSmoothnessRemap;
+    float4 AmbientOcclusionRemap;
+
+    float NormalsStrength;
+    uint MaskMode;
+    uint Padding0;
+    uint Padding1;
 };
 
 struct VividTerrainMaterialData
@@ -415,6 +430,10 @@ StructuredBuffer<VividMaterialData> _MaterialData;
 uint _MaterialDataCount;
 StructuredBuffer<VividDualSlabMaterialData> _DualSlabMaterialData;
 uint _DualSlabMaterialDataCount;
+StructuredBuffer<uint4> _MaterialParameterData;
+uint _MaterialParameterDataCount;
+StructuredBuffer<VividMaterialResourceData> _MaterialResourceData;
+uint _MaterialResourceDataCount;
 StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;
 uint _MaterialRuntimeHeaderCount;
 StructuredBuffer<VividMaterialProgramData> _MaterialPrograms;
@@ -443,6 +462,77 @@ VividMaterialData PullMaterialData(const uint materialIndex)
 VividDualSlabMaterialData PullDualSlabMaterialData(const uint materialIndex)
 {
     return _DualSlabMaterialData[materialIndex];
+}
+
+uint VividLoadMaterialParameterWord(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    const uint4 lane = _MaterialParameterData[
+        parameterAddress + (wordOffset >> 2u)];
+    return lane[wordOffset & 3u];
+}
+
+bool VividLoadMaterialBool(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return VividLoadMaterialParameterWord(parameterAddress, wordOffset) != 0u;
+}
+
+float VividLoadMaterialFloat(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return asfloat(VividLoadMaterialParameterWord(parameterAddress, wordOffset));
+}
+
+float2 VividLoadMaterialFloat2(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return asfloat(uint2(
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 1u)));
+}
+
+float3 VividLoadMaterialFloat3(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return asfloat(uint3(
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 1u),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 2u)));
+}
+
+float4 VividLoadMaterialFloat4(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return asfloat(uint4(
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 1u),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 2u),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 3u)));
+}
+
+VividMaterialResourceData PullMaterialResourceData(const uint resourceIndex)
+{
+    return _MaterialResourceData[resourceIndex];
+}
+
+VividSlabMaterialData VividCreateSlabMaterialData(
+    const VividMaterialResourceData resourceData)
+{
+    VividSlabMaterialData slabData = (VividSlabMaterialData) 0;
+    slabData.TextureTilingOffset = resourceData.TextureTilingOffset;
+    slabData.MetallicSmoothnessRemap =
+        resourceData.MetallicSmoothnessRemap;
+    slabData.AmbientOcclusionRemap = resourceData.AmbientOcclusionRemap;
+    slabData.NormalsStrength = resourceData.NormalsStrength;
+    slabData.MaskMode = resourceData.MaskMode;
+    return slabData;
 }
 
 VividSlabMaterialData VividCreateSlabMaterialData(

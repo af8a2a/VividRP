@@ -66,6 +66,12 @@ namespace VividRP.Runtime.GPUDriven
             [SerializeField]
             private VividMaterialExecutionClass m_ExecutionClass;
 
+            [SerializeField]
+            private uint m_ParameterStrideInWords;
+
+            [SerializeField]
+            private uint m_ResourceCount;
+
             internal VividMaterialProgramID ProgramID =>
                 (VividMaterialProgramID) m_ProgramID;
 
@@ -106,6 +112,10 @@ namespace VividRP.Runtime.GPUDriven
                     ExecutionClass = m_ExecutionClass,
                 };
 
+            internal uint ParameterStrideInWords => m_ParameterStrideInWords;
+
+            internal uint ResourceCount => m_ResourceCount;
+
             internal static Slot Create(
                 int slotIndex,
                 string stableName,
@@ -141,6 +151,11 @@ namespace VividRP.Runtime.GPUDriven
                 slot.m_ResourceLayoutID = runtimeData.ResourceLayoutID;
                 slot.m_CapabilityFlags = runtimeData.CapabilityFlags;
                 slot.m_ExecutionClass = runtimeData.ExecutionClass;
+                MaterialGenericLayout genericLayout =
+                    program.Lowering.GenericLayout;
+                slot.m_ParameterStrideInWords = checked(
+                    (uint) genericLayout.ParameterStrideInWords);
+                slot.m_ResourceCount = checked((uint) genericLayout.ResourceCount);
                 return slot;
             }
 
@@ -171,11 +186,13 @@ namespace VividRP.Runtime.GPUDriven
                     && m_ParameterLayoutID == other.m_ParameterLayoutID
                     && m_ResourceLayoutID == other.m_ResourceLayoutID
                     && m_CapabilityFlags == other.m_CapabilityFlags
-                    && m_ExecutionClass == other.m_ExecutionClass;
+                    && m_ExecutionClass == other.m_ExecutionClass
+                    && m_ParameterStrideInWords == other.m_ParameterStrideInWords
+                    && m_ResourceCount == other.m_ResourceCount;
             }
         }
 
-        internal const uint AssetSchemaVersion = 1u;
+        internal const uint AssetSchemaVersion = 2u;
         internal const string DefaultResourceName = "VividMaterialProgramCatalog";
 
         [SerializeField]

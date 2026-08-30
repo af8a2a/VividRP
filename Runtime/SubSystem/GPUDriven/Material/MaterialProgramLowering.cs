@@ -165,8 +165,10 @@ namespace VividRP.Runtime.GPUDriven
                 CoverageProgramID = coverageProgram.ProgramID,
                 SurfaceProgramID = surfaceProgram.ProgramID,
                 TransportProgramID = transportProgram.ProgramID,
-                ParameterLayoutID = materialLayout.ParameterLayout.LayoutID,
-                ResourceLayoutID = materialLayout.ResourceLayout.LayoutID,
+                ParameterLayoutID =
+                    VividMaterialParameterLayoutID.GenericParameterLanes,
+                ResourceLayoutID =
+                    VividMaterialResourceLayoutID.GenericResourceRecords,
                 CapabilityFlags = template.Capabilities,
                 ExecutionClass = selectionKey.ExecutionClass,
             };

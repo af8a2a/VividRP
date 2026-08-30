@@ -192,6 +192,16 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialData.AlphaClipThreshold, Is.EqualTo(0.42f));
                 Assert.That(materialData.Padding0, Is.EqualTo((uint)proxy.MaskMode));
                 Assert.That(materialData.Padding1, Is.Zero);
+                Assert.That(compiled.ParameterLanes.Count, Is.EqualTo(4));
+                Assert.That(
+                    compiled.ParameterLanes[1],
+                    Is.EqualTo(math.asuint(expectedBaseColor)));
+                Assert.That(
+                    math.asfloat(compiled.ParameterLanes[2].w),
+                    Is.EqualTo(proxy.Metallic));
+                Assert.That(
+                    math.asfloat(compiled.ParameterLanes[3].x),
+                    Is.EqualTo(proxy.Roughness));
             }
             finally
             {
@@ -241,6 +251,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     compiled.RuntimeHeader.ResourceBindingAddress,
                     Is.EqualTo(7u));
+                Assert.That(compiled.ParameterLanes.Count, Is.EqualTo(4));
             }
             finally
             {
@@ -400,8 +411,8 @@ namespace VividRP.Editor.Tests
                     program.CoverageProgramID,
                     Is.EqualTo(VividMaterialCoverageProgramID.BaseColorAlpha));
                 Assert.That(program.SurfaceProgramID, Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
-                Assert.That(program.ParameterLayoutID, Is.EqualTo(VividMaterialParameterLayoutID.LegacyMaterialData));
-                Assert.That(program.ResourceLayoutID, Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
+                Assert.That(program.ParameterLayoutID, Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
+                Assert.That(program.ResourceLayoutID, Is.EqualTo(VividMaterialResourceLayoutID.GenericResourceRecords));
                 Assert.That(
                     program.CapabilityFlags & VividMaterialProgramCapabilities.AlphaClip,
                     Is.EqualTo(VividMaterialProgramCapabilities.AlphaClip));
@@ -413,10 +424,10 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
                 Assert.That(
                     dualSlabProgram.ParameterLayoutID,
-                    Is.EqualTo(VividMaterialParameterLayoutID.DualSlabMaterialData));
+                    Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
                 Assert.That(
                     dualSlabProgram.ResourceLayoutID,
-                    Is.EqualTo(VividMaterialResourceLayoutID.DualSurfaceBinding));
+                    Is.EqualTo(VividMaterialResourceLayoutID.GenericResourceRecords));
                 Assert.That(
                     sceneData.MaterialPrograms[
                         (int) VividMaterialProgramID.DualSlabVerticalLayer].SurfaceProgramID,
@@ -478,6 +489,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(compiled.DualSlabMaterialData.LayerWeight, Is.EqualTo(0.65f));
                 Assert.That(compiled.DualSlabMaterialData.AlphaClipThreshold, Is.EqualTo(0.4f));
                 Assert.That(compiled.LegacyMaterialData.SurfaceBindingIndex, Is.EqualTo(7u));
+                Assert.That(compiled.ParameterLanes.Count, Is.EqualTo(6));
             }
             finally
             {
@@ -664,11 +676,23 @@ namespace VividRP.Editor.Tests
             {
                 var sceneData = new VividGPUDrivenSceneData();
                 GPUDrivenCompiledMaterialInstance first =
-                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(proxy, 0u, 3u);
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        proxy,
+                        parameterAddress: 0u,
+                        resourceBindingAddress: 0u,
+                        legacySurfaceBindingIndex: 3u);
                 GPUDrivenCompiledMaterialInstance second =
-                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(proxy, 1u, 5u);
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        proxy,
+                        parameterAddress: 4u,
+                        resourceBindingAddress: 1u,
+                        legacySurfaceBindingIndex: 5u);
                 for (int bindingIndex = 0; bindingIndex < 6; bindingIndex++)
                     sceneData.MutableSurfaceBindings.Add(default);
+                sceneData.MutableMaterialParameterLanes.AddRange(first.ParameterLanes);
+                sceneData.MutableMaterialParameterLanes.AddRange(second.ParameterLanes);
+                sceneData.MutableMaterialResources.Add(default);
+                sceneData.MutableMaterialResources.Add(default);
 
                 Assert.That(
                     sceneData.AddMaterial(first.LegacyMaterialData, first.RuntimeHeader),
@@ -679,9 +703,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialRuntimeHeaderCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialRuntimeHeaders[0].ParameterAddress, Is.Zero);
-                Assert.That(sceneData.MaterialRuntimeHeaders[1].ParameterAddress, Is.EqualTo(1u));
+                Assert.That(sceneData.MaterialRuntimeHeaders[1].ParameterAddress, Is.EqualTo(4u));
 
                 VividMaterialRuntimeHeader mismatchedHeader = second.RuntimeHeader;
+                mismatchedHeader.ParameterAddress = 5u;
                 Assert.Throws<System.ArgumentException>(() =>
                     sceneData.AddMaterial(second.LegacyMaterialData, mismatchedHeader));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(2));
@@ -731,12 +756,13 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 sceneData.MutableDualSlabMaterials.Add(compiled.DualSlabMaterialData);
-                sceneData.MutableSurfaceBindings.Add(default);
+                sceneData.MutableMaterialParameterLanes.AddRange(compiled.ParameterLanes);
+                sceneData.MutableMaterialResources.Add(default);
                 Assert.Throws<System.ArgumentException>(() => sceneData.AddMaterial(
                     compiled.LegacyMaterialData,
                     compiled.RuntimeHeader));
 
-                sceneData.MutableSurfaceBindings.Add(default);
+                sceneData.MutableMaterialResources.Add(default);
                 Assert.That(
                     sceneData.AddMaterial(
                         compiled.LegacyMaterialData,

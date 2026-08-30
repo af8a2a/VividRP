@@ -19,6 +19,7 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividMaterialRuntimeHeader>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividMaterialProgramData>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividSurfaceBindingData>(), Is.EqualTo(32));
+            Assert.That(UnsafeUtility.SizeOf<VividMaterialResourceData>(), Is.EqualTo(96));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
             Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
@@ -164,6 +165,31 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividSurfaceBindingData>(
                 nameof(VividSurfaceBindingData.UVScaleBias),
                 16);
+
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.SurfaceBinding),
+                0);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.TextureTilingOffset),
+                32);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.MetallicSmoothnessRemap),
+                48);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.AmbientOcclusionRemap),
+                64);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.NormalsStrength),
+                80);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.MaskMode),
+                84);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.Padding0),
+                88);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.Padding1),
+                92);
         }
 
         [Test]
@@ -372,6 +398,8 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.InstanceDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.DualSlabMaterialDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MaterialParameterDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MaterialResourceDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialRuntimeHeaderBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialProgramBuffer, Is.Not.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
@@ -382,8 +410,12 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.InstanceDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialRuntimeHeaderBuffer.count, Is.EqualTo(1));
-            Assert.That(bufferSet.MaterialProgramBuffer.count, Is.EqualTo(2));
+            Assert.That(
+                bufferSet.MaterialProgramBuffer.count,
+                Is.EqualTo(MaterialProgramContract.ProductionCatalogProgramCount));
             Assert.That(bufferSet.DualSlabMaterialDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialParameterDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialResourceDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshLODNodesBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletsBuffer.count, Is.EqualTo(1));
@@ -428,17 +460,38 @@ namespace VividRP.Editor.Tests
         public void Upload_PreservesMaterialRuntimeAndProgramTableContents()
         {
             var sceneData = new VividGPUDrivenSceneData();
-            var runtimeHeader = new VividMaterialRuntimeHeader
+            var materialData = new VividMaterialData
             {
-                ProgramID = VividMaterialProgramID.StandardSingleSlab,
-                ParameterAddress = 0u,
-                ResourceBindingAddress = 5u,
-                Flags = VividMaterialRuntimeFlags.AlphaClip,
+                AlbedoColor = new float4(0.25f, 0.5f, 0.75f, 1.0f),
+                TextureTilingOffset = new float4(1.0f, 1.0f, 0.0f, 0.0f),
+                MetallicSmoothnessRemap = new float4(0.0f, 1.0f, 0.0f, 1.0f),
+                AmbientOcclusionRemap = new float4(0.0f, 1.0f, 0.0f, 0.0f),
+                SurfaceBindingIndex = 5u,
+                NormalsStrength = 1.0f,
+                Roughness = 0.4f,
+                Metallic = 0.6f,
+                AlphaClipThreshold = 0.5f,
             };
+            GPUDrivenCompiledMaterialInstance compiled =
+                GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                    materialData,
+                    parameterAddress: 0u,
+                    resourceBindingAddress: 0u,
+                    legacySurfaceBindingIndex: 5u);
+            VividMaterialRuntimeHeader runtimeHeader = compiled.RuntimeHeader;
             for (int bindingIndex = 0; bindingIndex < 6; bindingIndex++)
                 sceneData.MutableSurfaceBindings.Add(default);
+            sceneData.MutableMaterialParameterLanes.AddRange(compiled.ParameterLanes);
+            sceneData.MutableMaterialResources.Add(new VividMaterialResourceData
+            {
+                SurfaceBinding = sceneData.MutableSurfaceBindings[5],
+                TextureTilingOffset = materialData.TextureTilingOffset,
+                MetallicSmoothnessRemap = materialData.MetallicSmoothnessRemap,
+                AmbientOcclusionRemap = materialData.AmbientOcclusionRemap,
+                NormalsStrength = materialData.NormalsStrength,
+            });
             sceneData.AddMaterial(
-                new VividMaterialData { SurfaceBindingIndex = 5u },
+                materialData,
                 runtimeHeader);
             sceneData.MutableDualSlabMaterials.Add(new VividDualSlabMaterialData
             {
@@ -451,8 +504,13 @@ namespace VividRP.Editor.Tests
 
             var uploadedHeaders = new VividMaterialRuntimeHeader[1];
             bufferSet.MaterialRuntimeHeaderBuffer.GetData(uploadedHeaders);
-            var uploadedPrograms = new VividMaterialProgramData[3];
+            var uploadedPrograms = new VividMaterialProgramData[
+                MaterialProgramContract.ProductionCatalogProgramCount];
             bufferSet.MaterialProgramBuffer.GetData(uploadedPrograms);
+            var uploadedParameterLanes = new uint4[compiled.ParameterLanes.Count];
+            bufferSet.MaterialParameterDataBuffer.GetData(uploadedParameterLanes);
+            var uploadedResources = new VividMaterialResourceData[1];
+            bufferSet.MaterialResourceDataBuffer.GetData(uploadedResources);
             var uploadedDualSlabs = new VividDualSlabMaterialData[1];
             bufferSet.DualSlabMaterialDataBuffer.GetData(uploadedDualSlabs);
 
@@ -468,16 +526,20 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
             Assert.That(
                 uploadedPrograms[0].ParameterLayoutID,
-                Is.EqualTo(VividMaterialParameterLayoutID.LegacyMaterialData));
+                Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
             Assert.That(
                 uploadedPrograms[0].ResourceLayoutID,
-                Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
+                Is.EqualTo(VividMaterialResourceLayoutID.GenericResourceRecords));
             Assert.That(
                 uploadedPrograms[1].SurfaceProgramID,
                 Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
             Assert.That(
                 uploadedPrograms[2].SurfaceProgramID,
                 Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
+            Assert.That(uploadedParameterLanes, Is.EqualTo(compiled.ParameterLanes));
+            Assert.That(
+                uploadedResources[0].TextureTilingOffset,
+                Is.EqualTo(materialData.TextureTilingOffset));
             Assert.That(
                 uploadedDualSlabs[0].LayerOperator,
                 Is.EqualTo(VividDualSlabOperator.VerticalLayer));
@@ -496,6 +558,10 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.SurfaceBindingCount, Is.Zero);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialParameterLaneCount, Is.Zero);
+            Assert.That(bufferSet.MaterialResourceCount, Is.Zero);
+            Assert.That(bufferSet.MaterialParameterDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.MaterialResourceDataBuffer.count, Is.EqualTo(1));
 
             CommandBuffer cmd = CommandBufferPool.Get("VividGPUDrivenBufferSetTests");
 
@@ -607,12 +673,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(bufferSet.MaterialRuntimeHeaderBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialProgramBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MaterialParameterDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MaterialResourceDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
 
             bufferSet.Dispose();
 
             Assert.That(bufferSet.MaterialRuntimeHeaderBuffer, Is.Null);
             Assert.That(bufferSet.MaterialProgramBuffer, Is.Null);
+            Assert.That(bufferSet.MaterialParameterDataBuffer, Is.Null);
+            Assert.That(bufferSet.MaterialResourceDataBuffer, Is.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Null);
         }
 

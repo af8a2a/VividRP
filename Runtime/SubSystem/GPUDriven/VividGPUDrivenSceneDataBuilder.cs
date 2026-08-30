@@ -1138,6 +1138,8 @@ namespace VividRP.Runtime.GPUDriven
             VividMaterialData materialData;
             VividMaterialRuntimeHeader runtimeHeader;
             uint surfaceBindingIndex = (uint) sceneData.SurfaceBindingCount;
+            uint parameterLaneAddress = (uint) sceneData.MaterialParameterLaneCount;
+            uint resourceBindingAddress = (uint) sceneData.MaterialResourceCount;
             if (materialProxy != null)
             {
                 GPUDrivenCompiledMaterialInstance compiledMaterial;
@@ -1150,14 +1152,24 @@ namespace VividRP.Runtime.GPUDriven
                         : null;
                     compiledMaterial = GPUDrivenMaterialCompiler.CompileDualSlab(
                         materialProxy,
-                        (uint) sceneData.DualSlabMaterialCount,
+                        parameterLaneAddress,
+                        resourceBindingAddress,
                         surfaceBindingIndex);
-                    sceneData.MutableSurfaceBindings.Add(
+                    VividSurfaceBindingData baseBinding =
                         textureBackend.CreateSurfaceBinding(
-                            ExtractSurfaceTextures(materialProxy, textureBackend)));
-                    sceneData.MutableSurfaceBindings.Add(
+                            ExtractSurfaceTextures(materialProxy, textureBackend));
+                    VividSurfaceBindingData topBinding =
                         textureBackend.CreateSurfaceBinding(
-                            ExtractSurfaceTextures(topSlab, textureBackend)));
+                            ExtractSurfaceTextures(topSlab, textureBackend));
+                    sceneData.MutableSurfaceBindings.Add(baseBinding);
+                    sceneData.MutableSurfaceBindings.Add(topBinding);
+                    AppendGenericMaterialResources(
+                        sceneData,
+                        compiledMaterial,
+                        materialProxy,
+                        topSlab,
+                        baseBinding,
+                        topBinding);
                     sceneData.MutableDualSlabMaterials.Add(
                         compiledMaterial.DualSlabMaterialData);
                 }
@@ -1165,16 +1177,27 @@ namespace VividRP.Runtime.GPUDriven
                 {
                     compiledMaterial = GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
                         materialProxy,
-                        (uint) sceneData.MaterialCount,
+                        parameterLaneAddress,
+                        resourceBindingAddress,
                         surfaceBindingIndex);
-                    sceneData.MutableSurfaceBindings.Add(
+                    VividSurfaceBindingData baseBinding =
                         textureBackend.CreateSurfaceBinding(
-                            ExtractSurfaceTextures(materialProxy, textureBackend)));
+                            ExtractSurfaceTextures(materialProxy, textureBackend));
+                    sceneData.MutableSurfaceBindings.Add(baseBinding);
+                    AppendGenericMaterialResources(
+                        sceneData,
+                        compiledMaterial,
+                        materialProxy,
+                        null,
+                        baseBinding,
+                        default);
                 }
-                int appendedResourceRecordCount =
-                    sceneData.SurfaceBindingCount - (int) surfaceBindingIndex;
+                sceneData.MutableMaterialParameterLanes.AddRange(
+                    compiledMaterial.ParameterLanes);
+                int appendedResourceRecordCount = sceneData.MaterialResourceCount
+                    - (int) resourceBindingAddress;
                 int requiredResourceRecordCount = compiledMaterial.MaterialProgram
-                    .MaterialLayout.ResourceLayout.RecordCount;
+                    .Lowering.GenericLayout.ResourceCount;
                 if (appendedResourceRecordCount != requiredResourceRecordCount)
                 {
                     throw new InvalidOperationException(
@@ -1186,15 +1209,24 @@ namespace VividRP.Runtime.GPUDriven
             else
             {
                 materialData = CreateMaterialData(material, surfaceBindingIndex);
-                sceneData.MutableSurfaceBindings.Add(
-                    textureBackend.CreateSurfaceBinding(ExtractSurfaceTextures(material)));
+                VividSurfaceBindingData baseBinding =
+                    textureBackend.CreateSurfaceBinding(ExtractSurfaceTextures(material));
+                sceneData.MutableSurfaceBindings.Add(baseBinding);
                 if (IsStandardLitShader(material != null ? material.shader : null))
                 {
                     GPUDrivenCompiledMaterialInstance compiledMaterial =
                         GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
                             materialData,
-                            (uint) sceneData.MaterialCount,
+                            parameterLaneAddress,
+                            resourceBindingAddress,
                             surfaceBindingIndex);
+                    sceneData.MutableMaterialParameterLanes.AddRange(
+                        compiledMaterial.ParameterLanes);
+                    AppendGenericMaterialResources(
+                        sceneData,
+                        compiledMaterial,
+                        materialData,
+                        baseBinding);
                     materialData = compiledMaterial.LegacyMaterialData;
                     runtimeHeader = compiledMaterial.RuntimeHeader;
                 }
@@ -1216,6 +1248,112 @@ namespace VividRP.Runtime.GPUDriven
                     ComputeMaterialProxyRevision(materialProxy, textureBackend));
             }
             return materialIndex;
+        }
+
+        private static void AppendGenericMaterialResources(
+            VividGPUDrivenSceneData sceneData,
+            in GPUDrivenCompiledMaterialInstance compiledMaterial,
+            GPUDrivenMaterialProxy baseProxy,
+            GPUDrivenMaterialProxy topProxy,
+            in VividSurfaceBindingData baseBinding,
+            in VividSurfaceBindingData topBinding)
+        {
+            MaterialGenericLayout layout =
+                compiledMaterial.MaterialProgram.Lowering.GenericLayout;
+            MaterialNativeTemplateLayoutSchema schema = compiledMaterial
+                .MaterialProgram.Lowering.Template.LayoutSchema;
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.ResourceBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialGenericResourceBinding genericBinding =
+                    layout.ResourceBindings[bindingIndex];
+                if (!schema.TryGetResourceBinding(
+                        genericBinding.Declaration,
+                        out MaterialNativeResourceBinding nativeBinding))
+                {
+                    throw new InvalidOperationException(
+                        $"Material program '{compiledMaterial.CatalogProgram.StableName}' has no runtime source for resource '{genericBinding.Declaration.Symbol}'.");
+                }
+
+                bool useTop = IsTopSlabResource(nativeBinding.Target);
+                GPUDrivenMaterialProxy sourceProxy = useTop ? topProxy : baseProxy;
+                if (sourceProxy == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Material resource '{nativeBinding.Target}' requires a missing top-slab proxy.");
+                }
+                sceneData.MutableMaterialResources.Add(
+                    CreateGenericMaterialResource(
+                        sourceProxy,
+                        useTop ? topBinding : baseBinding));
+            }
+        }
+
+        private static void AppendGenericMaterialResources(
+            VividGPUDrivenSceneData sceneData,
+            in GPUDrivenCompiledMaterialInstance compiledMaterial,
+            in VividMaterialData materialData,
+            in VividSurfaceBindingData surfaceBinding)
+        {
+            MaterialGenericLayout layout =
+                compiledMaterial.MaterialProgram.Lowering.GenericLayout;
+            for (int bindingIndex = 0;
+                 bindingIndex < layout.ResourceBindings.Count;
+                 bindingIndex++)
+            {
+                sceneData.MutableMaterialResources.Add(
+                    CreateGenericMaterialResource(materialData, surfaceBinding));
+            }
+        }
+
+        private static VividMaterialResourceData CreateGenericMaterialResource(
+            GPUDrivenMaterialProxy proxy,
+            in VividSurfaceBindingData surfaceBinding)
+        {
+            return new VividMaterialResourceData
+            {
+                SurfaceBinding = surfaceBinding,
+                TextureTilingOffset = new float4(
+                    proxy.TextureTilingOffset.x,
+                    proxy.TextureTilingOffset.y,
+                    proxy.TextureTilingOffset.z,
+                    proxy.TextureTilingOffset.w),
+                MetallicSmoothnessRemap = new float4(
+                    proxy.MetallicRemap.x,
+                    proxy.MetallicRemap.y,
+                    proxy.SmoothnessRemap.x,
+                    proxy.SmoothnessRemap.y),
+                AmbientOcclusionRemap = new float4(
+                    proxy.AmbientOcclusionRemap.x,
+                    proxy.AmbientOcclusionRemap.y,
+                    0.0f,
+                    0.0f),
+                NormalsStrength = proxy.BumpScale,
+                MaskMode = (uint) proxy.MaskMode,
+            };
+        }
+
+        private static VividMaterialResourceData CreateGenericMaterialResource(
+            in VividMaterialData materialData,
+            in VividSurfaceBindingData surfaceBinding)
+        {
+            return new VividMaterialResourceData
+            {
+                SurfaceBinding = surfaceBinding,
+                TextureTilingOffset = materialData.TextureTilingOffset,
+                MetallicSmoothnessRemap = materialData.MetallicSmoothnessRemap,
+                AmbientOcclusionRemap = materialData.AmbientOcclusionRemap,
+                NormalsStrength = materialData.NormalsStrength,
+                MaskMode = materialData.Padding0,
+            };
+        }
+
+        private static bool IsTopSlabResource(MaterialTextureResource resource)
+        {
+            return resource == MaterialTextureResource.TopBaseColor
+                || resource == MaterialTextureResource.TopNormal
+                || resource == MaterialTextureResource.TopMask;
         }
 
         private void WarnMissingMaterialProxy(

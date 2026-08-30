@@ -12,86 +12,94 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 617444a824ed9ed4ba8893f61605f9cb, type: 3}
   m_Name: VividMaterialProgramCatalog
   m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.GPUDriven.MaterialProgramCatalogAsset
-  m_AssetSchemaVersion: 1
-  m_ProgramCatalogVersion: 3
-  m_ManifestVersion: 2
-  m_RuntimeAbiVersion: 1
-  m_ManifestHashVersion: 2
-  m_ManifestHash: 11549898129256064516
+  m_AssetSchemaVersion: 2
+  m_ProgramCatalogVersion: 4
+  m_ManifestVersion: 3
+  m_RuntimeAbiVersion: 2
+  m_ManifestHashVersion: 3
+  m_ManifestHash: 3786857921302025095
   m_Slots:
   - m_ProgramID: 0
     m_StableName: P0.StandardSingleSlab
     m_IsReserved: 0
-    m_CompiledHashVersion: 6
-    m_CompiledHash: 8851551474658735965
+    m_CompiledHashVersion: 7
+    m_CompiledHash: 12882352052340410372
     m_LayoutFingerprintVersion: 1
     m_LayoutFingerprint: 9656787919339570309
     m_DeferredExportFingerprintVersion: 1
     m_DeferredExportFingerprint: 5888118281072226784
-    m_CoveragePayloadHash: 7478674352511511534
-    m_SurfacePayloadHash: 1288476404774087461
-    m_RuntimeVersion: 1
+    m_CoveragePayloadHash: 16739603204510334830
+    m_SurfacePayloadHash: 3508872135304997457
+    m_RuntimeVersion: 2
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 0
     m_TransportProgramID: 0
-    m_ParameterLayoutID: 0
-    m_ResourceLayoutID: 0
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
     m_CapabilityFlags: 7
     m_ExecutionClass: 0
+    m_ParameterStrideInWords: 16
+    m_ResourceCount: 1
   - m_ProgramID: 1
     m_StableName: P1.DualSlabHorizontalMix
     m_IsReserved: 0
-    m_CompiledHashVersion: 6
-    m_CompiledHash: 7757566201632722506
+    m_CompiledHashVersion: 7
+    m_CompiledHash: 9176310555744210271
     m_LayoutFingerprintVersion: 1
     m_LayoutFingerprint: 10226178297536332919
     m_DeferredExportFingerprintVersion: 1
     m_DeferredExportFingerprint: 12898365168916497089
-    m_CoveragePayloadHash: 17727778935427307162
-    m_SurfacePayloadHash: 8342589515784662258
-    m_RuntimeVersion: 1
+    m_CoveragePayloadHash: 12958207507376420321
+    m_SurfacePayloadHash: 13164212495289871385
+    m_RuntimeVersion: 2
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 1
     m_TransportProgramID: 0
-    m_ParameterLayoutID: 1
-    m_ResourceLayoutID: 1
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
     m_CapabilityFlags: 7
     m_ExecutionClass: 0
+    m_ParameterStrideInWords: 24
+    m_ResourceCount: 2
   - m_ProgramID: 2
     m_StableName: P2.DualSlabVerticalLayer
     m_IsReserved: 0
-    m_CompiledHashVersion: 6
-    m_CompiledHash: 6342762262226108038
+    m_CompiledHashVersion: 7
+    m_CompiledHash: 4893541612611642108
     m_LayoutFingerprintVersion: 1
     m_LayoutFingerprint: 10226178297536332919
     m_DeferredExportFingerprintVersion: 1
     m_DeferredExportFingerprint: 12268790991064211538
-    m_CoveragePayloadHash: 17727778935427307162
-    m_SurfacePayloadHash: 4360321795050157187
-    m_RuntimeVersion: 1
+    m_CoveragePayloadHash: 12958207507376420321
+    m_SurfacePayloadHash: 14545620924019049331
+    m_RuntimeVersion: 2
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 1
     m_TransportProgramID: 0
-    m_ParameterLayoutID: 1
-    m_ResourceLayoutID: 1
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
     m_CapabilityFlags: 7
     m_ExecutionClass: 0
+    m_ParameterStrideInWords: 24
+    m_ResourceCount: 2
   - m_ProgramID: 3
     m_StableName: P3.GenericSingleSlabProof
     m_IsReserved: 0
-    m_CompiledHashVersion: 6
-    m_CompiledHash: 1733903339899143714
+    m_CompiledHashVersion: 7
+    m_CompiledHash: 10246916302304989246
     m_LayoutFingerprintVersion: 1
     m_LayoutFingerprint: 9656787919339570309
     m_DeferredExportFingerprintVersion: 1
     m_DeferredExportFingerprint: 5888118281072226784
-    m_CoveragePayloadHash: 9523865824555214407
-    m_SurfacePayloadHash: 1523191165705972128
-    m_RuntimeVersion: 1
+    m_CoveragePayloadHash: 13710540041557055993
+    m_SurfacePayloadHash: 14199427039482510859
+    m_RuntimeVersion: 2
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 0
     m_TransportProgramID: 0
-    m_ParameterLayoutID: 0
-    m_ResourceLayoutID: 0
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
     m_CapabilityFlags: 7
     m_ExecutionClass: 0
+    m_ParameterStrideInWords: 16
+    m_ResourceCount: 1

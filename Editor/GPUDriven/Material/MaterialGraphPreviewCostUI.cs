@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
 using System.Reflection;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.GraphToolkit.Editor;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEditor.Overlays;
 using UnityEngine;
@@ -453,6 +455,8 @@ namespace VividRP.Editor.GPUDriven
 
         private Material m_Material;
         private RenderTexture m_Texture;
+        private GraphicsBuffer m_ParameterBuffer;
+        private GraphicsBuffer m_ResourceBuffer;
 
         internal Texture Render(VividMaterialProgramID programID)
         {
@@ -460,6 +464,7 @@ namespace VividRP.Editor.GPUDriven
             if (m_Material == null || m_Texture == null)
                 return null;
 
+            BindProgramData(programID);
             m_Material.SetInt("_ProgramID", unchecked((int) (uint) programID));
             Graphics.Blit(Texture2D.whiteTexture, m_Texture, m_Material);
             return m_Texture;
@@ -474,9 +479,106 @@ namespace VividRP.Editor.GPUDriven
                 m_Texture.Release();
                 Object.DestroyImmediate(m_Texture);
             }
+            m_ParameterBuffer?.Dispose();
+            m_ResourceBuffer?.Dispose();
 
             m_Material = null;
             m_Texture = null;
+            m_ParameterBuffer = null;
+            m_ResourceBuffer = null;
+        }
+
+        private void BindProgramData(VividMaterialProgramID programID)
+        {
+            MaterialProgramCatalog.ManifestEntry entry =
+                GPUDrivenMaterialCompiler.GetCatalogedMaterialProgram(programID);
+            var legacy = new VividMaterialData
+            {
+                AlbedoColor = new float4(0.42f, 0.55f, 0.72f, 1.0f),
+                Emission = float4.zero,
+                Roughness = 0.45f,
+                Metallic = 0.15f,
+                AlphaClipThreshold = 0.0f,
+            };
+            var dual = new VividDualSlabMaterialData
+            {
+                BaseAlbedoColor = legacy.AlbedoColor,
+                BaseRoughness = legacy.Roughness,
+                BaseMetallic = legacy.Metallic,
+                TopAlbedoColor = new float4(0.88f, 0.52f, 0.24f, 1.0f),
+                TopRoughness = Mathf.Clamp01(legacy.Roughness * 0.55f),
+                TopMetallic = Mathf.Clamp01(legacy.Metallic * 0.35f),
+                LayerWeight = 0.5f,
+            };
+            bool isDual = entry.Program.Lowering.SelectionKey.Topology
+                != MaterialProgramTopologySpecialization.SingleSlab;
+            uint4[] parameterLanes =
+                GPUDrivenMaterialCompiler.CreateGenericParameterLanes(
+                    entry,
+                    legacy,
+                    dual,
+                    isDual);
+            EnsureBuffer(
+                ref m_ParameterBuffer,
+                Mathf.Max(1, parameterLanes.Length),
+                UnsafeUtility.SizeOf<uint4>(),
+                "Vivid Material Preview Parameters");
+            if (parameterLanes.Length > 0)
+                m_ParameterBuffer.SetData(parameterLanes);
+
+            int resourceCount = entry.Program.Lowering.GenericLayout.ResourceCount;
+            var resources = new VividMaterialResourceData[Mathf.Max(1, resourceCount)];
+            for (int resourceIndex = 0;
+                 resourceIndex < resourceCount;
+                 resourceIndex++)
+            {
+                resources[resourceIndex] = CreatePreviewResource();
+            }
+            EnsureBuffer(
+                ref m_ResourceBuffer,
+                resources.Length,
+                UnsafeUtility.SizeOf<VividMaterialResourceData>(),
+                "Vivid Material Preview Resources");
+            m_ResourceBuffer.SetData(resources);
+
+            m_Material.SetBuffer("_MaterialParameterData", m_ParameterBuffer);
+            m_Material.SetBuffer("_MaterialResourceData", m_ResourceBuffer);
+            m_Material.SetInt("_MaterialParameterDataCount", parameterLanes.Length);
+            m_Material.SetInt("_MaterialResourceDataCount", resourceCount);
+        }
+
+        private static VividMaterialResourceData CreatePreviewResource()
+        {
+            return new VividMaterialResourceData
+            {
+                SurfaceBinding = new VividSurfaceBindingData
+                {
+                    BaseColorResource = VividSurfaceBindingData.InvalidResource,
+                    NormalResource = VividSurfaceBindingData.InvalidResource,
+                    MaskResource = VividSurfaceBindingData.InvalidResource,
+                    UVScaleBias = new float4(1.0f, 1.0f, 0.0f, 0.0f),
+                },
+                TextureTilingOffset = new float4(1.0f, 1.0f, 0.0f, 0.0f),
+                MetallicSmoothnessRemap = new float4(0.0f, 1.0f, 0.0f, 1.0f),
+                AmbientOcclusionRemap = new float4(0.0f, 1.0f, 0.0f, 0.0f),
+                NormalsStrength = 1.0f,
+            };
+        }
+
+        private static void EnsureBuffer(
+            ref GraphicsBuffer buffer,
+            int count,
+            int stride,
+            string name)
+        {
+            if (buffer != null && buffer.count == count && buffer.stride == stride)
+                return;
+
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, stride)
+            {
+                name = name,
+            };
         }
 
         private void EnsureResources()

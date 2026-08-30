@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Mathematics;
 using UnityEngine.Rendering;
 using UnityEngine;
 
@@ -44,6 +45,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividGPUDrivenInstanceSourceData> m_InstanceSources = new();
         private readonly List<VividMaterialData> m_Materials = new();
         private readonly List<VividDualSlabMaterialData> m_DualSlabMaterials = new();
+        private readonly List<uint4> m_MaterialParameterLanes = new();
+        private readonly List<VividMaterialResourceData> m_MaterialResources = new();
         private readonly List<VividMaterialRuntimeHeader> m_MaterialRuntimeHeaders = new();
         private readonly List<VividMaterialProgramData> m_MaterialPrograms = new(
             GPUDrivenMaterialCompiler.CreateRuntimeProgramTable());
@@ -65,6 +68,12 @@ namespace VividRP.Runtime.GPUDriven
 
         public IReadOnlyList<VividDualSlabMaterialData> DualSlabMaterials =>
             m_DualSlabMaterials;
+
+        public IReadOnlyList<uint4> MaterialParameterLanes =>
+            m_MaterialParameterLanes;
+
+        public IReadOnlyList<VividMaterialResourceData> MaterialResources =>
+            m_MaterialResources;
 
         public IReadOnlyList<VividMaterialRuntimeHeader> MaterialRuntimeHeaders =>
             m_MaterialRuntimeHeaders;
@@ -90,6 +99,10 @@ namespace VividRP.Runtime.GPUDriven
         public int MaterialCount => m_Materials.Count;
 
         public int DualSlabMaterialCount => m_DualSlabMaterials.Count;
+
+        public int MaterialParameterLaneCount => m_MaterialParameterLanes.Count;
+
+        public int MaterialResourceCount => m_MaterialResources.Count;
 
         public int MaterialRuntimeHeaderCount => m_MaterialRuntimeHeaders.Count;
 
@@ -171,6 +184,12 @@ namespace VividRP.Runtime.GPUDriven
         internal List<VividDualSlabMaterialData> MutableDualSlabMaterials =>
             m_DualSlabMaterials;
 
+        internal List<uint4> MutableMaterialParameterLanes =>
+            m_MaterialParameterLanes;
+
+        internal List<VividMaterialResourceData> MutableMaterialResources =>
+            m_MaterialResources;
+
         internal List<VividMaterialRuntimeHeader> MutableMaterialRuntimeHeaders =>
             m_MaterialRuntimeHeaders;
 
@@ -233,6 +252,8 @@ namespace VividRP.Runtime.GPUDriven
         {
             m_Materials.Clear();
             m_DualSlabMaterials.Clear();
+            m_MaterialParameterLanes.Clear();
+            m_MaterialResources.Clear();
             m_MaterialRuntimeHeaders.Clear();
         }
 
@@ -249,7 +270,6 @@ namespace VividRP.Runtime.GPUDriven
             int materialIndex = m_Materials.Count;
             bool usesLegacyParameterLayout =
                 runtimeHeader.ProgramID == VividMaterialProgramID.Invalid;
-            bool usesDualSlabParameterLayout = false;
             if (runtimeHeader.ProgramID != VividMaterialProgramID.Invalid)
             {
                 uint programIndex = (uint) runtimeHeader.ProgramID;
@@ -260,31 +280,41 @@ namespace VividRP.Runtime.GPUDriven
                         nameof(runtimeHeader));
                 }
 
-                CompiledMaterialLayout materialLayout =
-                    GPUDrivenMaterialCompiler.GetMaterialProgram(
-                        runtimeHeader.ProgramID).MaterialLayout;
-                VividMaterialParameterLayoutID parameterLayoutID =
-                    materialLayout.ParameterLayout.LayoutID;
-                usesLegacyParameterLayout =
-                    parameterLayoutID == VividMaterialParameterLayoutID.LegacyMaterialData;
-                usesDualSlabParameterLayout =
-                    parameterLayoutID == VividMaterialParameterLayoutID.DualSlabMaterialData;
-                if (!usesLegacyParameterLayout && !usesDualSlabParameterLayout)
+                VividMaterialProgramData runtimeData =
+                    m_MaterialPrograms[(int) programIndex];
+                if (runtimeData.ParameterLayoutID
+                        != VividMaterialParameterLayoutID.GenericParameterLanes
+                    || runtimeData.ResourceLayoutID
+                        != VividMaterialResourceLayoutID.GenericResourceRecords)
                 {
                     throw new ArgumentException(
-                        $"Material program {programIndex} uses unsupported parameter layout '{parameterLayoutID}'.",
+                        $"Material program {programIndex} does not use the generic runtime layout.",
+                        nameof(runtimeHeader));
+                }
+
+                MaterialGenericLayout genericLayout =
+                    GPUDrivenMaterialCompiler.GetMaterialProgram(
+                        runtimeHeader.ProgramID).Lowering.GenericLayout;
+                uint parameterLaneAddress = runtimeHeader.ParameterAddress;
+                uint parameterLaneCount =
+                    (uint) (genericLayout.ParameterStrideInWords / 4);
+                if (parameterLaneAddress > (uint) m_MaterialParameterLanes.Count
+                    || parameterLaneCount
+                        > (uint) m_MaterialParameterLanes.Count - parameterLaneAddress)
+                {
+                    throw new ArgumentException(
+                        $"Material program {programIndex} requires {parameterLaneCount} parameter lanes at address {parameterLaneAddress}, but only {m_MaterialParameterLanes.Count} lanes are present.",
                         nameof(runtimeHeader));
                 }
 
                 uint resourceBindingAddress = runtimeHeader.ResourceBindingAddress;
-                uint resourceRecordCount =
-                    (uint) materialLayout.ResourceLayout.RecordCount;
-                if (resourceBindingAddress > (uint) m_SurfaceBindings.Count
+                uint resourceRecordCount = (uint) genericLayout.ResourceCount;
+                if (resourceBindingAddress > (uint) m_MaterialResources.Count
                     || resourceRecordCount
-                        > (uint) m_SurfaceBindings.Count - resourceBindingAddress)
+                        > (uint) m_MaterialResources.Count - resourceBindingAddress)
                 {
                     throw new ArgumentException(
-                        $"Material program {programIndex} requires {resourceRecordCount} resource records at address {resourceBindingAddress}, but only {m_SurfaceBindings.Count} records are present.",
+                        $"Material program {programIndex} requires {resourceRecordCount} generic resource records at address {resourceBindingAddress}, but only {m_MaterialResources.Count} records are present.",
                         nameof(runtimeHeader));
                 }
             }
@@ -296,14 +326,6 @@ namespace VividRP.Runtime.GPUDriven
                     $"Material parameter address {runtimeHeader.ParameterAddress} does not match material index {materialIndex}.",
                     nameof(runtimeHeader));
             }
-            if (usesDualSlabParameterLayout
-                && runtimeHeader.ParameterAddress >= (uint) m_DualSlabMaterials.Count)
-            {
-                throw new ArgumentException(
-                    $"Dual Slab parameter address {runtimeHeader.ParameterAddress} is not present in the Dual Slab parameter buffer.",
-                    nameof(runtimeHeader));
-            }
-
             m_Materials.Add(materialData);
             m_MaterialRuntimeHeaders.Add(runtimeHeader);
             return materialIndex;

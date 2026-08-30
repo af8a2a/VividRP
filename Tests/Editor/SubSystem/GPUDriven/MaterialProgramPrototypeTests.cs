@@ -1110,25 +1110,25 @@ namespace VividRP.Editor.Tests
             Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.StageLIRVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.DerivativeLegalizationVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(5u));
             Assert.That(MaterialProgramContract.GenericLayoutVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.LayoutFingerprintVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.DeferredExportContractVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.DeferredExportFingerprintVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.ProgramCatalogManifestVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.ProgramCatalogManifestVersion, Is.EqualTo(3u));
             Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(6u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(11u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(6u));
-            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(7u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(12u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(7u));
+            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(5u));
             Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(1u));
-            Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(1u));
-            Assert.That(GPUDrivenMaterialCompiler.ProgramVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(2u));
+            Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(2u));
+            Assert.That(GPUDrivenMaterialCompiler.ProgramVersion, Is.EqualTo(2u));
             Assert.That((uint) MaterialProgramBackendKind.NativeTemplate, Is.Zero);
 
             Assert.That((uint) VividMaterialProgramID.StandardSingleSlab, Is.Zero);
@@ -1141,27 +1141,32 @@ namespace VividRP.Editor.Tests
             Assert.That((uint) VividMaterialTransportProgramID.None, Is.Zero);
             Assert.That((uint) VividMaterialParameterLayoutID.LegacyMaterialData, Is.Zero);
             Assert.That((uint) VividMaterialParameterLayoutID.DualSlabMaterialData, Is.EqualTo(1u));
+            Assert.That((uint) VividMaterialParameterLayoutID.GenericParameterLanes, Is.EqualTo(2u));
             Assert.That((uint) VividMaterialResourceLayoutID.LegacySurfaceBinding, Is.Zero);
             Assert.That((uint) VividMaterialResourceLayoutID.DualSurfaceBinding, Is.EqualTo(1u));
+            Assert.That((uint) VividMaterialResourceLayoutID.GenericResourceRecords, Is.EqualTo(2u));
 
             VividMaterialProgramData[] runtimePrograms =
                 GPUDrivenMaterialCompiler.CreateRuntimeProgramTable();
             Assert.That(
                 runtimePrograms.Length,
-                Is.EqualTo(MaterialProgramContract.BuiltinProgramCount));
+                Is.EqualTo(MaterialProgramContract.ProductionCatalogProgramCount));
 
             var expectedRuntimePrograms = new[]
             {
-                new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u },
-                new uint[] { 1u, 0u, 1u, 0u, 1u, 1u, 7u, 0u },
-                new uint[] { 1u, 0u, 1u, 0u, 1u, 1u, 7u, 0u },
+                new uint[] { 2u, 0u, 0u, 0u, 2u, 2u, 7u, 0u },
+                new uint[] { 2u, 0u, 1u, 0u, 2u, 2u, 7u, 0u },
+                new uint[] { 2u, 0u, 1u, 0u, 2u, 2u, 7u, 0u },
+                new uint[] { 2u, 0u, 0u, 0u, 2u, 2u, 7u, 0u },
             };
             var expectedSemanticHashes = new[]
             {
                 0xF934E6AEDE283181ul,
                 0x7B58B734ED0EDE45ul,
                 0x2E8FA4336811E656ul,
+                0ul,
             };
+            var semanticHashes = new List<ulong>();
             var compiledHashes = new List<ulong>();
 
             for (int programIndex = 0; programIndex < runtimePrograms.Length; programIndex++)
@@ -1181,26 +1186,30 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     program.SemanticHash.Version,
                     Is.EqualTo(MaterialProgramContract.SemanticHashVersion));
-                Assert.That(
-                    program.SemanticHash.Value,
-                    Is.EqualTo(expectedSemanticHashes[programIndex]));
+                if (expectedSemanticHashes[programIndex] != 0ul)
+                {
+                    Assert.That(
+                        program.SemanticHash.Value,
+                        Is.EqualTo(expectedSemanticHashes[programIndex]));
+                }
                 Assert.That(
                     program.Module.CanonicalIR.PayloadHash,
-                    Is.EqualTo(expectedSemanticHashes[programIndex]));
+                    Is.EqualTo(program.SemanticHash.Value));
                 Assert.That(program.Module.StructuralHash, Is.EqualTo(program.SemanticHash.Value));
+                semanticHashes.Add(program.SemanticHash.Value);
                 Assert.That(
                     program.CompiledHash.Version,
                     Is.EqualTo(MaterialProgramContract.CompiledHashVersion));
                 Assert.That(program.CompiledHash.Value, Is.Not.Zero);
                 compiledHashes.Add(program.CompiledHash.Value);
 
-                if (programIndex == 0)
+                if (programIndex == 0 || programIndex == 3)
                     AssertStandardMaterialLayout(program);
                 else
                     AssertDualSlabMaterialLayout(program);
             }
 
-            CollectionAssert.AllItemsAreUnique(expectedSemanticHashes);
+            CollectionAssert.AllItemsAreUnique(semanticHashes);
             CollectionAssert.AllItemsAreUnique(compiledHashes);
         }
 
@@ -1338,7 +1347,7 @@ namespace VividRP.Editor.Tests
 
             AssertRuntimeProgramData(
                 compiledUnlitOnly.RuntimeData,
-                new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u });
+                new uint[] { 2u, 0u, 0u, 0u, 2u, 2u, 7u, 0u });
             Assert.That(
                 compiledUnlitOnly.DeferredExportContract.ShadingModels,
                 Is.EqualTo(MaterialShadingModelMask.Unlit));
@@ -2208,7 +2217,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(runtimeTable[holeIndex].Version, Is.Zero);
             AssertRuntimeProgramData(
                 runtimeTable[4],
-                new uint[] { 1u, 0u, 0u, 0u, 0u, 0u, 7u, 0u });
+                new uint[] { 2u, 0u, 0u, 0u, 2u, 2u, 7u, 0u });
             Assert.Throws<ArgumentOutOfRangeException>(() =>
                 catalog.GetMaterialProgram(VividMaterialProgramID.StandardSingleSlab));
             Assert.Throws<InvalidOperationException>(() =>
@@ -2623,7 +2632,7 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
                 Assert.That(
                     program.RuntimeData.ParameterLayoutID,
-                    Is.EqualTo(VividMaterialParameterLayoutID.LegacyMaterialData));
+                    Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
                 Assert.That(
                     program.Module.Values.Nodes.Any(
                         node => node.Opcode == MaterialValueOpcode.TextureSampleGrad),
@@ -2675,7 +2684,7 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
                 Assert.That(
                     program.RuntimeData.ParameterLayoutID,
-                    Is.EqualTo(VividMaterialParameterLayoutID.DualSlabMaterialData));
+                    Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
                 Assert.That(compiled.RuntimeHeader.ProgramID, Is.EqualTo(compiled.ProgramID));
                 Assert.That(
                     compiled.DualSlabMaterialData.LayerOperator,
@@ -2885,10 +2894,10 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
             Assert.That(
                 program.RuntimeData.ParameterLayoutID,
-                Is.EqualTo(layout.ParameterLayout.LayoutID));
+                Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
             Assert.That(
                 program.RuntimeData.ResourceLayoutID,
-                Is.EqualTo(layout.ResourceLayout.LayoutID));
+                Is.EqualTo(VividMaterialResourceLayoutID.GenericResourceRecords));
             Assert.That(layout.ParameterLayout.Stride, Is.EqualTo(128));
             Assert.That(layout.ResourceLayout.RecordStride, Is.EqualTo(32));
             Assert.That(layout.ResourceLayout.RecordCount, Is.EqualTo(1));
@@ -3003,10 +3012,10 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(VividMaterialResourceLayoutID.DualSurfaceBinding));
             Assert.That(
                 program.RuntimeData.ParameterLayoutID,
-                Is.EqualTo(layout.ParameterLayout.LayoutID));
+                Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
             Assert.That(
                 program.RuntimeData.ResourceLayoutID,
-                Is.EqualTo(layout.ResourceLayout.LayoutID));
+                Is.EqualTo(VividMaterialResourceLayoutID.GenericResourceRecords));
             Assert.That(layout.ParameterLayout.Stride, Is.EqualTo(192));
             Assert.That(layout.ResourceLayout.RecordStride, Is.EqualTo(32));
             Assert.That(layout.ResourceLayout.RecordCount, Is.EqualTo(2));

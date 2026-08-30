@@ -27,6 +27,10 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
             #include "UnityCG.cginc"
             #include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl"
 
+            #define VIVID_MATERIAL_PROGRAM_VERSION 2u
+            #define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES 2u
+            #define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS 2u
+
             float4 _BaseColor;
             float4 _TopColor;
             float _Roughness;
@@ -48,6 +52,85 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
                 float AmbientOcclusion;
                 uint HasNormal;
             };
+
+            struct VividMaterialResourceData
+            {
+                VividSurfaceBindingData SurfaceBinding;
+                float4 TextureTilingOffset;
+                float4 MetallicSmoothnessRemap;
+                float4 AmbientOcclusionRemap;
+                float NormalsStrength;
+                uint MaskMode;
+                uint Padding0;
+                uint Padding1;
+            };
+
+            StructuredBuffer<uint4> _MaterialParameterData;
+            uint _MaterialParameterDataCount;
+            StructuredBuffer<VividMaterialResourceData> _MaterialResourceData;
+            uint _MaterialResourceDataCount;
+
+            uint VividLoadMaterialParameterWord(
+                const uint parameterAddress,
+                const uint wordOffset)
+            {
+                const uint4 lane = _MaterialParameterData[
+                    parameterAddress + (wordOffset >> 2u)];
+                return lane[wordOffset & 3u];
+            }
+
+            bool VividLoadMaterialBool(const uint address, const uint offset)
+            {
+                return VividLoadMaterialParameterWord(address, offset) != 0u;
+            }
+
+            float VividLoadMaterialFloat(const uint address, const uint offset)
+            {
+                return asfloat(VividLoadMaterialParameterWord(address, offset));
+            }
+
+            float2 VividLoadMaterialFloat2(const uint address, const uint offset)
+            {
+                return asfloat(uint2(
+                    VividLoadMaterialParameterWord(address, offset),
+                    VividLoadMaterialParameterWord(address, offset + 1u)));
+            }
+
+            float3 VividLoadMaterialFloat3(const uint address, const uint offset)
+            {
+                return asfloat(uint3(
+                    VividLoadMaterialParameterWord(address, offset),
+                    VividLoadMaterialParameterWord(address, offset + 1u),
+                    VividLoadMaterialParameterWord(address, offset + 2u)));
+            }
+
+            float4 VividLoadMaterialFloat4(const uint address, const uint offset)
+            {
+                return asfloat(uint4(
+                    VividLoadMaterialParameterWord(address, offset),
+                    VividLoadMaterialParameterWord(address, offset + 1u),
+                    VividLoadMaterialParameterWord(address, offset + 2u),
+                    VividLoadMaterialParameterWord(address, offset + 3u)));
+            }
+
+            VividMaterialResourceData PullMaterialResourceData(
+                const uint resourceIndex)
+            {
+                return _MaterialResourceData[resourceIndex];
+            }
+
+            VividSlabMaterialData VividCreateSlabMaterialData(
+                const VividMaterialResourceData resourceData)
+            {
+                VividSlabMaterialData result = (VividSlabMaterialData) 0;
+                result.TextureTilingOffset = resourceData.TextureTilingOffset;
+                result.MetallicSmoothnessRemap =
+                    resourceData.MetallicSmoothnessRemap;
+                result.AmbientOcclusionRemap = resourceData.AmbientOcclusionRemap;
+                result.NormalsStrength = resourceData.NormalsStrength;
+                result.MaskMode = resourceData.MaskMode;
+                return result;
+            }
 
             VividSlabMaterialData VividCreateSlabMaterialData(
                 const VividMaterialData materialData)
@@ -215,12 +298,19 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
 
                 VividAOTDeferredExportContract exportContract;
                 VividAOTSurfaceProgramOutput surface;
+                VividMaterialRuntimeHeader runtimeHeader =
+                    (VividMaterialRuntimeHeader) 0;
+                runtimeHeader.ProgramID = _ProgramID;
+                VividMaterialProgramData programData =
+                    (VividMaterialProgramData) 0;
+                programData.Version = VIVID_MATERIAL_PROGRAM_VERSION;
+                programData.ParameterLayoutID =
+                    VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES;
+                programData.ResourceLayoutID =
+                    VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS;
                 if (!VividTryEvaluateAOTSurfaceProgram(
-                        _ProgramID,
-                        CreateSingleSlabParameters(),
-                        CreateDualSlabParameters(),
-                        binding,
-                        binding,
+                        runtimeHeader,
+                        programData,
                         context,
                         exportContract,
                         surface))

@@ -268,27 +268,19 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                 if (programStatus == VIVID_MATERIAL_PROGRAM_KNOWN)
                 {
                     materialProgramID = runtimeHeader.ProgramID;
-                    if (programData.SurfaceProgramID
-                        == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB)
-                    {
-                        loadedMaterialProgram = VividTryLoadDualSlabSurfaceProgram(
-                            instanceData.MaterialIndex,
-                            0u,
-                            dualSlabMaterialData,
-                            surfaceBindingData,
-                            topSurfaceBindingData);
-                        isDualSlab = loadedMaterialProgram;
-                    }
-                    else if (programData.SurfaceProgramID
-                        == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB)
-                    {
-                        loadedMaterialProgram =
-                            VividTryLoadStandardSingleSlabSurfaceProgram(
-                                instanceData.MaterialIndex,
-                                0u,
-                                materialData,
-                                surfaceBindingData);
-                    }
+                    loadedMaterialProgram = programData.ParameterLayoutID
+                            == VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES
+                        && programData.ResourceLayoutID
+                            == VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS
+                        && (programData.SurfaceProgramID
+                                == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
+                            || programData.SurfaceProgramID
+                                == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB);
+                    isDualSlab = loadedMaterialProgram
+                        && programData.SurfaceProgramID
+                            == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB;
+                    if (instanceData.MaterialIndex < _MaterialDataCount)
+                        materialData = PullMaterialData(instanceData.MaterialIndex);
                     materialProgramFailed = !loadedMaterialProgram;
                 }
                 else if (usesLegacyMaterial)
@@ -361,11 +353,8 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
                     && !materialProgramFailed)
                 {
                     dispatchedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
-                        materialProgramID,
-                        materialData,
-                        dualSlabMaterialData,
-                        surfaceBindingData,
-                        topSurfaceBindingData,
+                        runtimeHeader,
+                        programData,
                         aotContext,
                         deferredExportContract,
                         aotSurfaceOutput);

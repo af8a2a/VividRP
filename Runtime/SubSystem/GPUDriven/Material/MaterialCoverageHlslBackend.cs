@@ -116,8 +116,9 @@ namespace VividRP.Runtime.GPUDriven
 
             MaterialNativeTemplateLayoutSchema schema =
                 lowering.Template.LayoutSchema;
+            MaterialGenericLayout genericLayout = lowering.GenericLayout;
             MaterialSurfaceHlslPhysicalContract physicalContract =
-                MaterialSurfaceHlslBackend.GetPhysicalContract(schema);
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime;
             ValidateResourceUses(stageLIR);
 
             var bodyBuilder = new StringBuilder(Math.Max(1024, stageLIR.NodeCount * 96));
@@ -125,7 +126,7 @@ namespace VividRP.Runtime.GPUDriven
                 bodyBuilder,
                 stageLIR,
                 schema,
-                physicalContract,
+                genericLayout,
                 includePositionCS: false);
             bodyBuilder.AppendLine("    VividMaterialCoverageEvaluation output;");
             bodyBuilder.Append("    output.Coverage = ")
@@ -138,7 +139,9 @@ namespace VividRP.Runtime.GPUDriven
 
             string bodySource = MaterialCoverageHlslArtifact.NormalizeLineEndings(
                 bodyBuilder.ToString());
-            ulong bindingHash = MaterialSurfaceHlslBackend.ComputeBindingHash(schema);
+            ulong bindingHash = MaterialSurfaceHlslBackend.ComputeGenericBindingHash(
+                genericLayout,
+                schema);
             ulong codeHash = ComputeCodeHash(
                 bodySource,
                 physicalContract,
@@ -156,8 +159,7 @@ namespace VividRP.Runtime.GPUDriven
                 .AppendLine(".");
             AppendFunctionSignature(
                 sourceBuilder,
-                entryPoint,
-                physicalContract);
+                entryPoint);
             sourceBuilder.AppendLine("{");
             sourceBuilder.Append(bodySource);
             sourceBuilder.AppendLine("}");
@@ -172,20 +174,13 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AppendFunctionSignature(
             StringBuilder builder,
-            string entryPoint,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
+            string entryPoint)
         {
             builder.Append("VividMaterialCoverageEvaluation ")
                 .Append(entryPoint)
                 .AppendLine("(");
-            builder.Append("    const ")
-                .Append(physicalContract == MaterialSurfaceHlslPhysicalContract.LegacySingleSlab
-                    ? "VividMaterialData"
-                    : "VividDualSlabMaterialData")
-                .AppendLine(" materialParameters,");
-            builder.AppendLine("    const VividSurfaceBindingData surfaceBinding0,");
-            if (physicalContract == MaterialSurfaceHlslPhysicalContract.DualSlab)
-                builder.AppendLine("    const VividSurfaceBindingData surfaceBinding1,");
+            builder.AppendLine("    const uint parameterAddress,");
+            builder.AppendLine("    const uint resourceAddress,");
             builder.AppendLine("    const VividAOTCoverageContext context)");
         }
 
@@ -356,7 +351,7 @@ namespace VividRP.Runtime.GPUDriven
                     .Append(((uint) entry.ProgramID).ToString(CultureInfo.InvariantCulture))
                     .AppendLine("u:");
                 builder.AppendLine("        {");
-                AppendDispatchCase(builder, artifact);
+                AppendDispatchCase(builder, entry);
                 builder.AppendLine("        }");
             }
             builder.AppendLine("        default:");
@@ -367,47 +362,31 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AppendDispatchCase(
             StringBuilder builder,
-            MaterialCoverageHlslArtifact artifact)
+            MaterialProgramCatalog.ManifestEntry entry)
         {
-            if (artifact.PhysicalContract
-                == MaterialSurfaceHlslPhysicalContract.LegacySingleSlab)
-            {
-                builder.AppendLine("            if (programData.ParameterLayoutID");
-                builder.AppendLine("                    != VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA");
-                builder.AppendLine("                || programData.ResourceLayoutID");
-                builder.AppendLine("                    != VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING");
-                builder.AppendLine("                || runtimeHeader.ParameterAddress >= _MaterialDataCount");
-                builder.AppendLine("                || runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount)");
-                builder.AppendLine("            {");
-                builder.AppendLine("                return false;");
-                builder.AppendLine("            }");
-                builder.Append("            output = ")
-                    .Append(artifact.EntryPoint)
-                    .AppendLine("(");
-                builder.AppendLine("                PullMaterialData(runtimeHeader.ParameterAddress),");
-                builder.AppendLine("                PullSurfaceBindingData(runtimeHeader.ResourceBindingAddress),");
-                builder.AppendLine("                context);");
-                builder.AppendLine("            return true;");
-                return;
-            }
-
-            builder.AppendLine("            const uint bindingAddress = runtimeHeader.ResourceBindingAddress;");
+            MaterialCoverageHlslArtifact artifact = entry.Program.CoverageHlsl;
+            MaterialGenericLayout layout = entry.Program.Lowering.GenericLayout;
+            builder.Append("            const uint parameterLaneCount = ")
+                .Append((layout.ParameterStrideInWords / 4).ToString(
+                    CultureInfo.InvariantCulture))
+                .AppendLine("u;");
+            builder.Append("            const uint resourceCount = ")
+                .Append(layout.ResourceCount.ToString(CultureInfo.InvariantCulture))
+                .AppendLine("u;");
             builder.AppendLine("            if (programData.ParameterLayoutID");
-            builder.AppendLine("                    != VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA");
+            builder.AppendLine("                    != VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES");
             builder.AppendLine("                || programData.ResourceLayoutID");
-            builder.AppendLine("                    != VIVIDMATERIALRESOURCELAYOUTID_DUAL_SURFACE_BINDING");
-            builder.AppendLine("                || runtimeHeader.ParameterAddress >= _DualSlabMaterialDataCount");
-            builder.AppendLine("                || bindingAddress >= _SurfaceBindingDataCount");
-            builder.AppendLine("                || _SurfaceBindingDataCount - bindingAddress < 2u)");
-            builder.AppendLine("            {");
+            builder.AppendLine("                    != VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS");
+            builder.AppendLine("                || runtimeHeader.ParameterAddress > _MaterialParameterDataCount");
+            builder.AppendLine("                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress");
+            builder.AppendLine("                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount");
+            builder.AppendLine("                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)");
             builder.AppendLine("                return false;");
-            builder.AppendLine("            }");
             builder.Append("            output = ")
                 .Append(artifact.EntryPoint)
                 .AppendLine("(");
-            builder.AppendLine("                PullDualSlabMaterialData(runtimeHeader.ParameterAddress),");
-            builder.AppendLine("                PullSurfaceBindingData(bindingAddress),");
-            builder.AppendLine("                PullSurfaceBindingData(bindingAddress + 1u),");
+            builder.AppendLine("                runtimeHeader.ParameterAddress,");
+            builder.AppendLine("                runtimeHeader.ResourceBindingAddress,");
             builder.AppendLine("                context);");
             builder.AppendLine("            return true;");
         }

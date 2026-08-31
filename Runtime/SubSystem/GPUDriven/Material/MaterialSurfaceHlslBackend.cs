@@ -340,9 +340,23 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(" = PullMaterialResourceData(resourceAddress + ")
                 .Append(genericBinding.Slot.ToString(CultureInfo.InvariantCulture))
                 .AppendLine("u);");
-            builder.Append("    const VividSurfaceBindingData ")
-                .Append(surfaceBinding).Append(" = ")
-                .Append(resourceName).AppendLine(".SurfaceBinding;");
+            builder.Append("    VividSurfaceBindingData ")
+                .Append(surfaceBinding).AppendLine(";");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".BaseColorResource = ").Append(resourceName)
+                .AppendLine(".BaseColorResource;");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".NormalResource = ").Append(resourceName)
+                .AppendLine(".NormalResource;");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".MaskResource = ").Append(resourceName)
+                .AppendLine(".MaskResource;");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".Flags = ").Append(resourceName)
+                .AppendLine(".SurfaceBindingFlags;");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".UVScaleBias = ").Append(resourceName)
+                .AppendLine(".UVScaleBias;");
             builder.Append("    const VividSlabMaterialData vivid_sample_slab_")
                 .Append(sampleIndex)
                 .Append(" = VividCreateSlabMaterialData(")

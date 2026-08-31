@@ -18,9 +18,9 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint ProgramCatalogVersion = 4u;
         internal const uint ProgramCatalogManifestVersion = 5u;
         internal const uint SurfaceHlslArtifactVersion = 4u;
-        internal const uint SurfaceHlslBackendVersion = 7u;
+        internal const uint SurfaceHlslBackendVersion = 8u;
         internal const uint CoverageHlslArtifactVersion = 2u;
-        internal const uint CoverageHlslBackendVersion = 4u;
+        internal const uint CoverageHlslBackendVersion = 5u;
         internal const uint SemanticHashVersion = 5u;
         internal const uint CompiledHashVersion = 9u;
         internal const uint CompilerVersion = 14u;

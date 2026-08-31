@@ -159,6 +159,13 @@ namespace VividRP.Runtime.GPUDriven
         Unlit = 1 << 2,
     }
 
+    [GenerateHLSL]
+    public static class VividMaterialConfiguration
+    {
+        public const uint VividMaterialProgramVersion =
+            MaterialProgramContract.RuntimeAbiVersion;
+    }
+
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
     [StructLayout(LayoutKind.Sequential)]
     public struct VividMaterialRuntimeHeader
@@ -271,10 +278,16 @@ namespace VividRP.Runtime.GPUDriven
         public const uint InvalidResource = uint.MaxValue;
     }
 
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
     [StructLayout(LayoutKind.Sequential)]
     public struct VividMaterialResourceData
     {
-        public VividSurfaceBindingData SurfaceBinding;
+        public uint BaseColorResource;
+        public uint NormalResource;
+        public uint MaskResource;
+        public VividSurfaceBindingFlags SurfaceBindingFlags;
+        public float4 UVScaleBias;
+
         public float4 TextureTilingOffset;
         public float4 MetallicSmoothnessRemap;
         public float4 AmbientOcclusionRemap;
@@ -283,6 +296,26 @@ namespace VividRP.Runtime.GPUDriven
         public uint MaskMode;
         public uint Padding0;
         public uint Padding1;
+
+        public VividSurfaceBindingData SurfaceBinding
+        {
+            readonly get => new()
+            {
+                BaseColorResource = BaseColorResource,
+                NormalResource = NormalResource,
+                MaskResource = MaskResource,
+                Flags = SurfaceBindingFlags,
+                UVScaleBias = UVScaleBias,
+            };
+            set
+            {
+                BaseColorResource = value.BaseColorResource;
+                NormalResource = value.NormalResource;
+                MaskResource = value.MaskResource;
+                SurfaceBindingFlags = value.Flags;
+                UVScaleBias = value.UVScaleBias;
+            }
+        }
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]

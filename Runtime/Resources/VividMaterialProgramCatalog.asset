@@ -17,24 +17,24 @@ MonoBehaviour:
   m_ManifestVersion: 5
   m_RuntimeAbiVersion: 3
   m_ManifestHashVersion: 5
-  m_ManifestHash: 475263142392958734
+  m_ManifestHash: 6320714283017605985
   m_IsCommitted: 1
   m_ArtifactSetHashVersion: 2
-  m_ArtifactSetHash: 3469102374116083222
+  m_ArtifactSetHash: 9312539219734920099
   m_CatalogPayloadSealVersion: 1
-  m_CatalogPayloadSealHash: 901470902498397526
+  m_CatalogPayloadSealHash: 8458151049704437983
   m_Slots:
   - m_ProgramID: 0
     m_StableName: P0.StandardSingleSlab
     m_IsReserved: 0
     m_CompiledHashVersion: 9
-    m_CompiledHash: 11402272090454779329
+    m_CompiledHash: 13834008346118628237
     m_LayoutFingerprintVersion: 3
     m_LayoutFingerprint: 11193960182733492371
     m_DeferredExportFingerprintVersion: 1
     m_DeferredExportFingerprint: 5888118281072226784
-    m_CoveragePayloadHash: 7137560220632849197
-    m_SurfacePayloadHash: 16669173617738550961
+    m_CoveragePayloadHash: 13510949883267873268
+    m_SurfacePayloadHash: 7960802402996909884
     m_RuntimeVersion: 3
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 0
@@ -76,13 +76,13 @@ MonoBehaviour:
     m_StableName: P1.DualSlabHorizontalMix
     m_IsReserved: 0
     m_CompiledHashVersion: 9
-    m_CompiledHash: 290742224967329527
+    m_CompiledHash: 4264700279243166112
     m_LayoutFingerprintVersion: 3
     m_LayoutFingerprint: 14469877800952702697
     m_DeferredExportFingerprintVersion: 1
     m_DeferredExportFingerprint: 12898365168916497089
-    m_CoveragePayloadHash: 9307308241831888842
-    m_SurfacePayloadHash: 2199718019886639208
+    m_CoveragePayloadHash: 18281067700041508341
+    m_SurfacePayloadHash: 8461351866686349072
     m_RuntimeVersion: 3
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 1
@@ -144,13 +144,13 @@ MonoBehaviour:
     m_StableName: P2.DualSlabVerticalLayer
     m_IsReserved: 0
     m_CompiledHashVersion: 9
-    m_CompiledHash: 2338501322770402560
+    m_CompiledHash: 17211617449893112778
     m_LayoutFingerprintVersion: 3
     m_LayoutFingerprint: 14469877800952702697
     m_DeferredExportFingerprintVersion: 1
     m_DeferredExportFingerprint: 12268790991064211538
-    m_CoveragePayloadHash: 9307308241831888842
-    m_SurfacePayloadHash: 4677015070646624258
+    m_CoveragePayloadHash: 18281067700041508341
+    m_SurfacePayloadHash: 13922409097743260219
     m_RuntimeVersion: 3
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 1
@@ -212,13 +212,13 @@ MonoBehaviour:
     m_StableName: P3.GenericSingleSlabProof
     m_IsReserved: 0
     m_CompiledHashVersion: 9
-    m_CompiledHash: 32135081645468557
+    m_CompiledHash: 15508265905773607658
     m_LayoutFingerprintVersion: 3
     m_LayoutFingerprint: 11193960182733492371
     m_DeferredExportFingerprintVersion: 1
     m_DeferredExportFingerprint: 10455666665750202914
-    m_CoveragePayloadHash: 5724832612685459396
-    m_SurfacePayloadHash: 2669312138888827367
+    m_CoveragePayloadHash: 15735384498121314332
+    m_SurfacePayloadHash: 15573847914114781256
     m_RuntimeVersion: 3
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 0

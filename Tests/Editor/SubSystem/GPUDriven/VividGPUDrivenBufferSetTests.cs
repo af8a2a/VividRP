@@ -167,8 +167,20 @@ namespace VividRP.Editor.Tests
                 16);
 
             AssertFieldOffset<VividMaterialResourceData>(
-                nameof(VividMaterialResourceData.SurfaceBinding),
+                nameof(VividMaterialResourceData.BaseColorResource),
                 0);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.NormalResource),
+                4);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.MaskResource),
+                8);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.SurfaceBindingFlags),
+                12);
+            AssertFieldOffset<VividMaterialResourceData>(
+                nameof(VividMaterialResourceData.UVScaleBias),
+                16);
             AssertFieldOffset<VividMaterialResourceData>(
                 nameof(VividMaterialResourceData.TextureTilingOffset),
                 32);

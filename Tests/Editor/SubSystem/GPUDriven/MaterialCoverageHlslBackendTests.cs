@@ -305,7 +305,7 @@ namespace VividRP.Editor.Tests
             MaterialCoverageHlslArtifact artifact = program.CoverageHlsl;
 
             Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(5u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.CoverageHlslArtifactVersion));
             Assert.That(artifact.BackendVersion, Is.EqualTo(

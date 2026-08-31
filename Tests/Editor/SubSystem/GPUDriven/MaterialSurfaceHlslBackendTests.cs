@@ -572,9 +572,9 @@ namespace VividRP.Editor.Tests
             MaterialSurfaceHlslArtifact artifact = program.SurfaceHlsl;
 
             Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(7u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(8u));
             Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(2u));
-            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(5u));
             Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(9u));
             Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(14u));
             Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(9u));

@@ -17,10 +17,13 @@ namespace VividRP.Editor.Tests
                 "Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl");
             string runtimeContract = File.ReadAllText(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl");
+            string previewContract = File.ReadAllText(
+                "Packages/com.vivid.render-pipelines/Editor/Shader/MaterialGraphPreview.shader");
 
             Assert.That(generatedContract, Does.Contain("struct VividMaterialRuntimeHeader"));
             Assert.That(generatedContract, Does.Contain("struct VividMaterialProgramData"));
             Assert.That(generatedContract, Does.Contain("struct VividDualSlabMaterialData"));
+            Assert.That(generatedContract, Does.Contain("struct VividMaterialResourceData"));
             Assert.That(
                 generatedContract,
                 Does.Contain("#define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB (0)"));
@@ -39,36 +42,44 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 generatedContract,
                 Does.Contain("#define VIVIDMATERIALRUNTIMEFLAGS_UNLIT (2)"));
-            Assert.That(runtimeContract, Does.Contain("struct VividMaterialRuntimeHeader"));
-            Assert.That(runtimeContract, Does.Contain("struct VividMaterialProgramData"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES (2)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS (2)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain(
+                    $"#define VIVID_MATERIAL_PROGRAM_VERSION ({GPUDrivenMaterialCompiler.ProgramVersion})"));
+
+            string normalizedGeneratedContract = generatedContract.Replace("\r\n", "\n");
+            string expectedResourceContract = string.Join("\n", new[]
+            {
+                "struct VividMaterialResourceData",
+                "{",
+                "    uint BaseColorResource;",
+                "    uint NormalResource;",
+                "    uint MaskResource;",
+                "    uint SurfaceBindingFlags;",
+                "    float4 UVScaleBias;",
+                "    float4 TextureTilingOffset;",
+                "    float4 MetallicSmoothnessRemap;",
+                "    float4 AmbientOcclusionRemap;",
+                "    float NormalsStrength;",
+                "    uint MaskMode;",
+                "    uint Padding0;",
+                "    uint Padding1;",
+                "};",
+            });
+            Assert.That(normalizedGeneratedContract, Does.Contain(expectedResourceContract));
+
+            const string generatedInclude =
+                "#include \"Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl\"";
             Assert.That(
                 runtimeContract,
-                Does.Contain(
-                    $"#define VIVID_MATERIAL_PROGRAM_VERSION {GPUDrivenMaterialCompiler.ProgramVersion}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_HORIZONTAL_MIX {(uint)VividMaterialProgramID.DualSlabHorizontalMix}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_VERTICAL_LAYER {(uint)VividMaterialProgramID.DualSlabVerticalLayer}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALRUNTIMEFLAGS_ALPHA_CLIP {(uint)VividMaterialRuntimeFlags.AlphaClip}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALPROGRAMCAPABILITIES_ALPHA_CLIP {(uint)VividMaterialProgramCapabilities.AlphaClip}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT {(uint)VividMaterialProgramCapabilities.Unlit}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALRUNTIMEFLAGS_UNLIT {(uint)VividMaterialRuntimeFlags.Unlit}u"));
+                Does.Contain(generatedInclude));
+            Assert.That(previewContract, Does.Contain(generatedInclude));
             Assert.That(
                 runtimeContract,
                 Does.Contain("StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;"));
@@ -84,16 +95,54 @@ namespace VividRP.Editor.Tests
                 "VividMaterialRuntimeHeader",
                 "VividMaterialProgramData",
                 "VividMaterialData",
+                "VividSlabMaterialData",
                 "VividDualSlabMaterialData",
                 "VividSurfaceBindingData",
+                "VividMaterialResourceData",
+                "VividTerrainMaterialData",
+                "VividTerrainLayerGPUData",
+                "VividInstanceData",
+                "VividMeshLODNode",
+                "VividMeshlet",
+                "VividMeshletVertex",
+                "VividMeshletRenderRequestPacked",
+                "VividIndirectDrawArgs",
+                "VividGPUCullingContext",
+                "VividGPULODSelectionContext",
             };
+            string normalizedRuntimeContract = runtimeContract.Replace("\r\n", "\n");
             foreach (string structName in sharedStructs)
             {
                 Assert.That(
-                    GetHlslStructSignature(runtimeContract, structName),
-                    Is.EqualTo(GetHlslStructSignature(generatedContract, structName)),
-                    $"C#-generated and runtime HLSL contracts differ for {structName}.");
+                    generatedContract,
+                    Does.Contain($"struct {structName}"),
+                    $"Generated ABI is missing {structName}.");
+                Assert.That(
+                    normalizedRuntimeContract,
+                    Does.Not.Contain($"struct {structName}\n{{"),
+                    $"VividGPUDrivenCommon.hlsl must consume, not redeclare, {structName}.");
             }
+
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDMATERIAL"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDDUALSLABOPERATOR"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDINSTANCE"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDGEOMETRYFLAGS"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDSURFACEBINDINGFLAGS"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDRENDERERLISTID"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVID_MATERIAL_PROGRAM_VERSION"));
+
+            Assert.That(
+                previewContract,
+                Does.Not.Contain("#define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES"));
+            Assert.That(
+                previewContract,
+                Does.Not.Contain("#define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS"));
+            Assert.That(
+                previewContract,
+                Does.Not.Contain("struct VividMaterialResourceData"));
+            Assert.That(
+                previewContract,
+                Does.Not.Contain("#define VIVID_MATERIAL_PROGRAM_VERSION"));
         }
 
         [Test]
@@ -1039,22 +1088,6 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(expectedBits[wordIndex]),
                     $"Parameter word {wordIndex}");
             }
-        }
-
-        private static string GetHlslStructSignature(string source, string structName)
-        {
-            string declaration = $"struct {structName}";
-            int start = source.IndexOf(declaration, System.StringComparison.Ordinal);
-            Assert.That(start, Is.GreaterThanOrEqualTo(0), $"Missing {declaration}.");
-            int end = source.IndexOf("};", start, System.StringComparison.Ordinal);
-            Assert.That(end, Is.GreaterThan(start), $"Incomplete {declaration}.");
-            string body = source.Substring(start, end - start + 2);
-            string signature = string.Join(
-                " ",
-                body.Split((char[]) null, System.StringSplitOptions.RemoveEmptyEntries));
-            // GenerateHLSL emits default-underlying C# enums as int, while the runtime
-            // contract exposes the same 32-bit bitfields as uint.
-            return signature.Replace(" int ", " uint ");
         }
 
         private static void AssertInvalidDualSlabProxy(

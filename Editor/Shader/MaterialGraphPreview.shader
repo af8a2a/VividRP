@@ -27,10 +27,6 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
             #include "UnityCG.cginc"
             #include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl"
 
-            #define VIVID_MATERIAL_PROGRAM_VERSION 3u
-            #define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES 2u
-            #define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS 2u
-
             float4 _BaseColor;
             float4 _TopColor;
             float _Roughness;
@@ -51,18 +47,6 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
                 float Metallic;
                 float AmbientOcclusion;
                 uint HasNormal;
-            };
-
-            struct VividMaterialResourceData
-            {
-                VividSurfaceBindingData SurfaceBinding;
-                float4 TextureTilingOffset;
-                float4 MetallicSmoothnessRemap;
-                float4 AmbientOcclusionRemap;
-                float NormalsStrength;
-                uint MaskMode;
-                uint Padding0;
-                uint Padding1;
             };
 
             StructuredBuffer<uint4> _MaterialParameterData;

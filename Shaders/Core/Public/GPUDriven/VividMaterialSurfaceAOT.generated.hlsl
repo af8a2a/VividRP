@@ -3,20 +3,20 @@
 #ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 #define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 
-#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 7u
+#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 8u
 
-// Expected Material Program artifact set: v2 0x3024BA3AAAA74616
+// Expected Material Program artifact set: v2 0x813CC91495317BA3
 #include "VividMaterialProgramCatalogStamp.generated.hlsl"
 #if !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_INCLUDED)
 #error Missing published Material Program Catalog stamp for Surface dispatcher.
-#elif !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V00000002_H3024BA3AAAA74616)
+#elif !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V00000002_H813CC91495317BA3)
 #error Surface dispatcher does not match the published Material Program Catalog artifact set.
 #endif
 
 #ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
-#define VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H0698794F592B0F0E_N00000004 1
-#elif !defined(VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H0698794F592B0F0E_N00000004)
+#define VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H57B7B026DE009361_N00000004 1
+#elif !defined(VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H57B7B026DE009361_N00000004)
 #error Material dispatchers use different frozen catalog manifests.
 #endif
 
@@ -192,8 +192,8 @@ struct VividAOTSurfaceProgramOutput
     uint LayerOperator;
 };
 
-// Surface AOT HLSL artifact v4, backend v7.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_94F184352819ABFE(
+// Surface AOT HLSL artifact v4, backend v8.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_ABF068A669E4D2A2(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -208,7 +208,12 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_94F184352819ABFE(
     const float2 vivid_v0008 = context.UV0Ddx;
     const float2 vivid_v0009 = context.UV0Ddy;
     const VividMaterialResourceData vivid_sample_resource_10 = PullMaterialResourceData(resourceAddress + 0u);
-    const VividSurfaceBindingData vivid_sample_binding_10 = vivid_sample_resource_10.SurfaceBinding;
+    VividSurfaceBindingData vivid_sample_binding_10;
+    vivid_sample_binding_10.BaseColorResource = vivid_sample_resource_10.BaseColorResource;
+    vivid_sample_binding_10.NormalResource = vivid_sample_resource_10.NormalResource;
+    vivid_sample_binding_10.MaskResource = vivid_sample_resource_10.MaskResource;
+    vivid_sample_binding_10.Flags = vivid_sample_resource_10.SurfaceBindingFlags;
+    vivid_sample_binding_10.UVScaleBias = vivid_sample_resource_10.UVScaleBias;
     const VividSlabMaterialData vivid_sample_slab_10 = VividCreateSlabMaterialData(vivid_sample_resource_10);
     const float2 vivid_sample_uv_10 = vivid_v0000 * vivid_sample_slab_10.TextureTilingOffset.xy + vivid_sample_slab_10.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_10 = vivid_v0008 * vivid_sample_slab_10.TextureTilingOffset.xy;
@@ -244,8 +249,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_94F184352819ABFE(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v7.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_0379535EBBA6A9CB(
+// Surface AOT HLSL artifact v4, backend v8.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_3FC025E7DAEEDDDC(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -264,7 +269,12 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_0379535EBBA6A9CB(
     const float2 vivid_v0013 = context.UV0Ddx;
     const float2 vivid_v0014 = context.UV0Ddy;
     const VividMaterialResourceData vivid_sample_resource_15 = PullMaterialResourceData(resourceAddress + 0u);
-    const VividSurfaceBindingData vivid_sample_binding_15 = vivid_sample_resource_15.SurfaceBinding;
+    VividSurfaceBindingData vivid_sample_binding_15;
+    vivid_sample_binding_15.BaseColorResource = vivid_sample_resource_15.BaseColorResource;
+    vivid_sample_binding_15.NormalResource = vivid_sample_resource_15.NormalResource;
+    vivid_sample_binding_15.MaskResource = vivid_sample_resource_15.MaskResource;
+    vivid_sample_binding_15.Flags = vivid_sample_resource_15.SurfaceBindingFlags;
+    vivid_sample_binding_15.UVScaleBias = vivid_sample_resource_15.UVScaleBias;
     const VividSlabMaterialData vivid_sample_slab_15 = VividCreateSlabMaterialData(vivid_sample_resource_15);
     const float2 vivid_sample_uv_15 = vivid_v0000 * vivid_sample_slab_15.TextureTilingOffset.xy + vivid_sample_slab_15.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_15 = vivid_v0013 * vivid_sample_slab_15.TextureTilingOffset.xy;
@@ -272,7 +282,12 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_0379535EBBA6A9CB(
     const VividSurfaceSampleContext vivid_sample_context_15 = VividCreateSurfaceSampleContextGrad(vivid_sample_binding_15, vivid_sample_uv_15, vivid_sample_ddx_15, vivid_sample_ddy_15, context.PositionCS);
     const float4 vivid_v0015 = VividSampleBaseColorGrad(vivid_sample_binding_15, vivid_sample_context_15);
     const VividMaterialResourceData vivid_sample_resource_16 = PullMaterialResourceData(resourceAddress + 1u);
-    const VividSurfaceBindingData vivid_sample_binding_16 = vivid_sample_resource_16.SurfaceBinding;
+    VividSurfaceBindingData vivid_sample_binding_16;
+    vivid_sample_binding_16.BaseColorResource = vivid_sample_resource_16.BaseColorResource;
+    vivid_sample_binding_16.NormalResource = vivid_sample_resource_16.NormalResource;
+    vivid_sample_binding_16.MaskResource = vivid_sample_resource_16.MaskResource;
+    vivid_sample_binding_16.Flags = vivid_sample_resource_16.SurfaceBindingFlags;
+    vivid_sample_binding_16.UVScaleBias = vivid_sample_resource_16.UVScaleBias;
     const VividSlabMaterialData vivid_sample_slab_16 = VividCreateSlabMaterialData(vivid_sample_resource_16);
     const float2 vivid_sample_uv_16 = vivid_v0000 * vivid_sample_slab_16.TextureTilingOffset.xy + vivid_sample_slab_16.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_16 = vivid_v0013 * vivid_sample_slab_16.TextureTilingOffset.xy;
@@ -330,8 +345,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_0379535EBBA6A9CB(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v7.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_C7F2CC72789B59DB(
+// Surface AOT HLSL artifact v4, backend v8.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_4AFB9BC7D86846A4(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -350,7 +365,12 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_C7F2CC72789B59DB(
     const float2 vivid_v0013 = context.UV0Ddx;
     const float2 vivid_v0014 = context.UV0Ddy;
     const VividMaterialResourceData vivid_sample_resource_15 = PullMaterialResourceData(resourceAddress + 0u);
-    const VividSurfaceBindingData vivid_sample_binding_15 = vivid_sample_resource_15.SurfaceBinding;
+    VividSurfaceBindingData vivid_sample_binding_15;
+    vivid_sample_binding_15.BaseColorResource = vivid_sample_resource_15.BaseColorResource;
+    vivid_sample_binding_15.NormalResource = vivid_sample_resource_15.NormalResource;
+    vivid_sample_binding_15.MaskResource = vivid_sample_resource_15.MaskResource;
+    vivid_sample_binding_15.Flags = vivid_sample_resource_15.SurfaceBindingFlags;
+    vivid_sample_binding_15.UVScaleBias = vivid_sample_resource_15.UVScaleBias;
     const VividSlabMaterialData vivid_sample_slab_15 = VividCreateSlabMaterialData(vivid_sample_resource_15);
     const float2 vivid_sample_uv_15 = vivid_v0000 * vivid_sample_slab_15.TextureTilingOffset.xy + vivid_sample_slab_15.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_15 = vivid_v0013 * vivid_sample_slab_15.TextureTilingOffset.xy;
@@ -358,7 +378,12 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_C7F2CC72789B59DB(
     const VividSurfaceSampleContext vivid_sample_context_15 = VividCreateSurfaceSampleContextGrad(vivid_sample_binding_15, vivid_sample_uv_15, vivid_sample_ddx_15, vivid_sample_ddy_15, context.PositionCS);
     const float4 vivid_v0015 = VividSampleBaseColorGrad(vivid_sample_binding_15, vivid_sample_context_15);
     const VividMaterialResourceData vivid_sample_resource_16 = PullMaterialResourceData(resourceAddress + 1u);
-    const VividSurfaceBindingData vivid_sample_binding_16 = vivid_sample_resource_16.SurfaceBinding;
+    VividSurfaceBindingData vivid_sample_binding_16;
+    vivid_sample_binding_16.BaseColorResource = vivid_sample_resource_16.BaseColorResource;
+    vivid_sample_binding_16.NormalResource = vivid_sample_resource_16.NormalResource;
+    vivid_sample_binding_16.MaskResource = vivid_sample_resource_16.MaskResource;
+    vivid_sample_binding_16.Flags = vivid_sample_resource_16.SurfaceBindingFlags;
+    vivid_sample_binding_16.UVScaleBias = vivid_sample_resource_16.UVScaleBias;
     const VividSlabMaterialData vivid_sample_slab_16 = VividCreateSlabMaterialData(vivid_sample_resource_16);
     const float2 vivid_sample_uv_16 = vivid_v0000 * vivid_sample_slab_16.TextureTilingOffset.xy + vivid_sample_slab_16.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_16 = vivid_v0013 * vivid_sample_slab_16.TextureTilingOffset.xy;
@@ -416,8 +441,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_C7F2CC72789B59DB(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v7.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_097E3A6D8F8336F2(
+// Surface AOT HLSL artifact v4, backend v8.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_2CF70EF09BCB8B6C(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -438,7 +463,12 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_097E3A6D8F8336F2(
     const float vivid_v0014 = (vivid_v0000 * vivid_v0006);
     const float vivid_v0015 = (1.0f - vivid_v0007);
     const VividMaterialResourceData vivid_sample_resource_16 = PullMaterialResourceData(resourceAddress + 0u);
-    const VividSurfaceBindingData vivid_sample_binding_16 = vivid_sample_resource_16.SurfaceBinding;
+    VividSurfaceBindingData vivid_sample_binding_16;
+    vivid_sample_binding_16.BaseColorResource = vivid_sample_resource_16.BaseColorResource;
+    vivid_sample_binding_16.NormalResource = vivid_sample_resource_16.NormalResource;
+    vivid_sample_binding_16.MaskResource = vivid_sample_resource_16.MaskResource;
+    vivid_sample_binding_16.Flags = vivid_sample_resource_16.SurfaceBindingFlags;
+    vivid_sample_binding_16.UVScaleBias = vivid_sample_resource_16.UVScaleBias;
     const VividSlabMaterialData vivid_sample_slab_16 = VividCreateSlabMaterialData(vivid_sample_resource_16);
     const float2 vivid_sample_uv_16 = vivid_v0003 * vivid_sample_slab_16.TextureTilingOffset.xy + vivid_sample_slab_16.TextureTilingOffset.zw;
     const float2 vivid_sample_ddx_16 = vivid_v0011 * vivid_sample_slab_16.TextureTilingOffset.xy;
@@ -500,7 +530,7 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 0u;
             deferredExportContract.PayloadFlags = 3u;
             deferredExportContract.PolicyFlags = 7u;
-            output = VividEvaluateAOTSurface_94F184352819ABFE(
+            output = VividEvaluateAOTSurface_ABF068A669E4D2A2(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -524,7 +554,7 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 1u;
             deferredExportContract.PayloadFlags = 15u;
             deferredExportContract.PolicyFlags = 15u;
-            output = VividEvaluateAOTSurface_0379535EBBA6A9CB(
+            output = VividEvaluateAOTSurface_3FC025E7DAEEDDDC(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -548,7 +578,7 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 2u;
             deferredExportContract.PayloadFlags = 15u;
             deferredExportContract.PolicyFlags = 15u;
-            output = VividEvaluateAOTSurface_C7F2CC72789B59DB(
+            output = VividEvaluateAOTSurface_4AFB9BC7D86846A4(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -572,7 +602,7 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.Topology = 0u;
             deferredExportContract.PayloadFlags = 3u;
             deferredExportContract.PolicyFlags = 7u;
-            output = VividEvaluateAOTSurface_097E3A6D8F8336F2(
+            output = VividEvaluateAOTSurface_2CF70EF09BCB8B6C(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);

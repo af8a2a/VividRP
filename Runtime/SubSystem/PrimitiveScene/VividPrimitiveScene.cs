@@ -78,6 +78,54 @@ namespace VividRP.Runtime.PrimitiveScene
             }
         }
 
+        internal bool TryGetWorldBounds(
+            VividInstancePassMask requiredPassMask,
+            uint cameraCullingMask,
+            out Bounds worldBounds)
+        {
+            ThrowIfDisposed();
+            worldBounds = default;
+            if (requiredPassMask == VividInstancePassMask.None || cameraCullingMask == 0u)
+                return false;
+
+            bool hasBounds = false;
+            for (int recordIndex = 0; recordIndex < m_ActiveCullRecords.Length; recordIndex++)
+            {
+                VividPrimitiveCullRecord record = m_ActiveCullRecords[recordIndex];
+                if (!IsValid(record.Handle)
+                    || (record.Flags & VividPrimitiveFlags.Valid) == 0
+                    || (record.Flags & VividPrimitiveFlags.Disabled) != 0
+                    || (record.PassMask & requiredPassMask) == 0
+                    || (record.CameraLayerMask & cameraCullingMask) == 0u
+                    || !math.all(math.isfinite(record.BoundsMin))
+                    || !math.all(math.isfinite(record.BoundsMax))
+                    || math.any(record.BoundsMax < record.BoundsMin))
+                {
+                    continue;
+                }
+
+                var minimum = new Vector3(
+                    record.BoundsMin.x,
+                    record.BoundsMin.y,
+                    record.BoundsMin.z);
+                var maximum = new Vector3(
+                    record.BoundsMax.x,
+                    record.BoundsMax.y,
+                    record.BoundsMax.z);
+                if (!hasBounds)
+                {
+                    worldBounds.SetMinMax(minimum, maximum);
+                    hasBounds = true;
+                    continue;
+                }
+
+                worldBounds.Encapsulate(minimum);
+                worldBounds.Encapsulate(maximum);
+            }
+
+            return hasBounds;
+        }
+
         internal VividPrimitiveGpuTable<VividPrimitiveData> PrimitiveTable { get; } = new();
         internal VividPrimitiveGpuTable<VividPrimitiveTransformData> TransformTable { get; } = new();
         internal VividPrimitiveGpuTable<VividPrimitivePreviousTransformData> PreviousTransformTable { get; } = new();

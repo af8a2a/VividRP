@@ -538,6 +538,7 @@ namespace VividRP.Runtime.PrimitiveScene
                     BucketCounts = m_BucketCounts,
                     BucketWriteCursors = m_BucketWriteCursors,
                     Result = m_BuildResult,
+                    RequiredPassMask = requiredPassMask,
                 }.Schedule(cullHandle);
                 m_HasPendingBuild = true;
                 JobHandle.ScheduleBatchedJobs();

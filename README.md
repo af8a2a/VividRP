@@ -99,7 +99,8 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 ## 资源同步与开发提示
 
 - `.vrdg` 是 RenderGraph 的源文件；不要手动维护导入生成的 `RenderGraphData` 内容。
-- 不要手动编辑 `Editor/RenderGraph/GeneratedRenderPassNodes.g.cs` 或 `Runtime/Resources/PipelineResources.asset`。前者由节点注册生成器维护，后者应通过资源回收流程更新。
+- `VividRP.Runtime` 中符合条件的 RenderGraph Pass 专用节点由 Roslyn Source Generator 在编译期生成，无需维护或重新生成 `GeneratedRenderPassNodes.g.cs`；消费方程序集中的自定义 Pass 继续使用通用节点的 `PassScript` 选项。不要手动编辑 `Runtime/Resources/PipelineResources.asset`，应通过资源回收流程更新。
+- 从旧版写盘生成器升级时，若已有图资产保存了 `VividRP.Editor.RenderGraph.Generated.<CustomPass>` 形式的消费方自定义节点，请先在旧版中将其替换为通用 Pass 节点并设置 `PassScript` 后再升级；新生成器不会为消费方程序集重新创建这些专用类型。
 - 修改 `[PipelineResource]` 或 `[ResourcePath]` 声明后，选择 `Runtime/Resources/PipelineResources.asset`，在 Inspector 中执行 **Recollect Engine Resources**。
 - RenderGraph Pass 的资源字段名是端口、预览和已编译绑定的契约；变更前请一并检查图资产与测试。
 - 跨帧的 Texture / Buffer 应使用相机所有的 History 资源；`PassRecorder` 会经由 `CameraHistoryRenderGraphBridge` 导入并在图成功执行后提交，无需在图尾手动复制。

@@ -260,11 +260,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesLocalExposurePass()
+        public void GeneratedNodeRegistry_IncludesLocalExposurePass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(LocalExposurePass) });
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(LocalExposurePass));
 
-            Assert.That(registrations.Select(registration => registration.NodeClassName), Does.Contain(nameof(LocalExposurePass)));
+            Assert.That(nodeType, Is.Not.Null);
+            Assert.That(nodeType.Name, Is.EqualTo(nameof(LocalExposurePass)));
         }
 
         [Test]

@@ -93,6 +93,7 @@ namespace VividRP.Runtime.PrimitiveScene
         internal NativeArray<int> BucketCounts;
         internal NativeArray<int> BucketWriteCursors;
         internal NativeArray<VividPrimitiveDrawSetBuildResult> Result;
+        internal VividInstancePassMask RequiredPassMask;
 
         public void Execute()
         {
@@ -237,7 +238,13 @@ namespace VividRP.Runtime.PrimitiveScene
             }
 
             VividRendererListID rendererListID = source.RendererListID;
-            if ((record.Flags & VividPrimitiveFlags.FlipWindingOrder) != 0
+            if ((RequiredPassMask & VividInstancePassMask.Shadows) != 0
+                && (record.Flags & VividPrimitiveFlags.TwoSidedShadows) != 0)
+            {
+                rendererListID = (rendererListID & ~VividRendererListID.CullFront)
+                    | VividRendererListID.CullOff;
+            }
+            else if ((record.Flags & VividPrimitiveFlags.FlipWindingOrder) != 0
                 && (rendererListID & VividRendererListID.CullOff) == 0)
             {
                 rendererListID ^= VividRendererListID.CullFront;

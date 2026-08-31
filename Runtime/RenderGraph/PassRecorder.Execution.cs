@@ -39,8 +39,25 @@ namespace VividRP.Runtime
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
         private static bool s_HasCascadedShadowCasterPass;
-        private static bool s_HasMeshletShadowPass;
         private static int s_EditModeFrameIndex;
+
+        internal static bool UsesExperimentalMeshShaderRasterization
+        {
+            get
+            {
+                foreach (IRenderPass pass in s_RenderPasses)
+                {
+                    if (pass is VisibilityBufferPass visibilityBufferPass
+                        && visibilityBufferPass.RasterizationPath
+                        == VisibilityBufferRasterizationPath.ExperimentalMeshShader)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
 
 #if UNITY_EDITOR
         private sealed class RenderGizmosPassData
@@ -61,7 +78,8 @@ namespace VividRP.Runtime
             Camera camera,
             CullingResults cullingResults,
             RenderGraphData graphAsset,
-            int pipelineFrameIndex = -1)
+            int pipelineFrameIndex = -1,
+            float cullingShadowDistance = float.PositiveInfinity)
         {
             using var initializeContextScope = RenderPassProfilingUtility.InitializeContextMarker.Auto();
 
@@ -174,15 +192,7 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.InitializeContextShadowDataUpdateMarker.Auto())
             {
-                shadowData.Update(cullingResults, lightData);
-            }
-
-            using (RenderPassProfilingUtility.InitializeContextShadowCasterCullingMarker.Auto())
-            {
-                // Unity schedules renderer shadow-culling jobs here. Start them before subsystem
-                // and pass preparation, but skip Meshlet-only graphs that never consume the results.
-                if (s_HasCascadedShadowCasterPass)
-                    shadowData.ScheduleShadowCasterCulling(context, cullingResults);
+                shadowData.Update(cullingResults, lightData, cameraData, cullingShadowDistance);
             }
         }
 
@@ -386,7 +396,6 @@ namespace VividRP.Runtime
             s_CurrentImportVersion = 0;
             s_IsCompiled = false;
             s_HasCascadedShadowCasterPass = false;
-            s_HasMeshletShadowPass = false;
             RenderPassProfilingUtility.Clear();
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -601,16 +610,9 @@ namespace VividRP.Runtime
 
         internal static bool HasCascadedShadowCasterPass => s_HasCascadedShadowCasterPass;
 
-        internal static bool HasMeshletShadowPass => s_HasMeshletShadowPass;
-
         internal static void RegisterCascadedShadowCasterPass()
         {
             s_HasCascadedShadowCasterPass = true;
-        }
-
-        internal static void RegisterMeshletShadowPass()
-        {
-            s_HasMeshletShadowPass = true;
         }
 
         internal static bool HasRenderGizmoPrePostProcessBoundary(IReadOnlyList<IRenderPass> renderPasses)
@@ -771,12 +773,12 @@ namespace VividRP.Runtime
                         renderLists,
                         accelerationStructures);
 
+                    indexedPasses[passIndex] = pass;
+                    indexedPassTypes[passIndex] = passType;
                     var accessOverrides = BuildResourceAccessOverrides(passType, passDef);
                     if (accessOverrides != null && accessOverrides.Count > 0)
                         s_PassResourceAccessOverrides[pass] = accessOverrides;
 
-                    indexedPasses[passIndex] = pass;
-                    indexedPassTypes[passIndex] = passType;
                     s_PassIndices[pass] = s_RenderPasses.Count;
                     s_RenderPasses.Add(pass);
                     s_RuntimePassDefinitions.Add(passDef);

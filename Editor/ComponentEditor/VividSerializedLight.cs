@@ -19,7 +19,7 @@ namespace VividRP.Editor
         internal SerializedProperty rayTracedShadowRayBias { get; }
         internal SerializedProperty rayTracedShadowDistantRayBias { get; }
         internal SerializedProperty screenSpaceShadowQuality { get; }
-        internal SerializedProperty shadowAtlasResolution { get; }
+        internal SerializedProperty shadowMapResolution { get; }
         internal SerializedProperty depthBias { get; }
         internal SerializedProperty normalBias { get; }
         internal SerializedProperty slopeBias { get; }
@@ -31,6 +31,7 @@ namespace VividRP.Editor
         internal SerializedProperty dirLightPCSSMinFilterMaxAngularDiameter { get; }
         internal SerializedProperty dirLightPCSSBlockerSearchAngularDiameter { get; }
         internal SerializedProperty dirLightPCSSBlockerSamplingClumpExponent { get; }
+        internal SerializedProperty dirLightBendSSSMaxRayDistance { get; }
         internal SerializedProperty dirLightBendSSSSurfaceThickness { get; }
         internal SerializedProperty dirLightBendSSSBilinearThreshold { get; }
         internal SerializedProperty dirLightBendSSSShadowContrast { get; }
@@ -93,7 +94,7 @@ namespace VividRP.Editor
             rayTracedShadowRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowRayBias");
             rayTracedShadowDistantRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowDistantRayBias");
             screenSpaceShadowQuality = serializedAdditionalDataObject.FindProperty("m_ScreenSpaceShadowQuality");
-            shadowAtlasResolution = serializedAdditionalDataObject.FindProperty("m_ShadowAtlasResolution");
+            shadowMapResolution = serializedAdditionalDataObject.FindProperty("m_ShadowMapResolution");
             depthBias = serializedAdditionalDataObject.FindProperty("m_DepthBias");
             normalBias = serializedAdditionalDataObject.FindProperty("m_NormalBias");
             slopeBias = serializedAdditionalDataObject.FindProperty("m_SlopeBias");
@@ -105,6 +106,7 @@ namespace VividRP.Editor
             dirLightPCSSMinFilterMaxAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSMinFilterMaxAngularDiameter");
             dirLightPCSSBlockerSearchAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSearchAngularDiameter");
             dirLightPCSSBlockerSamplingClumpExponent = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSamplingClumpExponent");
+            dirLightBendSSSMaxRayDistance = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSMaxRayDistance");
             dirLightBendSSSSurfaceThickness = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSSurfaceThickness");
             dirLightBendSSSBilinearThreshold = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSBilinearThreshold");
             dirLightBendSSSShadowContrast = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSShadowContrast");

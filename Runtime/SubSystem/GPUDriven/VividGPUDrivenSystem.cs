@@ -352,6 +352,20 @@ namespace VividRP.Runtime.GPUDriven
             return visibleMeshletRenderRequestsBuffer != null && visibleMeshletIndirectDrawArgsBuffer != null;
         }
 
+        internal static bool TryGetPrimitiveShadowCasterBounds(Camera camera, out Bounds worldBounds)
+        {
+            worldBounds = default;
+            VividGPUDrivenSystem currentInstance = RawInstance;
+            return camera != null
+                && currentInstance != null
+                && !currentInstance.m_IsDisposed
+                && currentInstance.IsAvailable
+                && currentInstance.PrimitiveScene.TryGetWorldBounds(
+                    VividInstancePassMask.Shadows,
+                    unchecked((uint) camera.cullingMask),
+                    out worldBounds);
+        }
+
         internal static bool TryGetVirtualTextureAllocationId(out int allocationId)
         {
             VividGPUDrivenSystem currentInstance = RawInstance;
@@ -591,7 +605,7 @@ namespace VividRP.Runtime.GPUDriven
             VividShadowData shadowData,
             int frameIndex)
         {
-            if (!PassRecorder.HasMeshletShadowPass
+            if (!PassRecorder.HasCascadedShadowCasterPass
                 || camera == null
                 || shadowData == null
                 || !shadowData.isCSMActive
@@ -956,7 +970,8 @@ namespace VividRP.Runtime.GPUDriven
                 resources = PipelineResourceManager.Get<VividRPCoreResources>();
             }
             bool occlusionObservationMode = !ReferenceEquals(cullingCamera, camera);
-            bool occlusionFeatureSupported = asset.EnableGPUDrivenOcclusionCulling
+            bool occlusionFeatureSupported = !PassRecorder.UsesExperimentalMeshShaderRasterization
+                && asset.EnableGPUDrivenOcclusionCulling
                 && !camera.stereoEnabled
                 && !cullingCamera.stereoEnabled
                 && resources?.GPUMeshletCullingCompute != null;

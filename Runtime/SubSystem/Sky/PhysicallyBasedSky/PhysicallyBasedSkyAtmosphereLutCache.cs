@@ -45,10 +45,8 @@ namespace VividRP.Runtime
         private static readonly int CSMShadowAtlasId = Shader.PropertyToID("_CSMShadowAtlas");
         private static readonly int CSMViewProjMatricesId = Shader.PropertyToID("_CSMViewProjMatrices");
         private static readonly int CSMCascadeSpheresId = Shader.PropertyToID("_CSMCascadeSpheres");
-        private static readonly int CSMAtlasScaleOffsetsId = Shader.PropertyToID("_CSMAtlasScaleOffsets");
         private static readonly int CSMCascadeCountId = Shader.PropertyToID("_CSMCascadeCount");
         private static readonly int CSMNormalBiasId = Shader.PropertyToID("_CSMNormalBias");
-        private static readonly int CSMAtlasResolutionId = Shader.PropertyToID("_CSMAtlasResolution");
         private static readonly int CSMCascadeResolutionId = Shader.PropertyToID("_CSMCascadeResolution");
         private static readonly int CSMCascadeWorldTexelSizesId = Shader.PropertyToID("_CSMCascadeWorldTexelSizes");
 
@@ -82,7 +80,6 @@ namespace VividRP.Runtime
         private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
         private readonly Matrix4x4[] m_CSMViewProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_CSMCascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
-        private readonly Vector4[] m_CSMAtlasScaleOffsets = new Vector4[VividShadowData.MaxCascadeCount];
         private Vector4 m_CSMCascadeWorldTexelSizes = Vector4.zero;
         private readonly PhysicallyBasedSkyCelestialBodyBuffer m_CelestialBodyBuffer = new();
 
@@ -353,14 +350,12 @@ namespace VividRP.Runtime
                 {
                     m_CSMViewProjMatrices[i] = shadowData.viewProjMatrices[i];
                     m_CSMCascadeSpheres[i] = shadowData.cascadeSpheres[i];
-                    m_CSMAtlasScaleOffsets[i] = shadowData.cascadeAtlasScaleOffsets[i];
                     m_CSMCascadeWorldTexelSizes[i] = shadowData.cascadeWorldTexelSizes[i];
                 }
                 else
                 {
                     m_CSMViewProjMatrices[i] = Matrix4x4.identity;
                     m_CSMCascadeSpheres[i] = Vector4.zero;
-                    m_CSMAtlasScaleOffsets[i] = Vector4.zero;
                 }
             }
 
@@ -370,14 +365,12 @@ namespace VividRP.Runtime
             }
             else
             {
-                cmd.SetComputeTextureParam(m_ComputeShader, kernel, CSMShadowAtlasId, Texture2D.blackTexture);
+                cmd.SetComputeTextureParam(m_ComputeShader, kernel, CSMShadowAtlasId, TextureXR.GetBlackTextureArray());
             }
             cmd.SetComputeMatrixArrayParam(m_ComputeShader, CSMViewProjMatricesId, m_CSMViewProjMatrices);
             cmd.SetComputeVectorArrayParam(m_ComputeShader, CSMCascadeSpheresId, m_CSMCascadeSpheres);
-            cmd.SetComputeVectorArrayParam(m_ComputeShader, CSMAtlasScaleOffsetsId, m_CSMAtlasScaleOffsets);
             cmd.SetComputeIntParam(m_ComputeShader, CSMCascadeCountId, cascadeCount);
             cmd.SetComputeFloatParam(m_ComputeShader, CSMNormalBiasId, hasCSMShadowAtlas ? Mathf.Max(shadowData.normalBias, 0.0f) : 0.0f);
-            cmd.SetComputeIntParam(m_ComputeShader, CSMAtlasResolutionId, hasCSMShadowAtlas ? Mathf.Max(shadowData.atlasResolution, 1) : 0);
             cmd.SetComputeIntParam(m_ComputeShader, CSMCascadeResolutionId, hasCSMShadowAtlas ? Mathf.Max(shadowData.cascadeResolution, 1) : 0);
             cmd.SetComputeVectorParam(m_ComputeShader, CSMCascadeWorldTexelSizesId, m_CSMCascadeWorldTexelSizes);
         }

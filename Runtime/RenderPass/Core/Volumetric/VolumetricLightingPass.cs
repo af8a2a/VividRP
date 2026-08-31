@@ -41,11 +41,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CSMShadowAtlasId = Shader.PropertyToID("_CSMShadowAtlas");
         private static readonly int CSMViewProjMatricesId = Shader.PropertyToID("_CSMViewProjMatrices");
         private static readonly int CSMCascadeSpheresId = Shader.PropertyToID("_CSMCascadeSpheres");
-        private static readonly int CSMAtlasScaleOffsetsId = Shader.PropertyToID("_CSMAtlasScaleOffsets");
         private static readonly int CSMCascadeCountId = Shader.PropertyToID("_CSMCascadeCount");
         private static readonly int CSMMaxShadowDistanceId = Shader.PropertyToID("_CSMMaxShadowDistance");
         private static readonly int CSMNormalBiasId = Shader.PropertyToID("_CSMNormalBias");
-        private static readonly int CSMAtlasResolutionId = Shader.PropertyToID("_CSMAtlasResolution");
         private static readonly int CSMCascadeResolutionId = Shader.PropertyToID("_CSMCascadeResolution");
         private static readonly int CSMCascadeWorldTexelSizesId = Shader.PropertyToID("_CSMCascadeWorldTexelSizes");
         private static readonly int CSMCascadeBordersId = Shader.PropertyToID("_CSMCascadeBorders");
@@ -212,13 +210,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_VBufferSampleOffset;
         private readonly Matrix4x4[] m_CSMViewProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_CSMCascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
-        private readonly Vector4[] m_CSMAtlasScaleOffsets = new Vector4[VividShadowData.MaxCascadeCount];
         private Vector4 m_CSMCascadeWorldTexelSizes = Vector4.zero;
         private Vector4 m_CSMCascadeBorders = Vector4.zero;
         private int m_CSMCascadeCount;
         private float m_CSMMaxShadowDistance;
         private float m_CSMNormalBias;
-        private int m_CSMAtlasResolution;
         private int m_CSMCascadeResolution;
         private int m_CSMShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
 
@@ -234,6 +230,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalShadowTexture = m_LocalDirectionalShadowTexture;
             m_LocalCSMShadowAtlas = RenderGraphTexture.CreateInput("CSMShadowAtlas", GraphicsFormat.None, DepthBits.Depth16);
             m_LocalCSMShadowAtlas.desc.IsShadowMap = true;
+            m_LocalCSMShadowAtlas.desc.Dimension = TextureDimension.Tex2DArray;
+            m_LocalCSMShadowAtlas.desc.Slices = VividShadowData.MaxCascadeCount;
             m_CSMShadowAtlas = m_LocalCSMShadowAtlas;
             m_LocalVBufferMaxZ = VolumetricMaxZPass.CreateVBufferMaxZTexture("VBufferMaxZ");
             m_VBufferMaxZ = m_LocalVBufferMaxZ;
@@ -406,7 +404,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CSMCascadeCount = 0;
             m_CSMMaxShadowDistance = 0.0f;
             m_CSMNormalBias = 0.0f;
-            m_CSMAtlasResolution = 0;
             m_CSMCascadeResolution = 0;
             m_CSMCascadeWorldTexelSizes = Vector4.zero;
             m_CSMCascadeBorders = Vector4.zero;
@@ -416,7 +413,6 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 m_CSMViewProjMatrices[i] = Matrix4x4.identity;
                 m_CSMCascadeSpheres[i] = Vector4.zero;
-                m_CSMAtlasScaleOffsets[i] = Vector4.zero;
             }
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
@@ -426,14 +422,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CSMCascadeCount = Mathf.Clamp(shadowData.cascadeCount, 0, VividShadowData.MaxCascadeCount);
             m_CSMMaxShadowDistance = Mathf.Max(shadowData.maxShadowDistance, 0.0f);
             m_CSMNormalBias = Mathf.Max(shadowData.normalBias, 0.0f);
-            m_CSMAtlasResolution = Mathf.Max(shadowData.atlasResolution, 1);
             m_CSMCascadeResolution = Mathf.Max(shadowData.cascadeResolution, 1);
 
             for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
             {
                 m_CSMViewProjMatrices[i] = shadowData.viewProjMatrices[i];
                 m_CSMCascadeSpheres[i] = shadowData.cascadeSpheres[i];
-                m_CSMAtlasScaleOffsets[i] = shadowData.cascadeAtlasScaleOffsets[i];
                 m_CSMCascadeWorldTexelSizes[i] = shadowData.cascadeWorldTexelSizes[i];
                 m_CSMCascadeBorders[i] = shadowData.cascadeBorders[i];
             }
@@ -486,14 +480,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 CSMShadowAtlasId,
                 hasCSMShadowAtlas
                     ? m_CSMShadowAtlas.innerHandle
-                    : context.renderGraphContext.defaultResources.blackTexture);
+                    : context.renderGraphContext.defaultResources.blackTextureArrayXR);
             cmd.SetComputeMatrixArrayParam(m_Shader, CSMViewProjMatricesId, m_CSMViewProjMatrices);
             cmd.SetComputeVectorArrayParam(m_Shader, CSMCascadeSpheresId, m_CSMCascadeSpheres);
-            cmd.SetComputeVectorArrayParam(m_Shader, CSMAtlasScaleOffsetsId, m_CSMAtlasScaleOffsets);
             cmd.SetComputeIntParam(m_Shader, CSMCascadeCountId, hasCSMShadowAtlas ? m_CSMCascadeCount : 0);
             cmd.SetComputeFloatParam(m_Shader, CSMMaxShadowDistanceId, m_CSMMaxShadowDistance);
             cmd.SetComputeFloatParam(m_Shader, CSMNormalBiasId, m_CSMNormalBias);
-            cmd.SetComputeIntParam(m_Shader, CSMAtlasResolutionId, m_CSMAtlasResolution);
             cmd.SetComputeIntParam(m_Shader, CSMCascadeResolutionId, m_CSMCascadeResolution);
             cmd.SetComputeVectorParam(m_Shader, CSMCascadeWorldTexelSizesId, m_CSMCascadeWorldTexelSizes);
             cmd.SetComputeVectorParam(m_Shader, CSMCascadeBordersId, m_CSMCascadeBorders);

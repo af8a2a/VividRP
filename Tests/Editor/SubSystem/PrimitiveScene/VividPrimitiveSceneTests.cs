@@ -179,6 +179,49 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TryGetWorldBounds_FiltersShadowCastersByStatePassAndCameraLayer()
+        {
+            using var scene = new VividPrimitiveScene();
+            scene.RegisterOrUpdate(CreateDescriptor(
+                CreateEntity("Shadow Bounds A"),
+                cameraLayerMask: 1u << 2,
+                worldBounds: new Bounds(new Vector3(-2.0f, 1.0f, 3.0f), new Vector3(2.0f, 4.0f, 6.0f))));
+            scene.RegisterOrUpdate(CreateDescriptor(
+                CreateEntity("Shadow Bounds B"),
+                cameraLayerMask: 1u << 2,
+                worldBounds: new Bounds(new Vector3(5.0f, -1.0f, 0.0f), new Vector3(4.0f, 2.0f, 2.0f))));
+            scene.RegisterOrUpdate(CreateDescriptor(
+                CreateEntity("Main Only Bounds"),
+                cameraLayerMask: 1u << 2,
+                worldBounds: new Bounds(Vector3.one * 100.0f, Vector3.one * 20.0f),
+                passMask: VividInstancePassMask.Main));
+            scene.RegisterOrUpdate(CreateDescriptor(
+                CreateEntity("Wrong Layer Bounds"),
+                cameraLayerMask: 1u << 3,
+                worldBounds: new Bounds(Vector3.one * 200.0f, Vector3.one * 20.0f)));
+            scene.RegisterOrUpdate(CreateDescriptor(
+                CreateEntity("Disabled Shadow Bounds"),
+                cameraLayerMask: 1u << 2,
+                worldBounds: new Bounds(Vector3.one * 300.0f, Vector3.one * 20.0f),
+                flags: VividPrimitiveFlags.Valid | VividPrimitiveFlags.Disabled));
+
+            Assert.That(
+                scene.TryGetWorldBounds(
+                    VividInstancePassMask.Shadows,
+                    1u << 2,
+                    out Bounds worldBounds),
+                Is.True);
+            Assert.That(worldBounds.min, Is.EqualTo(new Vector3(-3.0f, -2.0f, -1.0f)));
+            Assert.That(worldBounds.max, Is.EqualTo(new Vector3(7.0f, 3.0f, 6.0f)));
+            Assert.That(
+                scene.TryGetWorldBounds(
+                    VividInstancePassMask.Shadows,
+                    1u << 7,
+                    out _),
+                Is.False);
+        }
+
+        [Test]
         public void Register_ThreeSectionsCreatesOnePrimitiveAndOneTransform()
         {
             using var scene = new VividPrimitiveScene();
@@ -752,7 +795,10 @@ namespace VividRP.Editor.Tests
             EntityId source,
             IReadOnlyList<VividPrimitiveDrawSectionDescriptor> sections = null,
             Matrix4x4? objectToWorld = null,
-            uint cameraLayerMask = uint.MaxValue)
+            uint cameraLayerMask = uint.MaxValue,
+            Bounds? worldBounds = null,
+            VividInstancePassMask passMask = VividInstancePassMask.Main | VividInstancePassMask.Shadows,
+            VividPrimitiveFlags flags = VividPrimitiveFlags.Valid | VividPrimitiveFlags.ReceiveShadows)
         {
             Matrix4x4 transform = objectToWorld ?? Matrix4x4.identity;
             var center = new Vector3(transform.m03, transform.m13, transform.m23);
@@ -760,11 +806,11 @@ namespace VividRP.Editor.Tests
                 source,
                 transform,
                 transform.inverse,
-                new Bounds(center, Vector3.one * 2.0f),
+                worldBounds ?? new Bounds(center, Vector3.one * 2.0f),
                 uint.MaxValue,
                 cameraLayerMask,
-                VividInstancePassMask.Main | VividInstancePassMask.Shadows,
-                VividPrimitiveFlags.Valid | VividPrimitiveFlags.ReceiveShadows,
+                passMask,
+                flags,
                 sections ?? Array.Empty<VividPrimitiveDrawSectionDescriptor>());
         }
 

@@ -907,7 +907,7 @@ public Shader PhysicallyBasedSkyShader;
 
 ### 3.7 RenderGraph editor node
 
-After adding `PhysicallyBasedSkyPass`, regenerate `GeneratedRenderPassNodes.g.cs` via the existing `RenderPassNodeRegistryGenerator`.
+After adding `PhysicallyBasedSkyPass`, let the Roslyn source generator emit its node during compilation and verify that `RenderPassNodeRegistry.GetNodeType(typeof(PhysicallyBasedSkyPass))` resolves it. No generated source file needs to be regenerated.
 
 ### 3.8 Tests
 
@@ -1022,7 +1022,7 @@ Tests/Editor/
 | 0 | 7 runtime + 1 context + 2 test | `VividRenderPipeline.cs`, `PassRecorder.Execution.cs`, `HDRISkyPass.cs`, `DeferredLightingPass.cs`, `VividVolumeManagerUtility.cs`, existing tests |
 | 1 | 1 runtime + 2 test | `ShaderVariablesGlobal.cs`, `ShaderVariablesGlobal.hlsl`, `HdrpLitLighting.hlsl`, `HDRISkyRenderer.cs` |
 | 2 | 1 runtime + 1 test | `DeferredLightingPass.cs`, `SkyManager.cs` |
-| 3 | 3 runtime + 1 shader + 4 test | `VividRPCoreResources.cs`, `SkyManager.cs`, `GeneratedRenderPassNodes.g.cs` (regen) |
+| 3 | 3 runtime + 1 shader + 4 test | `VividRPCoreResources.cs`, `SkyManager.cs` |
 | 4 | 2 runtime + 2 shader + 2 test | `PhysicallyBasedSkyPass.cs`, `PhysicallyBasedSkyVolume.cs` |
 
 ---

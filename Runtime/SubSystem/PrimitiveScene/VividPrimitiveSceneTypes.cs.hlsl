@@ -22,6 +22,7 @@
 #define VIVIDPRIMITIVEFLAGS_SKINNED (16)
 #define VIVIDPRIMITIVEFLAGS_TERRAIN (32)
 #define VIVIDPRIMITIVEFLAGS_RECEIVE_SHADOWS (64)
+#define VIVIDPRIMITIVEFLAGS_TWO_SIDED_SHADOWS (128)
 
 // Generated from VividRP.Runtime.PrimitiveScene.VividLegacyInstanceMappingData
 // PackingRules = Exact

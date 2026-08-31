@@ -174,6 +174,30 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         : 1.0f);
             }
 
+            InterpolatedUV InterpolateUV(
+                const VividBarycentricDerivatives barycentric,
+                const VividMeshletVertex vertex0,
+                const VividMeshletVertex vertex1,
+                const VividMeshletVertex vertex2)
+            {
+                const float3 u = InterpolateWithBarycentric(
+                    barycentric,
+                    vertex0.UV.x,
+                    vertex1.UV.x,
+                    vertex2.UV.x);
+                const float3 v = InterpolateWithBarycentric(
+                    barycentric,
+                    vertex0.UV.y,
+                    vertex1.UV.y,
+                    vertex2.UV.y);
+
+                InterpolatedUV result;
+                result.uv = float2(u.x, v.x);
+                result.ddx = float2(u.y, v.y);
+                result.ddy = float2(u.z, v.z);
+                return result;
+            }
+
             float3 TransformInstanceObjectToWorldDir(float3 dirOS, float4x4 objectToWorldMatrix, bool doNormalize = true)
             {
                 float3 dirWS = mul((float3x3) objectToWorldMatrix, dirOS);
@@ -235,18 +259,25 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 const float3 autoNormalWS = cross(
                     SafeNormalize(triangleData.positionWS0 - triangleData.positionWS1),
                     SafeNormalize(triangleData.positionWS2 - triangleData.positionWS0));
-                const float3 viewForwardDirWS = GetViewForwardDir(UNITY_MATRIX_V);
-                return dot(autoNormalWS, viewForwardDirWS) < 0.0f ? -1.0f : 1.0f;
+                float3 viewRayDirectionWS = GetViewForwardDir(UNITY_MATRIX_V);
+                if (unity_OrthoParams.w == 0.0f)
+                {
+                    const float3 triangleCenterWS = (
+                        triangleData.positionWS0
+                        + triangleData.positionWS1
+                        + triangleData.positionWS2) / 3.0f;
+                    const float3 cameraToTriangleWS = triangleCenterWS - _WorldSpaceCameraPos;
+                    if (dot(cameraToTriangleWS, cameraToTriangleWS) > 1e-8f)
+                        viewRayDirectionWS = cameraToTriangleWS;
+                }
+
+                return dot(autoNormalWS, viewRayDirectionWS) < 0.0f ? -1.0f : 1.0f;
             }
 
-            bool TryLoadVisibilityData(
+            bool TryLoadVisibilityValue(
                 Varyings input,
-                out VividVisibilityBufferValue visibilityBufferValue,
-                out VividBarycentricDerivatives barycentric,
-                out InterpolatedUV interpolatedUV)
+                out VividVisibilityBufferValue visibilityBufferValue)
             {
-                barycentric = (VividBarycentricDerivatives) 0;
-                interpolatedUV = (InterpolatedUV) 0;
                 float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
                 uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
                 if (!IsPackedVisibilityBufferValueValid(packedValue))
@@ -256,36 +287,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 }
 
                 visibilityBufferValue = UnpackVisibilityBufferValue(packedValue);
-
-                float2 attributes0Uv = ApplyScaleBias(
-                    input.uv,
-                    _VisibilityBufferAttributes0ScaleBias);
-                float2 attributes1Uv = ApplyScaleBias(
-                    input.uv,
-                    _VisibilityBufferAttributes1ScaleBias);
-                float2 barycentricsUv = ApplyScaleBias(
-                    input.uv,
-                    _VisibilityBufferBarycentricsScaleBias);
-                float4 attributes0 = SAMPLE_TEXTURE2D_LOD(
-                    _VisibilityBufferAttributes0,
-                    sampler_PointClamp,
-                    attributes0Uv,
-                    0);
-                float4 attributes1 = SAMPLE_TEXTURE2D_LOD(
-                    _VisibilityBufferAttributes1,
-                    sampler_PointClamp,
-                    attributes1Uv,
-                    0);
-                float2 barycentrics = SAMPLE_TEXTURE2D_LOD(
-                    _VisibilityBufferBarycentrics,
-                    sampler_PointClamp,
-                    barycentricsUv,
-                    0).xy;
-
-                barycentric.lambda = DecodeVividVisibilityBufferBarycentrics(barycentrics);
-                interpolatedUV.uv = attributes0.xy;
-                interpolatedUV.ddx = attributes0.zw;
-                interpolatedUV.ddy = attributes1.xy;
                 return true;
             }
 
@@ -599,13 +600,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #endif
             {
                 VividVisibilityBufferValue visibilityBufferValue;
-                VividBarycentricDerivatives barycentric;
-                InterpolatedUV interpolatedUV;
-                if (!TryLoadVisibilityData(
-                        input,
-                        visibilityBufferValue,
-                        barycentric,
-                        interpolatedUV))
+                if (!TryLoadVisibilityValue(input, visibilityBufferValue))
                 {
                     discard;
                     #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
@@ -620,6 +615,25 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 if (triangleData.isDualSlab == 0u)
                     return (VividDualSlabLayerSidecarOutput) 0;
                 #endif
+                const float4 clipPosition0 = TransformWorldToHClip(
+                    triangleData.positionWS0);
+                const float4 clipPosition1 = TransformWorldToHClip(
+                    triangleData.positionWS1);
+                const float4 clipPosition2 = TransformWorldToHClip(
+                    triangleData.positionWS2);
+                const float2 pixelNdc = ScreenCoordsToNDC(input.positionCS);
+                const VividBarycentricDerivatives barycentric =
+                    CalculateFullBarycentric(
+                        clipPosition0,
+                        clipPosition1,
+                        clipPosition2,
+                        pixelNdc,
+                        _ScreenSize.zw);
+                const InterpolatedUV interpolatedUV = InterpolateUV(
+                    barycentric,
+                    triangleData.vertex0,
+                    triangleData.vertex1,
+                    triangleData.vertex2);
                 VividSurfaceSummaryData surfaceData;
                 VividDualSlabLayerData dualSlabLayerData;
                 ResolveSurfaceData(

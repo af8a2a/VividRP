@@ -86,11 +86,9 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesMaterialDebugPass()
+        public void GeneratedNodeRegistry_IncludesMaterialDebugPass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(MaterialDebugPass) });
-
-            Assert.That(registrations.Select(registration => registration.PassType), Contains.Item(typeof(MaterialDebugPass)));
+            Assert.That(RenderPassNodeRegistry.GetNodeType(typeof(MaterialDebugPass)), Is.Not.Null);
         }
     }
 }

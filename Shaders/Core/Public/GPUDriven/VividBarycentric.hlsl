@@ -51,10 +51,14 @@ VividBarycentricDerivatives CalculateFullBarycentric(
     result.lambda.y = interpW * (deltaVec.x * result.ddx.y + deltaVec.y * result.ddy.y);
     result.lambda.z = interpW * (deltaVec.x * result.ddx.z + deltaVec.y * result.ddy.z);
 
-    result.ddx *= 2.0f * invWinSize.x;
-    result.ddy *= 2.0f * invWinSize.y;
-    ddxSum *= 2.0f * invWinSize.x;
-    ddySum *= 2.0f * invWinSize.y;
+    float2 pixelStepNDC = 2.0f * invWinSize;
+    #ifdef UNITY_UV_STARTS_AT_TOP
+    pixelStepNDC.y *= -1.0f;
+    #endif
+    result.ddx *= pixelStepNDC.x;
+    result.ddy *= pixelStepNDC.y;
+    ddxSum *= pixelStepNDC.x;
+    ddySum *= pixelStepNDC.y;
 
     float interpW_ddx = rcp(interpInvW + ddxSum);
     float interpW_ddy = rcp(interpInvW + ddySum);

@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- RenderGraph dedicated pass nodes are now emitted at compile time by a Roslyn source generator, replacing the Editor-time generated source file and `TypeCache`-based registry join.
+- Consumer-authored passes no longer receive generated dedicated node types. Existing graphs that serialize those types must replace them with generic `PassScript` nodes before upgrading.
 - The Bloom Volume inspector now shows only the settings used by the selected Scattering or Convolution FFT path.
 - DLSS Ray Reconstruction reference-path inputs now emit finite, normalized ray guides and encode secondary misses with the FP16 maximum hit-distance sentinel.
 - Removed StandardLit `_OpacityColor`; colored transparency is now authored exclusively through OpenPBR transmission controls.

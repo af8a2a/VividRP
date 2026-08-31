@@ -962,20 +962,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesActiveVolumetricPasses()
+        public void GeneratedNodeRegistry_IncludesActiveVolumetricPasses()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[]
+            var passTypes = new[]
             {
                 typeof(VolumetricDensityPass),
                 typeof(VolumetricMaxZPass),
                 typeof(VolumetricLightingPass)
-            });
+            };
 
-            var nodeNames = registrations.Select(registration => registration.NodeClassName).ToArray();
-
-            Assert.That(nodeNames, Does.Contain(nameof(VolumetricDensityPass)));
-            Assert.That(nodeNames, Does.Contain(nameof(VolumetricMaxZPass)));
-            Assert.That(nodeNames, Does.Contain(nameof(VolumetricLightingPass)));
+            foreach (var passType in passTypes)
+                Assert.That(RenderPassNodeRegistry.GetNodeType(passType), Is.Not.Null, passType.FullName);
         }
 
         private static void SetLocalFogBoundProxy(VividLocalVolumetricFog fog, BoundProxyShape shape)

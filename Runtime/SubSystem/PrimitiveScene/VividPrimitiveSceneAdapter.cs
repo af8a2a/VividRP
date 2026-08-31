@@ -263,6 +263,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 flags |= VividPrimitiveFlags.Skinned;
             if ((rendererFlags & VividMeshletRendererFlags.ReceiveShadows) != 0)
                 flags |= VividPrimitiveFlags.ReceiveShadows;
+            if (trackedData.shadowCastingMode == ShadowCastingMode.TwoSided)
+                flags |= VividPrimitiveFlags.TwoSidedShadows;
             if (isTerrain)
                 flags |= VividPrimitiveFlags.Terrain;
 

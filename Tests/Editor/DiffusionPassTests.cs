@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
@@ -184,11 +183,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesDiffusionPass()
+        public void GeneratedNodeRegistry_IncludesDiffusionPass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(DiffusionPass) });
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(DiffusionPass));
 
-            Assert.That(registrations.Select(registration => registration.NodeClassName), Does.Contain(nameof(DiffusionPass)));
+            Assert.That(nodeType, Is.Not.Null);
+            Assert.That(nodeType.Name, Is.EqualTo(nameof(DiffusionPass)));
         }
 
 

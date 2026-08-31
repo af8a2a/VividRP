@@ -145,6 +145,7 @@ namespace VividRP.Runtime.PrimitiveScene
         Skinned = 1u << 4,
         Terrain = 1u << 5,
         ReceiveShadows = 1u << 6,
+        TwoSidedShadows = 1u << 7,
     }
 
     [GenerateHLSL(PackingRules.Exact)]

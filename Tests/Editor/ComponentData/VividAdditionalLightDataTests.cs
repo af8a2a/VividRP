@@ -160,7 +160,7 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.rayTracedShadowRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowDistantRayBias, Is.Not.Null);
             Assert.That(serializedLight.screenSpaceShadowQuality, Is.Not.Null);
-            Assert.That(serializedLight.shadowAtlasResolution, Is.Not.Null);
+            Assert.That(serializedLight.shadowMapResolution, Is.Not.Null);
             Assert.That(serializedLight.depthBias, Is.Not.Null);
             Assert.That(serializedLight.normalBias, Is.Not.Null);
             Assert.That(serializedLight.slopeBias, Is.Not.Null);
@@ -172,6 +172,7 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.dirLightPCSSMinFilterMaxAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.dirLightPCSSBlockerSearchAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.dirLightPCSSBlockerSamplingClumpExponent, Is.Not.Null);
+            Assert.That(serializedLight.dirLightBendSSSMaxRayDistance, Is.Not.Null);
             Assert.That(serializedLight.dirLightBendSSSSurfaceThickness, Is.Not.Null);
             Assert.That(serializedLight.dirLightBendSSSBilinearThreshold, Is.Not.Null);
             Assert.That(serializedLight.dirLightBendSSSShadowContrast, Is.Not.Null);
@@ -533,11 +534,11 @@ namespace VividRP.Editor.Tests
                 additionalData.screenSpaceShadowQuality,
                 Is.EqualTo(VividAdditionalLightData.DefaultScreenSpaceShadowQuality));
             Assert.That(
-                additionalData.shadowAtlasResolution,
-                Is.EqualTo(VividAdditionalLightData.CSMShadowAtlasResolution.Resolution4096));
+                additionalData.shadowMapResolution,
+                Is.EqualTo(VividAdditionalLightData.CSMShadowMapResolution.Resolution2048));
             Assert.That(
-                additionalData.resolvedShadowAtlasResolution,
-                Is.EqualTo(VividAdditionalLightData.DefaultShadowAtlasResolution));
+                additionalData.resolvedShadowMapResolution,
+                Is.EqualTo(VividAdditionalLightData.DefaultShadowMapResolution));
             Assert.That(additionalData.depthBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowDepthBias));
             Assert.That(additionalData.normalBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowNormalBias));
             Assert.That(additionalData.slopeBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowSlopeBias));
@@ -566,6 +567,9 @@ namespace VividRP.Editor.Tests
                 additionalData.dirLightPCSSBlockerSamplingClumpExponent,
                 Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSBlockerSamplingClumpExponent));
             Assert.That(
+                additionalData.dirLightBendSSSMaxRayDistance,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSMaxRayDistance));
+            Assert.That(
                 additionalData.dirLightBendSSSSurfaceThickness,
                 Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSSurfaceThickness));
             Assert.That(
@@ -583,6 +587,34 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 additionalData.dirLightBendSSSBilinearSamplingOffsetMode,
                 Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSBilinearSamplingOffsetMode));
+        }
+
+        [TestCase(1024, 512)]
+        [TestCase(2048, 1024)]
+        [TestCase(4096, 2048)]
+        [TestCase(8192, 4096)]
+        public void ShadowMapResolution_MigratesLegacyAtlasResolution(
+            int legacyAtlasResolution,
+            int expectedCascadeResolution)
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            var legacyResolutionField = typeof(VividAdditionalLightData).GetField(
+                "m_LegacyShadowAtlasResolution",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(legacyResolutionField, Is.Not.Null);
+            legacyResolutionField.SetValue(additionalData, legacyAtlasResolution);
+
+            Assert.That(s_OnValidateMethod, Is.Not.Null);
+            s_OnValidateMethod.Invoke(additionalData, null);
+
+            Assert.That(
+                additionalData.resolvedShadowMapResolution,
+                Is.EqualTo(expectedCascadeResolution));
+            Assert.That(legacyResolutionField.GetValue(additionalData), Is.EqualTo(0));
         }
 
         [Test]
@@ -603,6 +635,7 @@ namespace VividRP.Editor.Tests
             additionalData.dirLightPCSSMinFilterMaxAngularDiameter = -1.0f;
             additionalData.dirLightPCSSBlockerSearchAngularDiameter = -1.0f;
             additionalData.dirLightPCSSBlockerSamplingClumpExponent = 999.0f;
+            additionalData.dirLightBendSSSMaxRayDistance = 999.0f;
             additionalData.dirLightBendSSSSurfaceThickness = 999.0f;
             additionalData.dirLightBendSSSBilinearThreshold = -1.0f;
             additionalData.dirLightBendSSSShadowContrast = -1.0f;
@@ -610,18 +643,18 @@ namespace VividRP.Editor.Tests
             additionalData.dirLightBendSSSUsePrecisionOffset = true;
             additionalData.dirLightBendSSSBilinearSamplingOffsetMode = true;
 
-            additionalData.shadowAtlasResolution = (VividAdditionalLightData.CSMShadowAtlasResolution)12345;
+            additionalData.shadowMapResolution = (VividAdditionalLightData.CSMShadowMapResolution)12345;
             additionalData.screenSpaceShadowQuality = (VividAdditionalLightData.CSMScreenSpaceShadowQuality)12345;
 
             Assert.That(
                 additionalData.screenSpaceShadowQuality,
                 Is.EqualTo(VividAdditionalLightData.DefaultScreenSpaceShadowQuality));
             Assert.That(
-                additionalData.shadowAtlasResolution,
-                Is.EqualTo(VividAdditionalLightData.CSMShadowAtlasResolution.Resolution4096));
+                additionalData.shadowMapResolution,
+                Is.EqualTo(VividAdditionalLightData.CSMShadowMapResolution.Resolution2048));
             Assert.That(
-                additionalData.resolvedShadowAtlasResolution,
-                Is.EqualTo(VividAdditionalLightData.DefaultShadowAtlasResolution));
+                additionalData.resolvedShadowMapResolution,
+                Is.EqualTo(VividAdditionalLightData.DefaultShadowMapResolution));
             Assert.That(additionalData.depthBias, Is.EqualTo(VividAdditionalLightData.MaxShadowDepthBias));
             Assert.That(additionalData.normalBias, Is.EqualTo(0.0f));
             Assert.That(additionalData.slopeBias, Is.EqualTo(VividAdditionalLightData.MaxShadowSlopeBias));
@@ -635,6 +668,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 additionalData.dirLightPCSSBlockerSamplingClumpExponent,
                 Is.EqualTo(VividAdditionalLightData.MaxDirLightPCSSBlockerSamplingClumpExponent));
+            Assert.That(
+                additionalData.dirLightBendSSSMaxRayDistance,
+                Is.EqualTo(VividAdditionalLightData.MaxDirLightBendSSSMaxRayDistance));
             Assert.That(
                 additionalData.dirLightBendSSSSurfaceThickness,
                 Is.EqualTo(VividAdditionalLightData.MaxDirLightBendSSSSurfaceThickness));

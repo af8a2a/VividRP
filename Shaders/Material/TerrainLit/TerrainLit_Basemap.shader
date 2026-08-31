@@ -70,6 +70,7 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
                 #pragma vertex Vert
                 #pragma fragment FragShadow
 
+                #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
                 #define VIVID_TERRAIN_BASEMAP 1
                 #define VIVID_TERRAIN_PASS_SHADOW 1
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"

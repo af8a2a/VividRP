@@ -381,22 +381,35 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            VividRendererListID batchKey = m_Materials[(int) instanceData.MaterialIndex].RendererListID;
+            VividRendererListID materialBatchKey =
+                m_Materials[(int) instanceData.MaterialIndex].RendererListID;
+            VividRendererListID mainBatchKey = materialBatchKey;
             if ((instanceData.Flags & VividInstanceFlags.FlipWindingOrder) != 0
-                && (batchKey & VividRendererListID.CullOff) == 0)
+                && (mainBatchKey & VividRendererListID.CullOff) == 0)
             {
-                batchKey ^= VividRendererListID.CullFront;
+                mainBatchKey ^= VividRendererListID.CullFront;
             }
 
-            int batchIndex = (int) batchKey;
-            if ((uint) batchIndex >= (uint) VividRendererListID.Count)
-                return;
-
-            uint batchBit = 1u << batchIndex;
             if ((instanceData.PassMask & VividInstancePassMask.Main) != 0)
-                m_MainViewRendererBatchMask |= batchBit;
+                RegisterRendererBatch(ref m_MainViewRendererBatchMask, mainBatchKey);
             if ((instanceData.PassMask & VividInstancePassMask.Shadows) != 0)
-                m_ShadowRendererBatchMask |= batchBit;
+            {
+                VividRendererListID shadowBatchKey =
+                    (instanceData.Flags & VividInstanceFlags.TwoSidedShadows) != 0
+                        ? (materialBatchKey & ~VividRendererListID.CullFront)
+                            | VividRendererListID.CullOff
+                        : mainBatchKey;
+                RegisterRendererBatch(ref m_ShadowRendererBatchMask, shadowBatchKey);
+            }
+        }
+
+        private static void RegisterRendererBatch(
+            ref uint rendererBatchMask,
+            VividRendererListID batchKey)
+        {
+            int batchIndex = (int) batchKey;
+            if ((uint) batchIndex < (uint) VividRendererListID.Count)
+                rendererBatchMask |= 1u << batchIndex;
         }
 
         private static int SaturatingAdd(int current, int increment)

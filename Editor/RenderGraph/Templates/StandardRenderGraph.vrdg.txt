@@ -287,106 +287,6 @@ MonoBehaviour:
           m_PortDirection: 1
           m_PortOrientation: 0
           m_Title: VBufferAnisotropy (R)
-    - rid: 5491569293244235840
-      type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Guid:
-          m_Value0: 16217692952469770125
-          m_Value1: 14882032183244481893
-        m_HashGuid:
-          serializedVersion: 2
-          Hash: 8d0f51b4d0d110e165e5371a6c9987ce
-        m_Version: 2
-        m_Position: {x: 1810.3738, y: 12.413498}
-        m_Title:
-        m_Tooltip:
-        m_NodePreviewModel:
-          rid: -2
-        m_State: 0
-        m_InputConstantsById:
-          m_KeyList:
-          - m_CSMShadowAtlas_In
-          m_ValueList:
-          - rid: 5491569293244235841
-        m_InputPortInfos:
-          expandedPortsById:
-            m_KeyList: []
-            m_ValueList:
-        m_OutputPortInfos:
-          expandedPortsById:
-            m_KeyList: []
-            m_ValueList:
-        m_Collapsed: 0
-        m_CurrentModeIndex: 0
-        m_ElementColor:
-          m_Color: {r: 0, g: 0, b: 0, a: 0}
-          m_HasUserColor: 0
-        m_Node:
-          rid: 5491569293244235842
-    - rid: 5491569293244235841
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            Width: 1920
-            Height: 1080
-            Slices: 1
-            Dimension: 2
-            ColorFormat: 4
-            DepthBufferBits: 0
-            MsaaSamples: 1
-            FilterMode: 1
-            WrapMode: 1
-            AnisoLevel: 1
-            MipMapBias: 0
-            UseMipMap: 0
-            AutoGenerateMips: 0
-            MipCount: 1
-            ClearBuffer: 0
-            ClearColor: {r: 0, g: 0, b: 0, a: 0}
-            IsShadowMap: 0
-            EnableRandomWrite: 0
-            BindTextureMS: 0
-            UseDynamicScale: 0
-            UseDynamicScaleExplicit: 0
-            ScaleFactor: {x: 1, y: 1}
-            Name: Texture
-    - rid: 5491569293244235842
-      type: {class: MeshletShadowPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
-      data:
-        m_PassName:
-    - rid: 5491569293244235843
-      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Guid:
-          m_Value0: 14194567464211444800
-          m_Value1: 18096627350143103004
-        m_HashGuid:
-          serializedVersion: 2
-          Hash: 40f4a314e73bfdc41cf0e5e5b12224fb
-        m_Version: 2
-        m_FromPortReference:
-          m_NodeModelGuid:
-            m_Value0: 13452917271151572255
-            m_Value1: 5654668131305242374
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: 1ff5b443fb5cb2ba06bf2ba9b46a794e
-          m_UniqueId: m_ShadowAtlas
-          m_PortDirection: 2
-          m_PortOrientation: 0
-          m_Title: CSMShadowAtlas (W)
-        m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 16217692952469770125
-            m_Value1: 14882032183244481893
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: 8d0f51b4d0d110e165e5371a6c9987ce
-          m_UniqueId: m_CSMShadowAtlas_In
-          m_PortDirection: 1
-          m_PortOrientation: 0
-          m_Title: CSMShadowAtlas (R)
     - rid: 5491569293244235844
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -399,12 +299,12 @@ MonoBehaviour:
         m_Version: 2
         m_FromPortReference:
           m_NodeModelGuid:
-            m_Value0: 16217692952469770125
-            m_Value1: 14882032183244481893
+            m_Value0: 13452917271151572255
+            m_Value1: 5654668131305242374
           m_NodeModelHashGuid:
             serializedVersion: 2
-            Hash: 8d0f51b4d0d110e165e5371a6c9987ce
-          m_UniqueId: m_CSMShadowAtlas_Out
+            Hash: 1ff5b443fb5cb2ba06bf2ba9b46a794e
+          m_UniqueId: m_ShadowAtlas
           m_PortDirection: 2
           m_PortOrientation: 0
           m_Title: CSMShadowAtlas (W)
@@ -4536,7 +4436,6 @@ MonoBehaviour:
         - rid: 8515051808828424269
         - rid: 8515052000000000000
         - rid: 8515051898187808867
-        - rid: 5491569293244235840
         - rid: 5491569314989342777
         - rid: 5491569450071621755
         - rid: 5491569460029161592
@@ -4561,7 +4460,6 @@ MonoBehaviour:
         - rid: 8515051850175873101
         - rid: 8515051898187808893
         - rid: 5491569128883355718
-        - rid: 5491569293244235843
         - rid: 5491569293244235844
         - rid: 5491569314989342783
         - rid: 5491569450071621750
@@ -4894,29 +4792,13 @@ MonoBehaviour:
           m_Category: 2
           m_Index: 17
         - m_Guid:
-            m_Value0: 16217692952469770125
-            m_Value1: 14882032183244481893
-          m_HashGuid:
-            serializedVersion: 2
-            Hash: 8d0f51b4d0d110e165e5371a6c9987ce
-          m_Category: 0
-          m_Index: 16
-        - m_Guid:
-            m_Value0: 14194567464211444800
-            m_Value1: 18096627350143103004
-          m_HashGuid:
-            serializedVersion: 2
-            Hash: 40f4a314e73bfdc41cf0e5e5b12224fb
-          m_Category: 2
-          m_Index: 18
-        - m_Guid:
             m_Value0: 14329740723693967068
             m_Value1: 14267706175185850773
           m_HashGuid:
             serializedVersion: 2
             Hash: dc563a174477ddc69591993b2c1301c6
           m_Category: 2
-          m_Index: 19
+          m_Index: 18
         - m_Guid:
             m_Value0: 2047278322622808984
             m_Value1: 10354561750761685021

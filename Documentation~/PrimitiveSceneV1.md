@@ -124,11 +124,11 @@ VisibilityBufferPass
 
 ## 主方向光阴影 DrawSet
 
-`GPUDrivenSystem` 在 `SubsystemPreRender` 中检测当前编译图是否包含 `MeshletShadowPass`。当本相机的 CSM 数据有效时，它使用每个级联的逻辑 `projection * view` 矩阵调度独立的 Shadow DrawSet；主视图与阴影各自持有 per-camera 状态，不能覆盖对方的 pending job。
+`GPUDrivenSystem` 在 `SubsystemPreRender` 中检测当前编译图是否包含 `CSMShadowPass`。当本相机的 CSM 数据有效时，它使用每个级联的逻辑 `projection * view` 矩阵调度独立的 Shadow DrawSet；主视图与阴影各自持有 per-camera 状态，不能覆盖对方的 pending job。
 
 阴影 CPU 粗剔除采用所有活动级联的 OR-union：Primitive 与任一级联相交就只写入一次 legacy instance index，随后现有二维 GPU workload 再按每个级联精确剔除。Shadow DrawSet 只接受 `VividInstancePassMask.Shadows`，并与现有 shadow pancaking 一致地禁用每个级联的 near plane；cascade sphere 仍由 GPU 路径处理，因此 CPU 结果只可能增加 false positive。
 
-Shadow job 在 PreRender 只调度，不等待也不上传。pending DrawSet 随本相机的 `VividGPUDrivenFrameData` 传给 `MeshletShadowPass`，直到该 pass 已构建全部级联 context、即将调用 `CullShadowCascades` 时才 Complete 并上传紧凑 index。相机、frame 或 Scene revision 不匹配时不消费旧结果，直接回退到原有全场景 GPU 阴影剔除。图中 pass 动态不活动时，pending reader 会在下一次 `PrepareFrame` mutation barrier 或系统 Dispose 时完成并失效，且不会发布或上传。
+Shadow job 在 PreRender 只调度，不等待也不上传。pending DrawSet 随本相机的 `VividGPUDrivenFrameData` 传给 `CSMShadowPass`，直到该 pass 已构建全部级联 context、即将调用 `CullShadowCascades` 时才 Complete 并上传紧凑 index。相机、frame 或 Scene revision 不匹配时不消费旧结果，直接回退到原有全场景 GPU 阴影剔除。图中 pass 动态不活动时，pending reader 会在下一次 `PrepareFrame` mutation barrier 或系统 Dispose 时完成并失效，且不会发布或上传。
 
 空 DrawSet 仍先 reset GPU culling counters/indirect args，然后跳过 instance dispatch，不能保留上一相机或上一帧的结果。
 
@@ -169,7 +169,7 @@ GPU instance-cull threads = visible DrawSection count
 - temporal jitter 只能让 CPU coarse frustum 产生 false positive，4 px guard band 内不能产生边缘 false negative；
 - empty DrawSet 安全 reset，主视图不重用旧 indirect args；
 - Shadow DrawSet 必须按 Shadows pass 过滤、对全部活动级联取并集且禁用 near-plane coarse reject；
-- Shadow job 必须在 GPUDriven PreRender 调度，并延迟到 `MeshletShadowPass` 的 GPU cull 前才 Complete；
+- Shadow job 必须在 GPUDriven PreRender 调度，并延迟到 `CSMShadowPass` 的 GPU cull 前才 Complete；
 - empty Shadow DrawSet 仍 reset 全部 cascade indirect args，失配时则回退 full-scene shadow instance culling；
 - DrawSet-fed GPU culling 与 full-scene GPU culling 的最终 Visibility Buffer 在代表性 Meshlet/Terrain 场景中一致；
 - Unity `CullingResults` 仍服务于 lights/probes/shadows/RendererList，V1 不宣称已经完成整个 SRP culling replacement。

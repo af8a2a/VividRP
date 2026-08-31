@@ -203,6 +203,21 @@ DEALINGS IN THE SOFTWARE.
 
 ---------
 
+Component Name: Microsoft DirectX Shader Compiler (DXC)
+
+Source: https://github.com/microsoft/DirectXShaderCompiler
+
+Version / Revision: Microsoft.Direct3D.DXC 1.8.2505.32
+
+License Types: MIT, LLVM Release License, and Microsoft Software License Terms
+
+`VividMeshShader.dll` uses the redistributed Windows x86_64 `dxcompiler.dll`
+and `dxil.dll` for runtime compilation. The corresponding license texts are
+redistributed beside those binaries under
+`Runtime/SubSystem/Plugin/MeshShader/Plugins/x86_64`.
+
+---------
+
 Component Name: Unity Native Plugin API headers
 
 Source: https://github.com/Unity-Technologies/NativeRenderingPlugin

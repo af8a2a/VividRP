@@ -301,7 +301,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildDrawSetJob_BucketsVisibleSourcesAndFlipsWinding()
+        public void BuildDrawSetJob_BucketsVisibleSourcesAndHonorsPassSpecificCulling()
         {
             VividPrimitiveHandle firstHandle = CreateHandle(3);
             VividPrimitiveHandle secondHandle = CreateHandle(9);
@@ -313,7 +313,9 @@ namespace VividRP.Editor.Tests
                     new float3(1.0f),
                     drawSectionOffset: 0u,
                     drawSectionCount: 4u,
-                    flags: VividPrimitiveFlags.Valid | VividPrimitiveFlags.FlipWindingOrder),
+                    flags: VividPrimitiveFlags.Valid
+                        | VividPrimitiveFlags.FlipWindingOrder
+                        | VividPrimitiveFlags.TwoSidedShadows),
                 [1] = CreateRecord(
                     secondHandle,
                     new float3(-1.0f),
@@ -351,6 +353,7 @@ namespace VividRP.Editor.Tests
                 BucketCounts = counts,
                 BucketWriteCursors = cursors,
                 Result = result,
+                RequiredPassMask = VividInstancePassMask.Main,
             }.Schedule().Complete();
 
             Assert.That(result[0].VisiblePrimitiveCount, Is.EqualTo(1));
@@ -365,6 +368,32 @@ namespace VividRP.Editor.Tests
             Assert.That(entries[0].PrimitiveGeneration, Is.EqualTo(firstHandle.Generation));
             Assert.That(entries[0].DrawSectionIndex, Is.EqualTo(1u));
             Assert.That(entries[0].LegacyInstanceIndex, Is.EqualTo(11u));
+
+            new VividPrimitiveBuildDrawSetJob
+            {
+                CullingRecords = records,
+                Visibility = visibility,
+                DrawSources = sources,
+                Entries = entries,
+                LegacyInstanceIndices = legacyIndices,
+                Buckets = buckets,
+                BucketCounts = counts,
+                BucketWriteCursors = cursors,
+                Result = result,
+                RequiredPassMask = VividInstancePassMask.Shadows,
+            }.Schedule().Complete();
+
+            Assert.That(result[0].VisiblePrimitiveCount, Is.EqualTo(1));
+            Assert.That(result[0].DrawCount, Is.EqualTo(4));
+            Assert.That(result[0].NonEmptyBucketCount, Is.EqualTo(2));
+            AssertBucket(buckets[(int) VividRendererListID.CullOff], 0, 3);
+            AssertBucket(
+                buckets[(int) (VividRendererListID.CullOff | VividRendererListID.AlphaTest)],
+                3,
+                1);
+            Assert.That(
+                legacyIndices.GetSubArray(0, 4).ToArray(),
+                Is.EqualTo(new uint[] { 10, 11, 12, 13 }));
         }
 
         [Test]

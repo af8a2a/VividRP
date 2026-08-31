@@ -301,13 +301,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesDepthOfFieldPass()
+        public void GeneratedNodeRegistry_IncludesDepthOfFieldPass()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(DepthOfFieldPass) });
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(DepthOfFieldPass));
 
-            Assert.That(registrations, Has.Count.EqualTo(1));
-            Assert.That(registrations[0].NodeClassName, Is.EqualTo("DepthOfFieldPass"));
-            Assert.That(registrations[0].PassType, Is.EqualTo(typeof(DepthOfFieldPass)));
+            Assert.That(nodeType, Is.Not.Null);
+            Assert.That(nodeType.Name, Is.EqualTo(nameof(DepthOfFieldPass)));
+            Assert.That(RenderPassNodeRegistry.GetPassType(nodeType), Is.EqualTo(typeof(DepthOfFieldPass)));
         }
 
         private static void InvokeApplyInactivePassBypassDescriptors(

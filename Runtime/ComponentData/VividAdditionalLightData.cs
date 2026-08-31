@@ -6,6 +6,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Serialization;
 
 namespace VividRP.Runtime
 {
@@ -647,6 +648,15 @@ namespace VividRP.Runtime
             Unreal = 4,
         }
 
+        public enum CSMShadowMapResolution
+        {
+            Resolution512 = 512,
+            Resolution1024 = 1024,
+            Resolution2048 = 2048,
+            Resolution4096 = 4096,
+        }
+
+        [Obsolete("Use CSMShadowMapResolution instead.")]
         public enum CSMShadowAtlasResolution
         {
             Resolution1024 = 1024,
@@ -685,7 +695,7 @@ namespace VividRP.Runtime
         internal const float DefaultRayTracedShadowRayBias = 0.001f;
         internal const float DefaultRayTracedShadowDistantRayBias = 0.001f;
         private const float LegacyRayTracedShadowSunAngularDiameterDefault = 0.533f;
-        internal const int DefaultShadowAtlasResolution = 4096;
+        internal const int DefaultShadowMapResolution = 2048;
         internal const CSMScreenSpaceShadowQuality DefaultScreenSpaceShadowQuality = CSMScreenSpaceShadowQuality.Low;
         internal const float DefaultShadowDepthBias = 1.0f;
         internal const float DefaultShadowNormalBias = 1.0f;
@@ -705,6 +715,9 @@ namespace VividRP.Runtime
         internal const float MinDirLightPCSSBlockerSamplingClumpExponent = 1.0f;
         internal const float MaxDirLightPCSSBlockerSamplingClumpExponent = 6.0f;
         internal const float DefaultDirLightPCSSBlockerSamplingClumpExponent = 2.0f;
+        internal const float MinDirLightBendSSSMaxRayDistance = 0.0f;
+        internal const float MaxDirLightBendSSSMaxRayDistance = 10.0f;
+        internal const float DefaultDirLightBendSSSMaxRayDistance = 0.5f;
         internal const float MinDirLightBendSSSSurfaceThickness = 0.0f;
         internal const float MaxDirLightBendSSSSurfaceThickness = 0.05f;
         internal const float DefaultDirLightBendSSSSurfaceThickness = 0.004f;
@@ -766,7 +779,10 @@ namespace VividRP.Runtime
         private CSMScreenSpaceShadowQuality m_ScreenSpaceShadowQuality = DefaultScreenSpaceShadowQuality;
 
         [SerializeField]
-        private CSMShadowAtlasResolution m_ShadowAtlasResolution = CSMShadowAtlasResolution.Resolution4096;
+        private CSMShadowMapResolution m_ShadowMapResolution = CSMShadowMapResolution.Resolution2048;
+
+        [SerializeField, HideInInspector, FormerlySerializedAs("m_ShadowAtlasResolution")]
+        private int m_LegacyShadowAtlasResolution;
 
         [SerializeField]
         private float m_DepthBias = DefaultShadowDepthBias;
@@ -800,6 +816,9 @@ namespace VividRP.Runtime
 
         [SerializeField, Range(MinDirLightPCSSBlockerSamplingClumpExponent, MaxDirLightPCSSBlockerSamplingClumpExponent)]
         private float m_DirLightPCSSBlockerSamplingClumpExponent = DefaultDirLightPCSSBlockerSamplingClumpExponent;
+
+        [SerializeField, Range(MinDirLightBendSSSMaxRayDistance, MaxDirLightBendSSSMaxRayDistance)]
+        private float m_DirLightBendSSSMaxRayDistance = DefaultDirLightBendSSSMaxRayDistance;
 
         [SerializeField, Range(MinDirLightBendSSSSurfaceThickness, MaxDirLightBendSSSSurfaceThickness)]
         private float m_DirLightBendSSSSurfaceThickness = DefaultDirLightBendSSSSurfaceThickness;
@@ -1033,21 +1052,33 @@ namespace VividRP.Runtime
             }
         }
 
-        public CSMShadowAtlasResolution shadowAtlasResolution
+        public CSMShadowMapResolution shadowMapResolution
         {
-            get => SanitizeShadowAtlasResolution(m_ShadowAtlasResolution);
+            get
+            {
+                MigrateLegacyShadowMapResolution();
+                return SanitizeShadowMapResolution(m_ShadowMapResolution);
+            }
             set
             {
-                var sanitizedValue = SanitizeShadowAtlasResolution(value);
-                if (m_ShadowAtlasResolution == sanitizedValue)
+                m_LegacyShadowAtlasResolution = 0;
+                var sanitizedValue = SanitizeShadowMapResolution(value);
+                if (m_ShadowMapResolution == sanitizedValue)
                     return;
 
-                m_ShadowAtlasResolution = sanitizedValue;
+                m_ShadowMapResolution = sanitizedValue;
                 NotifyLightDataChanged();
             }
         }
 
-        internal int resolvedShadowAtlasResolution => (int)SanitizeShadowAtlasResolution(m_ShadowAtlasResolution);
+        internal int resolvedShadowMapResolution => (int)shadowMapResolution;
+
+        [Obsolete("Use shadowMapResolution instead.")]
+        public CSMShadowAtlasResolution shadowAtlasResolution
+        {
+            get => (CSMShadowAtlasResolution)(resolvedShadowMapResolution * 2);
+            set => shadowMapResolution = ConvertLegacyShadowAtlasResolution((int)value);
+        }
 
         public float depthBias
         {
@@ -1158,6 +1189,17 @@ namespace VividRP.Runtime
                 MinDirLightPCSSBlockerSamplingClumpExponent,
                 MaxDirLightPCSSBlockerSamplingClumpExponent,
                 DefaultDirLightPCSSBlockerSamplingClumpExponent);
+        }
+
+        public float dirLightBendSSSMaxRayDistance
+        {
+            get => m_DirLightBendSSSMaxRayDistance;
+            set => SetClampedFloat(
+                ref m_DirLightBendSSSMaxRayDistance,
+                value,
+                MinDirLightBendSSSMaxRayDistance,
+                MaxDirLightBendSSSMaxRayDistance,
+                DefaultDirLightBendSSSMaxRayDistance);
         }
 
         public float dirLightBendSSSSurfaceThickness
@@ -1524,6 +1566,7 @@ namespace VividRP.Runtime
         private void OnEnable()
         {
             m_Light = light;
+            MigrateLegacyShadowMapResolution();
             RefreshAnimatedState();
             ConstrainTimeOfDaySettings();
             ApplyTimeOfDayToLight(m_Light);
@@ -1570,6 +1613,7 @@ namespace VividRP.Runtime
         private void OnValidate()
         {
             m_Light = light;
+            MigrateLegacyShadowMapResolution();
             MigrateLegacyAngularDiameterSettings();
             ConstrainRayTracedShadowSettings();
             ConstrainShadowBiasSettings();
@@ -1771,7 +1815,7 @@ namespace VividRP.Runtime
         private void ConstrainShadowBiasSettings()
         {
             m_ScreenSpaceShadowQuality = SanitizeScreenSpaceShadowQuality(m_ScreenSpaceShadowQuality);
-            m_ShadowAtlasResolution = SanitizeShadowAtlasResolution(m_ShadowAtlasResolution);
+            m_ShadowMapResolution = SanitizeShadowMapResolution(m_ShadowMapResolution);
             m_DepthBias = SanitizeClampedFloat(
                 m_DepthBias,
                 0.0f,
@@ -1817,6 +1861,11 @@ namespace VividRP.Runtime
                 MinDirLightPCSSBlockerSamplingClumpExponent,
                 MaxDirLightPCSSBlockerSamplingClumpExponent,
                 DefaultDirLightPCSSBlockerSamplingClumpExponent);
+            m_DirLightBendSSSMaxRayDistance = SanitizeClampedFloat(
+                m_DirLightBendSSSMaxRayDistance,
+                MinDirLightBendSSSMaxRayDistance,
+                MaxDirLightBendSSSMaxRayDistance,
+                DefaultDirLightBendSSSMaxRayDistance);
             m_DirLightBendSSSSurfaceThickness = SanitizeClampedFloat(
                 m_DirLightBendSSSSurfaceThickness,
                 MinDirLightBendSSSSurfaceThickness,
@@ -1876,16 +1925,37 @@ namespace VividRP.Runtime
             };
         }
 
-        private static CSMShadowAtlasResolution SanitizeShadowAtlasResolution(CSMShadowAtlasResolution value)
+        private static CSMShadowMapResolution SanitizeShadowMapResolution(CSMShadowMapResolution value)
         {
             return value switch
             {
-                CSMShadowAtlasResolution.Resolution1024 => CSMShadowAtlasResolution.Resolution1024,
-                CSMShadowAtlasResolution.Resolution2048 => CSMShadowAtlasResolution.Resolution2048,
-                CSMShadowAtlasResolution.Resolution4096 => CSMShadowAtlasResolution.Resolution4096,
-                CSMShadowAtlasResolution.Resolution8192 => CSMShadowAtlasResolution.Resolution8192,
-                _ => (CSMShadowAtlasResolution)DefaultShadowAtlasResolution
+                CSMShadowMapResolution.Resolution512 => CSMShadowMapResolution.Resolution512,
+                CSMShadowMapResolution.Resolution1024 => CSMShadowMapResolution.Resolution1024,
+                CSMShadowMapResolution.Resolution2048 => CSMShadowMapResolution.Resolution2048,
+                CSMShadowMapResolution.Resolution4096 => CSMShadowMapResolution.Resolution4096,
+                _ => (CSMShadowMapResolution)DefaultShadowMapResolution
             };
+        }
+
+        private static CSMShadowMapResolution ConvertLegacyShadowAtlasResolution(int atlasResolution)
+        {
+            return atlasResolution switch
+            {
+                1024 => CSMShadowMapResolution.Resolution512,
+                2048 => CSMShadowMapResolution.Resolution1024,
+                4096 => CSMShadowMapResolution.Resolution2048,
+                8192 => CSMShadowMapResolution.Resolution4096,
+                _ => (CSMShadowMapResolution)DefaultShadowMapResolution
+            };
+        }
+
+        private void MigrateLegacyShadowMapResolution()
+        {
+            if (m_LegacyShadowAtlasResolution == 0)
+                return;
+
+            m_ShadowMapResolution = ConvertLegacyShadowAtlasResolution(m_LegacyShadowAtlasResolution);
+            m_LegacyShadowAtlasResolution = 0;
         }
 
         private void ConstrainCelestialBodySettings()

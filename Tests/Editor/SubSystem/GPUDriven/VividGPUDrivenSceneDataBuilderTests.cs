@@ -136,6 +136,39 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AddInstance_TwoSidedShadowUsesCullOffWithoutChangingMainViewCulling()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            sceneData.AddLegacyMaterial(new VividMaterialData
+            {
+                RendererListID = VividRendererListID.AlphaTest,
+            });
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    MaterialIndex = 0,
+                    PassMask = VividInstancePassMask.Main | VividInstancePassMask.Shadows,
+                    Flags = VividInstanceFlags.TwoSidedShadows,
+                },
+                maxVisibleMeshletRenderRequestCount: 1);
+
+            Assert.That(
+                sceneData.IsMainViewRendererBatchActive(VividRendererListID.AlphaTest),
+                Is.True);
+            Assert.That(
+                sceneData.IsMainViewRendererBatchActive(
+                    VividRendererListID.CullOff | VividRendererListID.AlphaTest),
+                Is.False);
+            Assert.That(
+                sceneData.IsShadowRendererBatchActive(VividRendererListID.AlphaTest),
+                Is.False);
+            Assert.That(
+                sceneData.IsShadowRendererBatchActive(
+                    VividRendererListID.CullOff | VividRendererListID.AlphaTest),
+                Is.True);
+        }
+
+        [Test]
         public void Build_DeduplicatesSharedMaterialAndMeshletData_WhenTwoRenderersReferenceSameAssets()
         {
             GameObject first = null;
@@ -189,6 +222,80 @@ namespace VividRP.Editor.Tests
             finally
             {
                 DestroyTestObjects(first, second, material, mesh, meshletCollection);
+            }
+        }
+
+        [Test]
+        public void Build_PreservesTwoSidedShadowCastingForGpuAndPrimitiveScene()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("TwoSidedShadowMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "TwoSidedShadowCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 });
+                gameObject = CreateMeshletRendererObject(
+                    "Renderer_TwoSidedShadow",
+                    mesh,
+                    new[] { material },
+                    out MeshletRenderer meshletRenderer);
+                MeshRenderer sourceRenderer = gameObject.GetComponent<MeshRenderer>();
+                sourceRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;
+                meshletRenderer.CaptureSourceFromRenderer(sourceRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new BindlessGPUDrivenTextureBackend(
+                    new FakeBindlessTextureDescriptorAllocator(16));
+                bool staticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    textureBackend,
+                    out bool materialDataChanged,
+                    out _);
+
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+                Assert.That(
+                    sceneData.Instances[0].Flags & VividInstanceFlags.TwoSidedShadows,
+                    Is.EqualTo(VividInstanceFlags.TwoSidedShadows));
+
+                using var primitiveScene = new VividPrimitiveScene();
+                var primitiveAdapter = new VividPrimitiveSceneAdapter();
+                primitiveAdapter.Synchronize(
+                    primitiveScene,
+                    VividMeshletRendererDatabase.instance,
+                    sceneData,
+                    staticDataChanged,
+                    materialDataChanged,
+                    0);
+
+                Assert.That(primitiveScene.ActiveCullRecords.Length, Is.EqualTo(1));
+                Assert.That(
+                    primitiveScene.ActiveCullRecords[0].Flags
+                        & VividPrimitiveFlags.TwoSidedShadows,
+                    Is.EqualTo(VividPrimitiveFlags.TwoSidedShadows));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection);
             }
         }
 

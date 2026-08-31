@@ -61,11 +61,11 @@ For multi-step tasks, state a brief plan:
 ## 5. Important Notes
 
 - Unity `.meta` files are auto-generated; do not manually create or edit them
-- Do not hand-edit generated or synchronized artifacts such as `Editor/RenderGraph/GeneratedRenderPassNodes.g.cs` or `Runtime/Resources/PipelineResources.asset` unless you are intentionally fixing their generator/sync pipeline
+- Do not hand-edit generated or synchronized artifacts such as `Editor/SourceGenerators/VividRP.RenderPassNodeGenerator.dll` or `Runtime/Resources/PipelineResources.asset`; rebuild the former from `SourceGenerators~/VividRP.RenderPassNodeGenerator` and update the latter through its sync pipeline
 - Unity `.meta` files, generated assets, and package-relative paths must stay in sync when moving or renaming files
 - The repository currently uses both `Packages/com.af8a2a.vividrp/...` and `Packages/VividRP/...` path constants; do not “fix” only one side during refactors — audit all package-relative paths together
-- Package path changes require updates to both `Editor/PipelineResource/PipelineResourceUpdater.cs` and `Editor/RenderGraph/RenderPassNodeRegistryGenerator.cs`
+- Package path changes require an audit of `Editor/PipelineResource/PipelineResourceUpdater.cs` and all package-relative constants found by the package path search below
 - Quick searches:
   - Pass/resource search: `rg "IRenderPass|RenderGraphResource|PipelineResource|ResourcePath" Runtime Editor Tests`
-  - Editor/codegen search: `rg "GeneratedRenderPassNodes|BuildRegistrations|RegisteredPassTypeName" Editor Runtime Tests`
+  - Editor/codegen search: `rg "GeneratedRenderPassNodeRegistry|RenderPassNodeSourceGenerator|GetRegisteredPassType" Editor Runtime Tests SourceGenerators~`
   - Package path audit: `rg "Packages/VividRP|Packages/com.af8a2a.vividrp|com.af8a2a.vividrp" Runtime Editor Tests package.json`

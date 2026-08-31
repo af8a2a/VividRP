@@ -440,7 +440,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ShadowDrawSetScheduling_UsesMeshletPassCascadeUnionAndShadowSemantics()
+        public void ShadowDrawSetScheduling_UsesUnifiedCascadeMatricesAndShadowSemantics()
         {
             string source = ReadRuntimeSource(
                 "Runtime",
@@ -452,7 +452,7 @@ namespace VividRP.Editor.Tests
                 "private VividPrimitiveDrawSet ScheduleShadowDrawSet(",
                 "internal VividPrimitiveDrawSet CompleteShadowDrawSet(");
 
-            StringAssert.Contains("PassRecorder.HasMeshletShadowPass", schedule);
+            StringAssert.Contains("PassRecorder.HasCascadedShadowCasterPass", schedule);
             StringAssert.Contains("shadowData.isCSMActive", schedule);
             StringAssert.Contains("shadowData.viewMatrices", schedule);
             StringAssert.Contains("shadowData.projMatrices", schedule);
@@ -486,26 +486,124 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void MeshletShadowRecord_CompletesDrawSetImmediatelyBeforeShadowGpuCull()
+        public void CSMShadowRecord_CompletesDrawSetImmediatelyBeforeShadowGpuCull()
         {
             string source = ReadRuntimeSource(
                 "Runtime",
                 "RenderPass",
                 "Core",
-                "MeshletShadowPass.cs");
-            string record = SliceSource(
+                "CSMShadowPass.cs");
+            string prepareMeshletDraws = SliceSource(
                 source,
-                "public override void Record(",
-                "public override void Dispose()");
+                "private bool TryPrepareMeshletShadowDraws(",
+                "private void DrawMeshletShadowCascade(");
 
-            int buildContexts = record.IndexOf("BuildShadowCullingContext(");
-            int complete = record.IndexOf("system.CompleteShadowDrawSet(");
-            int gpuCull = record.IndexOf("system.CullShadowCascades(");
+            int buildContexts = prepareMeshletDraws.IndexOf("BuildShadowCullingContext(");
+            int complete = prepareMeshletDraws.IndexOf("system.CompleteShadowDrawSet(");
+            int gpuCull = prepareMeshletDraws.IndexOf("system.CullShadowCascades(");
 
             Assert.That(buildContexts, Is.GreaterThanOrEqualTo(0));
             Assert.That(complete, Is.GreaterThan(buildContexts));
             Assert.That(gpuCull, Is.GreaterThan(complete));
-            StringAssert.Contains("m_PrimitiveShadowDrawSet", record);
+            StringAssert.Contains("m_PrimitiveShadowDrawSet", prepareMeshletDraws);
+        }
+
+        [Test]
+        public void CSMShadowPass_DrawsUnityAndMeshletCastersWithOneMatrixArrayAndPerCascadeSlices()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string shaderVariables = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Public",
+                "ShaderVariablesGlobal.hlsl");
+            string record = SliceSource(
+                source,
+                "public override void Record(",
+                "private void PrepareMeshletRendering(");
+            string drawMeshletShadowCascade = SliceSource(
+                source,
+                "private void DrawMeshletShadowCascade(",
+                "private void BuildShadowCullingContext(");
+            string buildCullingContext = SliceSource(
+                source,
+                "private void BuildShadowCullingContext(",
+                "private static void ConfigureMaterial(");
+
+            StringAssert.Contains("m_ShadowAtlas.desc.Dimension = TextureDimension.Tex2DArray", source);
+            StringAssert.Contains("m_ShadowAtlas.desc.Slices = VividShadowData.MaxCascadeCount", source);
+            StringAssert.Contains("ConstantBuffer.PushGlobal(", record);
+            StringAssert.Contains("ShadowMatricesConstantBufferId", record);
+            StringAssert.Contains("CBUFFER_START(ShaderVariablesShadowMatrices)", shaderVariables);
+            StringAssert.Contains("float4x4 _VividShadowVP[4]", shaderVariables);
+            StringAssert.DoesNotContain("SetGlobalMatrixArray", record);
+            StringAssert.Contains("depthSlice: cascadeIndex", record);
+            StringAssert.DoesNotContain("RenderBufferLoadAction.DontCare", record);
+            StringAssert.Contains("SetGlobalInt(ShadowCascadeIndexId, cascadeIndex)", record);
+            StringAssert.DoesNotContain("SetViewProjectionMatrices", record);
+            StringAssert.DoesNotContain("SetViewport", record);
+            StringAssert.DoesNotContain("EnableScissorRect", record);
+            StringAssert.Contains("m_ShadowData.viewMatrices", buildCullingContext);
+            StringAssert.Contains("m_ShadowData.projMatrices", buildCullingContext);
+            StringAssert.Contains("nativeCmd.DrawRendererList(rendererList)", record);
+            StringAssert.Contains("DrawMeshletShadowCascade(", record);
+            StringAssert.Contains(
+                "GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(",
+                drawMeshletShadowCascade);
+        }
+
+        [Test]
+        public void CSMShadowPass_SetsPerDrawStateWithoutReuploadingShadowMatrices()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string prepare = SliceSource(
+                source,
+                "private bool TryPrepareMeshletShadowDraws(",
+                "private void DrawMeshletShadowCascade(");
+            string draw = SliceSource(
+                source,
+                "private void DrawMeshletShadowCascade(",
+                "private void BuildShadowCullingContext(");
+
+            StringAssert.Contains(
+                "m_DrawProperties.SetInteger(ShadowCascadeIndexId, cascadeIndex)",
+                draw);
+            StringAssert.DoesNotContain("ShadowMatricesConstantBufferId", draw);
+            StringAssert.DoesNotContain("SetGlobalMatrixArray", draw);
+            StringAssert.Contains("BindSpaceProperties", draw);
+            StringAssert.Contains("VirtualTextureSpaceBinding", prepare);
+        }
+
+        [Test]
+        public void CSMShadowPass_UsesPerCascadeSplitDataWithoutBatchShadowCulling()
+        {
+            string csmSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string recorderSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderGraph",
+                "PassRecorder.Execution.cs");
+            string shadowDataSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderGraph",
+                "FrameContext",
+                "VividShadowData.cs");
+
+            StringAssert.Contains("settings.splitData = shadowData.splitData[i]", csmSource);
+            StringAssert.Contains("settings.splitIndex = -1", csmSource);
+            StringAssert.DoesNotContain("CullShadowCasters", recorderSource);
+            StringAssert.DoesNotContain("CullShadowCasters", shadowDataSource);
         }
 
         [Test]

@@ -74,7 +74,7 @@ namespace VividRP.Runtime.RenderPass.Experimental.Material
         {
             profilingSampler = new ProfilingSampler(nameof(ExperimentalClosureBufferPass));
             m_VisibilityBuffer = CreateInput("VisibilityBuffer", GraphicsFormat.R32G32_UInt);
-            m_Attributes0 = CreateInput("VisibilityBufferAttributes0", GraphicsFormat.R16G16B16A16_SFloat);
+            m_Attributes0 = CreateInput("VisibilityBufferAttributes0", GraphicsFormat.R32G32B32A32_SFloat);
             m_Attributes1 = CreateInput("VisibilityBufferAttributes1", GraphicsFormat.R16G16B16A16_SFloat);
             m_Depth = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
 

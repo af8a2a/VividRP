@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
@@ -14,24 +15,16 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GeneratedNodeRegistry_ContainsDeferredLightingPassNode()
         {
-            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[]
-            {
-                typeof(DeferredLightingPass),
-                typeof(DeferredDirectionalLightingPass),
-            });
+            var deferredNodeType = RenderPassNodeRegistry.GetNodeType(typeof(DeferredLightingPass));
+            var directionalNodeType = RenderPassNodeRegistry.GetNodeType(typeof(DeferredDirectionalLightingPass));
 
+            Assert.That(deferredNodeType, Is.Not.Null);
+            Assert.That(deferredNodeType.Name, Is.EqualTo(nameof(DeferredLightingPass)));
+            Assert.That(directionalNodeType, Is.Not.Null);
+            Assert.That(directionalNodeType.Name, Is.EqualTo(nameof(DeferredDirectionalLightingPass)));
             Assert.That(
-                registrations.Any(registration =>
-                    registration.NodeClassName == nameof(DeferredLightingPass)
-                    && registration.PassType == typeof(DeferredLightingPass)),
-                Is.True);
-            Assert.That(
-                registrations.Any(registration =>
-                    registration.NodeClassName == nameof(DeferredDirectionalLightingPass)
-                    && registration.PassType == typeof(DeferredDirectionalLightingPass)),
-                Is.True);
-            Assert.That(
-                registrations.Any(registration => registration.NodeClassName.Contains("PreIntegratedFGD")),
+                TypeCache.GetTypesDerivedFrom<RenderPassNodeData>()
+                    .Any(nodeType => nodeType.Name.Contains("PreIntegratedFGD")),
                 Is.False);
         }
     }

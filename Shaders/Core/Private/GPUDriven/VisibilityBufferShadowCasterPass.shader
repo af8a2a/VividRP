@@ -33,6 +33,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             #pragma shader_feature_local_fragment _ALPHATEST_ON
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
 
+            #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
             #if !defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
@@ -58,10 +59,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
-                #ifdef _ALPHATEST_ON
                 nointerpolation uint instanceIndex : TEXCOORD0;
                 float2 uv0 : TEXCOORD1;
-                #endif
             };
 
             uint PullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
@@ -95,10 +94,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 
                 Varyings output;
                 output.positionCS = float4(-2.0, -2.0, 0.0, 1.0);
-                #ifdef _ALPHATEST_ON
                 output.instanceIndex = 0u;
                 output.uv0 = 0.0;
-                #endif
 
                 const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
                 const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
@@ -118,10 +115,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 output.positionCS = TransformWorldToHClip(TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz));
                 output.positionCS = ApplyVividShadowClamping(output.positionCS);
 
-                #ifdef _ALPHATEST_ON
                 output.instanceIndex = renderRequest.InstanceID_LOD;
                 output.uv0 = vertex.UV.xy;
-                #endif
 
                 return output;
             }

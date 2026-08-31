@@ -6,15 +6,24 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
+using VividRP.Runtime.MeshShader;
 using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    public enum VisibilityBufferRasterizationPath
+    {
+        DrawProceduralIndirect = 0,
+        ExperimentalMeshShader = 1,
+    }
+
     public class VisibilityBufferPass : UnsafePass
     {
         internal const string VisibilityBufferShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferPass";
 
         private const int IndirectDrawArgsByteStride = sizeof(uint) * 4;
+        private const string MeshShaderProgramResourcePath =
+            "VividMeshShader/VisibilityBufferMeshShader";
         private const int SpdTileSize = 64;
         private const int SpdMipTextureCount = VividGPUDrivenOcclusionHistorySystem.MaxMipCount;
         private const int SpdAtomicCounterCount = 6;
@@ -57,11 +66,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public uint Counter5;
         }
 
-        [RenderGraphResource(Name = "VisibleMeshletRenderRequests", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_VisibleMeshletRenderRequests;
-
-        [RenderGraphResource(Name = "VisibleMeshletIndirectArgs", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_VisibleMeshletIndirectArgs;
+        private GraphicsBuffer m_VisibleMeshletRenderRequests;
+        private GraphicsBuffer m_VisibleMeshletIndirectArgs;
 
         [RenderGraphResource(
             Name = "VisibilityBuffer",
@@ -104,6 +110,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultDepth;
         private readonly RenderTargetIdentifier[] m_ColorTargets = new RenderTargetIdentifier[4];
         private readonly Material[] m_Materials = new Material[(int)VividRendererListID.Count];
+        private readonly VividMeshShaderObject[] m_MeshShaderObjects = new VividMeshShaderObject[3];
+        private readonly VividMeshShaderDispatch[] m_MeshShaderDispatchBatch =
+            new VividMeshShaderDispatch[(int)VividRendererListID.Count];
         private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
         private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
@@ -115,6 +124,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RTHandle m_CurrentOccluderDepthPyramid;
         private Camera m_Camera;
         private Matrix4x4 m_CurrentViewProjectionMatrix = Matrix4x4.identity;
+        private Matrix4x4 m_VisibilityViewProjectionMatrix = Matrix4x4.identity;
         private GraphicsBuffer m_OccludedMeshletRenderRequestsBuffer;
         private GraphicsBuffer m_OccludedMeshletRenderRequestCounterBuffer;
         private GraphicsBuffer m_OccludedMeshletIndirectDispatchArgsBuffer;
@@ -132,24 +142,30 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_OcclusionCullingEnabled;
         private bool m_OcclusionHistoryValid;
         private bool m_OcclusionObservationMode;
+        private bool m_MeshShaderInitializationAttempted;
+        private bool m_MeshShaderFailureLogged;
         private int m_FrameIndex;
+
+        [SerializeField, Tooltip("Experimental D3D12 mesh-shader path. Occlusion culling is temporarily disabled, and alpha-tested buckets continue to use DrawProceduralIndirect.")]
+        private VisibilityBufferRasterizationPath m_RasterizationPath =
+            VisibilityBufferRasterizationPath.DrawProceduralIndirect;
+
+        public VisibilityBufferRasterizationPath RasterizationPath
+        {
+            get => m_RasterizationPath;
+            set
+            {
+                if (m_RasterizationPath == value)
+                    return;
+
+                m_RasterizationPath = value;
+                DisposeMeshShaderObjects();
+            }
+        }
 
         public VisibilityBufferPass()
         {
             profilingSampler = new ProfilingSampler(nameof(VisibilityBufferPass));
-
-            m_VisibleMeshletRenderRequests = RenderGraphBuffer.CreateStructured(
-                "VisibleMeshletRenderRequests",
-                1,
-                sizeof(uint) * 2,
-                GraphicsBuffer.Target.Structured
-            );
-            m_VisibleMeshletIndirectArgs = RenderGraphBuffer.CreateStructured(
-                "VisibleMeshletIndirectArgs",
-                4,
-                sizeof(uint),
-                GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments
-            );
 
             m_VisibilityBuffer = new RenderGraphTexture
             {
@@ -169,7 +185,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 desc = RenderGraphTextureDesc.CreateColorTarget(
                     1,
                     1,
-                    GraphicsFormat.R16G16B16A16_SFloat)
+                    GraphicsFormat.R32G32B32A32_SFloat)
             };
             m_Attributes0.desc.Name = "VisibilityBufferAttributes0";
             m_Attributes0.desc.FilterMode = FilterMode.Point;
@@ -268,6 +284,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_Camera = cameraData.camera;
             m_CurrentViewProjectionMatrix = cameraData.mainViewConstants.viewProjMatrix;
+            m_VisibilityViewProjectionMatrix = m_CurrentViewProjectionMatrix;
             m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
             m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
             int width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
@@ -299,18 +316,32 @@ namespace VividRP.Runtime.RenderPass.Core
                 visibleMeshletIndirectDrawArgsBuffer ??= fallbackVisibleMeshletIndirectDrawArgsBuffer;
             }
 
-            UpdateImportedBuffer(
-                m_VisibleMeshletRenderRequests,
-                visibleMeshletRenderRequestsBuffer,
-                GraphicsBuffer.Target.Structured,
-                "VisibleMeshletRenderRequests"
-            );
-            UpdateImportedBuffer(
-                m_VisibleMeshletIndirectArgs,
-                visibleMeshletIndirectDrawArgsBuffer,
-                GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
-                "VisibleMeshletIndirectArgs"
-            );
+            m_VisibleMeshletRenderRequests = visibleMeshletRenderRequestsBuffer;
+            m_VisibleMeshletIndirectArgs = visibleMeshletIndirectDrawArgsBuffer;
+            // if (PassRecorder.IsPassTextureImportActive)
+            // {
+            //     if (m_VisibleMeshletRenderRequests != null)
+            //     {
+            //         PassRecorder.ImportBufferForPass(
+            //             this,
+            //             m_VisibleMeshletRenderRequests,
+            //             AccessFlags.Read);
+            //     }
+            //
+            //     if (m_VisibleMeshletIndirectArgs != null)
+            //     {
+            //         PassRecorder.ImportBufferForPass(
+            //             this,
+            //             m_VisibleMeshletIndirectArgs,
+            //             AccessFlags.Read);
+            //     }
+            // }
+
+            if (m_RasterizationPath == VisibilityBufferRasterizationPath.ExperimentalMeshShader
+                && VividGPUDrivenSystem.HasInstance)
+            {
+                ImportMeshShaderSceneBuffers(VividGPUDrivenSystem.instance);
+            }
 
             PrepareOcclusionResources(gpuDrivenFrameData, width, height);
         }
@@ -327,8 +358,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var nativeCmd = context.GetNativeCommandBuffer();
             BindVisibilityTargets(nativeCmd, false);
 
-            GraphicsBuffer visibleMeshletRenderRequestsBuffer = m_VisibleMeshletRenderRequests?.ImportedGraphicsBuffer;
-            GraphicsBuffer visibleMeshletIndirectArgsBuffer = m_VisibleMeshletIndirectArgs?.ImportedGraphicsBuffer;
+            GraphicsBuffer visibleMeshletRenderRequestsBuffer = m_VisibleMeshletRenderRequests;
+            GraphicsBuffer visibleMeshletIndirectArgsBuffer = m_VisibleMeshletIndirectArgs;
             bool hasGPUDrivenDraws = visibleMeshletRenderRequestsBuffer != null
                                      && visibleMeshletIndirectArgsBuffer != null;
 
@@ -405,10 +436,13 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_VirtualTextureFrameData = null;
             m_PrimitiveDrawSet = null;
+            m_VisibleMeshletRenderRequests = null;
+            m_VisibleMeshletIndirectArgs = null;
             m_MeshletCullingCompute = null;
             m_CopyOccluderDepthKernel = -1;
             m_DownsampleOccluderDepthKernel = -1;
             ReleaseSpdGlobalAtomicBuffer();
+            DisposeMeshShaderObjects();
             ResetOcclusionFrameState();
             m_FrameIndex = 0;
             for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
@@ -426,7 +460,8 @@ namespace VividRP.Runtime.RenderPass.Core
             int fallbackWidth,
             int fallbackHeight)
         {
-            if (gpuDrivenFrameData == null
+            if (m_RasterizationPath == VisibilityBufferRasterizationPath.ExperimentalMeshShader
+                || gpuDrivenFrameData == null
                 || !gpuDrivenFrameData.occlusionCullingEnabled
                 || m_Camera == null
                 || m_MeshletCullingCompute == null
@@ -521,6 +556,24 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, m_RecoveredMeshletRenderRequestsBuffer, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, m_RecoveredRendererListMeshletCountsBuffer, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, m_RecoveredMeshletIndirectDrawArgsBuffer, AccessFlags.ReadWrite);
+        }
+
+        private void ImportMeshShaderSceneBuffers(VividGPUDrivenSystem system)
+        {
+            VividGPUDrivenBufferSet buffers = system?.BufferSet;
+            if (buffers == null)
+                return;
+
+            ImportMeshShaderSceneBuffer(buffers.InstanceDataBuffer);
+            ImportMeshShaderSceneBuffer(buffers.MeshletsBuffer);
+            ImportMeshShaderSceneBuffer(buffers.SharedVertexBuffer);
+            ImportMeshShaderSceneBuffer(buffers.SharedIndexBuffer);
+        }
+
+        private void ImportMeshShaderSceneBuffer(GraphicsBuffer buffer)
+        {
+            if (buffer != null)
+                PassRecorder.ImportBufferForPass(this, buffer, AccessFlags.Read);
         }
 
         private bool CanGenerateCurrentOccluderDepthPyramid(VividGPUDrivenSystem system)
@@ -692,9 +745,25 @@ namespace VividRP.Runtime.RenderPass.Core
             if (visibleMeshletRenderRequestsBuffer == null || indirectArgsBuffer == null)
                 return;
 
+            bool meshShaderRequested = m_RasterizationPath
+                                       == VisibilityBufferRasterizationPath.ExperimentalMeshShader;
+            bool compatibleTargets = !meshShaderRequested || HasMeshShaderCompatibleTargets();
+            if (meshShaderRequested && !compatibleTargets)
+            {
+                LogMeshShaderFallback(
+                    "The bound targets must use the default four MRT formats, D32_SFloat depth, Tex2D, and no MSAA.");
+            }
+
+            bool useMeshShader = meshShaderRequested
+                                 && system != null
+                                 && compatibleTargets
+                                 && TryEnsureMeshShaderObjects();
+
+            int meshShaderDispatchCount = 0;
             for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
             {
                 VividRendererListID batchKey = (VividRendererListID) rendererListIndex;
+                bool alphaTest = (batchKey & VividRendererListID.AlphaTest) != 0;
                 if (m_PrimitiveDrawSet?.IsBuilt == true)
                 {
                     if (!m_PrimitiveDrawSet.TryGetBucket(batchKey, out VividPrimitiveDrawBucket bucket)
@@ -708,40 +777,308 @@ namespace VividRP.Runtime.RenderPass.Core
                     continue;
                 }
 
+                if (!virtualTextureReady && alphaTest)
+                    continue;
+
+                if (useMeshShader
+                    && !alphaTest
+                    && TryAppendMeshShaderRendererList(
+                        system,
+                        batchKey,
+                        rendererListIndex,
+                        ref meshShaderDispatchCount))
+                {
+                    continue;
+                }
+
                 Material material = m_Materials[rendererListIndex];
                 if (material == null)
                     continue;
-                if (!virtualTextureReady
-                    && ((batchKey & VividRendererListID.AlphaTest) != 0))
+
+                FlushMeshShaderDispatchBatch(
+                    cmd,
+                    visibleMeshletRenderRequestsBuffer,
+                    indirectArgsBuffer,
+                    system,
+                    virtualTextureReady,
+                    virtualTextureBinding,
+                    ref meshShaderDispatchCount);
+                DrawRendererListLegacy(
+                    cmd,
+                    visibleMeshletRenderRequestsBuffer,
+                    indirectArgsBuffer,
+                    system,
+                    rendererListIndex,
+                    virtualTextureReady,
+                    virtualTextureBinding);
+            }
+
+            FlushMeshShaderDispatchBatch(
+                cmd,
+                visibleMeshletRenderRequestsBuffer,
+                indirectArgsBuffer,
+                system,
+                virtualTextureReady,
+                virtualTextureBinding,
+                ref meshShaderDispatchCount);
+        }
+
+        private static void QueueMeshShaderStateBoundary(CommandBuffer cmd)
+        {
+            VividMeshShaderPlugin.QueueStateBoundary(cmd);
+        }
+
+        private bool TryAppendMeshShaderRendererList(
+            VividGPUDrivenSystem system,
+            VividRendererListID rendererListID,
+            int rendererListIndex,
+            ref int dispatchCount)
+        {
+            VividGPUDrivenBufferSet buffers = system?.BufferSet;
+            VividMeshShaderObject shaderObject = ResolveMeshShaderObject(GetCullMode(rendererListID));
+            if (buffers == null
+                || shaderObject?.IsValid != true
+                || dispatchCount >= m_MeshShaderDispatchBatch.Length)
+            {
+                return false;
+            }
+
+            m_MeshShaderDispatchBatch[dispatchCount++] =
+                new VividMeshShaderDispatch(shaderObject, (uint)rendererListIndex);
+            return true;
+        }
+
+        private void FlushMeshShaderDispatchBatch(
+            CommandBuffer cmd,
+            GraphicsBuffer visibleMeshletRenderRequestsBuffer,
+            GraphicsBuffer indirectArgsBuffer,
+            VividGPUDrivenSystem system,
+            bool virtualTextureReady,
+            in VirtualTextureSpaceBinding virtualTextureBinding,
+            ref int dispatchCount)
+        {
+            if (dispatchCount == 0)
+                return;
+
+            VividGPUDrivenBufferSet buffers = system?.BufferSet;
+            string error = null;
+            bool queued = buffers != null && VividMeshShaderPlugin.TryQueueDispatchBatch(
+                cmd,
+                m_MeshShaderDispatchBatch,
+                dispatchCount,
+                visibleMeshletRenderRequestsBuffer,
+                indirectArgsBuffer,
+                buffers.InstanceDataBuffer,
+                buffers.MeshletsBuffer,
+                buffers.SharedVertexBuffer,
+                buffers.SharedIndexBuffer,
+                (uint)Mathf.Max(0, visibleMeshletRenderRequestsBuffer.count),
+                m_VisibilityViewProjectionMatrix,
+                out error);
+
+            if (queued)
+            {
+                QueueMeshShaderStateBoundary(cmd);
+            }
+            else
+            {
+                LogMeshShaderFallback(buffers == null ? "GPU-driven buffers are unavailable." : error);
+                for (int dispatchIndex = 0; dispatchIndex < dispatchCount; dispatchIndex++)
                 {
+                    DrawRendererListLegacy(
+                        cmd,
+                        visibleMeshletRenderRequestsBuffer,
+                        indirectArgsBuffer,
+                        system,
+                        (int)m_MeshShaderDispatchBatch[dispatchIndex].RendererListIndex,
+                        virtualTextureReady,
+                        virtualTextureBinding);
+                }
+            }
+
+            dispatchCount = 0;
+        }
+
+        private void DrawRendererListLegacy(
+            CommandBuffer cmd,
+            GraphicsBuffer visibleMeshletRenderRequestsBuffer,
+            GraphicsBuffer indirectArgsBuffer,
+            VividGPUDrivenSystem system,
+            int rendererListIndex,
+            bool virtualTextureReady,
+            in VirtualTextureSpaceBinding virtualTextureBinding)
+        {
+            Material material = m_Materials[rendererListIndex];
+            if (material == null)
+                return;
+
+            m_DrawProperties.Clear();
+            m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);
+            m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, indirectArgsBuffer);
+            m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);
+            if (system?.UsesVirtualTexture == true && virtualTextureReady)
+            {
+                GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(
+                    m_DrawProperties,
+                    virtualTextureBinding,
+                    m_VirtualTextureSpaceParams,
+                    m_VirtualTextureMipOffsets,
+                    m_VirtualTextureLayerFallbacks,
+                    m_FrameIndex,
+                    m_VirtualTextureFrameData.AdaptiveMipBias);
+            }
+
+            cmd.DrawProceduralIndirect(
+                Matrix4x4.identity,
+                material,
+                0,
+                MeshTopology.Triangles,
+                indirectArgsBuffer,
+                rendererListIndex * IndirectDrawArgsByteStride,
+                m_DrawProperties);
+        }
+
+        private bool TryEnsureMeshShaderObjects()
+        {
+            if (m_MeshShaderInitializationAttempted)
+                return AreMeshShaderObjectsValid();
+
+            m_MeshShaderInitializationAttempted = true;
+            if (!VividMeshShaderPlugin.TryGetSupport(
+                    out VividMeshShaderSupportStatus supportStatus,
+                    out string supportError))
+            {
+                if (supportStatus is VividMeshShaderSupportStatus.Unknown
+                    or VividMeshShaderSupportStatus.NoDevice)
+                {
+                    m_MeshShaderInitializationAttempted = false;
+                }
+                LogMeshShaderFallback(supportError);
+                return false;
+            }
+
+            VividMeshShaderProgramAsset programAsset =
+                Resources.Load<VividMeshShaderProgramAsset>(MeshShaderProgramResourcePath);
+            if (programAsset == null)
+            {
+                LogMeshShaderFallback(
+                    $"Could not load precompiled mesh-shader program "
+                    + $"'{MeshShaderProgramResourcePath}'.");
+                return false;
+            }
+
+            VividMeshShaderCompareFunction depthCompare = SystemInfo.usesReversedZBuffer
+                ? VividMeshShaderCompareFunction.GreaterEqual
+                : VividMeshShaderCompareFunction.LessEqual;
+            VividMeshShaderCullMode[] cullModes =
+            {
+                VividMeshShaderCullMode.None,
+                VividMeshShaderCullMode.Front,
+                VividMeshShaderCullMode.Back,
+            };
+
+            for (int shaderIndex = 0; shaderIndex < cullModes.Length; shaderIndex++)
+            {
+                var renderState = new VividMeshShaderRenderState(cullModes[shaderIndex], depthCompare);
+                if (VividMeshShaderObject.TryCreate(
+                        programAsset,
+                        renderState,
+                        out VividMeshShaderObject shaderObject,
+                        out string creationError))
+                {
+                    m_MeshShaderObjects[shaderIndex] = shaderObject;
                     continue;
                 }
 
-                m_DrawProperties.Clear();
-                m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);
-                m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, indirectArgsBuffer);
-                m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);
-                if (system?.UsesVirtualTexture == true && virtualTextureReady)
-                {
-                    GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(
-                        m_DrawProperties,
-                        virtualTextureBinding,
-                        m_VirtualTextureSpaceParams,
-                        m_VirtualTextureMipOffsets,
-                        m_VirtualTextureLayerFallbacks,
-                        m_FrameIndex,
-                        m_VirtualTextureFrameData.AdaptiveMipBias);
-                }
-
-                cmd.DrawProceduralIndirect(
-                    Matrix4x4.identity,
-                    material,
-                    0,
-                    MeshTopology.Triangles,
-                    indirectArgsBuffer,
-                    rendererListIndex * IndirectDrawArgsByteStride,
-                    m_DrawProperties);
+                DisposeMeshShaderObjects();
+                m_MeshShaderInitializationAttempted = true;
+                LogMeshShaderFallback(creationError);
+                return false;
             }
+
+            return true;
+        }
+
+        private bool AreMeshShaderObjectsValid()
+        {
+            for (int shaderIndex = 0; shaderIndex < m_MeshShaderObjects.Length; shaderIndex++)
+            {
+                if (m_MeshShaderObjects[shaderIndex]?.IsValid != true)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private VividMeshShaderObject ResolveMeshShaderObject(CullMode cullMode)
+        {
+            int shaderIndex = cullMode switch
+            {
+                CullMode.Off => 0,
+                CullMode.Front => 1,
+                _ => 2,
+            };
+            return m_MeshShaderObjects[shaderIndex];
+        }
+
+        private void DisposeMeshShaderObjects()
+        {
+            for (int shaderIndex = 0; shaderIndex < m_MeshShaderObjects.Length; shaderIndex++)
+            {
+                m_MeshShaderObjects[shaderIndex]?.Dispose();
+                m_MeshShaderObjects[shaderIndex] = null;
+            }
+
+            m_MeshShaderInitializationAttempted = false;
+            m_MeshShaderFailureLogged = false;
+        }
+
+        private void LogMeshShaderFallback(string reason)
+        {
+            if (m_MeshShaderFailureLogged)
+                return;
+
+            m_MeshShaderFailureLogged = true;
+            Debug.LogWarning(
+                $"[VividRP] Experimental VisibilityBuffer mesh-shader path is unavailable; "
+                + $"falling back to DrawProceduralIndirect. {reason}");
+        }
+
+        private bool HasMeshShaderCompatibleTargets()
+        {
+            return HasMeshShaderCompatibleColorTarget(
+                       m_VisibilityBuffer,
+                       GraphicsFormat.R32G32_UInt)
+                   && HasMeshShaderCompatibleColorTarget(
+                       m_Attributes0,
+                       GraphicsFormat.R32G32B32A32_SFloat)
+                   && HasMeshShaderCompatibleColorTarget(
+                       m_Attributes1,
+                       GraphicsFormat.R16G16B16A16_SFloat)
+                   && HasMeshShaderCompatibleColorTarget(
+                       m_Barycentrics,
+                       GraphicsFormat.R16G16_SFloat)
+                   && m_Depth?.desc != null
+                   && m_Depth.desc.DepthBufferBits == DepthBits.Depth32
+                   && GraphicsFormatUtility.GetDepthStencilFormat(32, 0)
+                   == GraphicsFormat.D32_SFloat
+                   && HasMeshShaderCompatibleTextureLayout(m_Depth.desc);
+        }
+
+        private static bool HasMeshShaderCompatibleColorTarget(
+            RenderGraphTexture texture,
+            GraphicsFormat format)
+        {
+            return texture?.desc != null
+                   && texture.desc.ColorFormat == format
+                   && HasMeshShaderCompatibleTextureLayout(texture.desc);
+        }
+
+        private static bool HasMeshShaderCompatibleTextureLayout(RenderGraphTextureDesc desc)
+        {
+            return desc.Dimension == TextureDimension.Tex2D
+                   && desc.Slices == 1
+                   && desc.MsaaSamples == MSAASamples.None;
         }
 
         private void BindVisibilityTargets(CommandBuffer cmd, bool clearTargets)
@@ -769,6 +1106,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CurrentOccluderDepthPyramid = null;
             m_Camera = null;
             m_CurrentViewProjectionMatrix = Matrix4x4.identity;
+            m_VisibilityViewProjectionMatrix = Matrix4x4.identity;
             m_OccludedMeshletRenderRequestsBuffer = null;
             m_OccludedMeshletRenderRequestCounterBuffer = null;
             m_OccludedMeshletIndirectDispatchArgsBuffer = null;
@@ -818,28 +1156,5 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Height = height;
         }
 
-        private static void UpdateImportedBuffer(
-            RenderGraphBuffer renderGraphBuffer,
-            GraphicsBuffer graphicsBuffer,
-            GraphicsBuffer.Target fallbackTarget,
-            string name)
-        {
-            if (renderGraphBuffer == null)
-                return;
-
-            renderGraphBuffer.desc.Name = name;
-
-            if (graphicsBuffer == null)
-            {
-                renderGraphBuffer.desc.Target = fallbackTarget;
-                renderGraphBuffer.ClearImportedBuffer();
-                return;
-            }
-
-            renderGraphBuffer.desc.Count = Mathf.Max(1, graphicsBuffer.count);
-            renderGraphBuffer.desc.Stride = Mathf.Max(1, graphicsBuffer.stride);
-            renderGraphBuffer.desc.Target = graphicsBuffer.target;
-            renderGraphBuffer.SetImportedBuffer(graphicsBuffer);
-        }
     }
 }

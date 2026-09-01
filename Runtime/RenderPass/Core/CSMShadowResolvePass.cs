@@ -408,17 +408,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (csmSettings != null
                 && csmSettings.enableVirtualShadowMapPrototype.value
+                && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform()
+                && VirtualShadowMapPrototypeRuntime.IsFramePrepared
                 && m_VirtualShadowMapPrototypePhysicalPage.IsValid()
-                && m_VirtualShadowMapPrototypePageTable.IsValid()
-                && VirtualShadowMapPrototypeRuntime.IsFrameActive)
+                && m_VirtualShadowMapPrototypePageTable.IsValid())
             {
                 m_VirtualShadowMapPrototypeActive = true;
-                if (m_VirtualShadowMapPrototypeActive)
-                {
-                    m_EnableTiledResolve = false;
-                    m_EnableBilateralDenoise = false;
-                    m_EnableBendComposite = false;
-                }
+                m_EnableTiledResolve = false;
+                m_EnableBilateralDenoise = false;
+                m_EnableBendComposite = false;
             }
         }
 
@@ -638,7 +636,10 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(
                 m_ResolveCompute,
                 VSMPrototypeEnabledId,
-                m_VirtualShadowMapPrototypeActive ? 1 : 0);
+                m_VirtualShadowMapPrototypeActive
+                    && VirtualShadowMapPrototypeRuntime.IsFrameActive
+                        ? 1
+                        : 0);
             cmd.SetComputeIntParam(
                 m_ResolveCompute,
                 VSMPrototypePageSizeId,

@@ -154,5 +154,132 @@ namespace VividRP.Editor.Tests
                 VirtualShadowMapPrototypeRuntime.ReleaseResources();
             }
         }
+
+        [Test]
+        public void VirtualShadowMapPrototypeCache_ReusesMatchingStableState()
+        {
+            VirtualShadowMapPrototypeCacheKey key = CreateCacheKey();
+            int initialHitCount = VirtualShadowMapPrototypeRuntime.CacheHitCount;
+            int initialRefreshCount = VirtualShadowMapPrototypeRuntime.CacheRefreshCount;
+
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(key),
+                    Is.True);
+
+                VirtualShadowMapPrototypeRuntime.CommitCache(key);
+
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsCacheValid, Is.True);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(key),
+                    Is.False);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.TryUseCachedPages(key),
+                    Is.True);
+                Assert.That(VirtualShadowMapPrototypeRuntime.LastFrameUsedCache, Is.True);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.CacheHitCount,
+                    Is.EqualTo(initialHitCount + 1));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.CacheRefreshCount,
+                    Is.EqualTo(initialRefreshCount + 1));
+            }
+            finally
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypeCache_InvalidatesChangedSceneCameraAndCascade()
+        {
+            VirtualShadowMapPrototypeCacheKey key = CreateCacheKey();
+
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+                VirtualShadowMapPrototypeRuntime.CommitCache(key);
+
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
+                        CreateCacheKey(rendererInstanceRevision: 8u)),
+                    Is.True);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
+                        CreateCacheKey(gpuDrivenShadowRevision: 4u)),
+                    Is.True);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
+                        CreateCacheKey(cameraEntityId: 43ul)),
+                    Is.True);
+
+                Matrix4x4 movedCascade = Matrix4x4.identity;
+                movedCascade.m03 = 1.0f / 2048.0f;
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
+                        CreateCacheKey(cascade0: movedCascade)),
+                    Is.True);
+            }
+            finally
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypeCache_RejectsNonFiniteState()
+        {
+            Matrix4x4 invalidCascade = Matrix4x4.identity;
+            invalidCascade.m00 = float.NaN;
+            VirtualShadowMapPrototypeCacheKey key = CreateCacheKey(
+                cascade0: invalidCascade);
+
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+
+                Assert.That(key.IsValid, Is.False);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(key),
+                    Is.True);
+
+                VirtualShadowMapPrototypeRuntime.CommitCache(key);
+
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsCacheValid, Is.False);
+            }
+            finally
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+            }
+        }
+
+        private static VirtualShadowMapPrototypeCacheKey CreateCacheKey(
+            ulong cameraEntityId = 42ul,
+            uint rendererInstanceRevision = 7u,
+            uint gpuDrivenShadowRevision = 3u,
+            Matrix4x4? cascade0 = null)
+        {
+            return new VirtualShadowMapPrototypeCacheKey(
+                cameraEntityId,
+                primitiveSceneToken: 1u,
+                primitiveSceneRevision: 2u,
+                gpuDrivenShadowRevision: gpuDrivenShadowRevision,
+                rendererStructureRevision: 4u,
+                rendererResourceRevision: 5u,
+                rendererInstanceRevision: rendererInstanceRevision,
+                textureBindingRevision: 11u,
+                cascadeCount: 4,
+                virtualResolution: 2048,
+                forcedMeshLODNodeDepth: 0,
+                meshLODErrorThreshold: 1.0f,
+                slopeScaleDepthBias: 2.0f,
+                shadowCasterState: Vector4.zero,
+                cascade0: cascade0 ?? Matrix4x4.identity,
+                cascade1: Matrix4x4.identity,
+                cascade2: Matrix4x4.identity,
+                cascade3: Matrix4x4.identity);
+        }
     }
 }

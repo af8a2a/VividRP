@@ -56,6 +56,7 @@ namespace VividRP.Runtime.GPUDriven
         private VividPrimitiveDrawSet m_ScheduledMainViewDrawSet;
         private int m_ScheduledMainViewFrameIndex = -1;
         private uint m_ScheduledMainViewSceneRevision;
+        private uint m_ShadowCacheRevision = 1u;
         private int m_ShadowCullingContextCount;
         private bool m_IsDisposed;
 
@@ -258,6 +259,10 @@ namespace VividRP.Runtime.GPUDriven
 
         public bool UsesVirtualTexture => m_TextureBackend is IGPUDrivenVirtualTextureBackend;
 
+        internal uint TextureBindingRevision => m_TextureBackend.BindingRevision;
+
+        internal uint ShadowCacheRevision => m_ShadowCacheRevision;
+
         internal bool IsMainViewRendererBatchActive(VividRendererListID batchKey)
         {
             return SceneData.IsMainViewRendererBatchActive(batchKey);
@@ -456,6 +461,12 @@ namespace VividRP.Runtime.GPUDriven
                         out materialDataChanged,
                         out instanceDataChanged
                     );
+                    if (staticDataChanged || materialDataChanged || instanceDataChanged)
+                    {
+                        m_ShadowCacheRevision = m_ShadowCacheRevision == uint.MaxValue
+                            ? 1u
+                            : m_ShadowCacheRevision + 1u;
+                    }
                 }
 
                 m_PrimitiveSceneAdapter.Synchronize(

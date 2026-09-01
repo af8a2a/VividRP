@@ -607,7 +607,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VirtualShadowMapPrototype_UsesNoCachePageTableAndHardShadowResolve()
+        public void VirtualShadowMapPrototype_UsesFullyResidentPageTableAndHardShadowResolve()
         {
             string passSource = ReadRuntimeSource(
                 "Runtime",
@@ -663,6 +663,33 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("UseVirtualShadowMapPrototype(cascadeIndex)", resolveSource);
             StringAssert.Contains("EnsurePhysicalPageForBinding()", resolvePassSource);
             StringAssert.Contains("virtualShadowMapPage", resolvePassSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_CachesStablePagesAndFallsBackUntilRefreshCompletes()
+        {
+            string passSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string resolvePassSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowResolvePass.cs");
+
+            StringAssert.Contains("VirtualShadowMapPrototypeCacheKey", passSource);
+            StringAssert.Contains("rendererDatabase.InstanceRevision", passSource);
+            StringAssert.Contains("gpuDrivenSystem.ShadowCacheRevision", passSource);
+            StringAssert.Contains("gpuDrivenSystem.TextureBindingRevision", passSource);
+            StringAssert.Contains("RequiresCacheRefresh(", passSource);
+            StringAssert.Contains("TryUseCachedPages(", passSource);
+            StringAssert.Contains("CommitCache(", passSource);
+            StringAssert.Contains("if (!canDrawMeshlets || !virtualTextureReady || system == null)", passSource);
+            StringAssert.Contains("AccessFlags.ReadWrite", passSource);
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFramePrepared", resolvePassSource);
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFrameActive", resolvePassSource);
         }
 
         [Test]

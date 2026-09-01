@@ -287,11 +287,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void StopNaNPass_Prepare_ClonesInputDescriptorToOutput()
+        public void StopNaNPass_Prepare_CopiesInputDescriptorToReusableOutput()
         {
             var pass = new StopNaNPass();
             var sourceField = typeof(StopNaNPass).GetField("m_Source", BindingFlags.Instance | BindingFlags.NonPublic);
             var outputField = typeof(StopNaNPass).GetField("m_OutputTexture", BindingFlags.Instance | BindingFlags.NonPublic);
+            var frameData = new ContextContainer();
             var input = RenderGraphTexture.CreateInput("InjectedSource", GraphicsFormat.B10G11R11_UFloatPack32);
             input.desc.Width = 320;
             input.desc.Height = 180;
@@ -301,15 +302,27 @@ namespace VividRP.Editor.Tests
             Assert.That(outputField, Is.Not.Null);
             sourceField.SetValue(pass, input);
 
-            pass.Prepare(new ContextContainer());
+            pass.Prepare(frameData);
 
             var outputTexture = (RenderGraphTexture)outputField.GetValue(pass);
+            var outputDescriptor = outputTexture.desc;
 
+            Assert.That(outputDescriptor, Is.Not.SameAs(input.desc));
             Assert.That(outputTexture.desc.Width, Is.EqualTo(320));
             Assert.That(outputTexture.desc.Height, Is.EqualTo(180));
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
             Assert.That(outputTexture.desc.Name, Is.EqualTo("StopNaNOutput"));
             Assert.That(outputTexture.desc.UseDynamicScale, Is.True);
+
+            pass.Prepare(frameData);
+            Assert.That(outputTexture.desc, Is.SameAs(outputDescriptor));
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 32; iteration++)
+                pass.Prepare(frameData);
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.Zero);
         }
 
         [Test]

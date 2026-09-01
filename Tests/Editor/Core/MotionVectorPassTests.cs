@@ -179,6 +179,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ConfigureRenderLists_DoesNotAllocate_WhenConfigurationIsStable()
+        {
+            var pass = new MotionVectorPass();
+            var method = typeof(MotionVectorPass).GetMethod(
+                "ConfigureRenderLists",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(method, Is.Not.Null);
+            var configureRenderLists = (global::System.Action)method.CreateDelegate(
+                typeof(global::System.Action),
+                pass);
+
+            configureRenderLists();
+            var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 32; iteration++)
+                configureRenderLists();
+            var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void SupportsAsyncCompute_ReturnsFalse_ForMotionVectorPass()
         {
             Assert.That((typeof(MotionVectorPass)).SupportsAsyncCompute(), Is.False);

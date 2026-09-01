@@ -1,6 +1,8 @@
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -61,6 +63,95 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void CascadedShadowSettingsVolume_VirtualShadowMapPrototypeDefaultsOff()
+        {
+            var volume = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+
+            try
+            {
+                Assert.That(volume.enableVirtualShadowMapPrototype, Is.Not.Null);
+                Assert.That(volume.enableVirtualShadowMapPrototype.value, Is.False);
+
+                volume.enableVirtualShadowMapPrototype.value = true;
+
+                Assert.That(volume.enableVirtualShadowMapPrototype.value, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [TestCase(GraphicsDeviceType.Direct3D12, true, true, true, true)]
+        [TestCase(GraphicsDeviceType.Vulkan, true, true, true, true)]
+        [TestCase(GraphicsDeviceType.Direct3D11, true, true, true, false)]
+        [TestCase(GraphicsDeviceType.Direct3D12, false, true, true, false)]
+        [TestCase(GraphicsDeviceType.Direct3D12, true, false, true, false)]
+        [TestCase(GraphicsDeviceType.Direct3D12, true, true, false, false)]
+        public void VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(
+            GraphicsDeviceType deviceType,
+            bool usesReversedZBuffer,
+            bool supportsComputeShaders,
+            bool supportsR32UIntRenderAndLoadStore,
+            bool expected)
+        {
+            Assert.That(
+                VirtualShadowMapPrototypeRuntime.IsSupported(
+                    deviceType,
+                    usesReversedZBuffer,
+                    supportsComputeShaders,
+                    supportsR32UIntRenderAndLoadStore),
+                Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypePageTable_PacksFourCascadesIntoTwoByTwoPool()
+        {
+            int pagesPerAxis = VirtualShadowMapPrototypeRuntime.CalculatePagesPerAxis(2048);
+            uint[] pageTable = VirtualShadowMapPrototypeRuntime.BuildFullyResidentPageTable(
+                pagesPerAxis,
+                4);
+
+            Assert.That(pagesPerAxis, Is.EqualTo(16));
+            Assert.That(pageTable, Has.Length.EqualTo(1024));
+            Assert.That(pageTable[0], Is.EqualTo(1u));
+            Assert.That(pageTable[256], Is.EqualTo(17u));
+            Assert.That(pageTable[512], Is.EqualTo(513u));
+            Assert.That(pageTable[1023], Is.EqualTo(1024u));
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypeResources_AllocateFourCascadePhysicalPool()
+        {
+            Assume.That(
+                VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(),
+                Is.True);
+
+            try
+            {
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.EnsureResources(512, 4),
+                    Is.True);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.PhysicalPage.rt.width,
+                    Is.EqualTo(1024));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.PhysicalPage.rt.height,
+                    Is.EqualTo(1024));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RasterDepth.rt.volumeDepth,
+                    Is.EqualTo(4));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.PageTableEntryCount,
+                    Is.EqualTo(64));
+            }
+            finally
+            {
+                VirtualShadowMapPrototypeRuntime.ReleaseResources();
             }
         }
     }

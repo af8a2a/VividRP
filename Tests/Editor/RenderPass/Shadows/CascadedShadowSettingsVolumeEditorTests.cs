@@ -45,6 +45,7 @@ namespace VividRP.Editor.Tests
                 var flags = BindingFlags.Instance | BindingFlags.NonPublic;
 
                 Assert.That(editorType.GetField("m_EnableCSM", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_EnableVirtualShadowMapPrototype", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeCount", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MaxShadowDistance", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeSplit1", flags)?.GetValue(editor), Is.Not.Null);

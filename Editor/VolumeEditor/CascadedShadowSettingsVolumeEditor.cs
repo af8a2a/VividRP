@@ -17,6 +17,10 @@ namespace VividRP.Editor
 
         private static readonly GUIContent s_StateLabel =
             EditorGUIUtility.TrTextContent("State", "When enabled, VividRP renders cascaded shadow maps for the main directional light.");
+        private static readonly GUIContent s_EnableVirtualShadowMapPrototypeLabel =
+            EditorGUIUtility.TrTextContent(
+                "Enable Virtual Shadow Map Prototype",
+                "Experimental P0 validation. Replaces cascade 0 with the fixed virtual shadow-map page for GPU Driven casters on supported platforms.");
         private static readonly GUIContent s_MaxShadowDistanceLabel =
             EditorGUIUtility.TrTextContent("Max Distance", "Maximum distance from the camera that receives cascaded directional shadows.");
         private static readonly GUIContent s_ScreenSpaceShadowDenoiseLabel =
@@ -48,6 +52,7 @@ namespace VividRP.Editor
         };
 
         private SerializedDataParameter m_EnableCSM;
+        private SerializedDataParameter m_EnableVirtualShadowMapPrototype;
         private SerializedDataParameter m_CascadeCount;
         private SerializedDataParameter m_MaxShadowDistance;
         private SerializedDataParameter m_ScreenSpaceShadowDenoise;
@@ -71,6 +76,7 @@ namespace VividRP.Editor
         {
             var fetcher = new PropertyFetcher<CascadedShadowSettingsVolume>(serializedObject);
             m_EnableCSM = Unpack(fetcher.Find(x => x.enableCSM));
+            m_EnableVirtualShadowMapPrototype = Unpack(fetcher.Find(x => x.enableVirtualShadowMapPrototype));
             m_CascadeCount = Unpack(fetcher.Find(x => x.cascadeCount));
             m_MaxShadowDistance = Unpack(fetcher.Find(x => x.maxShadowDistance));
             m_ScreenSpaceShadowDenoise = Unpack(fetcher.Find(x => x.screenSpaceShadowDenoise));
@@ -86,6 +92,7 @@ namespace VividRP.Editor
         public override void OnInspectorGUI()
         {
             PropertyField(m_EnableCSM, s_StateLabel);
+            PropertyField(m_EnableVirtualShadowMapPrototype, s_EnableVirtualShadowMapPrototypeLabel);
             PropertyField(m_MaxShadowDistance, s_MaxShadowDistanceLabel);
             PropertyField(m_ScreenSpaceShadowDenoise, s_ScreenSpaceShadowDenoiseLabel);
 

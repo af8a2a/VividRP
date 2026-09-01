@@ -18,6 +18,8 @@ namespace VividRP.Runtime
         public const float DefaultCascadeBorder = 0.2f;
 
         public BoolParameter enableCSM = new(false);
+        [Tooltip("Experimental P1 directional-light virtual shadow map. Rebuilds a 128-texel fully resident page table every frame and resolves hard shadows for GPU Driven casters; unsupported platforms remain on CSM.")]
+        public BoolParameter enableVirtualShadowMapPrototype = new(false);
         public ClampedIntParameter cascadeCount = new(DefaultCascadeCount, 1, 4);
         public MinFloatParameter maxShadowDistance = new(DefaultMaxShadowDistance, 0.01f);
         public ClampedFloatParameter cascadeSplit1 = new(0.067f, 0f, 1f);

@@ -607,6 +607,115 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VirtualShadowMapPrototype_UsesNoCachePageTableAndHardShadowResolve()
+        {
+            string passSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string resolvePassSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowResolvePass.cs");
+            string casterSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferShadowCasterPass.shader");
+            string resolveSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "CSMShadowResolve.compute");
+
+            StringAssert.Contains("GraphicsFormat.R32_UInt", passSource);
+            StringAssert.Contains("GraphicsFormatUsage.Render", passSource);
+            StringAssert.Contains("GraphicsFormatUsage.LoadStore", passSource);
+            StringAssert.DoesNotContain(
+                "GraphicsFormatUsage.Sample | GraphicsFormatUsage.LoadStore",
+                passSource);
+            StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, physicalPage)", passSource);
+            StringAssert.Contains("nativeCmd.SetBufferData(", passSource);
+            StringAssert.Contains("BuildFullyResidentPageTable(", passSource);
+            StringAssert.Contains("TextureDimension.Tex2DArray", passSource);
+            StringAssert.Contains("AccessFlags.Write", passSource);
+            StringAssert.Contains("m_VirtualShadowMapPrototypeMaterials", passSource);
+            StringAssert.Contains(
+                "m_VirtualShadowMapPrototypeMaterials);",
+                passSource);
+            StringAssert.DoesNotContain(
+                "SetVirtualShadowMapPrototypeKeyword(",
+                passSource);
+            StringAssert.Contains("#pragma require randomwrite", casterSource);
+            StringAssert.Contains("RWTexture2D<uint> _VSMPrototypePhysicalPage : register(u0)", casterSource);
+            StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", casterSource);
+            StringAssert.Contains("encodedPhysicalPage - 1u", casterSource);
+            StringAssert.Contains("InterlockedMax(", casterSource);
+            StringAssert.Contains("AccessFlags.Read", resolvePassSource);
+            StringAssert.Contains("Texture2D<uint> _VSMPrototypePhysicalPage", resolveSource);
+            StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", resolveSource);
+            StringAssert.Contains("TryResolveVSMPhysicalTexel(", resolveSource);
+            StringAssert.Contains("return SampleCSMShadowMap(shadowUV, receiverDepth, cascadeIndex)", resolveSource);
+            StringAssert.Contains("asfloat(", resolveSource);
+            StringAssert.Contains("UseVirtualShadowMapPrototype(cascadeIndex)", resolveSource);
+            StringAssert.Contains("EnsurePhysicalPageForBinding()", resolvePassSource);
+            StringAssert.Contains("virtualShadowMapPage", resolvePassSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypeShaders_ImportWithoutErrors()
+        {
+            const string computeAssetPath =
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute";
+            const string casterShaderName =
+                "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass";
+
+            ComputeShader resolveCompute =
+                AssetDatabase.LoadAssetAtPath<ComputeShader>(computeAssetPath);
+            Assert.That(resolveCompute, Is.Not.Null, computeAssetPath);
+            Assert.That(resolveCompute.HasKernel("CSMShadowResolve"), Is.True);
+
+            ShaderMessage[] computeErrors = ShaderUtil
+                .GetComputeShaderMessages(resolveCompute)
+                .Where(message => message.severity.ToString() == "Error")
+                .ToArray();
+            Assert.That(
+                computeErrors,
+                Is.Empty,
+                string.Join(
+                    "\n",
+                    computeErrors.Select(message =>
+                        $"{message.file}:{message.line}: {message.message}")));
+
+            Shader casterShader = Shader.Find(casterShaderName);
+            Assert.That(casterShader, Is.Not.Null, casterShaderName);
+            var casterMaterial = new Material(casterShader);
+            try
+            {
+                casterMaterial.EnableKeyword("VIVID_VSM_PROTOTYPE");
+                ShaderUtil.CompilePass(casterMaterial, 0);
+                ShaderMessage[] casterErrors = ShaderUtil
+                    .GetShaderMessages(casterShader)
+                    .Where(message => message.severity.ToString() == "Error")
+                    .ToArray();
+                Assert.That(
+                    casterErrors,
+                    Is.Empty,
+                    string.Join(
+                        "\n",
+                        casterErrors.Select(message =>
+                            $"{message.file}:{message.line}: {message.message}")));
+            }
+            finally
+            {
+                Object.DestroyImmediate(casterMaterial);
+            }
+        }
+
+        [Test]
         public void ScheduledDrawSetToken_RequiresExactPendingCameraFrameAndRevisionMatch()
         {
             string source = ReadRuntimeSource(

@@ -20,6 +20,8 @@
 Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;
 Texture2DArray<float> _CSMShadowAtlas;
+Texture2D<uint> _VSMPrototypePhysicalPage;
+StructuredBuffer<uint> _VSMPrototypePageTable;
 RWTexture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _CSMShadowFilterSource;
 RWTexture2D<float> _CSMShadowFilterTexture;
@@ -40,6 +42,11 @@ int      _CSMCascadeResolution;
 float4   _CSMCascadeWorldTexelSizes;
 float4   _CSMCascadeBorders;
 int      _CSMShadowQuality;
+int      _VSMPrototypeEnabled;
+int      _VSMPrototypePageSize;
+int      _VSMPrototypeVirtualResolution;
+int      _VSMPrototypePagesPerAxis;
+int      _VSMPrototypePhysicalPagesPerRow;
 float    _CSMLightAngularDiameter;
 int      _CSMFrameIndex;
 int      _CSMPCSSBlockerSampleCount;
@@ -190,6 +197,20 @@ float3 TransformWorldToShadowCoord(float3 positionWS, int cascadeIndex)
     return mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0)).xyz;
 }
 
+bool UseVirtualShadowMapPrototype(int cascadeIndex)
+{
+    return _VSMPrototypeEnabled != 0
+        && cascadeIndex >= 0
+        && cascadeIndex < _CSMCascadeCount;
+}
+
+int GetShadowMapResolution(int cascadeIndex)
+{
+    return UseVirtualShadowMapPrototype(cascadeIndex)
+        ? max(_VSMPrototypeVirtualResolution, 1)
+        : max(_CSMCascadeResolution, 1);
+}
+
 float GetCascadeWorldTexelSize(int cascadeIndex)
 {
     return max(_CSMCascadeWorldTexelSizes[cascadeIndex], 0.0);
@@ -237,42 +258,124 @@ bool IsShadowMapDepthCloser(float sampleDepth, float compareDepth)
 #endif
 }
 
-void GetCascadeShadowMapBounds(out float2 cascadeMinUV, out float2 cascadeMaxUV, out float2 texelSize)
+void GetCascadeShadowMapBounds(
+    int cascadeIndex,
+    out float2 cascadeMinUV,
+    out float2 cascadeMaxUV,
+    out float2 texelSize)
 {
-    texelSize = 1.0 / max((float)_CSMCascadeResolution, 1.0);
+    texelSize = 1.0 / (float)GetShadowMapResolution(cascadeIndex);
     cascadeMinUV = texelSize * 0.5;
     cascadeMaxUV = 1.0 - cascadeMinUV;
 }
 
-float2 ClampShadowMapUV(float2 shadowUV)
+float2 ClampShadowMapUV(float2 shadowUV, int cascadeIndex)
 {
     float2 cascadeMinUV;
     float2 cascadeMaxUV;
     float2 texelSize;
-    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
     return clamp(shadowUV, cascadeMinUV, cascadeMaxUV);
 }
 
-bool IsWithinCascadeShadowMapBounds(float2 shadowUV)
+bool IsWithinCascadeShadowMapBounds(float2 shadowUV, int cascadeIndex)
 {
     float2 cascadeMinUV;
     float2 cascadeMaxUV;
     float2 texelSize;
-    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
     return all(shadowUV >= cascadeMinUV) && all(shadowUV <= cascadeMaxUV);
 }
 
-int2 ShadowUVToTexelCoord(float2 shadowUV)
+int2 ShadowUVToTexelCoord(float2 shadowUV, int cascadeIndex)
 {
-    return int2(saturate(shadowUV) * (_CSMCascadeResolution - 1));
+    return int2(saturate(shadowUV) * (GetShadowMapResolution(cascadeIndex) - 1));
+}
+
+bool TryResolveVSMPhysicalTexel(
+    float2 shadowUV,
+    int cascadeIndex,
+    out int2 physicalTexel)
+{
+    physicalTexel = 0;
+    if (!UseVirtualShadowMapPrototype(cascadeIndex))
+        return false;
+
+    uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
+    uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
+    uint physicalPagesPerRow = (uint)max(
+        _VSMPrototypePhysicalPagesPerRow,
+        1);
+    uint2 virtualTexel = (uint2)ShadowUVToTexelCoord(
+        shadowUV,
+        cascadeIndex);
+    uint2 virtualPage = virtualTexel / pageSize;
+    uint2 texelInPage = virtualTexel % pageSize;
+    uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
+    uint pageTableIndex = (uint)cascadeIndex * pagesPerCascade
+        + virtualPage.y * pagesPerAxis
+        + virtualPage.x;
+    uint encodedPhysicalPage = _VSMPrototypePageTable[pageTableIndex];
+    if (encodedPhysicalPage == 0u)
+        return false;
+
+    uint physicalPageIndex = encodedPhysicalPage - 1u;
+    uint2 physicalPage = uint2(
+        physicalPageIndex % physicalPagesPerRow,
+        physicalPageIndex / physicalPagesPerRow);
+    physicalTexel = (int2)(physicalPage * pageSize + texelInPage);
+    return true;
 }
 
 float SampleCSMShadowMap(float2 shadowUV, float depth, int cascadeIndex)
 {
+    if (UseVirtualShadowMapPrototype(cascadeIndex))
+    {
+        int2 physicalTexel;
+        if (!TryResolveVSMPhysicalTexel(
+            shadowUV,
+            cascadeIndex,
+            physicalTexel))
+        {
+            return 1.0;
+        }
+
+        uint rawDepth = _VSMPrototypePhysicalPage.Load(
+            int3(physicalTexel, 0));
+        if (rawDepth == 0u)
+            return 1.0;
+
+        float sampleDepth = asfloat(
+            rawDepth);
+        return IsShadowMapDepthCloser(sampleDepth, depth) ? 0.0 : 1.0;
+    }
+
     return _CSMShadowAtlas.SampleCmpLevelZero(
         sampler_CSMShadowAtlas,
         float3(shadowUV, cascadeIndex),
         depth);
+}
+
+float LoadCSMShadowMapDepth(float2 shadowUV, int cascadeIndex)
+{
+    if (UseVirtualShadowMapPrototype(cascadeIndex))
+    {
+        int2 physicalTexel;
+        if (!TryResolveVSMPhysicalTexel(
+            shadowUV,
+            cascadeIndex,
+            physicalTexel))
+        {
+            return UNITY_RAW_FAR_CLIP_VALUE;
+        }
+
+        return asfloat(
+            _VSMPrototypePhysicalPage.Load(
+                int3(physicalTexel, 0)));
+    }
+
+    return _CSMShadowAtlas.Load(
+        int4(ShadowUVToTexelCoord(shadowUV, cascadeIndex), cascadeIndex, 0));
 }
 
 float SampleShadowPCFKernel(float2 shadowUV, float depth, int cascadeIndex, int kernelRadius)
@@ -281,7 +384,7 @@ float SampleShadowPCFKernel(float2 shadowUV, float depth, int cascadeIndex, int 
     float2 cascadeMinUV;
     float2 cascadeMaxUV;
     float2 texelSize;
-    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
     int kernelWidth = kernelRadius * 2 + 1;
 
     [loop]
@@ -304,7 +407,7 @@ float SampleShadowPCFKernel(float2 shadowUV, float depth, int cascadeIndex, int 
 float SampleShadowPCF3x3(float2 shadowUV, float depth, int cascadeIndex)
 {
     float2 cascadeMinUV, cascadeMaxUV, texelSize;
-    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
 
     float2 texCoord = shadowUV / texelSize + 0.5;
     float2 texCoordFloor = floor(texCoord);
@@ -333,7 +436,7 @@ float SampleShadowPCF3x3(float2 shadowUV, float depth, int cascadeIndex)
 float SampleShadowPCF5x5(float2 shadowUV, float depth, int cascadeIndex)
 {
     float2 cascadeMinUV, cascadeMaxUV, texelSize;
-    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
 
     float2 texCoord = shadowUV / texelSize + 0.5;
     float2 texCoordFloor = floor(texCoord);
@@ -371,7 +474,7 @@ float SampleShadowPCF5x5(float2 shadowUV, float depth, int cascadeIndex)
 float SampleShadowPCF7x7(float2 shadowUV, float depth, int cascadeIndex)
 {
     float2 cascadeMinUV, cascadeMaxUV, texelSize;
-    GetCascadeShadowMapBounds(cascadeMinUV, cascadeMaxUV, texelSize);
+    GetCascadeShadowMapBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
 
     // 7x7 box filter using 4x4 bilinear taps placed between texels.
     // Each tap covers a 2x2 area, 4x4 taps cover the 8x8 neighborhood.
@@ -473,7 +576,7 @@ bool FindAverageBlockerDepth(
             blockerClumpExponent,
             sampleDistNorm);
         float2 sampleUV = shadowUV + diskSample * (blockerSearchRadiusTexels * texelSize);
-        if (!IsWithinCascadeShadowMapBounds(sampleUV))
+        if (!IsWithinCascadeShadowMapBounds(sampleUV, cascadeIndex))
             continue;
 
         float radialOffsetWorld = blockerSearchRadiusWorld * sampleDistNorm;
@@ -481,8 +584,7 @@ bool FindAverageBlockerDepth(
             ? minFilterRadial2DepthScale
             : blockerRadial2DepthScale;
         float coordz = receiverDepth + depthOffsetDirection * (radialOffsetWorld * radial2DepthScale);
-        float sampleDepth = _CSMShadowAtlas.Load(
-            int4(ShadowUVToTexelCoord(sampleUV), cascadeIndex, 0));
+        float sampleDepth = LoadCSMShadowMapDepth(sampleUV, cascadeIndex);
 
         if (IsShadowMapDepthCloser(sampleDepth, coordz))
         {
@@ -545,7 +647,7 @@ float SampleShadowPCSS(float2 shadowUV, float receiverDepth, int cascadeIndex, u
     float samplingFilterRadiusWorld = max(filterRadiusWorld, minFilterRadiusWorld);
     float filterRadiusTexels = samplingFilterRadiusWorld / worldTexelSize;
     float maxPCSSOffsetShadow = min(_CSMPCSSMaxSamplingDistance, blockerDistanceWorld * 0.25) / depthToWorldScale;
-    float2 texelSize = 1.0 / max((float)_CSMCascadeResolution, 1.0);
+    float2 texelSize = 1.0 / (float)GetShadowMapResolution(cascadeIndex);
     float depthOffsetDirection = GetShadowDepthOffsetDirection();
     float shadow = 0.0;
     float validSampleCount = 0.0;
@@ -557,7 +659,7 @@ float SampleShadowPCSS(float2 shadowUV, float receiverDepth, int cascadeIndex, u
         float sampleDistNorm;
         float2 diskSample = SampleVogelDiskUniform(sampleIndex, filterSampleCount, rotationAngle, sampleDistNorm);
         float2 sampleUV = shadowUV + diskSample * (filterRadiusTexels * texelSize);
-        if (!IsWithinCascadeShadowMapBounds(sampleUV))
+        if (!IsWithinCascadeShadowMapBounds(sampleUV, cascadeIndex))
             continue;
 
         float zOffset = filterRadiusWorld * sampleDistNorm * minFilterRadial2DepthScale;
@@ -571,6 +673,9 @@ float SampleShadowPCSS(float2 shadowUV, float receiverDepth, int cascadeIndex, u
 
 float EvaluateShadow(float2 shadowUV, float receiverDepth, int cascadeIndex, uint2 pixelCoord)
 {
+    if (UseVirtualShadowMapPrototype(cascadeIndex))
+        return SampleCSMShadowMap(shadowUV, receiverDepth, cascadeIndex);
+
     switch (_CSMShadowQuality)
     {
         case kCSMShadowQualityLow:
@@ -594,9 +699,9 @@ float3 ClampShadowCoordToShadowMap(float3 shadowCoord)
     return shadowCoord;
 }
 
-bool IsWithinCascadeBlendSamplingBounds(float3 shadowCoord)
+bool IsWithinCascadeBlendSamplingBounds(float3 shadowCoord, int cascadeIndex)
 {
-    float halfTexel = 0.5 / max((float)_CSMCascadeResolution, 1.0);
+    float halfTexel = 0.5 / (float)GetShadowMapResolution(cascadeIndex);
     return all(shadowCoord.xy >= halfTexel) && all(shadowCoord.xy <= (1.0 - halfTexel));
 }
 
@@ -615,9 +720,12 @@ bool TryGetBiasedShadowCoord(float3 positionWS, float3 normalWS, int cascadeInde
 
 float2 ComputeShadowUVJitter(uint2 pixelCoord, int cascadeIndex)
 {
+    if (UseVirtualShadowMapPrototype(cascadeIndex))
+        return 0.0;
+
     float noise = InterleavedGradientNoise(float2(pixelCoord) + 0.5, _CSMFrameIndex);
     float angle = noise * kPCSSTwoPi;
-    float texelSize = 1.0 / max((float)_CSMCascadeResolution, 1.0);
+    float texelSize = 1.0 / (float)GetShadowMapResolution(cascadeIndex);
     return float2(cos(angle), sin(angle)) * (texelSize * 0.5);
 }
 
@@ -632,7 +740,7 @@ bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeInd
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
     shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
     float2 shadowUV = shadowCoord.xy + ComputeShadowUVJitter(pixelCoord, cascadeIndex);
-    shadowUV = ClampShadowMapUV(shadowUV);
+    shadowUV = ClampShadowMapUV(shadowUV, cascadeIndex);
     shadow = EvaluateShadow(shadowUV, shadowCoord.z, cascadeIndex, pixelCoord);
     return true;
 }
@@ -644,13 +752,13 @@ bool TryEvaluateCascadeBlendShadow(float3 positionWS, float3 normalWS, int casca
     if (!TryGetBiasedShadowCoord(positionWS, normalWS, cascadeIndex, shadowCoord))
         return false;
 
-    if (!IsWithinCascadeBlendSamplingBounds(shadowCoord))
+    if (!IsWithinCascadeBlendSamplingBounds(shadowCoord, cascadeIndex))
         return false;
 
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
     shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
     float2 shadowUV = shadowCoord.xy + ComputeShadowUVJitter(pixelCoord, cascadeIndex);
-    shadowUV = ClampShadowMapUV(shadowUV);
+    shadowUV = ClampShadowMapUV(shadowUV, cascadeIndex);
     shadow = EvaluateShadow(shadowUV, shadowCoord.z, cascadeIndex, pixelCoord);
     return true;
 }
@@ -771,13 +879,13 @@ bool TryClassifyCascadeShadow(
     if (!TryGetBiasedShadowCoord(positionWS, normalWS, cascadeIndex, shadowCoord))
         return false;
 
-    if (requireBlendSamplingBounds && !IsWithinCascadeBlendSamplingBounds(shadowCoord))
+    if (requireBlendSamplingBounds && !IsWithinCascadeBlendSamplingBounds(shadowCoord, cascadeIndex))
         return false;
 
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
     shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
     float2 shadowUV = shadowCoord.xy + ComputeShadowUVJitter(pixelCoord, cascadeIndex);
-    shadowUV = ClampShadowMapUV(shadowUV);
+    shadowUV = ClampShadowMapUV(shadowUV, cascadeIndex);
 
     prefilteredShadow = SampleShadowPCF3x3(shadowUV, shadowCoord.z, cascadeIndex);
     return true;

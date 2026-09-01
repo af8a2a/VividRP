@@ -114,18 +114,16 @@ namespace VividRP.Runtime.GPUDriven
                     "Coverage AOT HLSL requires Float coverage and alpha-clip-threshold roots.");
             }
 
-            MaterialNativeTemplateLayoutSchema schema =
-                lowering.Template.LayoutSchema;
+            MaterialGenericLayout genericLayout = lowering.GenericLayout;
             MaterialSurfaceHlslPhysicalContract physicalContract =
-                MaterialSurfaceHlslBackend.GetPhysicalContract(schema);
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime;
             ValidateResourceUses(stageLIR);
 
             var bodyBuilder = new StringBuilder(Math.Max(1024, stageLIR.NodeCount * 96));
             MaterialSurfaceHlslBackend.AppendStageNodes(
                 bodyBuilder,
                 stageLIR,
-                schema,
-                physicalContract,
+                genericLayout,
                 includePositionCS: false);
             bodyBuilder.AppendLine("    VividMaterialCoverageEvaluation output;");
             bodyBuilder.Append("    output.Coverage = ")
@@ -138,7 +136,8 @@ namespace VividRP.Runtime.GPUDriven
 
             string bodySource = MaterialCoverageHlslArtifact.NormalizeLineEndings(
                 bodyBuilder.ToString());
-            ulong bindingHash = MaterialSurfaceHlslBackend.ComputeBindingHash(schema);
+            ulong bindingHash =
+                MaterialSurfaceHlslBackend.ComputeGenericBindingHash(genericLayout);
             ulong codeHash = ComputeCodeHash(
                 bodySource,
                 physicalContract,
@@ -156,8 +155,7 @@ namespace VividRP.Runtime.GPUDriven
                 .AppendLine(".");
             AppendFunctionSignature(
                 sourceBuilder,
-                entryPoint,
-                physicalContract);
+                entryPoint);
             sourceBuilder.AppendLine("{");
             sourceBuilder.Append(bodySource);
             sourceBuilder.AppendLine("}");
@@ -172,20 +170,13 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AppendFunctionSignature(
             StringBuilder builder,
-            string entryPoint,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
+            string entryPoint)
         {
             builder.Append("VividMaterialCoverageEvaluation ")
                 .Append(entryPoint)
                 .AppendLine("(");
-            builder.Append("    const ")
-                .Append(physicalContract == MaterialSurfaceHlslPhysicalContract.LegacySingleSlab
-                    ? "VividMaterialData"
-                    : "VividDualSlabMaterialData")
-                .AppendLine(" materialParameters,");
-            builder.AppendLine("    const VividSurfaceBindingData surfaceBinding0,");
-            if (physicalContract == MaterialSurfaceHlslPhysicalContract.DualSlab)
-                builder.AppendLine("    const VividSurfaceBindingData surfaceBinding1,");
+            builder.AppendLine("    const uint parameterAddress,");
+            builder.AppendLine("    const uint resourceAddress,");
             builder.AppendLine("    const VividAOTCoverageContext context)");
         }
 
@@ -288,6 +279,12 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(MaterialProgramContract.CoverageHlslBackendVersion)
                 .AppendLine("u");
             builder.AppendLine();
+            MaterialProgramArtifactSetHlslContract.AppendExpectedArtifactSet(
+                builder,
+                catalog,
+                "COVERAGE",
+                "Coverage");
+            builder.AppendLine();
             MaterialProgramCatalogHlslContract.Append(builder, catalog);
             builder.AppendLine();
             AppendAbi(builder);
@@ -356,7 +353,7 @@ namespace VividRP.Runtime.GPUDriven
                     .Append(((uint) entry.ProgramID).ToString(CultureInfo.InvariantCulture))
                     .AppendLine("u:");
                 builder.AppendLine("        {");
-                AppendDispatchCase(builder, artifact);
+                AppendDispatchCase(builder, entry);
                 builder.AppendLine("        }");
             }
             builder.AppendLine("        default:");
@@ -367,47 +364,31 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AppendDispatchCase(
             StringBuilder builder,
-            MaterialCoverageHlslArtifact artifact)
+            MaterialProgramCatalog.ManifestEntry entry)
         {
-            if (artifact.PhysicalContract
-                == MaterialSurfaceHlslPhysicalContract.LegacySingleSlab)
-            {
-                builder.AppendLine("            if (programData.ParameterLayoutID");
-                builder.AppendLine("                    != VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA");
-                builder.AppendLine("                || programData.ResourceLayoutID");
-                builder.AppendLine("                    != VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING");
-                builder.AppendLine("                || runtimeHeader.ParameterAddress >= _MaterialDataCount");
-                builder.AppendLine("                || runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount)");
-                builder.AppendLine("            {");
-                builder.AppendLine("                return false;");
-                builder.AppendLine("            }");
-                builder.Append("            output = ")
-                    .Append(artifact.EntryPoint)
-                    .AppendLine("(");
-                builder.AppendLine("                PullMaterialData(runtimeHeader.ParameterAddress),");
-                builder.AppendLine("                PullSurfaceBindingData(runtimeHeader.ResourceBindingAddress),");
-                builder.AppendLine("                context);");
-                builder.AppendLine("            return true;");
-                return;
-            }
-
-            builder.AppendLine("            const uint bindingAddress = runtimeHeader.ResourceBindingAddress;");
+            MaterialCoverageHlslArtifact artifact = entry.Program.CoverageHlsl;
+            MaterialGenericLayout layout = entry.Program.Lowering.GenericLayout;
+            builder.Append("            const uint parameterLaneCount = ")
+                .Append((layout.ParameterStrideInWords / 4).ToString(
+                    CultureInfo.InvariantCulture))
+                .AppendLine("u;");
+            builder.Append("            const uint resourceCount = ")
+                .Append(layout.ResourceCount.ToString(CultureInfo.InvariantCulture))
+                .AppendLine("u;");
             builder.AppendLine("            if (programData.ParameterLayoutID");
-            builder.AppendLine("                    != VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA");
+            builder.AppendLine("                    != VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES");
             builder.AppendLine("                || programData.ResourceLayoutID");
-            builder.AppendLine("                    != VIVIDMATERIALRESOURCELAYOUTID_DUAL_SURFACE_BINDING");
-            builder.AppendLine("                || runtimeHeader.ParameterAddress >= _DualSlabMaterialDataCount");
-            builder.AppendLine("                || bindingAddress >= _SurfaceBindingDataCount");
-            builder.AppendLine("                || _SurfaceBindingDataCount - bindingAddress < 2u)");
-            builder.AppendLine("            {");
+            builder.AppendLine("                    != VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS");
+            builder.AppendLine("                || runtimeHeader.ParameterAddress > _MaterialParameterDataCount");
+            builder.AppendLine("                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress");
+            builder.AppendLine("                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount");
+            builder.AppendLine("                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)");
             builder.AppendLine("                return false;");
-            builder.AppendLine("            }");
             builder.Append("            output = ")
                 .Append(artifact.EntryPoint)
                 .AppendLine("(");
-            builder.AppendLine("                PullDualSlabMaterialData(runtimeHeader.ParameterAddress),");
-            builder.AppendLine("                PullSurfaceBindingData(bindingAddress),");
-            builder.AppendLine("                PullSurfaceBindingData(bindingAddress + 1u),");
+            builder.AppendLine("                runtimeHeader.ParameterAddress,");
+            builder.AppendLine("                runtimeHeader.ResourceBindingAddress,");
             builder.AppendLine("                context);");
             builder.AppendLine("            return true;");
         }
@@ -425,33 +406,136 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(catalog));
 
             MaterialProgramCatalogManifestHash manifestHash = catalog.ManifestHash;
-            uint hashLo = unchecked((uint) manifestHash.Value);
-            uint hashHi = unchecked((uint) (manifestHash.Value >> 32));
-            string expectedContract = string.Format(
-                CultureInfo.InvariantCulture,
-                "VIVID_MATERIAL_CATALOG_MANIFEST_VERSION != {0}u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO != 0x{1:X8}u || VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI != 0x{2:X8}u || VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH != {3}u",
-                manifestHash.Version,
-                hashLo,
-                hashHi,
+            string identityMacro = GetIdentityMacro(
+                manifestHash,
                 catalog.RuntimeTableLength);
 
             builder.AppendLine("#ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED");
             builder.AppendLine("#define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED");
-            builder.Append("#define VIVID_MATERIAL_CATALOG_MANIFEST_VERSION ")
-                .Append(manifestHash.Version.ToString(CultureInfo.InvariantCulture))
-                .AppendLine("u");
-            builder.Append("#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO 0x")
-                .Append(hashLo.ToString("X8", CultureInfo.InvariantCulture))
-                .AppendLine("u");
-            builder.Append("#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_HI 0x")
-                .Append(hashHi.ToString("X8", CultureInfo.InvariantCulture))
-                .AppendLine("u");
-            builder.Append("#define VIVID_MATERIAL_CATALOG_PROGRAM_TABLE_LENGTH ")
-                .Append(catalog.RuntimeTableLength.ToString(CultureInfo.InvariantCulture))
-                .AppendLine("u");
-            builder.Append("#elif ").AppendLine(expectedContract);
-            builder.AppendLine("#error Material Surface and Coverage dispatchers use different frozen catalog manifests.");
+            builder.Append("#define ").Append(identityMacro).AppendLine(" 1");
+            builder.Append("#elif !defined(").Append(identityMacro).AppendLine(")");
+            builder.AppendLine("#error Material dispatchers use different frozen catalog manifests.");
             builder.AppendLine("#endif");
+        }
+
+        internal static string GetIdentityMacro(
+            MaterialProgramCatalogManifestHash manifestHash,
+            int runtimeTableLength)
+        {
+            // Unity's HLSL preprocessor evaluates conditional integers as
+            // signed 32-bit values. Encode the complete identity in a macro
+            // name so hashes with bit 31 set remain legal in every backend.
+            return "VIVID_MATERIAL_CATALOG_MANIFEST_V"
+                + manifestHash.Version.ToString("X8", CultureInfo.InvariantCulture)
+                + "_H"
+                + manifestHash.Value.ToString("X16", CultureInfo.InvariantCulture)
+                + "_N"
+                + unchecked((uint) runtimeTableLength).ToString(
+                    "X8",
+                    CultureInfo.InvariantCulture);
+        }
+    }
+
+    internal static class MaterialProgramArtifactSetHlslContract
+    {
+        internal const string PublishedStampFileName =
+            "VividMaterialProgramCatalogStamp.generated.hlsl";
+
+        internal static void AppendExpectedArtifactSet(
+            StringBuilder builder,
+            MaterialProgramCatalog catalog,
+            string dispatcherMacroName,
+            string dispatcherDisplayName)
+        {
+            if (builder == null)
+                throw new ArgumentNullException(nameof(builder));
+            if (catalog == null)
+                throw new ArgumentNullException(nameof(catalog));
+            if (string.IsNullOrEmpty(dispatcherMacroName))
+            {
+                throw new ArgumentException(
+                    "A dispatcher macro name is required.",
+                    nameof(dispatcherMacroName));
+            }
+            if (string.IsNullOrEmpty(dispatcherDisplayName))
+            {
+                throw new ArgumentException(
+                    "A dispatcher display name is required.",
+                    nameof(dispatcherDisplayName));
+            }
+
+            MaterialProgramArtifactSetHash artifactSetHash =
+                MaterialProgramArtifactSetHashBuilder.Compute(catalog);
+            string identityMacro = GetPublishedIdentityMacro(artifactSetHash);
+
+            builder.Append("// Expected Material Program artifact set: v")
+                .Append(artifactSetHash.Version.ToString(
+                    CultureInfo.InvariantCulture))
+                .Append(" 0x")
+                .AppendLine(artifactSetHash.Value.ToString(
+                    "X16",
+                    CultureInfo.InvariantCulture));
+            builder.Append("#include \"")
+                .Append(PublishedStampFileName)
+                .AppendLine("\"");
+            builder.AppendLine(
+                "#if !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_INCLUDED)");
+            builder.Append("#error Missing published Material Program Catalog stamp for ")
+                .Append(dispatcherDisplayName)
+                .AppendLine(" dispatcher.");
+            builder.Append("#elif !defined(")
+                .Append(identityMacro)
+                .AppendLine(")");
+            builder.Append("#error ")
+                .Append(dispatcherDisplayName)
+                .AppendLine(" dispatcher does not match the published Material Program Catalog artifact set.");
+            builder.AppendLine("#endif");
+        }
+
+        internal static string GetPublishedIdentityMacro(
+            MaterialProgramArtifactSetHash artifactSetHash)
+        {
+            // Keep arbitrary 64-bit values out of #if numeric expressions.
+            return "VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V"
+                + artifactSetHash.Version.ToString(
+                    "X8",
+                    CultureInfo.InvariantCulture)
+                + "_H"
+                + artifactSetHash.Value.ToString(
+                    "X16",
+                    CultureInfo.InvariantCulture);
+        }
+    }
+
+    internal static class MaterialProgramCatalogHlslStampSourceBuilder
+    {
+        internal static string BuildSource(MaterialProgramCatalog catalog)
+        {
+            if (catalog == null)
+                throw new ArgumentNullException(nameof(catalog));
+
+            MaterialProgramArtifactSetHash artifactSetHash =
+                MaterialProgramArtifactSetHashBuilder.Compute(catalog);
+            string identityMacro =
+                MaterialProgramArtifactSetHlslContract
+                    .GetPublishedIdentityMacro(artifactSetHash);
+            var builder = new StringBuilder(768);
+            builder.AppendLine(
+                "// <auto-generated by MaterialProgramCatalogBaker>");
+            builder.AppendLine(
+                "// Published Material Program Catalog artifact-set stamp; do not edit.");
+            builder.AppendLine(
+                "#ifndef VIVID_MATERIAL_PROGRAM_CATALOG_STAMP_GENERATED_INCLUDED");
+            builder.AppendLine(
+                "#define VIVID_MATERIAL_PROGRAM_CATALOG_STAMP_GENERATED_INCLUDED");
+            builder.AppendLine(
+                "#define VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_INCLUDED 1");
+            builder.Append("#define ")
+                .Append(identityMacro)
+                .AppendLine(" 1");
+            builder.AppendLine(
+                "#endif // VIVID_MATERIAL_PROGRAM_CATALOG_STAMP_GENERATED_INCLUDED");
+            return builder.ToString().Replace("\r\n", "\n").Replace('\r', '\n');
         }
     }
 }

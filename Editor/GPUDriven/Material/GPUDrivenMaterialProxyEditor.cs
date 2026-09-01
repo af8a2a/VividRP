@@ -110,6 +110,13 @@ namespace VividRP.Editor.GPUDriven
                 return;
             }
 
+            if (!GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                    materialProxy,
+                    out string validationMessage))
+            {
+                EditorGUILayout.HelpBox(validationMessage, MessageType.Error);
+            }
+
             if (materialProxy.SourceMaterial == null)
             {
                 EditorGUILayout.HelpBox("Assign a source Material to enable one-click synchronization.", MessageType.Info);

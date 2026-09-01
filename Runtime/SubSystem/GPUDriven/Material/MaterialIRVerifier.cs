@@ -1853,6 +1853,14 @@ namespace VividRP.Runtime.GPUDriven
                         MaterialIRDiagnosticCodes.InvalidSemantic,
                         $"Resource declaration {declarationIndex} has invalid type {declaration.Type}.");
                 }
+                if ((uint) declaration.SampleClass
+                    > (uint) MaterialTextureSampleClass.Mask)
+                {
+                    AddError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidSemantic,
+                        $"Resource declaration {declarationIndex} has invalid sample class {declaration.SampleClass}.");
+                }
 
                 for (int previousIndex = 0;
                      previousIndex < declarationIndex;

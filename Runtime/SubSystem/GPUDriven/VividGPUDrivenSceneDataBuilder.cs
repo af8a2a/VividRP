@@ -218,6 +218,10 @@ namespace VividRP.Runtime.GPUDriven
             catch
             {
                 bindingLifecycle?.CancelSurfaceBindingUpdate();
+                // Renderability and scene buffers may already reflect the failed
+                // attempt while dependency snapshots are committed only below.
+                // Force the next frame through a complete rebuild.
+                m_HasBuiltStaticData = false;
                 throw;
             }
 
@@ -254,7 +258,8 @@ namespace VividRP.Runtime.GPUDriven
                 || m_PreviousDatabaseStructureRevision != database.StructureRevision
                 || m_PreviousDatabaseResourceRevision != database.ResourceRevision
                 || m_PreviousDatabaseInstanceRevision != database.InstanceRevision
-                || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision)
+                || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision
+                || HaveRendererRenderabilityChanged(database))
             {
                 return false;
             }
@@ -262,6 +267,29 @@ namespace VividRP.Runtime.GPUDriven
             return !HaveTrackedMeshletAssetsChanged()
                 && !HaveTrackedMaterialProxiesChanged(textureBackend)
                 && !HaveTrackedTerrainDataChanged();
+        }
+
+        private bool HaveRendererRenderabilityChanged(
+            VividMeshletRendererDatabase database)
+        {
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+            IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            if (rendererCount != m_RendererRenderability.Count)
+            {
+                return true;
+            }
+
+            for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                if (m_RendererRenderability[rendererIndex]
+                    != IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool HaveTrackedMeshletAssetsChanged()
@@ -804,6 +832,22 @@ namespace VividRP.Runtime.GPUDriven
                 return hasGeometry;
             }
 
+            GPUDrivenMaterialProxy[] materialProxies = trackedResources.MaterialProxies;
+            if (materialProxies != null)
+            {
+                for (int proxyIndex = 0; proxyIndex < materialProxies.Length; proxyIndex++)
+                {
+                    GPUDrivenMaterialProxy materialProxy = materialProxies[proxyIndex];
+                    if (materialProxy != null
+                        && !GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                            materialProxy,
+                            out _))
+                    {
+                        return false;
+                    }
+                }
+            }
+
             return true;
         }
 
@@ -1094,6 +1138,8 @@ namespace VividRP.Runtime.GPUDriven
             VividMaterialData materialData;
             VividMaterialRuntimeHeader runtimeHeader;
             uint surfaceBindingIndex = (uint) sceneData.SurfaceBindingCount;
+            uint parameterLaneAddress = (uint) sceneData.MaterialParameterLaneCount;
+            uint resourceBindingAddress = (uint) sceneData.MaterialResourceCount;
             if (materialProxy != null)
             {
                 GPUDrivenCompiledMaterialInstance compiledMaterial;
@@ -1106,14 +1152,25 @@ namespace VividRP.Runtime.GPUDriven
                         : null;
                     compiledMaterial = GPUDrivenMaterialCompiler.CompileDualSlab(
                         materialProxy,
-                        (uint) sceneData.DualSlabMaterialCount,
+                        parameterLaneAddress,
+                        resourceBindingAddress,
                         surfaceBindingIndex);
-                    sceneData.MutableSurfaceBindings.Add(
+                    VividSurfaceBindingData baseBinding =
                         textureBackend.CreateSurfaceBinding(
-                            ExtractSurfaceTextures(materialProxy, textureBackend)));
-                    sceneData.MutableSurfaceBindings.Add(
+                            ExtractSurfaceTextures(materialProxy, textureBackend));
+                    VividSurfaceBindingData topBinding =
                         textureBackend.CreateSurfaceBinding(
-                            ExtractSurfaceTextures(topSlab, textureBackend)));
+                            ExtractSurfaceTextures(topSlab, textureBackend));
+                    sceneData.MutableSurfaceBindings.Add(baseBinding);
+                    sceneData.MutableSurfaceBindings.Add(topBinding);
+                    AppendGenericMaterialResources(
+                        sceneData,
+                        compiledMaterial,
+                        materialProxy,
+                        topSlab,
+                        baseBinding,
+                        topBinding,
+                        textureBackend);
                     sceneData.MutableDualSlabMaterials.Add(
                         compiledMaterial.DualSlabMaterialData);
                 }
@@ -1121,16 +1178,28 @@ namespace VividRP.Runtime.GPUDriven
                 {
                     compiledMaterial = GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
                         materialProxy,
-                        (uint) sceneData.MaterialCount,
+                        parameterLaneAddress,
+                        resourceBindingAddress,
                         surfaceBindingIndex);
-                    sceneData.MutableSurfaceBindings.Add(
+                    VividSurfaceBindingData baseBinding =
                         textureBackend.CreateSurfaceBinding(
-                            ExtractSurfaceTextures(materialProxy, textureBackend)));
+                            ExtractSurfaceTextures(materialProxy, textureBackend));
+                    sceneData.MutableSurfaceBindings.Add(baseBinding);
+                    AppendGenericMaterialResources(
+                        sceneData,
+                        compiledMaterial,
+                        materialProxy,
+                        null,
+                        baseBinding,
+                        default,
+                        textureBackend);
                 }
-                int appendedResourceRecordCount =
-                    sceneData.SurfaceBindingCount - (int) surfaceBindingIndex;
-                int requiredResourceRecordCount = compiledMaterial.MaterialProgram
-                    .MaterialLayout.ResourceLayout.RecordCount;
+                sceneData.MutableMaterialParameterLanes.AddRange(
+                    compiledMaterial.ParameterLanes);
+                int appendedResourceRecordCount = sceneData.MaterialResourceCount
+                    - (int) resourceBindingAddress;
+                int requiredResourceRecordCount =
+                    compiledMaterial.ProgramBinding.ResourceCount;
                 if (appendedResourceRecordCount != requiredResourceRecordCount)
                 {
                     throw new InvalidOperationException(
@@ -1142,15 +1211,24 @@ namespace VividRP.Runtime.GPUDriven
             else
             {
                 materialData = CreateMaterialData(material, surfaceBindingIndex);
-                sceneData.MutableSurfaceBindings.Add(
-                    textureBackend.CreateSurfaceBinding(ExtractSurfaceTextures(material)));
+                VividSurfaceBindingData baseBinding =
+                    textureBackend.CreateSurfaceBinding(ExtractSurfaceTextures(material));
+                sceneData.MutableSurfaceBindings.Add(baseBinding);
                 if (IsStandardLitShader(material != null ? material.shader : null))
                 {
                     GPUDrivenCompiledMaterialInstance compiledMaterial =
                         GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
                             materialData,
-                            (uint) sceneData.MaterialCount,
+                            parameterLaneAddress,
+                            resourceBindingAddress,
                             surfaceBindingIndex);
+                    sceneData.MutableMaterialParameterLanes.AddRange(
+                        compiledMaterial.ParameterLanes);
+                    AppendGenericMaterialResources(
+                        sceneData,
+                        compiledMaterial,
+                        materialData,
+                        baseBinding);
                     materialData = compiledMaterial.LegacyMaterialData;
                     runtimeHeader = compiledMaterial.RuntimeHeader;
                 }
@@ -1172,6 +1250,351 @@ namespace VividRP.Runtime.GPUDriven
                     ComputeMaterialProxyRevision(materialProxy, textureBackend));
             }
             return materialIndex;
+        }
+
+        private static void AppendGenericMaterialResources(
+            VividGPUDrivenSceneData sceneData,
+            in GPUDrivenCompiledMaterialInstance compiledMaterial,
+            GPUDrivenMaterialProxy baseProxy,
+            GPUDrivenMaterialProxy topProxy,
+            in VividSurfaceBindingData baseBinding,
+            in VividSurfaceBindingData topBinding,
+            IGPUDrivenTextureBackend textureBackend)
+        {
+            if (textureBackend == null)
+                throw new ArgumentNullException(nameof(textureBackend));
+            MaterialProgramRuntimeBinding program =
+                compiledMaterial.ProgramBinding;
+            var resources = new VividMaterialResourceData[program.ResourceCount];
+            for (int bindingIndex = 0;
+                 bindingIndex < program.ResourceBindings.Count;
+                 bindingIndex++)
+            {
+                MaterialRuntimeResourceBindingDescriptor binding =
+                    program.ResourceBindings[bindingIndex];
+
+                if (baseProxy.TryGetTextureOverride(
+                        binding.Declaration,
+                        out GPUDrivenMaterialTextureOverride textureOverride))
+                {
+                    resources[binding.Slot] = CreateTextureOverrideResource(
+                        binding.Declaration,
+                        textureOverride,
+                        baseProxy,
+                        topProxy,
+                        textureBackend);
+                    continue;
+                }
+
+                resources[binding.Slot] =
+                    CreateStandardLitCompatibilityResource(
+                        binding.Declaration,
+                        baseProxy,
+                        topProxy,
+                        baseBinding,
+                        topBinding);
+            }
+            sceneData.MutableMaterialResources.AddRange(resources);
+        }
+
+        internal static VividMaterialResourceData CreateTextureOverrideResource(
+            in MaterialResourceDeclaration declaration,
+            in GPUDrivenMaterialTextureOverride textureOverride,
+            GPUDrivenMaterialProxy baseProxy,
+            GPUDrivenMaterialProxy topProxy,
+            IGPUDrivenTextureBackend textureBackend)
+        {
+            if (textureOverride.Texture != null
+                && textureBackend is IGPUDrivenVirtualTextureBackend)
+            {
+                throw new NotSupportedException(
+                    $"Material resource '{declaration.Symbol}' uses a raw Texture2D "
+                    + "override, which is not supported by the Virtual Texture "
+                    + "backend. Use the Bindless backend until generic VT resource "
+                    + "overrides are available.");
+            }
+
+            GPUDrivenSurfaceTextureSet authoredOverride =
+                CreateAuthoredOverrideTextureSet(
+                    declaration,
+                    textureOverride,
+                    textureBackend);
+
+            if (!MaterialNativeTemplateDeclarationAdapter.TryGetTexture(
+                    declaration,
+                    out MaterialTextureResource compatibilityResource))
+            {
+                VividSurfaceBindingData genericBinding =
+                    textureBackend.CreateSurfaceBinding(authoredOverride);
+                return CreateGenericMaterialResource(
+                    textureOverride,
+                    genericBinding);
+            }
+
+            bool useTop = MaterialNativeTemplateDeclarationAdapter.IsTopSlabTexture(
+                compatibilityResource);
+            GPUDrivenMaterialProxy sourceProxy = useTop ? topProxy : baseProxy;
+            if (sourceProxy == null)
+            {
+                throw new InvalidOperationException(
+                    $"StandardLit compatibility resource '{declaration.Symbol}' requires a missing top-slab proxy.");
+            }
+
+            GPUDrivenSurfaceTextureSet sourceTextures =
+                ExtractSurfaceTextures(sourceProxy, textureBackend);
+            GPUDrivenSurfaceTextureSet overrideTextures =
+                textureOverride.StreamedVirtualTexture != null
+                    ? authoredOverride
+                    : CreateCompatibilityOverrideTextureSet(
+                        compatibilityResource,
+                        textureOverride.Texture,
+                        sourceTextures);
+            VividSurfaceBindingData overrideBinding =
+                textureBackend.CreateSurfaceBinding(overrideTextures);
+            VividMaterialResourceData resource = CreateGenericMaterialResource(
+                sourceProxy,
+                overrideBinding);
+            resource.TextureTilingOffset = new float4(
+                textureOverride.TilingOffset.x,
+                textureOverride.TilingOffset.y,
+                textureOverride.TilingOffset.z,
+                textureOverride.TilingOffset.w);
+            return resource;
+        }
+
+        private static GPUDrivenSurfaceTextureSet
+            CreateAuthoredOverrideTextureSet(
+                in MaterialResourceDeclaration declaration,
+                in GPUDrivenMaterialTextureOverride textureOverride,
+                IGPUDrivenTextureBackend textureBackend)
+        {
+            VividVirtualTextureAsset streamedVirtualTexture =
+                textureOverride.StreamedVirtualTexture;
+            if (streamedVirtualTexture != null)
+            {
+                if (!textureBackend.CanUseStreamedVirtualTexture(
+                        streamedVirtualTexture))
+                {
+                    throw new NotSupportedException(
+                        $"Material resource '{declaration.Symbol}' uses a streamed "
+                        + "Virtual Texture override that is not supported by the "
+                        + $"'{textureBackend.DisplayName}' texture backend.");
+                }
+
+                return new GPUDrivenSurfaceTextureSet(
+                    streamedVirtualTexture,
+                    null,
+                    null,
+                    null);
+            }
+
+            return CreateGenericOverrideTextureSet(
+                declaration.SampleClass,
+                textureOverride.Texture);
+        }
+
+        private static GPUDrivenSurfaceTextureSet
+            CreateGenericOverrideTextureSet(
+                MaterialTextureSampleClass sampleClass,
+                Texture2D texture)
+        {
+            switch (sampleClass)
+            {
+                case MaterialTextureSampleClass.Raw:
+                case MaterialTextureSampleClass.Mask:
+                    return new GPUDrivenSurfaceTextureSet(null, null, texture);
+                case MaterialTextureSampleClass.Color:
+                    return new GPUDrivenSurfaceTextureSet(texture, null, null);
+                case MaterialTextureSampleClass.Normal:
+                    return new GPUDrivenSurfaceTextureSet(null, texture, null);
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(sampleClass),
+                        sampleClass,
+                        null);
+            }
+        }
+
+        private static GPUDrivenSurfaceTextureSet
+            CreateCompatibilityOverrideTextureSet(
+                MaterialTextureResource resource,
+                Texture2D textureOverride,
+                in GPUDrivenSurfaceTextureSet source)
+        {
+            switch (resource)
+            {
+                case MaterialTextureResource.BaseColor:
+                case MaterialTextureResource.TopBaseColor:
+                    return new GPUDrivenSurfaceTextureSet(
+                        null,
+                        textureOverride,
+                        source.Normal,
+                        source.Mask,
+                        source.MaskMode);
+                case MaterialTextureResource.BaseNormal:
+                case MaterialTextureResource.TopNormal:
+                    return new GPUDrivenSurfaceTextureSet(
+                        null,
+                        source.BaseColor,
+                        textureOverride,
+                        source.Mask,
+                        source.MaskMode);
+                case MaterialTextureResource.BaseMask:
+                case MaterialTextureResource.TopMask:
+                    return new GPUDrivenSurfaceTextureSet(
+                        null,
+                        source.BaseColor,
+                        source.Normal,
+                        textureOverride,
+                        source.MaskMode);
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(resource),
+                        resource,
+                        null);
+            }
+        }
+
+        private static void AppendGenericMaterialResources(
+            VividGPUDrivenSceneData sceneData,
+            in GPUDrivenCompiledMaterialInstance compiledMaterial,
+            in VividMaterialData materialData,
+            in VividSurfaceBindingData surfaceBinding)
+        {
+            for (int bindingIndex = 0;
+                 bindingIndex < compiledMaterial.ProgramBinding.ResourceCount;
+                 bindingIndex++)
+            {
+                sceneData.MutableMaterialResources.Add(
+                    CreateGenericMaterialResource(materialData, surfaceBinding));
+            }
+        }
+
+        private static VividMaterialResourceData CreateGenericMaterialResource(
+            GPUDrivenMaterialProxy proxy,
+            in VividSurfaceBindingData surfaceBinding)
+        {
+            return new VividMaterialResourceData
+            {
+                SurfaceBinding = surfaceBinding,
+                TextureTilingOffset = new float4(
+                    proxy.TextureTilingOffset.x,
+                    proxy.TextureTilingOffset.y,
+                    proxy.TextureTilingOffset.z,
+                    proxy.TextureTilingOffset.w),
+                MetallicSmoothnessRemap = new float4(
+                    proxy.MetallicRemap.x,
+                    proxy.MetallicRemap.y,
+                    proxy.SmoothnessRemap.x,
+                    proxy.SmoothnessRemap.y),
+                AmbientOcclusionRemap = new float4(
+                    proxy.AmbientOcclusionRemap.x,
+                    proxy.AmbientOcclusionRemap.y,
+                    0.0f,
+                    0.0f),
+                NormalsStrength = proxy.BumpScale,
+                MaskMode = (uint) proxy.MaskMode,
+            };
+        }
+
+        private static VividMaterialResourceData CreateGenericMaterialResource(
+            in GPUDrivenMaterialTextureOverride textureOverride,
+            in VividSurfaceBindingData surfaceBinding)
+        {
+            return new VividMaterialResourceData
+            {
+                SurfaceBinding = surfaceBinding,
+                TextureTilingOffset = new float4(
+                    textureOverride.TilingOffset.x,
+                    textureOverride.TilingOffset.y,
+                    textureOverride.TilingOffset.z,
+                    textureOverride.TilingOffset.w),
+                MetallicSmoothnessRemap = new float4(0.0f, 1.0f, 0.0f, 1.0f),
+                AmbientOcclusionRemap = new float4(0.0f, 1.0f, 0.0f, 0.0f),
+                NormalsStrength = 1.0f,
+                MaskMode = (uint) GPUDrivenMaterialMaskMode.None,
+            };
+        }
+
+        private static VividMaterialResourceData
+            CreateStandardLitCompatibilityResource(
+                in MaterialResourceDeclaration declaration,
+                GPUDrivenMaterialProxy baseProxy,
+                GPUDrivenMaterialProxy topProxy,
+                in VividSurfaceBindingData baseBinding,
+                in VividSurfaceBindingData topBinding)
+        {
+            if (!MaterialNativeTemplateDeclarationAdapter.TryGetTexture(
+                    declaration,
+                    out MaterialTextureResource resource))
+            {
+                throw new InvalidOperationException(
+                    $"Material resource '{declaration.Symbol}' ({declaration.Type}) has no texture override on proxy '{baseProxy.name}'.");
+            }
+
+            bool useTop = MaterialNativeTemplateDeclarationAdapter.IsTopSlabTexture(
+                resource);
+            GPUDrivenMaterialProxy sourceProxy = useTop ? topProxy : baseProxy;
+            if (sourceProxy == null)
+            {
+                throw new InvalidOperationException(
+                    $"StandardLit compatibility resource '{declaration.Symbol}' requires a missing top-slab proxy.");
+            }
+            VividMaterialResourceData materialResource =
+                CreateGenericMaterialResource(
+                sourceProxy,
+                useTop ? topBinding : baseBinding);
+            materialResource.SurfaceBinding = RemapCompatibilitySampleBinding(
+                materialResource.SurfaceBinding,
+                resource);
+            return materialResource;
+        }
+
+        private static VividSurfaceBindingData RemapCompatibilitySampleBinding(
+            in VividSurfaceBindingData source,
+            MaterialTextureResource resource)
+        {
+            VividSurfaceBindingData result = source;
+            switch (resource)
+            {
+                case MaterialTextureResource.BaseColor:
+                case MaterialTextureResource.TopBaseColor:
+                    return result;
+                case MaterialTextureResource.BaseNormal:
+                case MaterialTextureResource.TopNormal:
+                    result.BaseColorResource = source.NormalResource;
+                    result.Flags &= ~VividSurfaceBindingFlags.BaseColor;
+                    if ((source.Flags & VividSurfaceBindingFlags.Normal) != 0)
+                        result.Flags |= VividSurfaceBindingFlags.BaseColor;
+                    return result;
+                case MaterialTextureResource.BaseMask:
+                case MaterialTextureResource.TopMask:
+                    result.BaseColorResource = source.MaskResource;
+                    result.Flags &= ~VividSurfaceBindingFlags.BaseColor;
+                    if ((source.Flags & VividSurfaceBindingFlags.Mask) != 0)
+                        result.Flags |= VividSurfaceBindingFlags.BaseColor;
+                    return result;
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(resource),
+                        resource,
+                        null);
+            }
+        }
+
+        private static VividMaterialResourceData CreateGenericMaterialResource(
+            in VividMaterialData materialData,
+            in VividSurfaceBindingData surfaceBinding)
+        {
+            return new VividMaterialResourceData
+            {
+                SurfaceBinding = surfaceBinding,
+                TextureTilingOffset = materialData.TextureTilingOffset,
+                MetallicSmoothnessRemap = materialData.MetallicSmoothnessRemap,
+                AmbientOcclusionRemap = materialData.AmbientOcclusionRemap,
+                NormalsStrength = materialData.NormalsStrength,
+                MaskMode = materialData.Padding0,
+            };
         }
 
         private void WarnMissingMaterialProxy(
@@ -1404,6 +1827,31 @@ namespace VividRP.Runtime.GPUDriven
             {
                 uint hash = 2166136261u;
                 hash = (hash ^ materialProxy.Revision) * 16777619u;
+                MaterialGraphImportAsset materialGraph =
+                    materialProxy.MaterialGraph;
+                hash = (hash ^ GetObjectRevisionId(materialGraph)) * 16777619u;
+                hash = (hash ^ (materialGraph != null
+                    ? materialGraph.ContentVersion
+                    : 0u)) * 16777619u;
+                IReadOnlyList<GPUDrivenMaterialTextureOverride> textureOverrides =
+                    materialProxy.TextureOverrides;
+                for (int overrideIndex = 0;
+                     textureOverrides != null
+                     && overrideIndex < textureOverrides.Count;
+                     overrideIndex++)
+                {
+                    GPUDrivenMaterialTextureOverride textureOverride =
+                        textureOverrides[overrideIndex];
+                    hash = (hash ^ GetObjectRevisionId(textureOverride.Texture))
+                        * 16777619u;
+                    VividVirtualTextureAsset overrideVirtualTexture =
+                        textureOverride.StreamedVirtualTexture;
+                    hash = (hash ^ GetObjectRevisionId(overrideVirtualTexture))
+                        * 16777619u;
+                    hash = (hash ^ (overrideVirtualTexture != null
+                        ? overrideVirtualTexture.ContentVersion
+                        : 0u)) * 16777619u;
+                }
                 if (UsesVirtualTexturePayload(materialProxy, textureBackend))
                 {
                     VividVirtualTextureAsset asset = materialProxy.StreamedVirtualTexture;
@@ -1427,10 +1875,20 @@ namespace VividRP.Runtime.GPUDriven
                     GPUDrivenMaterialProxy topSlab = definition != null
                         ? definition.TopSlab
                         : null;
-                    if (topSlab != null && !ReferenceEquals(topSlab, materialProxy))
+                    if (topSlab != null
+                        && GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                            materialProxy,
+                            out _))
                     {
                         hash = (hash ^ ComputeMaterialProxyRevision(topSlab, textureBackend))
                                * 16777619u;
+                    }
+                    else if (topSlab != null)
+                    {
+                        // Invalid nested/self-referential topology must remain
+                        // hashable so validation can report it without recursing.
+                        hash = (hash ^ GetObjectRevisionId(topSlab)) * 16777619u;
+                        hash = (hash ^ topSlab.Revision) * 16777619u;
                     }
                 }
                 return hash;

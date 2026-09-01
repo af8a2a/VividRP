@@ -54,6 +54,7 @@
 //
 #define VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA (0)
 #define VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA (1)
+#define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES (2)
 
 //
 // VividRP.Runtime.GPUDriven.VividMaterialProgramCapabilities:  static fields
@@ -76,6 +77,7 @@
 //
 #define VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING (0)
 #define VIVIDMATERIALRESOURCELAYOUTID_DUAL_SURFACE_BINDING (1)
+#define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS (2)
 
 //
 // VividRP.Runtime.GPUDriven.VividMaterialRuntimeFlags:  static fields
@@ -111,6 +113,11 @@
 #define VIVIDSURFACEBINDINGFLAGS_BASE_COLOR (1)
 #define VIVIDSURFACEBINDINGFLAGS_NORMAL (2)
 #define VIVIDSURFACEBINDINGFLAGS_MASK (4)
+
+//
+// VividRP.Runtime.GPUDriven.VividMaterialConfiguration:  static fields
+//
+#define VIVID_MATERIAL_PROGRAM_VERSION (3)
 
 //
 // VividRP.Runtime.GPUDriven.VividMeshletConfiguration:  static fields
@@ -256,6 +263,24 @@ struct VividMaterialProgramData
     uint ResourceLayoutID;
     uint CapabilityFlags;
     uint ExecutionClass;
+};
+
+// Generated from VividRP.Runtime.GPUDriven.VividMaterialResourceData
+// PackingRules = Exact
+struct VividMaterialResourceData
+{
+    uint BaseColorResource;
+    uint NormalResource;
+    uint MaskResource;
+    uint SurfaceBindingFlags;
+    float4 UVScaleBias;
+    float4 TextureTilingOffset;
+    float4 MetallicSmoothnessRemap;
+    float4 AmbientOcclusionRemap;
+    float NormalsStrength;
+    uint MaskMode;
+    uint Padding0;
+    uint Padding1;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividMaterialRuntimeHeader

@@ -8,6 +8,8 @@ namespace VividRP.Editor.Tests
     {
         private const string SurfaceSummaryAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl";
+        private const string PostSurfaceSummaryAssetPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividPostSurfaceSummary.hlsl";
 
         [Test]
         public void SurfaceSummaryGBuffer_DeclaresFrozenAbiAndCentralizedPacking()
@@ -156,6 +158,34 @@ namespace VividRP.Editor.Tests
                 "layerData.specularF0=VividDecodeSurfaceSummarySpecularF0(" +
                 "layerAux1.rgb);",
                 compactSource);
+        }
+
+        [Test]
+        public void PostSurfaceSummary_CentralizesMaterialToDeferredExportConversion()
+        {
+            string source = File.ReadAllText(PostSurfaceSummaryAssetPath);
+            string compactSource = string.Concat(
+                source.Where(character => !char.IsWhiteSpace(character)));
+
+            StringAssert.Contains("SurfaceSummaryGBuffer.hlsl", source);
+            StringAssert.Contains("VividPostSurfaceSummaryInput", source);
+            StringAssert.Contains("VividPostSurfaceSummaryOutput", source);
+            StringAssert.Contains("VividPostSurfaceSummary(", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_ERROR", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_UNLIT", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB", source);
+            StringAssert.Contains("VividBuildDeferredExportHeader(", source);
+            StringAssert.Contains(
+                "output.surfaceData.diffuseAlbedo=input.baseColor"
+                + "*(1.0f-saturatedMetallic);",
+                compactSource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.diffuseAlbedo=input.topBaseColor"
+                + "*(1.0f-topMetallic);",
+                compactSource);
+            StringAssert.DoesNotContain("VividAOT", source);
+            StringAssert.DoesNotContain("SampleVividProbeVolume", source);
         }
 
         private static void AssertDefine(

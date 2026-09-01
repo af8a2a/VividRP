@@ -952,13 +952,18 @@ namespace VividRP.Editor.RenderGraph
             return false;
         }
 
-        private static bool TryLoadGraphFromGraphObject(object graphModel, out RenderGraphEditorGraph graph)
+        internal static bool TryLoadGraphFromGraphObject(
+            object graphModel,
+            out RenderGraphEditorGraph graph)
         {
             graph = null;
             if (!TryGetValue(graphModel, GraphObjectPropertyName, out object graphObject) || graphObject == null)
                 return false;
 
             if (!TryGetValue(graphObject, FilePathPropertyName, out string graphPath) || string.IsNullOrEmpty(graphPath))
+                return false;
+
+            if (!IsRenderGraphAssetPath(graphPath))
                 return false;
 
             graph = GraphDatabase.LoadGraph<RenderGraphEditorGraph>(graphPath);

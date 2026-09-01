@@ -10,6 +10,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         LegacySingleSlab = 0,
         DualSlab = 1,
+        GenericRuntime = 2,
     }
 
     internal sealed class MaterialSurfaceHlslArtifact
@@ -90,7 +91,6 @@ namespace VividRP.Runtime.GPUDriven
 
     internal static class MaterialSurfaceHlslBackend
     {
-        private const string MaterialVariable = "materialParameters";
         private const string ContextVariable = "context";
 
         internal static MaterialSurfaceHlslArtifact Compile(
@@ -123,24 +123,22 @@ namespace VividRP.Runtime.GPUDriven
                     "Surface AOT HLSL requires VisibilityResolve Stage LIR with VisibilityBuffer derivatives.");
             }
 
-            MaterialNativeTemplateLayoutSchema schema =
-                lowering.Template.LayoutSchema;
+            MaterialGenericLayout genericLayout = lowering.GenericLayout;
             MaterialSurfaceHlslPhysicalContract physicalContract =
-                GetPhysicalContract(schema);
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime;
             ValidateResourceUses(stageLIR);
 
             var bodyBuilder = new StringBuilder(Math.Max(2048, stageLIR.NodeCount * 96));
-            AppendNodes(bodyBuilder, stageLIR, schema, physicalContract);
+            AppendNodes(bodyBuilder, stageLIR, genericLayout);
             AppendOutput(
                 bodyBuilder,
                 module,
                 stageLIR,
-                schema,
-                physicalContract,
+                genericLayout,
                 lowering.SelectionKey.Topology);
             string bodySource = MaterialSurfaceHlslArtifact.NormalizeLineEndings(
                 bodyBuilder.ToString());
-            ulong bindingHash = ComputeBindingHash(schema);
+            ulong bindingHash = ComputeGenericBindingHash(genericLayout);
             ulong codeHash = ComputeCodeHash(
                 bodySource,
                 lowering.SelectionKey.Topology,
@@ -157,7 +155,7 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(", backend v")
                 .Append(MaterialProgramContract.SurfaceHlslBackendVersion)
                 .AppendLine(".");
-            AppendFunctionSignature(sourceBuilder, entryPoint, physicalContract);
+            AppendFunctionSignature(sourceBuilder, entryPoint);
             sourceBuilder.AppendLine("{");
             sourceBuilder.Append(bodySource);
             sourceBuilder.AppendLine("}");
@@ -193,52 +191,40 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AppendFunctionSignature(
             StringBuilder builder,
-            string entryPoint,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
+            string entryPoint)
         {
             builder.Append("VividAOTSurfaceProgramOutput ")
                 .Append(entryPoint)
                 .AppendLine("(");
-            builder.Append("    const ")
-                .Append(physicalContract == MaterialSurfaceHlslPhysicalContract.LegacySingleSlab
-                    ? "VividMaterialData"
-                    : "VividDualSlabMaterialData")
-                .Append(' ')
-                .Append(MaterialVariable)
-                .AppendLine(",");
-            builder.AppendLine("    const VividSurfaceBindingData surfaceBinding0,");
-            if (physicalContract == MaterialSurfaceHlslPhysicalContract.DualSlab)
-                builder.AppendLine("    const VividSurfaceBindingData surfaceBinding1,");
+            builder.AppendLine("    const uint parameterAddress,");
+            builder.AppendLine("    const uint resourceAddress,");
             builder.AppendLine("    const VividAOTSurfaceContext context)");
         }
 
         private static void AppendNodes(
             StringBuilder builder,
             MaterialStageLIR stageLIR,
-            MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
+            MaterialGenericLayout genericLayout)
         {
             AppendStageNodes(
                 builder,
                 stageLIR,
-                schema,
-                physicalContract,
+                genericLayout,
                 includePositionCS: true);
         }
 
         internal static void AppendStageNodes(
             StringBuilder builder,
             MaterialStageLIR stageLIR,
-            MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract,
+            MaterialGenericLayout genericLayout,
             bool includePositionCS)
         {
             if (builder == null)
                 throw new ArgumentNullException(nameof(builder));
             if (stageLIR == null)
                 throw new ArgumentNullException(nameof(stageLIR));
-            if (schema == null)
-                throw new ArgumentNullException(nameof(schema));
+            if (genericLayout == null)
+                throw new ArgumentNullException(nameof(genericLayout));
             for (int nodeIndex = 0; nodeIndex < stageLIR.Nodes.Count; nodeIndex++)
             {
                 MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
@@ -252,8 +238,7 @@ namespace VividRP.Runtime.GPUDriven
                         stageLIR,
                         node,
                         nodeIndex,
-                        schema,
-                        physicalContract,
+                        genericLayout,
                         includePositionCS);
                     continue;
                 }
@@ -266,8 +251,7 @@ namespace VividRP.Runtime.GPUDriven
                     .Append(GetNodeExpression(
                         stageLIR,
                         node,
-                        schema,
-                        physicalContract))
+                        genericLayout))
                     .AppendLine(";");
             }
             builder.AppendLine();
@@ -276,8 +260,7 @@ namespace VividRP.Runtime.GPUDriven
         private static string GetNodeExpression(
             MaterialStageLIR stageLIR,
             in MaterialStageLIRNode node,
-            MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
+            MaterialGenericLayout genericLayout)
         {
             switch (node.Opcode)
             {
@@ -289,8 +272,7 @@ namespace VividRP.Runtime.GPUDriven
                     return GetParameterExpression(
                         stageLIR,
                         node.Semantic,
-                        schema,
-                        physicalContract);
+                        genericLayout);
                 case MaterialStageLIROpcode.Add:
                     return Binary(node, "+");
                 case MaterialStageLIROpcode.Multiply:
@@ -332,37 +314,53 @@ namespace VividRP.Runtime.GPUDriven
             MaterialStageLIR stageLIR,
             in MaterialStageLIRNode sample,
             int sampleIndex,
-            MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract,
+            MaterialGenericLayout genericLayout,
             bool includePositionCS)
         {
             MaterialStageLIRNode resourceNode = stageLIR.Nodes[sample.Operand0];
             if (!stageLIR.Values.TryGetResourceDeclaration(
                     resourceNode.Semantic,
                     out MaterialResourceDeclaration declaration)
-                || !schema.TryGetResourceBinding(
+                || !genericLayout.TryGetResourceBinding(
                     declaration,
-                    out MaterialNativeResourceBinding binding))
+                    out MaterialGenericResourceBinding genericBinding))
             {
                 throw new NotSupportedException(
-                    $"Surface texture declaration @{resourceNode.Semantic} has no native binding.");
+                    $"Surface texture declaration @{resourceNode.Semantic} has no generic binding.");
             }
 
-            GetResourceExpressions(
-                binding.Target,
-                physicalContract,
-                out string surfaceBinding,
-                out string slabData,
-                out string sampleFunction);
+            string resourceName = $"vivid_sample_resource_{sampleIndex}";
+            string surfaceBinding = $"vivid_sample_binding_{sampleIndex}";
             string contextName = $"vivid_sample_context_{sampleIndex}";
             string uvName = $"vivid_sample_uv_{sampleIndex}";
             string ddxName = $"vivid_sample_ddx_{sampleIndex}";
             string ddyName = $"vivid_sample_ddy_{sampleIndex}";
+            builder.Append("    const VividMaterialResourceData ")
+                .Append(resourceName)
+                .Append(" = PullMaterialResourceData(resourceAddress + ")
+                .Append(genericBinding.Slot.ToString(CultureInfo.InvariantCulture))
+                .AppendLine("u);");
+            builder.Append("    VividSurfaceBindingData ")
+                .Append(surfaceBinding).AppendLine(";");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".BaseColorResource = ").Append(resourceName)
+                .AppendLine(".BaseColorResource;");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".NormalResource = ").Append(resourceName)
+                .AppendLine(".NormalResource;");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".MaskResource = ").Append(resourceName)
+                .AppendLine(".MaskResource;");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".Flags = ").Append(resourceName)
+                .AppendLine(".SurfaceBindingFlags;");
+            builder.Append("    ").Append(surfaceBinding)
+                .Append(".UVScaleBias = ").Append(resourceName)
+                .AppendLine(".UVScaleBias;");
             builder.Append("    const VividSlabMaterialData vivid_sample_slab_")
                 .Append(sampleIndex)
-                .Append(" = ")
-                .Append(slabData)
-                .AppendLine(";");
+                .Append(" = VividCreateSlabMaterialData(")
+                .Append(resourceName).AppendLine(");");
             builder.Append("    const float2 ").Append(uvName).Append(" = ")
                 .Append(Value(sample.Operand1))
                 .Append(" * vivid_sample_slab_").Append(sampleIndex)
@@ -392,17 +390,36 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine(");");
             builder.Append("    const float4 ")
                 .Append(GetValueName(sampleIndex)).Append(" = ")
-                .Append(sampleFunction).Append('(')
+                .Append(GetTextureSampleFunction(declaration.SampleClass))
+                .Append('(')
                 .Append(surfaceBinding).Append(", ")
                 .Append(contextName).AppendLine(");");
+        }
+
+        private static string GetTextureSampleFunction(
+            MaterialTextureSampleClass sampleClass)
+        {
+            switch (sampleClass)
+            {
+                case MaterialTextureSampleClass.Raw:
+                    return "VividSampleRawGrad";
+                case MaterialTextureSampleClass.Mask:
+                    return "VividSampleMaskGrad";
+                case MaterialTextureSampleClass.Color:
+                    return "VividSampleBaseColorGrad";
+                case MaterialTextureSampleClass.Normal:
+                    return "VividSampleNormalGrad";
+                default:
+                    throw new NotSupportedException(
+                        $"Surface texture sample class '{sampleClass}' is not supported.");
+            }
         }
 
         private static void AppendOutput(
             StringBuilder builder,
             MaterialIRModule module,
             MaterialStageLIR stageLIR,
-            MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract,
+            MaterialGenericLayout genericLayout,
             MaterialProgramTopologySpecialization topology)
         {
             builder.AppendLine("    VividAOTSurfaceProgramOutput output = (VividAOTSurfaceProgramOutput) 0;");
@@ -415,8 +432,7 @@ namespace VividRP.Runtime.GPUDriven
                 AppendSlabOutput(
                     builder,
                     stageLIR,
-                    schema,
-                    physicalContract,
+                    genericLayout,
                     root.Slab,
                     "BaseSlab");
                 builder.AppendLine("    output.ClosureCount = 1u;");
@@ -447,15 +463,13 @@ namespace VividRP.Runtime.GPUDriven
                 AppendSlabOutput(
                     builder,
                     stageLIR,
-                    schema,
-                    physicalContract,
+                    genericLayout,
                     module.ClosureGraph.Nodes[root.Operand0].Slab,
                     "BaseSlab");
                 AppendSlabOutput(
                     builder,
                     stageLIR,
-                    schema,
-                    physicalContract,
+                    genericLayout,
                     module.ClosureGraph.Nodes[root.Operand1].Slab,
                     "TopSlab");
                 RequireType(root.Weight, MaterialValueType.Float, "closure weight");
@@ -480,8 +494,7 @@ namespace VividRP.Runtime.GPUDriven
         private static void AppendSlabOutput(
             StringBuilder builder,
             MaterialStageLIR stageLIR,
-            MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract,
+            MaterialGenericLayout genericLayout,
             in ClosureSlabExpression slab,
             string field)
         {
@@ -495,38 +508,48 @@ namespace VividRP.Runtime.GPUDriven
             AppendOutputAssignment(builder, stageLIR, field, "Metallic", slab.Metallic);
             AppendOutputAssignment(builder, stageLIR, field, "NormalWS", slab.Normal);
             AppendOutputAssignment(builder, stageLIR, field, "TangentWS", slab.Tangent);
+
+            ClosureFeatureMask detailFeatures = slab.Features
+                & (ClosureFeatureMask.NormalTexture
+                   | ClosureFeatureMask.MaskTexture);
+            int sampleIndex = -1;
+            bool hasUnambiguousDetailCarrier = detailFeatures
+                    != ClosureFeatureMask.None
+                && TryFindSlabDetailCarrierSampleIndex(
+                    stageLIR,
+                    slab,
+                    out sampleIndex);
+            ClosureFeatureMask emittedFeatures = hasUnambiguousDetailCarrier
+                ? slab.Features
+                : slab.Features & ~detailFeatures;
             builder.Append("    output.").Append(field).Append(".FeatureMask = ")
-                .Append(((uint) slab.Features).ToString(CultureInfo.InvariantCulture))
+                .Append(((uint) emittedFeatures).ToString(CultureInfo.InvariantCulture))
                 .AppendLine("u;");
 
-            int sampleIndex = FindSlabBaseColorSampleIndex(stageLIR, slab);
+            if (!hasUnambiguousDetailCarrier)
+            {
+                builder.Append("    output.").Append(field)
+                    .AppendLine(".NormalTS = float3(0.0f, 0.0f, 1.0f);");
+                builder.Append("    output.").Append(field)
+                    .AppendLine(".AmbientOcclusion = 1.0f;");
+                builder.Append("    output.").Append(field)
+                    .AppendLine(".HasNormal = false;");
+                return;
+            }
             MaterialStageLIRNode sample = stageLIR.Nodes[sampleIndex];
             MaterialStageLIRNode resource = stageLIR.Nodes[sample.Operand0];
             if (!stageLIR.Values.TryGetResourceDeclaration(
                     resource.Semantic,
                     out MaterialResourceDeclaration declaration)
-                || !schema.TryGetResourceBinding(
+                || !genericLayout.TryGetResourceBinding(
                     declaration,
-                    out MaterialNativeResourceBinding binding))
+                    out _))
             {
                 throw new NotSupportedException(
-                    $"Slab base-color declaration @{resource.Semantic} has no native binding.");
-            }
-            MaterialTextureResource expectedTarget = field == "BaseSlab"
-                ? MaterialTextureResource.BaseColor
-                : MaterialTextureResource.TopBaseColor;
-            if (binding.Target != expectedTarget)
-            {
-                throw new NotSupportedException(
-                    $"{field} base-color sample maps to '{binding.Target}', expected '{expectedTarget}'.");
+                    $"Slab base-color declaration @{resource.Semantic} has no generic binding.");
             }
 
-            GetResourceExpressions(
-                binding.Target,
-                physicalContract,
-                out string surfaceBinding,
-                out _,
-                out _);
+            string surfaceBinding = $"vivid_sample_binding_{sampleIndex}";
             string detailName = field == "BaseSlab"
                 ? "vivid_base_slab_detail"
                 : "vivid_top_slab_detail";
@@ -562,30 +585,29 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(detailName).AppendLine(".HasNormal;");
         }
 
-        private static int FindSlabBaseColorSampleIndex(
+        private static bool TryFindSlabDetailCarrierSampleIndex(
             MaterialStageLIR stageLIR,
-            in ClosureSlabExpression slab)
+            in ClosureSlabExpression slab,
+            out int sampleIndex)
         {
-            int sampleIndex = -1;
+            sampleIndex = -1;
+            int sampleCount = 0;
             var visited = new bool[stageLIR.NodeCount];
             FindTextureSampleGrad(
                 stageLIR,
                 stageLIR.GetValue(slab.BaseColor).Index,
                 visited,
-                ref sampleIndex);
-            if (sampleIndex < 0)
-            {
-                throw new NotSupportedException(
-                    "Slab base color must depend on one explicit-gradient texture sample.");
-            }
-            return sampleIndex;
+                ref sampleIndex,
+                ref sampleCount);
+            return sampleCount == 1;
         }
 
         private static void FindTextureSampleGrad(
             MaterialStageLIR stageLIR,
             int nodeIndex,
             bool[] visited,
-            ref int sampleIndex)
+            ref int sampleIndex,
+            ref int sampleCount)
         {
             if (visited[nodeIndex])
                 return;
@@ -594,12 +616,8 @@ namespace VividRP.Runtime.GPUDriven
             MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
             if (node.Opcode == MaterialStageLIROpcode.TextureSampleGrad)
             {
-                if (sampleIndex >= 0 && sampleIndex != nodeIndex)
-                {
-                    throw new NotSupportedException(
-                        "Slab base color may depend on only one texture sample in the native AOT adapter.");
-                }
                 sampleIndex = nodeIndex;
+                sampleCount++;
                 return;
             }
 
@@ -609,7 +627,8 @@ namespace VividRP.Runtime.GPUDriven
                     stageLIR,
                     node.GetOperand(operandIndex),
                     visited,
-                    ref sampleIndex);
+                    ref sampleIndex,
+                    ref sampleCount);
             }
         }
 
@@ -629,149 +648,46 @@ namespace VividRP.Runtime.GPUDriven
         private static string GetParameterExpression(
             MaterialStageLIR stageLIR,
             int declarationIndex,
-            MaterialNativeTemplateLayoutSchema schema,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
+            MaterialGenericLayout genericLayout)
         {
             if (!stageLIR.Values.TryGetParameterDeclaration(
                     declarationIndex,
                     out MaterialParameterDeclaration declaration)
-                || !schema.TryGetParameterBinding(
+                || !genericLayout.TryGetParameterBinding(
                     declaration,
-                    out MaterialNativeParameterBinding binding))
+                    out MaterialGenericParameterBinding binding))
             {
                 throw new NotSupportedException(
-                    $"Surface parameter declaration @{declarationIndex} has no native binding.");
+                    $"Surface parameter declaration @{declarationIndex} has no generic binding.");
             }
 
-            string expression = GetRuntimeParameterExpression(
-                binding.Target,
-                physicalContract);
-            switch (binding.Conversion)
+            string loader;
+            switch (declaration.Type)
             {
-                case MaterialParameterStorageConversion.None:
-                    return expression;
-                case MaterialParameterStorageConversion.Float3ToFloat4:
-                    return expression + ".xyz";
-                default:
-                    throw new NotSupportedException(
-                        $"Surface parameter conversion '{binding.Conversion}' is not supported by HLSL codegen.");
-            }
-        }
-
-        private static string GetRuntimeParameterExpression(
-            MaterialRuntimeParameter target,
-            MaterialSurfaceHlslPhysicalContract physicalContract)
-        {
-            if (physicalContract == MaterialSurfaceHlslPhysicalContract.LegacySingleSlab)
-            {
-                switch (target)
-                {
-                    case MaterialRuntimeParameter.BaseColor: return MaterialVariable + ".AlbedoColor";
-                    case MaterialRuntimeParameter.Emission: return MaterialVariable + ".Emission";
-                    case MaterialRuntimeParameter.Roughness: return MaterialVariable + ".Roughness";
-                    case MaterialRuntimeParameter.Metallic: return MaterialVariable + ".Metallic";
-                    case MaterialRuntimeParameter.AlphaClipThreshold:
-                        return MaterialVariable + ".AlphaClipThreshold";
-                    default:
-                        throw new NotSupportedException(
-                            $"Legacy Surface HLSL has no field mapping for '{target}'.");
-                }
-            }
-
-            switch (target)
-            {
-                case MaterialRuntimeParameter.BaseColor: return MaterialVariable + ".BaseAlbedoColor";
-                case MaterialRuntimeParameter.TopBaseColor: return MaterialVariable + ".TopAlbedoColor";
-                case MaterialRuntimeParameter.Emission: return MaterialVariable + ".Emission";
-                case MaterialRuntimeParameter.Roughness: return MaterialVariable + ".BaseRoughness";
-                case MaterialRuntimeParameter.TopRoughness: return MaterialVariable + ".TopRoughness";
-                case MaterialRuntimeParameter.Metallic: return MaterialVariable + ".BaseMetallic";
-                case MaterialRuntimeParameter.TopMetallic: return MaterialVariable + ".TopMetallic";
-                case MaterialRuntimeParameter.LayerWeight: return MaterialVariable + ".LayerWeight";
-                case MaterialRuntimeParameter.AlphaClipThreshold:
-                    return MaterialVariable + ".AlphaClipThreshold";
-                default:
-                    throw new NotSupportedException(
-                        $"Dual-Slab Surface HLSL has no field mapping for '{target}'.");
-            }
-        }
-
-        private static void GetResourceExpressions(
-            MaterialTextureResource target,
-            MaterialSurfaceHlslPhysicalContract physicalContract,
-            out string surfaceBinding,
-            out string slabData,
-            out string sampleFunction)
-        {
-            bool isTop;
-            switch (target)
-            {
-                case MaterialTextureResource.BaseColor:
-                    isTop = false;
-                    sampleFunction = "VividSampleBaseColorGrad";
+                case MaterialValueType.Bool:
+                    loader = "VividLoadMaterialBool";
                     break;
-                case MaterialTextureResource.BaseNormal:
-                    isTop = false;
-                    sampleFunction = "VividSampleNormalGrad";
+                case MaterialValueType.Float:
+                    loader = "VividLoadMaterialFloat";
                     break;
-                case MaterialTextureResource.BaseMask:
-                    isTop = false;
-                    sampleFunction = "VividSampleMaskGrad";
+                case MaterialValueType.Float2:
+                    loader = "VividLoadMaterialFloat2";
                     break;
-                case MaterialTextureResource.TopBaseColor:
-                    isTop = true;
-                    sampleFunction = "VividSampleBaseColorGrad";
+                case MaterialValueType.Float3:
+                    loader = "VividLoadMaterialFloat3";
                     break;
-                case MaterialTextureResource.TopNormal:
-                    isTop = true;
-                    sampleFunction = "VividSampleNormalGrad";
-                    break;
-                case MaterialTextureResource.TopMask:
-                    isTop = true;
-                    sampleFunction = "VividSampleMaskGrad";
+                case MaterialValueType.Float4:
+                    loader = "VividLoadMaterialFloat4";
                     break;
                 default:
                     throw new NotSupportedException(
-                        $"Surface texture target '{target}' is not supported by HLSL codegen.");
+                        $"Surface parameter type '{declaration.Type}' is not supported by generic HLSL codegen.");
             }
-
-            if (physicalContract == MaterialSurfaceHlslPhysicalContract.LegacySingleSlab)
-            {
-                if (isTop)
-                    throw new NotSupportedException("Legacy Surface HLSL cannot bind a Top Slab texture.");
-                surfaceBinding = "surfaceBinding0";
-                slabData = $"VividCreateSlabMaterialData({MaterialVariable})";
-                return;
-            }
-
-            surfaceBinding = isTop ? "surfaceBinding1" : "surfaceBinding0";
-            slabData = isTop
-                ? $"VividGetTopSlabMaterialData({MaterialVariable})"
-                : $"VividGetBaseSlabMaterialData({MaterialVariable})";
-        }
-
-        internal static MaterialSurfaceHlslPhysicalContract GetPhysicalContract(
-            MaterialNativeTemplateLayoutSchema schema)
-        {
-            if (schema.ParameterLayout.LayoutID
-                    == VividMaterialParameterLayoutID.LegacyMaterialData
-                && schema.ResourceLayout.LayoutID
-                    == VividMaterialResourceLayoutID.LegacySurfaceBinding)
-            {
-                return MaterialSurfaceHlslPhysicalContract.LegacySingleSlab;
-            }
-            if (schema.ParameterLayout.LayoutID
-                    == VividMaterialParameterLayoutID.DualSlabMaterialData
-                && schema.ResourceLayout.LayoutID
-                    == VividMaterialResourceLayoutID.DualSurfaceBinding)
-            {
-                return MaterialSurfaceHlslPhysicalContract.DualSlab;
-            }
-
-            throw new NotSupportedException(
-                $"Surface AOT HLSL has no native adapter for parameter layout "
-                + $"'{schema.ParameterLayout.LayoutID}' and resource layout "
-                + $"'{schema.ResourceLayout.LayoutID}'.");
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}(parameterAddress, {1}u)",
+                loader,
+                binding.WordOffset);
         }
 
         private static string GetStageInputExpression(MaterialStageInput input)
@@ -982,62 +898,53 @@ namespace VividRP.Runtime.GPUDriven
             return GetValueName(nodeIndex);
         }
 
-        internal static ulong ComputeBindingHash(MaterialNativeTemplateLayoutSchema schema)
+        internal static ulong ComputeGenericBindingHash(
+            MaterialGenericLayout layout)
         {
+            if (layout == null)
+                throw new ArgumentNullException(nameof(layout));
+
             ulong hash = MaterialProgramHashUtility.OffsetBasis;
-            MaterialProgramHashUtility.Add(ref hash, (uint) schema.ParameterLayout.LayoutID);
-            MaterialProgramHashUtility.Add(ref hash, schema.ParameterLayout.Stride);
+            MaterialProgramHashUtility.Add(ref hash, layout.Version);
             MaterialProgramHashUtility.Add(
                 ref hash,
-                schema.ParameterLayout.Bindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < schema.ParameterLayout.Bindings.Count;
-                 bindingIndex++)
-            {
-                MaterialParameterLayoutBinding binding =
-                    schema.ParameterLayout.Bindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Parameter);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Type);
-                MaterialProgramHashUtility.Add(ref hash, binding.ByteOffset);
-            }
-            MaterialProgramHashUtility.Add(ref hash, schema.ParameterBindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < schema.ParameterBindings.Count;
-                 bindingIndex++)
-            {
-                MaterialNativeParameterBinding binding =
-                    schema.ParameterBindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, binding.Declaration.Symbol);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Declaration.Type);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Target);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Conversion);
-            }
-            MaterialProgramHashUtility.Add(ref hash, (uint) schema.ResourceLayout.LayoutID);
-            MaterialProgramHashUtility.Add(ref hash, schema.ResourceLayout.RecordStride);
-            MaterialProgramHashUtility.Add(ref hash, schema.ResourceLayout.RecordCount);
+                layout.ParameterStrideInWords);
             MaterialProgramHashUtility.Add(
                 ref hash,
-                schema.ResourceLayout.Bindings.Count);
+                layout.ParameterBindings.Count);
             for (int bindingIndex = 0;
-                 bindingIndex < schema.ResourceLayout.Bindings.Count;
+                 bindingIndex < layout.ParameterBindings.Count;
                  bindingIndex++)
             {
-                MaterialResourceLayoutBinding binding =
-                    schema.ResourceLayout.Bindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Resource);
-                MaterialProgramHashUtility.Add(ref hash, binding.RecordOffset);
-                MaterialProgramHashUtility.Add(ref hash, binding.ByteOffset);
+                MaterialGenericParameterBinding binding =
+                    layout.ParameterBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(ref hash, binding.WordOffset);
+                MaterialProgramHashUtility.Add(ref hash, binding.WordCount);
             }
-            MaterialProgramHashUtility.Add(ref hash, schema.ResourceBindings.Count);
+
+            MaterialProgramHashUtility.Add(ref hash, layout.ResourceCount);
             for (int bindingIndex = 0;
-                 bindingIndex < schema.ResourceBindings.Count;
+                 bindingIndex < layout.ResourceBindings.Count;
                  bindingIndex++)
             {
-                MaterialNativeResourceBinding binding =
-                    schema.ResourceBindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, binding.Declaration.Symbol);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Declaration.Type);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Target);
+                MaterialGenericResourceBinding binding =
+                    layout.ResourceBindings[bindingIndex];
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    binding.Declaration.Symbol);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.SampleClass);
+                MaterialProgramHashUtility.Add(ref hash, binding.Slot);
             }
             return hash;
         }
@@ -1075,13 +982,19 @@ namespace VividRP.Runtime.GPUDriven
 
             var builder = new StringBuilder(Math.Max(4096, sortedEntries.Count * 3072));
             builder.AppendLine("// <auto-generated by MaterialSurfaceHlslGenerator>");
-            builder.AppendLine("// Generated from canonical Surface Stage LIR; do not edit.");
+            builder.AppendLine("// Generated from canonical Surface Stage LIR and Deferred Export contracts; do not edit.");
             builder.AppendLine("#ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED");
             builder.AppendLine("#define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED");
             builder.AppendLine();
             builder.Append("#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION ")
                 .Append(MaterialProgramContract.SurfaceHlslBackendVersion)
                 .AppendLine("u");
+            builder.AppendLine();
+            MaterialProgramArtifactSetHlslContract.AppendExpectedArtifactSet(
+                builder,
+                catalog,
+                "SURFACE",
+                "Surface");
             builder.AppendLine();
             MaterialProgramCatalogHlslContract.Append(builder, catalog);
             builder.AppendLine();
@@ -1121,6 +1034,21 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void AppendAbi(StringBuilder builder)
         {
+            AppendDeferredExportDefines(builder);
+            builder.AppendLine("struct VividAOTDeferredExportContract");
+            builder.AppendLine("{");
+            builder.AppendLine("    uint Version;");
+            builder.AppendLine("    uint SurfaceSummaryAbi;");
+            builder.AppendLine("    uint DualSlabSidecarAbi;");
+            builder.AppendLine("    uint ShadingModelMask;");
+            builder.AppendLine("    uint LitClass;");
+            builder.AppendLine("    uint ExpectedClosureCount;");
+            builder.AppendLine("    uint Topology;");
+            builder.AppendLine("    uint PayloadFlags;");
+            builder.AppendLine("    uint PolicyFlags;");
+            builder.AppendLine("};");
+            builder.AppendLine();
+            AppendDeferredExportValidation(builder);
             builder.AppendLine("struct VividAOTSurfaceContext");
             builder.AppendLine("{");
             builder.AppendLine("    float2 UV0;");
@@ -1156,46 +1084,316 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine();
         }
 
+        private static void AppendDeferredExportDefines(StringBuilder builder)
+        {
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_CONTRACT_VERSION",
+                MaterialProgramContract.DeferredExportContractVersion);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_V1",
+                (uint) MaterialDeferredExportSurfaceSummaryAbi.SurfaceSummaryV1);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_NONE",
+                (uint) MaterialDeferredExportSidecarAbi.None);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_DUAL_SLAB_V1",
+                (uint) MaterialDeferredExportSidecarAbi.DualSlabV1);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_STANDARD_LIT",
+                (uint) MaterialShadingModelMask.StandardLit);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_UNLIT",
+                (uint) MaterialShadingModelMask.Unlit);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_NONE",
+                (uint) MaterialDeferredExportLitClass.None);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_FAST_SLAB",
+                (uint) MaterialDeferredExportLitClass.FastSlab);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_DUAL_SLAB",
+                (uint) MaterialDeferredExportLitClass.DualSlab);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_NONE",
+                (uint) MaterialDeferredExportTopology.None);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_HORIZONTAL_MIX",
+                (uint) MaterialDeferredExportTopology.HorizontalMix);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER",
+                (uint) MaterialDeferredExportTopology.VerticalLayer);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SURFACE_SUMMARY",
+                (uint) MaterialDeferredExportPayloadFlags.SurfaceSummary);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DIFFUSE_IRRADIANCE",
+                (uint) MaterialDeferredExportPayloadFlags.DiffuseIrradiance);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DUAL_SLAB_SIDECAR",
+                (uint) MaterialDeferredExportPayloadFlags.DualSlabSidecar);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SHARED_NORMAL_AO",
+                (uint) MaterialDeferredExportPayloadFlags.SharedNormalAndAmbientOcclusion);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_POLICY_DYNAMIC_DIFFUSE_IRRADIANCE",
+                (uint) MaterialDeferredExportPolicyFlags.DynamicDiffuseIrradiance);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_SSR_ON_FAST_SLAB",
+                (uint) MaterialDeferredExportPolicyFlags.ReceiveSsrOnFastSlab);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_DECALS",
+                (uint) MaterialDeferredExportPolicyFlags.ReceiveDecals);
+            AppendDefine(
+                builder,
+                "VIVID_AOT_DEFERRED_EXPORT_POLICY_FAST_SLAB_WHEN_SIDECAR_EMPTY",
+                (uint) MaterialDeferredExportPolicyFlags.FastSlabWhenSidecarEmpty);
+            builder.AppendLine();
+        }
+
+        private static void AppendDefine(
+            StringBuilder builder,
+            string name,
+            uint value)
+        {
+            builder.Append("#define ")
+                .Append(name)
+                .Append(' ')
+                .Append(value.ToString(CultureInfo.InvariantCulture))
+                .AppendLine("u");
+        }
+
+        private static void AppendDeferredExportValidation(StringBuilder builder)
+        {
+            builder.AppendLine("bool VividAOTDeferredExportHasShadingModel(");
+            builder.AppendLine("    const VividAOTDeferredExportContract contract,");
+            builder.AppendLine("    const uint shadingModel)");
+            builder.AppendLine("{");
+            builder.AppendLine("    return (contract.ShadingModelMask & shadingModel) == shadingModel;");
+            builder.AppendLine("}");
+            builder.AppendLine();
+            builder.AppendLine("bool VividAOTDeferredExportHasPayload(");
+            builder.AppendLine("    const VividAOTDeferredExportContract contract,");
+            builder.AppendLine("    const uint payload)");
+            builder.AppendLine("{");
+            builder.AppendLine("    return (contract.PayloadFlags & payload) == payload;");
+            builder.AppendLine("}");
+            builder.AppendLine();
+            builder.AppendLine("bool VividAOTDeferredExportHasPolicy(");
+            builder.AppendLine("    const VividAOTDeferredExportContract contract,");
+            builder.AppendLine("    const uint policy)");
+            builder.AppendLine("{");
+            builder.AppendLine("    return (contract.PolicyFlags & policy) == policy;");
+            builder.AppendLine("}");
+            builder.AppendLine();
+            builder.AppendLine("bool VividIsAOTDeferredExportContractSupported(");
+            builder.AppendLine("    const VividAOTDeferredExportContract contract)");
+            builder.AppendLine("{");
+            builder.AppendLine("    if (contract.Version != VIVID_AOT_DEFERRED_EXPORT_CONTRACT_VERSION");
+            builder.AppendLine("        || contract.SurfaceSummaryAbi != VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_V1)");
+            builder.AppendLine("        return false;");
+            builder.AppendLine();
+            builder.AppendLine("    const uint knownShadingModels =");
+            builder.AppendLine("        VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_STANDARD_LIT");
+            builder.AppendLine("        | VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_UNLIT;");
+            builder.AppendLine("    if (contract.ShadingModelMask == 0u");
+            builder.AppendLine("        || (contract.ShadingModelMask & ~knownShadingModels) != 0u)");
+            builder.AppendLine("        return false;");
+            builder.AppendLine();
+            builder.AppendLine("    const bool isSingle = contract.Topology");
+            builder.AppendLine("        == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_NONE;");
+            builder.AppendLine("    const bool isDual = contract.Topology");
+            builder.AppendLine("            == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_HORIZONTAL_MIX");
+            builder.AppendLine("        || contract.Topology");
+            builder.AppendLine("            == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER;");
+            builder.AppendLine("    if ((!isSingle && !isDual)");
+            builder.AppendLine("        || contract.ExpectedClosureCount != (isDual ? 2u : 1u))");
+            builder.AppendLine("        return false;");
+            builder.AppendLine();
+            builder.AppendLine("    const uint corePayload =");
+            builder.AppendLine("        VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SURFACE_SUMMARY");
+            builder.AppendLine("        | VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DIFFUSE_IRRADIANCE;");
+            builder.AppendLine("    const uint knownPayload = corePayload");
+            builder.AppendLine("        | VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DUAL_SLAB_SIDECAR");
+            builder.AppendLine("        | VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SHARED_NORMAL_AO;");
+            builder.AppendLine("    if ((contract.PayloadFlags & corePayload) != corePayload");
+            builder.AppendLine("        || (contract.PayloadFlags & ~knownPayload) != 0u)");
+            builder.AppendLine("        return false;");
+            builder.AppendLine();
+            builder.AppendLine("    const uint knownPolicy =");
+            builder.AppendLine("        VIVID_AOT_DEFERRED_EXPORT_POLICY_DYNAMIC_DIFFUSE_IRRADIANCE");
+            builder.AppendLine("        | VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_SSR_ON_FAST_SLAB");
+            builder.AppendLine("        | VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_DECALS");
+            builder.AppendLine("        | VIVID_AOT_DEFERRED_EXPORT_POLICY_FAST_SLAB_WHEN_SIDECAR_EMPTY;");
+            builder.AppendLine("    if ((contract.PolicyFlags & ~knownPolicy) != 0u");
+            builder.AppendLine("        || !VividAOTDeferredExportHasPolicy(");
+            builder.AppendLine("            contract,");
+            builder.AppendLine("            VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_DECALS))");
+            builder.AppendLine("        return false;");
+            builder.AppendLine();
+            builder.AppendLine("    const bool supportsLit = VividAOTDeferredExportHasShadingModel(");
+            builder.AppendLine("        contract,");
+            builder.AppendLine("        VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_STANDARD_LIT);");
+            builder.AppendLine("    const uint expectedLitClass = !supportsLit");
+            builder.AppendLine("        ? VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_NONE");
+            builder.AppendLine("        : isDual");
+            builder.AppendLine("            ? VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_DUAL_SLAB");
+            builder.AppendLine("            : VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_FAST_SLAB;");
+            builder.AppendLine("    if (contract.LitClass != expectedLitClass)");
+            builder.AppendLine("        return false;");
+            builder.AppendLine();
+            builder.AppendLine("    const bool expectsDualSidecar = supportsLit && isDual;");
+            builder.AppendLine("    const bool hasDualSidecar = VividAOTDeferredExportHasPayload(");
+            builder.AppendLine("        contract,");
+            builder.AppendLine("        VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DUAL_SLAB_SIDECAR);");
+            builder.AppendLine("    const bool sharesNormalAO = VividAOTDeferredExportHasPayload(");
+            builder.AppendLine("        contract,");
+            builder.AppendLine("        VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SHARED_NORMAL_AO);");
+            builder.AppendLine("    const bool hasDualSidecarAbi = contract.DualSlabSidecarAbi");
+            builder.AppendLine("        == VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_DUAL_SLAB_V1;");
+            builder.AppendLine("    if ((contract.DualSlabSidecarAbi");
+            builder.AppendLine("            != VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_NONE");
+            builder.AppendLine("            && !hasDualSidecarAbi)");
+            builder.AppendLine("        || hasDualSidecar != expectsDualSidecar");
+            builder.AppendLine("        || sharesNormalAO != isDual");
+            builder.AppendLine("        || hasDualSidecarAbi != expectsDualSidecar)");
+            builder.AppendLine("        return false;");
+            builder.AppendLine();
+            builder.AppendLine("    const uint litPolicies =");
+            builder.AppendLine("        VIVID_AOT_DEFERRED_EXPORT_POLICY_DYNAMIC_DIFFUSE_IRRADIANCE");
+            builder.AppendLine("        | VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_SSR_ON_FAST_SLAB;");
+            builder.AppendLine("    const uint activeLitPolicies = contract.PolicyFlags & litPolicies;");
+            builder.AppendLine("    const bool hasFastFallback = VividAOTDeferredExportHasPolicy(");
+            builder.AppendLine("        contract,");
+            builder.AppendLine("        VIVID_AOT_DEFERRED_EXPORT_POLICY_FAST_SLAB_WHEN_SIDECAR_EMPTY);");
+            builder.AppendLine("    return activeLitPolicies == (supportsLit ? litPolicies : 0u)");
+            builder.AppendLine("        && hasFastFallback == expectsDualSidecar;");
+            builder.AppendLine("}");
+            builder.AppendLine();
+        }
+
         private static void AppendDispatcher(
             StringBuilder builder,
             IReadOnlyList<MaterialProgramCatalog.ManifestEntry> entries)
         {
             builder.AppendLine("bool VividTryEvaluateAOTSurfaceProgram(");
-            builder.AppendLine("    const uint programID,");
-            builder.AppendLine("    const VividMaterialData materialParameters,");
-            builder.AppendLine("    const VividDualSlabMaterialData dualSlabMaterialParameters,");
-            builder.AppendLine("    const VividSurfaceBindingData surfaceBinding0,");
-            builder.AppendLine("    const VividSurfaceBindingData surfaceBinding1,");
+            builder.AppendLine("    const VividMaterialRuntimeHeader runtimeHeader,");
+            builder.AppendLine("    const VividMaterialProgramData programData,");
             builder.AppendLine("    const VividAOTSurfaceContext context,");
+            builder.AppendLine("    out VividAOTDeferredExportContract deferredExportContract,");
             builder.AppendLine("    out VividAOTSurfaceProgramOutput output)");
             builder.AppendLine("{");
+            builder.AppendLine("    deferredExportContract = (VividAOTDeferredExportContract) 0;");
             builder.AppendLine("    output = (VividAOTSurfaceProgramOutput) 0;");
-            builder.AppendLine("    switch (programID)");
+            builder.AppendLine("    if (programData.Version != VIVID_MATERIAL_PROGRAM_VERSION");
+            builder.AppendLine("        || programData.ParameterLayoutID");
+            builder.AppendLine("            != VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES");
+            builder.AppendLine("        || programData.ResourceLayoutID");
+            builder.AppendLine("            != VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS)");
+            builder.AppendLine("        return false;");
+            builder.AppendLine("    switch (runtimeHeader.ProgramID)");
             builder.AppendLine("    {");
             for (int entryIndex = 0; entryIndex < entries.Count; entryIndex++)
             {
                 MaterialProgramCatalog.ManifestEntry entry = entries[entryIndex];
                 MaterialSurfaceHlslArtifact artifact = entry.Program.SurfaceHlsl;
+                MaterialGenericLayout layout =
+                    entry.Program.Lowering.GenericLayout;
+                uint parameterLaneCount =
+                    checked((uint) (layout.ParameterStrideInWords / 4));
+                uint resourceCount = checked((uint) layout.ResourceCount);
                 builder.Append("        case ")
                     .Append(((uint) entry.ProgramID).ToString(CultureInfo.InvariantCulture))
                     .AppendLine("u:");
+                builder.AppendLine("        {");
+                builder.Append("            const uint parameterLaneCount = ")
+                    .Append(parameterLaneCount.ToString(CultureInfo.InvariantCulture))
+                    .AppendLine("u;");
+                builder.Append("            const uint resourceCount = ")
+                    .Append(resourceCount.ToString(CultureInfo.InvariantCulture))
+                    .AppendLine("u;");
+                builder.AppendLine("            if (runtimeHeader.ParameterAddress > _MaterialParameterDataCount");
+                builder.AppendLine("                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress");
+                builder.AppendLine("                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount");
+                builder.AppendLine("                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)");
+                builder.AppendLine("                return false;");
+                AppendDeferredExportContract(
+                    builder,
+                    entry.Program.DeferredExportContract);
                 builder.Append("            output = ").Append(artifact.EntryPoint).AppendLine("(");
-                builder.Append("                ")
-                    .Append(artifact.PhysicalContract
-                        == MaterialSurfaceHlslPhysicalContract.LegacySingleSlab
-                            ? "materialParameters"
-                            : "dualSlabMaterialParameters")
-                    .AppendLine(",");
-                builder.AppendLine("                surfaceBinding0,");
-                if (artifact.PhysicalContract == MaterialSurfaceHlslPhysicalContract.DualSlab)
-                    builder.AppendLine("                surfaceBinding1,");
+                builder.AppendLine("                runtimeHeader.ParameterAddress,");
+                builder.AppendLine("                runtimeHeader.ResourceBindingAddress,");
                 builder.AppendLine("                context);");
                 builder.AppendLine("            return true;");
+                builder.AppendLine("        }");
             }
             builder.AppendLine("        default:");
             builder.AppendLine("            return false;");
             builder.AppendLine("    }");
             builder.AppendLine("}");
+        }
+
+        private static void AppendDeferredExportContract(
+            StringBuilder builder,
+            MaterialDeferredExportContract contract)
+        {
+            AppendContractField(builder, "Version", contract.Version);
+            AppendContractField(
+                builder,
+                "SurfaceSummaryAbi",
+                (uint) contract.SurfaceSummaryAbi);
+            AppendContractField(
+                builder,
+                "DualSlabSidecarAbi",
+                (uint) contract.DualSlabSidecarAbi);
+            AppendContractField(
+                builder,
+                "ShadingModelMask",
+                (uint) contract.ShadingModels);
+            AppendContractField(builder, "LitClass", (uint) contract.LitClass);
+            AppendContractField(
+                builder,
+                "ExpectedClosureCount",
+                contract.ExpectedClosureCount);
+            AppendContractField(builder, "Topology", (uint) contract.Topology);
+            AppendContractField(
+                builder,
+                "PayloadFlags",
+                (uint) contract.PayloadFlags);
+            AppendContractField(
+                builder,
+                "PolicyFlags",
+                (uint) contract.PolicyFlags);
+        }
+
+        private static void AppendContractField(
+            StringBuilder builder,
+            string field,
+            uint value)
+        {
+            builder.Append("            deferredExportContract.")
+                .Append(field)
+                .Append(" = ")
+                .Append(value.ToString(CultureInfo.InvariantCulture))
+                .AppendLine("u;");
         }
     }
 }

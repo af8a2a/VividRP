@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
+using Unity.Mathematics;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -212,9 +213,14 @@ namespace VividRP.Runtime.GPUDriven
             resources.Sort((left, right) =>
             {
                 int result = string.CompareOrdinal(left.Symbol, right.Symbol);
+                if (result == 0)
+                {
+                    result = ((int) left.Type).CompareTo((int) right.Type);
+                }
                 return result != 0
                     ? result
-                    : ((int) left.Type).CompareTo((int) right.Type);
+                    : ((int) left.SampleClass).CompareTo(
+                        (int) right.SampleClass);
             });
         }
 
@@ -412,6 +418,8 @@ namespace VividRP.Runtime.GPUDriven
         UInt = 2,
     }
 
+    // Physical fields retained by the StandardLit compatibility layout. These values
+    // are not serialized by the declaration-addressed generic runtime ABI.
     internal enum MaterialRuntimeParameter
     {
         BaseColor = 0,
@@ -709,11 +717,12 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(genericLayout));
             if (layoutSchema == null)
                 throw new ArgumentNullException(nameof(layoutSchema));
-            if (!layoutSchema.Matches(requirements)
-                || !layoutSchema.LiveLayout.PayloadEquals(genericLayout))
+            var expectedGenericLayout = new MaterialGenericLayout(requirements);
+            if (!expectedGenericLayout.PayloadEquals(genericLayout))
             {
-                throw new NotSupportedException(
-                    "The generic material layout does not match the selected native template layout schema.");
+                throw new ArgumentException(
+                    "The generic material layout is not the canonical layout for the material requirements.",
+                    nameof(genericLayout));
             }
 
             return new CompiledMaterialLayout(
@@ -1308,7 +1317,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             var builder = new StringBuilder();
             builder.AppendLine("material_program_diagnostics");
-            builder.AppendLine("cost_model=lowered_program_worst_case_v3");
+            builder.AppendLine("cost_model=lowered_program_worst_case_v4");
             builder.AppendLine("typed_ir:");
             AppendStageCost(builder, "coverage", Cost.Coverage);
             AppendStageCost(builder, "surface", Cost.Surface);
@@ -1376,7 +1385,7 @@ namespace VividRP.Runtime.GPUDriven
             MaterialIRModule module,
             CompiledCoverageProgram coverageProgram,
             CompiledSurfaceProgram surfaceProgram,
-            CompiledMaterialLayout materialLayout)
+            MaterialGenericLayout genericLayout)
         {
             if (module == null)
                 throw new ArgumentNullException(nameof(module));
@@ -1384,8 +1393,8 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(coverageProgram));
             if (surfaceProgram == null)
                 throw new ArgumentNullException(nameof(surfaceProgram));
-            if (materialLayout == null)
-                throw new ArgumentNullException(nameof(materialLayout));
+            if (genericLayout == null)
+                throw new ArgumentNullException(nameof(genericLayout));
 
             MaterialStageCost coverageCost = AnalyzeStageLIR(coverageProgram.StageLIR);
             MaterialStageCost surfaceCost = AnalyzeStageLIR(surfaceProgram.StageLIR);
@@ -1405,10 +1414,10 @@ namespace VividRP.Runtime.GPUDriven
                 worstCaseCoverageTextureSamples + worstCaseSurfaceTextureSamples,
                 module.Topology.ClosureCount,
                 module.Topology.OperatorCount,
-                materialLayout.ParameterLayout.Bindings.Count,
-                materialLayout.ResourceLayout.Bindings.Count,
-                materialLayout.ParameterLayout.Stride,
-                materialLayout.ResourceLayout.RecordCount);
+                genericLayout.ParameterBindings.Count,
+                genericLayout.ResourceBindings.Count,
+                genericLayout.ParameterStride,
+                genericLayout.ResourceCount);
         }
 
         private static int AnalyzeWorstCaseCoverageTextureSamples(
@@ -1593,14 +1602,14 @@ namespace VividRP.Runtime.GPUDriven
             MaterialIRModule module,
             CompiledCoverageProgram coverageProgram,
             CompiledSurfaceProgram surfaceProgram,
-            CompiledMaterialLayout materialLayout,
+            MaterialGenericLayout genericLayout,
             in MaterialProgramCostBudget budget)
         {
             MaterialProgramCost cost = MaterialProgramCostAnalyzer.Analyze(
                 module,
                 coverageProgram,
                 surfaceProgram,
-                materialLayout);
+                genericLayout);
             var entries = new List<MaterialProgramDiagnostic>();
             AddExceeded(
                 entries,
@@ -1716,6 +1725,9 @@ namespace VividRP.Runtime.GPUDriven
         internal CompiledTransportProgram TransportProgram =>
             Lowering.TransportProgram;
 
+        internal MaterialDeferredExportContract DeferredExportContract =>
+            Lowering.DeferredExportContract;
+
         internal CompiledMaterialLayout MaterialLayout =>
             Lowering.MaterialLayout;
 
@@ -1794,7 +1806,7 @@ namespace VividRP.Runtime.GPUDriven
                 module,
                 lowering.CoverageProgram,
                 lowering.SurfaceProgram,
-                lowering.MaterialLayout,
+                lowering.GenericLayout,
                 costBudget);
             if (!diagnostics.IsWithinBudget)
                 throw new InvalidOperationException(diagnostics.GetDebugDump());
@@ -1867,6 +1879,53 @@ namespace VividRP.Runtime.GPUDriven
                 ClosureTopologyBudget.Prototype,
                 SupportedMaterialFeatures,
                 SupportedShadingModels);
+            return CompiledMaterialProgram.Compile(module, programVersion);
+        }
+
+        internal static CompiledMaterialProgram BuildGenericSingleSlabProof(
+            uint programVersion)
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue baseColor = BuildSampledBaseColor(
+                valueIR,
+                MaterialTextureResource.BaseColor,
+                MaterialParameter.BaseColor);
+            MaterialValue surfaceBaseColor = valueIR.Multiply(
+                baseColor,
+                valueIR.Constant(new float4(0.5f, 0.25f, 0.75f, 1.0f)));
+            MaterialValue coverage = valueIR.Saturate(valueIR.Multiply(
+                valueIR.Swizzle(baseColor, MaterialSwizzleMask.W),
+                valueIR.Constant(0.5f)));
+            MaterialValue roughness = valueIR.OneMinus(
+                valueIR.Parameter(MaterialParameter.Roughness));
+            MaterialValue metallic = valueIR.Saturate(valueIR.Multiply(
+                valueIR.Parameter(MaterialParameter.Metallic),
+                valueIR.Constant(0.5f)));
+            MaterialValue alphaClipThreshold =
+                valueIR.Parameter(MaterialParameter.AlphaClipThreshold);
+            MaterialValue emission = valueIR.Add(
+                valueIR.Parameter(MaterialParameter.Emission),
+                valueIR.Constant(new float3(0.05f, 0.1f, 0.15f)));
+            MaterialValue normal =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent =
+                valueIR.ExternalInput(MaterialExternalInput.GeometryTangentWS);
+            var closureGraph = new ClosureExpressionGraph(valueIR);
+            MaterialClosure surfaceClosure = closureGraph.Slab(
+                surfaceBaseColor,
+                roughness,
+                metallic,
+                normal,
+                tangent,
+                ClosureFeatureMask.BaseColorTexture);
+            var module = new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(coverage, alphaClipThreshold, emission),
+                closureGraph,
+                surfaceClosure,
+                ClosureTopologyBudget.Prototype,
+                SupportedMaterialFeatures,
+                MaterialShadingModelMask.StandardLit);
             return CompiledMaterialProgram.Compile(module, programVersion);
         }
 

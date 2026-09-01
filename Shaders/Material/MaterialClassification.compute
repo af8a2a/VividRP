@@ -5,6 +5,8 @@
 #pragma kernel BuildDeferredVariantIndirectArgs
 #pragma kernel BuildDeferredVariantIndirectArgsWave32 VIVID_MATERIAL_WAVE_32
 #pragma kernel BuildDeferredVariantIndirectArgsWave64 VIVID_MATERIAL_WAVE_64
+#pragma kernel ClearDualSlabSidecarDrawArgs
+#pragma kernel ClassifyDualSlabSidecarTiles
 #pragma use_dxc
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_WAVE_32 UNITY_DEVICE_SUPPORTS_WAVE_64
 
@@ -370,6 +372,56 @@ void ClearDeferredVariantArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
     _MaterialFeatureIndirectArgs[argsOffset + 1u] = 1u;
     _MaterialFeatureIndirectArgs[argsOffset + 2u] = 1u;
     _MaterialFeatureIndirectArgs[argsOffset + 3u] = 0u;
+}
+
+[numthreads(1, 1, 1)]
+void ClearDualSlabSidecarDrawArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    _MaterialFeatureIndirectArgs[0u] = 3u;
+    _MaterialFeatureIndirectArgs[1u] = 0u;
+    _MaterialFeatureIndirectArgs[2u] = 0u;
+    _MaterialFeatureIndirectArgs[3u] = 0u;
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void ClassifyDualSlabSidecarTiles(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupId : SV_GroupID,
+    uint groupIndex : SV_GroupIndex)
+{
+    uint dualSlabClass = 0u;
+    if (dispatchThreadId.x < _ClassificationWidth
+        && dispatchThreadId.y < _ClassificationHeight)
+    {
+        uint2 pixelCoord = dispatchThreadId.xy;
+        float4 gbuffer0 = _GBuffer0.Load(int3(pixelCoord, 0));
+        float4 gbuffer1 = _GBuffer1.Load(int3(pixelCoord, 0));
+        if (VividIsSurfaceSummaryGBufferABIValid(gbuffer1.a))
+        {
+            uint deferredExportHeader = VividDecodeDeferredExportHeader(
+                gbuffer0.a);
+            uint deferredExportClass = VividGetDeferredExportClass(
+                deferredExportHeader);
+            dualSlabClass = deferredExportClass
+                    == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
+                ? VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB
+                : 0u;
+        }
+    }
+
+    TileClassifaction::InitializeTileClassification(groupIndex);
+    TileClassifaction::SubmitPixelClassification(dualSlabClass);
+    if (groupIndex == 0u
+        && (gs_TileMask & VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB) != 0u)
+    {
+        uint tileOffset;
+        InterlockedAdd(
+            _MaterialFeatureIndirectArgs[1u],
+            1u,
+            tileOffset);
+        _MaterialFeatureTileList[tileOffset] =
+            TileClassifaction::PackTileCoord(groupId.xy);
+    }
 }
 
 void ClassifyDeferredExportsInternal(

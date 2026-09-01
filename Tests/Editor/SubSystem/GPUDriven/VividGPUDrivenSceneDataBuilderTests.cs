@@ -206,6 +206,8 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialParameterLaneCount, Is.EqualTo(4));
+                Assert.That(sceneData.MaterialResourceCount, Is.EqualTo(1));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(sceneData.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(sceneData.MeshletCount, Is.EqualTo(1));
@@ -355,6 +357,8 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
                 Assert.That(sceneData.DualSlabMaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialParameterLaneCount, Is.EqualTo(6));
+                Assert.That(sceneData.MaterialResourceCount, Is.EqualTo(2));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(2));
                 Assert.That(
                     sceneData.MaterialRuntimeHeaders[0].ProgramID,
@@ -366,6 +370,13 @@ namespace VividRP.Editor.Tests
                     sceneData.DualSlabMaterials[0].LayerOperator,
                     Is.EqualTo(VividDualSlabOperator.VerticalLayer));
                 Assert.That(sceneData.DualSlabMaterials[0].LayerWeight, Is.EqualTo(0.6f));
+                Assert.That(sceneData.RequiresDualSlabSidecar(0u), Is.True);
+
+                VividMaterialRuntimeHeader unlitHeader =
+                    sceneData.MaterialRuntimeHeaders[0];
+                unlitHeader.Flags |= VividMaterialRuntimeFlags.Unlit;
+                sceneData.MutableMaterialRuntimeHeaders[0] = unlitHeader;
+                Assert.That(sceneData.RequiresDualSlabSidecar(0u), Is.False);
             }
             finally
             {
@@ -378,6 +389,96 @@ namespace VividRP.Editor.Tests
                     definition,
                     topProxy,
                     baseProxy);
+            }
+        }
+
+        [Test]
+        public void Build_CullsRendererWhenBoundProxyBecomesInvalidAndRestoresWhenValid()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("DynamicProxyValidationMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "DynamicProxyValidationCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 });
+                gameObject = CreateMeshletRendererObject(
+                    "DynamicProxyValidationRenderer",
+                    mesh,
+                    new[] { material },
+                    out MeshletRenderer meshletRenderer);
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase database =
+                    VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new ThrowOnceTextureBackend();
+
+                builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend);
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+
+                materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                Assert.That(
+                    database.TryGetRendererData(
+                        meshletRenderer,
+                        out VividMeshletRendererRenderData staleRendererData),
+                    Is.True);
+                Assert.That(
+                    staleRendererData.flags & VividMeshletRendererFlags.Valid,
+                    Is.EqualTo(VividMeshletRendererFlags.Valid));
+
+                Assert.DoesNotThrow(() => builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend));
+                Assert.That(sceneData.InstanceCount, Is.Zero);
+
+                materialProxy.Model = GPUDrivenMaterialProxyModel.StandardLit;
+                textureBackend.ThrowOnNextSurfaceBinding = true;
+
+                Assert.Throws<InvalidOperationException>(() => builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend));
+
+                Assert.DoesNotThrow(() => builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend));
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                DestroyTestObjects(
+                    gameObject,
+                    null,
+                    material,
+                    mesh,
+                    meshletCollection,
+                    materialProxy);
             }
         }
 
@@ -1148,7 +1249,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Build_UsesMaterialProxyData_WhenProxyIsAssigned()
+        public void Build_UsesMaterialProxyAndCatalogedGraphProgram_WhenAssigned()
         {
             GameObject gameObject = null;
             Mesh mesh = null;
@@ -1157,6 +1258,7 @@ namespace VividRP.Editor.Tests
             Texture2D bumpMap = null;
             VividMeshletCollectionAsset meshletCollection = null;
             GPUDrivenMaterialProxy materialProxy = null;
+            MaterialGraphImportAsset materialGraph = null;
 
             try
             {
@@ -1165,7 +1267,19 @@ namespace VividRP.Editor.Tests
                 baseMap = new Texture2D(1, 1);
                 bumpMap = new Texture2D(1, 1);
                 materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialGraph =
+                    ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+                VividMaterialProgramID genericProgramID =
+                    (VividMaterialProgramID)
+                        MaterialProgramContract.BuiltinProgramCount;
+                materialGraph.Apply(
+                    CreateCompilationResult(
+                        GPUDrivenMaterialCompiler.GetMaterialProgram(
+                            genericProgramID)),
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    GPUDrivenMaterialCompiler.ProgramCatalog);
                 materialProxy.SourceMaterial = material;
+                materialProxy.MaterialGraph = materialGraph;
                 materialProxy.BaseMap = baseMap;
                 materialProxy.BaseColor = new Color(0.8f, 0.6f, 0.4f, 1.0f);
                 materialProxy.TextureTilingOffset = new Vector4(4.0f, 5.0f, 0.25f, 0.5f);
@@ -1205,16 +1319,19 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
                 Assert.That(sceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialParameterLaneCount, Is.EqualTo(4));
+                Assert.That(sceneData.MaterialResourceCount, Is.EqualTo(1));
                 Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 VividMaterialData materialData = sceneData.Materials[0];
                 VividMaterialRuntimeHeader runtimeHeader = sceneData.MaterialRuntimeHeaders[0];
                 VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
-                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(VividMaterialProgramID.StandardSingleSlab));
+                Assert.That(runtimeHeader.ProgramID, Is.EqualTo(genericProgramID));
                 Assert.That(runtimeHeader.ParameterAddress, Is.Zero);
                 Assert.That(runtimeHeader.ResourceBindingAddress, Is.EqualTo(materialData.SurfaceBindingIndex));
                 Assert.That(
                     runtimeHeader.Flags,
                     Is.EqualTo(VividMaterialRuntimeFlags.AlphaClip | VividMaterialRuntimeFlags.Unlit));
+                Assert.That(sceneData.RequiresDualSlabSidecar(0u), Is.False);
                 float4 expectedAlbedo = VividGPUDrivenSceneDataBuilder.ConvertMaterialColorForGPU(
                     materialProxy.BaseColor);
                 Assert.That(materialData.AlbedoColor.x, Is.EqualTo(expectedAlbedo.x).Within(0.0001f));
@@ -1225,6 +1342,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(surfaceBindingData.BaseColorResource, Is.EqualTo(15u));
                 Assert.That(surfaceBindingData.NormalResource, Is.EqualTo(14u));
                 Assert.That(surfaceBindingData.MaskResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(
+                    sceneData.MaterialResources[0].SurfaceBinding.BaseColorResource,
+                    Is.EqualTo(surfaceBindingData.BaseColorResource));
+                Assert.That(
+                    sceneData.MaterialResources[0].TextureTilingOffset,
+                    Is.EqualTo(materialData.TextureTilingOffset));
                 Assert.That(materialData.NormalsStrength, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialData.Metallic, Is.EqualTo(0.75f).Within(0.0001f));
                 Assert.That(materialData.Roughness, Is.EqualTo(0.35f).Within(0.0001f));
@@ -1241,6 +1364,11 @@ namespace VividRP.Editor.Tests
             finally
             {
                 DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy);
+
+                if (materialGraph != null)
+                {
+                    Object.DestroyImmediate(materialGraph);
+                }
 
                 if (baseMap != null)
                 {
@@ -1313,6 +1441,182 @@ namespace VividRP.Editor.Tests
             finally
             {
                 DestroyTestObjects(null, null, materialProxy, baseMap, bumpMap, maskMap);
+            }
+        }
+
+        [TestCase(
+            (int)MaterialTextureSampleClass.Raw,
+            VividSurfaceBindingFlags.Mask)]
+        [TestCase(
+            (int)MaterialTextureSampleClass.Color,
+            VividSurfaceBindingFlags.BaseColor)]
+        [TestCase(
+            (int)MaterialTextureSampleClass.Normal,
+            VividSurfaceBindingFlags.Normal)]
+        [TestCase(
+            (int)MaterialTextureSampleClass.Mask,
+            VividSurfaceBindingFlags.Mask)]
+        public void NamedTextureOverride_UsesSampleClassPhysicalCarrier(
+            int sampleClassValue,
+            VividSurfaceBindingFlags expectedFlag)
+        {
+            var sampleClass = (MaterialTextureSampleClass)sampleClassValue;
+            GPUDrivenMaterialProxy materialProxy = null;
+            Texture2D texture = null;
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<
+                    GPUDrivenMaterialProxy>();
+                texture = new Texture2D(1, 1);
+                var textureOverride = new GPUDrivenMaterialTextureOverride(
+                    "ArtistPattern",
+                    texture,
+                    new Vector4(2.0f, 3.0f, 0.25f, 0.5f));
+                var declaration = new MaterialResourceDeclaration(
+                    "ArtistPattern",
+                    MaterialValueType.Texture2D,
+                    sampleClass);
+                var expectedBinding = new VividSurfaceBindingData
+                {
+                    BaseColorResource = sampleClass
+                        == MaterialTextureSampleClass.Color
+                            ? 41u
+                            : VividSurfaceBindingData.InvalidResource,
+                    NormalResource = sampleClass
+                        == MaterialTextureSampleClass.Normal
+                            ? 41u
+                            : VividSurfaceBindingData.InvalidResource,
+                    MaskResource = sampleClass
+                            == MaterialTextureSampleClass.Raw
+                        || sampleClass == MaterialTextureSampleClass.Mask
+                            ? 41u
+                            : VividSurfaceBindingData.InvalidResource,
+                    Flags = expectedFlag,
+                };
+                using var textureBackend = new SentinelTextureBackend(
+                    expectedBinding);
+
+                VividMaterialResourceData resource =
+                    VividGPUDrivenSceneDataBuilder.CreateTextureOverrideResource(
+                        declaration,
+                        textureOverride,
+                        materialProxy,
+                        null,
+                        textureBackend);
+
+                Assert.That(textureBackend.LastTextures.BaseColor,
+                    sampleClass == MaterialTextureSampleClass.Color
+                        ? Is.SameAs(texture)
+                        : Is.Null);
+                Assert.That(textureBackend.LastTextures.Normal,
+                    sampleClass == MaterialTextureSampleClass.Normal
+                        ? Is.SameAs(texture)
+                        : Is.Null);
+                Assert.That(textureBackend.LastTextures.Mask,
+                    sampleClass == MaterialTextureSampleClass.Raw
+                        || sampleClass == MaterialTextureSampleClass.Mask
+                            ? Is.SameAs(texture)
+                            : Is.Null);
+                Assert.That(resource.SurfaceBinding.Flags,
+                    Is.EqualTo(expectedFlag));
+                Assert.That(resource.TextureTilingOffset,
+                    Is.EqualTo(new float4(2.0f, 3.0f, 0.25f, 0.5f)));
+            }
+            finally
+            {
+                DestroyTestObjects(null, null, materialProxy, texture);
+            }
+        }
+
+        [Test]
+        public void NamedTextureOverride_RejectsRawTextureOnVirtualTextureBackend()
+        {
+            GPUDrivenMaterialProxy materialProxy = null;
+            Texture2D texture = null;
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<
+                    GPUDrivenMaterialProxy>();
+                texture = new Texture2D(1, 1);
+                var textureOverride = new GPUDrivenMaterialTextureOverride(
+                    "ArtistPattern",
+                    texture,
+                    Vector4.one);
+                var declaration = new MaterialResourceDeclaration(
+                    "ArtistPattern",
+                    MaterialValueType.Texture2D);
+                using var textureBackend = new CapturingVirtualTextureBackend();
+
+                NotSupportedException exception = Assert.Throws<
+                    NotSupportedException>(() =>
+                        VividGPUDrivenSceneDataBuilder.CreateTextureOverrideResource(
+                            declaration,
+                            textureOverride,
+                            materialProxy,
+                            null,
+                            textureBackend));
+
+                Assert.That(exception.Message,
+                    Does.Contain("Virtual Texture backend"));
+                Assert.That(textureBackend.CreateSurfaceBindingCallCount,
+                    Is.Zero);
+            }
+            finally
+            {
+                DestroyTestObjects(null, null, materialProxy, texture);
+            }
+        }
+
+        [Test]
+        public void NamedVirtualTextureOverride_UsesStreamedAssetOnVirtualTextureBackend()
+        {
+            GPUDrivenMaterialProxy materialProxy = null;
+            VividVirtualTextureAsset virtualTexture = null;
+            try
+            {
+                materialProxy = ScriptableObject.CreateInstance<
+                    GPUDrivenMaterialProxy>();
+                virtualTexture = ScriptableObject.CreateInstance<
+                    VividVirtualTextureAsset>();
+                GPUDrivenMaterialTextureOverride textureOverride =
+                    GPUDrivenMaterialTextureOverride.ForVirtualTexture(
+                        "ArtistPattern",
+                        virtualTexture,
+                        new Vector4(2.0f, 3.0f, 0.25f, 0.5f));
+                var declaration = new MaterialResourceDeclaration(
+                    "ArtistPattern",
+                    MaterialValueType.Texture2D,
+                    MaterialTextureSampleClass.Raw);
+                using var textureBackend =
+                    new CapturingVirtualTextureBackend();
+
+                VividMaterialResourceData resource =
+                    VividGPUDrivenSceneDataBuilder.CreateTextureOverrideResource(
+                        declaration,
+                        textureOverride,
+                        materialProxy,
+                        null,
+                        textureBackend);
+
+                Assert.That(
+                    textureBackend.CreateSurfaceBindingCallCount,
+                    Is.EqualTo(1));
+                Assert.That(
+                    textureBackend.LastTextures.StreamedVirtualTexture,
+                    Is.SameAs(virtualTexture));
+                Assert.That(textureBackend.LastTextures.BaseColor, Is.Null);
+                Assert.That(textureBackend.LastTextures.Normal, Is.Null);
+                Assert.That(textureBackend.LastTextures.Mask, Is.Null);
+                Assert.That(
+                    resource.TextureTilingOffset,
+                    Is.EqualTo(new float4(2.0f, 3.0f, 0.25f, 0.5f)));
+            }
+            finally
+            {
+                if (virtualTexture != null)
+                    Object.DestroyImmediate(virtualTexture);
+                if (materialProxy != null)
+                    Object.DestroyImmediate(materialProxy);
             }
         }
 
@@ -1530,10 +1834,17 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(system.SceneData.MaterialCount, Is.EqualTo(1));
                 Assert.That(system.SceneData.MaterialRuntimeHeaderCount, Is.EqualTo(1));
+                Assert.That(system.SceneData.MaterialParameterLaneCount, Is.EqualTo(4));
+                Assert.That(system.SceneData.MaterialResourceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.InstanceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialRuntimeHeaderCount, Is.EqualTo(1));
-                Assert.That(system.BufferSet.MaterialProgramCount, Is.EqualTo(3));
+                Assert.That(system.BufferSet.MaterialParameterLaneCount, Is.EqualTo(4));
+                Assert.That(system.BufferSet.MaterialResourceCount, Is.EqualTo(1));
+                Assert.That(
+                    system.BufferSet.MaterialProgramCount,
+                    Is.EqualTo(
+                        MaterialProgramContract.ProductionCatalogProgramCount));
                 Assert.That(system.BufferSet.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshletCount, Is.EqualTo(1));
@@ -2382,6 +2693,18 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        private static MaterialGraphCompilationResult CreateCompilationResult(
+            CompiledMaterialProgram program)
+        {
+            return new MaterialGraphCompilationResult(
+                program,
+                program.Module,
+                new MaterialGraphProvenance(
+                    new Dictionary<string, HashSet<int>>(),
+                    new Dictionary<string, HashSet<int>>()),
+                Array.Empty<MaterialGraphDiagnostic>());
+        }
+
         private static GameObject CreateMeshletRendererObject(
             string name,
             Mesh mesh,
@@ -2693,12 +3016,13 @@ namespace VividRP.Editor.Tests
             {
             }
 
-            public bool CanUseStreamedVirtualTexture(VividVirtualTextureAsset asset)
+            public virtual bool CanUseStreamedVirtualTexture(
+                VividVirtualTextureAsset asset)
             {
                 return false;
             }
 
-            public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
+            public virtual VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
             {
                 CreateSurfaceBindingCallCount++;
                 LastTextures = textures;
@@ -2715,6 +3039,23 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        private sealed class ThrowOnceTextureBackend : CapturingTextureBackend
+        {
+            internal bool ThrowOnNextSurfaceBinding { get; set; }
+
+            public override VividSurfaceBindingData CreateSurfaceBinding(
+                in GPUDrivenSurfaceTextureSet textures)
+            {
+                if (ThrowOnNextSurfaceBinding)
+                {
+                    ThrowOnNextSurfaceBinding = false;
+                    throw new InvalidOperationException("Intentional surface binding failure.");
+                }
+
+                return base.CreateSurfaceBinding(textures);
+            }
+        }
+
         private sealed class CapturingVirtualTextureBackend :
             CapturingTextureBackend,
             IGPUDrivenVirtualTextureBackend
@@ -2722,6 +3063,29 @@ namespace VividRP.Editor.Tests
             public int VirtualTextureSpaceId => 1;
 
             public int VirtualTextureAllocationId => 1;
+
+            public override bool CanUseStreamedVirtualTexture(
+                VividVirtualTextureAsset asset)
+            {
+                return asset != null;
+            }
+        }
+
+        private sealed class SentinelTextureBackend : CapturingTextureBackend
+        {
+            private readonly VividSurfaceBindingData m_Binding;
+
+            internal SentinelTextureBackend(in VividSurfaceBindingData binding)
+            {
+                m_Binding = binding;
+            }
+
+            public override VividSurfaceBindingData CreateSurfaceBinding(
+                in GPUDrivenSurfaceTextureSet textures)
+            {
+                base.CreateSurfaceBinding(textures);
+                return m_Binding;
+            }
         }
 
     }

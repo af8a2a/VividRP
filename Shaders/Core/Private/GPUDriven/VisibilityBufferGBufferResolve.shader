@@ -21,11 +21,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
             #pragma multi_compile_local_fragment _ VIVID_DUAL_SLAB_SIDECAR_OUTPUT
+            #pragma multi_compile_local_vertex _ VIVID_DUAL_SLAB_SIDECAR_TILED
             #pragma target 5.0
             #pragma require randomwrite
             #pragma use_dxc
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividPostSurfaceSummary.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
             #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
@@ -53,9 +55,16 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             float4 _VisibilityBufferAttributes1ScaleBias;
             float4 _VisibilityBufferBarycentricsScaleBias;
 
+            #if defined(VIVID_DUAL_SLAB_SIDECAR_TILED)
+            #define VIVID_DUAL_SLAB_SIDECAR_TILE_SIZE 8u
+            StructuredBuffer<uint> _DualSlabSidecarTileList;
+            float4 _DualSlabSidecarScreenSize;
+            #endif
+
             struct Attributes
             {
                 uint vertexID : SV_VertexID;
+                uint instanceID : SV_InstanceID;
             };
 
             struct Varyings
@@ -75,13 +84,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 VividInstanceData instanceData;
                 VividMaterialData materialData;
-                VividDualSlabMaterialData dualSlabMaterialData;
-                VividSurfaceBindingData surfaceBindingData;
-                VividSurfaceBindingData topSurfaceBindingData;
-                uint isUnlit;
+                uint materialRuntimeFlags;
                 uint isDualSlab;
                 uint materialProgramFailed;
                 uint materialProgramID;
+                VividMaterialRuntimeHeader materialRuntimeHeader;
+                VividMaterialProgramData materialProgramData;
                 VividMeshletVertex vertex0;
                 VividMeshletVertex vertex1;
                 VividMeshletVertex vertex2;
@@ -98,8 +106,34 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             Varyings Vert(Attributes input)
             {
                 Varyings output;
+                #if defined(VIVID_DUAL_SLAB_SIDECAR_TILED)
+                const uint packedTileCoord =
+                    _DualSlabSidecarTileList[input.instanceID];
+                const uint2 tileCoord = uint2(
+                    packedTileCoord & 0xFFFFu,
+                    packedTileCoord >> 16u);
+                const float2 tileMinPixel = float2(
+                    tileCoord * VIVID_DUAL_SLAB_SIDECAR_TILE_SIZE);
+                const float2 localUV = float2(
+                    (input.vertexID << 1u) & 2u,
+                    input.vertexID & 2u);
+                output.uv = (tileMinPixel
+                    + localUV * VIVID_DUAL_SLAB_SIDECAR_TILE_SIZE)
+                    * _DualSlabSidecarScreenSize.zw;
+
+                output.positionCS = float4(
+                    output.uv.x * 2.0f - 1.0f,
+                    1.0f - output.uv.y * 2.0f,
+                    UNITY_NEAR_CLIP_VALUE,
+                    1.0f);
+                #ifdef UNITY_PRETRANSFORM_TO_DISPLAY_ORIENTATION
+                output.positionCS = ApplyPretransformRotation(
+                    output.positionCS);
+                #endif
+                #else
                 output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
                 output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
+                #endif
                 return output;
             }
 
@@ -261,12 +295,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 result.materialData = (VividMaterialData) 0;
-                result.dualSlabMaterialData = (VividDualSlabMaterialData) 0;
-                result.surfaceBindingData = (VividSurfaceBindingData) 0;
-                result.topSurfaceBindingData = (VividSurfaceBindingData) 0;
                 result.isDualSlab = 0u;
+                result.materialRuntimeFlags = 0u;
                 result.materialProgramID = VIVIDMATERIALPROGRAMID_INVALID;
                 result.materialProgramFailed = 1u;
+                result.materialRuntimeHeader = (VividMaterialRuntimeHeader) 0;
+                result.materialProgramData = (VividMaterialProgramData) 0;
                 VividMaterialRuntimeHeader runtimeHeader;
                 VividMaterialProgramData programData;
                 const uint programStatus = VividGetMaterialProgramStatus(
@@ -277,39 +311,30 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 if (programStatus == VIVID_MATERIAL_PROGRAM_KNOWN)
                 {
                     result.materialProgramID = runtimeHeader.ProgramID;
-                    if (programData.SurfaceProgramID
-                        == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB)
+                    result.materialRuntimeHeader = runtimeHeader;
+                    result.materialProgramData = programData;
+                    loadedMaterialProgram = programData.ParameterLayoutID
+                            == VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES
+                        && programData.ResourceLayoutID
+                            == VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS
+                        && (programData.SurfaceProgramID
+                                == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
+                            || programData.SurfaceProgramID
+                                == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB);
+                    result.isDualSlab = loadedMaterialProgram
+                        && programData.SurfaceProgramID
+                            == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB
+                        ? 1u
+                        : 0u;
+                    if (result.instanceData.MaterialIndex < _MaterialDataCount)
                     {
-                        loadedMaterialProgram = VividTryLoadStandardSingleSlabSurfaceProgram(
-                            result.instanceData.MaterialIndex,
-                            0u,
-                            result.materialData,
-                            result.surfaceBindingData);
-                    }
-                    else if (programData.SurfaceProgramID
-                        == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB)
-                    {
-                        loadedMaterialProgram = VividTryLoadDualSlabSurfaceProgram(
-                            result.instanceData.MaterialIndex,
-                            0u,
-                            result.dualSlabMaterialData,
-                            result.surfaceBindingData,
-                            result.topSurfaceBindingData);
-                        result.isDualSlab = loadedMaterialProgram ? 1u : 0u;
+                        result.materialData = PullMaterialData(
+                            result.instanceData.MaterialIndex);
                     }
                     result.materialProgramFailed = loadedMaterialProgram ? 0u : 1u;
-                }
-
-                result.isUnlit = 0u;
-                if (loadedMaterialProgram)
-                {
-                    result.isUnlit =
-                        (programData.CapabilityFlags
-                            & VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT) != 0u
-                        && (runtimeHeader.Flags
-                            & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) != 0u
-                            ? 1u
-                            : 0u;
+                    result.materialRuntimeFlags = loadedMaterialProgram
+                        ? runtimeHeader.Flags
+                        : 0u;
                 }
                 const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
@@ -389,6 +414,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 aotContext.GeometryNormalWS = geometryNormalWS;
                 aotContext.GeometryTangentWS = geometryTangentWS;
                 aotContext.PositionCS = positionCS;
+                VividAOTDeferredExportContract deferredExportContract =
+                    (VividAOTDeferredExportContract) 0;
                 VividAOTSurfaceProgramOutput aotSurfaceOutput =
                     (VividAOTSurfaceProgramOutput) 0;
                 bool dispatchedAOTSurface = false;
@@ -396,30 +423,62 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     && triangleData.materialProgramFailed == 0u)
                 {
                     dispatchedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
-                        triangleData.materialProgramID,
-                        triangleData.materialData,
-                        triangleData.dualSlabMaterialData,
-                        triangleData.surfaceBindingData,
-                        triangleData.topSurfaceBindingData,
+                        triangleData.materialRuntimeHeader,
+                        triangleData.materialProgramData,
                         aotContext,
+                        deferredExportContract,
                         aotSurfaceOutput);
                 }
-                const bool expectsDualSlab = triangleData.isDualSlab != 0u;
-                const bool evaluatedAOTSingleSurface = !expectsDualSlab
-                    && dispatchedAOTSurface
-                    && aotSurfaceOutput.ClosureCount == 1u
-                    && aotSurfaceOutput.LayerOperator == 0u;
-                const bool evaluatedAOTDualSurface = expectsDualSlab
-                    && dispatchedAOTSurface
-                    && aotSurfaceOutput.ClosureCount == 2u
-                    && (aotSurfaceOutput.LayerOperator == 1u
-                        || aotSurfaceOutput.LayerOperator == 2u);
+                const bool supportedDeferredExport = dispatchedAOTSurface
+                    && VividIsAOTDeferredExportContractSupported(
+                        deferredExportContract)
+                    && deferredExportContract.SurfaceSummaryAbi
+                        == VIVID_SURFACE_SUMMARY_GBUFFER_ABI_VERSION
+                    && (deferredExportContract.DualSlabSidecarAbi
+                            == VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_NONE
+                        || deferredExportContract.DualSlabSidecarAbi
+                            == VIVID_DUAL_SLAB_LAYER_SIDECAR_ABI_VERSION);
+                const bool expectsDualTopology = deferredExportContract.Topology
+                    != VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_NONE;
+                const uint expectedLayerOperator = deferredExportContract.Topology;
+                const bool evaluatedAOTSurface = supportedDeferredExport
+                    && (triangleData.isDualSlab != 0u) == expectsDualTopology
+                    && aotSurfaceOutput.ClosureCount
+                        == deferredExportContract.ExpectedClosureCount
+                    && aotSurfaceOutput.LayerOperator == expectedLayerOperator;
+                const bool supportsLit = VividAOTDeferredExportHasShadingModel(
+                    deferredExportContract,
+                    VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_STANDARD_LIT);
+                const bool supportsUnlit = VividAOTDeferredExportHasShadingModel(
+                    deferredExportContract,
+                    VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_UNLIT);
+                const bool runtimeRequestsUnlit =
+                    (triangleData.materialRuntimeFlags
+                        & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) != 0u;
+                const bool invalidRuntimeUnlit = runtimeRequestsUnlit
+                    && !supportsUnlit;
                 const bool failedAOTSurface = triangleData.materialProgramFailed != 0u
-                    || (!evaluatedAOTSingleSurface
-                        && !evaluatedAOTDualSurface);
-                const bool exportDualSlab = evaluatedAOTDualSurface
+                    || !evaluatedAOTSurface
+                    || invalidRuntimeUnlit;
+                const bool isUnlit = !failedAOTSurface
+                    && supportsUnlit
+                    && (!supportsLit || runtimeRequestsUnlit);
+                const bool hasVisibleTopLayer = !failedAOTSurface
+                    && expectsDualTopology
                     && saturate(aotSurfaceOutput.LayerWeight)
                         > VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT;
+                const bool exportDualSlab = !isUnlit
+                    && hasVisibleTopLayer
+                    && deferredExportContract.LitClass
+                        == VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_DUAL_SLAB
+                    && deferredExportContract.DualSlabSidecarAbi
+                        == VIVID_DUAL_SLAB_LAYER_SIDECAR_ABI_VERSION
+                    && VividAOTDeferredExportHasPayload(
+                        deferredExportContract,
+                        VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DUAL_SLAB_SIDECAR)
+                    && VividAOTDeferredExportHasPolicy(
+                        deferredExportContract,
+                        VIVID_AOT_DEFERRED_EXPORT_POLICY_FAST_SLAB_WHEN_SIDECAR_EMPTY);
 
                 float3 baseColor;
                 float3 evaluatedAOTNormalWS = geometryNormalWS;
@@ -447,11 +506,14 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     metallic = aotSurfaceOutput.BaseSlab.Metallic;
                     ambientOcclusion =
                         aotSurfaceOutput.BaseSlab.AmbientOcclusion;
-                    if (exportDualSlab)
+                    if (hasVisibleTopLayer
+                        && VividAOTDeferredExportHasPayload(
+                            deferredExportContract,
+                            VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SHARED_NORMAL_AO))
                     {
-                        // Sidecar ABI v1 has one shared normal/AO. Blend the
-                        // two evaluated Slabs into that shared representative
-                        // so both layer-weight endpoints remain exact.
+                        // Deferred Export has one shared core normal/AO. Blend
+                        // the two evaluated Slabs into that representative so
+                        // both layer-weight endpoints remain exact.
                         const float layerWeight = saturate(
                             aotSurfaceOutput.LayerWeight);
                         const float3 topNormalWS = EvaluateAOTSlabNormalWS(
@@ -469,14 +531,18 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 }
 
                 const float3 normalWS = evaluatedAOTNormalWS;
-                const bool isUnlit = !failedAOTSurface
-                    && triangleData.isUnlit != 0u;
                 const bool hasDiffuseIrradiance = !failedAOTSurface
                     && !isUnlit
+                    && VividAOTDeferredExportHasPolicy(
+                        deferredExportContract,
+                        VIVID_AOT_DEFERRED_EXPORT_POLICY_DYNAMIC_DIFFUSE_IRRADIANCE)
                     && VividHasProbeVolumeGI();
-                // Runtime material flags do not expose SSR/decal policy yet.
-                const bool receiveSSR = true;
-                const bool receiveDecals = true;
+                const bool receiveSSR = VividAOTDeferredExportHasPolicy(
+                    deferredExportContract,
+                    VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_SSR_ON_FAST_SLAB);
+                const bool receiveDecals = VividAOTDeferredExportHasPolicy(
+                    deferredExportContract,
+                    VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_DECALS);
                 const float3 diffuseIrradiance = hasDiffuseIrradiance
                     ? SampleVividProbeVolume(
                         positionWS,
@@ -485,116 +551,46 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         0xFFFFFFFFu)
                     : 0.0f;
 
-                surfaceData = (VividSurfaceSummaryData) 0;
-                dualSlabLayerData = (VividDualSlabLayerData) 0;
-                surfaceData.normalWS = normalWS;
-                surfaceData.perceptualRoughness = perceptualRoughness;
-                surfaceData.ambientOcclusion = ambientOcclusion;
-                surfaceData.diffuseIrradiance = diffuseIrradiance;
+                VividPostSurfaceSummaryInput postSurfaceInput =
+                    (VividPostSurfaceSummaryInput) 0;
+                postSurfaceInput.baseColor = baseColor;
+                postSurfaceInput.topBaseColor =
+                    aotSurfaceOutput.TopSlab.BaseColor.rgb;
+                postSurfaceInput.normalWS = normalWS;
+                postSurfaceInput.perceptualRoughness = perceptualRoughness;
+                postSurfaceInput.metallic = metallic;
+                postSurfaceInput.ambientOcclusion = ambientOcclusion;
+                postSurfaceInput.emissive = aotSurfaceOutput.Emission;
+                postSurfaceInput.diffuseIrradiance = diffuseIrradiance;
+                postSurfaceInput.topPerceptualRoughness =
+                    aotSurfaceOutput.TopSlab.PerceptualRoughness;
+                postSurfaceInput.topMetallic =
+                    aotSurfaceOutput.TopSlab.Metallic;
+                postSurfaceInput.layerWeight = aotSurfaceOutput.LayerWeight;
+                postSurfaceInput.failedSurface = failedAOTSurface ? 1u : 0u;
+                postSurfaceInput.unlitSurface = isUnlit ? 1u : 0u;
+                postSurfaceInput.hasVisibleTopLayer =
+                    hasVisibleTopLayer ? 1u : 0u;
+                postSurfaceInput.exportDualSlab = exportDualSlab ? 1u : 0u;
+                postSurfaceInput.horizontalMix =
+                    deferredExportContract.Topology
+                        == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_HORIZONTAL_MIX
+                    ? 1u
+                    : 0u;
+                postSurfaceInput.verticalLayer =
+                    deferredExportContract.Topology
+                        == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER
+                    ? 1u
+                    : 0u;
+                postSurfaceInput.hasDiffuseIrradiance =
+                    hasDiffuseIrradiance ? 1u : 0u;
+                postSurfaceInput.receiveSSR = receiveSSR ? 1u : 0u;
+                postSurfaceInput.receiveDecals = receiveDecals ? 1u : 0u;
 
-                UNITY_BRANCH
-                if (failedAOTSurface)
-                {
-                    surfaceData.diffuseAlbedo = float3(1.0f, 0.0f, 1.0f);
-                    surfaceData.specularF0 = 0.0f;
-                    surfaceData.emissive = float3(1.0f, 0.0f, 1.0f);
-                    surfaceData.deferredExportHeader =
-                        VividBuildDeferredExportHeader(
-                            VIVID_DEFERRED_EXPORT_CLASS_ERROR,
-                            false,
-                            false,
-                            false,
-                            false);
-                }
-                else if (isUnlit)
-                {
-                    float3 unlitColor = baseColor;
-                    if (exportDualSlab)
-                    {
-                        const float layerWeight = saturate(
-                            aotSurfaceOutput.LayerWeight);
-                        const float3 topBaseColor =
-                            aotSurfaceOutput.TopSlab.BaseColor.rgb;
-                        if (aotSurfaceOutput.LayerOperator == 1u)
-                        {
-                            unlitColor = lerp(
-                                baseColor,
-                                topBaseColor,
-                                layerWeight);
-                        }
-                        else
-                        {
-                            const float topMetallic = saturate(
-                                aotSurfaceOutput.TopSlab.Metallic);
-                            const float3 topDiffuseAlbedo = topBaseColor
-                                * (1.0f - topMetallic);
-                            const float topOpacity = saturate(
-                                max(
-                                    topDiffuseAlbedo.x,
-                                    max(
-                                        topDiffuseAlbedo.y,
-                                        topDiffuseAlbedo.z))
-                                + topMetallic);
-                            unlitColor = topBaseColor * layerWeight
-                                + baseColor * lerp(
-                                    1.0f,
-                                    1.0f - topOpacity,
-                                    layerWeight);
-                        }
-                    }
-                    surfaceData.diffuseAlbedo = 0.0f;
-                    surfaceData.specularF0 = 0.0f;
-                    surfaceData.emissive = max(
-                        unlitColor + aotSurfaceOutput.Emission,
-                        0.0f);
-                    surfaceData.deferredExportHeader =
-                        VividBuildDeferredExportHeader(
-                            VIVID_DEFERRED_EXPORT_CLASS_UNLIT,
-                            false,
-                            false,
-                            false,
-                            receiveDecals);
-                }
-                else
-                {
-                    const float saturatedMetallic = saturate(metallic);
-                    surfaceData.diffuseAlbedo = baseColor
-                        * (1.0f - saturatedMetallic);
-                    surfaceData.specularF0 = lerp(
-                        0.04f.xxx,
-                        baseColor,
-                        saturatedMetallic);
-                    surfaceData.emissive = max(
-                        aotSurfaceOutput.Emission,
-                        0.0f);
-                    if (exportDualSlab)
-                    {
-                        const float3 topBaseColor =
-                            aotSurfaceOutput.TopSlab.BaseColor.rgb;
-                        const float topMetallic = saturate(
-                            aotSurfaceOutput.TopSlab.Metallic);
-                        dualSlabLayerData.diffuseAlbedo = topBaseColor
-                            * (1.0f - topMetallic);
-                        dualSlabLayerData.specularF0 = lerp(
-                            0.04f.xxx,
-                            topBaseColor,
-                            topMetallic);
-                        dualSlabLayerData.perceptualRoughness =
-                            aotSurfaceOutput.TopSlab.PerceptualRoughness;
-                        dualSlabLayerData.layerWeight =
-                            aotSurfaceOutput.LayerWeight;
-                    }
-                    surfaceData.deferredExportHeader =
-                        VividBuildDeferredExportHeader(
-                            exportDualSlab
-                                ? VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
-                                : VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB,
-                            exportDualSlab
-                                && aotSurfaceOutput.LayerOperator == 2u,
-                            hasDiffuseIrradiance,
-                            receiveSSR && !exportDualSlab,
-                            receiveDecals);
-                }
+                VividPostSurfaceSummaryOutput postSurfaceOutput =
+                    VividPostSurfaceSummary(postSurfaceInput);
+                surfaceData = postSurfaceOutput.surfaceData;
+                dualSlabLayerData = postSurfaceOutput.dualSlabLayerData;
             }
 
             #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)

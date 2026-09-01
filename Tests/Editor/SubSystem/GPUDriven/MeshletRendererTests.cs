@@ -188,6 +188,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(missingBindingMessage, Does.Contain("submesh 1"));
 
                 meshletRenderer.SetMeshletCollections(new[] { subMesh0, subMesh1 });
+                Assert.That(
+                    meshletRenderer.TryValidateRuntimeBindings(
+                        out string runtimeValidationMessage),
+                    Is.True);
+                Assert.That(runtimeValidationMessage, Is.Empty);
                 Assert.That(meshletRenderer.TryValidate(out string validationMessage), Is.True);
                 Assert.That(validationMessage, Is.Empty);
             }
@@ -224,6 +229,67 @@ namespace VividRP.Editor.Tests
                 meshletRenderer.SetMaterialProxies(new[] { materialProxy });
                 Assert.That(meshletRenderer.TryValidate(out string validationMessage), Is.True);
                 Assert.That(validationMessage, Is.Empty);
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(meshletCollection);
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void TryValidate_RejectsInvalidBoundProxy_WhileDatabaseKeepsGeometryValidity()
+        {
+            var gameObject = new GameObject("MeshletRenderer_InvalidProxyValidation");
+            Mesh mesh = CreateSingleSubMeshMesh("InvalidProxyValidationMesh");
+            var meshFilter = gameObject.AddComponent<MeshFilter>();
+            MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+            var meshletCollection =
+                ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+            var materialProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+
+            try
+            {
+                meshFilter.sharedMesh = mesh;
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
+                meshletRenderer.SetTakeOverSourceRenderer(false);
+                meshletCollection.SourceSubmeshIndex = 0;
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+
+                materialProxy.name = "InvalidDualSlabProxy";
+                materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+
+                Assert.That(
+                    meshletRenderer.TryValidateRuntimeBindings(
+                        out string runtimeValidationMessage),
+                    Is.False);
+                Assert.That(
+                    runtimeValidationMessage,
+                    Does.Contain("'InvalidDualSlabProxy'")
+                        .And.Contain("submesh 0")
+                        .And.Contain("require a definition"));
+
+                Assert.That(
+                    meshletRenderer.TryValidate(out string validationMessage),
+                    Is.False);
+                Assert.That(validationMessage, Is.EqualTo(runtimeValidationMessage));
+
+                VividMeshletRendererDatabase database =
+                    VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(meshletRenderer);
+                Assert.That(
+                    database.TryGetRendererData(
+                        meshletRenderer,
+                        out VividMeshletRendererRenderData trackedData),
+                    Is.True);
+                Assert.That(
+                    trackedData.flags & VividMeshletRendererFlags.Valid,
+                    Is.EqualTo(VividMeshletRendererFlags.Valid));
             }
             finally
             {

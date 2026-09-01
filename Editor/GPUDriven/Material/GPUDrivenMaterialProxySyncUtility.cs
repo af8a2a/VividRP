@@ -141,7 +141,8 @@ namespace VividRP.Editor.GPUDriven
             }
 
             materialProxy.SourceMaterial = sourceMaterial;
-            materialProxy.Model = GPUDrivenMaterialProxyModel.StandardLit;
+            // Synchronization updates the source-backed Slab payload. The material
+            // model and its Closure topology remain author-owned asset state.
             materialProxy.TextureMode = textureMode;
             if (textureMode == GPUDrivenMaterialProxyTextureMode.Bindless)
             {

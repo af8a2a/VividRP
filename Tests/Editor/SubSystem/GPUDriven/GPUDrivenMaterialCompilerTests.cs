@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -16,10 +17,13 @@ namespace VividRP.Editor.Tests
                 "Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl");
             string runtimeContract = File.ReadAllText(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl");
+            string previewContract = File.ReadAllText(
+                "Packages/com.vivid.render-pipelines/Editor/Shader/MaterialGraphPreview.shader");
 
             Assert.That(generatedContract, Does.Contain("struct VividMaterialRuntimeHeader"));
             Assert.That(generatedContract, Does.Contain("struct VividMaterialProgramData"));
             Assert.That(generatedContract, Does.Contain("struct VividDualSlabMaterialData"));
+            Assert.That(generatedContract, Does.Contain("struct VividMaterialResourceData"));
             Assert.That(
                 generatedContract,
                 Does.Contain("#define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB (0)"));
@@ -38,36 +42,44 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 generatedContract,
                 Does.Contain("#define VIVIDMATERIALRUNTIMEFLAGS_UNLIT (2)"));
-            Assert.That(runtimeContract, Does.Contain("struct VividMaterialRuntimeHeader"));
-            Assert.That(runtimeContract, Does.Contain("struct VividMaterialProgramData"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES (2)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain("#define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS (2)"));
+            Assert.That(
+                generatedContract,
+                Does.Contain(
+                    $"#define VIVID_MATERIAL_PROGRAM_VERSION ({GPUDrivenMaterialCompiler.ProgramVersion})"));
+
+            string normalizedGeneratedContract = generatedContract.Replace("\r\n", "\n");
+            string expectedResourceContract = string.Join("\n", new[]
+            {
+                "struct VividMaterialResourceData",
+                "{",
+                "    uint BaseColorResource;",
+                "    uint NormalResource;",
+                "    uint MaskResource;",
+                "    uint SurfaceBindingFlags;",
+                "    float4 UVScaleBias;",
+                "    float4 TextureTilingOffset;",
+                "    float4 MetallicSmoothnessRemap;",
+                "    float4 AmbientOcclusionRemap;",
+                "    float NormalsStrength;",
+                "    uint MaskMode;",
+                "    uint Padding0;",
+                "    uint Padding1;",
+                "};",
+            });
+            Assert.That(normalizedGeneratedContract, Does.Contain(expectedResourceContract));
+
+            const string generatedInclude =
+                "#include \"Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl\"";
             Assert.That(
                 runtimeContract,
-                Does.Contain(
-                    $"#define VIVID_MATERIAL_PROGRAM_VERSION {GPUDrivenMaterialCompiler.ProgramVersion}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_HORIZONTAL_MIX {(uint)VividMaterialProgramID.DualSlabHorizontalMix}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_VERTICAL_LAYER {(uint)VividMaterialProgramID.DualSlabVerticalLayer}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALRUNTIMEFLAGS_ALPHA_CLIP {(uint)VividMaterialRuntimeFlags.AlphaClip}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALPROGRAMCAPABILITIES_ALPHA_CLIP {(uint)VividMaterialProgramCapabilities.AlphaClip}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT {(uint)VividMaterialProgramCapabilities.Unlit}u"));
-            Assert.That(
-                runtimeContract,
-                Does.Contain(
-                    $"#define VIVIDMATERIALRUNTIMEFLAGS_UNLIT {(uint)VividMaterialRuntimeFlags.Unlit}u"));
+                Does.Contain(generatedInclude));
+            Assert.That(previewContract, Does.Contain(generatedInclude));
             Assert.That(
                 runtimeContract,
                 Does.Contain("StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;"));
@@ -83,16 +95,91 @@ namespace VividRP.Editor.Tests
                 "VividMaterialRuntimeHeader",
                 "VividMaterialProgramData",
                 "VividMaterialData",
+                "VividSlabMaterialData",
                 "VividDualSlabMaterialData",
                 "VividSurfaceBindingData",
+                "VividMaterialResourceData",
+                "VividTerrainMaterialData",
+                "VividTerrainLayerGPUData",
+                "VividInstanceData",
+                "VividMeshLODNode",
+                "VividMeshlet",
+                "VividMeshletVertex",
+                "VividMeshletRenderRequestPacked",
+                "VividIndirectDrawArgs",
+                "VividGPUCullingContext",
+                "VividGPULODSelectionContext",
             };
+            string normalizedRuntimeContract = runtimeContract.Replace("\r\n", "\n");
             foreach (string structName in sharedStructs)
             {
                 Assert.That(
-                    GetHlslStructSignature(runtimeContract, structName),
-                    Is.EqualTo(GetHlslStructSignature(generatedContract, structName)),
-                    $"C#-generated and runtime HLSL contracts differ for {structName}.");
+                    generatedContract,
+                    Does.Contain($"struct {structName}"),
+                    $"Generated ABI is missing {structName}.");
+                Assert.That(
+                    normalizedRuntimeContract,
+                    Does.Not.Contain($"struct {structName}\n{{"),
+                    $"VividGPUDrivenCommon.hlsl must consume, not redeclare, {structName}.");
             }
+
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDMATERIAL"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDDUALSLABOPERATOR"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDINSTANCE"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDGEOMETRYFLAGS"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDSURFACEBINDINGFLAGS"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVIDRENDERERLISTID"));
+            Assert.That(runtimeContract, Does.Not.Contain("#define VIVID_MATERIAL_PROGRAM_VERSION"));
+
+            Assert.That(
+                previewContract,
+                Does.Not.Contain("#define VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES"));
+            Assert.That(
+                previewContract,
+                Does.Not.Contain("#define VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS"));
+            Assert.That(
+                previewContract,
+                Does.Not.Contain("struct VividMaterialResourceData"));
+            Assert.That(
+                previewContract,
+                Does.Not.Contain("#define VIVID_MATERIAL_PROGRAM_VERSION"));
+        }
+
+        [Test]
+        public void ProductionCatalog_CoexistsSameTopologyWithDistinctCompiledPayload()
+        {
+            MaterialProgramCatalog catalog =
+                GPUDrivenMaterialCompiler.ProgramCatalog;
+            MaterialProgramCatalog.ManifestEntry standard =
+                catalog.GetEntry(VividMaterialProgramID.StandardSingleSlab);
+            MaterialProgramCatalog.ManifestEntry generic = catalog.GetEntry(
+                (VividMaterialProgramID)
+                    MaterialProgramContract.BuiltinProgramCount);
+
+            Assert.That(
+                catalog.RuntimeTableLength,
+                Is.EqualTo(
+                    MaterialProgramContract.ProductionCatalogProgramCount));
+            Assert.That(generic.StableName, Is.EqualTo("P3.GenericSingleSlabProof"));
+            Assert.That((uint) generic.ProgramID, Is.EqualTo(3u));
+            Assert.That(
+                generic.Program.Lowering.SelectionKey,
+                Is.EqualTo(standard.Program.Lowering.SelectionKey));
+            Assert.That(
+                generic.LayoutFingerprint,
+                Is.EqualTo(standard.LayoutFingerprint));
+            Assert.That(
+                generic.Program.CompiledHash,
+                Is.Not.EqualTo(standard.Program.CompiledHash));
+            Assert.That(
+                generic.Program.Module.SemanticHash,
+                Is.Not.EqualTo(standard.Program.Module.SemanticHash));
+            Assert.That(
+                generic.Program.CoverageHlsl.EntryPoint,
+                Is.Not.EqualTo(standard.Program.CoverageHlsl.EntryPoint));
+            Assert.That(
+                generic.Program.SurfaceHlsl.EntryPoint,
+                Is.Not.EqualTo(standard.Program.SurfaceHlsl.EntryPoint));
         }
 
         [Test]
@@ -154,9 +241,314 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialData.AlphaClipThreshold, Is.EqualTo(0.42f));
                 Assert.That(materialData.Padding0, Is.EqualTo((uint)proxy.MaskMode));
                 Assert.That(materialData.Padding1, Is.Zero);
+                Assert.That(compiled.ParameterLanes.Count, Is.EqualTo(4));
+                Assert.That(
+                    compiled.ParameterLanes[1],
+                    Is.EqualTo(math.asuint(expectedBaseColor)));
+                Assert.That(
+                    math.asfloat(compiled.ParameterLanes[2].w),
+                    Is.EqualTo(proxy.Metallic));
+                Assert.That(
+                    math.asfloat(compiled.ParameterLanes[3].x),
+                    Is.EqualTo(proxy.Roughness));
             }
             finally
             {
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void CompileStandardSingleSlab_UsesCatalogedMaterialGraphProgram()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graph = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            try
+            {
+                VividMaterialProgramID genericProgramID =
+                    (VividMaterialProgramID)
+                        MaterialProgramContract.BuiltinProgramCount;
+                CompiledMaterialProgram genericProgram =
+                    GPUDrivenMaterialCompiler.GetMaterialProgram(genericProgramID);
+                graph.Apply(
+                    CreateCompilationResult(genericProgram),
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    GPUDrivenMaterialCompiler.ProgramCatalog);
+                proxy.MaterialGraph = graph;
+
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        proxy,
+                        out string validationMessage),
+                    Is.True,
+                    validationMessage);
+                GPUDrivenCompiledMaterialInstance compiled =
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        proxy,
+                        parameterAddress: 5u,
+                        surfaceBindingIndex: 7u);
+
+                Assert.That(compiled.ProgramID, Is.EqualTo(genericProgramID));
+                Assert.That(
+                    compiled.CatalogProgram,
+                    Is.SameAs(GPUDrivenMaterialCompiler.ProgramCatalog.GetEntry(
+                        genericProgramID)));
+                Assert.That(
+                    compiled.MaterialProgram.CompiledHash,
+                    Is.EqualTo(genericProgram.CompiledHash));
+                Assert.That(compiled.RuntimeHeader.ParameterAddress, Is.EqualTo(5u));
+                Assert.That(
+                    compiled.RuntimeHeader.ResourceBindingAddress,
+                    Is.EqualTo(7u));
+                Assert.That(compiled.ParameterLanes.Count, Is.EqualTo(4));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graph);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void CompileStandardSingleSlab_PacksNamedParameterOverrideByDeclaration()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graphAsset = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            var catalogAsset = ScriptableObject.CreateInstance<MaterialProgramCatalogAsset>();
+            try
+            {
+                MaterialGraphCompilationResult compilation =
+                    CompileNamedParameterProgram();
+                MaterialProgramCatalog catalog = CreateExtendedCatalog(
+                    "P4.NamedParameter",
+                    compilation.Program);
+                catalogAsset.Apply(catalog);
+                graphAsset.Apply(
+                    compilation,
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    catalog);
+                proxy.MaterialGraph = graphAsset;
+                var value = new Vector4(0.125f, 0.375f, 0.625f, 0.875f);
+                proxy.SetParameterOverride(
+                    "UserTint",
+                    GPUDrivenMaterialParameterType.Float4,
+                    value);
+
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        proxy,
+                        catalogAsset,
+                        out string validationMessage),
+                    Is.True,
+                    validationMessage);
+                GPUDrivenCompiledMaterialInstance compiled =
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        proxy,
+                        parameterAddress: 3u,
+                        resourceBindingAddress: 7u,
+                        legacySurfaceBindingIndex: 11u,
+                        frozenCatalog: catalogAsset);
+                var declaration = new MaterialParameterDeclaration(
+                    "UserTint",
+                    MaterialValueType.Float4);
+                Assert.That(
+                    MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                        declaration,
+                        out _),
+                    Is.False);
+                Assert.That(
+                    compilation.Program.Lowering.GenericLayout
+                        .TryGetParameterBinding(
+                            declaration,
+                            out MaterialGenericParameterBinding binding),
+                    Is.True);
+
+                AssertParameterValue(compiled, binding, value);
+                Assert.That(
+                    (uint) compiled.ProgramID,
+                    Is.EqualTo((uint) MaterialProgramContract.ProductionCatalogProgramCount));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalogAsset);
+                Object.DestroyImmediate(graphAsset);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void CompileStandardSingleSlab_RejectsNamedParameterOverrideTypeMismatch()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graphAsset = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            var catalogAsset = ScriptableObject.CreateInstance<MaterialProgramCatalogAsset>();
+            try
+            {
+                MaterialGraphCompilationResult compilation =
+                    CompileNamedParameterProgram();
+                MaterialProgramCatalog catalog = CreateExtendedCatalog(
+                    "P4.NamedParameter",
+                    compilation.Program);
+                catalogAsset.Apply(catalog);
+                graphAsset.Apply(
+                    compilation,
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    catalog);
+                proxy.MaterialGraph = graphAsset;
+                proxy.SetParameterOverride(
+                    "UserTint",
+                    GPUDrivenMaterialParameterType.Float3,
+                    Vector4.one);
+
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        proxy,
+                        catalogAsset,
+                        out string validationMessage),
+                    Is.False);
+                Assert.That(validationMessage, Does.Contain("UserTint"));
+                Assert.That(validationMessage, Does.Contain("Float3"));
+                Assert.That(validationMessage, Does.Contain("Float4"));
+                System.InvalidOperationException exception = Assert.Throws<
+                    System.InvalidOperationException>(() =>
+                        GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                            proxy,
+                            parameterAddress: 0u,
+                            resourceBindingAddress: 0u,
+                            legacySurfaceBindingIndex: 0u,
+                            frozenCatalog: catalogAsset));
+                Assert.That(exception.Message, Is.EqualTo(validationMessage));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalogAsset);
+                Object.DestroyImmediate(graphAsset);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void CompileStandardSingleSlab_RejectsMissingNamedParameterOverride()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graphAsset = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            var catalogAsset = ScriptableObject.CreateInstance<MaterialProgramCatalogAsset>();
+            try
+            {
+                MaterialGraphCompilationResult compilation =
+                    CompileNamedParameterProgram();
+                MaterialProgramCatalog catalog = CreateExtendedCatalog(
+                    "P4.NamedParameter",
+                    compilation.Program);
+                catalogAsset.Apply(catalog);
+                graphAsset.Apply(
+                    compilation,
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    catalog);
+                proxy.MaterialGraph = graphAsset;
+
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        proxy,
+                        catalogAsset,
+                        out string validationMessage),
+                    Is.False);
+                Assert.That(validationMessage, Does.Contain("UserTint"));
+                Assert.That(validationMessage, Does.Contain("no value"));
+                System.InvalidOperationException exception = Assert.Throws<
+                    System.InvalidOperationException>(() =>
+                        GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                            proxy,
+                            parameterAddress: 0u,
+                            resourceBindingAddress: 0u,
+                            legacySurfaceBindingIndex: 0u,
+                            frozenCatalog: catalogAsset));
+                Assert.That(exception.Message, Is.EqualTo(validationMessage));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalogAsset);
+                Object.DestroyImmediate(graphAsset);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsStaleMaterialGraphCatalogBinding()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graph = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            try
+            {
+                MaterialProgramCatalog production =
+                    GPUDrivenMaterialCompiler.ProgramCatalog;
+                MaterialProgramCatalog staleCatalog = MaterialProgramCatalog.Bake(
+                    production.Templates,
+                    MaterialProgramCatalogBakeSlot.ForProgram(
+                        "P0.StandardSingleSlab",
+                        production.GetMaterialProgram(
+                            VividMaterialProgramID.StandardSingleSlab)),
+                    MaterialProgramCatalogBakeSlot.ForProgram(
+                        "P1.DualSlabHorizontalMix",
+                        production.GetMaterialProgram(
+                            VividMaterialProgramID.DualSlabHorizontalMix)),
+                    MaterialProgramCatalogBakeSlot.ForProgram(
+                        "P2.DualSlabVerticalLayer",
+                        production.GetMaterialProgram(
+                            VividMaterialProgramID.DualSlabVerticalLayer)),
+                    MaterialProgramCatalogBakeSlot.ForProgram(
+                        "P3.GenericSingleSlabProof",
+                        production.GetMaterialProgram(
+                            (VividMaterialProgramID)
+                                MaterialProgramContract.BuiltinProgramCount)),
+                    MaterialProgramCatalogBakeSlot.Reserved("P4.Reserved"));
+                graph.Apply(
+                    CreateCompilationResult(production.GetMaterialProgram(
+                        VividMaterialProgramID.StandardSingleSlab)),
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    staleCatalog);
+                proxy.MaterialGraph = graph;
+
+                bool valid = GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                    proxy,
+                    out string validationMessage);
+
+                Assert.That(valid, Is.False);
+                Assert.That(validationMessage, Does.Contain("stale"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graph);
+                Object.DestroyImmediate(proxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsGraphTopologyIncompatibleWithProxy()
+        {
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var graph = ScriptableObject.CreateInstance<MaterialGraphImportAsset>();
+            try
+            {
+                CompiledMaterialProgram dualProgram =
+                    GPUDrivenMaterialCompiler.GetMaterialProgram(
+                        VividMaterialProgramID.DualSlabHorizontalMix);
+                graph.Apply(
+                    CreateCompilationResult(dualProgram),
+                    GPUDrivenMaterialCompiler.ProgramVersion,
+                    GPUDrivenMaterialCompiler.ProgramCatalog);
+                proxy.MaterialGraph = graph;
+
+                bool valid = GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                    proxy,
+                    out string validationMessage);
+
+                Assert.That(valid, Is.False);
+                Assert.That(validationMessage, Does.Contain("not compatible"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graph);
                 Object.DestroyImmediate(proxy);
             }
         }
@@ -222,15 +614,18 @@ namespace VividRP.Editor.Tests
                 Assert.That(firstCompiled.LegacyMaterialData.Metallic, Is.Not.EqualTo(secondCompiled.LegacyMaterialData.Metallic));
 
                 var sceneData = new VividGPUDrivenSceneData();
-                Assert.That(sceneData.MaterialProgramCount, Is.EqualTo(3));
+                Assert.That(
+                    sceneData.MaterialProgramCount,
+                    Is.EqualTo(
+                        MaterialProgramContract.ProductionCatalogProgramCount));
                 VividMaterialProgramData program = sceneData.MaterialPrograms[0];
                 Assert.That(program.Version, Is.EqualTo(GPUDrivenMaterialCompiler.ProgramVersion));
                 Assert.That(
                     program.CoverageProgramID,
                     Is.EqualTo(VividMaterialCoverageProgramID.BaseColorAlpha));
                 Assert.That(program.SurfaceProgramID, Is.EqualTo(VividMaterialSurfaceProgramID.StandardSingleSlab));
-                Assert.That(program.ParameterLayoutID, Is.EqualTo(VividMaterialParameterLayoutID.LegacyMaterialData));
-                Assert.That(program.ResourceLayoutID, Is.EqualTo(VividMaterialResourceLayoutID.LegacySurfaceBinding));
+                Assert.That(program.ParameterLayoutID, Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
+                Assert.That(program.ResourceLayoutID, Is.EqualTo(VividMaterialResourceLayoutID.GenericResourceRecords));
                 Assert.That(
                     program.CapabilityFlags & VividMaterialProgramCapabilities.AlphaClip,
                     Is.EqualTo(VividMaterialProgramCapabilities.AlphaClip));
@@ -242,10 +637,10 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(VividMaterialSurfaceProgramID.DualSlab));
                 Assert.That(
                     dualSlabProgram.ParameterLayoutID,
-                    Is.EqualTo(VividMaterialParameterLayoutID.DualSlabMaterialData));
+                    Is.EqualTo(VividMaterialParameterLayoutID.GenericParameterLanes));
                 Assert.That(
                     dualSlabProgram.ResourceLayoutID,
-                    Is.EqualTo(VividMaterialResourceLayoutID.DualSurfaceBinding));
+                    Is.EqualTo(VividMaterialResourceLayoutID.GenericResourceRecords));
                 Assert.That(
                     sceneData.MaterialPrograms[
                         (int) VividMaterialProgramID.DualSlabVerticalLayer].SurfaceProgramID,
@@ -307,6 +702,176 @@ namespace VividRP.Editor.Tests
                 Assert.That(compiled.DualSlabMaterialData.LayerWeight, Is.EqualTo(0.65f));
                 Assert.That(compiled.DualSlabMaterialData.AlphaClipThreshold, Is.EqualTo(0.4f));
                 Assert.That(compiled.LegacyMaterialData.SurfaceBindingIndex, Is.EqualTo(7u));
+                Assert.That(compiled.ParameterLanes.Count, Is.EqualTo(6));
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topProxy);
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_AcceptsStandardAndBothDualSlabOperators()
+        {
+            var standardProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                Assert.That(
+                    GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                        standardProxy,
+                        out string standardValidationMessage),
+                    Is.True);
+                Assert.That(standardValidationMessage, Is.Empty);
+
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = topProxy;
+                baseProxy.DualSlabDefinition = definition;
+
+                VividDualSlabOperator[] operators =
+                {
+                    VividDualSlabOperator.HorizontalMix,
+                    VividDualSlabOperator.VerticalLayer,
+                };
+                foreach (VividDualSlabOperator layerOperator in operators)
+                {
+                    definition.Operator = layerOperator;
+
+                    Assert.That(
+                        GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                            baseProxy,
+                            out string validationMessage),
+                        Is.True,
+                        layerOperator.ToString());
+                    Assert.That(validationMessage, Is.Empty);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topProxy);
+                Object.DestroyImmediate(baseProxy);
+                Object.DestroyImmediate(standardProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsDualSlabWithoutDefinition()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+
+                AssertInvalidDualSlabProxy(baseProxy, "require a definition");
+            }
+            finally
+            {
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsDualSlabWithoutTopSlab()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                baseProxy.DualSlabDefinition = definition;
+
+                AssertInvalidDualSlabProxy(
+                    baseProxy,
+                    "require a StandardLit top-slab proxy");
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsSelfReferentialDualSlab()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = baseProxy;
+                baseProxy.DualSlabDefinition = definition;
+
+                AssertInvalidDualSlabProxy(
+                    baseProxy,
+                    "cannot use the base proxy as their top Slab");
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsNonStandardTopSlab()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                topProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = topProxy;
+                baseProxy.DualSlabDefinition = definition;
+
+                AssertInvalidDualSlabProxy(
+                    baseProxy,
+                    "nested Dual Slab topology is not supported");
+            }
+            finally
+            {
+                Object.DestroyImmediate(definition);
+                Object.DestroyImmediate(topProxy);
+                Object.DestroyImmediate(baseProxy);
+            }
+        }
+
+        [Test]
+        public void TryValidateMaterialProxy_RejectsUnsupportedDualSlabOperator()
+        {
+            var baseProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var topProxy =
+                ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            var definition =
+                ScriptableObject.CreateInstance<GPUDrivenDualSlabMaterialDefinition>();
+            try
+            {
+                baseProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
+                definition.TopSlab = topProxy;
+                definition.Operator = (VividDualSlabOperator) 99;
+                baseProxy.DualSlabDefinition = definition;
+
+                AssertInvalidDualSlabProxy(baseProxy, "operator '99' is not supported");
             }
             finally
             {
@@ -324,11 +889,23 @@ namespace VividRP.Editor.Tests
             {
                 var sceneData = new VividGPUDrivenSceneData();
                 GPUDrivenCompiledMaterialInstance first =
-                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(proxy, 0u, 3u);
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        proxy,
+                        parameterAddress: 0u,
+                        resourceBindingAddress: 0u,
+                        legacySurfaceBindingIndex: 3u);
                 GPUDrivenCompiledMaterialInstance second =
-                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(proxy, 1u, 5u);
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
+                        proxy,
+                        parameterAddress: 4u,
+                        resourceBindingAddress: 1u,
+                        legacySurfaceBindingIndex: 5u);
                 for (int bindingIndex = 0; bindingIndex < 6; bindingIndex++)
                     sceneData.MutableSurfaceBindings.Add(default);
+                sceneData.MutableMaterialParameterLanes.AddRange(first.ParameterLanes);
+                sceneData.MutableMaterialParameterLanes.AddRange(second.ParameterLanes);
+                sceneData.MutableMaterialResources.Add(default);
+                sceneData.MutableMaterialResources.Add(default);
 
                 Assert.That(
                     sceneData.AddMaterial(first.LegacyMaterialData, first.RuntimeHeader),
@@ -339,9 +916,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialRuntimeHeaderCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialRuntimeHeaders[0].ParameterAddress, Is.Zero);
-                Assert.That(sceneData.MaterialRuntimeHeaders[1].ParameterAddress, Is.EqualTo(1u));
+                Assert.That(sceneData.MaterialRuntimeHeaders[1].ParameterAddress, Is.EqualTo(4u));
 
                 VividMaterialRuntimeHeader mismatchedHeader = second.RuntimeHeader;
+                mismatchedHeader.ParameterAddress = 5u;
                 Assert.Throws<System.ArgumentException>(() =>
                     sceneData.AddMaterial(second.LegacyMaterialData, mismatchedHeader));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(2));
@@ -391,12 +969,13 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 sceneData.MutableDualSlabMaterials.Add(compiled.DualSlabMaterialData);
-                sceneData.MutableSurfaceBindings.Add(default);
+                sceneData.MutableMaterialParameterLanes.AddRange(compiled.ParameterLanes);
+                sceneData.MutableMaterialResources.Add(default);
                 Assert.Throws<System.ArgumentException>(() => sceneData.AddMaterial(
                     compiled.LegacyMaterialData,
                     compiled.RuntimeHeader));
 
-                sceneData.MutableSurfaceBindings.Add(default);
+                sceneData.MutableMaterialResources.Add(default);
                 Assert.That(
                     sceneData.AddMaterial(
                         compiled.LegacyMaterialData,
@@ -411,20 +990,124 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        private static string GetHlslStructSignature(string source, string structName)
+        private static MaterialGraphCompilationResult CreateCompilationResult(
+            CompiledMaterialProgram program)
         {
-            string declaration = $"struct {structName}";
-            int start = source.IndexOf(declaration, System.StringComparison.Ordinal);
-            Assert.That(start, Is.GreaterThanOrEqualTo(0), $"Missing {declaration}.");
-            int end = source.IndexOf("};", start, System.StringComparison.Ordinal);
-            Assert.That(end, Is.GreaterThan(start), $"Incomplete {declaration}.");
-            string body = source.Substring(start, end - start + 2);
-            string signature = string.Join(
-                " ",
-                body.Split((char[]) null, System.StringSplitOptions.RemoveEmptyEntries));
-            // GenerateHLSL emits default-underlying C# enums as int, while the runtime
-            // contract exposes the same 32-bit bitfields as uint.
-            return signature.Replace(" int ", " uint ");
+            return new MaterialGraphCompilationResult(
+                program,
+                program.Module,
+                new MaterialGraphProvenance(
+                    new Dictionary<string, HashSet<int>>(),
+                    new Dictionary<string, HashSet<int>>()),
+                System.Array.Empty<MaterialGraphDiagnostic>());
+        }
+
+        private static MaterialGraphCompilationResult CompileNamedParameterProgram()
+        {
+            var graph = new MaterialGraph();
+            MaterialGraphValue tint = graph.Parameter(
+                "UserTint",
+                "UserTint",
+                MaterialValueType.Float4);
+            MaterialGraphValue normal = graph.ExternalInput(
+                "GeometryNormal",
+                MaterialExternalInput.GeometryNormalWS);
+            MaterialGraphValue tangent = graph.ExternalInput(
+                "GeometryTangent",
+                MaterialExternalInput.GeometryTangentWS);
+            MaterialGraphClosure slab = graph.Slab(
+                "Slab",
+                tint,
+                graph.Constant("Roughness", 0.5f),
+                graph.Constant("Metallic", 0.0f),
+                normal,
+                tangent);
+            graph.Output(
+                "Output",
+                slab,
+                graph.Swizzle("Coverage", tint, MaterialSwizzleMask.W),
+                graph.Constant("AlphaClipThreshold", 0.0f),
+                graph.Constant("Emission", new float3(0.0f)));
+
+            MaterialGraphCompilationResult compilation =
+                MaterialGraphCompiler.Compile(
+                    graph,
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+            Assert.That(
+                compilation.Succeeded,
+                Is.True,
+                string.Join("\n", compilation.Diagnostics));
+            return compilation;
+        }
+
+        private static MaterialProgramCatalog CreateExtendedCatalog(
+            string customStableName,
+            CompiledMaterialProgram customProgram)
+        {
+            MaterialProgramCatalog production =
+                GPUDrivenMaterialCompiler.ProgramCatalog;
+            var slots = new List<MaterialProgramCatalogBakeSlot>(
+                production.RuntimeTableLength + 1);
+            for (int slotIndex = 0;
+                 slotIndex < production.RuntimeTableLength;
+                 slotIndex++)
+            {
+                MaterialProgramCatalog.ManifestEntry entry =
+                    production.Slots[slotIndex];
+                slots.Add(entry == null
+                    ? MaterialProgramCatalogBakeSlot.Reserved(
+                        $"P{slotIndex}.Reserved")
+                    : MaterialProgramCatalogBakeSlot.ForProgram(
+                        entry.StableName,
+                        entry.Program));
+            }
+            slots.Add(MaterialProgramCatalogBakeSlot.ForProgram(
+                customStableName,
+                customProgram));
+            return MaterialProgramCatalog.Bake(
+                production.Templates,
+                slots.ToArray());
+        }
+
+        private static void AssertParameterValue(
+            GPUDrivenCompiledMaterialInstance compiled,
+            in MaterialGenericParameterBinding binding,
+            Vector4 expected)
+        {
+            uint4 expectedBits = math.asuint(new float4(
+                expected.x,
+                expected.y,
+                expected.z,
+                expected.w));
+            for (int wordIndex = 0; wordIndex < binding.WordCount; wordIndex++)
+            {
+                int absoluteWord = binding.WordOffset + wordIndex;
+                uint4 lane = compiled.ParameterLanes[absoluteWord / 4];
+                Assert.That(
+                    lane[absoluteWord % 4],
+                    Is.EqualTo(expectedBits[wordIndex]),
+                    $"Parameter word {wordIndex}");
+            }
+        }
+
+        private static void AssertInvalidDualSlabProxy(
+            GPUDrivenMaterialProxy materialProxy,
+            string expectedMessageFragment)
+        {
+            Assert.That(
+                GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                    materialProxy,
+                    out string validationMessage),
+                Is.False);
+            Assert.That(validationMessage, Does.Contain(expectedMessageFragment));
+
+            System.InvalidOperationException exception =
+                Assert.Throws<System.InvalidOperationException>(() =>
+                    GPUDrivenMaterialCompiler.CompileDualSlab(
+                        materialProxy,
+                        parameterAddress: 0u,
+                        baseSurfaceBindingIndex: 0u));
+            Assert.That(exception.Message, Is.EqualTo(validationMessage));
         }
     }
 }

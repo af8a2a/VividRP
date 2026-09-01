@@ -33,8 +33,13 @@ namespace VividRP.Editor.Tests
                 entry => entry.Name == "LayerAux0");
             var layerAux1Entry = resources.Textures.Single(
                 entry => entry.Name == "LayerAux1");
+            var sidecarTileListEntry = resources.Buffers.Single(
+                entry => entry.Name == "DualSlabSidecarTileList");
+            var sidecarIndirectArgsEntry = resources.Buffers.Single(
+                entry => entry.Name == "DualSlabSidecarIndirectDrawArgs");
 
             Assert.That(resources.Textures, Has.Length.EqualTo(11));
+            Assert.That(resources.Buffers, Has.Length.EqualTo(2));
             Assert.That(visibilityEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(visibilityEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32_UInt));
             Assert.That(attributes0Entry.Access, Is.EqualTo(AccessFlags.Read));
@@ -92,6 +97,18 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(Color.clear));
             Assert.That(layerAux0Entry.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(layerAux1Entry.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(sidecarTileListEntry.IsTransient, Is.True);
+            Assert.That(sidecarTileListEntry.Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(
+                sidecarTileListEntry.Buffer.desc.Target,
+                Is.EqualTo(GraphicsBuffer.Target.Structured));
+            Assert.That(sidecarIndirectArgsEntry.IsTransient, Is.True);
+            Assert.That(sidecarIndirectArgsEntry.Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(
+                sidecarIndirectArgsEntry.Buffer.desc.Target,
+                Is.EqualTo(
+                    GraphicsBuffer.Target.Structured
+                    | GraphicsBuffer.Target.IndirectArguments));
         }
 
         [Test]
@@ -113,6 +130,8 @@ namespace VividRP.Editor.Tests
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             cameraData.actualWidth = 1920;
             cameraData.actualHeight = 1080;
+            frameData.GetOrCreate<VividGPUDrivenFrameData>()
+                .requiresDualSlabSidecar = true;
 
             pass.Prepare(frameData);
 
@@ -140,6 +159,77 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 layerAux1Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+        }
+
+        [Test]
+        public void Prepare_AdaptsDefaultDualSlabSidecarAcrossFrames()
+        {
+            var pass = new VisibilityBufferGBufferResolvePass();
+            var layerAux0Texture = GetTextureField(pass, "m_LayerAux0");
+            var layerAux1Texture = GetTextureField(pass, "m_LayerAux1");
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var gpuDrivenFrameData =
+                frameData.GetOrCreate<VividGPUDrivenFrameData>();
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+
+            pass.Prepare(frameData);
+
+            Assert.That(layerAux0Texture.desc.Width, Is.EqualTo(1));
+            Assert.That(layerAux0Texture.desc.Height, Is.EqualTo(1));
+            Assert.That(layerAux1Texture.desc.Width, Is.EqualTo(1));
+            Assert.That(layerAux1Texture.desc.Height, Is.EqualTo(1));
+
+            gpuDrivenFrameData.requiresDualSlabSidecar = true;
+            pass.Prepare(frameData);
+
+            Assert.That(layerAux0Texture.desc.Width, Is.EqualTo(1920));
+            Assert.That(layerAux0Texture.desc.Height, Is.EqualTo(1080));
+            Assert.That(layerAux1Texture.desc.Width, Is.EqualTo(1920));
+            Assert.That(layerAux1Texture.desc.Height, Is.EqualTo(1080));
+
+            gpuDrivenFrameData.requiresDualSlabSidecar = false;
+            pass.Prepare(frameData);
+
+            Assert.That(layerAux0Texture.desc.Width, Is.EqualTo(1));
+            Assert.That(layerAux0Texture.desc.Height, Is.EqualTo(1));
+            Assert.That(layerAux1Texture.desc.Width, Is.EqualTo(1));
+            Assert.That(layerAux1Texture.desc.Height, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Prepare_ResizesDualSlabSidecarTileScratchForResolveExtent()
+        {
+            var pass = new VisibilityBufferGBufferResolvePass();
+            var visibilityTexture = GetTextureField(pass, "m_VisibilityBuffer");
+            var tileList = GetBufferField(
+                pass,
+                "m_DualSlabSidecarTileList");
+            var indirectArgs = GetBufferField(
+                pass,
+                "m_DualSlabSidecarIndirectDrawArgs");
+            visibilityTexture.desc.Width = 17;
+            visibilityTexture.desc.Height = 9;
+
+            var frameData = new ContextContainer();
+            frameData.GetOrCreate<VividGPUDrivenFrameData>()
+                .requiresDualSlabSidecar = true;
+
+            pass.Prepare(frameData);
+
+            Assert.That(
+                tileList.desc.Count,
+                Is.EqualTo(6),
+                "17x9 at 8x8 must allocate a 3x2 tile list.");
+            Assert.That(tileList.desc.Stride, Is.EqualTo(sizeof(uint)));
+            Assert.That(indirectArgs.desc.Count, Is.EqualTo(4));
+            Assert.That(indirectArgs.desc.Stride, Is.EqualTo(sizeof(uint)));
+            Assert.That(
+                indirectArgs.desc.Target,
+                Is.EqualTo(
+                    GraphicsBuffer.Target.Structured
+                    | GraphicsBuffer.Target.IndirectArguments));
         }
 
         [Test]
@@ -187,6 +277,45 @@ namespace VividRP.Editor.Tests
             Assert.That(externalGBuffer0.desc.Width, Is.EqualTo(320));
             Assert.That(externalGBuffer0.desc.Height, Is.EqualTo(240));
             Assert.That(externalGBuffer0.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        [Test]
+        public void Prepare_LeavesOverriddenDualSlabSidecarOwnerManaged()
+        {
+            var pass = new VisibilityBufferGBufferResolvePass();
+            var externalLayerAux0 = new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 320,
+                    Height = 240,
+                    ColorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                }
+            };
+            var externalLayerAux1 = new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 640,
+                    Height = 360,
+                    ColorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                }
+            };
+
+            SetTextureField(pass, "m_LayerAux0", externalLayerAux0);
+            SetTextureField(pass, "m_LayerAux1", externalLayerAux1);
+
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+
+            pass.Prepare(frameData);
+
+            Assert.That(externalLayerAux0.desc.Width, Is.EqualTo(320));
+            Assert.That(externalLayerAux0.desc.Height, Is.EqualTo(240));
+            Assert.That(externalLayerAux1.desc.Width, Is.EqualTo(640));
+            Assert.That(externalLayerAux1.desc.Height, Is.EqualTo(360));
         }
 
         [Test]
@@ -264,13 +393,49 @@ namespace VividRP.Editor.Tests
                 "VividMaterialSurface.hlsl");
             Assert.That(File.Exists(surfaceProgramPath), Is.True, surfaceProgramPath);
             string surfaceProgramSource = File.ReadAllText(surfaceProgramPath);
+            string surfaceAotPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividMaterialSurfaceAOT.generated.hlsl");
+            Assert.That(File.Exists(surfaceAotPath), Is.True, surfaceAotPath);
+            string surfaceAotSource = File.ReadAllText(surfaceAotPath);
+            string surfaceSummaryPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "SurfaceSummaryGBuffer.hlsl");
+            Assert.That(File.Exists(surfaceSummaryPath), Is.True, surfaceSummaryPath);
+            string surfaceSummarySource = File.ReadAllText(surfaceSummaryPath);
+            string postSurfaceSummaryPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "VividPostSurfaceSummary.hlsl");
+            Assert.That(
+                File.Exists(postSurfaceSummaryPath),
+                Is.True,
+                postSurfaceSummaryPath);
+            string postSurfaceSummarySource =
+                File.ReadAllText(postSurfaceSummaryPath);
             string compactSource = string.Concat(
                 source.Where(character => !char.IsWhiteSpace(character)));
+            string compactPostSurfaceSummarySource = string.Concat(
+                postSurfaceSummarySource.Where(
+                    character => !char.IsWhiteSpace(character)));
 
             StringAssert.Contains("SurfaceSummaryGBuffer.hlsl", source);
             StringAssert.Contains("VividMaterialSurface.hlsl", source);
             StringAssert.Contains("VividMaterialSurfaceAOT.generated.hlsl", surfaceProgramSource);
             StringAssert.Contains("VividSurfaceSummaryData", source);
+            StringAssert.Contains("VividPostSurfaceSummaryInput", source);
+            StringAssert.Contains("VividPostSurfaceSummaryOutput", source);
+            StringAssert.Contains("VividPostSurfaceSummary(postSurfaceInput)", source);
             StringAssert.Contains("VividSurfaceSummaryGBufferOutput", source);
             StringAssert.Contains("VividPackSurfaceSummaryGBuffer(", source);
             StringAssert.Contains("VividDualSlabLayerSidecarOutput", source);
@@ -294,82 +459,135 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "EvaluateAOTSlabNormalWS(aotSurfaceOutput.BaseSlab,",
                 compactSource);
-            StringAssert.Contains("aotSurfaceOutput.ClosureCount == 1u", source);
-            StringAssert.Contains("aotSurfaceOutput.LayerOperator == 0u", source);
-            StringAssert.Contains("aotSurfaceOutput.ClosureCount == 2u", source);
-            StringAssert.Contains("aotSurfaceOutput.LayerOperator == 1u", source);
-            StringAssert.Contains("aotSurfaceOutput.LayerOperator == 2u", source);
+            StringAssert.Contains("VividAOTDeferredExportContract", source);
+            StringAssert.Contains("deferredExportContract.ExpectedClosureCount", source);
+            StringAssert.Contains("deferredExportContract.LitClass", source);
+            StringAssert.Contains("deferredExportContract.Topology", source);
+            StringAssert.Contains(
+                "VIVID_SURFACE_SUMMARY_GBUFFER_ABI_VERSION",
+                source);
+            StringAssert.Contains(
+                "VIVID_DUAL_SLAB_LAYER_SIDECAR_ABI_VERSION",
+                source);
+            StringAssert.Contains("VividAOTDeferredExportHasShadingModel", source);
+            StringAssert.Contains("VividAOTDeferredExportHasPayload", source);
+            StringAssert.Contains("VividAOTDeferredExportHasPolicy", source);
+            StringAssert.DoesNotContain("aotSurfaceOutput.ClosureCount == 1u", source);
+            StringAssert.DoesNotContain("aotSurfaceOutput.ClosureCount == 2u", source);
+            StringAssert.Contains(
+                "expectedLayerOperator = deferredExportContract.Topology",
+                source);
+            StringAssert.Contains(
+                "aotSurfaceOutput.LayerOperator == expectedLayerOperator",
+                source);
+            StringAssert.DoesNotContain("aotSurfaceOutput.LayerOperator == 1u", source);
+            StringAssert.DoesNotContain("aotSurfaceOutput.LayerOperator == 2u", source);
             StringAssert.Contains("aotSurfaceOutput.Emission", source);
             StringAssert.Contains("VividEvaluateAOTSlabSurfaceDetail", surfaceProgramSource);
             StringAssert.DoesNotContain("VividEvaluateSlabSurfaceDetailGrad", source);
-            StringAssert.Contains("VividTryLoadStandardSingleSlabSurfaceProgram", source);
-            StringAssert.Contains("VividTryLoadDualSlabSurfaceProgram", source);
+            StringAssert.DoesNotContain("VividTryLoadStandardSingleSlabSurfaceProgram", source);
+            StringAssert.DoesNotContain("VividTryLoadDualSlabSurfaceProgram", source);
             StringAssert.DoesNotContain("VividEvaluateSlabSurfaceGrad", source);
             StringAssert.DoesNotContain(
                 "VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK",
                 source);
-            StringAssert.Contains("PullMaterialRuntimeHeader(materialIndex)", surfaceProgramSource);
+            StringAssert.Contains("switch (runtimeHeader.ProgramID)", surfaceAotSource);
+            StringAssert.Contains("programData.SurfaceProgramID", source);
+            StringAssert.DoesNotContain("programData.CoverageProgramID", source);
+            StringAssert.DoesNotContain("programData.TransportProgramID", source);
             StringAssert.Contains(
-                "PullMaterialProgramData(runtimeHeader.ProgramID)",
-                surfaceProgramSource);
-            StringAssert.Contains("programData.SurfaceProgramID", surfaceProgramSource);
-            StringAssert.DoesNotContain("programData.CoverageProgramID", surfaceProgramSource);
-            StringAssert.DoesNotContain("programData.TransportProgramID", surfaceProgramSource);
+                "runtimeHeader.ParameterAddress",
+                surfaceAotSource);
             StringAssert.Contains(
-                "PullMaterialData(runtimeHeader.ParameterAddress)",
-                surfaceProgramSource);
-            StringAssert.Contains(
-                "runtimeHeader.ParameterAddress >= _MaterialDataCount",
-                surfaceProgramSource);
+                "_MaterialParameterDataCount",
+                surfaceAotSource);
             StringAssert.Contains(
                 "runtimeHeader.ResourceBindingAddress",
-                surfaceProgramSource);
+                surfaceAotSource);
             StringAssert.Contains(
-                "runtimeHeader.ResourceBindingAddress >= _SurfaceBindingDataCount",
-                surfaceProgramSource);
+                "_MaterialResourceDataCount",
+                surfaceAotSource);
+            StringAssert.Contains("VividLoadMaterialFloat", surfaceAotSource);
+            StringAssert.Contains("PullMaterialResourceData", surfaceAotSource);
+            StringAssert.DoesNotContain(
+                "PullMaterialData(runtimeHeader.ParameterAddress)",
+                surfaceAotSource);
             StringAssert.DoesNotContain(
                 "result.materialData = PullMaterialData(",
                 source);
             StringAssert.Contains(
                 "result.materialProgramFailed=1u;",
                 compactSource);
+            StringAssert.DoesNotContain("programData.CapabilityFlags", source);
             StringAssert.Contains(
-                "(programData.CapabilityFlags&VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT)!=0u"
-                + "&&(runtimeHeader.Flags&VIVIDMATERIALRUNTIMEFLAGS_UNLIT)!=0u",
+                "constboolsupportsUnlit=VividAOTDeferredExportHasShadingModel("
+                + "deferredExportContract,"
+                + "VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_UNLIT);",
+                compactSource);
+            StringAssert.Contains(
+                "(triangleData.materialRuntimeFlags"
+                + "&VIVIDMATERIALRUNTIMEFLAGS_UNLIT)!=0u",
+                compactSource);
+            StringAssert.Contains(
+                "constboolinvalidRuntimeUnlit=runtimeRequestsUnlit"
+                + "&&!supportsUnlit;",
+                compactSource);
+            StringAssert.Contains(
+                "constboolisUnlit=!failedAOTSurface&&supportsUnlit"
+                + "&&(!supportsLit||runtimeRequestsUnlit);",
                 compactSource);
             StringAssert.Contains("triangleData.materialProgramFailed", source);
             StringAssert.Contains(
                 "constboolfailedAOTSurface=triangleData.materialProgramFailed!=0u"
-                + "||(!evaluatedAOTSingleSurface&&!evaluatedAOTDualSurface);",
+                + "||!evaluatedAOTSurface||invalidRuntimeUnlit;",
                 compactSource);
             StringAssert.Contains(
                 "VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB",
                 compactSource);
             StringAssert.Contains(
-                "surfaceData.diffuseAlbedo=baseColor*(1.0f-saturatedMetallic);",
-                compactSource);
+                "output.surfaceData.diffuseAlbedo=input.baseColor"
+                + "*(1.0f-saturatedMetallic);",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains(
-                "surfaceData.specularF0=lerp(0.04f.xxx,baseColor,saturatedMetallic);",
-                compactSource);
+                "output.surfaceData.specularF0=lerp("
+                + "0.04f.xxx,input.baseColor,saturatedMetallic);",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains(
-                "surfaceData.perceptualRoughness=perceptualRoughness;",
-                compactSource);
+                "output.surfaceData.perceptualRoughness="
+                + "input.perceptualRoughness;",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains(
-                "surfaceData.ambientOcclusion=ambientOcclusion;",
-                compactSource);
+                "output.surfaceData.ambientOcclusion=input.ambientOcclusion;",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains("SampleVividProbeVolume(", source);
             StringAssert.Contains("VividHasProbeVolumeGI()", source);
             StringAssert.Contains(
-                "surfaceData.diffuseIrradiance=diffuseIrradiance;",
-                compactSource);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_UNLIT", source);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB", source);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB", source);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_ERROR", source);
-            StringAssert.Contains("dualSlabLayerData.diffuseAlbedo", source);
-            StringAssert.Contains("dualSlabLayerData.specularF0", source);
-            StringAssert.Contains("dualSlabLayerData.perceptualRoughness", source);
-            StringAssert.Contains("dualSlabLayerData.layerWeight", source);
+                "output.surfaceData.diffuseIrradiance=input.diffuseIrradiance;",
+                compactPostSurfaceSummarySource);
+            StringAssert.Contains(
+                "VIVID_DEFERRED_EXPORT_CLASS_UNLIT",
+                surfaceSummarySource);
+            StringAssert.Contains(
+                "VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB",
+                surfaceSummarySource);
+            StringAssert.Contains(
+                "VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB",
+                surfaceSummarySource);
+            StringAssert.Contains(
+                "VIVID_DEFERRED_EXPORT_CLASS_ERROR",
+                surfaceSummarySource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.diffuseAlbedo",
+                postSurfaceSummarySource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.specularF0",
+                postSurfaceSummarySource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.perceptualRoughness",
+                postSurfaceSummarySource);
+            StringAssert.Contains(
+                "output.dualSlabLayerData.layerWeight",
+                postSurfaceSummarySource);
             StringAssert.Contains(
                 "EvaluateAOTSlabNormalWS(aotSurfaceOutput.TopSlab,",
                 compactSource);
@@ -377,21 +595,25 @@ namespace VividRP.Editor.Tests
                 "aotSurfaceOutput.TopSlab.AmbientOcclusion",
                 source);
             StringAssert.Contains(
-                "exportDualSlab&&aotSurfaceOutput.LayerOperator==2u",
+                "postSurfaceInput.verticalLayer="
+                + "deferredExportContract.Topology"
+                + "==VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER?1u:0u;",
                 compactSource);
             StringAssert.Contains(
                 "saturate(aotSurfaceOutput.LayerWeight)>" +
                 "VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT",
                 compactSource);
             StringAssert.Contains(
-                "surfaceData.diffuseAlbedo=float3(1.0f,0.0f,1.0f);",
-                compactSource);
+                "output.surfaceData.diffuseAlbedo=float3(1.0f,0.0f,1.0f);",
+                compactPostSurfaceSummarySource);
             StringAssert.Contains(
-                "surfaceData.emissive=float3(1.0f,0.0f,1.0f);",
-                compactSource);
-            StringAssert.Contains("constboolreceiveSSR=true;", compactSource);
-            StringAssert.Contains("constboolreceiveDecals=true;", compactSource);
+                "output.surfaceData.emissive=float3(1.0f,0.0f,1.0f);",
+                compactPostSurfaceSummarySource);
+            StringAssert.Contains("VividAOTDeferredExportHasPolicy", source);
             StringAssert.Contains(
+                "VividBuildDeferredExportHeader(",
+                postSurfaceSummarySource);
+            StringAssert.DoesNotContain(
                 "VividBuildDeferredExportHeader(",
                 source);
             StringAssert.DoesNotContain(
@@ -400,7 +622,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolvePass_SplitsCoreAndDualSidecarTargetsAroundFeedbackUavs()
+        public void ResolvePass_UsesTileAdaptiveDualSidecarAfterFeedbackUavs()
         {
             var pass = new VisibilityBufferGBufferResolvePass();
             var coreTargets = typeof(VisibilityBufferGBufferResolvePass).GetField(
@@ -429,6 +651,14 @@ namespace VividRP.Editor.Tests
             string compactSource = string.Concat(
                 File.ReadAllText(sourcePath)
                     .Where(character => !char.IsWhiteSpace(character)));
+            string shaderPath = Path.Combine(
+                package.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferGBufferResolve.shader");
+            string shaderSource = File.ReadAllText(shaderPath);
 
             var bindCoreIndex = compactSource.IndexOf(
                 "BindGBufferTargets(nativeCmd);",
@@ -442,13 +672,60 @@ namespace VividRP.Editor.Tests
             var bindSidecarIndex = compactSource.IndexOf(
                 "BindDualSlabSidecarTargets(nativeCmd);",
                 global::System.StringComparison.Ordinal);
+            var adaptiveReturnIndex = compactSource.IndexOf(
+                "if(!m_RequiresDualSlabSidecar)return;",
+                global::System.StringComparison.Ordinal);
+            var clearSidecarIndex = compactSource.IndexOf(
+                "CoreUtils.ClearRenderTarget(nativeCmd,"
+                + "ClearFlag.Color,Color.clear);",
+                global::System.StringComparison.Ordinal);
+            var classifyTilesIndex = compactSource.IndexOf(
+                "ClassifyDualSlabSidecarTiles(nativeCmd);",
+                global::System.StringComparison.Ordinal);
+            var indirectDrawIndex = compactSource.IndexOf(
+                "nativeCmd.DrawProceduralIndirect(",
+                global::System.StringComparison.Ordinal);
             Assert.That(bindCoreIndex, Is.GreaterThanOrEqualTo(0));
             Assert.That(drawCoreIndex, Is.GreaterThan(bindCoreIndex));
             Assert.That(clearFeedbackIndex, Is.GreaterThan(drawCoreIndex));
-            Assert.That(bindSidecarIndex, Is.GreaterThan(clearFeedbackIndex));
+            Assert.That(adaptiveReturnIndex, Is.GreaterThan(clearFeedbackIndex));
+            Assert.That(bindSidecarIndex, Is.GreaterThan(adaptiveReturnIndex));
+            Assert.That(clearSidecarIndex, Is.GreaterThan(bindSidecarIndex));
+            Assert.That(classifyTilesIndex, Is.GreaterThan(clearSidecarIndex));
+            Assert.That(indirectDrawIndex, Is.GreaterThan(classifyTilesIndex));
             StringAssert.Contains(
                 "m_DualSlabSidecarMaterial,DualSlabSidecarKeyword,true",
                 compactSource);
+            StringAssert.Contains(
+                "m_DualSlabSidecarTiledMaterial,"
+                + "DualSlabSidecarKeyword,true",
+                compactSource);
+            StringAssert.Contains(
+                "m_DualSlabSidecarTiledMaterial,"
+                + "DualSlabSidecarTiledKeyword,true",
+                compactSource);
+            StringAssert.Contains(
+                "if(!CanUseTileAdaptiveSidecarResolve())"
+                + "{CoreUtils.DrawFullScreen(nativeCmd,"
+                + "m_DualSlabSidecarMaterial,m_DrawProperties,0);return;}",
+                compactSource);
+            StringAssert.Contains("_DualSlabSidecarTileList", shaderSource);
+            StringAssert.Contains("SV_InstanceID", shaderSource);
+            StringAssert.Contains(
+                "VIVID_DUAL_SLAB_SIDECAR_TILED",
+                shaderSource);
+            StringAssert.Contains(
+                "VIVID_DUAL_SLAB_SIDECAR_TILE_SIZE",
+                shaderSource);
+            StringAssert.Contains(
+                "_DualSlabSidecarTileList[input.instanceID]",
+                shaderSource);
+            StringAssert.Contains(
+                "(input.vertexID << 1u) & 2u",
+                shaderSource);
+            StringAssert.Contains(
+                "1.0f - output.uv.y * 2.0f",
+                shaderSource);
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName)
@@ -457,6 +734,18 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (RenderGraphTexture) field.GetValue(pass);
+        }
+
+        private static RenderGraphBuffer GetBufferField(
+            VisibilityBufferGBufferResolvePass pass,
+            string fieldName)
+        {
+            var field = typeof(VisibilityBufferGBufferResolvePass).GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            return (RenderGraphBuffer) field.GetValue(pass);
         }
 
         private static void SetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName, RenderGraphTexture value)

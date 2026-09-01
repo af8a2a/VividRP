@@ -18,18 +18,15 @@ namespace VividRP.Editor.Tests
 
             AssertArtifact(
                 standard.CoverageHlsl,
-                MaterialSurfaceHlslPhysicalContract.LegacySingleSlab,
-                "VividMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedSampleCount: 1);
             AssertArtifact(
                 horizontal.CoverageHlsl,
-                MaterialSurfaceHlslPhysicalContract.DualSlab,
-                "VividDualSlabMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedSampleCount: 1);
             AssertArtifact(
                 vertical.CoverageHlsl,
-                MaterialSurfaceHlslPhysicalContract.DualSlab,
-                "VividDualSlabMaterialData",
+                MaterialSurfaceHlslPhysicalContract.GenericRuntime,
                 expectedSampleCount: 1);
 
             Assert.That(
@@ -41,6 +38,97 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 standard.CoverageHlsl.PayloadEquals(horizontal.CoverageHlsl),
                 Is.False);
+        }
+
+        [Test]
+        public void CustomDeclarations_CompileCoverageByGenericBindings()
+        {
+            MaterialParameterDeclaration tint =
+                new("CoverageTint", MaterialValueType.Float4);
+            MaterialParameterDeclaration cutoff =
+                new("CoverageCutoff", MaterialValueType.Float);
+            MaterialResourceDeclaration texture =
+                new("CoveragePattern", MaterialValueType.Texture2D);
+
+            Assert.That(
+                MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                    tint,
+                    out _),
+                Is.False);
+            Assert.That(
+                MaterialNativeTemplateDeclarationAdapter.TryGetTexture(
+                    texture,
+                    out _),
+                Is.False);
+
+            CompiledMaterialProgram program = CompiledMaterialProgram.Compile(
+                BuildCustomCoverageModule(tint, cutoff, texture),
+                MaterialProgramContract.RuntimeAbiVersion);
+            MaterialGenericLayout layout = program.Lowering.GenericLayout;
+            Assert.That(
+                layout.TryGetParameterBinding(
+                    tint,
+                    out MaterialGenericParameterBinding tintBinding),
+                Is.True);
+            Assert.That(
+                layout.TryGetParameterBinding(
+                    cutoff,
+                    out MaterialGenericParameterBinding cutoffBinding),
+                Is.True);
+            Assert.That(
+                layout.TryGetResourceBinding(
+                    texture,
+                    out MaterialGenericResourceBinding textureBinding),
+                Is.True);
+
+            string source = program.CoverageHlsl.Source;
+            Assert.That(
+                source,
+                Does.Contain(
+                    $"VividLoadMaterialFloat4(parameterAddress, {tintBinding.WordOffset}u)"));
+            Assert.That(
+                source,
+                Does.Contain(
+                    $"VividLoadMaterialFloat(parameterAddress, {cutoffBinding.WordOffset}u)"));
+            Assert.That(
+                source,
+                Does.Contain(
+                    $"PullMaterialResourceData(resourceAddress + {textureBinding.Slot}u)"));
+            Assert.That(source, Does.Contain("VividSampleRawGrad("));
+            Assert.That(program.CoverageHlsl.PhysicalContract,
+                Is.EqualTo(MaterialSurfaceHlslPhysicalContract.GenericRuntime));
+        }
+
+        [TestCase((int)MaterialTextureSampleClass.Raw, "VividSampleRawGrad(")]
+        [TestCase((int)MaterialTextureSampleClass.Color, "VividSampleBaseColorGrad(")]
+        [TestCase((int)MaterialTextureSampleClass.Normal, "VividSampleNormalGrad(")]
+        [TestCase((int)MaterialTextureSampleClass.Mask, "VividSampleMaskGrad(")]
+        public void NamedTextureSampleClass_SelectsCoverageSamplingContract(
+            int sampleClassValue,
+            string expectedFunction)
+        {
+            var sampleClass = (MaterialTextureSampleClass)sampleClassValue;
+            MaterialResourceDeclaration texture = new(
+                "CoverageClassifiedTexture",
+                MaterialValueType.Texture2D,
+                sampleClass);
+            CompiledMaterialProgram program = CompiledMaterialProgram.Compile(
+                BuildCustomCoverageModule(
+                    new MaterialParameterDeclaration(
+                        "CoverageClassifiedTint",
+                        MaterialValueType.Float4),
+                    new MaterialParameterDeclaration(
+                        "CoverageClassifiedCutoff",
+                        MaterialValueType.Float),
+                    texture),
+                MaterialProgramContract.RuntimeAbiVersion);
+
+            Assert.That(program.CoverageHlsl.Source,
+                Does.Contain(expectedFunction));
+            Assert.That(
+                program.Lowering.GenericLayout.ResourceBindings[0]
+                    .Declaration.SampleClass,
+                Is.EqualTo(sampleClass));
         }
 
         [Test]
@@ -88,15 +176,18 @@ namespace VividRP.Editor.Tests
             Assert.That(sorted, Does.Contain("programData.ResourceLayoutID"));
             Assert.That(sorted, Does.Contain("runtimeHeader.ParameterAddress"));
             Assert.That(sorted, Does.Contain("runtimeHeader.ResourceBindingAddress"));
-            Assert.That(sorted, Does.Contain("_MaterialDataCount"));
-            Assert.That(sorted, Does.Contain("_DualSlabMaterialDataCount"));
-            Assert.That(sorted, Does.Contain("_SurfaceBindingDataCount"));
-            Assert.That(sorted, Does.Contain("PullMaterialData("));
-            Assert.That(sorted, Does.Contain("PullDualSlabMaterialData("));
-            Assert.That(sorted, Does.Contain("PullSurfaceBindingData("));
+            Assert.That(sorted, Does.Contain("_MaterialParameterDataCount"));
+            Assert.That(sorted, Does.Contain("_MaterialResourceDataCount"));
+            Assert.That(sorted, Does.Contain("VividLoadMaterialFloat("));
+            Assert.That(sorted, Does.Contain("PullMaterialResourceData("));
             Assert.That(
                 sorted,
-                Does.Contain("#define VIVID_MATERIAL_CATALOG_MANIFEST_HASH_LO"));
+                Does.Contain(
+                    "#define "
+                    + MaterialProgramCatalogHlslContract.GetIdentityMacro(
+                        catalog.ManifestHash,
+                        catalog.RuntimeTableLength)
+                    + " 1"));
 
             int case0 = sorted.IndexOf("        case 0u:", StringComparison.Ordinal);
             int case1 = sorted.IndexOf("        case 1u:", StringComparison.Ordinal);
@@ -173,19 +264,22 @@ namespace VividRP.Editor.Tests
                 MaterialCoverageHlslSourceBuilder.BuildSource(catalog);
             string surfaceSource =
                 MaterialSurfaceHlslSourceBuilder.BuildSource(catalog);
-            string manifestHashLo = $"0x{unchecked((uint) catalog.ManifestHash.Value):X8}u";
-            string manifestHashHi =
-                $"0x{unchecked((uint) (catalog.ManifestHash.Value >> 32)):X8}u";
+            string manifestIdentity =
+                MaterialProgramCatalogHlslContract.GetIdentityMacro(
+                    catalog.ManifestHash,
+                    catalog.RuntimeTableLength);
 
             Assert.That(runtimeTable, Has.Length.EqualTo(catalog.RuntimeTableLength));
             Assert.That(runtimeTable[0].Version, Is.EqualTo(
                 baseline.RuntimeData.Version));
             Assert.That(runtimeTable[1].Version, Is.EqualTo(
                 general.RuntimeData.Version));
-            Assert.That(coverageSource, Does.Contain(manifestHashLo));
-            Assert.That(coverageSource, Does.Contain(manifestHashHi));
-            Assert.That(surfaceSource, Does.Contain(manifestHashLo));
-            Assert.That(surfaceSource, Does.Contain(manifestHashHi));
+            Assert.That(
+                coverageSource,
+                Does.Contain("#define " + manifestIdentity + " 1"));
+            Assert.That(
+                surfaceSource,
+                Does.Contain("#define " + manifestIdentity + " 1"));
             Assert.That(coverageSource, Does.Contain("        case 0u:"));
             Assert.That(coverageSource, Does.Contain("        case 1u:"));
             Assert.That(surfaceSource, Does.Contain("        case 0u:"));
@@ -210,8 +304,8 @@ namespace VividRP.Editor.Tests
             CompiledMaterialProgram program = BuildStandard();
             MaterialCoverageHlslArtifact artifact = program.CoverageHlsl;
 
-            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(5u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.CoverageHlslArtifactVersion));
             Assert.That(artifact.BackendVersion, Is.EqualTo(
@@ -244,7 +338,75 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GeneratedInclude_IsSynchronizedWithBuiltinProgramCatalog()
+        public void BuildSource_RequiresPublishedArtifactSetStampInCoverageTranslationUnit()
+        {
+            MaterialProgramCatalog catalog = BakeBuiltinCatalog(
+                BuildStandard(),
+                BuildDual(VividDualSlabOperator.HorizontalMix),
+                BuildDual(VividDualSlabOperator.VerticalLayer));
+            MaterialProgramArtifactSetHash artifactSetHash =
+                MaterialProgramArtifactSetHashBuilder.Compute(catalog);
+            string identityMacro =
+                MaterialProgramArtifactSetHlslContract
+                    .GetPublishedIdentityMacro(artifactSetHash);
+            string source = MaterialCoverageHlslSourceBuilder.BuildSource(catalog);
+            string stampSource =
+                MaterialProgramCatalogHlslStampSourceBuilder.BuildSource(catalog);
+
+            Assert.That(
+                source,
+                Does.Contain(
+                    "#include \"VividMaterialProgramCatalogStamp.generated.hlsl\""));
+            Assert.That(
+                source,
+                Does.Contain(
+                    "#elif !defined(" + identityMacro + ")"));
+            Assert.That(
+                source,
+                Does.Not.Contain(
+                    "VIVID_MATERIAL_COVERAGE_EXPECTED_ARTIFACT_SET_HASH"));
+            Assert.That(
+                source,
+                Does.Contain(
+                    "Coverage dispatcher does not match the published Material Program Catalog artifact set."));
+            Assert.That(
+                source,
+                Does.Not.Contain(
+                    "VIVID_MATERIAL_SURFACE_EXPECTED_ARTIFACT_SET"));
+            Assert.That(
+                stampSource,
+                Does.Contain(
+                    "#define " + identityMacro + " 1"));
+            Assert.That(
+                stampSource,
+                Does.Not.Contain("PUBLISHED_ARTIFACT_SET_HASH_LO"));
+        }
+
+        [Test]
+        public void ArtifactAndManifestIdentityMacros_DoNotUseNumericHashComparisons()
+        {
+            var artifactSetHash = new MaterialProgramArtifactSetHash(
+                0xFEDCBA98u,
+                0xFEDCBA9880972705ul);
+            var manifestHash = new MaterialProgramCatalogManifestHash(
+                0x89ABCDEFu,
+                0xFEDCBA9880972705ul);
+
+            Assert.That(
+                MaterialProgramArtifactSetHlslContract
+                    .GetPublishedIdentityMacro(artifactSetHash),
+                Is.EqualTo(
+                    "VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_VFEDCBA98_HFEDCBA9880972705"));
+            Assert.That(
+                MaterialProgramCatalogHlslContract.GetIdentityMacro(
+                    manifestHash,
+                    0x1234),
+                Is.EqualTo(
+                    "VIVID_MATERIAL_CATALOG_MANIFEST_V89ABCDEF_HFEDCBA9880972705_N00001234"));
+        }
+
+        [Test]
+        public void GeneratedInclude_IsSynchronizedWithFrozenProgramCatalog()
         {
             UnityEditor.PackageManager.PackageInfo package =
                 UnityEditor.PackageManager.PackageInfo.FindForAssembly(
@@ -259,8 +421,12 @@ namespace VividRP.Editor.Tests
                 "VividMaterialCoverageAOT.generated.hlsl");
             Assert.That(File.Exists(generatedPath), Is.True, generatedPath);
 
-            string expected = MaterialCoverageHlslSourceBuilder.BuildSource(
-                GPUDrivenMaterialCompiler.ProgramCatalog);
+            MaterialProgramCatalog catalog =
+                MaterialProgramCatalogBaker.BuildCatalog(
+                    MaterialProgramCatalogBaker.DiscoverGraphPaths(),
+                    MaterialProgramCatalogAsset.LoadDefault());
+            string expected =
+                MaterialCoverageHlslSourceBuilder.BuildSource(catalog);
             Assert.That(File.ReadAllText(generatedPath), Is.EqualTo(expected));
         }
 
@@ -341,10 +507,49 @@ namespace VividRP.Editor.Tests
                 | MaterialShadingModelMask.Unlit);
         }
 
+        private static MaterialIRModule BuildCustomCoverageModule(
+            in MaterialParameterDeclaration tint,
+            in MaterialParameterDeclaration cutoff,
+            in MaterialResourceDeclaration texture)
+        {
+            var valueIR = new MaterialValueIR();
+            MaterialValue uv = valueIR.ExternalInput(MaterialExternalInput.UV0);
+            MaterialValue sample = valueIR.TextureSampleGrad(
+                valueIR.TextureResource(texture),
+                uv,
+                valueIR.Ddx(uv),
+                valueIR.Ddy(uv));
+            MaterialValue baseColor = valueIR.Multiply(
+                sample,
+                valueIR.Parameter(tint));
+            MaterialValue normal = valueIR.ExternalInput(
+                MaterialExternalInput.GeometryNormalWS);
+            MaterialValue tangent = valueIR.ExternalInput(
+                MaterialExternalInput.GeometryTangentWS);
+            var closureGraph = new ClosureExpressionGraph(valueIR);
+            MaterialClosure surfaceClosure = closureGraph.Slab(
+                baseColor,
+                valueIR.Constant(0.5f),
+                valueIR.Constant(0.0f),
+                normal,
+                tangent,
+                ClosureFeatureMask.BaseColorTexture);
+            return new MaterialIRModule(
+                valueIR,
+                new MaterialOutputRoots(
+                    valueIR.Swizzle(baseColor, MaterialSwizzleMask.W),
+                    valueIR.Parameter(cutoff),
+                    valueIR.Constant(new Unity.Mathematics.float3(0.0f))),
+                closureGraph,
+                surfaceClosure,
+                ClosureTopologyBudget.Prototype,
+                MaterialFeatureMask.AlphaClip,
+                MaterialShadingModelMask.StandardLit);
+        }
+
         private static void AssertArtifact(
             MaterialCoverageHlslArtifact artifact,
             MaterialSurfaceHlslPhysicalContract expectedPhysicalContract,
-            string expectedParameterType,
             int expectedSampleCount)
         {
             Assert.That(artifact, Is.Not.Null);
@@ -355,11 +560,12 @@ namespace VividRP.Editor.Tests
             Assert.That(artifact.Source, Does.Contain(
                 $"VividMaterialCoverageEvaluation {artifact.EntryPoint}("));
             Assert.That(artifact.Source, Does.Contain(
-                $"    const {expectedParameterType} materialParameters,"));
+                "    const uint parameterAddress,"));
+            Assert.That(artifact.Source, Does.Contain(
+                "    const uint resourceAddress,"));
             Assert.That(artifact.Source, Does.Contain("output.Coverage ="));
             Assert.That(artifact.Source, Does.Contain("output.AlphaClipThreshold ="));
-            if (expectedPhysicalContract == MaterialSurfaceHlslPhysicalContract.DualSlab)
-                Assert.That(artifact.Source, Does.Contain("surfaceBinding1"));
+            Assert.That(artifact.Source, Does.Contain("VividLoadMaterial"));
 
             AssertExplicitGradientContract(artifact.Source, expectedSampleCount);
         }

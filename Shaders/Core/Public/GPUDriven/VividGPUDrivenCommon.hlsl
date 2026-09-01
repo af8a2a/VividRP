@@ -1,235 +1,15 @@
 #ifndef VIVIDRP_GPU_DRIVEN_COMMON_INCLUDED
 #define VIVIDRP_GPU_DRIVEN_COMMON_INCLUDED
 
-#define VIVIDINSTANCEPASSMASK_MAIN 1u
-#define VIVIDINSTANCEPASSMASK_SHADOWS 2u
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl"
 
-#define VIVIDINSTANCEFLAGS_DISABLED 1u
-#define VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER 2u
-#define VIVIDINSTANCEFLAGS_TWO_SIDED_SHADOWS 4u
-
-#define VIVIDSURFACEBINDINGFLAGS_BASE_COLOR 1u
-#define VIVIDSURFACEBINDINGFLAGS_NORMAL 2u
-#define VIVIDSURFACEBINDINGFLAGS_MASK 4u
-
-#define VIVIDMATERIALFLAGS_UNLIT 1u
-#define VIVIDMATERIALFLAGS_TERRAIN 2u
-#define VIVIDMATERIALFLAGS_TERRAIN_RUNTIME_VIRTUAL_TEXTURE 4u
-
-#define VIVID_MATERIAL_PROGRAM_VERSION 1u
-#define VIVIDMATERIALPROGRAMID_STANDARD_SINGLE_SLAB 0u
-#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_HORIZONTAL_MIX 1u
-#define VIVIDMATERIALPROGRAMID_DUAL_SLAB_VERTICAL_LAYER 2u
-#define VIVIDMATERIALPROGRAMID_INVALID 0xffffffffu
 #define VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK 0u
 #define VIVID_MATERIAL_PROGRAM_KNOWN 1u
 #define VIVID_MATERIAL_PROGRAM_KNOWN_FAILURE 2u
-#define VIVIDMATERIALCOVERAGEPROGRAMID_BASE_COLOR_ALPHA 0u
-#define VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB 0u
-#define VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB 1u
-#define VIVIDMATERIALTRANSPORTPROGRAMID_NONE 0u
-#define VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA 0u
-#define VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA 1u
-#define VIVIDMATERIALRESOURCELAYOUTID_LEGACY_SURFACE_BINDING 0u
-#define VIVIDMATERIALRESOURCELAYOUTID_DUAL_SURFACE_BINDING 1u
-#define VIVIDDUALSLABOPERATOR_HORIZONTAL_MIX 0u
-#define VIVIDDUALSLABOPERATOR_VERTICAL_LAYER 1u
-#define VIVIDMATERIALPROGRAMCAPABILITIES_LEGACY_GBUFFER_EXPORT 1u
-#define VIVIDMATERIALPROGRAMCAPABILITIES_ALPHA_CLIP 2u
-#define VIVIDMATERIALPROGRAMCAPABILITIES_UNLIT 4u
-#define VIVIDMATERIALEXECUTIONCLASS_VISIBILITY_DEFERRED 0u
-#define VIVIDMATERIALRUNTIMEFLAGS_ALPHA_CLIP 1u
-#define VIVIDMATERIALRUNTIMEFLAGS_UNLIT 2u
-
-#define VIVIDRENDERERLISTID_CULL_FRONT 1u
-#define VIVIDRENDERERLISTID_CULL_OFF 2u
-#define VIVIDRENDERERLISTID_ALPHA_TEST 4u
-#define VIVIDRENDERERLISTID_COUNT 8u
-#define VIVID_MAX_MESHLET_INDICES 384u
+#define VIVID_MAX_MESHLET_INDICES MAX_MESHLET_INDICES
 #define VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH 0xffffffffu
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
-struct VividInstanceData
-{
-    float4x4 ObjectToWorldMatrix;
-    float4x4 WorldToObjectMatrix;
-    float4 AABBMin;
-    float4 AABBMax;
-
-    uint TopMeshLODStartIndex;
-    uint TotalMeshLODCount;
-    uint MaterialIndex;
-    uint MeshLODLevelCount;
-
-    float LODErrorScale;
-    uint PassMask;
-    uint Flags;
-    uint Padding0;
-};
-
-struct VividMaterialData
-{
-    float4 AlbedoColor;
-    float4 TextureTilingOffset;
-    float4 Emission;
-    float4 MetallicSmoothnessRemap;
-    float4 AmbientOcclusionRemap;
-
-    uint SurfaceBindingIndex;
-    float NormalsStrength;
-    float Roughness;
-    float Metallic;
-
-    float SpecularAAScreenSpaceVariance;
-    float SpecularAAThreshold;
-    uint GeometryFlags;
-    uint MaterialFlags;
-
-    uint RendererListID;
-    float AlphaClipThreshold;
-    uint Padding0;
-    uint Padding1;
-};
-
-struct VividSlabMaterialData
-{
-    float4 AlbedoColor;
-    float4 TextureTilingOffset;
-    float4 MetallicSmoothnessRemap;
-    float4 AmbientOcclusionRemap;
-
-    float NormalsStrength;
-    float Roughness;
-    float Metallic;
-    uint MaskMode;
-};
-
-struct VividDualSlabMaterialData
-{
-    float4 BaseAlbedoColor;
-    float4 BaseTextureTilingOffset;
-    float4 BaseMetallicSmoothnessRemap;
-    float4 BaseAmbientOcclusionRemap;
-
-    float BaseNormalsStrength;
-    float BaseRoughness;
-    float BaseMetallic;
-    uint BaseMaskMode;
-
-    float4 TopAlbedoColor;
-    float4 TopTextureTilingOffset;
-    float4 TopMetallicSmoothnessRemap;
-    float4 TopAmbientOcclusionRemap;
-
-    float TopNormalsStrength;
-    float TopRoughness;
-    float TopMetallic;
-    uint TopMaskMode;
-
-    float4 Emission;
-
-    uint LayerOperator;
-    float LayerWeight;
-    float AlphaClipThreshold;
-    uint Padding0;
-};
-
-struct VividMaterialRuntimeHeader
-{
-    uint ProgramID;
-    uint ParameterAddress;
-    uint ResourceBindingAddress;
-    uint Flags;
-};
-
-struct VividMaterialProgramData
-{
-    uint Version;
-    uint CoverageProgramID;
-    uint SurfaceProgramID;
-    uint TransportProgramID;
-    uint ParameterLayoutID;
-    uint ResourceLayoutID;
-    uint CapabilityFlags;
-    uint ExecutionClass;
-};
-
-struct VividSurfaceBindingData
-{
-    uint BaseColorResource;
-    uint NormalResource;
-    uint MaskResource;
-    uint Flags;
-
-    float4 UVScaleBias;
-};
-
-struct VividTerrainMaterialData
-{
-    uint LayerStartIndex;
-    uint LayerCount;
-    uint ControlBindingIndex0;
-    uint ControlBindingIndex1;
-};
-
-struct VividTerrainLayerGPUData
-{
-    float4 TextureTilingOffset;
-
-    uint SurfaceBindingIndex;
-    float NormalsStrength;
-    float Roughness;
-    float Metallic;
-
-    uint MaskMode;
-    uint Padding0;
-    uint Padding1;
-    uint Padding2;
-};
-
-struct VividMeshLODNode
-{
-    float4 Bounds;
-    float Error;
-    uint PackedParentErrorRadius;
-    uint MeshletStartIndex;
-    uint PackedMeshletCountLevel;
-};
-
-struct VividMeshlet
-{
-    uint VertexOffset;
-    uint TriangleOffset;
-    uint PackedVertexTriangleCounts;
-    uint PackedCone;
-    float4 BoundingSphere;
-};
-
-struct VividMeshletVertex
-{
-    float PositionX;
-    float PositionY;
-    float PositionZ;
-    uint PackedNormal;
-    uint PackedTangent;
-    float2 UV;
-    uint Reserved;
-};
-
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMeshletDecode.hlsli"
-
-struct VividMeshletRenderRequestPacked
-{
-    uint InstanceID_LOD;
-    uint MeshletID;
-};
-
-struct VividIndirectDrawArgs
-{
-    uint VertexCountPerInstance;
-    uint InstanceCount;
-    uint StartVertex;
-    uint StartInstance;
-};
 
 static const uint VIVID_INDIRECT_DRAW_ARGS_STRIDE = 16u;
 static const uint VIVID_INDIRECT_DRAW_ARGS_VERTEX_COUNT_OFFSET = 0u;
@@ -241,37 +21,6 @@ uint GetIndirectDrawArgsByteAddress(const uint drawArgsIndex)
 {
     return drawArgsIndex * VIVID_INDIRECT_DRAW_ARGS_STRIDE;
 }
-
-struct VividGPUCullingContext
-{
-    float4x4 ViewProjectionMatrix;
-    float4x4 ViewMatrix;
-    float4 CameraPosition;
-    float4 FrustumPlanes[6];
-    float4 CullingSphereLS;
-
-    int PassMask;
-    int CameraIsPerspective;
-    uint BaseStartInstance;
-    uint MeshletListBuildJobsOffset;
-    uint MeshletRenderRequestsOffset;
-
-    uint Padding0;
-    uint Padding1;
-    uint Padding2;
-};
-
-struct VividGPULODSelectionContext
-{
-    float4x4 ViewProjectionMatrix;
-    float4 CameraPosition;
-    float4 CameraUp;
-    float4 CameraRight;
-    float2 ScreenSizePixels;
-
-    uint Padding0;
-    uint Padding1;
-};
 
 struct VividMeshletListBuildJob
 {
@@ -288,6 +37,10 @@ StructuredBuffer<VividMaterialData> _MaterialData;
 uint _MaterialDataCount;
 StructuredBuffer<VividDualSlabMaterialData> _DualSlabMaterialData;
 uint _DualSlabMaterialDataCount;
+StructuredBuffer<uint4> _MaterialParameterData;
+uint _MaterialParameterDataCount;
+StructuredBuffer<VividMaterialResourceData> _MaterialResourceData;
+uint _MaterialResourceDataCount;
 StructuredBuffer<VividMaterialRuntimeHeader> _MaterialRuntimeHeaders;
 uint _MaterialRuntimeHeaderCount;
 StructuredBuffer<VividMaterialProgramData> _MaterialPrograms;
@@ -316,6 +69,77 @@ VividMaterialData PullMaterialData(const uint materialIndex)
 VividDualSlabMaterialData PullDualSlabMaterialData(const uint materialIndex)
 {
     return _DualSlabMaterialData[materialIndex];
+}
+
+uint VividLoadMaterialParameterWord(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    const uint4 lane = _MaterialParameterData[
+        parameterAddress + (wordOffset >> 2u)];
+    return lane[wordOffset & 3u];
+}
+
+bool VividLoadMaterialBool(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return VividLoadMaterialParameterWord(parameterAddress, wordOffset) != 0u;
+}
+
+float VividLoadMaterialFloat(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return asfloat(VividLoadMaterialParameterWord(parameterAddress, wordOffset));
+}
+
+float2 VividLoadMaterialFloat2(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return asfloat(uint2(
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 1u)));
+}
+
+float3 VividLoadMaterialFloat3(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return asfloat(uint3(
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 1u),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 2u)));
+}
+
+float4 VividLoadMaterialFloat4(
+    const uint parameterAddress,
+    const uint wordOffset)
+{
+    return asfloat(uint4(
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 1u),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 2u),
+        VividLoadMaterialParameterWord(parameterAddress, wordOffset + 3u)));
+}
+
+VividMaterialResourceData PullMaterialResourceData(const uint resourceIndex)
+{
+    return _MaterialResourceData[resourceIndex];
+}
+
+VividSlabMaterialData VividCreateSlabMaterialData(
+    const VividMaterialResourceData resourceData)
+{
+    VividSlabMaterialData slabData = (VividSlabMaterialData) 0;
+    slabData.TextureTilingOffset = resourceData.TextureTilingOffset;
+    slabData.MetallicSmoothnessRemap =
+        resourceData.MetallicSmoothnessRemap;
+    slabData.AmbientOcclusionRemap = resourceData.AmbientOcclusionRemap;
+    slabData.NormalsStrength = resourceData.NormalsStrength;
+    slabData.MaskMode = resourceData.MaskMode;
+    return slabData;
 }
 
 VividSlabMaterialData VividCreateSlabMaterialData(

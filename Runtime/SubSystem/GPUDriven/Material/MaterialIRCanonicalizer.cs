@@ -7,6 +7,8 @@ namespace VividRP.Runtime.GPUDriven
     internal sealed class CanonicalMaterialIR
     {
         private readonly byte[] m_Payload;
+        private readonly int[] m_SourceValueNodeMap;
+        private readonly int[] m_SourceClosureNodeMap;
 
         internal CanonicalMaterialIR(
             MaterialValueIR values,
@@ -16,7 +18,9 @@ namespace VividRP.Runtime.GPUDriven
             ClosureTopology topology,
             MaterialFeatureMask materialFeatures,
             MaterialShadingModelMask shadingModels,
-            byte[] payload)
+            byte[] payload,
+            int[] sourceValueNodeMap,
+            int[] sourceClosureNodeMap)
         {
             Values = values ?? throw new ArgumentNullException(nameof(values));
             ClosureGraph = closureGraph
@@ -24,6 +28,10 @@ namespace VividRP.Runtime.GPUDriven
             Topology = topology ?? throw new ArgumentNullException(nameof(topology));
             if (payload == null)
                 throw new ArgumentNullException(nameof(payload));
+            if (sourceValueNodeMap == null)
+                throw new ArgumentNullException(nameof(sourceValueNodeMap));
+            if (sourceClosureNodeMap == null)
+                throw new ArgumentNullException(nameof(sourceClosureNodeMap));
             if (!Values.IsFrozen)
             {
                 throw new InvalidOperationException(
@@ -40,6 +48,8 @@ namespace VividRP.Runtime.GPUDriven
             MaterialFeatures = materialFeatures;
             ShadingModels = shadingModels;
             m_Payload = (byte[]) payload.Clone();
+            m_SourceValueNodeMap = (int[]) sourceValueNodeMap.Clone();
+            m_SourceClosureNodeMap = (int[]) sourceClosureNodeMap.Clone();
             PayloadHash = MaterialProgramHashUtility.Compute(m_Payload);
         }
 
@@ -62,6 +72,20 @@ namespace VividRP.Runtime.GPUDriven
         internal int PayloadLength => m_Payload.Length;
 
         internal ulong PayloadHash { get; }
+
+        internal int GetCanonicalValueNodeIndex(int sourceNodeIndex)
+        {
+            return (uint) sourceNodeIndex < (uint) m_SourceValueNodeMap.Length
+                ? m_SourceValueNodeMap[sourceNodeIndex]
+                : -1;
+        }
+
+        internal int GetCanonicalClosureNodeIndex(int sourceNodeIndex)
+        {
+            return (uint) sourceNodeIndex < (uint) m_SourceClosureNodeMap.Length
+                ? m_SourceClosureNodeMap[sourceNodeIndex]
+                : -1;
+        }
 
         internal bool PayloadEquals(CanonicalMaterialIR other)
         {
@@ -149,7 +173,8 @@ namespace VividRP.Runtime.GPUDriven
                 canonicalValues,
                 canonicalNodeMap,
                 out ClosureExpressionGraph canonicalClosureGraph,
-                out MaterialClosure canonicalSurfaceClosure);
+                out MaterialClosure canonicalSurfaceClosure,
+                out int[] canonicalClosureNodeMap);
             canonicalValues.Freeze();
             canonicalClosureGraph.Freeze();
             ClosureTopology canonicalTopology = ClosureTopologyLowerer.Lower(
@@ -172,7 +197,9 @@ namespace VividRP.Runtime.GPUDriven
                 canonicalTopology,
                 materialFeatures,
                 shadingModels,
-                payload);
+                payload,
+                canonicalNodeMap,
+                canonicalClosureNodeMap);
         }
 
         private static bool[] FindLiveClosureNodes(
@@ -424,9 +451,15 @@ namespace VividRP.Runtime.GPUDriven
             int comparison = string.CompareOrdinal(
                 left.Declaration.Symbol,
                 right.Declaration.Symbol);
-            if (comparison != 0)
-                return comparison;
-            return ((int) left.Declaration.Type).CompareTo((int) right.Declaration.Type);
+            if (comparison == 0)
+            {
+                comparison = ((int) left.Declaration.Type).CompareTo(
+                    (int) right.Declaration.Type);
+            }
+            return comparison != 0
+                ? comparison
+                : ((int) left.Declaration.SampleClass).CompareTo(
+                    (int) right.Declaration.SampleClass);
         }
 
         private static int[] BuildCanonicalNodes(
@@ -581,16 +614,19 @@ namespace VividRP.Runtime.GPUDriven
             MaterialValueIR canonicalValues,
             int[] canonicalNodeMap,
             out ClosureExpressionGraph canonicalGraph,
-            out MaterialClosure canonicalRoot)
+            out MaterialClosure canonicalRoot,
+            out int[] canonicalClosureNodeMap)
         {
             canonicalGraph = new ClosureExpressionGraph(canonicalValues);
+            canonicalClosureNodeMap = CreateInvalidMap(sourceGraph.NodeCount);
             canonicalRoot = AppendCanonicalClosure(
                 sourceValues,
                 sourceGraph,
                 sourceRoot.Index,
                 canonicalValues,
                 canonicalNodeMap,
-                canonicalGraph);
+                canonicalGraph,
+                canonicalClosureNodeMap);
         }
 
         private static MaterialClosure AppendCanonicalClosure(
@@ -599,13 +635,14 @@ namespace VividRP.Runtime.GPUDriven
             int sourceIndex,
             MaterialValueIR canonicalValues,
             int[] canonicalNodeMap,
-            ClosureExpressionGraph canonicalGraph)
+            ClosureExpressionGraph canonicalGraph,
+            int[] canonicalClosureNodeMap)
         {
             ClosureExpressionNode sourceNode = sourceGraph.Nodes[sourceIndex];
             if (sourceNode.Opcode == ClosureExpressionOpcode.Slab)
             {
                 ClosureSlabExpression slab = sourceNode.Slab;
-                return canonicalGraph.Slab(
+                MaterialClosure canonicalSlab = canonicalGraph.Slab(
                     RemapValue(
                         sourceValues,
                         slab.BaseColor,
@@ -632,6 +669,8 @@ namespace VividRP.Runtime.GPUDriven
                         canonicalValues,
                         canonicalNodeMap),
                     slab.Features);
+                canonicalClosureNodeMap[sourceIndex] = canonicalSlab.Index;
+                return canonicalSlab;
             }
 
             MaterialClosure operand0 = AppendCanonicalClosure(
@@ -640,14 +679,16 @@ namespace VividRP.Runtime.GPUDriven
                 sourceNode.Operand0,
                 canonicalValues,
                 canonicalNodeMap,
-                canonicalGraph);
+                canonicalGraph,
+                canonicalClosureNodeMap);
             MaterialClosure operand1 = AppendCanonicalClosure(
                 sourceValues,
                 sourceGraph,
                 sourceNode.Operand1,
                 canonicalValues,
                 canonicalNodeMap,
-                canonicalGraph);
+                canonicalGraph,
+                canonicalClosureNodeMap);
             MaterialValue weight = RemapValue(
                 sourceValues,
                 sourceNode.Weight,
@@ -656,9 +697,23 @@ namespace VividRP.Runtime.GPUDriven
             switch (sourceNode.Opcode)
             {
                 case ClosureExpressionOpcode.HorizontalMix:
-                    return canonicalGraph.HorizontalMix(operand0, operand1, weight);
+                {
+                    MaterialClosure canonicalMix = canonicalGraph.HorizontalMix(
+                        operand0,
+                        operand1,
+                        weight);
+                    canonicalClosureNodeMap[sourceIndex] = canonicalMix.Index;
+                    return canonicalMix;
+                }
                 case ClosureExpressionOpcode.VerticalLayer:
-                    return canonicalGraph.VerticalLayer(operand0, operand1, weight);
+                {
+                    MaterialClosure canonicalLayer = canonicalGraph.VerticalLayer(
+                        operand0,
+                        operand1,
+                        weight);
+                    canonicalClosureNodeMap[sourceIndex] = canonicalLayer.Index;
+                    return canonicalLayer;
+                }
                 default:
                     throw new InvalidOperationException(
                         $"Closure expression opcode '{sourceNode.Opcode}' cannot be canonicalized.");
@@ -718,6 +773,7 @@ namespace VividRP.Runtime.GPUDriven
                     values.ResourceDeclarations[i];
                 writer.WriteString(declaration.Symbol);
                 writer.WriteUInt32((uint) declaration.Type);
+                writer.WriteUInt32((uint) declaration.SampleClass);
             }
 
             writer.WriteUInt32((uint) values.Nodes.Count);

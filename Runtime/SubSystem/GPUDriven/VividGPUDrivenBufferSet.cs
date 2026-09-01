@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Unity.Collections.LowLevel.Unsafe;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -13,6 +14,8 @@ namespace VividRP.Runtime.GPUDriven
         private GraphicsBuffer m_InstanceDataBuffer;
         private GraphicsBuffer m_MaterialDataBuffer;
         private GraphicsBuffer m_DualSlabMaterialDataBuffer;
+        private GraphicsBuffer m_MaterialParameterDataBuffer;
+        private GraphicsBuffer m_MaterialResourceDataBuffer;
         private GraphicsBuffer m_MaterialRuntimeHeaderBuffer;
         private GraphicsBuffer m_MaterialProgramBuffer;
         private GraphicsBuffer m_SurfaceBindingDataBuffer;
@@ -26,6 +29,9 @@ namespace VividRP.Runtime.GPUDriven
         private VividMaterialData[] m_MaterialUploadData = Array.Empty<VividMaterialData>();
         private VividDualSlabMaterialData[] m_DualSlabMaterialUploadData =
             Array.Empty<VividDualSlabMaterialData>();
+        private uint4[] m_MaterialParameterUploadData = Array.Empty<uint4>();
+        private VividMaterialResourceData[] m_MaterialResourceUploadData =
+            Array.Empty<VividMaterialResourceData>();
         private VividMaterialRuntimeHeader[] m_MaterialRuntimeHeaderUploadData =
             Array.Empty<VividMaterialRuntimeHeader>();
         private VividMaterialProgramData[] m_MaterialProgramUploadData =
@@ -44,6 +50,12 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer MaterialDataBuffer => m_MaterialDataBuffer;
 
         public GraphicsBuffer DualSlabMaterialDataBuffer => m_DualSlabMaterialDataBuffer;
+
+        public GraphicsBuffer MaterialParameterDataBuffer =>
+            m_MaterialParameterDataBuffer;
+
+        public GraphicsBuffer MaterialResourceDataBuffer =>
+            m_MaterialResourceDataBuffer;
 
         public GraphicsBuffer MaterialRuntimeHeaderBuffer => m_MaterialRuntimeHeaderBuffer;
 
@@ -68,6 +80,10 @@ namespace VividRP.Runtime.GPUDriven
         public int MaterialCount { get; private set; }
 
         public int DualSlabMaterialCount { get; private set; }
+
+        public int MaterialParameterLaneCount { get; private set; }
+
+        public int MaterialResourceCount { get; private set; }
 
         public int MaterialRuntimeHeaderCount { get; private set; }
 
@@ -104,6 +120,8 @@ namespace VividRP.Runtime.GPUDriven
             InstanceCount = sceneData.InstanceCount;
             MaterialCount = sceneData.MaterialCount;
             DualSlabMaterialCount = sceneData.DualSlabMaterialCount;
+            MaterialParameterLaneCount = sceneData.MaterialParameterLaneCount;
+            MaterialResourceCount = sceneData.MaterialResourceCount;
             MaterialRuntimeHeaderCount = sceneData.MaterialRuntimeHeaderCount;
             MaterialProgramCount = sceneData.MaterialProgramCount;
             SurfaceBindingCount = sceneData.SurfaceBindingCount;
@@ -143,6 +161,20 @@ namespace VividRP.Runtime.GPUDriven
                     ref m_DualSlabMaterialUploadData,
                     UnsafeUtility.SizeOf<VividDualSlabMaterialData>(),
                     "VividGPUDriven_DualSlabMaterialData"
+                );
+                UploadStructuredBuffer(
+                    ref m_MaterialParameterDataBuffer,
+                    sceneData.MutableMaterialParameterLanes,
+                    ref m_MaterialParameterUploadData,
+                    UnsafeUtility.SizeOf<uint4>(),
+                    "VividGPUDriven_MaterialParameterData"
+                );
+                UploadStructuredBuffer(
+                    ref m_MaterialResourceDataBuffer,
+                    sceneData.MutableMaterialResources,
+                    ref m_MaterialResourceUploadData,
+                    UnsafeUtility.SizeOf<VividMaterialResourceData>(),
+                    "VividGPUDriven_MaterialResourceData"
                 );
                 UploadStructuredBuffer(
                     ref m_MaterialRuntimeHeaderBuffer,
@@ -223,6 +255,12 @@ namespace VividRP.Runtime.GPUDriven
                 VividGPUDrivenShaderIDs._DualSlabMaterialData,
                 DualSlabMaterialDataBuffer);
             cmd.SetGlobalBuffer(
+                VividGPUDrivenShaderIDs._MaterialParameterData,
+                MaterialParameterDataBuffer);
+            cmd.SetGlobalBuffer(
+                VividGPUDrivenShaderIDs._MaterialResourceData,
+                MaterialResourceDataBuffer);
+            cmd.SetGlobalBuffer(
                 VividGPUDrivenShaderIDs._MaterialRuntimeHeaders,
                 MaterialRuntimeHeaderBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MaterialPrograms, MaterialProgramBuffer);
@@ -239,6 +277,12 @@ namespace VividRP.Runtime.GPUDriven
             cmd.SetGlobalInteger(
                 VividGPUDrivenShaderIDs._DualSlabMaterialDataCount,
                 DualSlabMaterialCount);
+            cmd.SetGlobalInteger(
+                VividGPUDrivenShaderIDs._MaterialParameterDataCount,
+                MaterialParameterLaneCount);
+            cmd.SetGlobalInteger(
+                VividGPUDrivenShaderIDs._MaterialResourceDataCount,
+                MaterialResourceCount);
             cmd.SetGlobalInteger(
                 VividGPUDrivenShaderIDs._MaterialRuntimeHeaderCount,
                 MaterialRuntimeHeaderCount);
@@ -264,6 +308,8 @@ namespace VividRP.Runtime.GPUDriven
             m_InstanceDataBuffer?.Dispose();
             m_MaterialDataBuffer?.Dispose();
             m_DualSlabMaterialDataBuffer?.Dispose();
+            m_MaterialParameterDataBuffer?.Dispose();
+            m_MaterialResourceDataBuffer?.Dispose();
             m_MaterialRuntimeHeaderBuffer?.Dispose();
             m_MaterialProgramBuffer?.Dispose();
             m_SurfaceBindingDataBuffer?.Dispose();
@@ -277,6 +323,8 @@ namespace VividRP.Runtime.GPUDriven
             m_InstanceDataBuffer = null;
             m_MaterialDataBuffer = null;
             m_DualSlabMaterialDataBuffer = null;
+            m_MaterialParameterDataBuffer = null;
+            m_MaterialResourceDataBuffer = null;
             m_MaterialRuntimeHeaderBuffer = null;
             m_MaterialProgramBuffer = null;
             m_SurfaceBindingDataBuffer = null;
@@ -289,6 +337,8 @@ namespace VividRP.Runtime.GPUDriven
             m_InstanceUploadData = Array.Empty<VividInstanceData>();
             m_MaterialUploadData = Array.Empty<VividMaterialData>();
             m_DualSlabMaterialUploadData = Array.Empty<VividDualSlabMaterialData>();
+            m_MaterialParameterUploadData = Array.Empty<uint4>();
+            m_MaterialResourceUploadData = Array.Empty<VividMaterialResourceData>();
             m_MaterialRuntimeHeaderUploadData = Array.Empty<VividMaterialRuntimeHeader>();
             m_MaterialProgramUploadData = Array.Empty<VividMaterialProgramData>();
             m_SurfaceBindingUploadData = Array.Empty<VividSurfaceBindingData>();
@@ -417,6 +467,14 @@ namespace VividRP.Runtime.GPUDriven
                        m_DualSlabMaterialDataBuffer,
                        sceneData.DualSlabMaterialCount,
                        UnsafeUtility.SizeOf<VividDualSlabMaterialData>()) ||
+                   !IsStructuredBufferCompatible(
+                       m_MaterialParameterDataBuffer,
+                       sceneData.MaterialParameterLaneCount,
+                       UnsafeUtility.SizeOf<uint4>()) ||
+                   !IsStructuredBufferCompatible(
+                       m_MaterialResourceDataBuffer,
+                       sceneData.MaterialResourceCount,
+                       UnsafeUtility.SizeOf<VividMaterialResourceData>()) ||
                    !IsStructuredBufferCompatible(
                        m_MaterialRuntimeHeaderBuffer,
                        sceneData.MaterialRuntimeHeaderCount,

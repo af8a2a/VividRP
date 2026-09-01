@@ -186,10 +186,8 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialProgramTemplate Resolve(
             in MaterialProgramSelectionKey selectionKey,
-            MaterialValueRequirements requirements)
+            VividMaterialProgramCapabilities requiredCapabilities)
         {
-            if (requirements == null)
-                throw new ArgumentNullException(nameof(requirements));
             if (!m_TemplatesBySelectionKey.TryGetValue(
                     selectionKey,
                     out List<MaterialProgramTemplate> templates))
@@ -204,12 +202,12 @@ namespace VividRP.Runtime.GPUDriven
                  templateIndex++)
             {
                 MaterialProgramTemplate candidate = templates[templateIndex];
-                if (!candidate.LayoutSchema.Matches(requirements))
+                if ((requiredCapabilities & ~candidate.Capabilities) != 0)
                     continue;
                 if (match != null)
                 {
                     throw new InvalidOperationException(
-                        "More than one material program template matches the lowering selection key and live layout.");
+                        "More than one material program template matches the lowering selection key and required capabilities.");
                 }
                 match = candidate;
             }
@@ -217,7 +215,7 @@ namespace VividRP.Runtime.GPUDriven
             if (match == null)
             {
                 throw new NotSupportedException(
-                    "Material requirements do not match any layout schema for the lowering selection key.");
+                    "No material program template provides the required capabilities for the lowering selection key.");
             }
             return match;
         }
@@ -338,12 +336,6 @@ namespace VividRP.Runtime.GPUDriven
             var slotNames = new string[slotCopy.Length];
             var entries = new List<ManifestEntry>(slotCopy.Length);
             var stableNames = new HashSet<string>(StringComparer.Ordinal);
-            var parameterLayouts = new Dictionary<
-                VividMaterialParameterLayoutID,
-                CompiledParameterLayout>();
-            var resourceLayouts = new Dictionary<
-                VividMaterialResourceLayoutID,
-                CompiledResourceLayout>();
 
             m_IsBaking = true;
             for (int slotIndex = 0; slotIndex < slotCopy.Length; slotIndex++)
@@ -379,11 +371,6 @@ namespace VividRP.Runtime.GPUDriven
                         "A frozen catalog slot cannot use the invalid program ID.");
                 }
                 ValidateCandidate(slot.Program, Templates, nameof(slots));
-                ValidateLayoutIDContracts(
-                    slot.Program,
-                    parameterLayouts,
-                    resourceLayouts,
-                    nameof(slots));
 
                 for (int entryIndex = 0;
                      entryIndex < entries.Count;
@@ -513,9 +500,7 @@ namespace VividRP.Runtime.GPUDriven
                     "A cataloged material program selected a template outside the supplied registry.",
                     parameterName);
             }
-            if (lowering.Template.SelectionKey != lowering.SelectionKey
-                || !lowering.Template.LayoutSchema.Matches(
-                    program.MaterialLayout.Requirements))
+            if (lowering.Template.SelectionKey != lowering.SelectionKey)
             {
                 throw new ArgumentException(
                     "A cataloged material program no longer satisfies its selected template.",
@@ -524,12 +509,24 @@ namespace VividRP.Runtime.GPUDriven
 
             MaterialProgramLayoutFingerprint expectedFingerprint =
                 MaterialProgramLayoutFingerprintBuilder.Compute(
-                    lowering.GenericLayout,
-                    lowering.Template.LayoutSchema);
+                    lowering.GenericLayout);
             if (lowering.LayoutFingerprint != expectedFingerprint)
             {
                 throw new ArgumentException(
                     "A cataloged material program carries a stale layout fingerprint.",
+                    parameterName);
+            }
+            MaterialDeferredExportContract expectedDeferredExport =
+                MaterialDeferredExportContractLowerer.Compile(
+                    program.Module,
+                    lowering.SelectionKey.Topology);
+            if (!lowering.DeferredExportContract.PayloadEquals(
+                    expectedDeferredExport)
+                || lowering.DeferredExportContract.Fingerprint
+                    != expectedDeferredExport.Fingerprint)
+            {
+                throw new ArgumentException(
+                    "A cataloged material program carries a stale Deferred Export contract.",
                     parameterName);
             }
             ValidateRuntimeContract(program, lowering.Template, parameterName);
@@ -547,72 +544,29 @@ namespace VividRP.Runtime.GPUDriven
                 || runtimeData.SurfaceProgramID != key.SurfaceProgramID
                 || runtimeData.TransportProgramID != key.TransportProgramID
                 || runtimeData.ParameterLayoutID
-                    != template.LayoutSchema.ParameterLayout.LayoutID
+                    != VividMaterialParameterLayoutID.GenericParameterLanes
                 || runtimeData.ResourceLayoutID
-                    != template.LayoutSchema.ResourceLayout.LayoutID
+                    != VividMaterialResourceLayoutID.GenericResourceRecords
                 || runtimeData.ExecutionClass != key.ExecutionClass
-                || runtimeData.CapabilityFlags != template.Capabilities
-                || !ReferenceEquals(
-                    program.MaterialLayout.ParameterLayout,
-                    template.LayoutSchema.ParameterLayout)
-                || !ReferenceEquals(
-                    program.MaterialLayout.ResourceLayout,
-                    template.LayoutSchema.ResourceLayout)
-                || !program.Lowering.GenericLayout.PayloadEquals(
-                    template.LayoutSchema.LiveLayout))
+                || runtimeData.CapabilityFlags != template.Capabilities)
             {
                 throw new ArgumentException(
                     "Compiled material program does not satisfy its lowering template runtime contract.",
                     parameterName);
             }
-        }
 
-        private static void ValidateLayoutIDContracts(
-            CompiledMaterialProgram program,
-            Dictionary<VividMaterialParameterLayoutID, CompiledParameterLayout>
-                parameterLayouts,
-            Dictionary<VividMaterialResourceLayoutID, CompiledResourceLayout>
-                resourceLayouts,
-            string parameterName)
-        {
-            CompiledParameterLayout parameterLayout =
-                program.MaterialLayout.ParameterLayout;
-            if (parameterLayouts.TryGetValue(
-                    parameterLayout.LayoutID,
-                    out CompiledParameterLayout previousParameterLayout))
+            var expectedGenericLayout = new MaterialGenericLayout(
+                program.Lowering.Requirements);
+            if (!program.Lowering.GenericLayout.PayloadEquals(
+                    expectedGenericLayout))
             {
-                if (!ParameterLayoutsEqual(previousParameterLayout, parameterLayout))
-                {
-                    throw new ArgumentException(
-                        $"Parameter layout ID '{parameterLayout.LayoutID}' maps to more than one physical payload.",
-                        parameterName);
-                }
-            }
-            else
-            {
-                parameterLayouts.Add(parameterLayout.LayoutID, parameterLayout);
-            }
-
-            CompiledResourceLayout resourceLayout =
-                program.MaterialLayout.ResourceLayout;
-            if (resourceLayouts.TryGetValue(
-                    resourceLayout.LayoutID,
-                    out CompiledResourceLayout previousResourceLayout))
-            {
-                if (!ResourceLayoutsEqual(previousResourceLayout, resourceLayout))
-                {
-                    throw new ArgumentException(
-                        $"Resource layout ID '{resourceLayout.LayoutID}' maps to more than one physical payload.",
-                        parameterName);
-                }
-            }
-            else
-            {
-                resourceLayouts.Add(resourceLayout.LayoutID, resourceLayout);
+                throw new ArgumentException(
+                    "Compiled material program carries a generic layout that does not match its requirements.",
+                    parameterName);
             }
         }
 
-        private static bool AreExactlyEquivalent(
+        internal static bool AreExactlyEquivalent(
             CompiledMaterialProgram left,
             CompiledMaterialProgram right)
         {
@@ -626,6 +580,13 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             if (!left.SurfaceHlsl.PayloadEquals(right.SurfaceHlsl))
                 return false;
+            if (!left.DeferredExportContract.PayloadEquals(
+                    right.DeferredExportContract)
+                || left.DeferredExportContract.Fingerprint
+                    != right.DeferredExportContract.Fingerprint)
+            {
+                return false;
+            }
             if (left.Lowering.SelectionKey != right.Lowering.SelectionKey
                 || left.Lowering.LayoutFingerprint
                     != right.Lowering.LayoutFingerprint)
@@ -636,9 +597,7 @@ namespace VividRP.Runtime.GPUDriven
             MaterialProgramTemplate leftTemplate = left.Lowering.Template;
             MaterialProgramTemplate rightTemplate = right.Lowering.Template;
             if (leftTemplate.RuntimeAbiVersion != rightTemplate.RuntimeAbiVersion
-                || leftTemplate.Capabilities != rightTemplate.Capabilities
-                || !leftTemplate.LayoutSchema.MappingPayloadEquals(
-                    rightTemplate.LayoutSchema))
+                || leftTemplate.Capabilities != rightTemplate.Capabilities)
             {
                 return false;
             }
@@ -646,12 +605,7 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             if (!left.Lowering.GenericLayout.PayloadEquals(right.Lowering.GenericLayout))
                 return false;
-            return ParameterLayoutsEqual(
-                    left.MaterialLayout.ParameterLayout,
-                    right.MaterialLayout.ParameterLayout)
-                && ResourceLayoutsEqual(
-                    left.MaterialLayout.ResourceLayout,
-                    right.MaterialLayout.ResourceLayout);
+            return true;
         }
 
         private static bool RuntimeDataEquals(
@@ -668,63 +622,5 @@ namespace VividRP.Runtime.GPUDriven
                 && left.ExecutionClass == right.ExecutionClass;
         }
 
-        private static bool ParameterLayoutsEqual(
-            CompiledParameterLayout left,
-            CompiledParameterLayout right)
-        {
-            if (ReferenceEquals(left, right))
-                return true;
-            if (left == null
-                || right == null
-                || left.LayoutID != right.LayoutID
-                || left.Stride != right.Stride
-                || left.Bindings.Count != right.Bindings.Count)
-            {
-                return false;
-            }
-
-            for (int bindingIndex = 0; bindingIndex < left.Bindings.Count; bindingIndex++)
-            {
-                MaterialParameterLayoutBinding leftBinding = left.Bindings[bindingIndex];
-                MaterialParameterLayoutBinding rightBinding = right.Bindings[bindingIndex];
-                if (leftBinding.Parameter != rightBinding.Parameter
-                    || leftBinding.Type != rightBinding.Type
-                    || leftBinding.ByteOffset != rightBinding.ByteOffset)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private static bool ResourceLayoutsEqual(
-            CompiledResourceLayout left,
-            CompiledResourceLayout right)
-        {
-            if (ReferenceEquals(left, right))
-                return true;
-            if (left == null
-                || right == null
-                || left.LayoutID != right.LayoutID
-                || left.RecordStride != right.RecordStride
-                || left.RecordCount != right.RecordCount
-                || left.Bindings.Count != right.Bindings.Count)
-            {
-                return false;
-            }
-
-            for (int bindingIndex = 0; bindingIndex < left.Bindings.Count; bindingIndex++)
-            {
-                MaterialResourceLayoutBinding leftBinding = left.Bindings[bindingIndex];
-                MaterialResourceLayoutBinding rightBinding = right.Bindings[bindingIndex];
-                if (leftBinding.Resource != rightBinding.Resource
-                    || leftBinding.RecordOffset != rightBinding.RecordOffset
-                    || leftBinding.ByteOffset != rightBinding.ByteOffset)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
     }
 }

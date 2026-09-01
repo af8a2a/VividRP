@@ -276,9 +276,12 @@ namespace VividRP.Runtime.GPUDriven
             MaterialResourceDeclaration right)
         {
             int result = string.CompareOrdinal(left.Symbol, right.Symbol);
+            if (result == 0)
+                result = ((int) left.Type).CompareTo((int) right.Type);
             return result != 0
                 ? result
-                : ((int) left.Type).CompareTo((int) right.Type);
+                : ((int) left.SampleClass).CompareTo(
+                    (int) right.SampleClass);
         }
 
         private static MaterialParameterDeclaration[] CopyParameters(
@@ -358,6 +361,13 @@ namespace VividRP.Runtime.GPUDriven
                         $"Generic material resource '{declaration.Symbol}' has unsupported type '{declaration.Type}'.",
                         nameof(declarations));
                 }
+                if ((uint) declaration.SampleClass
+                    > (uint) MaterialTextureSampleClass.Mask)
+                {
+                    throw new ArgumentException(
+                        $"Generic material resource '{declaration.Symbol}' has unsupported sample class '{declaration.SampleClass}'.",
+                        nameof(declarations));
+                }
                 if (declarationIndex > 0
                     && string.Equals(
                         declarations[declarationIndex - 1].Symbol,
@@ -434,6 +444,9 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialProgramHashUtility.Add(
                     ref hash,
                     (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.SampleClass);
                 MaterialProgramHashUtility.Add(ref hash, binding.Slot);
             }
             return hash;
@@ -479,6 +492,8 @@ namespace VividRP.Runtime.GPUDriven
                     .Append(binding.Declaration.Symbol)
                     .Append(':')
                     .Append(binding.Declaration.Type)
+                    .Append('/')
+                    .Append(binding.Declaration.SampleClass)
                     .Append(" slot=")
                     .Append(binding.Slot)
                     .AppendLine();
@@ -819,6 +834,19 @@ namespace VividRP.Runtime.GPUDriven
                         $"Native template resource target '{binding.Target}' is not present in physical layout '{resourceLayout.LayoutID}'.",
                         nameof(bindings));
                 }
+                MaterialTextureSampleClass targetSampleClass =
+                    MaterialNativeTemplateDeclarationAdapter
+                        .GetTexture(binding.Target)
+                        .SampleClass;
+                if (binding.Declaration.SampleClass != targetSampleClass)
+                {
+                    throw new ArgumentException(
+                        $"Native template resource '{binding.Declaration.Symbol}' "
+                        + $"uses sample class '{binding.Declaration.SampleClass}', "
+                        + $"but target '{binding.Target}' requires "
+                        + $"'{targetSampleClass}'.",
+                        nameof(bindings));
+                }
             }
         }
 
@@ -930,28 +958,22 @@ namespace VividRP.Runtime.GPUDriven
     internal static class MaterialProgramLayoutFingerprintBuilder
     {
         internal static MaterialProgramLayoutFingerprint Compute(
-            MaterialGenericLayout genericLayout,
-            MaterialNativeTemplateLayoutSchema schema)
+            MaterialGenericLayout genericLayout)
         {
             if (genericLayout == null)
                 throw new ArgumentNullException(nameof(genericLayout));
-            if (schema == null)
-                throw new ArgumentNullException(nameof(schema));
-            if (!schema.LiveLayout.PayloadEquals(genericLayout))
-            {
-                throw new ArgumentException(
-                    "A layout fingerprint requires a generic layout that exactly matches the native schema.",
-                    nameof(genericLayout));
-            }
 
             ulong hash = MaterialProgramHashUtility.OffsetBasis;
             MaterialProgramHashUtility.Add(
                 ref hash,
                 MaterialProgramContract.LayoutFingerprintVersion);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) VividMaterialParameterLayoutID.GenericParameterLanes);
+            MaterialProgramHashUtility.Add(
+                ref hash,
+                (uint) VividMaterialResourceLayoutID.GenericResourceRecords);
             AddGenericLayout(ref hash, genericLayout);
-            AddParameterLayout(ref hash, schema.ParameterLayout);
-            AddResourceLayout(ref hash, schema.ResourceLayout);
-            AddNativeMappings(ref hash, schema);
             return new MaterialProgramLayoutFingerprint(
                 MaterialProgramContract.LayoutFingerprintVersion,
                 hash);
@@ -993,83 +1015,12 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialProgramHashUtility.Add(
                     ref hash,
                     (int) binding.Declaration.Type);
+                MaterialProgramHashUtility.Add(
+                    ref hash,
+                    (int) binding.Declaration.SampleClass);
                 MaterialProgramHashUtility.Add(ref hash, binding.Slot);
             }
         }
 
-        private static void AddParameterLayout(
-            ref ulong hash,
-            CompiledParameterLayout layout)
-        {
-            MaterialProgramHashUtility.Add(ref hash, (uint) layout.LayoutID);
-            MaterialProgramHashUtility.Add(ref hash, layout.Stride);
-            MaterialProgramHashUtility.Add(ref hash, layout.Bindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < layout.Bindings.Count;
-                 bindingIndex++)
-            {
-                MaterialParameterLayoutBinding binding = layout.Bindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Parameter);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Type);
-                MaterialProgramHashUtility.Add(ref hash, binding.ByteOffset);
-            }
-        }
-
-        private static void AddResourceLayout(
-            ref ulong hash,
-            CompiledResourceLayout layout)
-        {
-            MaterialProgramHashUtility.Add(ref hash, (uint) layout.LayoutID);
-            MaterialProgramHashUtility.Add(ref hash, layout.RecordStride);
-            MaterialProgramHashUtility.Add(ref hash, layout.RecordCount);
-            MaterialProgramHashUtility.Add(ref hash, layout.Bindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < layout.Bindings.Count;
-                 bindingIndex++)
-            {
-                MaterialResourceLayoutBinding binding = layout.Bindings[bindingIndex];
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Resource);
-                MaterialProgramHashUtility.Add(ref hash, binding.RecordOffset);
-                MaterialProgramHashUtility.Add(ref hash, binding.ByteOffset);
-            }
-        }
-
-        private static void AddNativeMappings(
-            ref ulong hash,
-            MaterialNativeTemplateLayoutSchema schema)
-        {
-            MaterialProgramHashUtility.Add(ref hash, schema.ParameterBindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < schema.ParameterBindings.Count;
-                 bindingIndex++)
-            {
-                MaterialNativeParameterBinding binding =
-                    schema.ParameterBindings[bindingIndex];
-                MaterialProgramHashUtility.Add(
-                    ref hash,
-                    binding.Declaration.Symbol);
-                MaterialProgramHashUtility.Add(
-                    ref hash,
-                    (int) binding.Declaration.Type);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Target);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Conversion);
-            }
-
-            MaterialProgramHashUtility.Add(ref hash, schema.ResourceBindings.Count);
-            for (int bindingIndex = 0;
-                 bindingIndex < schema.ResourceBindings.Count;
-                 bindingIndex++)
-            {
-                MaterialNativeResourceBinding binding =
-                    schema.ResourceBindings[bindingIndex];
-                MaterialProgramHashUtility.Add(
-                    ref hash,
-                    binding.Declaration.Symbol);
-                MaterialProgramHashUtility.Add(
-                    ref hash,
-                    (int) binding.Declaration.Type);
-                MaterialProgramHashUtility.Add(ref hash, (int) binding.Target);
-            }
-        }
     }
 }

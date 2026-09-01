@@ -251,6 +251,37 @@ namespace VividRP.Runtime.GPUDriven
 
         internal VividPrimitiveDrawSet CurrentMainViewDrawSet => m_CurrentMainViewDrawSet;
 
+        internal bool RequiresDualSlabSidecarForMainView()
+        {
+            if (!SceneData.HasDualSlabSidecarMaterial())
+                return false;
+
+            VividPrimitiveDrawSet drawSet = m_CurrentMainViewDrawSet;
+            // Stereo and fallback culling do not publish a CPU draw set. Keep
+            // those paths conservative so a Dual Slab pixel never loses data.
+            if (drawSet?.IsBuilt != true)
+                return true;
+
+            // The CPU draw set is a guard-banded superset of the GPU-visible
+            // meshlets, so it is safe to use as the frame-level allocation gate.
+            var visibleInstanceIndices = drawSet.LegacyInstanceIndices;
+            for (var drawIndex = 0;
+                 drawIndex < visibleInstanceIndices.Length;
+                 drawIndex++)
+            {
+                uint instanceIndex = visibleInstanceIndices[drawIndex];
+                if (instanceIndex >= (uint) SceneData.Instances.Count)
+                    continue;
+
+                uint materialIndex =
+                    SceneData.Instances[(int) instanceIndex].MaterialIndex;
+                if (SceneData.RequiresDualSlabSidecar(materialIndex))
+                    return true;
+            }
+
+            return false;
+        }
+
         public bool IsAvailable => m_TextureBackend.IsAvailable;
 
         public string UnavailableReason => m_TextureBackend.UnavailableReason;
@@ -1014,7 +1045,8 @@ namespace VividRP.Runtime.GPUDriven
                     gpuDrivenSystem.VisibleMeshletRenderRequestsBuffer,
                     gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer,
                     gpuDrivenSystem.CurrentMainViewDrawSet,
-                    scheduledShadowDrawSet);
+                    scheduledShadowDrawSet,
+                    gpuDrivenSystem.RequiresDualSlabSidecarForMainView());
                 PassRecorder.SetGPUDrivenOcclusionFrameData(
                     occlusionCullingEnabled,
                     hasOcclusionHistory,

@@ -450,16 +450,17 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("const float2 uvDdy = uv0Ddy * tiling;", coverageSource);
             StringAssert.Contains("switch (runtimeHeader.ProgramID)", coverageAotSource);
             StringAssert.Contains(
-                "VIVIDMATERIALPARAMETERLAYOUTID_LEGACY_MATERIAL_DATA",
+                "VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES",
                 coverageAotSource);
             StringAssert.Contains(
-                "VIVIDMATERIALPARAMETERLAYOUTID_DUAL_SLAB_MATERIAL_DATA",
+                "VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS",
                 coverageAotSource);
             StringAssert.Contains("runtimeHeader.ParameterAddress", coverageAotSource);
             StringAssert.Contains("runtimeHeader.ResourceBindingAddress", coverageAotSource);
-            StringAssert.Contains("_MaterialDataCount", coverageAotSource);
-            StringAssert.Contains("_DualSlabMaterialDataCount", coverageAotSource);
-            StringAssert.Contains("_SurfaceBindingDataCount", coverageAotSource);
+            StringAssert.Contains("_MaterialParameterDataCount", coverageAotSource);
+            StringAssert.Contains("_MaterialResourceDataCount", coverageAotSource);
+            StringAssert.Contains("VividLoadMaterialFloat", coverageAotSource);
+            StringAssert.Contains("PullMaterialResourceData", coverageAotSource);
             StringAssert.Contains("VividCreateSurfaceSampleContextGrad", coverageAotSource);
             StringAssert.Contains("VividSampleBaseColorGrad", coverageAotSource);
             StringAssert.DoesNotContain("PositionCS", coverageAotSource);

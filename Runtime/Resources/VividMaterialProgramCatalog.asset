@@ -1,0 +1,258 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 617444a824ed9ed4ba8893f61605f9cb, type: 3}
+  m_Name: VividMaterialProgramCatalog
+  m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.GPUDriven.MaterialProgramCatalogAsset
+  m_AssetSchemaVersion: 6
+  m_ProgramCatalogVersion: 4
+  m_ManifestVersion: 5
+  m_RuntimeAbiVersion: 3
+  m_ManifestHashVersion: 5
+  m_ManifestHash: 6320714283017605985
+  m_IsCommitted: 1
+  m_ArtifactSetHashVersion: 2
+  m_ArtifactSetHash: 9312539219734920099
+  m_CatalogPayloadSealVersion: 1
+  m_CatalogPayloadSealHash: 8458151049704437983
+  m_Slots:
+  - m_ProgramID: 0
+    m_StableName: P0.StandardSingleSlab
+    m_IsReserved: 0
+    m_CompiledHashVersion: 9
+    m_CompiledHash: 13834008346118628237
+    m_LayoutFingerprintVersion: 3
+    m_LayoutFingerprint: 11193960182733492371
+    m_DeferredExportFingerprintVersion: 1
+    m_DeferredExportFingerprint: 5888118281072226784
+    m_CoveragePayloadHash: 13510949883267873268
+    m_SurfacePayloadHash: 7960802402996909884
+    m_RuntimeVersion: 3
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 0
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
+    m_CapabilityFlags: 7
+    m_ExecutionClass: 0
+    m_Topology: 0
+    m_ParameterStrideInWords: 16
+    m_ResourceCount: 1
+    m_ParameterBindings:
+    - m_Symbol: AlphaClipThreshold
+      m_Type: 1
+      m_WordOffset: 0
+      m_WordCount: 1
+    - m_Symbol: BaseColor
+      m_Type: 4
+      m_WordOffset: 4
+      m_WordCount: 4
+    - m_Symbol: Emission
+      m_Type: 3
+      m_WordOffset: 8
+      m_WordCount: 3
+    - m_Symbol: Metallic
+      m_Type: 1
+      m_WordOffset: 11
+      m_WordCount: 1
+    - m_Symbol: Roughness
+      m_Type: 1
+      m_WordOffset: 12
+      m_WordCount: 1
+    m_ResourceBindings:
+    - m_Symbol: BaseColor
+      m_Type: 5
+      m_SampleClass: 1
+      m_Slot: 0
+  - m_ProgramID: 1
+    m_StableName: P1.DualSlabHorizontalMix
+    m_IsReserved: 0
+    m_CompiledHashVersion: 9
+    m_CompiledHash: 4264700279243166112
+    m_LayoutFingerprintVersion: 3
+    m_LayoutFingerprint: 14469877800952702697
+    m_DeferredExportFingerprintVersion: 1
+    m_DeferredExportFingerprint: 12898365168916497089
+    m_CoveragePayloadHash: 18281067700041508341
+    m_SurfacePayloadHash: 8461351866686349072
+    m_RuntimeVersion: 3
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 1
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
+    m_CapabilityFlags: 7
+    m_ExecutionClass: 0
+    m_Topology: 1
+    m_ParameterStrideInWords: 24
+    m_ResourceCount: 2
+    m_ParameterBindings:
+    - m_Symbol: AlphaClipThreshold
+      m_Type: 1
+      m_WordOffset: 0
+      m_WordCount: 1
+    - m_Symbol: BaseColor
+      m_Type: 4
+      m_WordOffset: 4
+      m_WordCount: 4
+    - m_Symbol: Emission
+      m_Type: 3
+      m_WordOffset: 8
+      m_WordCount: 3
+    - m_Symbol: LayerWeight
+      m_Type: 1
+      m_WordOffset: 11
+      m_WordCount: 1
+    - m_Symbol: Metallic
+      m_Type: 1
+      m_WordOffset: 12
+      m_WordCount: 1
+    - m_Symbol: Roughness
+      m_Type: 1
+      m_WordOffset: 13
+      m_WordCount: 1
+    - m_Symbol: TopBaseColor
+      m_Type: 4
+      m_WordOffset: 16
+      m_WordCount: 4
+    - m_Symbol: TopMetallic
+      m_Type: 1
+      m_WordOffset: 20
+      m_WordCount: 1
+    - m_Symbol: TopRoughness
+      m_Type: 1
+      m_WordOffset: 21
+      m_WordCount: 1
+    m_ResourceBindings:
+    - m_Symbol: BaseColor
+      m_Type: 5
+      m_SampleClass: 1
+      m_Slot: 0
+    - m_Symbol: TopBaseColor
+      m_Type: 5
+      m_SampleClass: 1
+      m_Slot: 1
+  - m_ProgramID: 2
+    m_StableName: P2.DualSlabVerticalLayer
+    m_IsReserved: 0
+    m_CompiledHashVersion: 9
+    m_CompiledHash: 17211617449893112778
+    m_LayoutFingerprintVersion: 3
+    m_LayoutFingerprint: 14469877800952702697
+    m_DeferredExportFingerprintVersion: 1
+    m_DeferredExportFingerprint: 12268790991064211538
+    m_CoveragePayloadHash: 18281067700041508341
+    m_SurfacePayloadHash: 13922409097743260219
+    m_RuntimeVersion: 3
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 1
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
+    m_CapabilityFlags: 7
+    m_ExecutionClass: 0
+    m_Topology: 2
+    m_ParameterStrideInWords: 24
+    m_ResourceCount: 2
+    m_ParameterBindings:
+    - m_Symbol: AlphaClipThreshold
+      m_Type: 1
+      m_WordOffset: 0
+      m_WordCount: 1
+    - m_Symbol: BaseColor
+      m_Type: 4
+      m_WordOffset: 4
+      m_WordCount: 4
+    - m_Symbol: Emission
+      m_Type: 3
+      m_WordOffset: 8
+      m_WordCount: 3
+    - m_Symbol: LayerWeight
+      m_Type: 1
+      m_WordOffset: 11
+      m_WordCount: 1
+    - m_Symbol: Metallic
+      m_Type: 1
+      m_WordOffset: 12
+      m_WordCount: 1
+    - m_Symbol: Roughness
+      m_Type: 1
+      m_WordOffset: 13
+      m_WordCount: 1
+    - m_Symbol: TopBaseColor
+      m_Type: 4
+      m_WordOffset: 16
+      m_WordCount: 4
+    - m_Symbol: TopMetallic
+      m_Type: 1
+      m_WordOffset: 20
+      m_WordCount: 1
+    - m_Symbol: TopRoughness
+      m_Type: 1
+      m_WordOffset: 21
+      m_WordCount: 1
+    m_ResourceBindings:
+    - m_Symbol: BaseColor
+      m_Type: 5
+      m_SampleClass: 1
+      m_Slot: 0
+    - m_Symbol: TopBaseColor
+      m_Type: 5
+      m_SampleClass: 1
+      m_Slot: 1
+  - m_ProgramID: 3
+    m_StableName: P3.GenericSingleSlabProof
+    m_IsReserved: 0
+    m_CompiledHashVersion: 9
+    m_CompiledHash: 15508265905773607658
+    m_LayoutFingerprintVersion: 3
+    m_LayoutFingerprint: 11193960182733492371
+    m_DeferredExportFingerprintVersion: 1
+    m_DeferredExportFingerprint: 10455666665750202914
+    m_CoveragePayloadHash: 15735384498121314332
+    m_SurfacePayloadHash: 15573847914114781256
+    m_RuntimeVersion: 3
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 0
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
+    m_CapabilityFlags: 7
+    m_ExecutionClass: 0
+    m_Topology: 0
+    m_ParameterStrideInWords: 16
+    m_ResourceCount: 1
+    m_ParameterBindings:
+    - m_Symbol: AlphaClipThreshold
+      m_Type: 1
+      m_WordOffset: 0
+      m_WordCount: 1
+    - m_Symbol: BaseColor
+      m_Type: 4
+      m_WordOffset: 4
+      m_WordCount: 4
+    - m_Symbol: Emission
+      m_Type: 3
+      m_WordOffset: 8
+      m_WordCount: 3
+    - m_Symbol: Metallic
+      m_Type: 1
+      m_WordOffset: 11
+      m_WordCount: 1
+    - m_Symbol: Roughness
+      m_Type: 1
+      m_WordOffset: 12
+      m_WordCount: 1
+    m_ResourceBindings:
+    - m_Symbol: BaseColor
+      m_Type: 5
+      m_SampleClass: 1
+      m_Slot: 0

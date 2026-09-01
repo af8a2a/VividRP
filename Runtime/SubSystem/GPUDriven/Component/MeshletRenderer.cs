@@ -255,31 +255,28 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             }
 
-            if (!m_TakeOverSourceRenderer)
+            if (m_TakeOverSourceRenderer)
             {
-                validationMessage = string.Empty;
-                return true;
-            }
-
-            int expectedCount = Mathf.Max(1, m_SourceMesh.subMeshCount);
-            int actualCount = m_MaterialProxies?.Length ?? 0;
-            if (actualCount != expectedCount)
-            {
-                validationMessage =
-                    $"Expected {expectedCount} GPUDriven material proxies for '{m_SourceMesh.name}', but found {actualCount}.";
-                return false;
-            }
-
-            for (int subMeshIndex = 0; subMeshIndex < m_MaterialProxies.Length; subMeshIndex++)
-            {
-                if (m_MaterialProxies[subMeshIndex] != null)
+                int expectedCount = Mathf.Max(1, m_SourceMesh.subMeshCount);
+                int actualCount = m_MaterialProxies?.Length ?? 0;
+                if (actualCount != expectedCount)
                 {
-                    continue;
+                    validationMessage =
+                        $"Expected {expectedCount} GPUDriven material proxies for '{m_SourceMesh.name}', but found {actualCount}.";
+                    return false;
                 }
 
-                validationMessage =
-                    $"Missing GPUDriven material proxy for submesh {subMeshIndex} on '{m_SourceMesh.name}'.";
-                return false;
+                for (int subMeshIndex = 0; subMeshIndex < m_MaterialProxies.Length; subMeshIndex++)
+                {
+                    if (m_MaterialProxies[subMeshIndex] != null)
+                    {
+                        continue;
+                    }
+
+                    validationMessage =
+                        $"Missing GPUDriven material proxy for submesh {subMeshIndex} on '{m_SourceMesh.name}'.";
+                    return false;
+                }
             }
 
             validationMessage = string.Empty;
@@ -287,6 +284,36 @@ namespace VividRP.Runtime.GPUDriven
         }
 
         internal bool TryValidateRuntimeBindings(out string validationMessage)
+        {
+            if (!TryValidateGeometryBindings(out validationMessage))
+            {
+                return false;
+            }
+
+            if (m_MaterialProxies != null)
+            {
+                for (int subMeshIndex = 0; subMeshIndex < m_MaterialProxies.Length; subMeshIndex++)
+                {
+                    GPUDrivenMaterialProxy materialProxy = m_MaterialProxies[subMeshIndex];
+                    if (materialProxy == null)
+                        continue;
+
+                    if (!GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                            materialProxy,
+                            out string proxyValidationMessage))
+                    {
+                        validationMessage =
+                            $"GPUDriven material proxy '{materialProxy.name}' for submesh {subMeshIndex} is invalid: {proxyValidationMessage}";
+                        return false;
+                    }
+                }
+            }
+
+            validationMessage = string.Empty;
+            return true;
+        }
+
+        internal bool TryValidateGeometryBindings(out string validationMessage)
         {
             if (m_SourceMesh == null)
             {

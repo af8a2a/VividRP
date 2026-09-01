@@ -94,6 +94,24 @@ namespace VividRP.Editor.Tests
                 AssertPassFieldBinding(
                     result,
                     deferredIndex,
+                    "m_MaterialTileFeatureFlags",
+                    classificationIndex,
+                    "m_MaterialTileFeatureFlags");
+                AssertPassFieldBinding(
+                    result,
+                    deferredIndex,
+                    "m_MaterialFeatureTileList",
+                    classificationIndex,
+                    "m_MaterialFeatureTileList");
+                AssertPassFieldBinding(
+                    result,
+                    deferredIndex,
+                    "m_MaterialFeatureIndirectArgs",
+                    classificationIndex,
+                    "m_MaterialFeatureIndirectArgs");
+                AssertPassFieldBinding(
+                    result,
+                    deferredIndex,
                     "m_GBuffer4",
                     resolveIndex,
                     "m_GBuffer4");

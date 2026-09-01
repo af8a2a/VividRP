@@ -119,6 +119,8 @@ namespace VividRP.Runtime.GPUDriven
 
         public VividMeshletCollectionAsset[] MeshletCollections { get; }
 
+        // Immutable database snapshot. Update bindings through
+        // MeshletRenderer.SetMaterialProxies so resource revisions stay in sync.
         public GPUDrivenMaterialProxy[] MaterialProxies { get; }
 
         public Bounds[] LocalBounds { get; }
@@ -567,7 +569,10 @@ namespace VividRP.Runtime.GPUDriven
         private static VividMeshletRendererRenderData CreateRendererData(MeshletRenderer meshletRenderer)
         {
             Mesh sourceMesh = meshletRenderer.sourceMesh;
-            bool isValid = meshletRenderer.TryValidateRuntimeBindings(out _);
+            // The database flag tracks component-owned geometry bindings. Material
+            // proxy assets have independent revisions and are validated dynamically
+            // by the scene-data builder so stale flags cannot lock recovery.
+            bool isValid = meshletRenderer.TryValidateGeometryBindings(out _);
             Matrix4x4 objectToWorldMatrix = meshletRenderer.transform.localToWorldMatrix;
             Matrix4x4 worldToObjectMatrix = meshletRenderer.transform.worldToLocalMatrix;
             Bounds localBounds = sourceMesh != null ? sourceMesh.bounds : default;

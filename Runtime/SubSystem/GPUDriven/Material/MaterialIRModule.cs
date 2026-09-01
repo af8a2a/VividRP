@@ -250,6 +250,7 @@ namespace VividRP.Runtime.GPUDriven
                 builder.Append("  resource @r").Append(i)
                     .Append(' ').Append(declaration.Symbol)
                     .Append(':').Append(declaration.Type)
+                    .Append('/').Append(declaration.SampleClass)
                     .AppendLine();
             }
             builder.AppendLine("values:");

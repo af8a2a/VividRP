@@ -54,6 +54,43 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveSunDirectionAndColor_DoNotAllocate_WhenFrameLightDataIsValid()
+        {
+            var lightData = new VividLightData
+            {
+                directionalLights = new[]
+                {
+                    new VividLightData.DirectionalLightData
+                    {
+                        directionWS = Vector3.down,
+                        color = new Vector3(2.0f, 1.5f, 0.75f)
+                    }
+                },
+                directionalLightCount = 1,
+                mainDirectionalLightIndex = 0
+            };
+            var context = new SkyRendererContext(
+                new VividCameraData(),
+                lightData);
+
+            PhysicallyBasedSkyRenderer.ResolveSunDirection(context);
+            PhysicallyBasedSkyRenderer.ResolveSunColor(context);
+
+            var allocatedBefore =
+                global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 32; index++)
+            {
+                PhysicallyBasedSkyRenderer.ResolveSunDirection(context);
+                PhysicallyBasedSkyRenderer.ResolveSunColor(context);
+            }
+            var allocatedBytes =
+                global::System.GC.GetAllocatedBytesForCurrentThread()
+                - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void ResolveSunColor_UsesSceneDirectionalLight_WhenFrameLightDataIsNotReady()
         {
             var previousSun = RenderSettings.sun;

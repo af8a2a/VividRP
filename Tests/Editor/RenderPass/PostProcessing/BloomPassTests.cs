@@ -27,6 +27,42 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BloomPass_CachesFftHandleNames_ForPrepareReuse()
+        {
+            var realNames = GetPrivateStaticStringArray("s_FftRealNames");
+            var imagNames = GetPrivateStaticStringArray("s_FftImagNames");
+            var kernelRealNames =
+                GetPrivateStaticStringArray("s_FftKernelRealNames");
+            var kernelImagNames =
+                GetPrivateStaticStringArray("s_FftKernelImagNames");
+            var energyNames = GetPrivateStaticStringArray("s_FftEnergyNames");
+
+            Assert.That(realNames, Is.EqualTo(new[]
+            {
+                "BloomFFTReal0",
+                "BloomFFTReal1"
+            }));
+            Assert.That(imagNames, Is.EqualTo(new[]
+            {
+                "BloomFFTImag0",
+                "BloomFFTImag1"
+            }));
+            Assert.That(kernelRealNames, Is.EqualTo(new[]
+            {
+                "BloomFFTKernelReal0",
+                "BloomFFTKernelReal1"
+            }));
+            Assert.That(kernelImagNames, Is.EqualTo(new[]
+            {
+                "BloomFFTKernelImag0",
+                "BloomFFTKernelImag1"
+            }));
+            Assert.That(energyNames, Has.Length.EqualTo(13));
+            Assert.That(energyNames[0], Is.EqualTo("BloomFFTKernelEnergy0"));
+            Assert.That(energyNames[12], Is.EqualTo("BloomFFTKernelEnergy12"));
+        }
+
+        [Test]
         public void BloomSettingsData_DefaultsExperimentalSpdDownsampleOff()
         {
             var settings = BloomSettingsData.CreateDefault();

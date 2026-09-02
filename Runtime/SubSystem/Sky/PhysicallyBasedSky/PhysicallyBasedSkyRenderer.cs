@@ -596,7 +596,9 @@ namespace VividRP.Runtime
                     continue;
 
                 var candidateColor = VividLightRenderDatabase.EvaluateLightColor(candidate);
-                var candidateIntensity = Mathf.Max(candidateColor.r, candidateColor.g, candidateColor.b);
+                var candidateIntensity = Mathf.Max(
+                    candidateColor.r,
+                    Mathf.Max(candidateColor.g, candidateColor.b));
                 if (candidateIntensity <= brightestIntensity)
                     continue;
 
@@ -629,7 +631,7 @@ namespace VividRP.Runtime
 
         private static bool HasPositiveColor(Vector3 color)
         {
-            return Mathf.Max(color.x, color.y, color.z) > 0.0f;
+            return Mathf.Max(color.x, Mathf.Max(color.y, color.z)) > 0.0f;
         }
 
         internal static Vector3 ResolveCameraPosition(in SkyRendererContext context, float planetRadius)

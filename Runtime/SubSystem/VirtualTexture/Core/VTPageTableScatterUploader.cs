@@ -40,6 +40,8 @@ namespace VividRP.Runtime
         private static readonly int s_UpdateCountId = Shader.PropertyToID("_VTPageTableUpdateCount");
         [NoAutoStaticsCleanup]
         private static readonly BaseRenderFunc<ScatterPassData, ComputeGraphContext> s_RenderFunc = Execute;
+        [NoAutoStaticsCleanup]
+        private static readonly Comparison<VTPageTableSpace> s_SpaceIdComparison = CompareSpaceIds;
 
         private readonly List<VTPageTableSpace> m_PendingSpaces = new();
         private readonly List<PendingSlice> m_PendingSlices = new();
@@ -78,7 +80,7 @@ namespace VividRP.Runtime
 
         internal bool Record(
             RenderGraph renderGraph,
-            IEnumerable<VTPageTableSpace> addressSpaces)
+            Dictionary<int, VTPageTableSpace>.ValueCollection addressSpaces)
         {
             if (renderGraph == null)
                 throw new ArgumentNullException(nameof(renderGraph));
@@ -191,7 +193,7 @@ namespace VividRP.Runtime
             m_LastLegacySetDataCallCount = 0;
         }
 
-        private void CollectPendingSpaces(IEnumerable<VTPageTableSpace> addressSpaces)
+        private void CollectPendingSpaces(Dictionary<int, VTPageTableSpace>.ValueCollection addressSpaces)
         {
             m_PendingSpaces.Clear();
             foreach (VTPageTableSpace addressSpace in addressSpaces)
@@ -200,7 +202,12 @@ namespace VividRP.Runtime
                     m_PendingSpaces.Add(addressSpace);
             }
 
-            m_PendingSpaces.Sort(static (left, right) => left.SpaceId.CompareTo(right.SpaceId));
+            m_PendingSpaces.Sort(s_SpaceIdComparison);
+        }
+
+        private static int CompareSpaceIds(VTPageTableSpace left, VTPageTableSpace right)
+        {
+            return left.SpaceId.CompareTo(right.SpaceId);
         }
 
         private bool TryResolveShader()

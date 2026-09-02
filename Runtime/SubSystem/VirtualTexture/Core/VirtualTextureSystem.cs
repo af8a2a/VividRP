@@ -115,6 +115,8 @@ namespace VividRP.Runtime
         private static readonly VirtualTextureFeedbackCameraSystem s_FeedbackCameraSystem = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_CompletedReadbacks = new();
         private static readonly List<VTPageTableSpace> s_TransitionSchedulingSpaces = new();
+        private static readonly Comparison<VTPageTableSpace>
+            s_AddressSpaceIdComparison = CompareAddressSpacesById;
         private static readonly List<VirtualTextureFeedbackBatch> s_InjectedReadbacks = new();
         private static readonly Dictionary<FeedbackMotionKey, FeedbackMotionState> s_FeedbackMotionStates = new();
         private static readonly Dictionary<int, Vector2Int> s_PrefetchBiasBySpace = new();
@@ -814,7 +816,7 @@ namespace VividRP.Runtime
                 if (s_TransitionSchedulingSpaces.Count == 0)
                     return;
 
-                s_TransitionSchedulingSpaces.Sort(CompareAddressSpacesById);
+                s_TransitionSchedulingSpaces.Sort(s_AddressSpaceIdComparison);
                 spaceCount = s_TransitionSchedulingSpaces.Count;
                 frameOffset = frameIndex >= 0 ? frameIndex % spaceCount : 0;
                 maxTransitionStartRounds = VTResidencyManager.MaxTransitionStartsPerFrame;
@@ -3429,7 +3431,7 @@ namespace VividRP.Runtime
 #if UNITY_INCLUDE_TESTS
                 s_UploadSpaceSortCount += 1;
 #endif
-                s_UploadSpaceOrder.Sort(CompareAddressSpacesById);
+                s_UploadSpaceOrder.Sort(s_AddressSpaceIdComparison);
             }
 
             int spaceCount = s_UploadSpaceOrder.Count;

@@ -30,8 +30,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma target 5.0
+            #pragma require randomwrite
             #pragma shader_feature_local_fragment _ALPHATEST_ON
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
+            #pragma multi_compile_local_fragment _ VIVID_VSM_PROTOTYPE
 
             #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
@@ -49,6 +52,15 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
             ByteAddressBuffer _SharedIndexBuffer;
             float4 _ShadowBias;
+
+            #if defined(VIVID_VSM_PROTOTYPE)
+            RWTexture2D<uint> _VSMPrototypePhysicalPage : register(u0);
+            StructuredBuffer<uint> _VSMPrototypePageTable;
+            int _VSMPrototypePageSize;
+            int _VSMPrototypeVirtualResolution;
+            int _VSMPrototypePagesPerAxis;
+            int _VSMPrototypePhysicalPagesPerRow;
+            #endif
 
             struct Attributes
             {
@@ -150,6 +162,43 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 if (coverageStatus == VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE)
                     clip(-1.0f);
                 clip(coverage.Coverage - coverage.AlphaClipThreshold);
+                #endif
+
+                #if defined(VIVID_VSM_PROTOTYPE)
+                const uint virtualResolution = (uint)max(
+                    _VSMPrototypeVirtualResolution,
+                    1);
+                const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
+                const uint pagesPerAxis = (uint)max(
+                    _VSMPrototypePagesPerAxis,
+                    1);
+                const uint physicalPagesPerRow = (uint)max(
+                    _VSMPrototypePhysicalPagesPerRow,
+                    1);
+                const uint2 virtualTexel = min(
+                    uint2(input.positionCS.xy),
+                    virtualResolution - 1u);
+                const uint2 virtualPage = virtualTexel / pageSize;
+                const uint2 texelInPage = virtualTexel % pageSize;
+                const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
+                const uint pageTableIndex =
+                    (uint)_VividShadowCascadeIndex * pagesPerCascade
+                    + virtualPage.y * pagesPerAxis
+                    + virtualPage.x;
+                const uint encodedPhysicalPage =
+                    _VSMPrototypePageTable[pageTableIndex];
+                if (encodedPhysicalPage == 0u)
+                    return;
+
+                const uint physicalPageIndex = encodedPhysicalPage - 1u;
+                const uint2 physicalPage = uint2(
+                    physicalPageIndex % physicalPagesPerRow,
+                    physicalPageIndex / physicalPagesPerRow);
+                const uint2 physicalTexel = physicalPage * pageSize
+                    + texelInPage;
+                InterlockedMax(
+                    _VSMPrototypePhysicalPage[physicalTexel],
+                    asuint(saturate(input.positionCS.z)));
                 #endif
             }
             ENDHLSL

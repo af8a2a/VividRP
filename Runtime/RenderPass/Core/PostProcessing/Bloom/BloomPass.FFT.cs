@@ -64,6 +64,19 @@ namespace VividRP.Runtime
         private const int k_MaxWaveFftSize = 2048;
         private const int k_MaxFftReductionLevels = 13;
 
+        private static readonly string[] s_FftRealNames =
+            CreateFftHandleNames("BloomFFTReal", 2);
+        private static readonly string[] s_FftImagNames =
+            CreateFftHandleNames("BloomFFTImag", 2);
+        private static readonly string[] s_FftKernelRealNames =
+            CreateFftHandleNames("BloomFFTKernelReal", 2);
+        private static readonly string[] s_FftKernelImagNames =
+            CreateFftHandleNames("BloomFFTKernelImag", 2);
+        private static readonly string[] s_FftEnergyNames =
+            CreateFftHandleNames(
+                "BloomFFTKernelEnergy",
+                k_MaxFftReductionLevels);
+
         private static readonly int FftSizeId = Shader.PropertyToID("_FFTSize");
         private static readonly int FftImageSizeId = Shader.PropertyToID("_FFTImageSize");
         private static readonly int FftInverseId = Shader.PropertyToID("_FFTInverse");
@@ -301,22 +314,22 @@ namespace VividRP.Runtime
                     ref m_FftRealHandles[i],
                     m_FftDomain.FrequencyWidth,
                     m_FftDomain.FrequencyHeight,
-                    $"BloomFFTReal{i}");
+                    s_FftRealNames[i]);
                 resourcesChanged |= EnsureFftHandle(
                     ref m_FftImagHandles[i],
                     m_FftDomain.FrequencyWidth,
                     m_FftDomain.FrequencyHeight,
-                    $"BloomFFTImag{i}");
+                    s_FftImagNames[i]);
                 resourcesChanged |= EnsureFftHandle(
                     ref m_FftKernelRealHandles[i],
                     m_FftDomain.FrequencyWidth,
                     m_FftDomain.FrequencyHeight,
-                    $"BloomFFTKernelReal{i}");
+                    s_FftKernelRealNames[i]);
                 resourcesChanged |= EnsureFftHandle(
                     ref m_FftKernelImagHandles[i],
                     m_FftDomain.FrequencyWidth,
                     m_FftDomain.FrequencyHeight,
-                    $"BloomFFTKernelImag{i}");
+                    s_FftKernelImagNames[i]);
 
                 m_FftRealTH[i] = Import(m_FftRealHandles[i]);
                 m_FftImagTH[i] = Import(m_FftImagHandles[i]);
@@ -336,7 +349,7 @@ namespace VividRP.Runtime
                     ref m_FftEnergyHandles[m_FftEnergyLevelCount],
                     reductionWidth,
                     reductionHeight,
-                    $"BloomFFTKernelEnergy{m_FftEnergyLevelCount}",
+                    s_FftEnergyNames[m_FftEnergyLevelCount],
                     GraphicsFormat.R32G32B32A32_SFloat);
                 m_FftEnergyTH[m_FftEnergyLevelCount] = Import(m_FftEnergyHandles[m_FftEnergyLevelCount]);
                 m_FftEnergyLevelCount++;
@@ -776,6 +789,16 @@ namespace VividRP.Runtime
                 wrapMode: TextureWrapMode.Clamp,
                 name: name);
             return true;
+        }
+
+        private static string[] CreateFftHandleNames(
+            string prefix,
+            int count)
+        {
+            var names = new string[count];
+            for (int index = 0; index < names.Length; index++)
+                names[index] = $"{prefix}{index}";
+            return names;
         }
 
         private static void ReleaseFftHandle(ref RTHandle handle)

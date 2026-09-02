@@ -48,14 +48,19 @@ namespace VividRP.Runtime.RenderPass.Core
         private Material m_CameraMotionMaterial;
         private Material m_ObjectMotionVectorFallbackMaterial;
         private Camera m_Camera;
+        private readonly string[] m_MotionVectorShaderTagNames;
+        private readonly string[] m_FallbackShaderTagNames;
 
         public MotionVectorPass()
         {
+            m_MotionVectorShaderTagNames = (string[])s_MotionVectorShaderTagNames.Clone();
+            m_FallbackShaderTagNames = (string[])s_FallbackShaderTagNames.Clone();
+
             m_RenderList = new RenderGraphRenderList
             {
                 desc = new RenderGraphRenderListDesc
                 {
-                    ShaderTagNames = (string[])s_MotionVectorShaderTagNames.Clone(),
+                    ShaderTagNames = m_MotionVectorShaderTagNames,
                     RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
                     SortingCriteria = SortingCriteria.CommonOpaque,
                     RendererConfiguration = PerObjectData.MotionVectors,
@@ -66,7 +71,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = new RenderGraphRenderListDesc
                 {
-                    ShaderTagNames = (string[])s_FallbackShaderTagNames.Clone(),
+                    ShaderTagNames = m_FallbackShaderTagNames,
                     RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
                     SortingCriteria = SortingCriteria.CommonOpaque,
                     RendererConfiguration = PerObjectData.MotionVectors,
@@ -179,14 +184,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RenderList ??= new RenderGraphRenderList();
             m_RenderList.desc ??= new RenderGraphRenderListDesc();
 
-            m_RenderList.desc.ShaderTagNames = (string[])s_MotionVectorShaderTagNames.Clone();
+            s_MotionVectorShaderTagNames.CopyTo(m_MotionVectorShaderTagNames, 0);
+            m_RenderList.desc.ShaderTagNames = m_MotionVectorShaderTagNames;
             m_RenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
             m_RenderList.desc.ExcludeObjectMotionVectors = false;
 
             m_FallbackRenderList ??= new RenderGraphRenderList();
             m_FallbackRenderList.desc ??= new RenderGraphRenderListDesc();
 
-            m_FallbackRenderList.desc.ShaderTagNames = (string[])s_FallbackShaderTagNames.Clone();
+            s_FallbackShaderTagNames.CopyTo(m_FallbackShaderTagNames, 0);
+            m_FallbackRenderList.desc.ShaderTagNames = m_FallbackShaderTagNames;
             m_FallbackRenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
             m_FallbackRenderList.desc.ExcludeObjectMotionVectors = true;
             m_FallbackRenderList.desc.OverrideMaterial = m_ObjectMotionVectorFallbackMaterial;

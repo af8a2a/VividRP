@@ -63,6 +63,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: b974f021133ecde479d75a3763b559b1, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
+  - ResourceName: Shaders/Core/Private/Debug/VSMDebug
+    ResourceObject: {fileID: 4800000, guid: e6505fc15aea3bd42bf6101f5fe0e874, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/VisibilityBufferDebug
     ResourceObject: {fileID: 4800000, guid: 8fc0c26bc17f0c34199116c378c2318e, type: 3}
   - ResourceName: Shaders/Core/Private/DepthOfField

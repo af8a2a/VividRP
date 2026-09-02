@@ -109,7 +109,8 @@ namespace VividRP.Runtime.RenderPass.Core
             if (sourceDesc == null)
                 return;
 
-            m_OutputTexture.desc = sourceDesc.Clone();
+            m_OutputTexture.desc ??= new RenderGraphTextureDesc();
+            sourceDesc.Copy(m_OutputTexture.desc);
             m_OutputTexture.desc.Name = "StopNaNOutput";
             m_OutputTexture.desc.ClearBuffer = false;
             m_OutputTexture.desc.FilterMode = FilterMode.Bilinear;

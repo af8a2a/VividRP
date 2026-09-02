@@ -182,6 +182,8 @@ namespace VividRP.Runtime
 
         private static readonly AutoExposureHistorySystem s_HistorySystem = new();
         private static readonly Vector4[] s_ExposureBufferData = new Vector4[1];
+        private static readonly CameraHistoryBufferAllocator
+            s_AutoExposureBufferAllocator = AllocateAutoExposureBuffer;
 
         private static GraphicsBuffer s_DefaultExposureBuffer;
 
@@ -482,7 +484,7 @@ namespace VividRP.Runtime
                     1,
                     AutoExposureVectorStride,
                     GraphicsBuffer.Target.Structured),
-                AllocateAutoExposureBuffer);
+                s_AutoExposureBufferAllocator);
             state.exposureTextureHistory = cameraHistory.GetOrCreateTexture(
                 CameraHistoryIds.AutoExposureTexture,
                 2,

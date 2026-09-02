@@ -651,7 +651,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Build_ReusesStaticMeshletData_WhenSceneIsRebuiltWithoutAssetChanges()
+        public void Build_ReusesStaticAndFallbackMaterialData_WhenSceneIsUnchanged()
         {
             GameObject gameObject = null;
             Mesh mesh = null;
@@ -688,13 +688,27 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.VertexCount, Is.EqualTo(3));
                 Assert.That(sceneData.IndexCount, Is.EqualTo(3));
 
-                bool secondStaticDataChanged = builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
+                bool secondStaticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    bindlessTextureContainer,
+                    out bool secondMaterialDataChanged);
                 Assert.That(secondStaticDataChanged, Is.False);
+                Assert.That(secondMaterialDataChanged, Is.False);
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
                 Assert.That(sceneData.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(sceneData.MeshletCount, Is.EqualTo(1));
                 Assert.That(sceneData.VertexCount, Is.EqualTo(3));
                 Assert.That(sceneData.IndexCount, Is.EqualTo(3));
+
+                material.renderQueue += 1;
+                bool thirdStaticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    bindlessTextureContainer,
+                    out bool thirdMaterialDataChanged);
+                Assert.That(thirdStaticDataChanged, Is.False);
+                Assert.That(thirdMaterialDataChanged, Is.True);
             }
             finally
             {
@@ -2649,19 +2663,21 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PrepareFrame_DoesNotAllocate_WhenFallbackMaterialSceneIsStable()
+        public void PrepareFrame_DoesNotAllocate_WhenFallbackAndProxyMaterialSceneIsStable()
         {
             GameObject gameObject = null;
             Mesh mesh = null;
             Material material = null;
-            VividMeshletCollectionAsset meshletCollection = null;
+            VividMeshletCollectionAsset firstMeshletCollection = null;
+            VividMeshletCollectionAsset secondMeshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
 
             try
             {
-                mesh = CreateSingleSubMeshMesh("StablePrepareFrameMesh");
+                mesh = CreateTwoSubMeshMesh("StablePrepareFrameMesh");
                 material = CreateTestMaterial();
-                meshletCollection = CreateMeshletCollectionAsset(
-                    "StablePrepareFrameCollection",
+                firstMeshletCollection = CreateMeshletCollectionAsset(
+                    "StablePrepareFrameCollection0",
                     0,
                     1,
                     new[] { CreateMeshLODNode(0, 1, 0) },
@@ -2669,9 +2685,27 @@ namespace VividRP.Editor.Tests
                     new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
                     new byte[] { 0, 1, 2 }
                 );
+                secondMeshletCollection = CreateMeshletCollectionAsset(
+                    "StablePrepareFrameCollection1",
+                    1,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
 
-                gameObject = CreateMeshletRendererObject("Renderer_StablePrepareFrame", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
-                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                gameObject = CreateMeshletRendererObject(
+                    "Renderer_StablePrepareFrame",
+                    mesh,
+                    new[] { material, material },
+                    out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(
+                    new[] { firstMeshletCollection, secondMeshletCollection });
+                meshletRenderer.SetMaterialProxies(
+                    new[] { materialProxy, null });
                 VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
 
                 using var system = new VividGPUDrivenSystem(new FakeBindlessTextureDescriptorAllocator(16));
@@ -2689,7 +2723,14 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
-                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection);
+                DestroyTestObjects(
+                    gameObject,
+                    null,
+                    material,
+                    mesh,
+                    firstMeshletCollection,
+                    secondMeshletCollection,
+                    materialProxy);
             }
         }
 

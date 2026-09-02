@@ -904,6 +904,9 @@ namespace VividRP.Runtime.GPUDriven
         [NonSerialized]
         private MaterialProgramCatalog m_StagedCatalog;
 
+        [NonSerialized]
+        private uint m_RuntimeRevision;
+
         internal uint SchemaVersion => m_AssetSchemaVersion;
 
         internal uint ProgramCatalogVersion => m_ProgramCatalogVersion;
@@ -933,6 +936,8 @@ namespace VividRP.Runtime.GPUDriven
                 m_CatalogPayloadSealHash);
 
         internal IReadOnlyList<Slot> Slots => m_Slots;
+
+        internal uint RuntimeRevision => m_RuntimeRevision;
 
         internal bool TryGetSlot(
             VividMaterialProgramID programID,
@@ -992,6 +997,8 @@ namespace VividRP.Runtime.GPUDriven
             m_CatalogPayloadSealHash = payloadSeal.Value;
             if (committed)
                 Seal(catalog);
+            else
+                IncrementRuntimeRevision();
         }
 
         internal void Seal()
@@ -1013,6 +1020,7 @@ namespace VividRP.Runtime.GPUDriven
             }
             m_IsCommitted = true;
             m_StagedCatalog = null;
+            IncrementRuntimeRevision();
         }
 
         internal void InvalidatePublication()
@@ -1022,6 +1030,7 @@ namespace VividRP.Runtime.GPUDriven
             // published again.
             m_IsCommitted = false;
             m_StagedCatalog = null;
+            IncrementRuntimeRevision();
         }
 
         internal bool ValidatePublication(out string failure)
@@ -1274,6 +1283,24 @@ namespace VividRP.Runtime.GPUDriven
         {
             return Resources.Load<MaterialProgramCatalogAsset>(
                 DefaultResourceName);
+        }
+
+        private void OnEnable()
+        {
+            IncrementRuntimeRevision();
+        }
+
+        private void OnValidate()
+        {
+            IncrementRuntimeRevision();
+        }
+
+        private void IncrementRuntimeRevision()
+        {
+            unchecked
+            {
+                m_RuntimeRevision++;
+            }
         }
     }
 }

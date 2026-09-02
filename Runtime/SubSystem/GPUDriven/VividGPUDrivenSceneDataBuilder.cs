@@ -37,11 +37,14 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly Dictionary<EntityId, int> m_MaterialIndexByObjectId = new(s_EntityIdComparer);
         private readonly Dictionary<EntityId, MaterialMetadata> m_MaterialMetadataByObjectId = new(s_EntityIdComparer);
+        private readonly Dictionary<EntityId, uint> m_FallbackMaterialRevisionByObjectId = new(s_EntityIdComparer);
         private readonly Dictionary<EntityId, MeshletAssetMetadata> m_MeshMetadataByObjectId = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_PreviousReferencedMeshletAssetIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_CurrentReferencedMeshletAssetIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_PreviousReferencedMaterialProxyIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_CurrentReferencedMaterialProxyIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_PreviousReferencedFallbackMaterialIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_CurrentReferencedFallbackMaterialIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_PreviousReferencedTerrainDataIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_CurrentReferencedTerrainDataIds = new(s_EntityIdComparer);
         private readonly HashSet<(EntityId entityId, int subMeshIndex)> m_MissingProxyWarningKeys = new(s_EntityIdSubMeshIndexComparer);
@@ -49,6 +52,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMeshletCollectionAsset> m_TrackedMeshletAssets = new();
         private readonly List<GPUDrivenMaterialProxy> m_CurrentReferencedMaterialProxies = new();
         private readonly List<GPUDrivenMaterialProxy> m_TrackedMaterialProxies = new();
+        private readonly List<FallbackMaterialReference> m_CurrentReferencedFallbackMaterials = new();
+        private readonly List<FallbackMaterialReference> m_TrackedFallbackMaterials = new();
         private readonly List<VividTerrainData> m_CurrentReferencedTerrainData = new();
         private readonly List<VividTerrainData> m_TrackedTerrainData = new();
         private readonly List<bool> m_RendererRenderability = new();
@@ -57,7 +62,6 @@ namespace VividRP.Runtime.GPUDriven
         private static Shader s_SimpleForwardShader;
         private static bool s_SimpleForwardShaderResolved;
         private bool m_HasBuiltStaticData;
-        private bool m_UsesFallbackMaterials;
         private IGPUDrivenTextureBackend m_PreviousTextureBackend;
         private uint m_PreviousSurfaceBindingRevision;
         private uint m_PreviousDatabaseStructureRevision;
@@ -136,7 +140,6 @@ namespace VividRP.Runtime.GPUDriven
                 }
 
                 materialDataChanged = staticDataChanged
-                                      || m_UsesFallbackMaterials
                                       || !ReferenceEquals(m_PreviousTextureBackend, textureBackend);
                 if (!materialDataChanged && !AreEntityIdSetsEqual(m_CurrentReferencedMaterialProxyIds, m_PreviousReferencedMaterialProxyIds))
                 {
@@ -144,6 +147,16 @@ namespace VividRP.Runtime.GPUDriven
                 }
 
                 if (!materialDataChanged && HasTrackedMaterialProxyVersionChanges(database, textureBackend))
+                {
+                    materialDataChanged = true;
+                }
+
+                if (!materialDataChanged && !AreEntityIdSetsEqual(m_CurrentReferencedFallbackMaterialIds, m_PreviousReferencedFallbackMaterialIds))
+                {
+                    materialDataChanged = true;
+                }
+
+                if (!materialDataChanged && HaveFallbackMaterialsChanged(m_CurrentReferencedFallbackMaterials))
                 {
                     materialDataChanged = true;
                 }
@@ -235,6 +248,7 @@ namespace VividRP.Runtime.GPUDriven
             {
                 SwapReferencedMeshletAssetIds();
                 SwapReferencedMaterialProxyIds();
+                SwapReferencedFallbackMaterialIds();
                 SwapReferencedTerrainDataIds();
                 UpdateTrackedDependencies();
             }
@@ -253,7 +267,6 @@ namespace VividRP.Runtime.GPUDriven
             IGPUDrivenTextureBackend textureBackend)
         {
             if (!m_HasBuiltStaticData
-                || m_UsesFallbackMaterials
                 || !ReferenceEquals(m_PreviousTextureBackend, textureBackend)
                 || m_PreviousDatabaseStructureRevision != database.StructureRevision
                 || m_PreviousDatabaseResourceRevision != database.ResourceRevision
@@ -266,6 +279,7 @@ namespace VividRP.Runtime.GPUDriven
 
             return !HaveTrackedMeshletAssetsChanged()
                 && !HaveTrackedMaterialProxiesChanged(textureBackend)
+                && !HaveFallbackMaterialsChanged(m_TrackedFallbackMaterials)
                 && !HaveTrackedTerrainDataChanged();
         }
 
@@ -472,7 +486,8 @@ namespace VividRP.Runtime.GPUDriven
         {
             m_CurrentReferencedMaterialProxyIds.Clear();
             m_CurrentReferencedMaterialProxies.Clear();
-            m_UsesFallbackMaterials = false;
+            m_CurrentReferencedFallbackMaterialIds.Clear();
+            m_CurrentReferencedFallbackMaterials.Clear();
 
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
             int rendererCount = m_RendererRenderability.Count;
@@ -501,7 +516,8 @@ namespace VividRP.Runtime.GPUDriven
                     }
                     else
                     {
-                        m_UsesFallbackMaterials = true;
+                        TrackFallbackMaterial(
+                            GetMaterialForSubMesh(resources.SharedMaterials, subMeshIndex));
                     }
                 }
             }
@@ -522,6 +538,26 @@ namespace VividRP.Runtime.GPUDriven
             foreach (EntityId proxyId in m_CurrentReferencedMaterialProxyIds)
             {
                 m_PreviousReferencedMaterialProxyIds.Add(proxyId);
+            }
+        }
+
+        private void SwapReferencedFallbackMaterialIds()
+        {
+            m_PreviousReferencedFallbackMaterialIds.Clear();
+            foreach (EntityId materialId in m_CurrentReferencedFallbackMaterialIds)
+            {
+                m_PreviousReferencedFallbackMaterialIds.Add(materialId);
+            }
+
+            m_FallbackMaterialRevisionByObjectId.Clear();
+            for (int materialIndex = 0;
+                 materialIndex < m_CurrentReferencedFallbackMaterials.Count;
+                 materialIndex++)
+            {
+                FallbackMaterialReference materialReference =
+                    m_CurrentReferencedFallbackMaterials[materialIndex];
+                m_FallbackMaterialRevisionByObjectId[materialReference.MaterialId] =
+                    ComputeFallbackMaterialRevision(materialReference.Material);
             }
         }
 
@@ -547,7 +583,8 @@ namespace VividRP.Runtime.GPUDriven
                         m_CurrentReferencedTerrainData.Add(terrainData);
                     if (terrainData.Layers.Count == 0)
                     {
-                        m_UsesFallbackMaterials = true;
+                        TrackFallbackMaterial(
+                            GetMaterialForSubMesh(resources.SharedMaterials, 0));
                     }
                 }
             }
@@ -559,8 +596,43 @@ namespace VividRP.Runtime.GPUDriven
             m_TrackedMeshletAssets.AddRange(m_CurrentReferencedMeshletAssets);
             m_TrackedMaterialProxies.Clear();
             m_TrackedMaterialProxies.AddRange(m_CurrentReferencedMaterialProxies);
+            m_TrackedFallbackMaterials.Clear();
+            m_TrackedFallbackMaterials.AddRange(m_CurrentReferencedFallbackMaterials);
             m_TrackedTerrainData.Clear();
             m_TrackedTerrainData.AddRange(m_CurrentReferencedTerrainData);
+        }
+
+        private void TrackFallbackMaterial(Material material)
+        {
+            EntityId materialId = material != null
+                ? material.GetEntityId()
+                : EntityId.None;
+            if (m_CurrentReferencedFallbackMaterialIds.Add(materialId))
+            {
+                m_CurrentReferencedFallbackMaterials.Add(
+                    new FallbackMaterialReference(material, materialId));
+            }
+        }
+
+        private bool HaveFallbackMaterialsChanged(
+            List<FallbackMaterialReference> materialReferences)
+        {
+            for (int materialIndex = 0; materialIndex < materialReferences.Count; materialIndex++)
+            {
+                FallbackMaterialReference materialReference = materialReferences[materialIndex];
+                if ((materialReference.Material == null
+                    && !materialReference.MaterialId.Equals(EntityId.None))
+                    || !m_FallbackMaterialRevisionByObjectId.TryGetValue(
+                        materialReference.MaterialId,
+                        out uint previousRevision)
+                    || previousRevision
+                    != ComputeFallbackMaterialRevision(materialReference.Material))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void SwapReferencedTerrainDataIds()
@@ -1127,8 +1199,7 @@ namespace VividRP.Runtime.GPUDriven
                 return materialIndex;
             }
 
-            if (materialProxy != null &&
-                m_MaterialMetadataByObjectId.TryGetValue(objectId, out MaterialMetadata metadata))
+            if (m_MaterialMetadataByObjectId.TryGetValue(objectId, out MaterialMetadata metadata))
             {
                 materialIndex = metadata.MaterialIndex;
                 m_MaterialIndexByObjectId.Add(objectId, materialIndex);
@@ -1243,13 +1314,20 @@ namespace VividRP.Runtime.GPUDriven
 
             materialIndex = sceneData.AddMaterial(materialData, runtimeHeader);
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
-            if (materialProxy != null)
-            {
-                m_MaterialMetadataByObjectId[objectId] = new MaterialMetadata(
-                    materialIndex,
-                    ComputeMaterialProxyRevision(materialProxy, textureBackend));
-            }
+            uint materialRevision = materialProxy != null
+                ? ComputeMaterialProxyRevision(materialProxy, textureBackend)
+                : ComputeFallbackMaterialRevision(material);
+            m_MaterialMetadataByObjectId[objectId] = new MaterialMetadata(
+                materialIndex,
+                materialRevision);
             return materialIndex;
+        }
+
+        private static uint ComputeFallbackMaterialRevision(Material material)
+        {
+            return material != null
+                ? unchecked((uint) material.ComputeCRC())
+                : 0u;
         }
 
         private static void AppendGenericMaterialResources(
@@ -2215,6 +2293,19 @@ namespace VividRP.Runtime.GPUDriven
             public int MaterialIndex { get; }
 
             public uint Revision { get; }
+        }
+
+        private readonly struct FallbackMaterialReference
+        {
+            public FallbackMaterialReference(Material material, EntityId materialId)
+            {
+                Material = material;
+                MaterialId = materialId;
+            }
+
+            public Material Material { get; }
+
+            public EntityId MaterialId { get; }
         }
 
         private sealed class EntityIdComparer : IEqualityComparer<EntityId>

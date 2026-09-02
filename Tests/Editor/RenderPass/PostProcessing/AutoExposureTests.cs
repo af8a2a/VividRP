@@ -48,6 +48,52 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoExposureHistory_PrepareDoesNotAllocate_WhenResourcesMatch()
+        {
+            var cameraObject = new GameObject(
+                "AutoExposureCameraHistoryNoAllocationTests.Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var history = camera.GetVividCameraHistory();
+            var state = new AutoExposureHistoryState();
+
+            try
+            {
+                history.BeginFrame(1, 1);
+                var prepareHistory = typeof(VividAutoExposureSystem).GetMethod(
+                    "PrepareAutoExposureHistory",
+                    BindingFlags.Static | BindingFlags.NonPublic);
+                Assert.That(prepareHistory, Is.Not.Null);
+                var prepare = (global::System.Action<
+                    AutoExposureHistoryState,
+                    Camera>) global::System.Delegate.CreateDelegate(
+                        typeof(global::System.Action<
+                            AutoExposureHistoryState,
+                            Camera>),
+                        prepareHistory);
+
+                prepare(state, camera);
+                prepare(state, camera);
+
+                var allocatedBefore =
+                    global::System.GC.GetAllocatedBytesForCurrentThread();
+                for (var index = 0; index < 32; index++)
+                    prepare(state, camera);
+                var allocatedBytes =
+                    global::System.GC.GetAllocatedBytesForCurrentThread()
+                    - allocatedBefore;
+
+                Assert.That(allocatedBytes, Is.Zero);
+            }
+            finally
+            {
+                history.AbortFrame();
+                state.Dispose();
+                CameraHistorySystem.Dispose();
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void AutoExposure_IsInactive_WhenDisabled()
         {
             var autoExposure = new AutoExposure();

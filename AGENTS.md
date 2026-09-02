@@ -58,7 +58,30 @@ For multi-step tasks, state a brief plan:
 3. [Step] → verify: [check]
 ```
 
-## 5. Important Notes
+## 5. Render-Loop Managed Allocation Rules
+
+Treat render-loop code as zero-managed-allocation after warm-up. This includes pipeline/frame preparation, subsystem `OnUpdate`/`Update`, render-pass `Prepare`/`Record`, GPU-driven scene building and validation, culling, history preparation, and virtual-texture scheduling/upload collection. Constructors and validation helpers also count as hot paths when they can be reached once per renderer, material, camera, or instance.
+
+The following patterns have caused recurring `GC.Alloc` regressions in this repository:
+
+- Do not build strings in a stable hot path. Avoid interpolation, concatenation, `string.Format`, numeric `ToString`, and `StringBuilder.ToString` for resource names, debug dumps, validation text, or logging. Precompute bounded names in static tables, cache names with the owning resource, and construct diagnostic dumps lazily only when they are actually requested. On Unity/Mono, even `StringBuilder.Append(int)` may allocate through numeric formatting.
+- Do not call `Array.Clone()` or descriptor `Clone()` every frame. Allocate pass-owned arrays and descriptors once, then restore or copy fields into the existing destination. Use `Array.Copy`/`CopyTo` for arrays and the relevant non-allocating descriptor `Copy` helper for render-graph descriptors. Preserve ownership: do not alias a mutable source descriptor or shared static array when downstream code can modify it.
+- Do not create recurring delegates at call sites. Capturing lambdas allocate closures, and inline non-capturing lambdas or method-group conversions are not guaranteed allocation-free across all Unity compiler/runtime combinations. Cache recurring callbacks, comparers, allocators, and render functions in `static readonly` delegate fields.
+- Do not pass concrete hot-path collections through `IEnumerable<T>` when their struct enumerator will be boxed. Prefer a concrete collection or concrete `Dictionary<TKey, TValue>.KeyCollection`/`ValueCollection` parameter, or use an indexed loop over `List<T>`/arrays. Avoid LINQ and iterator methods in render-loop code unless a measured implementation proves zero allocation.
+- Do not use `params` overloads in a hot path; the compiler creates an array for the arguments. Use fixed-arity overloads or explicit pairwise operations, for example nested two-argument `Mathf.Max` calls instead of a multi-value `params` call.
+- Reuse scratch storage. Keep arrays, lists, dictionaries, hash sets, and builders on the owning object, call `Clear()`, and grow capacity only when needed. Do not create a new temporary collection per frame or per camera.
+- Cache immutable canonical layouts, compiled metadata, and validation results by their real inputs. Do not reconstruct layouts or eagerly regenerate debug representations while checking renderability for every instance. Invalidation must follow the data/version that can actually change.
+- Resource recreation is allowed only when the resource's effective descriptor changes. Stable `Prepare` calls should update an existing descriptor and reuse handles and names; put unavoidable allocations behind the configuration-change/recreation branch.
+- Watch for other hidden boxing: passing value types through `object` or non-generic interfaces, enum formatting/logging, and interface-based comparisons. A source line without an explicit `new` is not evidence that it is allocation-free.
+
+When fixing or adding hot-path code:
+
+1. Warm the path before measuring so initialization and static caches are excluded.
+2. Add a focused regression test using `GC.GetAllocatedBytesForCurrentThread()`: warm up, call the stable path repeatedly, and assert zero bytes. Create delegates, reflection data, test inputs, and assertion messages before the measured region.
+3. Use the Unity Profiler to verify all relevant threads; the current-thread API only covers the thread executing the test. Follow the first managed allocator in the call stack rather than assuming the marker's top-level method is the direct cause.
+4. Keep cold-path defensive copies and real resource creation when required for correctness. Move them out of the stable frame path instead of removing ownership boundaries.
+
+## 6. Important Notes
 - Validate C# and shader changes with focused, non-Unity-test checks whenever possible. Use C# Roslyn or .NET assembly compilation for C# code, MCP-based Unity console inspection, DXC shader compilation, or equivalent targeted checks to confirm the result of a code change.
 - Run Unity Test Framework unit tests only when Unity Editor is not running. If an open Unity Editor prevents `-batchmode` tests from running, treat that as an active interactive user session: do not use computer-use, UI automation, or similar means to start Unity tests proactively; instead, state in the final task handoff that the user should run the relevant Unity tests manually.
 - Unity `.meta` files are auto-generated; do not manually create or edit them

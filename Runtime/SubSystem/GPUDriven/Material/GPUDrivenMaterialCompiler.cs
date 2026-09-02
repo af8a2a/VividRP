@@ -29,7 +29,8 @@ namespace VividRP.Runtime.GPUDriven
             in VividDualSlabMaterialData dualSlabMaterialData,
             uint4[] parameterLanes)
             : this(
-                new MaterialProgramRuntimeBinding(catalogProgram),
+                GPUDrivenMaterialCompiler.GetRuntimeProgramBinding(
+                    catalogProgram),
                 runtimeHeader,
                 legacyMaterialData,
                 dualSlabMaterialData,
@@ -91,8 +92,124 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly MaterialProgramCatalog s_MaterialProgramCatalog =
             CreateProductionProgramCatalog();
 
+        [NoAutoStaticsCleanup]
+        private static readonly MaterialProgramRuntimeBinding[]
+            s_BuiltinRuntimeBindings = CreateBuiltinRuntimeBindings();
+
+        private static MaterialProgramCatalogAsset s_DefaultFrozenCatalog;
+        private static uint s_DefaultFrozenCatalogRevision;
+        private static bool s_HasDefaultFrozenCatalogValidation;
+        private static bool s_DefaultFrozenCatalogIsCompatible;
+        private static string s_DefaultFrozenCatalogFailure;
+        private static MaterialProgramRuntimeBinding[]
+            s_DefaultFrozenRuntimeBindings;
+
         internal static MaterialProgramCatalog ProgramCatalog =>
             s_MaterialProgramCatalog;
+
+        private static MaterialProgramRuntimeBinding[]
+            CreateBuiltinRuntimeBindings()
+        {
+            var bindings = new MaterialProgramRuntimeBinding[
+                s_MaterialProgramCatalog.RuntimeTableLength];
+            for (int slotIndex = 0;
+                 slotIndex < bindings.Length;
+                 slotIndex++)
+            {
+                MaterialProgramCatalog.ManifestEntry entry =
+                    s_MaterialProgramCatalog.Slots[slotIndex];
+                if (entry != null)
+                    bindings[slotIndex] =
+                        new MaterialProgramRuntimeBinding(entry);
+            }
+            return bindings;
+        }
+
+        private static MaterialProgramRuntimeBinding
+            GetBuiltinRuntimeProgramBinding(
+                VividMaterialProgramID programID)
+        {
+            uint programIndex = (uint) programID;
+            if (programIndex >= (uint) s_BuiltinRuntimeBindings.Length
+                || s_BuiltinRuntimeBindings[(int) programIndex] == null)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(programID),
+                    programID,
+                    null);
+            }
+            return s_BuiltinRuntimeBindings[(int) programIndex];
+        }
+
+        private static MaterialProgramCatalogAsset GetDefaultFrozenCatalog()
+        {
+            MaterialProgramCatalogAsset frozenCatalog =
+                MaterialProgramCatalogAsset.LoadDefault();
+            if (!ReferenceEquals(frozenCatalog, s_DefaultFrozenCatalog))
+            {
+                s_DefaultFrozenCatalog = frozenCatalog;
+                s_DefaultFrozenCatalogRevision = 0u;
+                s_HasDefaultFrozenCatalogValidation = false;
+                s_DefaultFrozenCatalogIsCompatible = false;
+                s_DefaultFrozenCatalogFailure = null;
+                s_DefaultFrozenRuntimeBindings = null;
+            }
+            return frozenCatalog;
+        }
+
+        private static bool TryValidateFrozenCatalog(
+            MaterialProgramCatalogAsset frozenCatalog,
+            out string failure)
+        {
+            if (!ReferenceEquals(frozenCatalog, s_DefaultFrozenCatalog))
+            {
+                return frozenCatalog.ExtendsBuiltinCatalog(
+                    s_MaterialProgramCatalog,
+                    out failure);
+            }
+
+            uint runtimeRevision = frozenCatalog.RuntimeRevision;
+            if (!s_HasDefaultFrozenCatalogValidation
+                || s_DefaultFrozenCatalogRevision != runtimeRevision)
+            {
+                s_DefaultFrozenCatalogRevision = runtimeRevision;
+                s_DefaultFrozenRuntimeBindings = null;
+                s_DefaultFrozenCatalogIsCompatible =
+                    frozenCatalog.ExtendsBuiltinCatalog(
+                        s_MaterialProgramCatalog,
+                        out s_DefaultFrozenCatalogFailure);
+                s_HasDefaultFrozenCatalogValidation = true;
+            }
+
+            failure = s_DefaultFrozenCatalogFailure;
+            return s_DefaultFrozenCatalogIsCompatible;
+        }
+
+        private static MaterialProgramRuntimeBinding
+            GetFrozenRuntimeProgramBinding(
+                MaterialProgramCatalogAsset frozenCatalog,
+                MaterialProgramCatalogAsset.Slot slot)
+        {
+            if (!ReferenceEquals(frozenCatalog, s_DefaultFrozenCatalog))
+                return new MaterialProgramRuntimeBinding(slot);
+
+            if (s_DefaultFrozenRuntimeBindings == null)
+            {
+                s_DefaultFrozenRuntimeBindings =
+                    new MaterialProgramRuntimeBinding[
+                        frozenCatalog.Slots.Count];
+            }
+
+            int programIndex = checked((int) (uint) slot.ProgramID);
+            MaterialProgramRuntimeBinding binding =
+                s_DefaultFrozenRuntimeBindings[programIndex];
+            if (binding == null)
+            {
+                binding = new MaterialProgramRuntimeBinding(slot);
+                s_DefaultFrozenRuntimeBindings[programIndex] = binding;
+            }
+            return binding;
+        }
 
         internal static MaterialProgramCatalog.ManifestEntry GetCatalogedMaterialProgram(
             VividMaterialProgramID programID)
@@ -107,14 +224,30 @@ namespace VividRP.Runtime.GPUDriven
         }
 
         internal static MaterialProgramRuntimeBinding GetRuntimeProgramBinding(
+            MaterialProgramCatalog.ManifestEntry catalogProgram)
+        {
+            if (catalogProgram == null)
+                throw new ArgumentNullException(nameof(catalogProgram));
+            uint programIndex = (uint) catalogProgram.ProgramID;
+            if (programIndex < (uint) s_MaterialProgramCatalog.Slots.Count
+                && ReferenceEquals(
+                    catalogProgram,
+                    s_MaterialProgramCatalog.Slots[(int) programIndex]))
+            {
+                return GetBuiltinRuntimeProgramBinding(
+                    catalogProgram.ProgramID);
+            }
+            return new MaterialProgramRuntimeBinding(catalogProgram);
+        }
+
+        internal static MaterialProgramRuntimeBinding GetRuntimeProgramBinding(
             VividMaterialProgramID programID)
         {
             MaterialProgramCatalogAsset frozenCatalog =
-                MaterialProgramCatalogAsset.LoadDefault();
+                GetDefaultFrozenCatalog();
             if (frozenCatalog == null)
             {
-                return new MaterialProgramRuntimeBinding(
-                    s_MaterialProgramCatalog.GetEntry(programID));
+                return GetBuiltinRuntimeProgramBinding(programID);
             }
             return GetRuntimeProgramBinding(programID, frozenCatalog);
         }
@@ -125,9 +258,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (frozenCatalog == null)
                 throw new ArgumentNullException(nameof(frozenCatalog));
-            if (!frozenCatalog.ExtendsBuiltinCatalog(
-                    s_MaterialProgramCatalog,
-                    out string failure))
+            if (!TryValidateFrozenCatalog(frozenCatalog, out string failure))
             {
                 throw new InvalidOperationException(
                     $"Frozen Material Program Catalog is stale: {failure}");
@@ -142,13 +273,13 @@ namespace VividRP.Runtime.GPUDriven
                     programID,
                     null);
             }
-            return new MaterialProgramRuntimeBinding(slot);
+            return GetFrozenRuntimeProgramBinding(frozenCatalog, slot);
         }
 
         internal static VividMaterialProgramData[] CreateRuntimeProgramTable()
         {
             MaterialProgramCatalogAsset frozenCatalog =
-                MaterialProgramCatalogAsset.LoadDefault();
+                GetDefaultFrozenCatalog();
             if (frozenCatalog == null)
                 return s_MaterialProgramCatalog.CreateRuntimeProgramTable();
             return CreateRuntimeProgramTable(frozenCatalog);
@@ -159,9 +290,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (frozenCatalog == null)
                 throw new ArgumentNullException(nameof(frozenCatalog));
-            if (!frozenCatalog.ExtendsBuiltinCatalog(
-                    s_MaterialProgramCatalog,
-                    out string failure))
+            if (!TryValidateFrozenCatalog(frozenCatalog, out string failure))
             {
                 throw new InvalidOperationException(
                     $"Frozen Material Program Catalog is stale: {failure}");
@@ -175,7 +304,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             return TryResolveMaterialProgram(
                 materialProxy,
-                MaterialProgramCatalogAsset.LoadDefault(),
+                GetDefaultFrozenCatalog(),
                 out _,
                 out validationMessage);
         }
@@ -205,8 +334,8 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             }
             if (frozenCatalog != null
-                && !frozenCatalog.ExtendsBuiltinCatalog(
-                    s_MaterialProgramCatalog,
+                && !TryValidateFrozenCatalog(
+                    frozenCatalog,
                     out string frozenCatalogFailure))
             {
                 validationMessage =
@@ -287,7 +416,8 @@ namespace VividRP.Runtime.GPUDriven
                             VividMaterialProgramID.StandardSingleSlab)
                         : GetDualSlabProgram(
                             materialProxy.DualSlabDefinition.Operator);
-                materialProgram = new MaterialProgramRuntimeBinding(builtinProgram);
+                materialProgram = GetBuiltinRuntimeProgramBinding(
+                    builtinProgram.ProgramID);
             }
             else
             {
@@ -358,8 +488,8 @@ namespace VividRP.Runtime.GPUDriven
                     return false;
                 }
                 materialProgram = builtinEntry != null
-                    ? new MaterialProgramRuntimeBinding(builtinEntry)
-                    : new MaterialProgramRuntimeBinding(frozenSlot);
+                    ? GetBuiltinRuntimeProgramBinding(builtinEntry.ProgramID)
+                    : GetFrozenRuntimeProgramBinding(frozenCatalog, frozenSlot);
                 if (graph.CompiledProgramHash != materialProgram.CompiledHash
                     || graph.LayoutFingerprint
                         != materialProgram.LayoutFingerprint)
@@ -522,7 +652,7 @@ namespace VividRP.Runtime.GPUDriven
                 parameterAddress,
                 resourceBindingAddress,
                 legacySurfaceBindingIndex,
-                MaterialProgramCatalogAsset.LoadDefault());
+                GetDefaultFrozenCatalog());
         }
 
         internal static GPUDrivenCompiledMaterialInstance CompileStandardSingleSlab(
@@ -643,7 +773,7 @@ namespace VividRP.Runtime.GPUDriven
             }
             if (!TryResolveMaterialProgram(
                     materialProxy,
-                    MaterialProgramCatalogAsset.LoadDefault(),
+                    GetDefaultFrozenCatalog(),
                     out MaterialProgramRuntimeBinding materialProgram,
                     out string validationMessage))
             {
@@ -707,7 +837,7 @@ namespace VividRP.Runtime.GPUDriven
             bool isDualSlab)
         {
             return CreateGenericParameterLanes(
-                new MaterialProgramRuntimeBinding(materialProgram),
+                GetRuntimeProgramBinding(materialProgram),
                 legacyMaterialData,
                 dualSlabMaterialData,
                 isDualSlab);

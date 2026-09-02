@@ -1,0 +1,59 @@
+#pragma kernel EvaluateDirectLights
+#pragma use_dxc
+#pragma target 5.0
+
+#include "../../../../Shaders/Core/Public/VividSimpleSlabDirectLighting.hlsl"
+
+RWStructuredBuffer<float4> _Output;
+
+VividSimpleSlabData CreateDefaultPlastic()
+{
+    VividSimpleSlabData slab;
+    slab.diffuseAlbedo = float3(0.18f, 0.18f, 0.18f);
+    slab.specularF0 = float3(0.04f, 0.04f, 0.04f);
+    slab.perceptualRoughness = 0.5f;
+    slab.normalWS = float3(0.0f, 0.0f, 1.0f);
+    return slab;
+}
+
+void StoreLighting(uint index, VividSimpleSlabDirectLighting lighting)
+{
+    _Output[index] = float4(
+        lighting.diffuse.x,
+        lighting.specular.x,
+        lighting.diffuse.y,
+        lighting.specular.y);
+}
+
+[numthreads(1, 1, 1)]
+void EvaluateDirectLights(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    VividSimpleSlabData slab = CreateDefaultPlastic();
+    float3 positionWS = 0.0f;
+    float3 viewDirectionWS = float3(0.0f, 0.0f, 1.0f);
+
+    DirectionalLightData directionalLight = (DirectionalLightData)0;
+    directionalLight.directionWS = float3(0.0f, 0.0f, 2.0f);
+    directionalLight.color = float3(2.0f, 0.5f, 1.0f);
+    StoreLighting(
+        0u,
+        VividEvaluateSimpleSlabDirectionalLight(
+            slab,
+            viewDirectionWS,
+            directionalLight,
+            0.25f));
+
+    PunctualLightData punctualLight = (PunctualLightData)0;
+    punctualLight.positionWS = float3(0.0f, 0.0f, 2.0f);
+    punctualLight.color = float3(2.0f, 0.5f, 1.0f);
+    punctualLight.lightType = VIVID_PUNCTUAL_LIGHT_TYPE_POINT;
+    punctualLight.angleOffset = 1.0f;
+    punctualLight.rangeAttenuationBias = 1.0f;
+    StoreLighting(
+        1u,
+        VividEvaluateSimpleSlabPunctualLight(
+            slab,
+            positionWS,
+            viewDirectionWS,
+            punctualLight));
+}

@@ -15,6 +15,8 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint LayoutFingerprintVersion = 3u;
         internal const uint DeferredExportContractVersion = 1u;
         internal const uint DeferredExportFingerprintVersion = 1u;
+        internal const uint SimpleSlabContractVersion = 1u;
+        internal const uint SimpleSlabFingerprintVersion = 1u;
         internal const uint ProgramCatalogVersion = 4u;
         internal const uint ProgramCatalogManifestVersion = 5u;
         internal const uint SurfaceHlslArtifactVersion = 4u;

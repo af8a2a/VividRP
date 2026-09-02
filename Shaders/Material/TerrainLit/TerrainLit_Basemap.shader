@@ -53,7 +53,7 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
         Pass
         {
             Name "ShadowCaster"
-            Tags { "LightMode" = "ShadowCaster" }
+            Tags { "LightMode" = "ShadowCaster" "VividVSMCaster" = "True" }
 
             ZWrite On
             ZTest LEqual

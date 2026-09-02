@@ -1,7 +1,12 @@
 using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEditor.Rendering;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor
 {
@@ -20,7 +25,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_EnableVirtualShadowMapPrototypeLabel =
             EditorGUIUtility.TrTextContent(
                 "Enable Virtual Shadow Map Prototype",
-                "Experimental P2 directional-light hard shadows. Meshlet-only pages are cached while Unity Renderer compatibility casters refresh every frame; unsupported platforms fall back to CSM.");
+                "Experimental P2 directional-light hard shadows. Unity Renderer casters require a VSM-compatible ShadowCaster pass; incompatible content and unsupported platforms fail closed to CSM.");
         private static readonly GUIContent s_MaxShadowDistanceLabel =
             EditorGUIUtility.TrTextContent("Max Distance", "Maximum distance from the camera that receives cascaded directional shadows.");
         private static readonly GUIContent s_ScreenSpaceShadowDenoiseLabel =
@@ -353,6 +358,127 @@ namespace VividRP.Editor
         {
             EditorGUILayout.Space();
             EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+        }
+    }
+
+    internal sealed class VirtualShadowMapSceneBuildValidator
+        : IProcessSceneWithReport
+    {
+        public int callbackOrder => 0;
+
+        public void OnProcessScene(Scene scene, BuildReport report)
+        {
+            if (report == null || !IsVirtualShadowMapConfigured(scene))
+                return;
+
+            if (TryValidateScene(scene, out VirtualShadowMapUnityCasterFailure failure))
+                return;
+
+            string scenePath = string.IsNullOrEmpty(scene.path)
+                ? scene.name
+                : scene.path;
+            throw new BuildFailedException(
+                $"VSM Unity caster validation failed in scene '{scenePath}'. {VirtualShadowMapUnityCasterCompatibility.FormatFailure(failure)}");
+        }
+
+        internal static bool TryValidateScene(
+            Scene scene,
+            out VirtualShadowMapUnityCasterFailure failure)
+        {
+            failure = default;
+            if (!scene.IsValid() || !scene.isLoaded)
+                return true;
+
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                Renderer[] renderers = roots[rootIndex]
+                    .GetComponentsInChildren<Renderer>(includeInactive: true);
+                for (int rendererIndex = 0;
+                     rendererIndex < renderers.Length;
+                     rendererIndex++)
+                {
+                    if (!VirtualShadowMapUnityCasterCompatibility.TryValidateRenderer(
+                            renderers[rendererIndex],
+                            activeOnly: false,
+                            out failure))
+                    {
+                        return false;
+                    }
+                }
+
+                Terrain[] terrains = roots[rootIndex]
+                    .GetComponentsInChildren<Terrain>(includeInactive: true);
+                for (int terrainIndex = 0;
+                     terrainIndex < terrains.Length;
+                     terrainIndex++)
+                {
+                    if (!VirtualShadowMapUnityCasterCompatibility.TryValidateTerrain(
+                            terrains[terrainIndex],
+                            activeOnly: false,
+                            out failure))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        internal static bool IsVirtualShadowMapConfigured(Scene scene)
+        {
+            if (ProfileEnablesVirtualShadowMap(
+                    VividVolumeManagerUtility.GetDefaultVolumeProfile(),
+                    requireOverride: false))
+            {
+                return true;
+            }
+
+            if (!scene.IsValid() || !scene.isLoaded)
+                return false;
+
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                Volume[] volumes = roots[rootIndex]
+                    .GetComponentsInChildren<Volume>(includeInactive: true);
+                for (int volumeIndex = 0;
+                     volumeIndex < volumes.Length;
+                     volumeIndex++)
+                {
+                    Volume volume = volumes[volumeIndex];
+                    if (volume == null
+                        || !volume.enabled
+                        || volume.gameObject == null
+                        || !volume.gameObject.activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    if (ProfileEnablesVirtualShadowMap(
+                            volume.sharedProfile,
+                            requireOverride: true))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        internal static bool ProfileEnablesVirtualShadowMap(
+            VolumeProfile profile,
+            bool requireOverride)
+        {
+            return profile != null
+                && profile.TryGet(out CascadedShadowSettingsVolume settings)
+                && settings != null
+                && settings.active
+                && settings.enableVirtualShadowMapPrototype.value
+                && (!requireOverride
+                    || settings.enableVirtualShadowMapPrototype.overrideState);
         }
     }
 }

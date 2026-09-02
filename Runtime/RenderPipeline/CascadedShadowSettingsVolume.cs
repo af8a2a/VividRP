@@ -18,7 +18,7 @@ namespace VividRP.Runtime
         public const float DefaultCascadeBorder = 0.2f;
 
         public BoolParameter enableCSM = new(false);
-        [Tooltip("Experimental P2 directional-light virtual shadow map. Meshlet-only pages are cached while Unity Renderer compatibility casters refresh every frame; unsupported platforms remain on CSM.")]
+        [Tooltip("Experimental P2 directional-light virtual shadow map. Unity Renderer casters require a VSM-compatible ShadowCaster pass; incompatible content and unsupported platforms fail closed to CSM.")]
         public BoolParameter enableVirtualShadowMapPrototype = new(false);
         public ClampedIntParameter cascadeCount = new(DefaultCascadeCount, 1, 4);
         public MinFloatParameter maxShadowDistance = new(DefaultMaxShadowDistance, 0.01f);

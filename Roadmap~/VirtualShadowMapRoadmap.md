@@ -202,7 +202,9 @@ Allow Unity Renderer and MeshletRenderer caster sets to write one fully resident
 - No graphics API validation error is produced by DSV/UAV binding or global keyword transitions.
 - All supported VSM caster variants import and compile successfully.
 
-## P2.2 - Shader Compatibility Validation and Fail-Closed Fallback
+## P2-B (P2.2) - Shader Compatibility Validation and Fail-Closed Fallback
+
+> Implementation status: code and compiler validation complete. Targeted Unity EditMode tests are added; scene/build acceptance remains pending while an Editor session is active.
 
 ### Objective
 
@@ -219,6 +221,15 @@ Prevent a Unity Renderer with an unsupported shader from silently disappearing f
    - continue with conventional CSM;
    - never expose a partially populated VSM as active.
 6. Ensure shader build stripping retains the global VSM caster variants.
+
+The implemented shader contract requires both declarations on every participating Unity caster pass:
+
+```shaderlab
+Tags { "LightMode" = "ShadowCaster" "VividVSMCaster" = "True" }
+#pragma multi_compile_fragment _ VIVID_VSM_CASTER
+```
+
+Runtime validation is event-invalidated through Renderer, Terrain, Material, and Shader object changes. Stable frames read the cached result without rescanning scene casters or formatting diagnostics.
 
 ### Verification
 

@@ -111,7 +111,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
         Pass
         {
             Name "ShadowCaster"
-            Tags { "LightMode" = "ShadowCaster" }
+            Tags { "LightMode" = "ShadowCaster" "VividVSMCaster" = "True" }
 
             ZWrite On
             ZTest LEqual

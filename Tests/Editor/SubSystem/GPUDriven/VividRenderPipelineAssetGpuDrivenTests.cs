@@ -5,6 +5,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
@@ -660,6 +661,10 @@ namespace VividRP.Editor.Tests
                 "Core",
                 "Private",
                 "CSMShadowResolve.compute");
+            string volumeEditorSource = ReadRuntimeSource(
+                "Editor",
+                "VolumeEditor",
+                "CascadedShadowSettingsVolumeEditor.cs");
 
             StringAssert.Contains("GraphicsFormat.R32_UInt", passSource);
             StringAssert.Contains("GraphicsFormatUsage.Render", passSource);
@@ -684,7 +689,14 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("nativeCmd.DisableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
             StringAssert.Contains("ShouldPrepareVirtualShadowMapPrototype(", passSource);
             StringAssert.Contains("m_HasUnityShadowCasters,", passSource);
-            StringAssert.Contains("m_MeshletRenderingActive)", passSource);
+            StringAssert.Contains("m_MeshletRenderingActive,", passSource);
+            StringAssert.Contains("VirtualShadowMapUnityCasterCompatibility.IsReady()", passSource);
+            StringAssert.Contains("ObjectTracker<Renderer>", passSource);
+            StringAssert.Contains("ObjectTracker<Terrain>", passSource);
+            StringAssert.Contains("ObjectTracker<Material>", passSource);
+            StringAssert.Contains("ObjectTracker<Shader>", passSource);
+            StringAssert.Contains("IProcessSceneWithReport", volumeEditorSource);
+            StringAssert.Contains("BuildFailedException", volumeEditorSource);
             StringAssert.Contains("#pragma require randomwrite", casterSource);
             StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", casterSource);
             StringAssert.Contains("RWTexture2D<uint> _VSMPrototypePhysicalPage : register(u0)", casterAbiSource);
@@ -701,6 +713,9 @@ namespace VividRP.Editor.Tests
                     supportedUnityCasterSources[shaderIndex]);
                 StringAssert.Contains(
                     "#pragma require randomwrite : VIVID_VSM_CASTER",
+                    supportedUnityCasterSources[shaderIndex]);
+                StringAssert.Contains(
+                    "\"VividVSMCaster\" = \"True\"",
                     supportedUnityCasterSources[shaderIndex]);
             }
             StringAssert.Contains("AccessFlags.Read", resolvePassSource);
@@ -829,6 +844,12 @@ namespace VividRP.Editor.Tests
             {
                 int passIndex = material.FindPass(passName);
                 Assert.That(passIndex, Is.GreaterThanOrEqualTo(0), shaderName);
+                Assert.That(
+                    shader.FindPassTagValue(
+                        passIndex,
+                        new ShaderTagId("VividVSMCaster")),
+                    Is.EqualTo(new ShaderTagId("True")),
+                    shaderName);
                 ShaderUtil.CompilePass(material, passIndex);
                 ShaderMessage[] errors = ShaderUtil
                     .GetShaderMessages(shader)

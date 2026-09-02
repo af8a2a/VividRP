@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Editor;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -108,21 +109,24 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(expected));
         }
 
-        [TestCase(false, true, true, false)]
-        [TestCase(true, false, false, false)]
-        [TestCase(true, true, false, true)]
-        [TestCase(true, false, true, true)]
+        [TestCase(false, true, true, true, false)]
+        [TestCase(true, false, false, true, false)]
+        [TestCase(true, true, false, true, true)]
+        [TestCase(true, false, true, false, true)]
+        [TestCase(true, true, true, false, false)]
         public void VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(
             bool prototypeEnabled,
             bool hasUnityShadowCasters,
             bool hasMeshletShadowCasters,
+            bool unityCastersCompatible,
             bool expected)
         {
             Assert.That(
                 CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
                     prototypeEnabled,
                     hasUnityShadowCasters,
-                    hasMeshletShadowCasters),
+                    hasMeshletShadowCasters,
+                    unityCastersCompatible),
                 Is.EqualTo(expected));
         }
 
@@ -135,7 +139,8 @@ namespace VividRP.Editor.Tests
                 CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
                     prototypeEnabled: true,
                     hasUnityShadowCasters: true,
-                    hasMeshletShadowCasters: false);
+                    hasMeshletShadowCasters: false,
+                    unityCastersCompatible: true);
             }
 
             int enabledCount = 0;
@@ -145,7 +150,8 @@ namespace VividRP.Editor.Tests
                 if (CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
                         prototypeEnabled: true,
                         hasUnityShadowCasters: true,
-                        hasMeshletShadowCasters: false))
+                        hasMeshletShadowCasters: false,
+                        unityCastersCompatible: true))
                 {
                     enabledCount++;
                 }
@@ -154,6 +160,191 @@ namespace VividRP.Editor.Tests
                 - allocatedBefore;
 
             Assert.That(enabledCount, Is.EqualTo(iterationCount));
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [TestCase("VividRP/Material/StandardLit")]
+        [TestCase("VividRP/Material/StandardLayeredLit")]
+        [TestCase("VividRP/Experimental/Material/StandardLit")]
+        [TestCase("VividRP/Material/Unlit")]
+        [TestCase("VividRP/Terrain/TerrainLit")]
+        [TestCase("Hidden/VividRP/TerrainLit_Basemap")]
+        public void VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(
+            string shaderName)
+        {
+            Shader shader = Shader.Find(shaderName);
+            Assert.That(shader, Is.Not.Null, shaderName);
+            var material = new Material(shader);
+            try
+            {
+                Assert.That(
+                    VirtualShadowMapUnityCasterCompatibility.TryValidateMaterial(
+                        material,
+                        out Shader unsupportedShader,
+                        out string unsupportedPassName),
+                    Is.True,
+                    $"Unexpected unsupported pass '{unsupportedPassName}' on '{unsupportedShader}'.");
+
+                int shadowCasterPass = material.FindPass("ShadowCaster");
+                Assert.That(shadowCasterPass, Is.GreaterThanOrEqualTo(0));
+                Assert.That(
+                    shader.FindPassTagValue(
+                        shadowCasterPass,
+                        new ShaderTagId(
+                            VirtualShadowMapUnityCasterCompatibility.CapabilityTagName)),
+                    Is.EqualTo(new ShaderTagId(
+                        VirtualShadowMapUnityCasterCompatibility.CapabilityTagValue)));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapUnityCasterCompatibility_RejectsUnmarkedShadowCaster()
+        {
+            Shader shader = Shader.Find("Hidden/VividRP/Tests/PerObjectBuffer");
+            Assert.That(shader, Is.Not.Null);
+            var material = new Material(shader);
+            try
+            {
+                Assert.That(
+                    VirtualShadowMapUnityCasterCompatibility.TryValidateMaterial(
+                        material,
+                        out Shader unsupportedShader,
+                        out string unsupportedPassName),
+                    Is.False);
+                Assert.That(unsupportedShader, Is.SameAs(shader));
+                Assert.That(unsupportedPassName, Is.EqualTo("ShadowCaster"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapUnityCasterCompatibility_ReportsExactRendererMaterialSlot()
+        {
+            Shader shader = Shader.Find("Hidden/VividRP/Tests/PerObjectBuffer");
+            Assert.That(shader, Is.Not.Null);
+            var material = new Material(shader);
+            var gameObject = new GameObject("UnsupportedVSMCaster");
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.On;
+
+            try
+            {
+                Assert.That(
+                    VirtualShadowMapUnityCasterCompatibility.TryValidateRenderer(
+                        renderer,
+                        activeOnly: true,
+                        out VirtualShadowMapUnityCasterFailure failure),
+                    Is.False);
+                Assert.That(failure.Caster, Is.SameAs(renderer));
+                Assert.That(failure.Material, Is.SameAs(material));
+                Assert.That(failure.Shader, Is.SameAs(shader));
+                Assert.That(failure.MaterialSlot, Is.Zero);
+                Assert.That(failure.PassName, Is.EqualTo("ShadowCaster"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapBuildValidation_RejectsInactivePotentialCaster()
+        {
+            Shader shader = Shader.Find("Hidden/VividRP/Tests/PerObjectBuffer");
+            Assert.That(shader, Is.Not.Null);
+            var material = new Material(shader);
+            var gameObject = new GameObject("InactiveUnsupportedVSMCaster");
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.On;
+            gameObject.SetActive(false);
+
+            try
+            {
+                Assert.That(
+                    VirtualShadowMapUnityCasterCompatibility.TryValidateRenderer(
+                        renderer,
+                        activeOnly: true,
+                        out _),
+                    Is.True);
+                Assert.That(
+                    VirtualShadowMapUnityCasterCompatibility.TryValidateRenderer(
+                        renderer,
+                        activeOnly: false,
+                        out VirtualShadowMapUnityCasterFailure failure),
+                    Is.False);
+                Assert.That(failure.Caster, Is.SameAs(renderer));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapBuildValidation_RequiresSceneVolumeOverride()
+        {
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            CascadedShadowSettingsVolume settings =
+                profile.Add<CascadedShadowSettingsVolume>(overrides: false);
+            settings.enableVirtualShadowMapPrototype.value = true;
+
+            try
+            {
+                Assert.That(
+                    VirtualShadowMapSceneBuildValidator.ProfileEnablesVirtualShadowMap(
+                        profile,
+                        requireOverride: false),
+                    Is.True);
+                Assert.That(
+                    VirtualShadowMapSceneBuildValidator.ProfileEnablesVirtualShadowMap(
+                        profile,
+                        requireOverride: true),
+                    Is.False);
+
+                settings.enableVirtualShadowMapPrototype.overrideState = true;
+
+                Assert.That(
+                    VirtualShadowMapSceneBuildValidator.ProfileEnablesVirtualShadowMap(
+                        profile,
+                        requireOverride: true),
+                    Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapUnityCasterCompatibility_StableReadinessAllocatesZeroBytes()
+        {
+            const int warmupCount = 16;
+            const int iterationCount = 256;
+            for (int iteration = 0; iteration < warmupCount; iteration++)
+                VirtualShadowMapUnityCasterCompatibility.IsReady();
+
+            int readyCount = 0;
+            long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < iterationCount; iteration++)
+            {
+                if (VirtualShadowMapUnityCasterCompatibility.IsReady())
+                    readyCount++;
+            }
+            long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread()
+                - allocatedBefore;
+
+            Assert.That(readyCount, Is.InRange(0, iterationCount));
             Assert.That(allocatedBytes, Is.Zero);
         }
 

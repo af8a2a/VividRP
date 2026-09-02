@@ -23,6 +23,7 @@ namespace VividRP.Editor
             DLSS = 1 << 5,
             FSR3 = 1 << 6,
             TSR = 1 << 7,
+            DLSSNeuralRendering = 1 << 8,
         }
 
         private const Expandable DefaultExpandedState =
@@ -33,7 +34,8 @@ namespace VividRP.Editor
             | Expandable.TAA
             | Expandable.DLSS
             | Expandable.FSR3
-            | Expandable.TSR;
+            | Expandable.TSR
+            | Expandable.DLSSNeuralRendering;
 
         private static ExpandedState<Expandable, VividCameraEditor> s_ExpandedState;
 
@@ -67,11 +69,24 @@ namespace VividRP.Editor
         private static readonly GUIContent s_TAAAntiFlickerIntensityLabel = EditorGUIUtility.TrTextContent("Anti-Flicker");
 #if !DLSS_PLUGIN_INTEGRATE
         private const int DlssAntialiasingModeValue = 4;
+        private const int DlssNeuralRenderingAntialiasingModeValue = 7;
         private const string DlssDisabledWarning = "DLSS is not enabled. Define DLSS_PLUGIN_INTEGRATE to expose DLSS camera options.";
 #endif
 #if DLSS_PLUGIN_INTEGRATE
         private static readonly GUIContent s_DLSSLabel = EditorGUIUtility.TrTextContent("Deep Learning Super Sampling");
         private static readonly GUIContent s_DLSSQualityLabel = EditorGUIUtility.TrTextContent("Quality");
+        private static readonly GUIContent s_DLSSNeuralRenderingLabel = EditorGUIUtility.TrTextContent("DLSS 5 Neural Rendering");
+        private static readonly GUIContent s_DLSSNeuralRenderingPresetLabel = EditorGUIUtility.TrTextContent("Preset");
+        private static readonly GUIContent s_DLSSNeuralRenderingStyleLabel = EditorGUIUtility.TrTextContent("Style");
+        private static readonly GUIContent s_DLSSNeuralRenderingUpscalingLabel = EditorGUIUtility.TrTextContent(
+            "2x Upscaling",
+            "Render at half resolution and produce an exact 2x output. Odd output dimensions use full resolution.");
+        private static readonly GUIContent s_DLSSNeuralRenderingIntensityLabel = EditorGUIUtility.TrTextContent("Intensity");
+        private static readonly GUIContent s_DLSSNeuralRenderingLocalToneLabel = EditorGUIUtility.TrTextContent("Local Tone Strength");
+        private static readonly GUIContent s_DLSSNeuralRenderingLocalStructureLabel = EditorGUIUtility.TrTextContent("Local Structure Strength");
+        private static readonly GUIContent s_DLSSNeuralRenderingSkinStructureLabel = EditorGUIUtility.TrTextContent("Skin Structure Strength");
+        private static readonly GUIContent s_DLSSNeuralRenderingAutoMaskLabel = EditorGUIUtility.TrTextContent("Auto Mask");
+        private static readonly GUIContent s_DLSSNeuralRenderingUICorrectionLabel = EditorGUIUtility.TrTextContent("UI Correction");
 #endif
         private static readonly GUIContent s_FSR3Label = EditorGUIUtility.TrTextContent("FidelityFX Super Resolution 3");
         private static readonly GUIContent s_FSR3QualityLabel = EditorGUIUtility.TrTextContent("Quality");
@@ -235,6 +250,7 @@ namespace VividRP.Editor
 
 #if DLSS_PLUGIN_INTEGRATE
                 DrawDLSSInspector();
+                DrawDLSSNeuralRenderingInspector();
 #endif
 
                 DrawFSR3Inspector();
@@ -273,6 +289,28 @@ namespace VividRP.Editor
             using (new EditorGUI.IndentLevelScope())
             {
                 EditorGUILayout.PropertyField(m_SerializedCamera.dlssQuality, s_DLSSQualityLabel);
+            }
+        }
+
+        private void DrawDLSSNeuralRenderingInspector()
+        {
+            if (!ShouldShowDLSSNeuralRenderingSettings())
+                return;
+
+            if (!DrawCameraSubFoldout(Expandable.DLSSNeuralRendering, s_DLSSNeuralRenderingLabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingPreset, s_DLSSNeuralRenderingPresetLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingStyle, s_DLSSNeuralRenderingStyleLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingUpscaling, s_DLSSNeuralRenderingUpscalingLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingIntensity, s_DLSSNeuralRenderingIntensityLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingLocalToneStrength, s_DLSSNeuralRenderingLocalToneLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingLocalStructureStrength, s_DLSSNeuralRenderingLocalStructureLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingSkinStructureStrength, s_DLSSNeuralRenderingSkinStructureLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingUseAutoMask, s_DLSSNeuralRenderingAutoMaskLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssNeuralRenderingUICorrection, s_DLSSNeuralRenderingUICorrectionLabel);
             }
         }
 #endif
@@ -389,7 +427,8 @@ namespace VividRP.Editor
         {
             return m_SerializedCamera.antialiasing != null
                 && !m_SerializedCamera.antialiasing.hasMultipleDifferentValues
-                && m_SerializedCamera.antialiasing.intValue == DlssAntialiasingModeValue;
+                && (m_SerializedCamera.antialiasing.intValue == DlssAntialiasingModeValue
+                    || m_SerializedCamera.antialiasing.intValue == DlssNeuralRenderingAntialiasingModeValue);
         }
 #endif
 
@@ -401,6 +440,15 @@ namespace VividRP.Editor
 
             return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
                 || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.DeepLearningSuperSampling;
+        }
+
+        private bool ShouldShowDLSSNeuralRenderingSettings()
+        {
+            if (m_SerializedCamera.antialiasing == null)
+                return false;
+
+            return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.DLSSNeuralRendering;
         }
 #endif
 

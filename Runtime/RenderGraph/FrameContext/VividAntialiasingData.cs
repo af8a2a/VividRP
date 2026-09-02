@@ -40,6 +40,8 @@ namespace VividRP.Runtime
 #if DLSS_PLUGIN_INTEGRATE
         private static bool s_HasResolvedDlssSupport;
         private static bool s_CachedDlssSupport;
+        private static bool s_HasResolvedDlssNeuralRenderingSupport;
+        private static bool s_CachedDlssNeuralRenderingSupport;
 #endif
 
         internal static void Clear()
@@ -54,6 +56,8 @@ namespace VividRP.Runtime
 #if DLSS_PLUGIN_INTEGRATE
             s_HasResolvedDlssSupport = false;
             s_CachedDlssSupport = false;
+            s_HasResolvedDlssNeuralRenderingSupport = false;
+            s_CachedDlssNeuralRenderingSupport = false;
 #endif
         }
 
@@ -156,6 +160,16 @@ namespace VividRP.Runtime
             if (effectiveMode == VividAntialiasingMode.TemporalSuperResolution)
                 return TSRUpscalerUtility.ResolveRenderSize(width, height, additionalData.tsrQuality);
 
+#if DLSS_PLUGIN_INTEGRATE
+            if (effectiveMode == VividAntialiasingMode.DLSSNeuralRendering
+                && additionalData.dlssNeuralRenderingUpscaling
+                && (width & 1) == 0
+                && (height & 1) == 0)
+            {
+                return new Vector2Int(width / 2, height / 2);
+            }
+#endif
+
             return new Vector2Int(width, height);
         }
 
@@ -203,6 +217,10 @@ namespace VividRP.Runtime
                 case VividAntialiasingMode.DeepLearningSuperSampling:
                     return IsDlssSupported()
                         ? VividAntialiasingMode.DeepLearningSuperSampling
+                        : VividAntialiasingMode.None;
+                case VividAntialiasingMode.DLSSNeuralRendering:
+                    return IsDlssNeuralRenderingSupported()
+                        ? VividAntialiasingMode.DLSSNeuralRendering
                         : VividAntialiasingMode.None;
 #endif
                 default:
@@ -253,6 +271,18 @@ namespace VividRP.Runtime
             }
 
             return s_CachedDlssSupport;
+        }
+
+        internal static bool IsDlssNeuralRenderingSupported()
+        {
+            if (!s_HasResolvedDlssNeuralRenderingSupport)
+            {
+                s_CachedDlssNeuralRenderingSupport =
+                    DLSSExtension.IsNeuralRenderingSupported;
+                s_HasResolvedDlssNeuralRenderingSupport = true;
+            }
+
+            return s_CachedDlssNeuralRenderingSupport;
         }
 #endif
 

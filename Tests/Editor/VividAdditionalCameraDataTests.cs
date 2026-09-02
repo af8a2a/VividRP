@@ -236,6 +236,12 @@ namespace VividRP.Editor.Tests
 
 #if DLSS_PLUGIN_INTEGRATE
         [Test]
+        public void AntialiasingMode_NeuralRenderingKeepsExplicitValueSeven()
+        {
+            Assert.That((int)VividAntialiasingMode.DLSSNeuralRendering, Is.EqualTo(7));
+        }
+
+        [Test]
         public void Antialiasing_Setter_TracksDlssModeAsTemporalAntialiasing()
         {
             var gameObject = new GameObject("VividAdditionalCameraDataTests_DLSS");
@@ -257,12 +263,61 @@ namespace VividRP.Editor.Tests
                 GameObject.DestroyImmediate(gameObject);
             }
         }
+
+        [Test]
+        public void NeuralRenderingSettings_DefaultAndClampRanges()
+        {
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_DLSSNR");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                additionalData.enableDLSSNeuralRendering = true;
+
+                Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.DLSSNeuralRendering));
+                Assert.That(additionalData.enableDLSSNeuralRendering, Is.True);
+                Assert.That(additionalData.usesTemporalAntialiasing, Is.True);
+                Assert.That(additionalData.dlssNeuralRenderingPreset, Is.EqualTo(DLSSNeuralRenderingPreset.Default));
+                Assert.That(additionalData.dlssNeuralRenderingStyle, Is.EqualTo(DLSSNeuralRenderingStyle.Default));
+                Assert.That(additionalData.dlssNeuralRenderingIntensity, Is.EqualTo(1.0f));
+                Assert.That(additionalData.dlssNeuralRenderingSkinStructureStrength, Is.EqualTo(-1.0f));
+
+                additionalData.dlssNeuralRenderingIntensity = 3.0f;
+                additionalData.dlssNeuralRenderingSkinStructureStrength = -2.0f;
+                Assert.That(additionalData.dlssNeuralRenderingIntensity, Is.EqualTo(2.0f));
+                Assert.That(additionalData.dlssNeuralRenderingSkinStructureStrength, Is.EqualTo(-1.0f));
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void NeuralRenderingSettings_ValidationDoesNotAllocate()
+        {
+            var settings = new DLSSNeuralRenderingSettings();
+            Assert.That(settings.TryValidate(out _), Is.True);
+
+            GC.Collect();
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < 64; index++)
+            {
+                if (!settings.TryValidate(out _))
+                    Assert.Fail("Default Neural Rendering settings must remain valid.");
+            }
+
+            long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Assert.That(allocatedBytes, Is.Zero);
+        }
 #else
         [Test]
         public void DLSSOptions_AreNotExposed_WhenDlssPluginIsNotIntegrated()
         {
             Assert.That(Enum.GetNames(typeof(VividAntialiasingMode)), Does.Not.Contain("DeepLearningSuperSampling"));
+            Assert.That(Enum.GetNames(typeof(VividAntialiasingMode)), Does.Not.Contain("DLSSNeuralRendering"));
             Assert.That(typeof(VividAdditionalCameraData).GetProperty("enableDLSS"), Is.Null);
+            Assert.That(typeof(VividAdditionalCameraData).GetProperty("enableDLSSNeuralRendering"), Is.Null);
             Assert.That(typeof(VividAdditionalCameraData).GetProperty("dlssQuality"), Is.Null);
             Assert.That(
                 typeof(VividAdditionalCameraData).GetField("m_DLSSQuality", BindingFlags.Instance | BindingFlags.NonPublic),
@@ -271,7 +326,9 @@ namespace VividRP.Editor.Tests
             var runtimeAssembly = typeof(VividAdditionalCameraData).Assembly;
             Assert.That(runtimeAssembly.GetType("VividRP.Runtime.DLSSQuality"), Is.Null);
             Assert.That(runtimeAssembly.GetType("VividRP.Runtime.DLSSExtension"), Is.Null);
+            Assert.That(runtimeAssembly.GetType("VividRP.Runtime.DLSSNeuralRendering"), Is.Null);
             Assert.That(runtimeAssembly.GetType("VividRP.Runtime.RenderPass.Core.DLSSPass"), Is.Null);
+            Assert.That(runtimeAssembly.GetType("VividRP.Runtime.RenderPass.Core.DLSSNeuralRenderingPass"), Is.Null);
 
             var gameObject = new GameObject("VividAdditionalCameraDataTests_NoDLSS");
             var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
@@ -279,6 +336,11 @@ namespace VividRP.Editor.Tests
             try
             {
                 SetPrivateField(additionalData, "m_Antialiasing", (VividAntialiasingMode)4);
+                ((ISerializationCallbackReceiver)additionalData).OnAfterDeserialize();
+
+                Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.None));
+
+                SetPrivateField(additionalData, "m_Antialiasing", (VividAntialiasingMode)7);
                 ((ISerializationCallbackReceiver)additionalData).OnAfterDeserialize();
 
                 Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.None));

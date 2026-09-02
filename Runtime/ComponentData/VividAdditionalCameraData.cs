@@ -27,6 +27,9 @@ namespace VividRP.Runtime
 #if DLSS_PLUGIN_INTEGRATE
         [InspectorName("Deep Learning Super Sampling (DLSS)")]
         DeepLearningSuperSampling = 4,
+
+        [InspectorName("DLSS 5 Neural Rendering")]
+        DLSSNeuralRendering = 7,
 #endif
 
         [InspectorName("FidelityFX Super Resolution 3 (FSR3)")]
@@ -133,6 +136,33 @@ namespace VividRP.Runtime
 #if DLSS_PLUGIN_INTEGRATE
         [SerializeField]
         private DLSSQuality m_DLSSQuality = DLSSQuality.Balanced;
+
+        [SerializeField]
+        private DLSSNeuralRenderingPreset m_DLSSNeuralRenderingPreset = DLSSNeuralRenderingPreset.Default;
+
+        [SerializeField]
+        private DLSSNeuralRenderingStyle m_DLSSNeuralRenderingStyle = DLSSNeuralRenderingStyle.Default;
+
+        [SerializeField]
+        private bool m_DLSSNeuralRenderingUpscaling;
+
+        [SerializeField, Range(0.0f, 2.0f)]
+        private float m_DLSSNeuralRenderingIntensity = 1.0f;
+
+        [SerializeField, Range(0.0f, 2.0f)]
+        private float m_DLSSNeuralRenderingLocalToneStrength = 1.0f;
+
+        [SerializeField, Range(0.0f, 2.0f)]
+        private float m_DLSSNeuralRenderingLocalStructureStrength = 1.0f;
+
+        [SerializeField, Range(-1.0f, 2.0f)]
+        private float m_DLSSNeuralRenderingSkinStructureStrength = -1.0f;
+
+        [SerializeField]
+        private bool m_DLSSNeuralRenderingUseAutoMask;
+
+        [SerializeField]
+        private bool m_DLSSNeuralRenderingUICorrection;
 #endif
 
         [SerializeField]
@@ -349,6 +379,14 @@ namespace VividRP.Runtime
                 ? VividAntialiasingMode.DeepLearningSuperSampling
                 : VividAntialiasingMode.None;
         }
+
+        public bool enableDLSSNeuralRendering
+        {
+            get => antialiasing == VividAntialiasingMode.DLSSNeuralRendering;
+            set => antialiasing = value
+                ? VividAntialiasingMode.DLSSNeuralRendering
+                : VividAntialiasingMode.None;
+        }
 #endif
 
         public bool usesTemporalAntialiasing
@@ -364,7 +402,8 @@ namespace VividRP.Runtime
                 }
 
 #if DLSS_PLUGIN_INTEGRATE
-                if (antialiasing == VividAntialiasingMode.DeepLearningSuperSampling)
+                if (antialiasing == VividAntialiasingMode.DeepLearningSuperSampling
+                    || antialiasing == VividAntialiasingMode.DLSSNeuralRendering)
                     return true;
 #endif
 
@@ -415,6 +454,60 @@ namespace VividRP.Runtime
         {
             get => m_DLSSQuality;
             set => m_DLSSQuality = value;
+        }
+
+        public DLSSNeuralRenderingPreset dlssNeuralRenderingPreset
+        {
+            get => m_DLSSNeuralRenderingPreset;
+            set => m_DLSSNeuralRenderingPreset = value;
+        }
+
+        public DLSSNeuralRenderingStyle dlssNeuralRenderingStyle
+        {
+            get => m_DLSSNeuralRenderingStyle;
+            set => m_DLSSNeuralRenderingStyle = value;
+        }
+
+        public bool dlssNeuralRenderingUpscaling
+        {
+            get => m_DLSSNeuralRenderingUpscaling;
+            set => m_DLSSNeuralRenderingUpscaling = value;
+        }
+
+        public float dlssNeuralRenderingIntensity
+        {
+            get => m_DLSSNeuralRenderingIntensity;
+            set => m_DLSSNeuralRenderingIntensity = Mathf.Clamp(value, 0.0f, 2.0f);
+        }
+
+        public float dlssNeuralRenderingLocalToneStrength
+        {
+            get => m_DLSSNeuralRenderingLocalToneStrength;
+            set => m_DLSSNeuralRenderingLocalToneStrength = Mathf.Clamp(value, 0.0f, 2.0f);
+        }
+
+        public float dlssNeuralRenderingLocalStructureStrength
+        {
+            get => m_DLSSNeuralRenderingLocalStructureStrength;
+            set => m_DLSSNeuralRenderingLocalStructureStrength = Mathf.Clamp(value, 0.0f, 2.0f);
+        }
+
+        public float dlssNeuralRenderingSkinStructureStrength
+        {
+            get => m_DLSSNeuralRenderingSkinStructureStrength;
+            set => m_DLSSNeuralRenderingSkinStructureStrength = Mathf.Clamp(value, -1.0f, 2.0f);
+        }
+
+        public bool dlssNeuralRenderingUseAutoMask
+        {
+            get => m_DLSSNeuralRenderingUseAutoMask;
+            set => m_DLSSNeuralRenderingUseAutoMask = value;
+        }
+
+        public bool dlssNeuralRenderingUICorrection
+        {
+            get => m_DLSSNeuralRenderingUICorrection;
+            set => m_DLSSNeuralRenderingUICorrection = value;
         }
 #endif
 
@@ -494,6 +587,9 @@ namespace VividRP.Runtime
 
         private void OnValidate()
         {
+#if DLSS_PLUGIN_INTEGRATE
+            ClampDlssNeuralRenderingSettings();
+#endif
             ClampTsrSettings();
             SynchronizeLegacyAntialiasing();
             m_Camera = camera;
@@ -505,9 +601,22 @@ namespace VividRP.Runtime
 
         void ISerializationCallbackReceiver.OnAfterDeserialize()
         {
+#if DLSS_PLUGIN_INTEGRATE
+            ClampDlssNeuralRenderingSettings();
+#endif
             ClampTsrSettings();
             SynchronizeLegacyAntialiasing();
         }
+
+#if DLSS_PLUGIN_INTEGRATE
+        private void ClampDlssNeuralRenderingSettings()
+        {
+            m_DLSSNeuralRenderingIntensity = Mathf.Clamp(m_DLSSNeuralRenderingIntensity, 0.0f, 2.0f);
+            m_DLSSNeuralRenderingLocalToneStrength = Mathf.Clamp(m_DLSSNeuralRenderingLocalToneStrength, 0.0f, 2.0f);
+            m_DLSSNeuralRenderingLocalStructureStrength = Mathf.Clamp(m_DLSSNeuralRenderingLocalStructureStrength, 0.0f, 2.0f);
+            m_DLSSNeuralRenderingSkinStructureStrength = Mathf.Clamp(m_DLSSNeuralRenderingSkinStructureStrength, -1.0f, 2.0f);
+        }
+#endif
 
         private void ClampTsrSettings()
         {
@@ -518,7 +627,7 @@ namespace VividRP.Runtime
         private void SynchronizeLegacyAntialiasing()
         {
 #if !DLSS_PLUGIN_INTEGRATE
-            if ((int)m_Antialiasing == 4)
+            if ((int)m_Antialiasing == 4 || (int)m_Antialiasing == 7)
                 m_Antialiasing = VividAntialiasingMode.None;
 #endif
 

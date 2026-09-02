@@ -48,6 +48,23 @@ fingerprint.
 | Smooth plastic | `(0.18, 0.18, 0.18)` | `(0.04, 0.04, 0.04)` | 0 | 1 | 0.002 |
 | Copper-like conductor | `(0, 0, 0)` | `(0.95, 0.64, 0.54)` | 0.25 | 1 | 0.0625 |
 
+## Phase 8.1 analytic kernel
+
+`VividSimpleSlabBSDF.hlsl` owns the first Vivid-native BSDF implementation. It
+has no dependency on HDRP's `BSDF.hlsl` or the legacy
+`HdrpLitLighting.hlsl`. Version 1 provides:
+
+- Lambert diffuse;
+- isotropic GGX normal distribution;
+- height-correlated Smith visibility;
+- the V1 derived-F90 Schlick Fresnel function;
+- colored diffuse and specular directional responses that include `NdotL`.
+
+The normal, view direction, and light direction are normalized caller inputs.
+Backfacing view or light directions return zero. Directional-albedo
+multiple-scattering compensation, IBL integration, LTC area lights, and the
+production Deferred switch remain outside the 8.1 kernel boundary.
+
 For image baselines, use a linear HDR target, fixed exposure, no temporal
 accumulation, the same camera and normal field, and separate direct-white-light
 and white-environment captures. The current HDRP-derived deferred output is the

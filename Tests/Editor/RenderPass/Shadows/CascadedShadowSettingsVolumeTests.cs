@@ -108,6 +108,55 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(expected));
         }
 
+        [TestCase(false, true, true, false)]
+        [TestCase(true, false, false, false)]
+        [TestCase(true, true, false, true)]
+        [TestCase(true, false, true, true)]
+        public void VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(
+            bool prototypeEnabled,
+            bool hasUnityShadowCasters,
+            bool hasMeshletShadowCasters,
+            bool expected)
+        {
+            Assert.That(
+                CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
+                    prototypeEnabled,
+                    hasUnityShadowCasters,
+                    hasMeshletShadowCasters),
+                Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypePreparation_StableSelectionAllocatesZeroBytes()
+        {
+            const int iterationCount = 4096;
+            for (int iteration = 0; iteration < iterationCount; iteration++)
+            {
+                CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
+                    prototypeEnabled: true,
+                    hasUnityShadowCasters: true,
+                    hasMeshletShadowCasters: false);
+            }
+
+            int enabledCount = 0;
+            long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < iterationCount; iteration++)
+            {
+                if (CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
+                        prototypeEnabled: true,
+                        hasUnityShadowCasters: true,
+                        hasMeshletShadowCasters: false))
+                {
+                    enabledCount++;
+                }
+            }
+            long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread()
+                - allocatedBefore;
+
+            Assert.That(enabledCount, Is.EqualTo(iterationCount));
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
         [Test]
         public void VirtualShadowMapPrototypePageTable_PacksFourCascadesIntoTwoByTwoPool()
         {
@@ -214,6 +263,10 @@ namespace VividRP.Editor.Tests
                     VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
                         CreateCacheKey(cameraEntityId: 43ul)),
                     Is.True);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
+                        CreateCacheKey(hasUnityShadowCasters: true)),
+                    Is.True);
 
                 Matrix4x4 movedCascade = Matrix4x4.identity;
                 movedCascade.m03 = 1.0f / 2048.0f;
@@ -255,21 +308,37 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void VirtualShadowMapPrototypeCacheKey_AcceptsUnityOnlyCasters()
+        {
+            VirtualShadowMapPrototypeCacheKey key = CreateCacheKey(
+                primitiveSceneToken: 0u,
+                hasUnityShadowCasters: true,
+                hasMeshletShadowCasters: false);
+
+            Assert.That(key.IsValid, Is.True);
+        }
+
         private static VirtualShadowMapPrototypeCacheKey CreateCacheKey(
             ulong cameraEntityId = 42ul,
             uint rendererInstanceRevision = 7u,
             uint gpuDrivenShadowRevision = 3u,
+            uint primitiveSceneToken = 1u,
+            bool hasUnityShadowCasters = false,
+            bool hasMeshletShadowCasters = true,
             Matrix4x4? cascade0 = null)
         {
             return new VirtualShadowMapPrototypeCacheKey(
                 cameraEntityId,
-                primitiveSceneToken: 1u,
+                primitiveSceneToken: primitiveSceneToken,
                 primitiveSceneRevision: 2u,
                 gpuDrivenShadowRevision: gpuDrivenShadowRevision,
                 rendererStructureRevision: 4u,
                 rendererResourceRevision: 5u,
                 rendererInstanceRevision: rendererInstanceRevision,
                 textureBindingRevision: 11u,
+                hasUnityShadowCasters: hasUnityShadowCasters,
+                hasMeshletShadowCasters: hasMeshletShadowCasters,
                 cascadeCount: 4,
                 virtualResolution: 2048,
                 forcedMeshLODNodeDepth: 0,

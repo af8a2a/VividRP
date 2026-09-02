@@ -65,6 +65,8 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
                 #pragma use_dxc
                 #pragma multi_compile_instancing
                 #pragma instancing_options assumeuniformscaling nomatrices nolightprobe nolightmap renderinglayer
+                #pragma multi_compile_fragment _ VIVID_VSM_CASTER
+                #pragma require randomwrite : VIVID_VSM_CASTER
                 #pragma shader_feature_local _ALPHATEST_ON
                 #pragma shader_feature_local _TERRAIN_INSTANCED_PERPIXEL_NORMAL
                 #pragma vertex Vert

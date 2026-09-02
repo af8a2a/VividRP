@@ -20,7 +20,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_EnableVirtualShadowMapPrototypeLabel =
             EditorGUIUtility.TrTextContent(
                 "Enable Virtual Shadow Map Prototype",
-                "Experimental P2 directional-light hard shadows. Reuses cached physical pages while stabilized cascades and GPU Driven caster state remain unchanged; unsupported platforms fall back to CSM.");
+                "Experimental P2 directional-light hard shadows. Meshlet-only pages are cached while Unity Renderer compatibility casters refresh every frame; unsupported platforms fall back to CSM.");
         private static readonly GUIContent s_MaxShadowDistanceLabel =
             EditorGUIUtility.TrTextContent("Max Distance", "Maximum distance from the camera that receives cascaded directional shadows.");
         private static readonly GUIContent s_ScreenSpaceShadowDenoiseLabel =

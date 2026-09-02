@@ -96,6 +96,8 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma use_dxc
                 #pragma multi_compile_instancing
                 #pragma instancing_options renderinglayer
+                #pragma multi_compile_fragment _ VIVID_VSM_CASTER
+                #pragma require randomwrite : VIVID_VSM_CASTER
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma vertex Vert

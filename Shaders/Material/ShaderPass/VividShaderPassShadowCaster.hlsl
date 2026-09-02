@@ -6,6 +6,7 @@
 #endif
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl"
 
 float4 _ShadowBias;
 
@@ -28,14 +29,21 @@ VividPackedVaryingsMesh Vert(VividAttributesMesh input)
     return PackVividVaryingsMesh(output);
 }
 
+#if defined(VIVID_VSM_CASTER)
+void Frag(VividPackedVaryingsMesh packedInput)
+#else
 half4 Frag(VividPackedVaryingsMesh packedInput) : SV_Target
+#endif
 {
     UNITY_SETUP_INSTANCE_ID(packedInput);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(packedInput);
 
     FragInputs input = UnpackVividVaryingsMeshToFragInputs(packedInput);
     VividApplyAlphaClip(input);
+    VividWriteVSMDepth(packedInput.positionCS);
+#if !defined(VIVID_VSM_CASTER)
     return 0.0;
+#endif
 }
 
 #endif

@@ -3,6 +3,7 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
 #if defined(VIVIDRP_UNLIT_MOTION_VECTOR_PASS)
@@ -199,12 +200,19 @@ float4 FragPreDepth(Varyings input) : SV_Target
     return 0.0;
 }
 
+#if defined(VIVID_VSM_CASTER)
+void FragShadow(Varyings input)
+#else
 float4 FragShadow(Varyings input) : SV_Target
+#endif
 {
     UNITY_SETUP_INSTANCE_ID(input);
 
     ApplyUnlitAlphaClip(SampleUnlitColor(input.uv).a);
+    VividWriteVSMDepth(input.positionCS);
+#if !defined(VIVID_VSM_CASTER)
     return 0.0;
+#endif
 }
 
 float4 FragForward(Varyings input) : SV_Target

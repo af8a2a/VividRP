@@ -625,6 +625,36 @@ namespace VividRP.Editor.Tests
                 "Private",
                 "GPUDriven",
                 "VisibilityBufferShadowCasterPass.shader");
+            string casterAbiSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Public",
+                "Shadow",
+                "VividVirtualShadowMapCaster.hlsl");
+            string standardCasterSource = ReadRuntimeSource(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "VividShaderPassShadowCaster.hlsl");
+            string unlitPassSource = ReadRuntimeSource(
+                "Shaders",
+                "Material",
+                "Unlit",
+                "UnlitPass.hlsl");
+            string terrainPassSource = ReadRuntimeSource(
+                "Shaders",
+                "Material",
+                "TerrainLit",
+                "TerrainLitPass.hlsl");
+            string[] supportedUnityCasterSources =
+            {
+                ReadRuntimeSource("Shaders", "Material", "StandardLit", "StandardLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "StandardLayeredLit", "StandardLayeredLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "Experimental", "StandardLit", "ExperimentalStandardLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "Unlit", "Unlit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "TerrainLit", "TerrainLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "TerrainLit", "TerrainLit_Basemap.shader"),
+            };
             string resolveSource = ReadRuntimeSource(
                 "Shaders",
                 "Core",
@@ -649,11 +679,30 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain(
                 "SetVirtualShadowMapPrototypeKeyword(",
                 passSource);
+            StringAssert.Contains("DrawUnityVirtualShadowMapCascade(nativeCmd, cascadeIndex)", passSource);
+            StringAssert.Contains("nativeCmd.EnableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
+            StringAssert.Contains("nativeCmd.DisableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
+            StringAssert.Contains("ShouldPrepareVirtualShadowMapPrototype(", passSource);
+            StringAssert.Contains("m_HasUnityShadowCasters,", passSource);
+            StringAssert.Contains("m_MeshletRenderingActive)", passSource);
             StringAssert.Contains("#pragma require randomwrite", casterSource);
-            StringAssert.Contains("RWTexture2D<uint> _VSMPrototypePhysicalPage : register(u0)", casterSource);
-            StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", casterSource);
-            StringAssert.Contains("encodedPhysicalPage - 1u", casterSource);
-            StringAssert.Contains("InterlockedMax(", casterSource);
+            StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", casterSource);
+            StringAssert.Contains("RWTexture2D<uint> _VSMPrototypePhysicalPage : register(u0)", casterAbiSource);
+            StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", casterAbiSource);
+            StringAssert.Contains("encodedPhysicalPage - 1u", casterAbiSource);
+            StringAssert.Contains("InterlockedMax(", casterAbiSource);
+            StringAssert.Contains("VividWriteVSMDepth(packedInput.positionCS)", standardCasterSource);
+            StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", unlitPassSource);
+            StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", terrainPassSource);
+            for (int shaderIndex = 0; shaderIndex < supportedUnityCasterSources.Length; shaderIndex++)
+            {
+                StringAssert.Contains(
+                    "#pragma multi_compile_fragment _ VIVID_VSM_CASTER",
+                    supportedUnityCasterSources[shaderIndex]);
+                StringAssert.Contains(
+                    "#pragma require randomwrite : VIVID_VSM_CASTER",
+                    supportedUnityCasterSources[shaderIndex]);
+            }
             StringAssert.Contains("AccessFlags.Read", resolvePassSource);
             StringAssert.Contains("Texture2D<uint> _VSMPrototypePhysicalPage", resolveSource);
             StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", resolveSource);
@@ -686,7 +735,8 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("RequiresCacheRefresh(", passSource);
             StringAssert.Contains("TryUseCachedPages(", passSource);
             StringAssert.Contains("CommitCache(", passSource);
-            StringAssert.Contains("if (!canDrawMeshlets || !virtualTextureReady || system == null)", passSource);
+            StringAssert.DoesNotContain("if (!canDrawMeshlets || !virtualTextureReady || system == null)", passSource);
+            StringAssert.Contains("m_VirtualShadowMapPrototypeNeedsCacheRefresh = m_HasUnityShadowCasters", passSource);
             StringAssert.Contains("AccessFlags.ReadWrite", passSource);
             StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFramePrepared", resolvePassSource);
             StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFrameActive", resolvePassSource);
@@ -722,7 +772,7 @@ namespace VividRP.Editor.Tests
             var casterMaterial = new Material(casterShader);
             try
             {
-                casterMaterial.EnableKeyword("VIVID_VSM_PROTOTYPE");
+                casterMaterial.EnableKeyword("VIVID_VSM_CASTER");
                 ShaderUtil.CompilePass(casterMaterial, 0);
                 ShaderMessage[] casterErrors = ShaderUtil
                     .GetShaderMessages(casterShader)
@@ -739,6 +789,62 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(casterMaterial);
+            }
+
+            string[] unityCasterShaderNames =
+            {
+                "VividRP/Material/StandardLit",
+                "VividRP/Material/StandardLayeredLit",
+                "VividRP/Experimental/Material/StandardLit",
+                "VividRP/Material/Unlit",
+                "VividRP/Terrain/TerrainLit",
+                "Hidden/VividRP/TerrainLit_Basemap",
+            };
+            bool casterKeywordWasEnabled = Shader.IsKeywordEnabled("VIVID_VSM_CASTER");
+            Shader.EnableKeyword("VIVID_VSM_CASTER");
+            try
+            {
+                for (int shaderIndex = 0; shaderIndex < unityCasterShaderNames.Length; shaderIndex++)
+                {
+                    AssertShaderPassCompilesWithoutErrors(
+                        unityCasterShaderNames[shaderIndex],
+                        "ShadowCaster");
+                }
+            }
+            finally
+            {
+                if (!casterKeywordWasEnabled)
+                    Shader.DisableKeyword("VIVID_VSM_CASTER");
+            }
+        }
+
+        private static void AssertShaderPassCompilesWithoutErrors(
+            string shaderName,
+            string passName)
+        {
+            Shader shader = Shader.Find(shaderName);
+            Assert.That(shader, Is.Not.Null, shaderName);
+            var material = new Material(shader);
+            try
+            {
+                int passIndex = material.FindPass(passName);
+                Assert.That(passIndex, Is.GreaterThanOrEqualTo(0), shaderName);
+                ShaderUtil.CompilePass(material, passIndex);
+                ShaderMessage[] errors = ShaderUtil
+                    .GetShaderMessages(shader)
+                    .Where(message => message.severity.ToString() == "Error")
+                    .ToArray();
+                Assert.That(
+                    errors,
+                    Is.Empty,
+                    string.Join(
+                        "\n",
+                        errors.Select(message =>
+                            $"{message.file}:{message.line}: {message.message}")));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
             }
         }
 

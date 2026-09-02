@@ -92,6 +92,8 @@ Shader "VividRP/Material/Unlit"
                 #pragma target 4.5
                 #pragma multi_compile_instancing
                 #pragma instancing_options renderinglayer
+                #pragma multi_compile_fragment _ VIVID_VSM_CASTER
+                #pragma require randomwrite : VIVID_VSM_CASTER
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma vertex Vert
                 #pragma fragment FragShadow

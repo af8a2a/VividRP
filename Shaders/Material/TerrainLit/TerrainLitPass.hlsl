@@ -4,12 +4,12 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/MetaPass.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitSampling.hlsl"
 #if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
 #endif
-
 float4 _ShadowBias;
 
 #if defined(UNITY_INSTANCING_ENABLED)
@@ -246,12 +246,19 @@ half4 FragPreDepth(Varyings input) : SV_Target
     return 0.0;
 }
 
+#if defined(VIVID_VSM_CASTER)
+void FragShadow(Varyings input)
+#else
 half4 FragShadow(Varyings input) : SV_Target
+#endif
 {
     UNITY_SETUP_INSTANCE_ID(input);
 
     TerrainApplyHoleClip(input.terrainUV);
+    VividWriteVSMDepth(input.positionCS);
+#if !defined(VIVID_VSM_CASTER)
     return 0.0;
+#endif
 }
 
 float4 FragMeta(Varyings input) : SV_Target

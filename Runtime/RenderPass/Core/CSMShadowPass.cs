@@ -29,8 +29,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VSMPrototypePagesPerAxisId = Shader.PropertyToID("_VSMPrototypePagesPerAxis");
         private static readonly int VSMPrototypePhysicalPagesPerRowId = Shader.PropertyToID("_VSMPrototypePhysicalPagesPerRow");
         private static readonly int s_VisibleMeshletRenderRequestsId = Shader.PropertyToID("_VisibleMeshletRenderRequests");
-        private static readonly string s_AlphaTestKeyword = "_ALPHATEST_ON";
-        private static readonly string s_VirtualShadowMapPrototypeKeyword = "VIVID_VSM_PROTOTYPE";
+        private const string AlphaTestKeywordName = "_ALPHATEST_ON";
+        private const string VirtualShadowMapCasterKeywordName = "VIVID_VSM_CASTER";
+        private static readonly GlobalKeyword s_VirtualShadowMapCasterKeyword =
+            GlobalKeyword.Create(VirtualShadowMapCasterKeywordName);
 
         [RenderGraphResource(Name = "CSMShadowAtlas", Access = AccessFlags.Write)]
         private RenderGraphTexture m_ShadowAtlas;
@@ -110,7 +112,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ConfigureMaterial(vsmMaterial, (VividRendererListID)rendererListIndex);
                 CoreUtils.SetKeyword(
                     vsmMaterial,
-                    s_VirtualShadowMapPrototypeKeyword,
+                    VirtualShadowMapCasterKeywordName,
                     true);
                 m_VirtualShadowMapPrototypeMaterials[rendererListIndex] = vsmMaterial;
             }
@@ -258,9 +260,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private void PrepareVirtualShadowMapPrototype(VividCameraData cameraData)
         {
             var settings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
-            if (settings == null
-                || !settings.enableVirtualShadowMapPrototype.value
-                || !m_MeshletRenderingActive
+            bool prototypeEnabled = settings != null
+                && settings.enableVirtualShadowMapPrototype.value;
+            if (!ShouldPrepareVirtualShadowMapPrototype(
+                    prototypeEnabled,
+                    m_HasUnityShadowCasters,
+                    m_MeshletRenderingActive)
+                || cameraData?.camera == null
                 || !VirtualShadowMapPrototypeRuntime.EnsureResources(
                     m_CascadeResolution,
                     m_CascadeCount))
@@ -268,21 +274,29 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var gpuDrivenSystem = VividGPUDrivenSystem.instance;
-            var rendererDatabase = VividMeshletRendererDatabase.instance;
+            bool hasMeshletShadowCasters = m_MeshletRenderingActive
+                && VividGPUDrivenSystem.HasInstance;
+            VividGPUDrivenSystem gpuDrivenSystem = hasMeshletShadowCasters
+                ? VividGPUDrivenSystem.instance
+                : null;
+            VividMeshletRendererDatabase rendererDatabase = hasMeshletShadowCasters
+                ? VividMeshletRendererDatabase.instance
+                : null;
             m_VirtualShadowMapPrototypeCacheKey = new VirtualShadowMapPrototypeCacheKey(
                 EntityId.ToULong(cameraData.camera.GetEntityId()),
-                gpuDrivenSystem.PrimitiveScene.SceneToken,
-                gpuDrivenSystem.PrimitiveScene.SceneRevision,
-                gpuDrivenSystem.ShadowCacheRevision,
-                rendererDatabase.StructureRevision,
-                rendererDatabase.ResourceRevision,
-                rendererDatabase.InstanceRevision,
-                gpuDrivenSystem.TextureBindingRevision,
+                hasMeshletShadowCasters ? gpuDrivenSystem.PrimitiveScene.SceneToken : 0u,
+                hasMeshletShadowCasters ? gpuDrivenSystem.PrimitiveScene.SceneRevision : 0u,
+                hasMeshletShadowCasters ? gpuDrivenSystem.ShadowCacheRevision : 0u,
+                hasMeshletShadowCasters ? rendererDatabase.StructureRevision : 0u,
+                hasMeshletShadowCasters ? rendererDatabase.ResourceRevision : 0u,
+                hasMeshletShadowCasters ? rendererDatabase.InstanceRevision : 0u,
+                hasMeshletShadowCasters ? gpuDrivenSystem.TextureBindingRevision : 0u,
+                m_HasUnityShadowCasters,
+                hasMeshletShadowCasters,
                 m_CascadeCount,
                 m_CascadeResolution,
-                gpuDrivenSystem.ForcedMeshLODNodeDepth,
-                gpuDrivenSystem.MeshLODErrorThreshold,
+                hasMeshletShadowCasters ? gpuDrivenSystem.ForcedMeshLODNodeDepth : 0,
+                hasMeshletShadowCasters ? gpuDrivenSystem.MeshLODErrorThreshold : 0.0f,
                 m_SlopeScaleDepthBias,
                 m_ShadowData.shadowCasterState,
                 m_ShadowMatrices.Cascade0,
@@ -292,8 +306,10 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_VirtualShadowMapPrototypeCacheKey.IsValid)
                 return;
 
-            m_VirtualShadowMapPrototypeNeedsCacheRefresh =
-                VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
+            // Unity Renderer transforms and material state do not currently expose a
+            // reliable revision, so mixed/Unity-only pages are conservatively refreshed.
+            m_VirtualShadowMapPrototypeNeedsCacheRefresh = m_HasUnityShadowCasters
+                || VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
                     m_VirtualShadowMapPrototypeCacheKey);
 
             PassRecorder.ImportTextureForPass(
@@ -310,6 +326,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 AccessFlags.ReadWrite);
             m_VirtualShadowMapPrototypeActive = true;
             VirtualShadowMapPrototypeRuntime.SetFramePrepared(true);
+        }
+
+        internal static bool ShouldPrepareVirtualShadowMapPrototype(
+            bool prototypeEnabled,
+            bool hasUnityShadowCasters,
+            bool hasMeshletShadowCasters)
+        {
+            return prototypeEnabled
+                && (hasUnityShadowCasters || hasMeshletShadowCasters);
         }
 
         private void PrepareMeshletRendering(
@@ -517,7 +542,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            if (!canDrawMeshlets || !virtualTextureReady || system == null)
+            bool canDrawMeshletCasters = canDrawMeshlets
+                && HasRenderableMeshletShadowBatch(system, virtualTextureReady);
+            if (!m_HasUnityShadowCasters && !canDrawMeshletCasters)
                 return;
 
             CoreUtils.SetRenderTarget(
@@ -555,21 +582,60 @@ namespace VividRP.Runtime.RenderPass.Core
                     Color.black,
                     depthSlice: cascadeIndex);
                 nativeCmd.SetRandomWriteTarget(0, physicalPage);
-                DrawMeshletShadowCascade(
-                    nativeCmd,
-                    system,
-                    requestsBuffer,
-                    argsBuffer,
-                    virtualTextureReady,
-                    virtualTextureBinding,
-                    cascadeIndex,
-                    m_VirtualShadowMapPrototypeMaterials);
+                DrawUnityVirtualShadowMapCascade(nativeCmd, cascadeIndex);
+                if (canDrawMeshletCasters)
+                {
+                    DrawMeshletShadowCascade(
+                        nativeCmd,
+                        system,
+                        requestsBuffer,
+                        argsBuffer,
+                        virtualTextureReady,
+                        virtualTextureBinding,
+                        cascadeIndex,
+                        m_VirtualShadowMapPrototypeMaterials);
+                }
             }
 
             nativeCmd.ClearRandomWriteTargets();
             VirtualShadowMapPrototypeRuntime.CommitCache(
                 m_VirtualShadowMapPrototypeCacheKey);
             VirtualShadowMapPrototypeRuntime.SetFrameActive(true);
+        }
+
+        private void DrawUnityVirtualShadowMapCascade(
+            CommandBuffer nativeCmd,
+            int cascadeIndex)
+        {
+            if (!m_HasUnityShadowCasters)
+                return;
+
+            nativeCmd.EnableKeyword(s_VirtualShadowMapCasterKeyword);
+            var settings = m_ShadowDrawSettings[cascadeIndex];
+            var rendererList = m_RenderContext.CreateShadowRendererList(ref settings);
+            nativeCmd.DrawRendererList(rendererList);
+            nativeCmd.DisableKeyword(s_VirtualShadowMapCasterKeyword);
+        }
+
+        private static bool HasRenderableMeshletShadowBatch(
+            VividGPUDrivenSystem system,
+            bool virtualTextureReady)
+        {
+            if (system == null)
+                return false;
+
+            for (int rendererListIndex = 0; rendererListIndex < RendererListCount; rendererListIndex++)
+            {
+                VividRendererListID batchKey = (VividRendererListID)rendererListIndex;
+                if (system.IsShadowRendererBatchActive(batchKey)
+                    && (virtualTextureReady
+                        || (batchKey & VividRendererListID.AlphaTest) == 0))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void BuildShadowCullingContext(
@@ -621,7 +687,7 @@ namespace VividRP.Runtime.RenderPass.Core
             material.SetFloat(s_CullId, (float)GetCullMode(rendererListID));
             CoreUtils.SetKeyword(
                 material,
-                s_AlphaTestKeyword,
+                AlphaTestKeywordName,
                 (rendererListID & VividRendererListID.AlphaTest) != 0);
         }
 
@@ -693,6 +759,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly uint m_RendererResourceRevision;
         private readonly uint m_RendererInstanceRevision;
         private readonly uint m_TextureBindingRevision;
+        private readonly bool m_HasUnityShadowCasters;
+        private readonly bool m_HasMeshletShadowCasters;
         private readonly int m_CascadeCount;
         private readonly int m_VirtualResolution;
         private readonly int m_ForcedMeshLODNodeDepth;
@@ -713,6 +781,8 @@ namespace VividRP.Runtime.RenderPass.Core
             uint rendererResourceRevision,
             uint rendererInstanceRevision,
             uint textureBindingRevision,
+            bool hasUnityShadowCasters,
+            bool hasMeshletShadowCasters,
             int cascadeCount,
             int virtualResolution,
             int forcedMeshLODNodeDepth,
@@ -732,6 +802,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RendererResourceRevision = rendererResourceRevision;
             m_RendererInstanceRevision = rendererInstanceRevision;
             m_TextureBindingRevision = textureBindingRevision;
+            m_HasUnityShadowCasters = hasUnityShadowCasters;
+            m_HasMeshletShadowCasters = hasMeshletShadowCasters;
             m_CascadeCount = cascadeCount;
             m_VirtualResolution = virtualResolution;
             m_ForcedMeshLODNodeDepth = forcedMeshLODNodeDepth;
@@ -745,7 +817,8 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         internal bool IsValid => m_CameraEntityId != 0ul
-            && m_PrimitiveSceneToken != 0u
+            && (!m_HasMeshletShadowCasters || m_PrimitiveSceneToken != 0u)
+            && (m_HasUnityShadowCasters || m_HasMeshletShadowCasters)
             && m_CascadeCount > 0
             && m_CascadeCount <= VividShadowData.MaxCascadeCount
             && m_VirtualResolution > 0
@@ -767,6 +840,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_RendererResourceRevision == other.m_RendererResourceRevision
                 && m_RendererInstanceRevision == other.m_RendererInstanceRevision
                 && m_TextureBindingRevision == other.m_TextureBindingRevision
+                && m_HasUnityShadowCasters == other.m_HasUnityShadowCasters
+                && m_HasMeshletShadowCasters == other.m_HasMeshletShadowCasters
                 && m_CascadeCount == other.m_CascadeCount
                 && m_VirtualResolution == other.m_VirtualResolution
                 && m_ForcedMeshLODNodeDepth == other.m_ForcedMeshLODNodeDepth
@@ -795,6 +870,8 @@ namespace VividRP.Runtime.RenderPass.Core
             hash.Add(m_RendererResourceRevision);
             hash.Add(m_RendererInstanceRevision);
             hash.Add(m_TextureBindingRevision);
+            hash.Add(m_HasUnityShadowCasters);
+            hash.Add(m_HasMeshletShadowCasters);
             hash.Add(m_CascadeCount);
             hash.Add(m_VirtualResolution);
             hash.Add(m_ForcedMeshLODNodeDepth);

@@ -13,6 +13,7 @@
 #define CLASSIFY_TILE_SIZE 8
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/HdrpLitLighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSimpleSlabDirectLighting.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LightingLoop.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Sky/SkyUtils.hlsl"
 
@@ -121,6 +122,17 @@ VividLitBSDFData BuildFastSlabBSDFData(VividSurfaceSummaryData summary)
     bsdfData.coatMask = 0.0;
     bsdfData.coatRoughness = kVividClearCoatRoughness;
     return bsdfData;
+}
+
+VividSimpleSlabData BuildVividSimpleSlabData(
+    VividSurfaceSummaryData summary)
+{
+    VividSimpleSlabData slab;
+    slab.diffuseAlbedo = summary.diffuseAlbedo;
+    slab.specularF0 = summary.specularF0;
+    slab.perceptualRoughness = summary.perceptualRoughness;
+    slab.normalWS = summary.normalWS;
+    return slab;
 }
 
 float SampleDirectionalShadow(uint2 pixelCoord)
@@ -239,9 +251,12 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
         BuildFastSlabLightingSurfaceData(summary);
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
     VividLitBSDFData bsdfData = BuildFastSlabBSDFData(summary);
+    VividSimpleSlabData simpleSlab = BuildVividSimpleSlabData(summary);
     VividPreLightData preLightData = GetVividPreLightData(viewDirectionWS, surfaceData, bsdfData);
     screenSpaceReflectionFGD = preLightData.specularFGD;
     VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
+    VividSimpleSlabDirectLighting simpleDirectLighting =
+        VividCreateEmptySimpleSlabDirectLighting();
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
 
     AccumulateIndirectLighting(
@@ -261,8 +276,13 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
         DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
         float shadowAttenuation = EvaluateDeferredDirectionalShadowAttenuation(pixelCoord, lightIndex, directionalLight);
 
-        VividDirectLighting lighting = EvaluateBSDF_Directional(surfaceData, bsdfData, preLightData, viewDirectionWS, directionalLight, shadowAttenuation);
-        AccumulateDirectLighting(lighting, aggregateLighting);
+        VividAccumulateSimpleSlabDirectLighting(
+            VividEvaluateSimpleSlabDirectionalLight(
+                simpleSlab,
+                viewDirectionWS,
+                directionalLight,
+                shadowAttenuation),
+            simpleDirectLighting);
     }
 
     uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
@@ -271,10 +291,17 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
     for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
     {
         PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
-        VividDirectLighting lighting = EvaluateBSDF_Punctual(surfaceData, bsdfData, preLightData, positionWS, viewDirectionWS, punctualLight);
-        AccumulateDirectLighting(lighting, aggregateLighting);
+        VividAccumulateSimpleSlabDirectLighting(
+            VividEvaluateSimpleSlabPunctualLight(
+                simpleSlab,
+                positionWS,
+                viewDirectionWS,
+                punctualLight),
+            simpleDirectLighting);
     }
-    _LightingDebugTexture[pixelCoord] = aggregateLighting.direct.specular.xyzz;
+    _LightingDebugTexture[pixelCoord] =
+        (aggregateLighting.direct.specular
+            + simpleDirectLighting.specular).xyzz;
 
     uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
 
@@ -295,6 +322,8 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
 
     VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;
     PostEvaluateBSDF(surfaceData, bsdfData, preLightData, aggregateLighting, lightLoopOutput);
+    lightLoopOutput.diffuseLighting += simpleDirectLighting.diffuse;
+    lightLoopOutput.specularLighting += simpleDirectLighting.specular;
     indirectDiffuseLighting = bsdfData.diffuseColor * aggregateLighting.indirect.diffuse;
     indirectSpecularLighting = FinalizeVividSpecularLighting(
         surfaceData,
@@ -343,10 +372,7 @@ VividIndirectLighting ScaleVividDeferredIndirectLighting(
 
 float3 VividDeferredFresnelSchlick(float3 specularF0, float cosTheta)
 {
-    float oneMinusCosTheta = 1.0 - saturate(cosTheta);
-    float fresnel = oneMinusCosTheta * oneMinusCosTheta;
-    fresnel *= fresnel * oneMinusCosTheta;
-    return lerp(saturate(specularF0), 1.0, fresnel);
+    return VividSimpleSlabEvaluateSchlickFresnel(specularF0, cosTheta);
 }
 
 float VividDeferredRecoverMetallicChannel(
@@ -458,6 +484,10 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
         BuildFastSlabLightingSurfaceData(topSummary);
     VividLitBSDFData baseBSDFData = BuildFastSlabBSDFData(baseSummary);
     VividLitBSDFData topBSDFData = BuildFastSlabBSDFData(topSummary);
+    VividSimpleSlabData baseSimpleSlab =
+        BuildVividSimpleSlabData(baseSummary);
+    VividSimpleSlabData topSimpleSlab =
+        BuildVividSimpleSlabData(topSummary);
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
     VividPreLightData basePreLightData = GetVividPreLightData(
         viewDirectionWS,
@@ -469,6 +499,10 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
         topBSDFData);
     VividAggregateLighting baseAggregateLighting = (VividAggregateLighting)0;
     VividAggregateLighting topAggregateLighting = (VividAggregateLighting)0;
+    VividSimpleSlabDirectLighting baseSimpleDirectLighting =
+        VividCreateEmptySimpleSlabDirectLighting();
+    VividSimpleSlabDirectLighting topSimpleDirectLighting =
+        VividCreateEmptySimpleSlabDirectLighting();
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(
         pixelCoord,
         positionWS);
@@ -537,28 +571,24 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
                     SafeNormalize(directionalLight.directionWS)),
                 layerWeight)
             : (1.0 - layerWeight).xxx;
-        AccumulateDirectLighting(
-            ScaleVividDeferredDirectLighting(
-                EvaluateBSDF_Directional(
-                    baseSurfaceData,
-                    baseBSDFData,
-                    basePreLightData,
+        VividAccumulateSimpleSlabDirectLighting(
+            VividScaleSimpleSlabDirectLighting(
+                VividEvaluateSimpleSlabDirectionalLight(
+                    baseSimpleSlab,
                     viewDirectionWS,
                     directionalLight,
                     shadowAttenuation),
                 baseWeight),
-            baseAggregateLighting);
-        AccumulateDirectLighting(
-            ScaleVividDeferredDirectLighting(
-                EvaluateBSDF_Directional(
-                    topSurfaceData,
-                    topBSDFData,
-                    topPreLightData,
+            baseSimpleDirectLighting);
+        VividAccumulateSimpleSlabDirectLighting(
+            VividScaleSimpleSlabDirectLighting(
+                VividEvaluateSimpleSlabDirectionalLight(
+                    topSimpleSlab,
                     viewDirectionWS,
                     directionalLight,
                     shadowAttenuation),
                 topWeight),
-            topAggregateLighting);
+            topSimpleDirectLighting);
     }
 
     uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
@@ -585,28 +615,24 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
                     lightDirectionWS),
                 layerWeight)
             : (1.0 - layerWeight).xxx;
-        AccumulateDirectLighting(
-            ScaleVividDeferredDirectLighting(
-                EvaluateBSDF_Punctual(
-                    baseSurfaceData,
-                    baseBSDFData,
-                    basePreLightData,
+        VividAccumulateSimpleSlabDirectLighting(
+            VividScaleSimpleSlabDirectLighting(
+                VividEvaluateSimpleSlabPunctualLight(
+                    baseSimpleSlab,
                     positionWS,
                     viewDirectionWS,
                     punctualLight),
                 baseWeight),
-            baseAggregateLighting);
-        AccumulateDirectLighting(
-            ScaleVividDeferredDirectLighting(
-                EvaluateBSDF_Punctual(
-                    topSurfaceData,
-                    topBSDFData,
-                    topPreLightData,
+            baseSimpleDirectLighting);
+        VividAccumulateSimpleSlabDirectLighting(
+            VividScaleSimpleSlabDirectLighting(
+                VividEvaluateSimpleSlabPunctualLight(
+                    topSimpleSlab,
                     positionWS,
                     viewDirectionWS,
                     punctualLight),
                 topWeight),
-            topAggregateLighting);
+            topSimpleDirectLighting);
     }
 
     uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
@@ -660,11 +686,15 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
     VividLightLoopOutput lightLoopOutput;
     lightLoopOutput.diffuseLighting = max(
         baseLightLoopOutput.diffuseLighting
-            + topLightLoopOutput.diffuseLighting,
+            + topLightLoopOutput.diffuseLighting
+            + baseSimpleDirectLighting.diffuse
+            + topSimpleDirectLighting.diffuse,
         0.0);
     lightLoopOutput.specularLighting = max(
         baseLightLoopOutput.specularLighting
-            + topLightLoopOutput.specularLighting,
+            + topLightLoopOutput.specularLighting
+            + baseSimpleDirectLighting.specular
+            + topSimpleDirectLighting.specular,
         0.0);
     indirectDiffuseLighting = max(
         baseBSDFData.diffuseColor

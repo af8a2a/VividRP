@@ -65,6 +65,19 @@ Backfacing view or light directions return zero. Directional-albedo
 multiple-scattering compensation, IBL integration, LTC area lights, and the
 production Deferred switch remain outside the 8.1 kernel boundary.
 
+## Phase 8.2 direct lighting
+
+The production deferred Fast Slab and Dual Slab paths evaluate directional and
+punctual lights through `VividSimpleSlabDirectLighting.hlsl`. Light color,
+direction normalization, resolved directional shadows, punctual distance/range
+attenuation, spot attenuation, and dual-slab weights are applied outside the
+BSDF kernel.
+
+HDRP-derived code remains responsible for indirect lighting, reflection probes,
+SSR integration, and LTC area lights. The two paths accumulate separately so
+the HDRP post-evaluation stage cannot recolor Lambert output or apply its
+specular energy compensation to Vivid's direct response.
+
 For image baselines, use a linear HDR target, fixed exposure, no temporal
 accumulation, the same camera and normal field, and separate direct-white-light
 and white-environment captures. The current HDRP-derived deferred output is the

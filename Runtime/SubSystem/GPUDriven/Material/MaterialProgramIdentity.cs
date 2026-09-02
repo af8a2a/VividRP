@@ -18,6 +18,7 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint SimpleSlabContractVersion = 1u;
         internal const uint SimpleSlabFingerprintVersion = 1u;
         internal const uint SimpleSlabBSDFKernelVersion = 1u;
+        internal const uint SimpleSlabDirectLightingVersion = 1u;
         internal const uint ProgramCatalogVersion = 4u;
         internal const uint ProgramCatalogManifestVersion = 5u;
         internal const uint SurfaceHlslArtifactVersion = 4u;

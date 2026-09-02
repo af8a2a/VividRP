@@ -20,6 +20,7 @@ namespace VividRP.Runtime
 
         internal int mainLightVisibleIndex = -1;
         internal bool hasUnityShadowCasters;
+        internal bool hasPrimitiveShadowCasters;
         internal float slopeScaleDepthBias;
         internal Vector4 shadowCasterState;
 
@@ -43,6 +44,7 @@ namespace VividRP.Runtime
             normalBias = 0f;
             mainLightVisibleIndex = -1;
             hasUnityShadowCasters = false;
+            hasPrimitiveShadowCasters = false;
             slopeScaleDepthBias = 0f;
             shadowCasterState = Vector4.zero;
 
@@ -107,6 +109,7 @@ namespace VividRP.Runtime
                 && VividGPUDrivenSystem.TryGetPrimitiveShadowCasterBounds(
                     cameraData?.camera,
                     out primitiveShadowCasterBounds);
+            hasPrimitiveShadowCasters = hasPrimitiveShadowCasterBounds;
             if (!TryCombineShadowCasterBounds(
                     hasUnityShadowCasters,
                     unityShadowCasterBounds,

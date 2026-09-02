@@ -14,6 +14,32 @@ using Object = UnityEngine.Object;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    internal enum VirtualShadowMapPrototypeFrameState
+    {
+        Disabled = 0,
+        Prepared = 1,
+        Refreshing = 2,
+        Cached = 3,
+        Active = 4,
+        Fallback = 5,
+    }
+
+    internal enum VirtualShadowMapPrototypeFallbackReason
+    {
+        None = 0,
+        InvalidCamera = 1,
+        UnityCasterIncompatible = 2,
+        UnsupportedPlatform = 3,
+        ResourceUnavailable = 4,
+        InvalidCacheKey = 5,
+        GPUDrivenUnavailable = 6,
+        MeshletShaderResourceUnavailable = 7,
+        MeshletDrawSetUnavailable = 8,
+        VirtualTextureUnavailable = 9,
+        RecordPreparationFailed = 10,
+        PhysicalResourceUnavailable = 11,
+    }
+
     public sealed class CSMShadowPass : UnsafePass
     {
         internal const string ShadowCasterShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass";
@@ -63,9 +89,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_CascadeResolution;
         private int m_MainLightVisibleIndex = -1;
         private bool m_HasUnityShadowCasters;
+        private bool m_HasMeshletShadowCasters;
         private bool m_VirtualShadowMapPrototypeActive;
         private bool m_VirtualShadowMapStaticPoolNeedsCacheRefresh;
-        private bool m_MeshletShadowCullingPrepared;
         private float m_SlopeScaleDepthBias;
         private VirtualShadowMapPrototypeCacheKey m_VirtualShadowMapPrototypeCacheKey;
 
@@ -128,15 +154,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            VirtualShadowMapPrototypeRuntime.SetFramePrepared(false);
+            VirtualShadowMapPrototypeRuntime.BeginFrame();
             m_IsActive = false;
             m_MeshletRenderingActive = false;
             m_CascadeCount = 0;
             m_MainLightVisibleIndex = -1;
             m_HasUnityShadowCasters = false;
+            m_HasMeshletShadowCasters = false;
             m_VirtualShadowMapPrototypeActive = false;
             m_VirtualShadowMapStaticPoolNeedsCacheRefresh = false;
-            m_MeshletShadowCullingPrepared = false;
             m_SlopeScaleDepthBias = 0.0f;
             m_VirtualShadowMapPrototypeCacheKey = default;
             m_ShadowData = null;
@@ -162,6 +188,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RenderContext = renderingData.context;
             m_MainLightVisibleIndex = shadowData.mainLightVisibleIndex;
             m_HasUnityShadowCasters = shadowData.hasUnityShadowCasters;
+            m_HasMeshletShadowCasters = shadowData.hasPrimitiveShadowCasters;
             m_CascadeCount = Mathf.Min(shadowData.cascadeCount, VividShadowData.MaxCascadeCount);
             m_CascadeResolution = shadowData.cascadeResolution;
             m_SlopeScaleDepthBias = shadowData.slopeScaleDepthBias;
@@ -204,16 +231,21 @@ namespace VividRP.Runtime.RenderPass.Core
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
-                if (!m_IsActive || !m_ShadowAtlas.innerHandle.IsValid())
+                if (!m_IsActive)
                     return;
+                if (!m_ShadowAtlas.innerHandle.IsValid())
+                {
+                    if (m_VirtualShadowMapPrototypeActive)
+                    {
+                        VirtualShadowMapPrototypeRuntime.MarkFallback(
+                            VirtualShadowMapPrototypeFallbackReason.ResourceUnavailable);
+                    }
+                    return;
+                }
 
-                bool canDrawMeshlets = TryPrepareMeshletShadowDraws(
+                bool meshletPreparationSucceeded = TryPrepareMeshletShadowDraws(
                     nativeCmd,
-                    out VividGPUDrivenSystem gpuDrivenSystem,
-                    out GraphicsBuffer requestsBuffer,
-                    out GraphicsBuffer argsBuffer,
-                    out bool virtualTextureReady,
-                    out VirtualTextureSpaceBinding virtualTextureBinding);
+                    out MeshletShadowRecordContext meshletContext);
 
                 ConstantBuffer.PushGlobal(
                     nativeCmd,
@@ -222,44 +254,37 @@ namespace VividRP.Runtime.RenderPass.Core
                 nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowData.shadowCasterState);
                 nativeCmd.SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias);
 
-                for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)
+                bool vsmCompleted = false;
+                if (m_VirtualShadowMapPrototypeActive)
                 {
-                    CoreUtils.SetRenderTarget(
-                        nativeCmd,
-                        m_ShadowAtlas.innerHandle,
-                        ClearFlag.Depth,
-                        Color.black,
-                        depthSlice: cascadeIndex);
-                    nativeCmd.SetGlobalInt(ShadowCascadeIndexId, cascadeIndex);
-
-                    if (m_HasUnityShadowCasters)
+                    if (!meshletPreparationSucceeded)
                     {
-                        var settings = m_ShadowDrawSettings[cascadeIndex];
-                        var rendererList = m_RenderContext.CreateShadowRendererList(ref settings);
-                        nativeCmd.DrawRendererList(rendererList);
+                        VirtualShadowMapPrototypeRuntime.MarkFallback(
+                            VirtualShadowMapPrototypeFallbackReason.RecordPreparationFailed);
                     }
-
-                    if (canDrawMeshlets)
+                    else if (m_HasMeshletShadowCasters
+                        && !meshletContext.VirtualTextureReady)
                     {
-                        DrawMeshletShadowCascade(
+                        VirtualShadowMapPrototypeRuntime.MarkFallback(
+                            VirtualShadowMapPrototypeFallbackReason.VirtualTextureUnavailable);
+                    }
+                    else
+                    {
+                        vsmCompleted = DrawVirtualShadowMapPrototypePages(
                             nativeCmd,
-                            gpuDrivenSystem,
-                            requestsBuffer,
-                            argsBuffer,
-                            virtualTextureReady,
-                            virtualTextureBinding,
-                            cascadeIndex,
-                            m_Materials);
+                            in meshletContext,
+                            out VirtualShadowMapPrototypeFallbackReason fallbackReason);
+                        if (!vsmCompleted)
+                            VirtualShadowMapPrototypeRuntime.MarkFallback(fallbackReason);
                     }
                 }
 
-                if (m_VirtualShadowMapPrototypeActive)
+                if (!vsmCompleted)
                 {
-                    DrawVirtualShadowMapPrototypePages(
+                    DrawConventionalShadowMap(
                         nativeCmd,
-                        gpuDrivenSystem,
-                        virtualTextureReady,
-                        virtualTextureBinding);
+                        meshletPreparationSucceeded,
+                        in meshletContext);
                 }
 
                 nativeCmd.SetGlobalDepthBias(0.0f, 0.0f);
@@ -271,36 +296,63 @@ namespace VividRP.Runtime.RenderPass.Core
             var settings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             bool prototypeEnabled = settings != null
                 && settings.enableVirtualShadowMapPrototype.value;
-            bool unityCastersCompatible = !prototypeEnabled
-                || !m_HasUnityShadowCasters
-                || VirtualShadowMapUnityCasterCompatibility.IsReady();
-            if (!ShouldPrepareVirtualShadowMapPrototype(
-                    prototypeEnabled,
-                    m_HasUnityShadowCasters,
-                    m_MeshletRenderingActive,
-                    unityCastersCompatible)
-                || cameraData?.camera == null
-                || !VirtualShadowMapPrototypeRuntime.EnsureResources(
-                    m_CascadeResolution,
-                    m_CascadeCount))
+            if (!prototypeEnabled
+                || (!m_HasUnityShadowCasters && !m_HasMeshletShadowCasters))
             {
                 return;
             }
 
-            bool hasMeshletShadowCasters = m_MeshletRenderingActive
-                && VividGPUDrivenSystem.HasInstance;
-            VividGPUDrivenSystem gpuDrivenSystem = hasMeshletShadowCasters
+            if (m_HasUnityShadowCasters
+                && !VirtualShadowMapUnityCasterCompatibility.IsReady())
+            {
+                VirtualShadowMapPrototypeRuntime.MarkFallback(
+                    VirtualShadowMapPrototypeFallbackReason.UnityCasterIncompatible);
+                return;
+            }
+
+            if (cameraData?.camera == null)
+            {
+                VirtualShadowMapPrototypeRuntime.MarkFallback(
+                    VirtualShadowMapPrototypeFallbackReason.InvalidCamera);
+                return;
+            }
+
+            if (!VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform())
+            {
+                VirtualShadowMapPrototypeRuntime.MarkFallback(
+                    VirtualShadowMapPrototypeFallbackReason.UnsupportedPlatform);
+                return;
+            }
+
+            if (!TryValidateMeshletVirtualShadowMapReadiness(
+                    out VirtualShadowMapPrototypeFallbackReason fallbackReason))
+            {
+                VirtualShadowMapPrototypeRuntime.MarkFallback(fallbackReason);
+                return;
+            }
+
+            if (!VirtualShadowMapPrototypeRuntime.EnsureResources(
+                    m_CascadeResolution,
+                    m_CascadeCount))
+            {
+                VirtualShadowMapPrototypeRuntime.MarkFallback(
+                    VirtualShadowMapPrototypeFallbackReason.ResourceUnavailable);
+                return;
+            }
+
+            VirtualShadowMapPrototypeRuntime.MarkPrepared();
+            VividGPUDrivenSystem gpuDrivenSystem = m_HasMeshletShadowCasters
                 ? VividGPUDrivenSystem.instance
                 : null;
             m_VirtualShadowMapPrototypeCacheKey = new VirtualShadowMapPrototypeCacheKey(
                 EntityId.ToULong(cameraData.camera.GetEntityId()),
-                hasMeshletShadowCasters ? gpuDrivenSystem.PrimitiveScene.SceneToken : 0u,
-                hasMeshletShadowCasters ? gpuDrivenSystem.StaticShadowCacheRevision : 0u,
-                hasMeshletShadowCasters ? gpuDrivenSystem.TextureBindingRevision : 0u,
+                m_HasMeshletShadowCasters ? gpuDrivenSystem.PrimitiveScene.SceneToken : 0u,
+                m_HasMeshletShadowCasters ? gpuDrivenSystem.StaticShadowCacheRevision : 0u,
+                m_HasMeshletShadowCasters ? gpuDrivenSystem.TextureBindingRevision : 0u,
                 m_CascadeCount,
                 m_CascadeResolution,
-                hasMeshletShadowCasters ? gpuDrivenSystem.ForcedMeshLODNodeDepth : 0,
-                hasMeshletShadowCasters ? gpuDrivenSystem.MeshLODErrorThreshold : 0.0f,
+                m_HasMeshletShadowCasters ? gpuDrivenSystem.ForcedMeshLODNodeDepth : 0,
+                m_HasMeshletShadowCasters ? gpuDrivenSystem.MeshLODErrorThreshold : 0.0f,
                 m_SlopeScaleDepthBias,
                 m_ShadowData.shadowCasterState,
                 m_ShadowMatrices.Cascade0,
@@ -308,7 +360,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ShadowMatrices.Cascade2,
                 m_ShadowMatrices.Cascade3);
             if (!m_VirtualShadowMapPrototypeCacheKey.IsValid)
+            {
+                VirtualShadowMapPrototypeRuntime.MarkFallback(
+                    VirtualShadowMapPrototypeFallbackReason.InvalidCacheKey);
                 return;
+            }
 
             m_VirtualShadowMapStaticPoolNeedsCacheRefresh =
                 VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(
@@ -331,7 +387,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 VirtualShadowMapPrototypeRuntime.PageTable,
                 AccessFlags.ReadWrite);
             m_VirtualShadowMapPrototypeActive = true;
-            VirtualShadowMapPrototypeRuntime.SetFramePrepared(true);
+            VirtualShadowMapPrototypeRuntime.MarkReady(
+                m_VirtualShadowMapStaticPoolNeedsCacheRefresh);
         }
 
         internal static bool ShouldPrepareVirtualShadowMapPrototype(
@@ -379,19 +436,84 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MeshletRenderingActive = true;
         }
 
+        private bool TryValidateMeshletVirtualShadowMapReadiness(
+            out VirtualShadowMapPrototypeFallbackReason fallbackReason)
+        {
+            fallbackReason = VirtualShadowMapPrototypeFallbackReason.None;
+            if (!m_HasMeshletShadowCasters)
+                return true;
+
+            if (!m_MeshletRenderingActive
+                || !VividGPUDrivenSystem.HasInstance)
+            {
+                fallbackReason =
+                    VirtualShadowMapPrototypeFallbackReason.GPUDrivenUnavailable;
+                return false;
+            }
+
+            VividGPUDrivenSystem system = VividGPUDrivenSystem.instance;
+            if (!system.IsAvailable
+                || system.SceneData == null
+                || system.SceneData.InstanceCount == 0)
+            {
+                fallbackReason =
+                    VirtualShadowMapPrototypeFallbackReason.GPUDrivenUnavailable;
+                return false;
+            }
+
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            if (!HasMeshletShadowShaderResources(resources))
+            {
+                fallbackReason = VirtualShadowMapPrototypeFallbackReason
+                    .MeshletShaderResourceUnavailable;
+                return false;
+            }
+
+            if (m_PrimitiveShadowDrawSet == null
+                || m_StaticPrimitiveShadowDrawSet == null
+                || m_DynamicPrimitiveShadowDrawSet == null)
+            {
+                fallbackReason = VirtualShadowMapPrototypeFallbackReason
+                    .MeshletDrawSetUnavailable;
+                return false;
+            }
+
+            for (int materialIndex = 0;
+                 materialIndex < m_VirtualShadowMapPrototypeMaterials.Length;
+                 materialIndex++)
+            {
+                if (m_VirtualShadowMapPrototypeMaterials[materialIndex] == null)
+                {
+                    fallbackReason = VirtualShadowMapPrototypeFallbackReason
+                        .MeshletShaderResourceUnavailable;
+                    return false;
+                }
+            }
+
+            if (system.UsesVirtualTexture
+                && !GPUDrivenVirtualTextureBindingUtility.TryGetBinding(
+                    m_VirtualTextureFrameData,
+                    out _))
+            {
+                fallbackReason = VirtualShadowMapPrototypeFallbackReason
+                    .VirtualTextureUnavailable;
+                return false;
+            }
+
+            return true;
+        }
+
         private bool TryPrepareMeshletShadowDraws(
             CommandBuffer nativeCmd,
-            out VividGPUDrivenSystem system,
-            out GraphicsBuffer requestsBuffer,
-            out GraphicsBuffer argsBuffer,
-            out bool virtualTextureReady,
-            out VirtualTextureSpaceBinding virtualTextureBinding)
+            out MeshletShadowRecordContext recordContext)
         {
-            system = null;
-            requestsBuffer = null;
-            argsBuffer = null;
-            virtualTextureReady = false;
-            virtualTextureBinding = default;
+            recordContext = default;
+            if (!m_HasMeshletShadowCasters)
+            {
+                recordContext.VirtualTextureReady = true;
+                return true;
+            }
+
             if (!m_MeshletRenderingActive
                 || m_ShadowData == null
                 || m_LODCamera == null
@@ -400,28 +522,25 @@ namespace VividRP.Runtime.RenderPass.Core
                 return false;
             }
 
-            system = VividGPUDrivenSystem.instance;
+            VividGPUDrivenSystem system = VividGPUDrivenSystem.instance;
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             if (!system.IsAvailable
                 || system.SceneData == null
-                || system.SceneData.InstanceCount == 0)
-            {
-                return false;
-            }
-
-            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            if (resources == null
-                || resources.GPUInstanceCullingCompute == null
-                || resources.MeshletListBuildCompute == null
-                || resources.GPUMeshletCullingCompute == null
-                || resources.FixupVisibleMeshletIndirectDrawArgsCompute == null)
+                || system.SceneData.InstanceCount == 0
+                || !HasMeshletShadowShaderResources(resources))
             {
                 return false;
             }
 
             for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
+            {
                 system.ConfigureTextureBackendKeyword(m_Materials[materialIndex]);
+                system.ConfigureTextureBackendKeyword(
+                    m_VirtualShadowMapPrototypeMaterials[materialIndex]);
+            }
 
-            virtualTextureReady = !system.UsesVirtualTexture
+            VirtualTextureSpaceBinding virtualTextureBinding = default;
+            bool virtualTextureReady = !system.UsesVirtualTexture
                 || GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
                     nativeCmd,
                     m_VirtualTextureFrameData,
@@ -442,59 +561,52 @@ namespace VividRP.Runtime.RenderPass.Core
                     out m_ShadowCullingContexts[cascadeIndex]);
             }
 
-            VividPrimitiveDrawSet shadowDrawSet = system.CompleteShadowDrawSet(
+            VividPrimitiveDrawSet aggregateDrawSet = system.CompleteShadowDrawSet(
                 m_PrimitiveShadowDrawSet,
                 m_LODCamera,
                 m_FrameIndex);
-            system.CullShadowCascades(
-                nativeCmd,
-                m_ShadowCullingContexts,
-                m_CascadeCount,
-                m_ShadowLODSelectionContext,
-                resources.GPUInstanceCullingCompute,
-                resources.MeshletListBuildCompute,
-                resources.GPUMeshletCullingCompute,
-                resources.FixupVisibleMeshletIndirectDrawArgsCompute,
-                shadowDrawSet);
-            m_MeshletShadowCullingPrepared = true;
+            VividPrimitiveDrawSet staticDrawSet = system.CompleteShadowDrawSet(
+                m_StaticPrimitiveShadowDrawSet,
+                m_LODCamera,
+                m_FrameIndex);
+            VividPrimitiveDrawSet dynamicDrawSet = system.CompleteShadowDrawSet(
+                m_DynamicPrimitiveShadowDrawSet,
+                m_LODCamera,
+                m_FrameIndex);
+            if (aggregateDrawSet == null)
+                return false;
 
-            requestsBuffer = system.GetShadowVisibleMeshletRenderRequestsBuffer(0);
-            argsBuffer = system.GetShadowVisibleMeshletIndirectDrawArgsBuffer(0);
-            return requestsBuffer != null && argsBuffer != null;
+            recordContext = new MeshletShadowRecordContext
+            {
+                System = system,
+                AggregateDrawSet = aggregateDrawSet,
+                StaticDrawSet = staticDrawSet,
+                DynamicDrawSet = dynamicDrawSet,
+                VirtualTextureReady = virtualTextureReady,
+                VirtualTextureBinding = virtualTextureBinding,
+            };
+            return true;
         }
 
         private bool TryPrepareMeshletShadowPoolDraws(
             CommandBuffer nativeCmd,
             VividGPUDrivenSystem system,
-            VividPrimitiveDrawSet scheduledDrawSet,
+            VividPrimitiveDrawSet drawSet,
             out GraphicsBuffer requestsBuffer,
-            out GraphicsBuffer argsBuffer)
+            out GraphicsBuffer argsBuffer,
+            out bool hasDraws)
         {
             requestsBuffer = null;
             argsBuffer = null;
-            if (!m_MeshletShadowCullingPrepared
-                || system == null
-                || scheduledDrawSet == null)
-            {
+            hasDraws = false;
+            if (system == null || drawSet == null)
                 return false;
-            }
-
-            VividPrimitiveDrawSet drawSet = system.CompleteShadowDrawSet(
-                scheduledDrawSet,
-                m_LODCamera,
-                m_FrameIndex);
-            if (drawSet == null || drawSet.DrawCount <= 0)
-                return false;
+            if (drawSet.DrawCount <= 0)
+                return true;
 
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            if (resources == null
-                || resources.GPUInstanceCullingCompute == null
-                || resources.MeshletListBuildCompute == null
-                || resources.GPUMeshletCullingCompute == null
-                || resources.FixupVisibleMeshletIndirectDrawArgsCompute == null)
-            {
+            if (!HasMeshletShadowShaderResources(resources))
                 return false;
-            }
 
             system.CullShadowCascades(
                 nativeCmd,
@@ -508,7 +620,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 drawSet);
             requestsBuffer = system.GetShadowVisibleMeshletRenderRequestsBuffer(0);
             argsBuffer = system.GetShadowVisibleMeshletIndirectDrawArgsBuffer(0);
-            return requestsBuffer != null && argsBuffer != null;
+            hasDraws = requestsBuffer != null && argsBuffer != null;
+            return hasDraws;
+        }
+
+        private static bool HasMeshletShadowShaderResources(
+            VividRPCoreResources resources)
+        {
+            return resources != null
+                && resources.GPUInstanceCullingCompute != null
+                && resources.MeshletListBuildCompute != null
+                && resources.GPUMeshletCullingCompute != null
+                && resources.FixupVisibleMeshletIndirectDrawArgsCompute != null;
         }
 
         private void DrawMeshletShadowCascade(
@@ -571,12 +694,69 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private void DrawVirtualShadowMapPrototypePages(
+        private void DrawConventionalShadowMap(
             CommandBuffer nativeCmd,
-            VividGPUDrivenSystem system,
-            bool virtualTextureReady,
-            in VirtualTextureSpaceBinding virtualTextureBinding)
+            bool meshletPreparationSucceeded,
+            in MeshletShadowRecordContext meshletContext)
         {
+            bool canDrawMeshlets = false;
+            GraphicsBuffer requestsBuffer = null;
+            GraphicsBuffer argsBuffer = null;
+            if (m_HasMeshletShadowCasters && meshletPreparationSucceeded)
+            {
+                bool cullSucceeded = TryPrepareMeshletShadowPoolDraws(
+                    nativeCmd,
+                    meshletContext.System,
+                    meshletContext.AggregateDrawSet,
+                    out requestsBuffer,
+                    out argsBuffer,
+                    out bool hasDraws);
+                canDrawMeshlets = cullSucceeded
+                    && hasDraws
+                    && HasRenderableMeshletShadowBatch(
+                        meshletContext.System,
+                        meshletContext.VirtualTextureReady);
+            }
+
+            for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)
+            {
+                CoreUtils.SetRenderTarget(
+                    nativeCmd,
+                    m_ShadowAtlas.innerHandle,
+                    ClearFlag.Depth,
+                    Color.black,
+                    depthSlice: cascadeIndex);
+                nativeCmd.SetGlobalInt(ShadowCascadeIndexId, cascadeIndex);
+
+                if (m_HasUnityShadowCasters)
+                {
+                    var settings = m_ShadowDrawSettings[cascadeIndex];
+                    var rendererList = m_RenderContext.CreateShadowRendererList(ref settings);
+                    nativeCmd.DrawRendererList(rendererList);
+                }
+
+                if (canDrawMeshlets)
+                {
+                    DrawMeshletShadowCascade(
+                        nativeCmd,
+                        meshletContext.System,
+                        requestsBuffer,
+                        argsBuffer,
+                        meshletContext.VirtualTextureReady,
+                        meshletContext.VirtualTextureBinding,
+                        cascadeIndex,
+                        m_Materials);
+                }
+            }
+        }
+
+        private bool DrawVirtualShadowMapPrototypePages(
+            CommandBuffer nativeCmd,
+            in MeshletShadowRecordContext meshletContext,
+            out VirtualShadowMapPrototypeFallbackReason fallbackReason)
+        {
+            fallbackReason =
+                VirtualShadowMapPrototypeFallbackReason.PhysicalResourceUnavailable;
             RTHandle staticPhysicalPage =
                 VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
             RTHandle dynamicPhysicalPage =
@@ -592,7 +772,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 || pageTableUpload == null
                 || pageTableEntryCount <= 0)
             {
-                return;
+                return false;
             }
 
             nativeCmd.SetBufferData(
@@ -616,7 +796,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 VirtualShadowMapPrototypeRuntime.PhysicalPagesPerRow);
 
             bool staticCacheHit = !m_VirtualShadowMapStaticPoolNeedsCacheRefresh
-                && VirtualShadowMapPrototypeRuntime.TryUseCachedStaticPages(
+                && !VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(
                     m_VirtualShadowMapPrototypeCacheKey);
             if (!staticCacheHit)
             {
@@ -625,14 +805,29 @@ namespace VividRP.Runtime.RenderPass.Core
                     staticPhysicalPage,
                     ClearFlag.Color,
                     Color.clear);
-                bool canDrawStaticMeshletCasters =
-                    TryPrepareMeshletShadowPoolDraws(
+                bool canDrawStaticMeshletCasters = false;
+                GraphicsBuffer staticRequestsBuffer = null;
+                GraphicsBuffer staticArgsBuffer = null;
+                if (m_HasMeshletShadowCasters)
+                {
+                    if (!TryPrepareMeshletShadowPoolDraws(
                         nativeCmd,
-                        system,
-                        m_StaticPrimitiveShadowDrawSet,
-                        out GraphicsBuffer staticRequestsBuffer,
-                        out GraphicsBuffer staticArgsBuffer)
-                    && HasRenderableMeshletShadowBatch(system, virtualTextureReady);
+                        meshletContext.System,
+                        meshletContext.StaticDrawSet,
+                        out staticRequestsBuffer,
+                        out staticArgsBuffer,
+                        out bool hasStaticDraws))
+                    {
+                        fallbackReason = VirtualShadowMapPrototypeFallbackReason
+                            .RecordPreparationFailed;
+                        return false;
+                    }
+
+                    canDrawStaticMeshletCasters = hasStaticDraws
+                        && HasRenderableMeshletShadowBatch(
+                            meshletContext.System,
+                            meshletContext.VirtualTextureReady);
+                }
                 for (int cascadeIndex = 0;
                      cascadeIndex < m_CascadeCount;
                      cascadeIndex++)
@@ -648,19 +843,17 @@ namespace VividRP.Runtime.RenderPass.Core
                     {
                         DrawMeshletShadowCascade(
                             nativeCmd,
-                            system,
+                            meshletContext.System,
                             staticRequestsBuffer,
                             staticArgsBuffer,
-                            virtualTextureReady,
-                            virtualTextureBinding,
+                            meshletContext.VirtualTextureReady,
+                            meshletContext.VirtualTextureBinding,
                             cascadeIndex,
                             m_VirtualShadowMapPrototypeMaterials);
                     }
                 }
 
                 nativeCmd.ClearRandomWriteTargets();
-                VirtualShadowMapPrototypeRuntime.CommitStaticCache(
-                    m_VirtualShadowMapPrototypeCacheKey);
             }
 
             CoreUtils.SetRenderTarget(
@@ -668,14 +861,29 @@ namespace VividRP.Runtime.RenderPass.Core
                 dynamicPhysicalPage,
                 ClearFlag.Color,
                 Color.clear);
-            bool canDrawDynamicMeshletCasters =
-                TryPrepareMeshletShadowPoolDraws(
+            bool canDrawDynamicMeshletCasters = false;
+            GraphicsBuffer dynamicRequestsBuffer = null;
+            GraphicsBuffer dynamicArgsBuffer = null;
+            if (m_HasMeshletShadowCasters)
+            {
+                if (!TryPrepareMeshletShadowPoolDraws(
                     nativeCmd,
-                    system,
-                    m_DynamicPrimitiveShadowDrawSet,
-                    out GraphicsBuffer dynamicRequestsBuffer,
-                    out GraphicsBuffer dynamicArgsBuffer)
-                && HasRenderableMeshletShadowBatch(system, virtualTextureReady);
+                    meshletContext.System,
+                    meshletContext.DynamicDrawSet,
+                    out dynamicRequestsBuffer,
+                    out dynamicArgsBuffer,
+                    out bool hasDynamicDraws))
+                {
+                    fallbackReason = VirtualShadowMapPrototypeFallbackReason
+                        .RecordPreparationFailed;
+                    return false;
+                }
+
+                canDrawDynamicMeshletCasters = hasDynamicDraws
+                    && HasRenderableMeshletShadowBatch(
+                        meshletContext.System,
+                        meshletContext.VirtualTextureReady);
+            }
             for (int cascadeIndex = 0;
                  cascadeIndex < m_CascadeCount;
                  cascadeIndex++)
@@ -692,18 +900,31 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     DrawMeshletShadowCascade(
                         nativeCmd,
-                        system,
+                        meshletContext.System,
                         dynamicRequestsBuffer,
                         dynamicArgsBuffer,
-                        virtualTextureReady,
-                        virtualTextureBinding,
+                        meshletContext.VirtualTextureReady,
+                        meshletContext.VirtualTextureBinding,
                         cascadeIndex,
                         m_VirtualShadowMapPrototypeMaterials);
                 }
             }
             nativeCmd.ClearRandomWriteTargets();
+
+            if (staticCacheHit)
+            {
+                VirtualShadowMapPrototypeRuntime.TryUseCachedStaticPages(
+                    m_VirtualShadowMapPrototypeCacheKey);
+            }
+            else
+            {
+                VirtualShadowMapPrototypeRuntime.CommitStaticCache(
+                    m_VirtualShadowMapPrototypeCacheKey);
+            }
             VirtualShadowMapPrototypeRuntime.MarkDynamicPoolRefreshed();
-            VirtualShadowMapPrototypeRuntime.SetFrameActive(true);
+            VirtualShadowMapPrototypeRuntime.MarkActive();
+            fallbackReason = VirtualShadowMapPrototypeFallbackReason.None;
+            return true;
         }
 
         private void DrawUnityVirtualShadowMapCascade(
@@ -826,9 +1047,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MeshletRenderingActive = false;
             m_MainLightVisibleIndex = -1;
             m_HasUnityShadowCasters = false;
+            m_HasMeshletShadowCasters = false;
             m_VirtualShadowMapPrototypeActive = false;
             m_VirtualShadowMapStaticPoolNeedsCacheRefresh = false;
-            m_MeshletShadowCullingPrepared = false;
             m_CascadeCount = 0;
             m_SlopeScaleDepthBias = 0.0f;
             m_ShadowData = null;
@@ -841,8 +1062,17 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FrameIndex = 0;
             m_ShadowMatrices = default;
             m_VirtualShadowMapPrototypeCacheKey = default;
-            VirtualShadowMapPrototypeRuntime.SetFramePrepared(false);
             VirtualShadowMapPrototypeRuntime.ReleaseResources();
+        }
+
+        private struct MeshletShadowRecordContext
+        {
+            internal VividGPUDrivenSystem System;
+            internal VividPrimitiveDrawSet AggregateDrawSet;
+            internal VividPrimitiveDrawSet StaticDrawSet;
+            internal VividPrimitiveDrawSet DynamicDrawSet;
+            internal bool VirtualTextureReady;
+            internal VirtualTextureSpaceBinding VirtualTextureBinding;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -1496,8 +1726,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static int s_PhysicalPagesPerRow;
         private static int s_PhysicalPageWidth;
         private static int s_PhysicalPageHeight;
-        private static bool s_FramePrepared;
-        private static bool s_FrameActive;
+        private static VirtualShadowMapPrototypeFrameState s_FrameState;
+        private static VirtualShadowMapPrototypeFallbackReason s_LastFallbackReason;
         private static bool s_CacheValid;
         private static bool s_LastFrameUsedCache;
         private static int s_StaticCacheHitCount;
@@ -1515,8 +1745,16 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static int VirtualResolution => s_VirtualResolution;
         internal static int PagesPerAxis => s_PagesPerAxis;
         internal static int PhysicalPagesPerRow => s_PhysicalPagesPerRow;
-        internal static bool IsFramePrepared => s_FramePrepared;
-        internal static bool IsFrameActive => s_FrameActive;
+        internal static VirtualShadowMapPrototypeFrameState FrameState => s_FrameState;
+        internal static VirtualShadowMapPrototypeFallbackReason LastFallbackReason =>
+            s_LastFallbackReason;
+        internal static bool IsFramePrepared => s_FrameState ==
+                VirtualShadowMapPrototypeFrameState.Prepared
+            || s_FrameState == VirtualShadowMapPrototypeFrameState.Refreshing
+            || s_FrameState == VirtualShadowMapPrototypeFrameState.Cached
+            || s_FrameState == VirtualShadowMapPrototypeFrameState.Active;
+        internal static bool IsFrameActive =>
+            s_FrameState == VirtualShadowMapPrototypeFrameState.Active;
         internal static bool IsCacheValid => s_CacheValid;
         internal static bool LastFrameUsedCache => s_LastFrameUsedCache;
         internal static int StaticCacheHitCount => s_StaticCacheHitCount;
@@ -1718,25 +1956,47 @@ namespace VividRP.Runtime.RenderPass.Core
             s_PhysicalPagesPerRow = 0;
             s_PhysicalPageWidth = 0;
             s_PhysicalPageHeight = 0;
-            s_FramePrepared = false;
-            s_FrameActive = false;
+            BeginFrame();
             s_StaticCacheHitCount = 0;
             s_StaticCacheRefreshCount = 0;
             s_DynamicRefreshCount = 0;
         }
 
-        internal static void SetFrameActive(bool active)
+        internal static void BeginFrame()
         {
-            s_FrameActive = active;
-            if (!active)
-                s_LastFrameUsedCache = false;
+            s_FrameState = VirtualShadowMapPrototypeFrameState.Disabled;
+            s_LastFallbackReason = VirtualShadowMapPrototypeFallbackReason.None;
+            s_LastFrameUsedCache = false;
         }
 
-        internal static void SetFramePrepared(bool prepared)
+        internal static void MarkPrepared()
         {
-            s_FramePrepared = prepared;
-            if (!prepared)
-                SetFrameActive(false);
+            s_FrameState = VirtualShadowMapPrototypeFrameState.Prepared;
+            s_LastFallbackReason = VirtualShadowMapPrototypeFallbackReason.None;
+            s_LastFrameUsedCache = false;
+        }
+
+        internal static void MarkReady(bool requiresStaticRefresh)
+        {
+            s_FrameState = requiresStaticRefresh
+                ? VirtualShadowMapPrototypeFrameState.Refreshing
+                : VirtualShadowMapPrototypeFrameState.Cached;
+            s_LastFallbackReason = VirtualShadowMapPrototypeFallbackReason.None;
+            s_LastFrameUsedCache = false;
+        }
+
+        internal static void MarkActive()
+        {
+            s_FrameState = VirtualShadowMapPrototypeFrameState.Active;
+            s_LastFallbackReason = VirtualShadowMapPrototypeFallbackReason.None;
+        }
+
+        internal static void MarkFallback(
+            VirtualShadowMapPrototypeFallbackReason fallbackReason)
+        {
+            s_FrameState = VirtualShadowMapPrototypeFrameState.Fallback;
+            s_LastFallbackReason = fallbackReason;
+            s_LastFrameUsedCache = false;
         }
 
         internal static bool RequiresStaticCacheRefresh(

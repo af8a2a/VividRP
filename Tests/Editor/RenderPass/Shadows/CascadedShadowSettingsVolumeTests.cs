@@ -365,6 +365,101 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VirtualShadowMapPrototypeFrameState_TracksReadinessActivationAndFallback()
+        {
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.BeginFrame();
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.FrameState,
+                    Is.EqualTo(VirtualShadowMapPrototypeFrameState.Disabled));
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsFramePrepared, Is.False);
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsFrameActive, Is.False);
+
+                VirtualShadowMapPrototypeRuntime.MarkPrepared();
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.FrameState,
+                    Is.EqualTo(VirtualShadowMapPrototypeFrameState.Prepared));
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsFramePrepared, Is.True);
+
+                VirtualShadowMapPrototypeRuntime.MarkReady(requiresStaticRefresh: true);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.FrameState,
+                    Is.EqualTo(VirtualShadowMapPrototypeFrameState.Refreshing));
+
+                VirtualShadowMapPrototypeRuntime.MarkReady(requiresStaticRefresh: false);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.FrameState,
+                    Is.EqualTo(VirtualShadowMapPrototypeFrameState.Cached));
+
+                VirtualShadowMapPrototypeRuntime.MarkActive();
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.FrameState,
+                    Is.EqualTo(VirtualShadowMapPrototypeFrameState.Active));
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsFrameActive, Is.True);
+
+                VirtualShadowMapPrototypeRuntime.MarkFallback(
+                    VirtualShadowMapPrototypeFallbackReason.VirtualTextureUnavailable);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.FrameState,
+                    Is.EqualTo(VirtualShadowMapPrototypeFrameState.Fallback));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.LastFallbackReason,
+                    Is.EqualTo(
+                        VirtualShadowMapPrototypeFallbackReason.VirtualTextureUnavailable));
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsFramePrepared, Is.False);
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsFrameActive, Is.False);
+            }
+            finally
+            {
+                VirtualShadowMapPrototypeRuntime.BeginFrame();
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypeStableFrameTransitions_AllocateZeroBytes()
+        {
+            const int warmupCount = 16;
+            const int iterationCount = 4096;
+            for (int iteration = 0; iteration < warmupCount; iteration++)
+            {
+                VirtualShadowMapPrototypeRuntime.BeginFrame();
+                VirtualShadowMapPrototypeRuntime.MarkPrepared();
+                VirtualShadowMapPrototypeRuntime.MarkReady(requiresStaticRefresh: false);
+                VirtualShadowMapPrototypeRuntime.MarkActive();
+                VirtualShadowMapPrototypeRuntime.MarkFallback(
+                    VirtualShadowMapPrototypeFallbackReason.RecordPreparationFailed);
+            }
+
+            int activeCount = 0;
+            int fallbackCount = 0;
+            long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < iterationCount; iteration++)
+            {
+                VirtualShadowMapPrototypeRuntime.BeginFrame();
+                VirtualShadowMapPrototypeRuntime.MarkPrepared();
+                VirtualShadowMapPrototypeRuntime.MarkReady(requiresStaticRefresh: false);
+                VirtualShadowMapPrototypeRuntime.MarkActive();
+                if (VirtualShadowMapPrototypeRuntime.IsFrameActive)
+                    activeCount++;
+                VirtualShadowMapPrototypeRuntime.MarkFallback(
+                    VirtualShadowMapPrototypeFallbackReason.RecordPreparationFailed);
+                if (VirtualShadowMapPrototypeRuntime.LastFallbackReason ==
+                    VirtualShadowMapPrototypeFallbackReason.RecordPreparationFailed)
+                {
+                    fallbackCount++;
+                }
+            }
+            long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread()
+                - allocatedBefore;
+
+            Assert.That(activeCount, Is.EqualTo(iterationCount));
+            Assert.That(fallbackCount, Is.EqualTo(iterationCount));
+            Assert.That(allocatedBytes, Is.Zero);
+            VirtualShadowMapPrototypeRuntime.BeginFrame();
+        }
+
+        [Test]
         public void VirtualShadowMapPrototypeResources_AllocateFourCascadePhysicalPool()
         {
             Assume.That(

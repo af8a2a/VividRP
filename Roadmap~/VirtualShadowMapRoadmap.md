@@ -55,7 +55,7 @@ The repository already contains the following prototype pieces:
 - `VSMDebugPass` views for static, dynamic, or combined device depth, occupancy, and a depth heat map;
 - a conventional CSM path in which Unity Renderer and Meshlet casters already share one cascade depth target.
 
-The current VSM path caches static Meshlet casters and refreshes dynamic Meshlet plus compatible Unity Renderer casters every frame. It remains fully resident, requires GPUDriven readiness for Meshlet content, and still renders conventional CSM every frame until P2.4 makes readiness and fallback deterministic.
+The current VSM path caches static Meshlet casters and refreshes dynamic Meshlet plus compatible Unity Renderer casters every frame. It remains fully resident and requires GPUDriven readiness for Meshlet content. Conventional CSM is now recorded only when VSM is disabled, not ready, or fails before completing the current frame.
 
 ## 5. Target Architecture
 
@@ -293,6 +293,10 @@ uint finalRawDepth = max(staticRawDepth, dynamicRawDepth);
 - Static and dynamic pool resource descriptors remain stable and are not recreated per frame.
 
 ## P2.4 - Deterministic VSM/CSM State Machine
+
+### Status
+
+Implementation complete on 2026-09-02. VSM readiness is resolved during `Prepare`, successful VSM recording transitions to `Active`, and conventional CSM recording is gated by that success. Resource, compatibility, GPUDriven, DrawSet, virtual-texture, cache-key, and record-time failures retain an allocation-free fallback reason and route the same frame through conventional CSM. Focused C# compilation passes; Unity Test Framework and RenderDoc/graphics validation remain pending while an interactive Editor session is active.
 
 ### Objective
 

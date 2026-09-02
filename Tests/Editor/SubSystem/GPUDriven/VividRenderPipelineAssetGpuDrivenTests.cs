@@ -496,7 +496,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CSMShadowRecord_CompletesDrawSetImmediatelyBeforeShadowGpuCull()
+        public void CSMShadowRecord_UsesBranchSpecificDrawSetsForShadowGpuCull()
         {
             string source = ReadRuntimeSource(
                 "Runtime",
@@ -506,16 +506,29 @@ namespace VividRP.Editor.Tests
             string prepareMeshletDraws = SliceSource(
                 source,
                 "private bool TryPrepareMeshletShadowDraws(",
-                "private void DrawMeshletShadowCascade(");
+                "private bool TryPrepareMeshletShadowPoolDraws(");
+            string conventionalDraw = SliceSource(
+                source,
+                "private void DrawConventionalShadowMap(",
+                "private bool DrawVirtualShadowMapPrototypePages(");
+            string virtualDraw = SliceSource(
+                source,
+                "private bool DrawVirtualShadowMapPrototypePages(",
+                "private void DrawUnityVirtualShadowMapCascade(");
 
             int buildContexts = prepareMeshletDraws.IndexOf("BuildShadowCullingContext(");
             int complete = prepareMeshletDraws.IndexOf("system.CompleteShadowDrawSet(");
-            int gpuCull = prepareMeshletDraws.IndexOf("system.CullShadowCascades(");
 
             Assert.That(buildContexts, Is.GreaterThanOrEqualTo(0));
             Assert.That(complete, Is.GreaterThan(buildContexts));
-            Assert.That(gpuCull, Is.GreaterThan(complete));
             StringAssert.Contains("m_PrimitiveShadowDrawSet", prepareMeshletDraws);
+            StringAssert.DoesNotContain("system.CullShadowCascades(", prepareMeshletDraws);
+            StringAssert.Contains("meshletContext.AggregateDrawSet", conventionalDraw);
+            StringAssert.DoesNotContain("meshletContext.StaticDrawSet", conventionalDraw);
+            StringAssert.DoesNotContain("meshletContext.DynamicDrawSet", conventionalDraw);
+            StringAssert.Contains("meshletContext.StaticDrawSet", virtualDraw);
+            StringAssert.Contains("meshletContext.DynamicDrawSet", virtualDraw);
+            StringAssert.DoesNotContain("meshletContext.AggregateDrawSet", virtualDraw);
         }
 
         [Test]
@@ -534,11 +547,15 @@ namespace VividRP.Editor.Tests
             string record = SliceSource(
                 source,
                 "public override void Record(",
-                "private void PrepareMeshletRendering(");
+                "private void PrepareVirtualShadowMapPrototype(");
+            string conventionalDraw = SliceSource(
+                source,
+                "private void DrawConventionalShadowMap(",
+                "private bool DrawVirtualShadowMapPrototypePages(");
             string drawMeshletShadowCascade = SliceSource(
                 source,
                 "private void DrawMeshletShadowCascade(",
-                "private void BuildShadowCullingContext(");
+                "private void DrawConventionalShadowMap(");
             string buildCullingContext = SliceSource(
                 source,
                 "private void BuildShadowCullingContext(",
@@ -551,16 +568,20 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("CBUFFER_START(ShaderVariablesShadowMatrices)", shaderVariables);
             StringAssert.Contains("float4x4 _VividShadowVP[4]", shaderVariables);
             StringAssert.DoesNotContain("SetGlobalMatrixArray", record);
-            StringAssert.Contains("depthSlice: cascadeIndex", record);
-            StringAssert.DoesNotContain("RenderBufferLoadAction.DontCare", record);
-            StringAssert.Contains("SetGlobalInt(ShadowCascadeIndexId, cascadeIndex)", record);
+            StringAssert.Contains("depthSlice: cascadeIndex", conventionalDraw);
+            StringAssert.DoesNotContain("RenderBufferLoadAction.DontCare", conventionalDraw);
+            StringAssert.Contains(
+                "SetGlobalInt(ShadowCascadeIndexId, cascadeIndex)",
+                conventionalDraw);
             StringAssert.DoesNotContain("SetViewProjectionMatrices", record);
             StringAssert.DoesNotContain("SetViewport", record);
             StringAssert.DoesNotContain("EnableScissorRect", record);
             StringAssert.Contains("m_ShadowData.viewMatrices", buildCullingContext);
             StringAssert.Contains("m_ShadowData.projMatrices", buildCullingContext);
-            StringAssert.Contains("nativeCmd.DrawRendererList(rendererList)", record);
-            StringAssert.Contains("DrawMeshletShadowCascade(", record);
+            StringAssert.Contains(
+                "nativeCmd.DrawRendererList(rendererList)",
+                conventionalDraw);
+            StringAssert.Contains("DrawMeshletShadowCascade(", conventionalDraw);
             StringAssert.Contains(
                 "GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(",
                 drawMeshletShadowCascade);
@@ -577,11 +598,11 @@ namespace VividRP.Editor.Tests
             string prepare = SliceSource(
                 source,
                 "private bool TryPrepareMeshletShadowDraws(",
-                "private void DrawMeshletShadowCascade(");
+                "private bool TryPrepareMeshletShadowPoolDraws(");
             string draw = SliceSource(
                 source,
                 "private void DrawMeshletShadowCascade(",
-                "private void BuildShadowCullingContext(");
+                "private void DrawConventionalShadowMap(");
 
             StringAssert.Contains(
                 "m_DrawProperties.SetInteger(ShadowCascadeIndexId, cascadeIndex)",
@@ -697,9 +718,10 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("DrawUnityVirtualShadowMapCascade(nativeCmd, cascadeIndex)", passSource);
             StringAssert.Contains("nativeCmd.EnableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
             StringAssert.Contains("nativeCmd.DisableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
-            StringAssert.Contains("ShouldPrepareVirtualShadowMapPrototype(", passSource);
-            StringAssert.Contains("m_HasUnityShadowCasters,", passSource);
-            StringAssert.Contains("m_MeshletRenderingActive,", passSource);
+            StringAssert.Contains("m_HasUnityShadowCasters", passSource);
+            StringAssert.Contains("m_HasMeshletShadowCasters", passSource);
+            StringAssert.Contains("TryValidateMeshletVirtualShadowMapReadiness(", passSource);
+            StringAssert.Contains("VirtualShadowMapPrototypeFallbackReason", passSource);
             StringAssert.Contains("VirtualShadowMapUnityCasterCompatibility.IsReady()", passSource);
             StringAssert.Contains("ObjectTracker<Renderer>", passSource);
             StringAssert.Contains("ObjectTracker<Terrain>", passSource);
@@ -781,6 +803,36 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("AccessFlags.ReadWrite", passSource);
             StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFramePrepared", resolvePassSource);
             StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFrameActive", resolvePassSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_SkipsConventionalCsmOnlyAfterSuccessfulRecord()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string record = SliceSource(
+                source,
+                "public override void Record(",
+                "private void PrepareVirtualShadowMapPrototype(");
+            string virtualDraw = SliceSource(
+                source,
+                "private bool DrawVirtualShadowMapPrototypePages(",
+                "private void DrawUnityVirtualShadowMapCascade(");
+
+            int virtualAttempt = record.IndexOf("DrawVirtualShadowMapPrototypePages(");
+            int fallbackBranch = record.IndexOf("if (!vsmCompleted)");
+            int conventionalDraw = record.IndexOf("DrawConventionalShadowMap(");
+
+            Assert.That(virtualAttempt, Is.GreaterThanOrEqualTo(0));
+            Assert.That(fallbackBranch, Is.GreaterThan(virtualAttempt));
+            Assert.That(conventionalDraw, Is.GreaterThan(fallbackBranch));
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.MarkFallback(", record);
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.MarkActive()", virtualDraw);
+            StringAssert.Contains("VirtualShadowMapPrototypeFrameState", source);
+            StringAssert.Contains("LastFallbackReason", source);
         }
 
         [Test]

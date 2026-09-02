@@ -377,10 +377,16 @@ namespace VividRP.Editor.Tests
                     VirtualShadowMapPrototypeRuntime.EnsureResources(512, 4),
                     Is.True);
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.PhysicalPage.rt.width,
+                    VirtualShadowMapPrototypeRuntime.StaticPhysicalPage.rt.width,
                     Is.EqualTo(1024));
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.PhysicalPage.rt.height,
+                    VirtualShadowMapPrototypeRuntime.StaticPhysicalPage.rt.height,
+                    Is.EqualTo(1024));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage.rt.width,
+                    Is.EqualTo(1024));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage.rt.height,
                     Is.EqualTo(1024));
                 Assert.That(
                     VirtualShadowMapPrototypeRuntime.RasterDepth.rt.volumeDepth,
@@ -388,6 +394,18 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     VirtualShadowMapPrototypeRuntime.PageTableEntryCount,
                     Is.EqualTo(64));
+
+                RTHandle staticPool = VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
+                RTHandle dynamicPool = VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage;
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.EnsureResources(512, 4),
+                    Is.True);
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
+                    Is.SameAs(staticPool));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage,
+                    Is.SameAs(dynamicPool));
             }
             finally
             {
@@ -399,31 +417,31 @@ namespace VividRP.Editor.Tests
         public void VirtualShadowMapPrototypeCache_ReusesMatchingStableState()
         {
             VirtualShadowMapPrototypeCacheKey key = CreateCacheKey();
-            int initialHitCount = VirtualShadowMapPrototypeRuntime.CacheHitCount;
-            int initialRefreshCount = VirtualShadowMapPrototypeRuntime.CacheRefreshCount;
+            int initialHitCount = VirtualShadowMapPrototypeRuntime.StaticCacheHitCount;
+            int initialRefreshCount = VirtualShadowMapPrototypeRuntime.StaticCacheRefreshCount;
 
             try
             {
                 VirtualShadowMapPrototypeRuntime.InvalidateCache();
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(key),
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(key),
                     Is.True);
 
-                VirtualShadowMapPrototypeRuntime.CommitCache(key);
+                VirtualShadowMapPrototypeRuntime.CommitStaticCache(key);
 
                 Assert.That(VirtualShadowMapPrototypeRuntime.IsCacheValid, Is.True);
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(key),
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(key),
                     Is.False);
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.TryUseCachedPages(key),
+                    VirtualShadowMapPrototypeRuntime.TryUseCachedStaticPages(key),
                     Is.True);
                 Assert.That(VirtualShadowMapPrototypeRuntime.LastFrameUsedCache, Is.True);
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.CacheHitCount,
+                    VirtualShadowMapPrototypeRuntime.StaticCacheHitCount,
                     Is.EqualTo(initialHitCount + 1));
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.CacheRefreshCount,
+                    VirtualShadowMapPrototypeRuntime.StaticCacheRefreshCount,
                     Is.EqualTo(initialRefreshCount + 1));
             }
             finally
@@ -433,36 +451,88 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VirtualShadowMapPrototypeCache_InvalidatesChangedSceneCameraAndCascade()
+        public void VirtualShadowMapPrototypeStableStaticCacheCheck_AllocatesZeroBytes()
+        {
+            const int iterationCount = 4096;
+            VirtualShadowMapPrototypeCacheKey key = CreateCacheKey();
+            VirtualShadowMapPrototypeRuntime.InvalidateCache();
+            VirtualShadowMapPrototypeRuntime.CommitStaticCache(key);
+
+            for (int iteration = 0; iteration < 16; iteration++)
+                VirtualShadowMapPrototypeRuntime.TryUseCachedStaticPages(key);
+
+            int hitCount = 0;
+            long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < iterationCount; iteration++)
+            {
+                if (VirtualShadowMapPrototypeRuntime.TryUseCachedStaticPages(key))
+                    hitCount++;
+            }
+            long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread()
+                - allocatedBefore;
+
+            Assert.That(hitCount, Is.EqualTo(iterationCount));
+            Assert.That(allocatedBytes, Is.Zero);
+            VirtualShadowMapPrototypeRuntime.InvalidateCache();
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypeDynamicRefresh_DoesNotInvalidateStaticCache()
+        {
+            VirtualShadowMapPrototypeCacheKey key = CreateCacheKey();
+            int initialDynamicRefreshCount =
+                VirtualShadowMapPrototypeRuntime.DynamicRefreshCount;
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+                VirtualShadowMapPrototypeRuntime.CommitStaticCache(key);
+
+                VirtualShadowMapPrototypeRuntime.MarkDynamicPoolRefreshed();
+
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.DynamicRefreshCount,
+                    Is.EqualTo(initialDynamicRefreshCount + 1));
+                Assert.That(
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(key),
+                    Is.False);
+            }
+            finally
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+            }
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypeStaticCache_InvalidatesStaticSceneCameraAndCascade()
         {
             VirtualShadowMapPrototypeCacheKey key = CreateCacheKey();
 
             try
             {
                 VirtualShadowMapPrototypeRuntime.InvalidateCache();
-                VirtualShadowMapPrototypeRuntime.CommitCache(key);
+                VirtualShadowMapPrototypeRuntime.CommitStaticCache(key);
 
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
-                        CreateCacheKey(rendererInstanceRevision: 8u)),
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(
+                        CreateCacheKey(staticShadowRevision: 8u)),
                     Is.True);
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
-                        CreateCacheKey(gpuDrivenShadowRevision: 4u)),
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(
+                        CreateCacheKey(textureBindingRevision: 12u)),
                     Is.True);
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(
                         CreateCacheKey(cameraEntityId: 43ul)),
                     Is.True);
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
-                        CreateCacheKey(hasUnityShadowCasters: true)),
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(
+                        CreateCacheKey(primitiveSceneToken: 2u)),
                     Is.True);
 
                 Matrix4x4 movedCascade = Matrix4x4.identity;
                 movedCascade.m03 = 1.0f / 2048.0f;
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(
                         CreateCacheKey(cascade0: movedCascade)),
                     Is.True);
             }
@@ -486,10 +556,10 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(key.IsValid, Is.False);
                 Assert.That(
-                    VirtualShadowMapPrototypeRuntime.RequiresCacheRefresh(key),
+                    VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(key),
                     Is.True);
 
-                VirtualShadowMapPrototypeRuntime.CommitCache(key);
+                VirtualShadowMapPrototypeRuntime.CommitStaticCache(key);
 
                 Assert.That(VirtualShadowMapPrototypeRuntime.IsCacheValid, Is.False);
             }
@@ -500,36 +570,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VirtualShadowMapPrototypeCacheKey_AcceptsUnityOnlyCasters()
+        public void VirtualShadowMapPrototypeCacheKey_AcceptsEmptyStaticPool()
         {
             VirtualShadowMapPrototypeCacheKey key = CreateCacheKey(
                 primitiveSceneToken: 0u,
-                hasUnityShadowCasters: true,
-                hasMeshletShadowCasters: false);
+                staticShadowRevision: 0u);
 
             Assert.That(key.IsValid, Is.True);
         }
 
         private static VirtualShadowMapPrototypeCacheKey CreateCacheKey(
             ulong cameraEntityId = 42ul,
-            uint rendererInstanceRevision = 7u,
-            uint gpuDrivenShadowRevision = 3u,
             uint primitiveSceneToken = 1u,
-            bool hasUnityShadowCasters = false,
-            bool hasMeshletShadowCasters = true,
+            uint staticShadowRevision = 7u,
+            uint textureBindingRevision = 11u,
             Matrix4x4? cascade0 = null)
         {
             return new VirtualShadowMapPrototypeCacheKey(
                 cameraEntityId,
                 primitiveSceneToken: primitiveSceneToken,
-                primitiveSceneRevision: 2u,
-                gpuDrivenShadowRevision: gpuDrivenShadowRevision,
-                rendererStructureRevision: 4u,
-                rendererResourceRevision: 5u,
-                rendererInstanceRevision: rendererInstanceRevision,
-                textureBindingRevision: 11u,
-                hasUnityShadowCasters: hasUnityShadowCasters,
-                hasMeshletShadowCasters: hasMeshletShadowCasters,
+                staticShadowRevision: staticShadowRevision,
+                textureBindingRevision: textureBindingRevision,
                 cascadeCount: 4,
                 virtualResolution: 2048,
                 forcedMeshLODNodeDepth: 0,

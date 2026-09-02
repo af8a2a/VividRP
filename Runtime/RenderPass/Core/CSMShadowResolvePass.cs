@@ -28,7 +28,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int CSMShadowAtlasId = Shader.PropertyToID("_CSMShadowAtlas");
-        private static readonly int VSMPrototypePhysicalPageId = Shader.PropertyToID("_VSMPrototypePhysicalPage");
+        private static readonly int VSMPrototypeStaticPhysicalPageId =
+            Shader.PropertyToID("_VSMPrototypeStaticPhysicalPage");
+        private static readonly int VSMPrototypeDynamicPhysicalPageId =
+            Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
         private static readonly int VSMPrototypePageTableId = Shader.PropertyToID("_VSMPrototypePageTable");
         private static readonly int VSMPrototypeEnabledId = Shader.PropertyToID("_VSMPrototypeEnabled");
         private static readonly int VSMPrototypePageSizeId = Shader.PropertyToID("_VSMPrototypePageSize");
@@ -179,7 +182,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_EnableBilateralDenoise;
         private bool m_EnableBendComposite;
         private bool m_VirtualShadowMapPrototypeActive;
-        private TextureHandle m_VirtualShadowMapPrototypePhysicalPage;
+        private TextureHandle m_VirtualShadowMapPrototypeStaticPhysicalPage;
+        private TextureHandle m_VirtualShadowMapPrototypeDynamicPhysicalPage;
         private BufferHandle m_VirtualShadowMapPrototypePageTable;
         private int m_DispatchGroupCountX = 1;
         private int m_DispatchGroupCountY = 1;
@@ -279,7 +283,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_VirtualShadowMapPrototypeActive = false;
-            m_VirtualShadowMapPrototypePhysicalPage = default;
+            m_VirtualShadowMapPrototypeStaticPhysicalPage = default;
+            m_VirtualShadowMapPrototypeDynamicPhysicalPage = default;
             m_VirtualShadowMapPrototypePageTable = default;
             m_LightDirectionWS = Vector4.zero;
             m_BendDispatchList = CreateEmptyBendDispatchList();
@@ -396,9 +401,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (VirtualShadowMapPrototypeRuntime.EnsurePhysicalPageForBinding())
             {
-                m_VirtualShadowMapPrototypePhysicalPage = PassRecorder.ImportTextureForPass(
+                m_VirtualShadowMapPrototypeStaticPhysicalPage = PassRecorder.ImportTextureForPass(
                     this,
-                    VirtualShadowMapPrototypeRuntime.PhysicalPage,
+                    VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
+                    AccessFlags.Read);
+                m_VirtualShadowMapPrototypeDynamicPhysicalPage = PassRecorder.ImportTextureForPass(
+                    this,
+                    VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage,
                     AccessFlags.Read);
                 m_VirtualShadowMapPrototypePageTable = PassRecorder.ImportBufferForPass(
                     this,
@@ -410,7 +419,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && csmSettings.enableVirtualShadowMapPrototype.value
                 && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform()
                 && VirtualShadowMapPrototypeRuntime.IsFramePrepared
-                && m_VirtualShadowMapPrototypePhysicalPage.IsValid()
+                && m_VirtualShadowMapPrototypeStaticPhysicalPage.IsValid()
+                && m_VirtualShadowMapPrototypeDynamicPhysicalPage.IsValid()
                 && m_VirtualShadowMapPrototypePageTable.IsValid())
             {
                 m_VirtualShadowMapPrototypeActive = true;
@@ -464,7 +474,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_VirtualShadowMapPrototypeActive = false;
-            m_VirtualShadowMapPrototypePhysicalPage = default;
+            m_VirtualShadowMapPrototypeStaticPhysicalPage = default;
+            m_VirtualShadowMapPrototypeDynamicPhysicalPage = default;
             m_VirtualShadowMapPrototypePageTable = default;
             m_DispatchGroupCountX = 1;
             m_DispatchGroupCountY = 1;
@@ -570,8 +581,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void BindCommonTextures(ComputeCommandBuffer cmd, int kernel)
         {
-            TextureHandle virtualShadowMapPage = m_VirtualShadowMapPrototypePhysicalPage.IsValid()
-                ? m_VirtualShadowMapPrototypePhysicalPage
+            TextureHandle staticVirtualShadowMapPage =
+                m_VirtualShadowMapPrototypeStaticPhysicalPage.IsValid()
+                ? m_VirtualShadowMapPrototypeStaticPhysicalPage
+                : m_GBuffer1.innerHandle;
+            TextureHandle dynamicVirtualShadowMapPage =
+                m_VirtualShadowMapPrototypeDynamicPhysicalPage.IsValid()
+                ? m_VirtualShadowMapPrototypeDynamicPhysicalPage
                 : m_GBuffer1.innerHandle;
             cmd.SetComputeTextureParam(m_ResolveCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ResolveCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
@@ -579,8 +595,13 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(
                 m_ResolveCompute,
                 kernel,
-                VSMPrototypePhysicalPageId,
-                virtualShadowMapPage);
+                VSMPrototypeStaticPhysicalPageId,
+                staticVirtualShadowMapPage);
+            cmd.SetComputeTextureParam(
+                m_ResolveCompute,
+                kernel,
+                VSMPrototypeDynamicPhysicalPageId,
+                dynamicVirtualShadowMapPage);
             if (VirtualShadowMapPrototypeRuntime.PageTable != null)
                 cmd.SetComputeBufferParam(
                     m_ResolveCompute,

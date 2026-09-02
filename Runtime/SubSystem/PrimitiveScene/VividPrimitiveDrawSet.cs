@@ -111,6 +111,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 ScheduleJobs(
                     unchecked((uint) camera.cullingMask),
                     VividInstancePassMask.Main,
+                    VividPrimitiveFlags.None,
+                    VividPrimitiveFlags.None,
                     1,
                     cullingRecords,
                     drawSources,
@@ -140,6 +142,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 ScheduleJobs(
                     cameraCullingMask,
                     VividInstancePassMask.Main,
+                    VividPrimitiveFlags.None,
+                    VividPrimitiveFlags.None,
                     1,
                     cullingRecords,
                     drawSources,
@@ -159,7 +163,9 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
-            int frameIndex)
+            int frameIndex,
+            VividPrimitiveFlags requiredPrimitiveFlags = VividPrimitiveFlags.None,
+            VividPrimitiveFlags excludedPrimitiveFlags = VividPrimitiveFlags.None)
         {
             ThrowIfDisposed();
             if (camera == null)
@@ -192,6 +198,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 ScheduleJobs(
                     unchecked((uint) camera.cullingMask),
                     requiredPassMask,
+                    requiredPrimitiveFlags,
+                    excludedPrimitiveFlags,
                     frustumCount,
                     cullingRecords,
                     drawSources,
@@ -490,6 +498,8 @@ namespace VividRP.Runtime.PrimitiveScene
         private void ScheduleJobs(
             uint cameraCullingMask,
             VividInstancePassMask requiredPassMask,
+            VividPrimitiveFlags requiredPrimitiveFlags,
+            VividPrimitiveFlags excludedPrimitiveFlags,
             int frustumCount,
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
@@ -520,6 +530,8 @@ namespace VividRP.Runtime.PrimitiveScene
                         Visibility = m_Visibility.GetSubArray(0, cullingRecords.Length),
                         CameraCullingMask = cameraCullingMask,
                         RequiredPassMask = requiredPassMask,
+                        RequiredPrimitiveFlags = requiredPrimitiveFlags,
+                        ExcludedPrimitiveFlags = excludedPrimitiveFlags,
                         FrustumCount = frustumCount,
                     }.Schedule(cullingRecords.Length, CullJobBatchSize, dependency);
                 }
@@ -714,7 +726,9 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
-            int frameIndex = -1)
+            int frameIndex = -1,
+            VividPrimitiveFlags requiredPrimitiveFlags = VividPrimitiveFlags.None,
+            VividPrimitiveFlags excludedPrimitiveFlags = VividPrimitiveFlags.None)
         {
             if (camera == null)
                 throw new ArgumentNullException(nameof(camera));
@@ -731,7 +745,9 @@ namespace VividRP.Runtime.PrimitiveScene
                 cullingRecords,
                 drawSources,
                 sceneRevision,
-                frameIndex >= 0 ? frameIndex : Time.frameCount);
+                frameIndex >= 0 ? frameIndex : Time.frameCount,
+                requiredPrimitiveFlags,
+                excludedPrimitiveFlags);
             return drawSet;
         }
 

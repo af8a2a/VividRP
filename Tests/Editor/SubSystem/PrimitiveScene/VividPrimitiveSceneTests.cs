@@ -696,6 +696,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StaticShadowRevision_IgnoresDynamicMotionAndTracksStaticContent()
+        {
+            using var scene = new VividPrimitiveScene();
+            EntityId source = CreateEntity("Static Shadow Revision Primitive");
+            VividPrimitiveFlags dynamicFlags = VividPrimitiveFlags.Valid;
+            VividPrimitiveFlags staticFlags = dynamicFlags | VividPrimitiveFlags.Static;
+
+            scene.RegisterOrUpdate(CreateDescriptor(source, flags: dynamicFlags));
+            uint initialRevision = scene.StaticShadowRevision;
+            scene.RegisterOrUpdate(CreateDescriptor(
+                source,
+                objectToWorld: Matrix4x4.Translate(Vector3.right),
+                flags: dynamicFlags));
+            Assert.That(scene.StaticShadowRevision, Is.EqualTo(initialRevision));
+
+            scene.RegisterOrUpdate(CreateDescriptor(
+                source,
+                objectToWorld: Matrix4x4.Translate(Vector3.right),
+                flags: staticFlags));
+            uint classifiedRevision = scene.StaticShadowRevision;
+            Assert.That(classifiedRevision, Is.Not.EqualTo(initialRevision));
+
+            scene.RegisterOrUpdate(CreateDescriptor(
+                source,
+                objectToWorld: Matrix4x4.Translate(Vector3.up),
+                flags: staticFlags));
+            uint movedRevision = scene.StaticShadowRevision;
+            Assert.That(movedRevision, Is.Not.EqualTo(classifiedRevision));
+
+            scene.Remove(source);
+            Assert.That(scene.StaticShadowRevision, Is.Not.EqualTo(movedRevision));
+        }
+
+        [Test]
         public void Upload_EmptySceneCreatesPlaceholdersAndBuffersGrowWithoutShrinking()
         {
             using var scene = new VividPrimitiveScene();

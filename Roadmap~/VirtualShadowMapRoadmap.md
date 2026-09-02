@@ -48,14 +48,14 @@ The repository already contains the following prototype pieces:
 
 - a platform capability gate for reverse-Z Direct3D 12/Vulkan and `R32_UInt` storage;
 - a fully resident 128 x 128 page table;
-- a four-cascade physical page layout;
+- a four-cascade static/dynamic physical page layout with a shared page table;
 - Meshlet hard-shadow raster that writes `R32_UInt` pages with `InterlockedMax`;
 - hard-shadow resolve through the VSM page table;
-- a whole-pool cache key and cache hit/refresh state;
-- `VSMDebugPass` views for device depth, occupancy, and a depth heat map;
+- a static-pool cache key plus independent static-hit/static-refresh/dynamic-refresh counters;
+- `VSMDebugPass` views for static, dynamic, or combined device depth, occupancy, and a depth heat map;
 - a conventional CSM path in which Unity Renderer and Meshlet casters already share one cascade depth target.
 
-The current VSM refresh remains Meshlet-only, requires GPUDriven readiness, and still renders conventional CSM every frame. The current whole-pool cache also has no safe invalidation source for arbitrary Unity Renderers.
+The current VSM path caches static Meshlet casters and refreshes dynamic Meshlet plus compatible Unity Renderer casters every frame. It remains fully resident, requires GPUDriven readiness for Meshlet content, and still renders conventional CSM every frame until P2.4 makes readiness and fallback deterministic.
 
 ## 5. Target Architecture
 
@@ -244,6 +244,12 @@ Runtime validation is event-invalidated through Renderer, Terrain, Material, and
 - VSM activation and debug state agree with the validation result.
 
 ## P2.3 - Static and Dynamic Physical Pools
+
+### Status
+
+Implementation complete on 2026-09-02. Focused C# compilation and the active Unity Editor script/shader reload pass without persistent compile or shader errors. Unity Test Framework execution and static/dynamic graphics validation remain pending because an interactive Editor session is active.
+
+The implementation uses the existing Meshlet static flag to build aggregate, static-only, and dynamic-only shadow DrawSets. Static Meshlet changes advance a dedicated cache revision, while dynamic-only transform changes leave it stable. Both pools share the same page table and descriptor; resolve combines reverse-Z depths with `max`, and `VSMDebugPass` exposes Combined, Static, and Dynamic pool selection.
 
 ### Objective
 

@@ -23,6 +23,8 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal uint CameraCullingMask;
         internal VividInstancePassMask RequiredPassMask;
+        internal VividPrimitiveFlags RequiredPrimitiveFlags;
+        internal VividPrimitiveFlags ExcludedPrimitiveFlags;
         internal int FrustumCount;
 
         public void Execute(int index)
@@ -32,6 +34,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 && (record.Flags & VividPrimitiveFlags.Valid) != 0
                 && (record.Flags & VividPrimitiveFlags.Disabled) == 0
                 && (record.PassMask & RequiredPassMask) != 0
+                && (record.Flags & RequiredPrimitiveFlags) == RequiredPrimitiveFlags
+                && (record.Flags & ExcludedPrimitiveFlags) == 0
                 && (record.CameraLayerMask & CameraCullingMask) != 0u;
 
             if (visible && (record.Flags & VividPrimitiveFlags.Skinned) == 0)

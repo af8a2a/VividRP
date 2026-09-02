@@ -39,6 +39,7 @@ namespace VividRP.Runtime.PrimitiveScene
         private int m_LastUploadRangeCount;
         private long m_LastUploadBytes;
         private uint m_SceneRevision;
+        private uint m_StaticShadowRevision;
         private bool m_IsDisposed;
 
         internal VividPrimitiveScene()
@@ -75,6 +76,15 @@ namespace VividRP.Runtime.PrimitiveScene
             {
                 ThrowIfDisposed();
                 return m_SceneRevision;
+            }
+        }
+
+        internal uint StaticShadowRevision
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_StaticShadowRevision;
             }
         }
 
@@ -161,11 +171,24 @@ namespace VividRP.Runtime.PrimitiveScene
                 handle = Register(descriptor);
                 m_ChangedPrimitiveCount++;
                 IncrementSceneRevision();
+                if (IsStaticShadowCaster(descriptor.Flags, descriptor.PassMask))
+                    IncrementStaticShadowRevision();
                 return handle;
             }
 
+            VividPrimitiveData previousData = PrimitiveTable[handle.Index];
+            bool wasStaticShadowCaster = IsStaticShadowCaster(
+                previousData.Flags,
+                (VividInstancePassMask) previousData.PassMask);
             if (Update(handle, descriptor))
+            {
                 m_ChangedPrimitiveCount++;
+                if (wasStaticShadowCaster
+                    || IsStaticShadowCaster(descriptor.Flags, descriptor.PassMask))
+                {
+                    IncrementStaticShadowRevision();
+                }
+            }
             return handle;
         }
 
@@ -180,6 +203,10 @@ namespace VividRP.Runtime.PrimitiveScene
             }
 
             PrimitiveRecord record = m_PrimitiveRecords[handle.Index];
+            VividPrimitiveData removedData = PrimitiveTable[handle.Index];
+            bool removedStaticShadowCaster = IsStaticShadowCaster(
+                removedData.Flags,
+                (VividInstancePassMask) removedData.PassMask);
             ReleaseSections(record.DrawSectionOffset, record.DrawSectionCount);
             m_ActiveDrawSectionCount -= record.DrawSectionCount;
             m_PrimitivesByEntityId.Remove(sourceEntityId);
@@ -201,6 +228,8 @@ namespace VividRP.Runtime.PrimitiveScene
             PreviousTransformTable.Set(handle.Index, default);
             m_ChangedPrimitiveCount++;
             IncrementSceneRevision();
+            if (removedStaticShadowCaster)
+                IncrementStaticShadowRevision();
             return true;
         }
 
@@ -902,6 +931,21 @@ namespace VividRP.Runtime.PrimitiveScene
         private void IncrementSceneRevision()
         {
             m_SceneRevision = m_SceneRevision == uint.MaxValue ? 1u : m_SceneRevision + 1u;
+        }
+
+        private void IncrementStaticShadowRevision()
+        {
+            m_StaticShadowRevision = m_StaticShadowRevision == uint.MaxValue
+                ? 1u
+                : m_StaticShadowRevision + 1u;
+        }
+
+        private static bool IsStaticShadowCaster(
+            VividPrimitiveFlags flags,
+            VividInstancePassMask passMask)
+        {
+            return (flags & VividPrimitiveFlags.Static) != 0
+                && (passMask & VividInstancePassMask.Shadows) != 0;
         }
 
         private static uint AllocateSceneToken()

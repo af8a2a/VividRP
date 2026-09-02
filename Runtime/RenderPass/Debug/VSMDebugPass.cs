@@ -14,18 +14,29 @@ namespace VividRP.Runtime.RenderPass.Core
         DepthHeatMap = 2,
     }
 
+    public enum VSMDebugPoolMode
+    {
+        Combined = 0,
+        Static = 1,
+        Dynamic = 2,
+    }
+
     public sealed class VSMDebugPass : RasterPass
     {
         internal const string VSMDebugShaderName = "Hidden/VividRP/VSMDebug";
 
-        private static readonly int VSMPrototypePhysicalPageId =
-            Shader.PropertyToID("_VSMPrototypePhysicalPage");
+        private static readonly int VSMPrototypeStaticPhysicalPageId =
+            Shader.PropertyToID("_VSMPrototypeStaticPhysicalPage");
+        private static readonly int VSMPrototypeDynamicPhysicalPageId =
+            Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
         private static readonly int VSMPrototypeAvailableId =
             Shader.PropertyToID("_VSMPrototypeAvailable");
         private static readonly int VSMDebugVisualizationModeId =
             Shader.PropertyToID("_VSMDebugVisualizationMode");
         private static readonly int VSMDebugExposureId =
             Shader.PropertyToID("_VSMDebugExposure");
+        private static readonly int VSMDebugPoolModeId =
+            Shader.PropertyToID("_VSMDebugPoolMode");
 
         [RenderGraphResource(
             Name = "OutputTexture",
@@ -38,11 +49,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private VSMDebugVisualizationMode m_VisualizationMode =
             VSMDebugVisualizationMode.DeviceDepth;
 
+        [SerializeField]
+        private VSMDebugPoolMode m_PoolMode = VSMDebugPoolMode.Combined;
+
         [SerializeField, Range(-16f, 16f)]
         private float m_Exposure;
 
         private Material m_Material;
-        private TextureHandle m_PhysicalPageHandle;
+        private TextureHandle m_StaticPhysicalPageHandle;
+        private TextureHandle m_DynamicPhysicalPageHandle;
         private bool m_PhysicalPageAvailable;
         private bool m_ShouldSkipExecution;
 
@@ -56,6 +71,12 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             get => m_Exposure;
             set => m_Exposure = Mathf.Clamp(value, -16f, 16f);
+        }
+
+        public VSMDebugPoolMode PoolMode
+        {
+            get => m_PoolMode;
+            set => m_PoolMode = NormalizePoolMode(value);
         }
 
         public VSMDebugPass()
@@ -88,7 +109,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            m_PhysicalPageHandle = default;
+            m_StaticPhysicalPageHandle = default;
+            m_DynamicPhysicalPageHandle = default;
             m_PhysicalPageAvailable = false;
 
             var settings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
@@ -98,13 +120,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform()
                 && VirtualShadowMapPrototypeRuntime.EnsurePhysicalPageForBinding())
             {
-                m_PhysicalPageHandle = PassRecorder.ImportTextureForPass(
+                m_StaticPhysicalPageHandle = PassRecorder.ImportTextureForPass(
                     this,
-                    VirtualShadowMapPrototypeRuntime.PhysicalPage,
+                    VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
+                    AccessFlags.Read);
+                m_DynamicPhysicalPageHandle = PassRecorder.ImportTextureForPass(
+                    this,
+                    VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage,
                     AccessFlags.Read);
             }
 
-            m_PhysicalPageAvailable = m_PhysicalPageHandle.IsValid();
+            m_PhysicalPageAvailable = m_StaticPhysicalPageHandle.IsValid()
+                && m_DynamicPhysicalPageHandle.IsValid();
 
             var cameraData = frameData?.GetOrCreate<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
@@ -128,21 +155,37 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            RTHandle physicalPage = VirtualShadowMapPrototypeRuntime.PhysicalPage;
-            Texture physicalPageTexture = physicalPage != null
-                ? physicalPage.ResolveTexture()
+            RTHandle staticPhysicalPage =
+                VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
+            RTHandle dynamicPhysicalPage =
+                VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage;
+            Texture staticPhysicalPageTexture = staticPhysicalPage != null
+                ? staticPhysicalPage.ResolveTexture()
                 : null;
-            bool pageAvailable = m_PhysicalPageAvailable && physicalPageTexture != null;
+            Texture dynamicPhysicalPageTexture = dynamicPhysicalPage != null
+                ? dynamicPhysicalPage.ResolveTexture()
+                : null;
+            bool pageAvailable = m_PhysicalPageAvailable
+                && staticPhysicalPageTexture != null
+                && dynamicPhysicalPageTexture != null;
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(
-                VSMPrototypePhysicalPageId,
-                physicalPageTexture != null ? physicalPageTexture : Texture2D.blackTexture);
+                VSMPrototypeStaticPhysicalPageId,
+                staticPhysicalPageTexture != null
+                    ? staticPhysicalPageTexture
+                    : Texture2D.blackTexture);
+            mpb.SetTexture(
+                VSMPrototypeDynamicPhysicalPageId,
+                dynamicPhysicalPageTexture != null
+                    ? dynamicPhysicalPageTexture
+                    : Texture2D.blackTexture);
             mpb.SetInt(VSMPrototypeAvailableId, pageAvailable ? 1 : 0);
             mpb.SetInt(
                 VSMDebugVisualizationModeId,
                 (int)NormalizeVisualizationMode(m_VisualizationMode));
             mpb.SetFloat(VSMDebugExposureId, Mathf.Clamp(m_Exposure, -16f, 16f));
+            mpb.SetInt(VSMDebugPoolModeId, (int)NormalizePoolMode(m_PoolMode));
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }
@@ -155,7 +198,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Material = null;
             }
 
-            m_PhysicalPageHandle = default;
+            m_StaticPhysicalPageHandle = default;
+            m_DynamicPhysicalPageHandle = default;
             m_PhysicalPageAvailable = false;
             m_ShouldSkipExecution = false;
         }
@@ -169,6 +213,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 VSMDebugVisualizationMode.Occupancy => VSMDebugVisualizationMode.Occupancy,
                 VSMDebugVisualizationMode.DepthHeatMap => VSMDebugVisualizationMode.DepthHeatMap,
                 _ => VSMDebugVisualizationMode.DeviceDepth,
+            };
+        }
+
+        internal static VSMDebugPoolMode NormalizePoolMode(VSMDebugPoolMode mode)
+        {
+            return mode switch
+            {
+                VSMDebugPoolMode.Combined => VSMDebugPoolMode.Combined,
+                VSMDebugPoolMode.Static => VSMDebugPoolMode.Static,
+                VSMDebugPoolMode.Dynamic => VSMDebugPoolMode.Dynamic,
+                _ => VSMDebugPoolMode.Combined,
             };
         }
 

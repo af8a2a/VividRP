@@ -21,10 +21,15 @@ Shader "Hidden/VividRP/VSMDebug"
             #define VIVID_VSM_DEBUG_DEVICE_DEPTH 0
             #define VIVID_VSM_DEBUG_OCCUPANCY 1
             #define VIVID_VSM_DEBUG_DEPTH_HEAT_MAP 2
+            #define VIVID_VSM_DEBUG_POOL_COMBINED 0
+            #define VIVID_VSM_DEBUG_POOL_STATIC 1
+            #define VIVID_VSM_DEBUG_POOL_DYNAMIC 2
 
-            Texture2D<uint> _VSMPrototypePhysicalPage;
+            Texture2D<uint> _VSMPrototypeStaticPhysicalPage;
+            Texture2D<uint> _VSMPrototypeDynamicPhysicalPage;
             int _VSMPrototypeAvailable;
             int _VSMDebugVisualizationMode;
+            int _VSMDebugPoolMode;
             float _VSMDebugExposure;
 
             struct Attributes
@@ -59,12 +64,20 @@ Shader "Hidden/VividRP/VSMDebug"
 
                 uint pageWidth;
                 uint pageHeight;
-                _VSMPrototypePhysicalPage.GetDimensions(pageWidth, pageHeight);
+                _VSMPrototypeStaticPhysicalPage.GetDimensions(pageWidth, pageHeight);
                 uint2 pageSize = max(uint2(pageWidth, pageHeight), 1u);
                 uint2 texel = min(
                     uint2(saturate(input.uv) * pageSize),
                     pageSize - 1u);
-                uint rawDepth = _VSMPrototypePhysicalPage.Load(int3(texel, 0));
+                uint staticRawDepth = _VSMPrototypeStaticPhysicalPage.Load(
+                    int3(texel, 0));
+                uint dynamicRawDepth = _VSMPrototypeDynamicPhysicalPage.Load(
+                    int3(texel, 0));
+                uint rawDepth = _VSMDebugPoolMode == VIVID_VSM_DEBUG_POOL_STATIC
+                    ? staticRawDepth
+                    : (_VSMDebugPoolMode == VIVID_VSM_DEBUG_POOL_DYNAMIC
+                        ? dynamicRawDepth
+                        : max(staticRawDepth, dynamicRawDepth));
 
                 if (_VSMDebugVisualizationMode == VIVID_VSM_DEBUG_OCCUPANCY)
                 {

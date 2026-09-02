@@ -29,6 +29,8 @@ namespace VividRP.Runtime
         public GraphicsBuffer recoveredMeshletIndirectDrawArgsBuffer;
         internal PrimitiveScene.VividPrimitiveDrawSet primitiveDrawSet;
         internal PrimitiveScene.VividPrimitiveDrawSet primitiveShadowDrawSet;
+        internal PrimitiveScene.VividPrimitiveDrawSet staticPrimitiveShadowDrawSet;
+        internal PrimitiveScene.VividPrimitiveDrawSet dynamicPrimitiveShadowDrawSet;
         internal GPUDriven.VividGPUDrivenOcclusionCullingParameters observationRetestParameters;
 
         public override void Reset()
@@ -38,6 +40,8 @@ namespace VividRP.Runtime
             requiresDualSlabSidecar = false;
             primitiveDrawSet = null;
             primitiveShadowDrawSet = null;
+            staticPrimitiveShadowDrawSet = null;
+            dynamicPrimitiveShadowDrawSet = null;
             ResetOcclusion();
         }
 

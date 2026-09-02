@@ -29,6 +29,11 @@ namespace VividRP.Editor.Tests
             {
                 return TryGetFloatParameterValue("m_Exposure", out value);
             }
+
+            internal bool TryGetPoolMode(out VSMDebugPoolMode value)
+            {
+                return TryGetEnumParameterValue("m_PoolMode", out value);
+            }
         }
 
         [Test]
@@ -62,6 +67,11 @@ namespace VividRP.Editor.Tests
                         FieldName = "m_VisualizationMode",
                         Value = (int)VSMDebugVisualizationMode.Occupancy,
                     },
+                    new()
+                    {
+                        FieldName = "m_PoolMode",
+                        Value = (int)VSMDebugPoolMode.Dynamic,
+                    },
                 });
             RenderGraphPassFloatParameterUtility.ApplyFloatParameters(
                 pass,
@@ -76,6 +86,7 @@ namespace VividRP.Editor.Tests
                 });
 
             Assert.That(pass.VisualizationMode, Is.EqualTo(VSMDebugVisualizationMode.Occupancy));
+            Assert.That(pass.PoolMode, Is.EqualTo(VSMDebugPoolMode.Dynamic));
             Assert.That(pass.Exposure, Is.EqualTo(2f));
         }
 
@@ -97,7 +108,9 @@ namespace VividRP.Editor.Tests
             Assert.That(File.Exists(path), Is.True, path);
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("Texture2D<uint> _VSMPrototypePhysicalPage", source);
+            StringAssert.Contains("Texture2D<uint> _VSMPrototypeStaticPhysicalPage", source);
+            StringAssert.Contains("Texture2D<uint> _VSMPrototypeDynamicPhysicalPage", source);
+            StringAssert.Contains("max(staticRawDepth, dynamicRawDepth)", source);
             StringAssert.Contains("asfloat(rawDepth)", source);
             StringAssert.Contains("VIVID_VSM_DEBUG_OCCUPANCY", source);
         }
@@ -114,8 +127,10 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(node.GetOutputPortByName("m_OutputTexture"), Is.Not.Null);
                 Assert.That(node.TryGetVisualizationMode(out var mode), Is.True);
+                Assert.That(node.TryGetPoolMode(out var poolMode), Is.True);
                 Assert.That(node.TryGetExposure(out var exposure), Is.True);
                 Assert.That(mode, Is.EqualTo(VSMDebugVisualizationMode.DeviceDepth));
+                Assert.That(poolMode, Is.EqualTo(VSMDebugPoolMode.Combined));
                 Assert.That(exposure, Is.EqualTo(0f));
             }
             finally
@@ -139,7 +154,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(result.Passes, Has.Count.EqualTo(1));
                 Assert.That(
                     result.Passes[0].EnumParameters.Select(parameter => parameter.FieldName),
-                    Is.EquivalentTo(new[] { "m_VisualizationMode" }));
+                    Is.EquivalentTo(new[] { "m_VisualizationMode", "m_PoolMode" }));
                 Assert.That(
                     result.Passes[0].FloatParameters.Select(parameter => parameter.FieldName),
                     Is.EquivalentTo(new[] { "m_Exposure" }));

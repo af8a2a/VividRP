@@ -45,6 +45,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly VividPrimitiveSceneBufferSet m_PrimitiveSceneBufferSet;
         private readonly VividPrimitiveDrawSetSystem m_PrimitiveDrawSetSystem;
         private readonly VividPrimitiveDrawSetSystem m_ShadowPrimitiveDrawSetSystem;
+        private readonly VividPrimitiveDrawSetSystem m_StaticShadowPrimitiveDrawSetSystem;
+        private readonly VividPrimitiveDrawSetSystem m_DynamicShadowPrimitiveDrawSetSystem;
         private readonly IGPUDrivenTextureBackend m_TextureBackend;
         private readonly BindlessGPUDrivenTextureBackend m_LegacyBindlessBackend;
         private readonly GPUDrivenTextureBackendMode m_TextureBackendMode;
@@ -57,6 +59,7 @@ namespace VividRP.Runtime.GPUDriven
         private int m_ScheduledMainViewFrameIndex = -1;
         private uint m_ScheduledMainViewSceneRevision;
         private uint m_ShadowCacheRevision = 1u;
+        private uint m_StaticShadowCacheRevision = 1u;
         private int m_ShadowCullingContextCount;
         private bool m_IsDisposed;
 
@@ -117,6 +120,8 @@ namespace VividRP.Runtime.GPUDriven
             m_PrimitiveSceneBufferSet = new VividPrimitiveSceneBufferSet();
             m_PrimitiveDrawSetSystem = new VividPrimitiveDrawSetSystem();
             m_ShadowPrimitiveDrawSetSystem = new VividPrimitiveDrawSetSystem();
+            m_StaticShadowPrimitiveDrawSetSystem = new VividPrimitiveDrawSetSystem();
+            m_DynamicShadowPrimitiveDrawSetSystem = new VividPrimitiveDrawSetSystem();
             ForcedMeshLODNodeDepth = VividGPUDrivenCullingContextUtility.DefaultForcedMeshLODNodeDepth;
             MeshLODErrorThreshold = VividGPUDrivenCullingContextUtility.DefaultMeshLODErrorThreshold;
         }
@@ -294,6 +299,8 @@ namespace VividRP.Runtime.GPUDriven
 
         internal uint ShadowCacheRevision => m_ShadowCacheRevision;
 
+        internal uint StaticShadowCacheRevision => m_StaticShadowCacheRevision;
+
         internal bool IsMainViewRendererBatchActive(VividRendererListID batchKey)
         {
             return SceneData.IsMainViewRendererBatchActive(batchKey);
@@ -461,6 +468,8 @@ namespace VividRP.Runtime.GPUDriven
             // must be retired before the adapter can resize or rewrite those arrays.
             m_PrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds();
             m_ShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds();
+            m_StaticShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds();
+            m_DynamicShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds();
             ClearScheduledMainViewDrawSet();
             m_CurrentMainViewDrawSet = null;
 
@@ -500,6 +509,7 @@ namespace VividRP.Runtime.GPUDriven
                     }
                 }
 
+                uint previousStaticShadowRevision = PrimitiveScene.StaticShadowRevision;
                 m_PrimitiveSceneAdapter.Synchronize(
                     PrimitiveScene,
                     VividMeshletRendererDatabase.instance,
@@ -507,6 +517,14 @@ namespace VividRP.Runtime.GPUDriven
                     staticDataChanged,
                     materialDataChanged,
                     Time.frameCount);
+                if (staticDataChanged
+                    || materialDataChanged
+                    || previousStaticShadowRevision != PrimitiveScene.StaticShadowRevision)
+                {
+                    m_StaticShadowCacheRevision = m_StaticShadowCacheRevision == uint.MaxValue
+                        ? 1u
+                        : m_StaticShadowCacheRevision + 1u;
+                }
 
                 m_PrimitiveSceneBufferSet.Upload(PrimitiveScene);
 
@@ -614,7 +632,10 @@ namespace VividRP.Runtime.GPUDriven
         private VividPrimitiveDrawSet ScheduleShadowDrawSet(
             Camera camera,
             VividShadowData shadowData,
-            int frameIndex)
+            int frameIndex,
+            VividPrimitiveDrawSetSystem drawSetSystem,
+            VividPrimitiveFlags requiredPrimitiveFlags,
+            VividPrimitiveFlags excludedPrimitiveFlags)
         {
             if (!PassRecorder.HasCascadedShadowCasterPass
                 || camera == null
@@ -628,7 +649,7 @@ namespace VividRP.Runtime.GPUDriven
             int cascadeCount = Mathf.Min(
                 shadowData.cascadeCount,
                 VividShadowData.MaxCascadeCount);
-            return m_ShadowPrimitiveDrawSetSystem.Schedule(
+            return drawSetSystem.Schedule(
                 camera,
                 shadowData.viewMatrices,
                 shadowData.projMatrices,
@@ -638,7 +659,9 @@ namespace VividRP.Runtime.GPUDriven
                 PrimitiveScene.ActiveCullRecords,
                 PrimitiveScene.DrawSetSources,
                 PrimitiveScene.SceneRevision,
-                ResolveFrameIndex(frameIndex));
+                ResolveFrameIndex(frameIndex),
+                requiredPrimitiveFlags,
+                excludedPrimitiveFlags);
         }
 
         internal VividPrimitiveDrawSet CompleteShadowDrawSet(
@@ -865,6 +888,8 @@ namespace VividRP.Runtime.GPUDriven
             ClearScheduledMainViewDrawSet();
             m_PrimitiveDrawSetSystem.Dispose();
             m_ShadowPrimitiveDrawSetSystem.Dispose();
+            m_StaticShadowPrimitiveDrawSetSystem.Dispose();
+            m_DynamicShadowPrimitiveDrawSetSystem.Dispose();
             VividMeshletRendererDatabase.instance.InvalidatePrimitiveHandles();
             PrimitiveScene.Dispose();
             m_BufferSet.Dispose();
@@ -955,11 +980,31 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
+            VividShadowData shadowData = frameData.GetOrCreate<VividShadowData>();
             VividPrimitiveDrawSet scheduledShadowDrawSet =
                 gpuDrivenSystem.ScheduleShadowDrawSet(
                     camera,
-                    frameData.GetOrCreate<VividShadowData>(),
-                    cameraData.frameIndex);
+                    shadowData,
+                    cameraData.frameIndex,
+                    gpuDrivenSystem.m_ShadowPrimitiveDrawSetSystem,
+                    VividPrimitiveFlags.None,
+                    VividPrimitiveFlags.None);
+            VividPrimitiveDrawSet scheduledStaticShadowDrawSet =
+                gpuDrivenSystem.ScheduleShadowDrawSet(
+                    camera,
+                    shadowData,
+                    cameraData.frameIndex,
+                    gpuDrivenSystem.m_StaticShadowPrimitiveDrawSetSystem,
+                    VividPrimitiveFlags.Static,
+                    VividPrimitiveFlags.None);
+            VividPrimitiveDrawSet scheduledDynamicShadowDrawSet =
+                gpuDrivenSystem.ScheduleShadowDrawSet(
+                    camera,
+                    shadowData,
+                    cameraData.frameIndex,
+                    gpuDrivenSystem.m_DynamicShadowPrimitiveDrawSetSystem,
+                    VividPrimitiveFlags.None,
+                    VividPrimitiveFlags.Static);
 
             if (gpuDrivenSystem.m_TextureBackend is IGPUDrivenTerrainRuntimeVirtualTextureBackend terrainRVTBackend)
             {
@@ -1046,7 +1091,10 @@ namespace VividRP.Runtime.GPUDriven
                     gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer,
                     gpuDrivenSystem.CurrentMainViewDrawSet,
                     scheduledShadowDrawSet,
-                    gpuDrivenSystem.RequiresDualSlabSidecarForMainView());
+                    scheduledStaticShadowDrawSet,
+                    scheduledDynamicShadowDrawSet,
+                    requiresDualSlabSidecar:
+                        gpuDrivenSystem.RequiresDualSlabSidecarForMainView());
                 PassRecorder.SetGPUDrivenOcclusionFrameData(
                     occlusionCullingEnabled,
                     hasOcclusionHistory,

@@ -144,6 +144,53 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FrustumCullJob_SplitsStaticAndDynamicShadowCasters()
+        {
+            using NativeArray<float4> planes = CreateBoxFrustumPlanes(5.0f);
+            using var records = new NativeArray<VividPrimitiveCullRecord>(2, Allocator.TempJob)
+            {
+                [0] = CreateRecord(
+                    CreateHandle(0),
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    passMask: VividInstancePassMask.Shadows),
+                [1] = CreateRecord(
+                    CreateHandle(1),
+                    new float3(-1.0f),
+                    new float3(1.0f),
+                    passMask: VividInstancePassMask.Shadows,
+                    flags: VividPrimitiveFlags.Valid | VividPrimitiveFlags.Static),
+            };
+            using var visibility = new NativeArray<byte>(records.Length, Allocator.TempJob);
+
+            new VividPrimitiveFrustumCullJob
+            {
+                CullingRecords = records,
+                FrustumPlanes = planes,
+                Visibility = visibility,
+                CameraCullingMask = uint.MaxValue,
+                RequiredPassMask = VividInstancePassMask.Shadows,
+                RequiredPrimitiveFlags = VividPrimitiveFlags.Static,
+                FrustumCount = 1,
+            }.Schedule(records.Length, 1).Complete();
+
+            Assert.That(visibility.ToArray(), Is.EqualTo(new byte[] { 0, 1 }));
+
+            new VividPrimitiveFrustumCullJob
+            {
+                CullingRecords = records,
+                FrustumPlanes = planes,
+                Visibility = visibility,
+                CameraCullingMask = uint.MaxValue,
+                RequiredPassMask = VividInstancePassMask.Shadows,
+                ExcludedPrimitiveFlags = VividPrimitiveFlags.Static,
+                FrustumCount = 1,
+            }.Schedule(records.Length, 1).Complete();
+
+            Assert.That(visibility.ToArray(), Is.EqualTo(new byte[] { 1, 0 }));
+        }
+
+        [Test]
         public void ShadowDrawSet_UnionsCascadeFrusta()
         {
             var cameraObject = new GameObject("Shadow Primitive DrawSet Camera");

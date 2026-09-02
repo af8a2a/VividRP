@@ -432,12 +432,19 @@ namespace VividRP.Editor.Tests
                 "m_PrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
             int invalidateShadowBuilds = prepareFrame.IndexOf(
                 "m_ShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int invalidateStaticShadowBuilds = prepareFrame.IndexOf(
+                "m_StaticShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int invalidateDynamicShadowBuilds = prepareFrame.IndexOf(
+                "m_DynamicShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
             int synchronizeScene = prepareFrame.IndexOf("m_PrimitiveSceneAdapter.Synchronize(");
 
             Assert.That(invalidateBuilds, Is.GreaterThanOrEqualTo(0));
             Assert.That(invalidateShadowBuilds, Is.GreaterThan(invalidateBuilds));
+            Assert.That(invalidateStaticShadowBuilds, Is.GreaterThan(invalidateShadowBuilds));
+            Assert.That(invalidateDynamicShadowBuilds, Is.GreaterThan(invalidateStaticShadowBuilds));
             Assert.That(synchronizeScene, Is.GreaterThan(invalidateBuilds));
             Assert.That(synchronizeScene, Is.GreaterThan(invalidateShadowBuilds));
+            Assert.That(synchronizeScene, Is.GreaterThan(invalidateDynamicShadowBuilds));
         }
 
         [Test]
@@ -459,7 +466,9 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("shadowData.projMatrices", schedule);
             StringAssert.Contains("VividInstancePassMask.Shadows", schedule);
             StringAssert.Contains("cullAgainstNearPlane: false", schedule);
-            StringAssert.Contains("m_ShadowPrimitiveDrawSetSystem.Schedule(", schedule);
+            StringAssert.Contains("drawSetSystem.Schedule(", schedule);
+            StringAssert.Contains("requiredPrimitiveFlags", schedule);
+            StringAssert.Contains("excludedPrimitiveFlags", schedule);
             StringAssert.DoesNotContain("CompleteScheduledBuild", schedule);
         }
 
@@ -672,7 +681,8 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain(
                 "GraphicsFormatUsage.Sample | GraphicsFormatUsage.LoadStore",
                 passSource);
-            StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, physicalPage)", passSource);
+            StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, staticPhysicalPage)", passSource);
+            StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, dynamicPhysicalPage)", passSource);
             StringAssert.Contains("nativeCmd.SetBufferData(", passSource);
             StringAssert.Contains("BuildFullyResidentPageTable(", passSource);
             StringAssert.Contains("TextureDimension.Tex2DArray", passSource);
@@ -719,18 +729,21 @@ namespace VividRP.Editor.Tests
                     supportedUnityCasterSources[shaderIndex]);
             }
             StringAssert.Contains("AccessFlags.Read", resolvePassSource);
-            StringAssert.Contains("Texture2D<uint> _VSMPrototypePhysicalPage", resolveSource);
+            StringAssert.Contains("Texture2D<uint> _VSMPrototypeStaticPhysicalPage", resolveSource);
+            StringAssert.Contains("Texture2D<uint> _VSMPrototypeDynamicPhysicalPage", resolveSource);
+            StringAssert.Contains("max(staticRawDepth, dynamicRawDepth)", resolveSource);
             StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", resolveSource);
             StringAssert.Contains("TryResolveVSMPhysicalTexel(", resolveSource);
             StringAssert.Contains("return SampleCSMShadowMap(shadowUV, receiverDepth, cascadeIndex)", resolveSource);
             StringAssert.Contains("asfloat(", resolveSource);
             StringAssert.Contains("UseVirtualShadowMapPrototype(cascadeIndex)", resolveSource);
             StringAssert.Contains("EnsurePhysicalPageForBinding()", resolvePassSource);
-            StringAssert.Contains("virtualShadowMapPage", resolvePassSource);
+            StringAssert.Contains("staticVirtualShadowMapPage", resolvePassSource);
+            StringAssert.Contains("dynamicVirtualShadowMapPage", resolvePassSource);
         }
 
         [Test]
-        public void VirtualShadowMapPrototype_CachesStablePagesAndFallsBackUntilRefreshCompletes()
+        public void VirtualShadowMapPrototype_CachesStaticPoolAndRefreshesDynamicPool()
         {
             string passSource = ReadRuntimeSource(
                 "Runtime",
@@ -742,16 +755,29 @@ namespace VividRP.Editor.Tests
                 "RenderPass",
                 "Core",
                 "CSMShadowResolvePass.cs");
+            string gpuDrivenSystemSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string drawSetJobSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "PrimitiveScene",
+                "VividPrimitiveDrawSetJobs.cs");
 
             StringAssert.Contains("VirtualShadowMapPrototypeCacheKey", passSource);
-            StringAssert.Contains("rendererDatabase.InstanceRevision", passSource);
-            StringAssert.Contains("gpuDrivenSystem.ShadowCacheRevision", passSource);
+            StringAssert.Contains("gpuDrivenSystem.StaticShadowCacheRevision", passSource);
             StringAssert.Contains("gpuDrivenSystem.TextureBindingRevision", passSource);
-            StringAssert.Contains("RequiresCacheRefresh(", passSource);
-            StringAssert.Contains("TryUseCachedPages(", passSource);
-            StringAssert.Contains("CommitCache(", passSource);
-            StringAssert.DoesNotContain("if (!canDrawMeshlets || !virtualTextureReady || system == null)", passSource);
-            StringAssert.Contains("m_VirtualShadowMapPrototypeNeedsCacheRefresh = m_HasUnityShadowCasters", passSource);
+            StringAssert.Contains("RequiresStaticCacheRefresh(", passSource);
+            StringAssert.Contains("TryUseCachedStaticPages(", passSource);
+            StringAssert.Contains("CommitStaticCache(", passSource);
+            StringAssert.Contains("MarkDynamicPoolRefreshed()", passSource);
+            StringAssert.Contains("m_StaticPrimitiveShadowDrawSet", passSource);
+            StringAssert.Contains("m_DynamicPrimitiveShadowDrawSet", passSource);
+            StringAssert.Contains("VividPrimitiveFlags.Static", gpuDrivenSystemSource);
+            StringAssert.Contains("RequiredPrimitiveFlags", drawSetJobSource);
+            StringAssert.Contains("ExcludedPrimitiveFlags", drawSetJobSource);
             StringAssert.Contains("AccessFlags.ReadWrite", passSource);
             StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFramePrepared", resolvePassSource);
             StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFrameActive", resolvePassSource);

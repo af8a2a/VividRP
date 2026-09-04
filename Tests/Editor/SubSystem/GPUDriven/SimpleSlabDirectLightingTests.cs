@@ -75,8 +75,10 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(3));
             StringAssert.DoesNotContain("EvaluateBSDF_Directional(", source);
             StringAssert.DoesNotContain("EvaluateBSDF_Punctual(", source);
-            StringAssert.Contains("EvaluateBSDF_Area(", source);
-            StringAssert.Contains("EvaluateBSDF_Env(", source);
+            StringAssert.DoesNotContain("EvaluateBSDF_Area(", source);
+            StringAssert.DoesNotContain("EvaluateBSDF_Env(", source);
+            Assert.That(CountOccurrences(source, "VividEvaluateSimpleSlabAreaLight("), Is.EqualTo(3));
+            Assert.That(CountOccurrences(source, "VividEvaluateSimpleSlabIndirectLighting("), Is.EqualTo(3));
             StringAssert.Contains(
                 "return VividComposeSimpleSlabDeferredLighting(directLighting, indirectLighting, preLight.energy);",
                 source);

@@ -92,8 +92,7 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_ScreenSpaceReflectionTexture", 511, 257);
             AssertTextureSize(pass, "m_ColorTexture", 511, 257);
             AssertTextureSize(pass, "m_DebugTexture", 511, 257);
-            AssertTextureSize(pass, "m_PreIntegratedFGDGGXDisneyDiffuseTexture", 64, 64);
-            AssertTextureSize(pass, "m_PreIntegratedFGDCharlieAndFabricTexture", 64, 64);
+            AssertTextureSize(pass, "m_SlabLutTexture", VividSlabLut.Resolution, VividSlabLut.Resolution);
 
             Assert.That(GetFieldValue<int>(pass, "m_LightingWidth"), Is.EqualTo(511));
             Assert.That(GetFieldValue<int>(pass, "m_LightingHeight"), Is.EqualTo(257));
@@ -592,6 +591,29 @@ namespace VividRP.Editor.Tests
             }
         }
 
+
+        [Test]
+        public void StablePrepare_ReusesNativeSlabLutDescriptorWithoutManagedAllocations()
+        {
+            var pass = new DeferredLightingPass();
+            using var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 256;
+            cameraData.actualHeight = 144;
+            frameData.GetOrCreate<VividPreIntegratedFGDData>();
+            for (int i = 0; i < 32; ++i) pass.Prepare(frameData);
+            var lut = GetFieldValue<RenderGraphTexture>(pass, "m_SlabLutTexture");
+            long before = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; ++i) pass.Prepare(frameData);
+            long allocated = global::System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            Assert.That(GetFieldValue<RenderGraphTexture>(pass, "m_SlabLutTexture"), Is.SameAs(lut));
+            Assert.That(typeof(DeferredLightingPass).GetField("m_PreIntegratedFGDGGXDisneyDiffuseTexture",
+                BindingFlags.Instance | BindingFlags.NonPublic), Is.Null);
+            Assert.That(typeof(DeferredLightingPass).GetField("m_PreIntegratedFGDCharlieAndFabricTexture",
+                BindingFlags.Instance | BindingFlags.NonPublic), Is.Null);
+            pass.Dispose();
+        }
 
         private static void AssertTextureSize(DeferredLightingPass pass, string fieldName, int expectedWidth, int expectedHeight)
         {

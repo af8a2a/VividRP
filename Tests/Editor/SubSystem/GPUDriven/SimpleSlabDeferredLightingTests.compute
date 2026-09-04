@@ -12,6 +12,8 @@ RWTexture2D<float4> _TestGBuffer2;
 RWTexture2D<float4> _TestGBuffer3;
 RWTexture2D<float4> _TestGBuffer4;
 RWTexture2D<float> _TestDepth;
+RWTexture2D<float4> _TestLayerAux0;
+RWTexture2D<float4> _TestLayerAux1;
 RWStructuredBuffer<float4> _Expected;
 float _TestSSRWeight;
 float _TestExposure;
@@ -19,11 +21,14 @@ uint _TestLutReady;
 uint _TestMixedTile;
 uint _TestEnvironment;
 uint _TestSSREnabled;
+uint _TestDualMode;
+float _TestLayerWeight;
 
 // The fixture's mip levels are constant-colored, so expected filtering and
 // hierarchy arithmetic need not call production sky/probe sampling helpers.
 float3 ReferenceEnvironment(float roughness, float3 direction)
 {
+    if (_TestEnvironment == 6u) return 1;
     float mip = roughness * (1.7f - 0.7f * roughness);
     float3 sky = float3(0.2f, 0.4f, 0.6f);
     if (_TestEnvironment != 0u) sky = lerp(sky, float3(0.7f, 0.15f, 0.05f), mip);
@@ -109,8 +114,11 @@ VividSurfaceSummaryData TestSummary(uint column)
     summary.diffuseIrradiance = float3(0.3f, 0.2f, 0.1f);
     uint exportClass = column == 4u ? VIVID_DEFERRED_EXPORT_CLASS_UNLIT
         : (column == 5u && _TestMixedTile != 0u ? VIVID_DEFERRED_EXPORT_CLASS_ERROR : VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB);
+    if (_TestDualMode != 0u && _TestLayerWeight > 0 && column != 3u
+        && exportClass == VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB)
+        exportClass = VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB;
     summary.deferredExportHeader = VividBuildDeferredExportHeader(exportClass,
-        false, true, column != 1u && column != 6u, false);
+        _TestDualMode == 2u, true, column != 1u && column != 6u, false);
     if (column == 2u)
     {
         summary.diffuseAlbedo = 0;
@@ -118,7 +126,38 @@ VividSurfaceSummaryData TestSummary(uint column)
         summary.perceptualRoughness = 0.85f;
     }
     if (column == 3u) summary.specularF0 = 0.01f;
+    if (_TestEnvironment == 6u)
+    {
+        summary.emissive = 0;
+        summary.diffuseIrradiance = 1;
+        if (column == 0u) summary.diffuseAlbedo = 1;
+    }
     return summary;
+}
+
+VividDualSlabLayerData TestTopLayer(uint column)
+{
+    VividDualSlabLayerData top;
+    top.diffuseAlbedo = column == 5u ? 0.02f : float3(0.12f, 0.22f, 0.08f);
+    top.specularF0 = 0.04f;
+    top.perceptualRoughness = 0.18f;
+    top.layerWeight = _TestLayerWeight;
+    if (column == 2u)
+    {
+        top.diffuseAlbedo = 0;
+        top.specularF0 = float3(0.95f, 0.64f, 0.54f);
+        top.perceptualRoughness = 0.87f;
+    }
+    if (column == 6u) { top.diffuseAlbedo = 0; top.specularF0 = 0; }
+    return top;
+}
+
+// Known opacity of the fixture's StandardLit-compatible top layers. The black
+// D=F0=0 case retains ABI v1's opaque-metal interpretation; do not duplicate the
+// production metallic-recovery quadratic in the oracle.
+float ReferenceTopOpacity(uint column)
+{
+    return column == 2u || column == 6u ? 1.0f : (column == 5u ? 0.02f : 0.22f);
 }
 
 [numthreads(8, 8, 1)]
@@ -131,6 +170,49 @@ void PrepareInputs(uint3 id : SV_DispatchThreadID)
     _TestGBuffer3[id.xy] = packed.rt3;
     _TestGBuffer4[id.xy] = packed.rt4;
     _TestDepth[id.xy] = id.x == 7u ? UNITY_RAW_FAR_CLIP_VALUE : 0.5f;
+    VividDualSlabLayerData top = TestTopLayer(id.x);
+    _TestLayerAux0[id.xy] = _TestDualMode == 3u ? 0.0f : VividPackDualSlabLayerAux0(top);
+    _TestLayerAux1[id.xy] = VividPackDualSlabLayerAux1(top);
+}
+
+float3 ReferenceSlabLighting(VividSurfaceSummaryData summary, float3 view, float3 position,
+    float3 directionalWeight, float3 punctualWeight, float3 environmentWeight)
+{
+    VividSimpleSlabData slab;
+    slab.diffuseAlbedo = summary.diffuseAlbedo;
+    slab.specularF0 = summary.specularF0;
+    slab.perceptualRoughness = summary.perceptualRoughness;
+    slab.normalWS = summary.normalWS;
+    VividSimpleSlabEnergy energy = VividLoadSimpleSlabEnergy(slab, view);
+    float4 lut = VividSampleSlabLut(dot(slab.normalWS, view), slab.perceptualRoughness);
+    float2 directional = VividSlabNormalizeAlbedoBasis(lut.xy);
+    float2 average = VividSlabNormalizeAlbedoBasis(lut.zw);
+    float f90 = saturate(50.0f * dot(slab.specularF0, 1.0f / 3.0f));
+    float3 averageFresnel = slab.specularF0 + (f90 - slab.specularF0) / 21.0f;
+    float3 singleScatter = slab.specularF0 * (1 - directional.x - directional.y) + f90 * directional.x;
+    float3 multipleScatter = averageFresnel * averageFresnel * (1 - average.y)
+        / max(1 - averageFresnel * average.y, 1e-6f) * directional.y;
+    float3 direct = 0;
+    if (_DirectionalLightCount > 0u)
+    {
+        VividSimpleSlabDirectLighting light = VividEvaluateSimpleSlabDirectionalLight(
+            slab, energy, view, GetDirectionalLight(0), 0.25f);
+        direct += (light.diffuse + light.specular) * directionalWeight;
+        light = VividEvaluateSimpleSlabPunctualLight(slab, energy, position, view, GetPunctualLight(0));
+        direct += (light.diffuse + light.specular) * punctualWeight;
+
+        direct += ReferenceArea(slab, energy, position, view, singleScatter, multipleScatter) * environmentWeight;
+    }
+    float ao = summary.ambientOcclusion * 0.5f; // material AO times GTAO, once
+    float ssr = _TestSSREnabled != 0u && VividHasDeferredExportFlag(summary.deferredExportHeader,
+        VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_SSR) ? _TestSSRWeight : 0.0f;
+    float3 reflection = GetSpecularDominantDir(slab.normalWS, reflect(-view, slab.normalWS),
+        slab.perceptualRoughness, dot(slab.normalWS, view));
+    return direct + environmentWeight * (
+          summary.diffuseIrradiance * slab.diffuseAlbedo * energy.diffuseTransmission * ao
+        + ReferenceEnvironment(slab.perceptualRoughness, reflection) * singleScatter * ao * (1.0f - ssr)
+        + ReferenceEnvironment(1.0f, slab.normalWS) * multipleScatter * ao
+        + float3(0.8f, 0.1f, 0.3f) * singleScatter * ssr);
 }
 
 [numthreads(8, 8, 1)]
@@ -139,50 +221,49 @@ void ReferenceLighting(uint3 id : SV_DispatchThreadID)
     VividSurfaceSummaryGBufferOutput packed = VividPackSurfaceSummaryGBuffer(TestSummary(id.x));
     VividSurfaceSummaryData summary = VividUnpackSurfaceSummaryGBuffer(
         packed.rt0, packed.rt1, packed.rt2, packed.rt3, packed.rt4);
+    uint exportClass = VividGetDeferredExportClass(summary.deferredExportHeader);
+    bool dual = exportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB;
     float3 expected;
-    float3 sky = float3(0.2f, 0.4f, 0.6f);
-    if (id.x == 7u) expected = sky;
-    else if ((id.x == 5u && _TestMixedTile != 0u) || (_TestLutReady == 0u && id.x != 4u)) expected = float3(1, 0, 1);
+    if (id.x == 7u) expected = _TestEnvironment == 6u ? 1 : float3(0.2f, 0.4f, 0.6f);
+    else if (exportClass == VIVID_DEFERRED_EXPORT_CLASS_ERROR
+        || (_TestLutReady == 0u && id.x != 4u) || (dual && _TestDualMode == 3u))
+        expected = float3(1, 0, 1);
     else if (id.x == 4u) expected = summary.emissive;
     else
     {
-        VividSimpleSlabData slab;
-        slab.diffuseAlbedo = summary.diffuseAlbedo;
-        slab.specularF0 = summary.specularF0;
-        slab.perceptualRoughness = summary.perceptualRoughness;
-        slab.normalWS = summary.normalWS;
         float3 view = _TestEnvironment == 5u ? float3(0.8f, 0, 0.6f) : float3(0, 0, 1);
         float3 position = ComputeWorldSpacePosition((id.xy + 0.5f) / 8.0f, 0.5f, UNITY_MATRIX_I_VP);
-        VividSimpleSlabEnergy energy = VividLoadSimpleSlabEnergy(slab, view);
-        float4 lut = VividSampleSlabLut(dot(slab.normalWS, view), slab.perceptualRoughness);
-        float2 directional = VividSlabNormalizeAlbedoBasis(lut.xy);
-        float2 average = VividSlabNormalizeAlbedoBasis(lut.zw);
-        float f90 = saturate(50.0f * dot(slab.specularF0, 1.0f / 3.0f));
-        float3 averageFresnel = slab.specularF0 + (f90 - slab.specularF0) / 21.0f;
-        float3 singleScatter = slab.specularF0 * (1 - directional.x - directional.y) + f90 * directional.x;
-        float3 multipleScatter = averageFresnel * averageFresnel * (1 - average.y)
-            / max(1 - averageFresnel * average.y, 1e-6f) * directional.y;
-        float3 direct = 0;
-        if (_DirectionalLightCount > 0u)
+        expected = summary.emissive;
+        if (!dual)
+            expected += ReferenceSlabLighting(summary, view, position, 1, 1, 1);
+        else
         {
-            VividSimpleSlabDirectLighting light = VividEvaluateSimpleSlabDirectionalLight(
-                slab, energy, view, GetDirectionalLight(0), 0.25f);
-            direct += light.diffuse + light.specular;
-            light = VividEvaluateSimpleSlabPunctualLight(slab, energy, position, view, GetPunctualLight(0));
-            direct += light.diffuse + light.specular;
-
-            direct += ReferenceArea(slab, energy, position, view, singleScatter, multipleScatter);
+            VividDualSlabLayerData top = TestTopLayer(id.x);
+            top = VividUnpackDualSlabLayerSidecar(VividPackDualSlabLayerAux0(top), VividPackDualSlabLayerAux1(top));
+            VividSurfaceSummaryData topSummary = summary;
+            topSummary.diffuseAlbedo = top.diffuseAlbedo;
+            topSummary.specularF0 = top.specularF0;
+            topSummary.perceptualRoughness = top.perceptualRoughness;
+            float w = top.layerWeight;
+            float3 environmentWeight = 1 - w;
+            float3 directionalWeight = 1 - w;
+            float3 punctualWeight = 1 - w;
+            if (_TestDualMode == 2u)
+            {
+                float opacity = ReferenceTopOpacity(id.x);
+                float3 viewF = VividSimpleSlabEvaluateSchlickFresnel(top.specularF0, dot(summary.normalWS, view));
+                float3 dirF = VividSimpleSlabEvaluateSchlickFresnel(top.specularF0, summary.normalWS.z);
+                float3 punctualDirection = normalize(float3(0, 0, 3) - position);
+                float3 punctualF = VividSimpleSlabEvaluateSchlickFresnel(top.specularF0, dot(summary.normalWS, punctualDirection));
+                directionalWeight += w * (1 - viewF) * (1 - dirF) * (1 - opacity);
+                punctualWeight += w * (1 - viewF) * (1 - punctualF) * (1 - opacity);
+                VividSimpleSlabEnergy energy = VividPrepareSimpleSlabEnergy(top.specularF0,
+                    VividSampleSlabLut(dot(summary.normalWS, view), top.perceptualRoughness));
+                environmentWeight += w * (1 - energy.specularAlbedo) * (1 - opacity);
+            }
+            expected += ReferenceSlabLighting(summary, view, position, directionalWeight, punctualWeight, environmentWeight)
+                + ReferenceSlabLighting(topSummary, view, position, w, w, w);
         }
-        float ao = summary.ambientOcclusion * 0.5f; // material AO times GTAO, once
-        float ssr = _TestSSREnabled != 0u && VividHasDeferredExportFlag(summary.deferredExportHeader,
-            VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_SSR) ? _TestSSRWeight : 0.0f;
-        float3 reflection = GetSpecularDominantDir(slab.normalWS, reflect(-view, slab.normalWS),
-            slab.perceptualRoughness, dot(slab.normalWS, view));
-        expected = summary.emissive + direct
-            + summary.diffuseIrradiance * slab.diffuseAlbedo * energy.diffuseTransmission * ao
-            + ReferenceEnvironment(slab.perceptualRoughness, reflection) * singleScatter * ao * (1.0f - ssr)
-            + ReferenceEnvironment(1.0f, slab.normalWS) * multipleScatter * ao
-            + float3(0.8f, 0.1f, 0.3f) * singleScatter * ssr;
     }
     _Expected[id.y * 8u + id.x] = float4(expected * _TestExposure, 1);
 }

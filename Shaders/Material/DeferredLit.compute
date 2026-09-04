@@ -8,11 +8,9 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
 #define CLASSIFY_TILE_SIZE 8
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/HdrpLitLighting.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSimpleSlabDirectLighting.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSimpleSlabDeferredLighting.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LightingLoop.hlsl"
@@ -77,54 +75,6 @@ bool TryLoadVividDualSlabLayerData(
     return VividIsDualSlabLayerSidecarValid(layerAux0);
 }
 
-VividGBufferSurfaceData BuildLegacyDualSlabLightingSurfaceData(
-    VividSurfaceSummaryData summary)
-{
-    VividGBufferSurfaceData surfaceData = (VividGBufferSurfaceData)0;
-    surfaceData.normalWS = summary.normalWS;
-    surfaceData.linearRoughness =
-        summary.perceptualRoughness * summary.perceptualRoughness;
-    surfaceData.ambientOcclusion = summary.ambientOcclusion;
-    surfaceData.materialFeatures = VIVID_MATERIALFEATURE_LIT;
-    if (VividHasDeferredExportFlag(
-            summary.deferredExportHeader,
-            VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_SSR))
-    {
-        surfaceData.materialFeatures |= VIVID_MATERIALFEATURE_SSR_RECEIVE;
-    }
-    if (VividHasDeferredExportFlag(
-            summary.deferredExportHeader,
-            VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_DECALS))
-    {
-        surfaceData.materialFeatures |= VIVID_MATERIALFEATURE_DECAL_RECEIVE;
-    }
-    surfaceData.emissive = summary.emissive;
-    surfaceData.builtinData = CreateVividBuiltinData(
-        summary.diffuseIrradiance,
-        VividHasDeferredExportFlag(
-            summary.deferredExportHeader,
-            VIVID_DEFERRED_EXPORT_FLAG_HAS_DIFFUSE_IRRADIANCE)
-                ? 1.0
-                : 0.0,
-        0.0,
-        1.0);
-    return surfaceData;
-}
-
-VividLitBSDFData BuildLegacyDualSlabBSDFData(VividSurfaceSummaryData summary)
-{
-    VividLitBSDFData bsdfData = (VividLitBSDFData)0;
-    bsdfData.diffuseColor = summary.diffuseAlbedo;
-    bsdfData.fresnel0 = summary.specularF0;
-    bsdfData.fresnel90 = 1.0;
-    bsdfData.perceptualRoughness = summary.perceptualRoughness;
-    bsdfData.roughness = ClampRoughnessForAnalyticalLights(
-        summary.perceptualRoughness * summary.perceptualRoughness);
-    bsdfData.coatMask = 0.0;
-    bsdfData.coatRoughness = kVividClearCoatRoughness;
-    return bsdfData;
-}
-
 VividSimpleSlabData BuildVividSimpleSlabData(
     VividSurfaceSummaryData summary)
 {
@@ -134,20 +84,6 @@ VividSimpleSlabData BuildVividSimpleSlabData(
     slab.perceptualRoughness = summary.perceptualRoughness;
     slab.normalWS = summary.normalWS;
     return slab;
-}
-
-// Retain the environment/LTC sampling infrastructure, not Disney diffuse or
-// HDRP specular compensation. Both lobes now share the Slab energy budget.
-void ApplyVividSlabEnergyToLegacyPreLight(
-    VividSimpleSlabEnergy energy,
-    inout VividLitBSDFData bsdfData,
-    inout VividPreLightData preLightData)
-{
-    bsdfData.diffuseColor *= energy.diffuseTransmission;
-    preLightData.specularFGD = energy.specularAlbedo;
-    preLightData.diffuseFGD = 1.0f;
-    preLightData.energyCompensation = 0.0f;
-    preLightData.ltcTransformDiffuse = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
 }
 
 float SampleDirectionalShadow(uint2 pixelCoord)
@@ -187,71 +123,6 @@ float EvaluateDeferredDirectionalShadowAttenuation(
 
     float directionalShadow = saturate(SampleDirectionalShadow(pixelCoord));
     return lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength));
-}
-
-VividIndirectLighting EvaluateDeferredReflectionProbeIndirectLighting(
-    VividLightingLoopContext lightLoop,
-    VividIndirectLighting indirectLighting,
-    VividGBufferSurfaceData surfaceData,
-    VividLitBSDFData bsdfData,
-    VividPreLightData preLightData,
-    float3 positionWS,
-    float3 viewDirectionWS)
-{
-    float3 probeDirectionWS;
-    float probePerceptualRoughness;
-    GetVividReflectionProbeSampleInputs(
-        surfaceData,
-        preLightData,
-        viewDirectionWS,
-        probeDirectionWS,
-        probePerceptualRoughness);
-
-    float3 weightedProbeRadiance;
-    float reflectionProbeWeight;
-    if (!VividLightingLoop::TryEvaluateReflectionProbes(
-            lightLoop,
-            positionWS,
-            surfaceData.normalWS,
-            probeDirectionWS,
-            probePerceptualRoughness,
-            weightedProbeRadiance,
-            reflectionProbeWeight))
-    {
-        return indirectLighting;
-    }
-
-    float3 weightedCoatProbeRadiance = 0.0;
-    if (NeedsVividClearCoatReflectionProbeSample(bsdfData))
-    {
-        float3 coatProbeDirectionWS;
-        float coatProbePerceptualRoughness;
-        float coatProbeWeight;
-        GetVividClearCoatReflectionProbeSampleInputs(
-            surfaceData,
-            bsdfData,
-            preLightData,
-            coatProbeDirectionWS,
-            coatProbePerceptualRoughness);
-        VividLightingLoop::TryEvaluateReflectionProbes(
-            lightLoop,
-            positionWS,
-            surfaceData.normalWS,
-            coatProbeDirectionWS,
-            coatProbePerceptualRoughness,
-            weightedCoatProbeRadiance,
-            coatProbeWeight);
-    }
-
-    return ApplyVividReflectionProbeSpecularLighting(
-        indirectLighting,
-        weightedProbeRadiance,
-        reflectionProbeWeight,
-        weightedCoatProbeRadiance,
-        surfaceData,
-        bsdfData,
-        preLightData,
-        viewDirectionWS);
 }
 
 VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
@@ -297,24 +168,6 @@ VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
     }
 
     return VividComposeSimpleSlabDeferredLighting(directLighting, indirectLighting, preLight.energy);
-}
-
-VividDirectLighting ScaleVividDeferredDirectLighting(
-    VividDirectLighting lighting,
-    float3 weight)
-{
-    lighting.diffuse *= weight;
-    lighting.specular *= weight;
-    return lighting;
-}
-
-VividIndirectLighting ScaleVividDeferredIndirectLighting(
-    VividIndirectLighting lighting,
-    float3 weight)
-{
-    lighting.diffuse *= weight;
-    lighting.specularReflected *= weight;
-    return lighting;
 }
 
 float3 VividDeferredFresnelSchlick(float3 specularF0, float cosTheta)
@@ -389,9 +242,9 @@ float3 VividDeferredVerticalDirectionalTransmittance(
 
 float3 VividDeferredVerticalEnvironmentTransmittance(
     VividDualSlabLayerData topLayer,
-    VividPreLightData topPreLightData)
+    VividSimpleSlabEnergy topEnergy)
 {
-    return saturate(1.0 - topPreLightData.specularFGD)
+    return topEnergy.diffuseTransmission
         * (1.0 - VividDeferredTopLayerOpacity(topLayer));
 }
 
@@ -407,102 +260,40 @@ VividSurfaceSummaryData BuildVividDualSlabTopSummary(
     return topSummary;
 }
 
-VividLightLoopOutput EvaluateDeferredDualSlabLighting(
+VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     VividSurfaceSummaryData baseSummary,
     VividDualSlabLayerData topLayer,
     uint2 pixelCoord,
-    float3 positionWS,
-    out float3 indirectDiffuseLighting,
-    out float3 indirectSpecularLighting,
-    out float3 screenSpaceReflectionFGD)
+    float3 positionWS)
 {
     float layerWeight = saturate(topLayer.layerWeight);
     bool isVerticalLayer = VividHasDeferredExportFlag(
         baseSummary.deferredExportHeader,
         VIVID_DEFERRED_EXPORT_FLAG_VERTICAL_LAYER);
-    baseSummary.emissive = 0.0;
-    VividSurfaceSummaryData topSummary = BuildVividDualSlabTopSummary(
-        baseSummary,
-        topLayer);
-
-    VividGBufferSurfaceData baseSurfaceData =
-        BuildLegacyDualSlabLightingSurfaceData(baseSummary);
-    VividGBufferSurfaceData topSurfaceData =
-        BuildLegacyDualSlabLightingSurfaceData(topSummary);
-    VividLitBSDFData baseBSDFData = BuildLegacyDualSlabBSDFData(baseSummary);
-    VividLitBSDFData topBSDFData = BuildLegacyDualSlabBSDFData(topSummary);
-    VividSimpleSlabData baseSimpleSlab =
-        BuildVividSimpleSlabData(baseSummary);
-    VividSimpleSlabData topSimpleSlab =
-        BuildVividSimpleSlabData(topSummary);
+    VividSurfaceSummaryData topSummary = BuildVividDualSlabTopSummary(baseSummary, topLayer);
+    VividSimpleSlabData baseSimpleSlab = BuildVividSimpleSlabData(baseSummary);
+    VividSimpleSlabData topSimpleSlab = BuildVividSimpleSlabData(topSummary);
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
-    VividPreLightData basePreLightData = GetVividPreLightData(
-        viewDirectionWS,
-        baseSurfaceData,
-        baseBSDFData);
-    VividPreLightData topPreLightData = GetVividPreLightData(
-        viewDirectionWS,
-        topSurfaceData,
-        topBSDFData);
-    VividSimpleSlabEnergy baseEnergy = VividLoadSimpleSlabEnergy(baseSimpleSlab, viewDirectionWS);
-    VividSimpleSlabEnergy topEnergy = VividLoadSimpleSlabEnergy(topSimpleSlab, viewDirectionWS);
-    ApplyVividSlabEnergyToLegacyPreLight(baseEnergy, baseBSDFData, basePreLightData);
-    ApplyVividSlabEnergyToLegacyPreLight(topEnergy, topBSDFData, topPreLightData);
-    VividAggregateLighting baseAggregateLighting = (VividAggregateLighting)0;
-    VividAggregateLighting topAggregateLighting = (VividAggregateLighting)0;
-    VividSimpleSlabDirectLighting baseSimpleDirectLighting =
-        VividCreateEmptySimpleSlabDirectLighting();
-    VividSimpleSlabDirectLighting topSimpleDirectLighting =
-        VividCreateEmptySimpleSlabDirectLighting();
-    VividLightingLoopContext lightLoop = VividLightingLoop::Create(
-        pixelCoord,
-        positionWS);
+    VividSimpleSlabPreLightData basePreLightData =
+        VividPrepareSimpleSlabDeferredLighting(baseSimpleSlab, viewDirectionWS);
+    VividSimpleSlabPreLightData topPreLightData =
+        VividPrepareSimpleSlabDeferredLighting(topSimpleSlab, viewDirectionWS);
+    VividSimpleSlabEnergy baseEnergy = basePreLightData.energy;
+    VividSimpleSlabEnergy topEnergy = topPreLightData.energy;
+    VividSimpleSlabDirectLighting baseSimpleDirectLighting = VividCreateEmptySimpleSlabDirectLighting();
+    VividSimpleSlabDirectLighting topSimpleDirectLighting = VividCreateEmptySimpleSlabDirectLighting();
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
 
     float3 topWeight = layerWeight.xxx;
     float3 environmentTransmittance =
-        VividDeferredVerticalEnvironmentTransmittance(
-            topLayer,
-            topPreLightData);
+        VividDeferredVerticalEnvironmentTransmittance(topLayer, topEnergy);
     float3 baseEnvironmentWeight = isVerticalLayer
         ? lerp(1.0.xxx, environmentTransmittance, layerWeight)
         : (1.0 - layerWeight).xxx;
-
-    VividIndirectLighting baseIndirectLighting =
-        EvaluateDeferredReflectionProbeIndirectLighting(
-            lightLoop,
-            EvaluateBSDF_Env(
-                positionWS,
-                viewDirectionWS,
-                basePreLightData,
-                baseSurfaceData,
-                baseBSDFData),
-            baseSurfaceData,
-            baseBSDFData,
-            basePreLightData,
-            positionWS,
-            viewDirectionWS);
-    VividIndirectLighting topIndirectLighting =
-        EvaluateDeferredReflectionProbeIndirectLighting(
-            lightLoop,
-            EvaluateBSDF_Env(
-                positionWS,
-                viewDirectionWS,
-                topPreLightData,
-                topSurfaceData,
-                topBSDFData),
-            topSurfaceData,
-            topBSDFData,
-            topPreLightData,
-            positionWS,
-            viewDirectionWS);
-    AccumulateIndirectLighting(
-        ScaleVividDeferredIndirectLighting(
-            baseIndirectLighting,
-            baseEnvironmentWeight),
-        baseAggregateLighting);
-    AccumulateIndirectLighting(
-        ScaleVividDeferredIndirectLighting(topIndirectLighting, topWeight),
-        topAggregateLighting);
+    VividSimpleSlabIndirectLighting baseIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
+        baseSummary, baseSimpleSlab, basePreLightData, lightLoop, positionWS, viewDirectionWS);
+    VividSimpleSlabIndirectLighting topIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
+        topSummary, topSimpleSlab, topPreLightData, lightLoop, positionWS, viewDirectionWS);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
@@ -592,88 +383,40 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
 
     uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     [loop]
-    for (uint localAreaLightIndex = 0;
-        localAreaLightIndex < areaLightCount;
-        localAreaLightIndex++)
+    for (uint lightIndex = 0; lightIndex < areaLightCount; ++lightIndex)
     {
-        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(
-            lightLoop,
-            localAreaLightIndex);
-        AccumulateDirectLighting(
-            ScaleVividDeferredDirectLighting(
-                EvaluateBSDF_Area(
-                    baseSurfaceData,
-                    baseBSDFData,
-                    basePreLightData,
-                    positionWS,
-                    viewDirectionWS,
-                    areaLight),
+        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, lightIndex);
+        VividAccumulateSimpleSlabDirectLighting(
+            VividScaleSimpleSlabDirectLighting(
+                VividEvaluateSimpleSlabAreaLight(baseSimpleSlab, basePreLightData, positionWS, areaLight),
                 baseEnvironmentWeight),
-            baseAggregateLighting);
-        AccumulateDirectLighting(
-            ScaleVividDeferredDirectLighting(
-                EvaluateBSDF_Area(
-                    topSurfaceData,
-                    topBSDFData,
-                    topPreLightData,
-                    positionWS,
-                    viewDirectionWS,
-                    areaLight),
+            baseSimpleDirectLighting);
+        VividAccumulateSimpleSlabDirectLighting(
+            VividScaleSimpleSlabDirectLighting(
+                VividEvaluateSimpleSlabAreaLight(topSimpleSlab, topPreLightData, positionWS, areaLight),
                 topWeight),
-            topAggregateLighting);
+            topSimpleDirectLighting);
     }
 
-    VividLightLoopOutput baseLightLoopOutput;
-    VividLightLoopOutput topLightLoopOutput;
-    PostEvaluateBSDF(
-        baseSurfaceData,
-        baseBSDFData,
-        basePreLightData,
-        baseAggregateLighting,
-        baseLightLoopOutput);
-    PostEvaluateBSDF(
-        topSurfaceData,
-        topBSDFData,
-        topPreLightData,
-        topAggregateLighting,
-        topLightLoopOutput);
-
-    VividLightLoopOutput lightLoopOutput;
-    lightLoopOutput.diffuseLighting = max(
-        baseLightLoopOutput.diffuseLighting
-            + topLightLoopOutput.diffuseLighting
-            + baseSimpleDirectLighting.diffuse
-            + topSimpleDirectLighting.diffuse,
-        0.0);
-    lightLoopOutput.specularLighting = max(
-        baseLightLoopOutput.specularLighting
-            + topLightLoopOutput.specularLighting
-            + baseSimpleDirectLighting.specular
-            + topSimpleDirectLighting.specular,
-        0.0);
-    indirectDiffuseLighting = max(
-        baseBSDFData.diffuseColor
-            * baseAggregateLighting.indirect.diffuse
-            + topBSDFData.diffuseColor
-            * topAggregateLighting.indirect.diffuse,
-        0.0);
-    indirectSpecularLighting = max(
-        FinalizeVividSpecularLighting(
-            baseSurfaceData,
-            baseBSDFData,
-            basePreLightData,
-            baseAggregateLighting.indirect.specularReflected)
-            + FinalizeVividSpecularLighting(
-                topSurfaceData,
-                topBSDFData,
-                topPreLightData,
-                topAggregateLighting.indirect.specularReflected),
-        0.0);
-    screenSpaceReflectionFGD = lerp(
-        basePreLightData.specularFGD,
-        topPreLightData.specularFGD,
-        layerWeight);
-    return lightLoopOutput;
+    VividSimpleSlabDeferredLighting result;
+    result.indirectDiffuseLighting = baseIndirectLighting.diffuse * baseEnvironmentWeight
+        + topIndirectLighting.diffuse * topWeight;
+    result.screenSpaceReplaceableSpecularLighting = baseIndirectLighting.singleScatterSpecular * baseEnvironmentWeight
+        + topIndirectLighting.singleScatterSpecular * topWeight;
+    result.indirectSpecularLighting = result.screenSpaceReplaceableSpecularLighting
+        + baseIndirectLighting.multipleScatterSpecular * baseEnvironmentWeight
+        + topIndirectLighting.multipleScatterSpecular * topWeight;
+    result.diffuseLighting = baseSimpleDirectLighting.diffuse + topSimpleDirectLighting.diffuse
+        + result.indirectDiffuseLighting;
+    result.specularLighting = baseSimpleDirectLighting.specular + topSimpleDirectLighting.specular
+        + result.indirectSpecularLighting;
+    // The single SSR signal is shared by both closures (Sidecar ABI v1 has one
+    // normal/SSR trace). Match the exact weights of the replaced environment SS,
+    // including vertical transmission, and preserve both MS lobes.
+    result.screenSpaceReflectionFGD = baseEnergy.singleScatterSpecularAlbedo * baseEnvironmentWeight
+        + topEnergy.singleScatterSpecularAlbedo * topWeight;
+    // ClearDeferredLit adds the combined material emission once, outside layers.
+    return result;
 }
 
 [numthreads(8, 8, 1)]
@@ -769,19 +512,11 @@ void DeferredLitVariant(
                 1.0);
             return;
         }
-        VividLightLoopOutput legacyDualOutput = EvaluateDeferredDualSlabLighting(
+        lightLoopOutput = EvaluateDeferredDualSlabLighting(
             summary,
             topLayer,
             pixelCoord,
-            positionWS,
-            lightLoopOutput.indirectDiffuseLighting,
-            lightLoopOutput.indirectSpecularLighting,
-            lightLoopOutput.screenSpaceReflectionFGD);
-        lightLoopOutput.diffuseLighting = legacyDualOutput.diffuseLighting;
-        lightLoopOutput.specularLighting = legacyDualOutput.specularLighting;
-        // Dual Slab retains its legacy environment/SSR composition until its
-        // layer adapter migrates. FastSlab replaces only single scattering.
-        lightLoopOutput.screenSpaceReplaceableSpecularLighting = lightLoopOutput.indirectSpecularLighting;
+            positionWS);
     }
     else
     {

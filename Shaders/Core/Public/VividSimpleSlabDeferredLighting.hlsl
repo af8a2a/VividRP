@@ -10,7 +10,7 @@
 #include "VividAreaLightCommon.hlsl"
 #include "LTCAreaLight.hlsl"
 
-#define VIVID_SIMPLE_SLAB_DEFERRED_LIGHTING_VERSION 2u
+#define VIVID_SIMPLE_SLAB_DEFERRED_LIGHTING_VERSION 3u
 
 struct VividSimpleSlabPreLightData
 {

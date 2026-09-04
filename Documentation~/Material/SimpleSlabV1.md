@@ -155,6 +155,140 @@ The existing direct-light test uses a synthetic zero-loss LUT to isolate light
 scaling; the earlier AOT/SSR routing test uses an explicitly synthetic F90 LUT,
 not a physical white-furnace reference.
 
+## Phase 8.4 main FastSlab Deferred switch
+
+`EvaluateDeferredFastSlabLighting` is now the production FastSlab entrypoint.
+It consumes the Surface Summary directly and uses the Vivid-native preparation,
+indirect lighting, LTC adapter, and composition in
+`VividSimpleSlabDeferredLighting.hlsl` (version 1). It no longer constructs
+`VividGBufferSurfaceData` / `VividLitBSDFData` or calls the legacy
+`GetVividPreLightData`, `EvaluateBSDF_Env`, `EvaluateBSDF_Area`, or
+`PostEvaluateBSDF` functions. There is no FastSlab legacy fallback switch.
+
+The new entrypoint applies albedo, interface transmission, and specular energy
+only at their lobe evaluations. Its result contains colored direct/indirect
+radiance plus the SSR factor, with no emission or pre-exposure. The main pass
+keeps the existing rules:
+
+- Material AO times GTAO affects indirect lighting only.
+- Baked diffuse irradiance takes precedence over APV, then ambient SH fallback.
+- Reflection-probe hierarchy radiance is already weighted and is not weighted
+  a second time. Remaining probe weight is filled by the sky.
+- SSR replaces indirect specular only; it does not erase direct highlights or
+  reapply AO. Receive-SSR flags still gate this operation.
+- `ClearDeferredLit` adds emission once, including Unlit pixels. Exposure is
+  applied once at the final render-target boundary. Missing LUT and invalid
+  exports retain diagnostic output.
+
+Neutral sky sampling and area-light geometry were extracted into
+`VividSkyLighting.hlsl` and `VividAreaLightCommon.hlsl`, shared with legacy
+consumers without changing their formulas. Dual Slab remains on the explicit
+legacy adapter for now, using the 8.3 Slab energy weights. The legacy headers
+and FGD resources are therefore still present for that path; this phase does
+not claim to remove HDRP-derived shading repository-wide. The IBL dominant
+direction, prefilter convention, and LTC GGX fit are unchanged. Separately
+convolving multiple-scatter energy or replacing LTC fits remains later work.
+
+No changes to MaterialClassification's tile policy, the GBuffer ABI, material
+program IDs, Frozen Catalog assets, or render-loop managed allocations are
+required. Mixed tiles still select the most capable deferred variant; FastSlab
+pixels within a CatchAll tile use the same new FastSlab entrypoint.
+
+`SimpleSlabDeferredLightingTests` records packed GBuffer inputs, the production
+tile classifier and indirect-argument builder, then production Clear/Deferred
+dispatches. It covers arbitrary colored F0, rough conductor, low F0, AO-zero,
+Unlit, sky, mixed Error/FastSlab tiles, missing LUT, directional shadow,
+punctual/rectangle lighting, partial/full SSR and receive flags, emission,
+pre-exposure, and independence from legacy FGD contents. The lighting oracle
+uses the 8.3 direct kernel, explicit uniform-environment arithmetic, and the
+8.3 legacy area adapter rather than the new FastSlab composition. These are
+focused shader tests, not a replacement for the existing full-SRP pixel tests.
+
+## Phase 8.5 IBL, reflection probes, SSR and area lights
+
+The FastSlab deferred evaluator is now version 2. It separates the LUT's
+directional specular energy into single scattering `Sss(v)` and multiple
+scattering `Sms(v) = C * L(v)`, retaining `S(v) = Sss(v) + Sms(v)` for direct
+lighting and diffuse transmission. This does not change the Slab contract,
+LUT format/bake, Surface Summary, or material/Catalog fingerprints.
+
+### Environment and probe integration
+
+- Single scattering uses the existing GGX dominant direction and perceptual
+  roughness-to-mip convention, multiplied by `Sss(v)`.
+- Multiple scattering independently samples the normal direction at perceptual
+  roughness one (the widest available sky/probe prefilter), multiplied by
+  `Sms(v)`. It no longer follows the narrow GGX reflection. Zero MS energy
+  bypasses this extra evaluation.
+- Each lobe evaluates probe hierarchy coverage independently: probe face fades
+  depend on direction. The existing sorted probe order, influence volume,
+  box projection, atlas mapping/padding, multiplier, and invalid-entry fallback
+  are retained. Already-weighted probe radiance is added once; only uncovered
+  weight samples the sky contribution.
+- Baked irradiance / APV / ambient SH priority and diffuse transmission are
+  unchanged. Material AO times GTAO multiplies the two environment lobes once.
+
+This is an explicit **real-time broad-lobe approximation**, not a new
+directional-loss convolution. The roughest GGX mip is not an exact Lambert
+convolution or the exact `L(l)` convolution of the 8.3 direct model. Constant
+environment energy is preserved, but agreement for small bright environment
+features is not claimed. There are no new textures, cache invalidation rules,
+or per-frame managed allocations. Nonzero MS adds one sky lookup and one
+additional probe hierarchy traversal (up to one atlas lookup per contributing
+probe); exact GPU cost still needs scene profiling.
+
+### SSR replacement contract
+
+SSR supplies linear, uncolored incident reflection radiance plus confidence;
+the receiving material's response is applied in Deferred, not the SSR producer.
+FastSlab now exports an explicit `screenSpaceReplaceableSpecularLighting`:
+
+```
+environmentSS = SS radiance * Sss(v) * AO
+environmentMS = broad radiance * Sms(v) * AO
+specular      = directSpecular + environmentMS
+              + (1-confidence) * environmentSS
+              + confidence * SSRradiance * Sss(v)
+```
+
+Receive-SSR flags and the global enable still gate confidence. SSR does not
+erase MS, direct lighting, or emission, and receives no additional AO factor.
+Pre-exposure is applied once at the output boundary. The indirect debug target
+continues to show pre-SSR diffuse plus both environment specular lobes.
+
+### Area-light adapter
+
+Directional/punctual lighting retains the full reciprocal 8.3 kernel. Rectangle
+and tube lights now use the existing GGX LTC shape only for `Sss(v)`. MS uses
+the identity Lambert LTC shape with amplitude `Sms(v)`; transmitted diffuse
+uses that same broad shape with amplitude `DiffuseAlbedo * (1-S(v))`.
+Thus all three lobe amplitudes preserve the same white-environment budget,
+without assigning the MS energy to the narrow highlight. Range attenuation,
+rectangle sidedness, barn doors and the existing tube geometry are retained.
+
+Both the Lambert MS shape and the diffuse transmission shape remain
+directional-albedo approximations, not exact integrations of the 8.3 angular
+kernel. The existing GGX fit and rectangle clipped-sphere horizon approximation
+are retained; a dedicated loss-lobe fit, exact convolution and angular-error
+calibration remain future work. Dual Slab deliberately remains on its explicit
+8.3/8.4 legacy environment/area/SSR adapter; this phase changes FastSlab only.
+
+### Regression coverage
+
+`SimpleSlabDeferredLightingTests` now contains 20 production pixel cases plus
+the source-boundary test. In addition to the 8.4 cases, it uses mip-colored sky
+and two probe atlas slices to distinguish narrow/broad samples, partial probe
+coverage and sky fill, saturated overlapping coverage, multipliers, invalid
+entries, and differing N/R face fades. Partial/full/disabled SSR checks preserve
+MS, AO policy and receive flags. Rectangle, tube, backface, range and barn-door
+cases use a synthetic non-identity GGX transform distinct from Lambert.
+The rectangle oracle numerically integrates the vector form factor at 64 x 64
+samples and then applies the retained horizon approximation; it does not call
+the new area-light adapter or claim an exact physical-rectangle reference.
+The tube test retains the existing line primitive and independently combines
+its lobe weights. These are production Classify + indirect Deferred shader
+tests, not full-SRP captures or proof of the physical accuracy of the fits.
+
 ## Image validation
 
 For image baselines, use a linear HDR target, fixed exposure, no temporal

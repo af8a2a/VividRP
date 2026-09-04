@@ -837,6 +837,8 @@ namespace VividRP.Editor.Tests
                     1,
                     Color.clear,
                     "CharlieFabricFGD"));
+                Texture2D slabLut = TrackObject(CreateSolidTexture2D(
+                    64, 64, new Color(1, 0, 1, 0), "SyntheticSlabF90Lut"));
                 Texture2DArray ltcData = TrackObject(CreateSolidTexture2DArray(
                     1,
                     1,
@@ -1210,7 +1212,8 @@ namespace VividRP.Editor.Tests
                     commandBuffer,
                     depth,
                     new Color(0.5f, 0.0f, 0.0f, 0.0f));
-                // A uniform SSR sample plus FGD=1 gives an exact lighting
+                // Synthetic Slab basis (1,0,1,0) selects F90=1 for these fixtures.
+                // A uniform SSR sample then gives an exact lighting
                 // delta over Resolve's emissive clear, without scene lights.
                 ClearRenderTexture(
                     commandBuffer,
@@ -1293,6 +1296,7 @@ namespace VividRP.Editor.Tests
                     layeredLightList,
                     logBaseBuffer,
                     ggxFgd,
+                    slabLut,
                     charlieFgd,
                     ltcData,
                     reflectionAtlas,
@@ -2394,6 +2398,7 @@ namespace VividRP.Editor.Tests
             GraphicsBuffer layeredLightList,
             GraphicsBuffer logBaseBuffer,
             Texture ggxFgd,
+            Texture slabLut,
             Texture charlieFgd,
             Texture ltcData,
             Texture reflectionAtlas,
@@ -2401,6 +2406,7 @@ namespace VividRP.Editor.Tests
         {
             int Property(string name) => Shader.PropertyToID(name);
             int clearKernel = compute.FindKernel("ClearDeferredLit");
+            commandBuffer.SetComputeIntParam(compute, Property("_VividSlabLutReady"), 1);
             int[] variantKernels =
             {
                 compute.FindKernel("DeferredLit_Variant0"),
@@ -2598,6 +2604,8 @@ namespace VividRP.Editor.Tests
                     kernel,
                     Property("_PreIntegratedFGD_GGXDisneyDiffuse"),
                     ggxFgd);
+                commandBuffer.SetComputeTextureParam(compute, kernel,
+                    Property("_VividSlabLut"), slabLut);
                 commandBuffer.SetComputeTextureParam(
                     compute,
                     kernel,

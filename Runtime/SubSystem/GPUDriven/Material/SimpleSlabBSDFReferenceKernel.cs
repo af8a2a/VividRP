@@ -36,10 +36,8 @@ namespace VividRP.Runtime.GPUDriven
                 SimpleSlabContract.MinimumAlphaRoughness);
             float alphaSquared = alpha * alpha;
             float saturatedNdotH = math.saturate(nDotH);
-            float denominator =
-                (saturatedNdotH * alphaSquared - saturatedNdotH)
-                * saturatedNdotH
-                + 1.0f;
+            float denominator = (1.0f - saturatedNdotH) * (1.0f + saturatedNdotH)
+                + saturatedNdotH * saturatedNdotH * alphaSquared;
             return alphaSquared / (Pi * denominator * denominator);
         }
 

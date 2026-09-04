@@ -31,6 +31,7 @@ void EvaluateDirectLights(uint3 dispatchThreadId : SV_DispatchThreadID)
     VividSimpleSlabData slab = CreateDefaultPlastic();
     float3 positionWS = 0.0f;
     float3 viewDirectionWS = float3(0.0f, 0.0f, 1.0f);
+    VividSimpleSlabEnergy energy = VividLoadSimpleSlabEnergy(slab, viewDirectionWS);
 
     DirectionalLightData directionalLight = (DirectionalLightData)0;
     directionalLight.directionWS = float3(0.0f, 0.0f, 2.0f);
@@ -39,6 +40,7 @@ void EvaluateDirectLights(uint3 dispatchThreadId : SV_DispatchThreadID)
         0u,
         VividEvaluateSimpleSlabDirectionalLight(
             slab,
+            energy,
             viewDirectionWS,
             directionalLight,
             0.25f));
@@ -53,6 +55,7 @@ void EvaluateDirectLights(uint3 dispatchThreadId : SV_DispatchThreadID)
         1u,
         VividEvaluateSimpleSlabPunctualLight(
             slab,
+            energy,
             positionWS,
             viewDirectionWS,
             punctualLight));

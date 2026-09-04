@@ -135,6 +135,20 @@ VividSimpleSlabData BuildVividSimpleSlabData(
     return slab;
 }
 
+// Retain the environment/LTC sampling infrastructure, not Disney diffuse or
+// HDRP specular compensation. Both lobes now share the Slab energy budget.
+void ApplyVividSlabEnergyToLegacyPreLight(
+    VividSimpleSlabEnergy energy,
+    inout VividLitBSDFData bsdfData,
+    inout VividPreLightData preLightData)
+{
+    bsdfData.diffuseColor *= energy.diffuseTransmission;
+    preLightData.specularFGD = energy.specularAlbedo;
+    preLightData.diffuseFGD = 1.0f;
+    preLightData.energyCompensation = 0.0f;
+    preLightData.ltcTransformDiffuse = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+}
+
 float SampleDirectionalShadow(uint2 pixelCoord)
 {
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
@@ -253,6 +267,8 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
     VividLitBSDFData bsdfData = BuildFastSlabBSDFData(summary);
     VividSimpleSlabData simpleSlab = BuildVividSimpleSlabData(summary);
     VividPreLightData preLightData = GetVividPreLightData(viewDirectionWS, surfaceData, bsdfData);
+    VividSimpleSlabEnergy simpleEnergy = VividLoadSimpleSlabEnergy(simpleSlab, viewDirectionWS);
+    ApplyVividSlabEnergyToLegacyPreLight(simpleEnergy, bsdfData, preLightData);
     screenSpaceReflectionFGD = preLightData.specularFGD;
     VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
     VividSimpleSlabDirectLighting simpleDirectLighting =
@@ -279,6 +295,7 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
         VividAccumulateSimpleSlabDirectLighting(
             VividEvaluateSimpleSlabDirectionalLight(
                 simpleSlab,
+                simpleEnergy,
                 viewDirectionWS,
                 directionalLight,
                 shadowAttenuation),
@@ -294,6 +311,7 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
         VividAccumulateSimpleSlabDirectLighting(
             VividEvaluateSimpleSlabPunctualLight(
                 simpleSlab,
+                simpleEnergy,
                 positionWS,
                 viewDirectionWS,
                 punctualLight),
@@ -497,6 +515,10 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
         viewDirectionWS,
         topSurfaceData,
         topBSDFData);
+    VividSimpleSlabEnergy baseEnergy = VividLoadSimpleSlabEnergy(baseSimpleSlab, viewDirectionWS);
+    VividSimpleSlabEnergy topEnergy = VividLoadSimpleSlabEnergy(topSimpleSlab, viewDirectionWS);
+    ApplyVividSlabEnergyToLegacyPreLight(baseEnergy, baseBSDFData, basePreLightData);
+    ApplyVividSlabEnergyToLegacyPreLight(topEnergy, topBSDFData, topPreLightData);
     VividAggregateLighting baseAggregateLighting = (VividAggregateLighting)0;
     VividAggregateLighting topAggregateLighting = (VividAggregateLighting)0;
     VividSimpleSlabDirectLighting baseSimpleDirectLighting =
@@ -575,6 +597,7 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
             VividScaleSimpleSlabDirectLighting(
                 VividEvaluateSimpleSlabDirectionalLight(
                     baseSimpleSlab,
+                    baseEnergy,
                     viewDirectionWS,
                     directionalLight,
                     shadowAttenuation),
@@ -584,6 +607,7 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
             VividScaleSimpleSlabDirectLighting(
                 VividEvaluateSimpleSlabDirectionalLight(
                     topSimpleSlab,
+                    topEnergy,
                     viewDirectionWS,
                     directionalLight,
                     shadowAttenuation),
@@ -619,6 +643,7 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
             VividScaleSimpleSlabDirectLighting(
                 VividEvaluateSimpleSlabPunctualLight(
                     baseSimpleSlab,
+                    baseEnergy,
                     positionWS,
                     viewDirectionWS,
                     punctualLight),
@@ -628,6 +653,7 @@ VividLightLoopOutput EvaluateDeferredDualSlabLighting(
             VividScaleSimpleSlabDirectLighting(
                 VividEvaluateSimpleSlabPunctualLight(
                     topSimpleSlab,
+                    topEnergy,
                     positionWS,
                     viewDirectionWS,
                     punctualLight),
@@ -747,6 +773,8 @@ uint GetDeferredVariantBit(uint deferredVariant)
     return VIVID_DEFERRED_CLASS_BIT_CATCH_ALL;
 }
 
+uint _VividSlabLutReady;
+
 void DeferredLitVariant(
     uint deferredVariant,
     uint3 groupId,
@@ -783,6 +811,13 @@ void DeferredLitVariant(
     if (deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB
         && deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
         return;
+
+    if (_VividSlabLutReady == 0u)
+    {
+        _LightingTexture[pixelCoord] = float4(VividApplyPreExposure(float3(1, 0, 1)), 1);
+        _LightingDebugTexture[pixelCoord] = float4(1, 0, 1, 1);
+        return;
+    }
 
     summary.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));
 

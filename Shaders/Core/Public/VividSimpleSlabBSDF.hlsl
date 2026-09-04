@@ -33,10 +33,9 @@ float VividSimpleSlabDGGX(float alphaRoughness, float nDotH)
         VIVID_SIMPLE_SLAB_MINIMUM_ALPHA_ROUGHNESS);
     float alphaSquared = alpha * alpha;
     float saturatedNdotH = saturate(nDotH);
-    float denominator =
-        (saturatedNdotH * alphaSquared - saturatedNdotH)
-        * saturatedNdotH
-        + 1.0f;
+    // Avoid cancellation at NdotH = 1 and the minimum alpha.
+    float denominator = (1.0f - saturatedNdotH) * (1.0f + saturatedNdotH)
+        + saturatedNdotH * saturatedNdotH * alphaSquared;
     return alphaSquared
         / (VIVID_SIMPLE_SLAB_PI * denominator * denominator);
 }

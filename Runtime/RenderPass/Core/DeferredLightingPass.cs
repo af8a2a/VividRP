@@ -171,6 +171,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_PreIntegratedFGDGGXDisneyDiffuseTexture;
 
         private RenderGraphTexture m_PreIntegratedFGDCharlieAndFabricTexture;
+        private RenderGraphTexture m_SlabLutTexture;
 
         private ComputeShader m_DeferredLitCompute;
         private int m_ClearDeferredLitKernel = -1;
@@ -309,6 +310,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LogBaseBuffer = m_LocalLogBaseBuffer;
             m_PreIntegratedFGDGGXDisneyDiffuseTexture = VividPreIntegratedFGD.CreateTexture("PreIntegratedFGD_GGXDisneyDiffuse");
             m_PreIntegratedFGDCharlieAndFabricTexture = VividPreIntegratedFGD.CreateTexture("PreIntegratedFGD_CharlieAndFabric");
+            m_SlabLutTexture = VividSlabLut.CreateGraphTexture();
         }
 
         public override void Create()
@@ -411,6 +413,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FrameContextScreenSpaceReflectionTexture = null;
             m_PreIntegratedFGDGGXDisneyDiffuseTexture?.ClearImportedHandle();
             m_PreIntegratedFGDCharlieAndFabricTexture?.ClearImportedHandle();
+            m_SlabLutTexture?.ClearImportedHandle();
             m_IsPassResourceLayoutDirty = false;
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
@@ -586,6 +589,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private void BindIndirectLightingParameters(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)
         {
             var rgDefaultResource = context.renderGraphContext.defaultResources;
+            BindPreIntegratedFGDTexture(cmd, kernel, VividSlabLut.TextureId,
+                m_SlabLutTexture, rgDefaultResource.blackTexture);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, VividSlabLut.ReadyId,
+                m_SlabLutTexture != null && m_SlabLutTexture.innerHandle.IsValid() ? 1 : 0);
             BindPreIntegratedFGDTexture(
                 cmd,
                 kernel,
@@ -910,6 +917,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_PreIntegratedFGDGGXDisneyDiffuseTexture.ClearImportedHandle();
             m_PreIntegratedFGDCharlieAndFabricTexture.ClearImportedHandle();
+            m_SlabLutTexture.ClearImportedHandle();
 
             if (!PassRecorder.IsPassTextureImportActive)
                 return;
@@ -918,6 +926,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var fgdData = frameData.Get<VividPreIntegratedFGDData>();
+            ImportPreIntegratedFGDTexture(m_SlabLutTexture, fgdData.slabLutTexture);
             if (fgdData?.hasValidTextures != true)
                 return;
 

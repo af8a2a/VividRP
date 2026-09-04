@@ -1,10 +1,10 @@
 #ifndef VIVIDRP_SIMPLE_SLAB_DIRECT_LIGHTING_INCLUDED
 #define VIVIDRP_SIMPLE_SLAB_DIRECT_LIGHTING_INCLUDED
 
-#include "VividSimpleSlabBSDF.hlsl"
+#include "VividSlabLut.hlsl"
 #include "PunctualLightCommon.hlsl"
 
-#define VIVID_SIMPLE_SLAB_DIRECT_LIGHTING_VERSION 1u
+#define VIVID_SIMPLE_SLAB_DIRECT_LIGHTING_VERSION 2u
 #define VIVID_SIMPLE_SLAB_MIN_DIRECTION_LENGTH_SQ 1e-12f
 #define VIVID_SIMPLE_SLAB_MIN_PUNCTUAL_DISTANCE_SQ 1e-6f
 
@@ -42,6 +42,7 @@ VividSimpleSlabDirectLighting VividApplySimpleSlabLightColor(
 
 VividSimpleSlabDirectLighting VividEvaluateSimpleSlabDirectionalLight(
     VividSimpleSlabData slab,
+    VividSimpleSlabEnergy viewEnergy,
     float3 viewDirectionWS,
     DirectionalLightData directionalLight,
     float shadowAttenuation)
@@ -49,10 +50,12 @@ VividSimpleSlabDirectLighting VividEvaluateSimpleSlabDirectionalLight(
     float3 lightDirectionWS = VividSimpleSlabNormalizeDirection(
         directionalLight.directionWS);
     VividSimpleSlabBSDFResponse response =
-        VividEvaluateSimpleSlabAnalyticDirect(
+        VividEvaluateSimpleSlabEnergyDirect(
             slab,
             viewDirectionWS,
-            lightDirectionWS);
+            lightDirectionWS,
+            viewEnergy,
+            VividSampleSlabLut(dot(slab.normalWS, lightDirectionWS), slab.perceptualRoughness).xy);
     float3 lightColor = max(directionalLight.color, 0.0f)
         * saturate(shadowAttenuation);
     return VividApplySimpleSlabLightColor(response, lightColor);
@@ -60,6 +63,7 @@ VividSimpleSlabDirectLighting VividEvaluateSimpleSlabDirectionalLight(
 
 VividSimpleSlabDirectLighting VividEvaluateSimpleSlabPunctualLight(
     VividSimpleSlabData slab,
+    VividSimpleSlabEnergy viewEnergy,
     float3 positionWS,
     float3 viewDirectionWS,
     PunctualLightData punctualLight)
@@ -86,10 +90,12 @@ VividSimpleSlabDirectLighting VividEvaluateSimpleSlabPunctualLight(
         return lighting;
 
     VividSimpleSlabBSDFResponse response =
-        VividEvaluateSimpleSlabAnalyticDirect(
+        VividEvaluateSimpleSlabEnergyDirect(
             slab,
             viewDirectionWS,
-            lightDirectionWS);
+            lightDirectionWS,
+            viewEnergy,
+            VividSampleSlabLut(dot(slab.normalWS, lightDirectionWS), slab.perceptualRoughness).xy);
     return VividApplySimpleSlabLightColor(
         response,
         max(punctualLight.color, 0.0f) * attenuation);

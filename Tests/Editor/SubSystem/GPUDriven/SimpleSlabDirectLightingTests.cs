@@ -34,7 +34,7 @@ namespace VividRP.Editor.Tests
             CollectionAssert.AreEqual(
                 new[]
                 {
-                    "#include \"VividSimpleSlabBSDF.hlsl\"",
+                    "#include \"VividSlabLut.hlsl\"",
                     "#include \"PunctualLightCommon.hlsl\"",
                 },
                 includes);
@@ -48,7 +48,7 @@ namespace VividRP.Editor.Tests
                 "VividPunctualLightAttenuationWithDistanceModification(",
                 source);
             StringAssert.Contains(
-                "VividEvaluateSimpleSlabAnalyticDirect(",
+                "VividEvaluateSimpleSlabEnergyDirect(",
                 source);
             StringAssert.DoesNotContain("HdrpLitLighting.hlsl", source);
             StringAssert.DoesNotContain("EvaluateBSDF_Directional", source);
@@ -113,22 +113,35 @@ namespace VividRP.Editor.Tests
                 sizeof(float) * 4,
                 ComputeBufferType.Structured);
             compute.SetBuffer(kernel, "_Output", output);
-            compute.Dispatch(kernel, 1, 1, 1);
+            // Synthetic unit single-scatter LUT isolates light scaling from the bake.
+            var lut = new Texture2D(1, 1, TextureFormat.RGBAFloat, false, true);
+            lut.SetPixel(0, 0, Color.clear);
+            lut.Apply();
+            compute.SetTexture(kernel, "_VividSlabLut", lut);
+            try
+            {
+                compute.Dispatch(kernel, 1, 1, 1);
 
-            var actual = new Vector4[2];
-            output.GetData(actual);
-            SimpleSlabBSDFResponse response =
-                SimpleSlabBSDFReferenceKernel.EvaluateAnalyticDirect(
-                    new float3(0.18f),
-                    new float3(0.04f),
-                    0.5f,
-                    new float3(0.0f, 0.0f, 1.0f),
-                    new float3(0.0f, 0.0f, 1.0f),
-                    new float3(0.0f, 0.0f, 1.0f));
-            float3 expectedScale = new float3(0.5f, 0.125f, 0.25f);
+                var actual = new Vector4[2];
+                output.GetData(actual);
+                SimpleSlabBSDFResponse response =
+                    SimpleSlabBSDFReferenceKernel.EvaluateAnalyticDirect(
+                        new float3(0.18f),
+                        new float3(0.04f),
+                        0.5f,
+                        new float3(0.0f, 0.0f, 1.0f),
+                        new float3(0.0f, 0.0f, 1.0f),
+                        new float3(0.0f, 0.0f, 1.0f));
+                float3 expectedScale = new float3(0.5f, 0.125f, 0.25f);
+                response = new SimpleSlabBSDFResponse(response.Diffuse * 0.96f, response.Specular);
 
-            AssertLighting(actual[0], response, expectedScale);
-            AssertLighting(actual[1], response, expectedScale);
+                AssertLighting(actual[0], response, expectedScale);
+                AssertLighting(actual[1], response, expectedScale);
+            }
+            finally
+            {
+                Object.DestroyImmediate(lut);
+            }
         }
 
         private static string ReadPackageFile(string relativePath)

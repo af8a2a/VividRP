@@ -152,7 +152,8 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("SurfaceSummaryGBuffer.hlsl", source);
             StringAssert.Contains("Texture2D<float4> _DiffuseIrradiance;", source);
             StringAssert.Contains("VividUnpackSurfaceSummaryGBuffer", source);
-            StringAssert.Contains("BuildFastSlabBSDFData", source);
+            StringAssert.Contains("EvaluateDeferredFastSlabLighting", source);
+            StringAssert.Contains("BuildVividSimpleSlabData", source);
             StringAssert.Contains("VIVID_DEFERRED_CLASS_BIT_FAST_SLAB", source);
             StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_ERROR", source);
             StringAssert.Contains("float3(1.0, 0.0, 1.0)", source);

@@ -78,10 +78,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("EvaluateBSDF_Area(", source);
             StringAssert.Contains("EvaluateBSDF_Env(", source);
             StringAssert.Contains(
-                "lightLoopOutput.diffuseLighting += simpleDirectLighting.diffuse;",
-                source);
-            StringAssert.Contains(
-                "lightLoopOutput.specularLighting += simpleDirectLighting.specular;",
+                "return VividComposeSimpleSlabDeferredLighting(directLighting, indirectLighting, preLight.energy);",
                 source);
         }
 

@@ -20,6 +20,8 @@ float2 VividSlabNormalizeAlbedoBasis(float2 basis)
 struct VividSimpleSlabEnergy
 {
     float singleScatterLoss;
+    float3 singleScatterSpecularAlbedo;
+    float3 multipleScatterSpecularAlbedo;
     float3 specularAlbedo;
     float3 multipleScatterColor;
     float inverseAverageLoss;
@@ -41,8 +43,12 @@ VividSimpleSlabEnergy VividPrepareSimpleSlabEnergy(float3 specularF0, float4 lut
     energy.multipleScatterColor = averageFresnel * averageFresnel * averageAlbedo
         / max(1.0f - averageFresnel * average.y, 1e-6f);
     energy.inverseAverageLoss = rcp(max(average.y, 1e-6f));
-    energy.specularAlbedo = saturate(f0 * (1.0f - directional.y - directional.x) + f90 * directional.x
-        + energy.multipleScatterColor * energy.singleScatterLoss);
+    energy.singleScatterSpecularAlbedo = saturate(
+        f0 * (1.0f - directional.y - directional.x) + f90 * directional.x);
+    energy.multipleScatterSpecularAlbedo = min(
+        energy.multipleScatterColor * energy.singleScatterLoss,
+        1.0f - energy.singleScatterSpecularAlbedo);
+    energy.specularAlbedo = energy.singleScatterSpecularAlbedo + energy.multipleScatterSpecularAlbedo;
     float3 averageSpecular = saturate(f0 * (averageAlbedo - average.x) + f90 * average.x
         + energy.multipleScatterColor * average.y);
     energy.diffuseTransmission = 1.0f - energy.specularAlbedo;

@@ -13,7 +13,7 @@ namespace VividRP.Editor.Tests
     public sealed class SimpleSlabEnergyTests
     {
         [Test]
-        public void LutContract_AndProductionEnergyBridgeStaySynchronized()
+        public void LutContract_AndNativeDeferredEnergyStaySynchronized()
         {
             string header = Read("Shaders/Core/Public/VividSimpleSlabEnergy.hlsl");
             StringAssert.Contains($"#define VIVID_SLAB_LUT_VERSION {VividSlabLut.Version}u", header);
@@ -21,11 +21,11 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains($"#define VIVID_SLAB_LUT_SAMPLE_COUNT {VividSlabLut.SampleCount}u", header);
             StringAssert.Contains($"#define VIVID_SIMPLE_SLAB_ENERGY_VERSION {MaterialProgramContract.SimpleSlabEnergyVersion}u", header);
             string deferred = Read("Shaders/Material/DeferredLit.compute");
-            StringAssert.Contains("preLightData.energyCompensation = 0.0f;", deferred);
-            StringAssert.Contains("preLightData.specularFGD = energy.specularAlbedo;", deferred);
-            StringAssert.Contains("bsdfData.diffuseColor *= energy.diffuseTransmission;", deferred);
-            StringAssert.Contains("ApplyVividSlabEnergyToLegacyPreLight(baseEnergy", deferred);
-            StringAssert.Contains("ApplyVividSlabEnergyToLegacyPreLight(topEnergy", deferred);
+            StringAssert.DoesNotContain("ApplyVividSlabEnergyToLegacyPreLight", deferred);
+            StringAssert.Contains("VividSimpleSlabEnergy baseEnergy = basePreLightData.energy;", deferred);
+            StringAssert.Contains("VividSimpleSlabEnergy topEnergy = topPreLightData.energy;", deferred);
+            StringAssert.Contains("return topEnergy.diffuseTransmission", deferred);
+            StringAssert.Contains("baseEnergy.singleScatterSpecularAlbedo * baseEnvironmentWeight", deferred);
             StringAssert.Contains("if (_VividSlabLutReady == 0u)", deferred);
         }
 

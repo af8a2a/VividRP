@@ -827,16 +827,6 @@ namespace VividRP.Editor.Tests
                     "LightingDebug",
                     enableRandomWrite: true));
 
-                Texture2D ggxFgd = TrackObject(CreateSolidTexture2D(
-                    64,
-                    64,
-                    new Color(0.0f, 1.0f, 0.0f, 0.0f),
-                    "GGXDisneyDiffuseFGD"));
-                Texture2D charlieFgd = TrackObject(CreateSolidTexture2D(
-                    1,
-                    1,
-                    Color.clear,
-                    "CharlieFabricFGD"));
                 Texture2D slabLut = TrackObject(CreateSolidTexture2D(
                     64, 64, new Color(1, 0, 1, 0), "SyntheticSlabF90Lut"));
                 Texture2DArray ltcData = TrackObject(CreateSolidTexture2DArray(
@@ -1295,9 +1285,7 @@ namespace VividRP.Editor.Tests
                     layeredOffset,
                     layeredLightList,
                     logBaseBuffer,
-                    ggxFgd,
                     slabLut,
-                    charlieFgd,
                     ltcData,
                     reflectionAtlas,
                     skyTexture);
@@ -2397,9 +2385,7 @@ namespace VividRP.Editor.Tests
             GraphicsBuffer layeredOffset,
             GraphicsBuffer layeredLightList,
             GraphicsBuffer logBaseBuffer,
-            Texture ggxFgd,
             Texture slabLut,
-            Texture charlieFgd,
             Texture ltcData,
             Texture reflectionAtlas,
             Texture skyTexture)
@@ -2599,18 +2585,8 @@ namespace VividRP.Editor.Tests
                     screenSpaceReflection,
                     lighting,
                     lightingDebug);
-                commandBuffer.SetComputeTextureParam(
-                    compute,
-                    kernel,
-                    Property("_PreIntegratedFGD_GGXDisneyDiffuse"),
-                    ggxFgd);
                 commandBuffer.SetComputeTextureParam(compute, kernel,
                     Property("_VividSlabLut"), slabLut);
-                commandBuffer.SetComputeTextureParam(
-                    compute,
-                    kernel,
-                    Property("_PreIntegratedFGD_CharlieAndFabric"),
-                    charlieFgd);
                 commandBuffer.SetComputeTextureParam(
                     compute,
                     kernel,

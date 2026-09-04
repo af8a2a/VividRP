@@ -16,20 +16,25 @@ namespace VividRP.Editor.Tests
     public sealed class SimpleSlabDeferredLightingTests
     {
         [Test]
-        public void FastSlab_OwnsItsLightingDataAndComposition()
+        public void FastAndDualSlab_OwnLightingWithoutLegacyBsdfOrFgd()
         {
             string source = Read("Shaders/Material/DeferredLit.compute");
             int start = source.IndexOf("VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(", StringComparison.Ordinal);
             Assert.That(start, Is.GreaterThanOrEqualTo(0));
-            int end = source.IndexOf("VividDirectLighting ScaleVividDeferredDirectLighting(", start, StringComparison.Ordinal);
+            int end = source.IndexOf("float3 VividDeferredFresnelSchlick(", start, StringComparison.Ordinal);
             Assert.That(end, Is.GreaterThan(start));
             string fastPath = source.Substring(start, end - start);
             foreach (string legacy in new[] { "VividGBufferSurfaceData", "VividLitBSDFData", "GetVividPreLightData",
                          "ApplyVividSlabEnergyToLegacyPreLight", "PostEvaluateBSDF", "EvaluateBSDF_Env", "EvaluateBSDF_Area" })
-                StringAssert.DoesNotContain(legacy, fastPath);
+                StringAssert.DoesNotContain(legacy, source);
             StringAssert.Contains("VividComposeSimpleSlabDeferredLighting", fastPath);
             StringAssert.Contains("lightLoopOutput = EvaluateDeferredFastSlabLighting(", source);
-            StringAssert.Contains("legacyDualOutput = EvaluateDeferredDualSlabLighting(", source);
+            StringAssert.Contains("lightLoopOutput = EvaluateDeferredDualSlabLighting(", source);
+            StringAssert.DoesNotContain("HdrpLitLighting.hlsl", source);
+            StringAssert.DoesNotContain("VividPreLightData", source);
+            StringAssert.DoesNotContain("PreIntegratedFGD", source);
+            StringAssert.Contains("baseEnergy.singleScatterSpecularAlbedo * baseEnvironmentWeight", source);
+            StringAssert.Contains("topEnergy.singleScatterSpecularAlbedo * topWeight", source);
             string header = Read("Shaders/Core/Public/VividSimpleSlabDeferredLighting.hlsl");
             StringAssert.Contains($"#define VIVID_SIMPLE_SLAB_DEFERRED_LIGHTING_VERSION {MaterialProgramContract.SimpleSlabDeferredLightingVersion}u", header);
             foreach (string legacy in new[] { "HdrpLitLighting.hlsl", "PreIntegratedFGD.hlsl", "VividLitBSDFData", "PostEvaluateBSDF" })
@@ -92,6 +97,58 @@ namespace VividRP.Editor.Tests
             fixture.Run(true, 0, true, false, areaCase: areaCase);
         }
 
+        // Every tile also contains FastSlab, Unlit, AO-zero and no-SSR pixels.
+        // Mode 3 forces an invalid Sidecar, which must remain diagnostic.
+        [TestCase(1, 0.0f, 0.0f, false, false)]
+        [TestCase(1, 1.0f / 255.0f, 0.0f, true, false)]
+        [TestCase(1, 0.4f, 0.0f, true, false)]
+        [TestCase(1, 0.4f, 0.4f, true, false)]
+        [TestCase(1, 0.4f, 1.0f, false, false)]
+        [TestCase(1, 1.0f, 1.0f, true, false)]
+        [TestCase(2, 0.0f, 1.0f, false, false)]
+        [TestCase(2, 1.0f / 255.0f, 0.0f, true, false)]
+        [TestCase(2, 0.4f, 0.0f, true, false)]
+        [TestCase(2, 0.4f, 0.4f, true, false)]
+        [TestCase(2, 0.4f, 1.0f, false, false)]
+        [TestCase(2, 1.0f, 1.0f, true, false)]
+        [TestCase(2, 0.4f, 1.0f, true, true)]
+        [TestCase(3, 0.4f, 1.0f, false, true)]
+        public void ProductionDualSlab_MatchesLayerWeightsAndSingleScatterSsr(
+            int dualMode, float layerWeight, float ssrWeight, bool directLights, bool mixedTile)
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Compute and GPU readback required.");
+            RTHandles.Initialize(1, 1);
+            using var fixture = new PixelFixture();
+            fixture.Run(directLights, ssrWeight, true, mixedTile, environment: 5,
+                dualMode: dualMode, layerWeight: layerWeight);
+        }
+
+        [TestCase(1, 1, true)]  // Horizontal + tube
+        [TestCase(2, 4, true)]  // Vertical + barn doors
+        [TestCase(2, 0, false)] // Missing Slab LUT
+        public void ProductionDualSlab_RetainsAreaGeometryAndLutDiagnostics(int dualMode, int areaCase, bool lutReady)
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Compute and GPU readback required.");
+            RTHandles.Initialize(1, 1);
+            using var fixture = new PixelFixture();
+            fixture.Run(true, 0.4f, lutReady, false, environment: 2, areaCase: areaCase, dualMode: dualMode);
+        }
+
+        [TestCase(1, 0.4f)]
+        [TestCase(1, 1.0f)]
+        [TestCase(2, 0.4f)]
+        [TestCase(2, 1.0f)]
+        public void ProductionDualSlab_WhiteEnvironmentPreservesLayerEnergyBudget(int dualMode, float layerWeight)
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Compute and GPU readback required.");
+            RTHandles.Initialize(1, 1);
+            using var fixture = new PixelFixture();
+            fixture.Run(false, 0, true, false, environment: 6, dualMode: dualMode, layerWeight: layerWeight);
+        }
+
         private sealed class PixelFixture : IDisposable
         {
             private readonly List<Object> m_Objects = new();
@@ -100,7 +157,8 @@ namespace VividRP.Editor.Tests
             private readonly CommandBuffer m_Cmd = new();
 
             internal void Run(bool directLights, float ssrWeight, bool lutReady, bool mixedTile,
-                int environment = 0, bool ssrEnabled = true, int areaCase = 0)
+                int environment = 0, bool ssrEnabled = true, int areaCase = 0,
+                int dualMode = 0, float layerWeight = 0.4f)
             {
                 ComputeShader production = Load("Shaders/Material/DeferredLit.compute");
                 ComputeShader control = Load("Tests/Editor/SubSystem/GPUDriven/SimpleSlabDeferredLightingTests.compute");
@@ -109,7 +167,7 @@ namespace VividRP.Editor.Tests
                 int prepare = control.FindKernel("PrepareInputs");
                 int reference = control.FindKernel("ReferenceLighting");
                 int clear = production.FindKernel("ClearDeferredLit");
-                int variant = mixedTile ? 3 : 0;
+                int variant = mixedTile ? 3 : (dualMode > 0 && layerWeight > 0 ? 2 : 0);
                 int shade = production.FindKernel("DeferredLit_Variant" + variant);
                 var gbuffers = new RenderTexture[5];
                 for (int i = 0; i < gbuffers.Length; ++i)
@@ -124,15 +182,17 @@ namespace VividRP.Editor.Tests
                 RenderTexture lighting = Target(GraphicsFormat.R32G32B32A32_SFloat);
                 RenderTexture debug = Target(GraphicsFormat.R32G32B32A32_SFloat);
                 Texture(control, prepare, "_TestDepth", depth);
+                RenderTexture layerAux0 = Target(GraphicsFormat.R32G32B32A32_SFloat);
+                RenderTexture layerAux1 = Target(GraphicsFormat.R32G32B32A32_SFloat);
+                Texture(control, prepare, "_TestLayerAux0", layerAux0);
+                Texture(control, prepare, "_TestLayerAux1", layerAux1);
                 var sky = Track(new Cubemap(2, TextureFormat.RGBAFloat, true) { filterMode = FilterMode.Trilinear });
                 for (int face = 0; face < 6; ++face)
                 {
-                    sky.SetPixels(Pixels(new Color(0.2f, 0.4f, 0.6f, 1), 4), (CubemapFace)face, 0);
-                    sky.SetPixels(Pixels(new Color(0.7f, 0.15f, 0.05f, 1), 1), (CubemapFace)face, 1);
+                    sky.SetPixels(Pixels(environment == 6 ? Color.white : new Color(0.2f, 0.4f, 0.6f, 1), 4), (CubemapFace)face, 0);
+                    sky.SetPixels(Pixels(environment == 6 ? Color.white : new Color(0.7f, 0.15f, 0.05f, 1), 1), (CubemapFace)face, 1);
                 }
                 sky.Apply(false, false);
-                Texture2D legacyFgd = Solid(new Color(0.93f, 0.17f, 0.66f, 0.5f));
-                Texture2D black = Solid(Color.clear);
                 Texture2D shadow = Solid(new Color(0.25f, 0, 0, 0));
                 // These inputs use pixel-coordinate Load(), not normalized-UV sampling.
                 Texture2D ao = Solid(new Color(0.5f, 0, 0, 0), 8);
@@ -214,7 +274,7 @@ namespace VividRP.Editor.Tests
                     Int(shader, "_DirectionalLightCount", directLights ? 1 : 0);
                     Int(shader, "_PunctualLightCount", directLights ? 1 : 0);
                     Int(shader, "_AreaLightCount", directLights ? 1 : 0);
-                    Int(shader, "_ReflectionProbeCount", environment >= 2 ? 2 : 0);
+                    Int(shader, "_ReflectionProbeCount", environment >= 2 && environment <= 5 ? 2 : 0);
                     Int(shader, "_ReflectionAtlasMipCount", 2);
                     Int(shader, "_ReflectionAtlasSliceCount", 2);
                     Int(shader, "_EnableProbeVolumes", 0);
@@ -244,10 +304,8 @@ namespace VividRP.Editor.Tests
                     Bind(pair.shader, pair.kernel, "_PunctualLights", punctual);
                     Bind(pair.shader, pair.kernel, "_AreaLights", area);
                 }
-                Texture(production, shade, "_PreIntegratedFGD_GGXDisneyDiffuse", legacyFgd);
-                Texture(production, shade, "_PreIntegratedFGD_CharlieAndFabric", black);
-                Texture(production, shade, "_LayerAux0", black);
-                Texture(production, shade, "_LayerAux1", black);
+                Texture(production, shade, "_LayerAux0", layerAux0);
+                Texture(production, shade, "_LayerAux1", layerAux1);
                 Texture(production, shade, "_GTAOTexture", ao);
                 Texture(production, shade, "_DirectionalShadowTexture", shadow);
                 Texture(production, shade, "_ScreenSpaceReflectionTexture", ssr);
@@ -266,6 +324,8 @@ namespace VividRP.Editor.Tests
                 Int(control, "_TestMixedTile", mixedTile ? 1 : 0);
                 Int(control, "_TestEnvironment", environment);
                 Int(control, "_TestSSREnabled", ssrEnabled ? 1 : 0);
+                Int(control, "_TestDualMode", dualMode);
+                m_Cmd.SetComputeFloatParam(control, "_TestLayerWeight", layerWeight);
                 m_Cmd.DispatchCompute(control, prepare, 1, 1, 1);
                 Int(classifier, "_ClassificationWidth", 8);
                 Int(classifier, "_ClassificationHeight", 8);
@@ -292,16 +352,15 @@ namespace VividRP.Editor.Tests
                 args.GetData(dispatchArgs);
                 for (int i = 0; i < 4; ++i)
                     Assert.That(dispatchArgs[i * 4], Is.EqualTo(i == variant ? 1u : 0u));
-                AssertPixels(lighting, referencePixels);
+                AssertPixels(lighting, referencePixels, environment == 6, dualMode == 2);
 
-                // FastSlab must be independent of BOTH legacy FGD contents and repeated dispatch state.
-                legacyFgd.SetPixel(0, 0, Color.white);
-                legacyFgd.Apply();
+                // Neither Fast nor Dual requires any legacy FGD binding. Repeat
+                // the dispatch to check that accumulation is cleared each time.
                 Graphics.ExecuteCommandBuffer(m_Cmd);
-                AssertPixels(lighting, referencePixels);
+                AssertPixels(lighting, referencePixels, environment == 6, dualMode == 2);
             }
 
-            private static void AssertPixels(RenderTexture target, Vector4[] expected)
+            private static void AssertPixels(RenderTexture target, Vector4[] expected, bool whiteEnvironment, bool verticalLayer)
             {
                 AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(target, 0, TextureFormat.RGBAFloat);
                 request.WaitForCompletion();
@@ -309,7 +368,15 @@ namespace VividRP.Editor.Tests
                 var actual = request.GetData<Vector4>();
                 for (int i = 0; i < expected.Length; ++i)
                     for (int c = 0; c < 3; ++c)
+                    {
                         Assert.That(actual[i][c], Is.EqualTo(expected[i][c]).Within(0.003f), $"pixel {i}, channel {c}");
+                        if (whiteEnvironment && i % 8 != 7)
+                            Assert.That(actual[i][c], Is.InRange(0.0f, 1.253f), "unit environment times AO 0.5 and exposure 2.5");
+                        // White base and top opacity == green diffuse albedo:
+                        // vertical composition preserves unit green energy.
+                        if (whiteEnvironment && verticalLayer && i % 8 == 0 && c == 1)
+                            Assert.That(actual[i][c], Is.EqualTo(1.25f).Within(0.003f));
+                    }
             }
 
             private T Track<T>(T value) where T : Object { m_Objects.Add(value); return value; }

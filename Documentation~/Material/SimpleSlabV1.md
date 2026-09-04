@@ -289,6 +289,79 @@ The tube test retains the existing line primitive and independently combines
 its lobe weights. These are production Classify + indirect Deferred shader
 tests, not full-SRP captures or proof of the physical accuracy of the fits.
 
+## Phase 8.6 native Dual Slab migration
+
+Deferred evaluator version 3 migrates both Dual Slab closures onto the same
+Vivid-native preparation, directional/punctual kernels, split SS/MS environment
+sampling, reflection-probe hierarchy and area-light adapter as FastSlab.
+The light lists and shadow samples remain shared between the closures. Each
+Slab prepares its own roughness-dependent LUT energy and LTC transform once.
+There is no legacy lighting fallback in the production Deferred shader.
+
+The existing Sidecar and layer operators are preserved. With top weight `w`,
+opacity `O` recovered by the existing ABI-v1 StandardLit metallic-workflow rule,
+top directional energy `S_top(v)`, and V1 Schlick Fresnel `F_top`:
+
+| Contribution | Horizontal base weight | Vertical base weight | Top weight |
+| --- | --- | --- | --- |
+| Directional / punctual | `1-w` | `1-w + w*(1-F_top(v))*(1-F_top(l))*(1-O)` | `w` |
+| Diffuse GI / environment SS+MS / area | `1-w` | `1-w + w*(1-S_top(v))*(1-O)` | `w` |
+| SSR single-scatter response | `1-w` | Same as environment | `w` |
+
+The old SSR `lerp` was inconsistent with vertical environment transmission.
+SSR now removes the **weighted sum of the two environment SS lobes**, and adds
+the SSR radiance multiplied by `baseWeight*Sss_base + w*Sss_top`. Both MS lobes,
+direct light and emission remain intact. Layer weights, albedo, interface
+transmission, AO and exposure are not applied a second time in composition.
+The shared material emission is still written once by `ClearDeferredLit`.
+
+This migration does not redefine vertical layering as an exact physical BSDF.
+The existing opacity recovery (including dark-color ambiguity), shared normal,
+shared irradiance/AO policy, and approximate vertical transmittance are retained.
+The Sidecar still supplies no independent top normal or opacity semantic.
+There is still one SSR radiance/confidence signal, reused for both closures;
+different layer roughnesses do not produce two independently traced/denoised
+reflections. The 8.5 broad-environment and LTC approximations also apply per
+layer. More general closure transport remains a separate contract change.
+
+### Resource and compatibility boundary
+
+- Production `DeferredLit.compute` no longer includes `HdrpLitLighting.hlsl`
+  or legacy `GBuffer.hlsl`, constructs legacy BSDF/pre-light structures, or
+  calls legacy environment/area/post-evaluation functions.
+- `DeferredLightingPass` no longer constructs, imports or binds the legacy
+  GGX/Disney and Charlie/Fabric FGD textures. Only the native Slab LUT is
+  imported from the existing shared frame-data owner; its availability is
+  independent of the legacy FGD validity flag. Missing LUT remains diagnostic.
+- The shared FGD subsystem, LTC resources and legacy shaders used by other
+  paths are not deleted. No generated resource asset or package path changes
+  are required.
+- Material program IDs, Catalog hashes, Surface Summary, Sidecar formats,
+  valid-weight sentinel, tile policy and zero-weight producer downgrade are
+  unchanged. Invalid Dual Sidecar data still produces magenta, including at
+  weight zero; a valid zero-weight material is exported as FastSlab upstream.
+
+### Regression coverage
+
+The focused production classifier/indirect-Deferred fixture adds 21 Dual Slab
+pixel cases (41 total with the 8.4/8.5 cases): horizontal/vertical mixes,
+zero-weight FastSlab exports, minimum valid Sidecar weight, full top weight,
+different layer F0/roughness, partial/full SSR, direct lighting, probe/sky
+mixing, rectangle/tube/barn doors, AO-zero, receive flags, Unlit, missing LUT,
+invalid Sidecar and mixed Fast/Dual/Error tiles. The oracle combines separate
+per-Slab responses using known fixture opacity rather than calling production
+layer composition or copying its metallic-recovery quadratic. White-environment
+cases check the energy bound and the green-channel unit-energy identity for a
+white base with matched top opacity/diffuse albedo. These checks concern the
+retained environment approximation, not exact vertical direct-light transport.
+
+Tests no longer bind any legacy FGD texture, including the existing AOT
+Resolve/Classify/Deferred fixture. Source-boundary checks reject legacy lighting
+dependencies for both Fast and Dual. A warmed `DeferredLightingPass.Prepare`
+allocation regression verifies stable descriptor reuse and zero managed bytes.
+GPU tests and full-SRP visual acceptance still need execution in a compatible
+Unity Editor; DXC and managed compilation alone do not establish pixel results.
+
 ## Image validation
 
 For image baselines, use a linear HDR target, fixed exposure, no temporal

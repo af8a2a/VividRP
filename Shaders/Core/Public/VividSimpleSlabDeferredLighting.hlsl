@@ -10,11 +10,12 @@
 #include "VividAreaLightCommon.hlsl"
 #include "LTCAreaLight.hlsl"
 
-#define VIVID_SIMPLE_SLAB_DEFERRED_LIGHTING_VERSION 4u
+#define VIVID_SIMPLE_SLAB_DEFERRED_LIGHTING_VERSION 5u
 
 struct VividSimpleSlabPreLightData
 {
     VividSimpleSlabEnergy energy;
+    float nDotV;
     float3 reflectionDirectionWS;
     float3x3 viewNormalBasis;
     float3x3 ltcSpecular;
@@ -44,12 +45,17 @@ VividSimpleSlabPreLightData VividPrepareSimpleSlabDeferredLighting(
 {
     VividSimpleSlabPreLightData data;
     float nDotV = dot(slab.normalWS, viewDirectionWS);
+    data.nDotV = nDotV;
     float clampedNdotV = saturate(ClampNdotV(nDotV));
     data.energy = VividLoadSimpleSlabEnergy(slab, viewDirectionWS);
     // Single scattering retains the existing GGX prefilter convention.
     data.reflectionDirectionWS = GetSpecularDominantDir(slab.normalWS,
         reflect(-viewDirectionWS, slab.normalWS), slab.perceptualRoughness, clampedNdotV);
-    data.viewNormalBasis = GetOrthoBasisViewNormal(viewDirectionWS, slab.normalWS, nDotV);
+    // Area lighting rejects backfacing views; avoid the V == -N singularity
+    // while preparing their otherwise-unused LTC basis.
+    data.viewNormalBasis = nDotV > 0.0f
+        ? GetOrthoBasisViewNormal(viewDirectionWS, slab.normalWS, nDotV)
+        : GetLocalFrame(slab.normalWS);
     data.ltcSpecular = SampleLtcMatrix(slab.perceptualRoughness,
         clampedNdotV, VIVID_LTC_LIGHTING_MODEL_GGX);
     return data;
@@ -114,6 +120,10 @@ VividSimpleSlabDirectLighting VividEvaluateSimpleSlabAreaLight(
     float3 positionWS, AreaLightData areaLight)
 {
     VividSimpleSlabDirectLighting lighting = VividCreateEmptySimpleSlabDirectLighting();
+    // Match the analytic direct kernel, using the unclamped view hemisphere.
+    if (preLight.nDotV <= 0.0f)
+        return lighting;
+
     ApplyRectangularAreaLightBarnDoor(areaLight, positionWS);
     float intensity = EvaluateAreaLightIntensity(areaLight, positionWS);
     if (intensity <= 0.0f)

@@ -119,7 +119,7 @@ namespace VividRP.Editor.Tests
             Assert.That(MaterialProgramContract.SimpleSlabBSDFKernelVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.SimpleSlabDirectLightingVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.SimpleSlabEnergyVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.SimpleSlabDeferredLightingVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.SimpleSlabDeferredLightingVersion, Is.EqualTo(5u));
             Assert.That(Runtime.VividSlabLut.Version, Is.EqualTo(1u));
             Assert.That(Runtime.VividSlabLut.Resolution, Is.EqualTo(64));
             Assert.That(Runtime.VividSlabLut.SampleCount, Is.EqualTo(4096));

@@ -15,7 +15,7 @@ release validated.
 | Analytic BSDF kernel | 1 | `SimpleSlabBSDFKernelVersion` |
 | Directional/punctual adapter | 2 | `SimpleSlabDirectLightingVersion` |
 | Energy model | 1 | `SimpleSlabEnergyVersion` |
-| Deferred evaluator | 4 | `SimpleSlabDeferredLightingVersion` |
+| Deferred evaluator | 5 | `SimpleSlabDeferredLightingVersion` |
 | Native Slab LUT | 1, 64² RGBA16F, 4096 samples | `VividSlabLut` |
 | Surface Summary / Dual Sidecar ABI | 1 / 1 | `SurfaceSummaryGBuffer.hlsl` |
 
@@ -33,6 +33,8 @@ not require a new material program ID.
 
 Evaluator version 4 makes reserved GeneralSlab/Subsurface/CatchAll material
 classes diagnostic. It keeps Fast/Dual lighting formulas from version 3.
+Version 5 additionally makes rectangle/tube direct lighting return zero for
+`NdotV <= 0`, matching the analytic kernel, without changing indirect lighting.
 MaterialProgram compiler versions, Catalog hashes and serialized payloads are
 unchanged: generated material programs export Slab inputs, while the pipeline
 owns BSDF evaluation. A future export/layout change must follow the existing
@@ -243,7 +245,7 @@ includes. From the package root:
 ```
 
 It checks 27 Deferred compute/raster variants (APV off/L1/L2), three production
-classification kernels, two bake kernels and seven focused test kernels.
+classification kernels, two bake kernels and eight focused test kernels.
 It uses temporary include junctions and removes only those junctions and empty
 directories. It does not import assets or run Unity tests.
 
@@ -258,6 +260,10 @@ directories. It does not import assets or run Unity tests.
 | Serialized resources | `PipelineResourcesContainerEditorTests.FrozenSimpleSlabLut_IsPublishedByTheSerializedRuntimeContainer` |
 | Visual acceptance | Fixed-exposure linear HDR captures: dielectric/metal, roughness sweep, grazing view, white environment, direct, probe/SSR and both Dual operators |
 | Performance | Warm-frame Unity Profiler GC on all relevant threads; representative Fast/Dual GPU timings |
+
+`AreaLight_ViewHemisphereGatesDiffuseAndSpecular` checks rectangle and tube
+lights at `NdotV = 1, 1e-5, 0, -0.6, -1`: both lobes must remain finite,
+positive for front-facing views and exactly zero otherwise.
 
 Furnace tolerance is 0.015 per channel; independent rough-lobe LUT quadrature
 tolerance is 0.004; reciprocity error is below 2e-5. Deferred pixel tolerance

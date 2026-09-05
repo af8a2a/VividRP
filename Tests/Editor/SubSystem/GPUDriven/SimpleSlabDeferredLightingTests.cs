@@ -116,6 +116,16 @@ namespace VividRP.Editor.Tests
             fixture.Run(true, 0, true, false, areaCase: areaCase);
         }
 
+        [Test]
+        public void AreaLight_ViewHemisphereGatesDiffuseAndSpecular()
+        {
+            if (!SystemInfo.supportsComputeShaders)
+                Assert.Ignore("Compute shaders required.");
+            RTHandles.Initialize(1, 1);
+            using var fixture = new PixelFixture();
+            fixture.AssertAreaViewHemisphere();
+        }
+
         // Every tile also contains FastSlab, Unlit, AO-zero and no-SSR pixels.
         // Mode 3 forces an invalid Sidecar, which must remain diagnostic.
         [TestCase(1, 0.0f, 0.0f, false, false)]
@@ -211,6 +221,40 @@ namespace VividRP.Editor.Tests
             private readonly CommandBuffer m_Cmd = new();
             private readonly MaterialPropertyBlock m_RasterProperties = new();
             private ComputeShader m_Production;
+
+            internal void AssertAreaViewHemisphere()
+            {
+                ComputeShader shader = Load("Tests/Editor/SubSystem/GPUDriven/SimpleSlabDeferredLightingTests.compute");
+                Assert.That(m_Lut.Create(Load("Shaders/Core/Private/VividSlabLut.compute")), Is.True);
+                int kernel = shader.FindKernel("EvaluateAreaViewHemisphere");
+                var ltc = Track(new Texture2DArray(1, 1, 3, TextureFormat.RGBAFloat, false, true));
+                for (int slice = 0; slice < 3; ++slice)
+                    ltc.SetPixels(new[] { new Color(2, 0, 1.3f, 0) }, slice);
+                ltc.Apply(false, false);
+                var values = new Vector4[20]; // Rectangle/tube x five views x diffuse/specular.
+                ComputeBuffer output = Buffer(values);
+                Texture(shader, kernel, "_VividSlabLut", m_Lut.Texture.rt);
+                Texture(shader, kernel, "_LtcData", ltc);
+                Bind(shader, kernel, "_Expected", output);
+                m_Cmd.DispatchCompute(shader, kernel, 10, 1, 1);
+                Graphics.ExecuteCommandBuffer(m_Cmd);
+                output.GetData(values);
+                for (int i = 0; i < values.Length; ++i)
+                {
+                    int viewCase = (i / 2) % 5;
+                    Assert.That(values[i].w, Is.EqualTo(1), $"Output {i} was not written.");
+                    for (int channel = 0; channel < 3; ++channel)
+                    {
+                        float value = values[i][channel];
+                        string label = $"shape {i / 10}, view {viewCase}, lobe {i % 2}, channel {channel}";
+                        Assert.That(float.IsNaN(value) || float.IsInfinity(value), Is.False, label);
+                        if (viewCase < 2)
+                            Assert.That(value, Is.GreaterThan(0), label);
+                        else
+                            Assert.That(value, Is.Zero, label);
+                    }
+                }
+            }
 
             internal void Run(bool directLights, float ssrWeight, bool lutReady, bool mixedTile,
                 int environment = 0, bool ssrEnabled = true, int areaCase = 0,

@@ -1,5 +1,6 @@
 #pragma kernel PrepareInputs
 #pragma kernel ReferenceLighting
+#pragma kernel EvaluateAreaViewHemisphere
 #pragma use_dxc
 #pragma target 5.0
 
@@ -24,6 +25,36 @@ uint _TestSSREnabled;
 uint _TestDualMode;
 uint _TestOverrideClass;
 float _TestLayerWeight;
+
+// Both light shapes face the surface. Only the viewing hemisphere changes.
+// The first two views must light both lobes; the remaining three must be zero.
+[numthreads(1, 1, 1)]
+void EvaluateAreaViewHemisphere(uint3 id : SV_DispatchThreadID)
+{
+    uint viewCase = id.x % 5u;
+    float nDotV = viewCase == 0u ? 1.0f : (viewCase == 1u ? 1e-5f
+        : (viewCase == 2u ? 0.0f : (viewCase == 3u ? -0.6f : -1.0f)));
+    float3 view = float3(sqrt(saturate(1.0f - nDotV * nDotV)), 0, nDotV);
+    VividSimpleSlabData slab;
+    slab.normalWS = float3(0, 0, 1);
+    slab.diffuseAlbedo = float3(0.27f, 0.48f, 0.13f);
+    slab.specularF0 = float3(0.19f, 0.05f, 0.35f);
+    slab.perceptualRoughness = 0.42f;
+    AreaLightData area = (AreaLightData)0;
+    area.lightType = id.x < 5u ? VIVID_AREA_LIGHT_TYPE_RECTANGLE : VIVID_AREA_LIGHT_TYPE_TUBE;
+    area.positionWS = float3(0.3f, 0.2f, 2);
+    area.rightWS = float3(-1, 0, 0);
+    area.upWS = float3(0, 1, 0);
+    area.forwardWS = float3(0, 0, -1);
+    area.width = 1;
+    area.height = 0.8f;
+    area.rangeAttenuationBias = 1;
+    area.color = 1;
+    VividSimpleSlabPreLightData preLight = VividPrepareSimpleSlabDeferredLighting(slab, view);
+    VividSimpleSlabDirectLighting lighting = VividEvaluateSimpleSlabAreaLight(slab, preLight, 0, area);
+    _Expected[id.x * 2u] = float4(lighting.diffuse, 1);
+    _Expected[id.x * 2u + 1u] = float4(lighting.specular, 1);
+}
 
 // The fixture's mip levels are constant-colored, so expected filtering and
 // hierarchy arithmetic need not call production sky/probe sampling helpers.

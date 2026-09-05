@@ -63,6 +63,13 @@ namespace VividRP.Runtime.PrimitiveScene
         internal uint CameraLayerMask;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VividStaticShadowInvalidationBounds
+    {
+        internal float4 BoundsMin;
+        internal float4 BoundsMax;
+    }
+
     internal readonly struct VividPrimitiveGeometryHandle : IEquatable<VividPrimitiveGeometryHandle>
     {
         internal static readonly VividPrimitiveGeometryHandle Invalid = new(-1, 0u);

@@ -81,7 +81,7 @@ Shader "VividRP/Material/Unlit"
         Pass
         {
             Name "ShadowCaster"
-            Tags { "LightMode" = "ShadowCaster" "VividVSMCaster" = "True" }
+            Tags { "LightMode" = "ShadowCaster" "VividVSMCaster" = "2" }
 
             ZWrite On
             ZTest LEqual

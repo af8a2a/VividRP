@@ -1,4 +1,6 @@
 using System.Linq;
+using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -571,6 +573,68 @@ namespace VividRP.Editor.Tests
                 out VirtualTexturePageTableEntry revealedEntry), Is.True);
             Assert.That(revealedEntry.Fallback, Is.False);
             Assert.That(revealedEntry.PhysicalPageId, Is.EqualTo(steadyRequest.PhysicalPageId));
+        }
+
+        [Test]
+        public void SamplingRevision_TracksArrivalRevealAndEvictionAndSurvivesUploadAcknowledgement()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("Shadow Sampling", 4, 4, 3, 8, 4));
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var initial), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var stable), Is.True);
+            Assert.That(stable.SamplingRevision, Is.EqualTo(initial.SamplingRevision));
+
+            var coord = new VirtualTexturePageCoord(0, 0, 0);
+            VirtualTextureUploadRequest request = RequestAndCommit(spaceId, coord);
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var arrived), Is.True);
+            Assert.That(arrived.SamplingRevision, Is.Not.EqualTo(initial.SamplingRevision));
+            Assert.That(arrived.WithBindingIndex(3).SamplingRevision, Is.EqualTo(arrived.SamplingRevision));
+            var frameData = new VividVirtualTextureFrameData();
+            frameData.AddBinding(arrived);
+            Assert.That(frameData.TryGetBinding(0, out var snapshot), Is.True);
+            Assert.That(snapshot.SamplingRevision, Is.EqualTo(arrived.SamplingRevision));
+
+            int frameIndex = request.RequestFrame;
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(frameIndex + 1);
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(
+                frameIndex + 1 + VTResidencyManager.ColdStartPageTransitionFrameCount);
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var revealed), Is.True);
+            Assert.That(revealed.SamplingRevision, Is.Not.EqualTo(arrived.SamplingRevision));
+            Assert.That(snapshot.SamplingRevision, Is.EqualTo(arrived.SamplingRevision), "Bindings must retain their frame snapshot.");
+            Assert.That(VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                spaceId, out var updates, out int pendingVersion, out bool fullUpload), Is.True);
+            Assert.That(VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                spaceId, pendingVersion, fullUpload, updates.Length), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var uploaded), Is.True);
+            Assert.That(uploaded.SamplingRevision, Is.EqualTo(revealed.SamplingRevision));
+
+            Assert.That(VirtualTextureSystem.FlushRegion(spaceId, coord.Mip, new RectInt(coord.X, coord.Y, 1, 1)), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var evicted), Is.True);
+            Assert.That(evicted.SamplingRevision, Is.Not.EqualTo(uploaded.SamplingRevision));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(spaceId, request.PageCoord, out var entry), Is.True);
+            Assert.That(entry.Fallback, Is.True);
+        }
+
+        [Test]
+        public void SamplingRevision_TracksInPlaceMipTailUploadWithoutChangingThePageTable()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("Shadow Mip Tail", 4, 4, 3, 8, 4));
+            var coord = new VirtualTexturePageCoord(0, 0, 2);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(spaceId, coord, out var entry), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var before), Is.True);
+            // Model the deferred bootstrap upload queued by a streamed asset producer.
+            // Its completion overwrites an already-resident slot rather than remapping it.
+            var spaces = (Dictionary<int, VTPageTableSpace>)typeof(VirtualTextureSystem)
+                .GetField("s_PageTableSpaces", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+            var refreshes = (List<VTRequest>)typeof(VTPageTableSpace)
+                .GetField("m_ResidentRefreshRequests", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(spaces[spaceId]);
+            var request = new VTRequest(spaceId, coord, entry.PhysicalPageId, 1, int.MaxValue, 0);
+            refreshes.Add(request);
+            Assert.That(VirtualTextureSystem.CommitRequest(request), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var after), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(spaceId, coord, out var unchanged), Is.True);
+            Assert.That(unchanged.PackedValue, Is.EqualTo(entry.PackedValue));
+            Assert.That(after.SamplingRevision, Is.Not.EqualTo(before.SamplingRevision));
+            Assert.That(after.SamplingRevision >> 32, Is.EqualTo(before.SamplingRevision >> 32));
         }
 
         [Test]

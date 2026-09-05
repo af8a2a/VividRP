@@ -384,6 +384,7 @@ namespace VividRP.Editor.Tests
                 VirtualTextureSystem.TryMakePageResident(spaceId, coord, locked: false, frameIndex: 7),
                 Is.True);
             Assert.That(VirtualTextureSystem.TryGetPageTableEntry(spaceId, coord, out var oldEntry), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var oldBinding), Is.True);
             int freeBeforeRefresh = VirtualTextureSystem.GetFreePageCountForTesting(spaceId);
 
             Assert.That(VirtualTextureSystem.TryQueuePageRefresh(spaceId, coord, frameIndex: 8), Is.True);
@@ -393,6 +394,8 @@ namespace VividRP.Editor.Tests
             Assert.That(beforeCommit.Resident, Is.True);
             Assert.That(beforeCommit.PendingUpload, Is.False);
             Assert.That(beforeCommit.PhysicalPageId, Is.EqualTo(oldEntry.PhysicalPageId));
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var queuedBinding), Is.True);
+            Assert.That(queuedBinding.SamplingRevision, Is.EqualTo(oldBinding.SamplingRevision));
 
             Assert.That(VirtualTextureSystem.TryGetPendingRequests(spaceId, out var pending), Is.True);
             VTRequest refreshRequest = pending.Single(request => request.PageCoord.Equals(coord));
@@ -405,6 +408,8 @@ namespace VividRP.Editor.Tests
             Assert.That(committed.PendingUpload, Is.False);
             Assert.That(committed.PhysicalPageId, Is.EqualTo(refreshRequest.PhysicalPageId));
             Assert.That(committed.PhysicalPageId, Is.Not.EqualTo(oldEntry.PhysicalPageId));
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var committedBinding), Is.True);
+            Assert.That(committedBinding.SamplingRevision, Is.Not.EqualTo(oldBinding.SamplingRevision));
             Assert.That(
                 VirtualTextureSystem.GetFreePageCountForTesting(spaceId),
                 Is.EqualTo(freeBeforeRefresh - 1),

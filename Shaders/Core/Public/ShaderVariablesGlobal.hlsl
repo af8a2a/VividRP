@@ -65,6 +65,9 @@ CBUFFER_START(ShaderVariablesShadowMatrices)
     float4x4 _VividShadowVP[4];
 CBUFFER_END
 int _VividShadowCascadeIndex;
+// Runtime branch intentionally also works with fragment-only VSM shader variants.
+int _VSMUnityRasterEnabled;
+float4x4 _VSMRasterViewProjection;
 #endif
 
 #define _Time _VividTime
@@ -90,7 +93,7 @@ int _VividShadowCascadeIndex;
 #define unity_MatrixInvV _VividMatrixInvV
 #define unity_MatrixInvP _VividMatrixInvP
 #if defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
-#define unity_MatrixVP _VividShadowVP[_VividShadowCascadeIndex]
+#define unity_MatrixVP (_VSMUnityRasterEnabled != 0 ? _VSMRasterViewProjection : _VividShadowVP[_VividShadowCascadeIndex])
 #else
 #define unity_MatrixVP _VividMatrixVP
 #endif

@@ -14,6 +14,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int BendWaveSize = 64;
         private const int BendMaxDispatchCount = 8;
         private const string KernelName = "CSMShadowResolve";
+        private const string ResetReceiverFeedbackKernelName = "VSMPrototypeResetReceiverFeedback";
         private const string ClearTilesKernelName = "CSMShadowClearTiles";
         private const string ClassifyTilesKernelName = "CSMShadowClassifyTiles";
         private const string ResolveTilesKernelName = "CSMShadowResolveTiles";
@@ -33,11 +34,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VSMPrototypeDynamicPhysicalPageId =
             Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
         private static readonly int VSMPrototypePageTableId = Shader.PropertyToID("_VSMPrototypePageTable");
+        private static readonly int VSMPrototypePageMetadataId = Shader.PropertyToID("_VSMPrototypePageMetadata");
         private static readonly int VSMPrototypeEnabledId = Shader.PropertyToID("_VSMPrototypeEnabled");
+        private static readonly int VSMReceiverParametersId = Shader.PropertyToID("_VSMReceiverParameters");
+        private static readonly int VSMPrototypeRequestEnabledId = Shader.PropertyToID("_VSMPrototypeRequestEnabled");
         private static readonly int VSMPrototypePageSizeId = Shader.PropertyToID("_VSMPrototypePageSize");
         private static readonly int VSMPrototypeVirtualResolutionId = Shader.PropertyToID("_VSMPrototypeVirtualResolution");
         private static readonly int VSMPrototypePagesPerAxisId = Shader.PropertyToID("_VSMPrototypePagesPerAxis");
         private static readonly int VSMPrototypePhysicalPagesPerRowId = Shader.PropertyToID("_VSMPrototypePhysicalPagesPerRow");
+        private static readonly int VSMPrototypePageTableEntryCountId = Shader.PropertyToID("_VSMPrototypePageTableEntryCount");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int CSMShadowTileListId = Shader.PropertyToID("_CSMShadowTileList");
         private static readonly int CSMShadowDispatchIndirectArgsId = Shader.PropertyToID("_CSMShadowDispatchIndirectArgs");
@@ -169,6 +174,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_ResolveCompute;
         private int m_Kernel = -1;
+        private int m_ResetReceiverFeedbackKernel = -1;
         private int m_ClearTilesKernel = -1;
         private int m_ClassifyTilesKernel = -1;
         private int m_ResolveTilesKernel = -1;
@@ -182,9 +188,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_EnableBilateralDenoise;
         private bool m_EnableBendComposite;
         private bool m_VirtualShadowMapPrototypeActive;
+        private Vector4 m_VSMReceiverParameters;
+        private Vector4 m_VSMReceiverQuality;
+        private bool m_VirtualShadowMapRequestCollectionActive;
         private TextureHandle m_VirtualShadowMapPrototypeStaticPhysicalPage;
         private TextureHandle m_VirtualShadowMapPrototypeDynamicPhysicalPage;
         private BufferHandle m_VirtualShadowMapPrototypePageTable;
+        private BufferHandle m_VirtualShadowMapPrototypePageMetadata;
         private int m_DispatchGroupCountX = 1;
         private int m_DispatchGroupCountY = 1;
         private int m_TileCountX = 1;
@@ -209,6 +219,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
         private float m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
         private int m_FrameIndex;
+        private ulong m_CameraEntityId;
         private int m_PCSSBlockerSampleCount = VividAdditionalLightData.DefaultDirLightPCSSBlockerSampleCount;
         private int m_PCSSFilterSampleCount = VividAdditionalLightData.DefaultDirLightPCSSFilterSampleCount;
         private float m_PCSSMaxPenumbraSize = VividAdditionalLightData.DefaultDirLightPCSSMaxPenumbraSize;
@@ -265,6 +276,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_Kernel = FindKernelOrInvalid(m_ResolveCompute, KernelName);
+            m_ResetReceiverFeedbackKernel = FindKernelOrInvalid(m_ResolveCompute, ResetReceiverFeedbackKernelName);
             m_ClearTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ClearTilesKernelName);
             m_ClassifyTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ClassifyTilesKernelName);
             m_ResolveTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ResolveTilesKernelName);
@@ -283,9 +295,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_VirtualShadowMapPrototypeActive = false;
+            m_VirtualShadowMapRequestCollectionActive = false;
             m_VirtualShadowMapPrototypeStaticPhysicalPage = default;
             m_VirtualShadowMapPrototypeDynamicPhysicalPage = default;
             m_VirtualShadowMapPrototypePageTable = default;
+            m_VirtualShadowMapPrototypePageMetadata = default;
             m_LightDirectionWS = Vector4.zero;
             m_BendDispatchList = CreateEmptyBendDispatchList();
             m_BendDepthTextureSize = Vector4.zero;
@@ -295,6 +309,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BendQualitySettings = ResolveBendQualitySettings(m_ShadowQuality);
             m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
             m_FrameIndex = 0;
+            m_CameraEntityId = 0ul;
             m_CascadeWorldTexelSizes = Vector4.zero;
             m_CascadeBorders = Vector4.zero;
             m_PCSSBlockerSampleCount = VividAdditionalLightData.DefaultDirLightPCSSBlockerSampleCount;
@@ -334,7 +349,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CascadeResolution = shadowData.cascadeResolution;
             m_CascadeWorldTexelSizes = Vector4.zero;
             m_CascadeBorders = Vector4.zero;
-            m_FrameIndex = Time.frameCount;
+            m_FrameIndex = cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
+            m_CameraEntityId = cameraData.camera != null
+                ? EntityId.ToULong(cameraData.camera.GetEntityId())
+                : 0ul;
 
             for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
             {
@@ -395,12 +415,17 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
+            m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings);
+            m_VSMReceiverParameters = new Vector4(csmSettings != null && csmSettings.virtualShadowMapPCF.value ? 1 : 0,
+                shadowData.depthBias, shadowData.slopeScaleDepthBias, 0);
             m_EnableBilateralDenoise = csmSettings != null && csmSettings.screenSpaceShadowDenoise.value;
             m_EnableTiledResolve = IsVividTiledPCSSQuality(m_ShadowQuality)
                 && CanUseTiledResolveKernels();
 
             if (VirtualShadowMapPrototypeRuntime.EnsurePhysicalPageForBinding())
             {
+                PassRecorder.ImportBufferForPass(this,
+                    VirtualShadowMapPrototypeRuntime.Projections.Buffer, AccessFlags.Read);
                 m_VirtualShadowMapPrototypeStaticPhysicalPage = PassRecorder.ImportTextureForPass(
                     this,
                     VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
@@ -413,7 +438,25 @@ namespace VividRP.Runtime.RenderPass.Core
                     this,
                     VirtualShadowMapPrototypeRuntime.PageTable,
                     AccessFlags.Read);
+                m_VirtualShadowMapPrototypePageMetadata = PassRecorder.ImportBufferForPass(
+                    this,
+                    VirtualShadowMapPrototypeRuntime.PageMetadata,
+                    AccessFlags.ReadWrite);
             }
+
+            m_VirtualShadowMapRequestCollectionActive = csmSettings != null
+                && csmSettings.enableVirtualShadowMapPrototype.value
+                && m_CameraEntityId != 0ul
+                && m_ResetReceiverFeedbackKernel >= 0
+                && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform()
+                && VirtualShadowMapPrototypeRuntime.HasPageRequestResources
+                && VirtualShadowMapPrototypeRuntime.Projections.Count > 0
+                && m_VirtualShadowMapPrototypePageMetadata.IsValid();
+
+            // Feedback must visit every receiver, including fully-lit CSM tiles
+            // during bootstrap and Record-time fallback.
+            if (m_VirtualShadowMapRequestCollectionActive)
+                m_EnableTiledResolve = false;
 
             if (csmSettings != null
                 && csmSettings.enableVirtualShadowMapPrototype.value
@@ -443,6 +486,29 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var cmd = context.cmd;
 
+            m_VirtualShadowMapRequestCollectionActive &= VirtualShadowMapPrototypeRuntime.Projections.LayoutRecorded;
+            if (m_VirtualShadowMapRequestCollectionActive
+                && VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(
+                    m_CameraEntityId, m_FrameIndex))
+            {
+                using var feedbackScope = new ProfilingScope(cmd, VSMProfiling.ResetFeedback);
+                cmd.SetComputeBufferParam(
+                    m_ResolveCompute,
+                    m_ResetReceiverFeedbackKernel,
+                    VSMPrototypePageMetadataId,
+                    VirtualShadowMapPrototypeRuntime.PageMetadata);
+                cmd.SetComputeIntParam(
+                    m_ResolveCompute,
+                    VSMPrototypePageTableEntryCountId,
+                    VirtualShadowMapPrototypeRuntime.PageTableEntryCount);
+                cmd.DispatchCompute(
+                    m_ResolveCompute,
+                    m_ResetReceiverFeedbackKernel,
+                    CoreUtils.DivRoundUp(VirtualShadowMapPrototypeRuntime.PageTableEntryCount, 64),
+                    1,
+                    1);
+            }
+
             if (m_EnableTiledResolve
                 && m_TileListBuffer?.innerHandle.IsValid() == true
                 && m_DispatchIndirectArgsBuffer?.innerHandle.IsValid() == true)
@@ -455,12 +521,16 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             RecordBendScreenSpaceContactShadow(cmd);
+            if (m_VirtualShadowMapRequestCollectionActive)
+                VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(
+                    m_CameraEntityId, m_FrameIndex);
         }
 
         public override void Dispose()
         {
             m_ResolveCompute = null;
             m_Kernel = -1;
+            m_ResetReceiverFeedbackKernel = -1;
             m_ClearTilesKernel = -1;
             m_ClassifyTilesKernel = -1;
             m_ResolveTilesKernel = -1;
@@ -474,14 +544,17 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_VirtualShadowMapPrototypeActive = false;
+            m_VirtualShadowMapRequestCollectionActive = false;
             m_VirtualShadowMapPrototypeStaticPhysicalPage = default;
             m_VirtualShadowMapPrototypeDynamicPhysicalPage = default;
             m_VirtualShadowMapPrototypePageTable = default;
+            m_VirtualShadowMapPrototypePageMetadata = default;
             m_DispatchGroupCountX = 1;
             m_DispatchGroupCountY = 1;
             m_TileCountX = 1;
             m_TileCountY = 1;
             m_FrameIndex = 0;
+            m_CameraEntityId = 0ul;
             m_BendDispatchList = CreateEmptyBendDispatchList();
             m_BendDepthTextureSize = Vector4.zero;
             m_ViewProjMatrix = Matrix4x4.identity;
@@ -492,6 +565,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void RecordFullScreenCSMResolve(ComputeCommandBuffer cmd)
         {
+            using var resolveScope = new ProfilingScope(cmd,
+                m_VirtualShadowMapRequestCollectionActive ? VSMProfiling.Resolve : null);
             BindCommonTextures(cmd, m_Kernel);
             BindShadowParameters(cmd);
 
@@ -589,6 +664,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_VirtualShadowMapPrototypeDynamicPhysicalPage.IsValid()
                 ? m_VirtualShadowMapPrototypeDynamicPhysicalPage
                 : m_GBuffer1.innerHandle;
+            cmd.SetComputeBufferParam(m_ResolveCompute, kernel,
+                VirtualShadowMapProjectionSet.BufferId, VirtualShadowMapPrototypeRuntime.Projections.Buffer);
             cmd.SetComputeTextureParam(m_ResolveCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ResolveCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_ResolveCompute, kernel, CSMShadowAtlasId, m_CSMShadowAtlas.innerHandle);
@@ -614,6 +691,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     kernel,
                     VSMPrototypePageTableId,
                     m_TileListBuffer.innerHandle);
+            if (VirtualShadowMapPrototypeRuntime.PageMetadata != null)
+                cmd.SetComputeBufferParam(
+                    m_ResolveCompute,
+                    kernel,
+                    VSMPrototypePageMetadataId,
+                    VirtualShadowMapPrototypeRuntime.PageMetadata);
             cmd.SetComputeTextureParam(m_ResolveCompute, kernel, DirectionalShadowTextureId, m_DirectionalShadowTexture.innerHandle);
         }
 
@@ -641,6 +724,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void BindShadowParameters(ComputeCommandBuffer cmd)
         {
+            cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ParametersId, m_VSMReceiverQuality);
+            cmd.SetComputeMatrixParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ViewProjMatrix);
+            cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters);
+            cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapProjectionSet.CountId,
+                VirtualShadowMapPrototypeRuntime.Projections.Count);
             cmd.SetComputeMatrixArrayParam(m_ResolveCompute, CSMViewProjMatricesId, m_ViewProjMatrices);
             cmd.SetComputeVectorArrayParam(m_ResolveCompute, CSMCascadeSpheresId, m_CascadeSpheres);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMCascadeCountId, m_CascadeCount);
@@ -663,6 +751,10 @@ namespace VividRP.Runtime.RenderPass.Core
                         : 0);
             cmd.SetComputeIntParam(
                 m_ResolveCompute,
+                VSMPrototypeRequestEnabledId,
+                m_VirtualShadowMapRequestCollectionActive ? 1 : 0);
+            cmd.SetComputeIntParam(
+                m_ResolveCompute,
                 VSMPrototypePageSizeId,
                 VirtualShadowMapPrototypeRuntime.PageSize);
             cmd.SetComputeIntParam(
@@ -677,6 +769,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ResolveCompute,
                 VSMPrototypePhysicalPagesPerRowId,
                 Mathf.Max(VirtualShadowMapPrototypeRuntime.PhysicalPagesPerRow, 1));
+            cmd.SetComputeIntParam(
+                m_ResolveCompute,
+                VSMPrototypePageTableEntryCountId,
+                Mathf.Max(VirtualShadowMapPrototypeRuntime.PageTableEntryCount, 1));
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMLightAngularDiameterId, m_LightAngularDiameter);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMFrameIndexId, m_FrameIndex);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMPCSSBlockerSampleCountId, m_PCSSBlockerSampleCount);

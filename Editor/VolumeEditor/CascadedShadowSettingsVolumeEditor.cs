@@ -25,7 +25,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_EnableVirtualShadowMapPrototypeLabel =
             EditorGUIUtility.TrTextContent(
                 "Enable Virtual Shadow Map Prototype",
-                "Experimental P2 directional-light hard shadows. Unity Renderer casters require a VSM-compatible ShadowCaster pass; incompatible content and unsupported platforms fail closed to CSM.");
+                "Experimental directional-light virtual shadows. Unity Renderer casters require a VSM-compatible ShadowCaster pass; incompatible content and unsupported platforms fail closed to CSM.");
         private static readonly GUIContent s_MaxShadowDistanceLabel =
             EditorGUIUtility.TrTextContent("Max Distance", "Maximum distance from the camera that receives cascaded directional shadows.");
         private static readonly GUIContent s_ScreenSpaceShadowDenoiseLabel =
@@ -58,6 +58,13 @@ namespace VividRP.Editor
 
         private SerializedDataParameter m_EnableCSM;
         private SerializedDataParameter m_EnableVirtualShadowMapPrototype;
+        private SerializedDataParameter m_VirtualShadowMapResolution;
+        private SerializedDataParameter m_VirtualShadowMapFirstLevel;
+        private SerializedDataParameter m_VirtualShadowMapScreenDensity;
+        private SerializedDataParameter m_VirtualShadowMapTargetTexelPixels;
+        private SerializedDataParameter m_VirtualShadowMapResolutionLodBias;
+        private SerializedDataParameter m_VirtualShadowMapPCF;
+        private SerializedDataParameter m_VirtualShadowMapTransition;
         private SerializedDataParameter m_CascadeCount;
         private SerializedDataParameter m_MaxShadowDistance;
         private SerializedDataParameter m_ScreenSpaceShadowDenoise;
@@ -82,6 +89,13 @@ namespace VividRP.Editor
             var fetcher = new PropertyFetcher<CascadedShadowSettingsVolume>(serializedObject);
             m_EnableCSM = Unpack(fetcher.Find(x => x.enableCSM));
             m_EnableVirtualShadowMapPrototype = Unpack(fetcher.Find(x => x.enableVirtualShadowMapPrototype));
+            m_VirtualShadowMapResolution = Unpack(fetcher.Find(x => x.virtualShadowMapResolution));
+            m_VirtualShadowMapFirstLevel = Unpack(fetcher.Find(x => x.virtualShadowMapFirstLevel));
+            m_VirtualShadowMapScreenDensity = Unpack(fetcher.Find(x => x.virtualShadowMapScreenDensity));
+            m_VirtualShadowMapTargetTexelPixels = Unpack(fetcher.Find(x => x.virtualShadowMapTargetTexelPixels));
+            m_VirtualShadowMapResolutionLodBias = Unpack(fetcher.Find(x => x.virtualShadowMapResolutionLodBias));
+            m_VirtualShadowMapPCF = Unpack(fetcher.Find(x => x.virtualShadowMapPCF));
+            m_VirtualShadowMapTransition = Unpack(fetcher.Find(x => x.virtualShadowMapTransition));
             m_CascadeCount = Unpack(fetcher.Find(x => x.cascadeCount));
             m_MaxShadowDistance = Unpack(fetcher.Find(x => x.maxShadowDistance));
             m_ScreenSpaceShadowDenoise = Unpack(fetcher.Find(x => x.screenSpaceShadowDenoise));
@@ -98,6 +112,13 @@ namespace VividRP.Editor
         {
             PropertyField(m_EnableCSM, s_StateLabel);
             PropertyField(m_EnableVirtualShadowMapPrototype, s_EnableVirtualShadowMapPrototypeLabel);
+            PropertyField(m_VirtualShadowMapResolution);
+            PropertyField(m_VirtualShadowMapFirstLevel);
+            PropertyField(m_VirtualShadowMapScreenDensity);
+            PropertyField(m_VirtualShadowMapTargetTexelPixels);
+            PropertyField(m_VirtualShadowMapResolutionLodBias);
+            PropertyField(m_VirtualShadowMapPCF);
+            PropertyField(m_VirtualShadowMapTransition);
             PropertyField(m_MaxShadowDistance, s_MaxShadowDistanceLabel);
             PropertyField(m_ScreenSpaceShadowDenoise, s_ScreenSpaceShadowDenoiseLabel);
 
@@ -126,7 +147,7 @@ namespace VividRP.Editor
 
             DrawSectionHeader("Per Light");
             EditorGUILayout.HelpBox(
-                "Screen Space Quality, Cascade Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light. When Screen Space Quality is set to Very High (VividRP PCSS), blocker and filter tuning also lives on that light.",
+                "Screen Space Quality, Cascade Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light. VSM applies those biases at the receiver in virtual-texel units; PCF and transition settings above are independent of CSM quality. When Screen Space Quality is set to Very High (VividRP PCSS), blocker and filter tuning also lives on that light.",
                 MessageType.Info);
         }
 

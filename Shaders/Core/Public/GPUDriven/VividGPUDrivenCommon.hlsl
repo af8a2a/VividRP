@@ -485,4 +485,23 @@ bool ShouldSelectMeshLODNode(
     return parentError > threshold && error <= threshold;
 }
 
+bool ShouldSelectShadowMeshLODNode(
+    const VividDecodedMeshLODNode node, const VividInstanceData instance,
+    float texelsPerWorldUnit, uint forcedDepth, float errorThreshold)
+{
+    if (forcedDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
+    {
+        bool leaf = node.LevelIndex == instance.MeshLODLevelCount - 1;
+        return node.LevelIndex == forcedDepth || (node.LevelIndex < forcedDepth && leaf);
+    }
+    float radius = TransformSphere(node.Bounds, instance.ObjectToWorldMatrix).w;
+    float parentRadius = TransformSphere(node.ParentBounds, instance.ObjectToWorldMatrix).w;
+    float scaleSq = texelsPerWorldUnit * texelsPerWorldUnit;
+    float error = node.Error * radius * radius * scaleSq;
+    float parentError = node.ParentError >= 0
+        ? node.ParentError * parentRadius * parentRadius * scaleSq : 3.402823466e+38f;
+    float threshold = errorThreshold * instance.LODErrorScale;
+    return parentError > threshold && error <= threshold;
+}
+
 #endif // VIVIDRP_GPU_DRIVEN_COMMON_INCLUDED

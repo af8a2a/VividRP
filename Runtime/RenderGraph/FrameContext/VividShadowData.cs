@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Runtime
 {
@@ -13,6 +14,7 @@ namespace VividRP.Runtime
         private const float MinCascadeRadius = 0.001f;
 
         public bool isCSMActive;
+        internal readonly VirtualShadowMapClipmapLayout clipmaps = new();
         public int cascadeCount;
         public float maxShadowDistance;
         public int cascadeResolution;
@@ -21,6 +23,7 @@ namespace VividRP.Runtime
         internal int mainLightVisibleIndex = -1;
         internal bool hasUnityShadowCasters;
         internal bool hasPrimitiveShadowCasters;
+        internal float depthBias;
         internal float slopeScaleDepthBias;
         internal Vector4 shadowCasterState;
 
@@ -37,6 +40,7 @@ namespace VividRP.Runtime
 
         public override void Reset()
         {
+            clipmaps.Reset();
             isCSMActive = false;
             cascadeCount = 0;
             maxShadowDistance = 0f;
@@ -45,6 +49,7 @@ namespace VividRP.Runtime
             mainLightVisibleIndex = -1;
             hasUnityShadowCasters = false;
             hasPrimitiveShadowCasters = false;
+            depthBias = 0f;
             slopeScaleDepthBias = 0f;
             shadowCasterState = Vector4.zero;
 
@@ -93,6 +98,7 @@ namespace VividRP.Runtime
                 ? Mathf.Min(csmSettings.maxShadowDistance.value, Mathf.Max(0.0f, cullingShadowDistance))
                 : csmSettings.maxShadowDistance.value;
             normalBias = Mathf.Max(0.0f, additionalLightData.normalBias);
+            depthBias = Mathf.Max(0.0f, additionalLightData.depthBias);
             slopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
             shadowCasterState = BuildShadowCasterState(lightData.mainVisibleLight);
             Bounds unityShadowCasterBounds = default;
@@ -167,6 +173,15 @@ namespace VividRP.Runtime
             }
 
             isCSMActive = true;
+            if (csmSettings.enableVirtualShadowMapPrototype.value)
+            {
+                clipmaps.Update(cameraData.camera.transform.position, light.transform.rotation,
+                    shadowCasterBounds, maxShadowDistance,
+                    VirtualShadowMapProjectionSet.ResolveResolution(csmSettings.virtualShadowMapResolution.value, cascadeResolution),
+                    csmSettings.virtualShadowMapFirstLevel.value, normalBias,
+                    EntityId.ToULong(cameraData.camera.GetEntityId()), EntityId.ToULong(light.GetEntityId()),
+                    csmSettings.virtualShadowMapTransition.value);
+            }
         }
 
         private static bool TryResolveVisibleMainDirectionalLight(
@@ -595,7 +610,7 @@ namespace VividRP.Runtime
                 && size.z >= 0.0f;
         }
 
-        private static Matrix4x4 BuildWorldToShadowMatrix(Matrix4x4 projMatrix, Matrix4x4 viewMatrix)
+        internal static Matrix4x4 BuildWorldToShadowMatrix(Matrix4x4 projMatrix, Matrix4x4 viewMatrix)
         {
             if (SystemInfo.usesReversedZBuffer)
             {
@@ -618,8 +633,8 @@ namespace VividRP.Runtime
 
         private static Vector4 BuildShadowCasterState(in VisibleLight shadowLight)
         {
-            // Match HDRP's directional shadow path: rely on raster slope-scale depth bias,
-            // receiver normal bias, and a tiny fixed compare bias instead of caster vertex offsets.
+            // No caster vertex offsets: CSM uses raster slope bias and receiver
+            // bias; VSM stores raw depth and applies all bias at the receiver.
             return new Vector4(0.0f, 0.0f, (float)shadowLight.lightType, 0.0f);
         }
 

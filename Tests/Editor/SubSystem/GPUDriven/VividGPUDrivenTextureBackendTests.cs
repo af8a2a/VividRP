@@ -1,7 +1,10 @@
 using NUnit.Framework;
 using Unity.Mathematics;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Editor.Tests
 {
@@ -57,7 +60,101 @@ namespace VividRP.Editor.Tests
             Assert.That(backend.DisposeCallCount, Is.EqualTo(1));
         }
 
-        private sealed class FakeGPUDrivenTextureBackend : IGPUDrivenTextureBackend
+        [TestCase(false)]
+        [TestCase(true)]
+        public void VirtualTextureShadows_TrackSamplingAndResolvedBiasWithoutStableFrameAllocations(bool usesVirtualTexture)
+        {
+            var source = new GameObject("VT Shadow Caster");
+            try
+            {
+                IGPUDrivenTextureBackend backend = usesVirtualTexture
+                    ? new FakeVirtualTextureBackend()
+                    : new FakeGPUDrivenTextureBackend();
+                using var system = new VividGPUDrivenSystem(backend);
+                VividPrimitiveScene scene = system.PrimitiveScene;
+                EntityId sourceId = source.GetEntityId();
+                var geometry = new VividPrimitiveResourceKey(VividPrimitiveResourceDomain.MeshletGeometry, sourceId, EntityId.None, -1);
+                var material = new VividPrimitiveResourceKey(VividPrimitiveResourceDomain.MaterialProxy, sourceId, EntityId.None, -1);
+                var sections = new[] { new VividPrimitiveDrawSectionDescriptor(0, geometry, material, VividPrimitiveDrawSectionFlags.Valid) };
+                scene.RegisterOrUpdate(new VividPrimitiveSourceDescriptor(sourceId, Matrix4x4.identity, Matrix4x4.identity,
+                    new Bounds(Vector3.zero, Vector3.one), uint.MaxValue, VividInstancePassMask.Shadows,
+                    VividPrimitiveFlags.Valid | VividPrimitiveFlags.Static, sections));
+                scene.UpdateMaterialPayload(material, 0u, new VividMaterialData { RendererListID = VividRendererListID.AlphaTest });
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                var desc = new VirtualTextureSpaceDesc("Shadow VT", 16, 1, 4, 4, 3, 4,
+                    GraphicsFormat.R8G8B8A8_UNorm, 4, 32);
+                int spaceId = VirtualTextureSystem.RegisterSpace(desc);
+                Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var binding), Is.True);
+                var frameData = new VividVirtualTextureFrameData();
+                frameData.AddBinding(binding);
+                uint revision = scene.StaticShadowRevision;
+                system.UpdateVirtualTextureShadowInvalidations(frameData);
+                Assert.That(scene.StaticShadowRevision == revision, Is.EqualTo(!usesVirtualTexture));
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                revision = scene.StaticShadowRevision;
+                system.UpdateVirtualTextureShadowInvalidations(frameData);
+                Assert.That(scene.StaticShadowRevision, Is.EqualTo(revision));
+
+                Assert.That(VirtualTextureSystem.TryMakePageResident(spaceId, new VirtualTexturePageCoord(0, 0, 0), false, 1), Is.True);
+                Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out binding), Is.True);
+                frameData.Reset();
+                frameData.AddBinding(binding);
+                system.UpdateVirtualTextureShadowInvalidations(frameData);
+                Assert.That(scene.StaticShadowRevision == revision, Is.EqualTo(!usesVirtualTexture));
+                Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(usesVirtualTexture ? 1 : 0));
+                Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.False);
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+
+                revision = scene.StaticShadowRevision;
+                frameData.AdaptiveMipBias = 1.25f;
+                system.UpdateVirtualTextureShadowInvalidations(frameData);
+                Assert.That(scene.StaticShadowRevision == revision, Is.EqualTo(!usesVirtualTexture));
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                VirtualTextureSystem.SetAdaptiveMipBiasEnabled(spaceId, false); // Resolved space bias now overrides the frame value.
+                revision = scene.StaticShadowRevision;
+                system.UpdateVirtualTextureShadowInvalidations(frameData);
+                Assert.That(scene.StaticShadowRevision == revision, Is.EqualTo(!usesVirtualTexture));
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                revision = scene.StaticShadowRevision;
+                frameData.AdaptiveMipBias = 2.5f;
+                system.UpdateVirtualTextureShadowInvalidations(frameData);
+                Assert.That(scene.StaticShadowRevision, Is.EqualTo(revision));
+
+                // A different VT space must not invalidate this allocation.
+                int otherSpaceId = VirtualTextureSystem.RegisterSpace(new VirtualTextureSpaceDesc(
+                    "Other Shadow VT", 32, 1, 4, 4, 3, 4, GraphicsFormat.R8G8B8A8_UNorm, 4, 32));
+                Assert.That(VirtualTextureSystem.TryMakePageResident(otherSpaceId, new VirtualTexturePageCoord(1, 1, 0), false, 2), Is.True);
+                system.UpdateVirtualTextureShadowInvalidations(frameData);
+                Assert.That(scene.StaticShadowRevision, Is.EqualTo(revision));
+                for (int i = 0; i < 8; i++)
+                    system.UpdateVirtualTextureShadowInvalidations(frameData);
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 128; i++)
+                    system.UpdateVirtualTextureShadowInvalidations(frameData);
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+
+                system.UpdateVirtualTextureShadowInvalidations(null);
+                Assert.That(scene.StaticShadowRevision == revision, Is.EqualTo(!usesVirtualTexture));
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                revision = scene.StaticShadowRevision;
+                system.UpdateVirtualTextureShadowInvalidations(frameData);
+                Assert.That(scene.StaticShadowRevision == revision, Is.EqualTo(!usesVirtualTexture));
+            }
+            finally
+            {
+                Object.DestroyImmediate(source);
+                VirtualTextureSystem.Deinitialize();
+            }
+        }
+
+        private sealed class FakeVirtualTextureBackend : FakeGPUDrivenTextureBackend, IGPUDrivenVirtualTextureBackend
+        {
+            public int VirtualTextureAllocationId => 0;
+            public int VirtualTextureSpaceId => 0;
+        }
+
+        private class FakeGPUDrivenTextureBackend : IGPUDrivenTextureBackend
         {
             public string DisplayName => "Fake";
 

@@ -50,14 +50,25 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
         }
 
         const VividDecodedMeshLODNode meshLODNode = PullMeshLODNode(nodeIndex);
-        if (!ShouldSelectMeshLODNode(
+        // CameraPosition.w == 0 is the VSM clipmap LOD mode. Evaluate error in
+        // shadow texels per level, independent of observer position/FOV/viewport.
+        const bool shadowTexelLOD = lodSelectionContext.CameraPosition.w == 0.0
+            && cullingContext.CameraIsPerspective == 0
+            && (cullingContext.PassMask & VIVIDINSTANCEPASSMASK_SHADOWS) != 0u;
+        const float texelsPerWorldUnit = length(cullingContext.ViewProjectionMatrix[0].xyz)
+            * lodSelectionContext.ScreenSizePixels.x * 0.5;
+        bool selected = shadowTexelLOD
+            ? ShouldSelectShadowMeshLODNode(meshLODNode, instanceData, texelsPerWorldUnit,
+                _ForcedMeshLODNodeDepth, _MeshLODErrorThreshold)
+            : ShouldSelectMeshLODNode(
                 lodSelectionContext,
                 meshLODNode,
                 instanceData,
                 distanceToViewSq,
                 _ForcedMeshLODNodeDepth,
                 _MeshLODErrorThreshold
-            ))
+            );
+        if (!selected)
         {
             continue;
         }

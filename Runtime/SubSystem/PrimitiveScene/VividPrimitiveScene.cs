@@ -12,6 +12,7 @@ namespace VividRP.Runtime.PrimitiveScene
     internal sealed class VividPrimitiveScene : IDisposable
     {
         internal const uint InvalidIndex = uint.MaxValue;
+        internal const int MaxPendingStaticShadowInvalidationBounds = 1024;
 
         private static int s_NextSceneToken;
 
@@ -30,6 +31,7 @@ namespace VividRP.Runtime.PrimitiveScene
         private NativeList<VividPrimitiveCullRecord> m_ActiveCullRecords;
         private NativeList<int> m_PrimitiveSlotToActiveIndex;
         private NativeList<VividPrimitiveDrawSourceData> m_DrawSetSources;
+        private NativeList<VividStaticShadowInvalidationBounds> m_PendingStaticShadowInvalidationBounds;
 
         private int m_PreparedFrameIndex = int.MinValue;
         private int m_ActiveDrawSectionCount;
@@ -40,6 +42,7 @@ namespace VividRP.Runtime.PrimitiveScene
         private long m_LastUploadBytes;
         private uint m_SceneRevision;
         private uint m_StaticShadowRevision;
+        private bool m_StaticShadowInvalidationRequiresFullRefresh = true;
         private bool m_IsDisposed;
 
         internal VividPrimitiveScene()
@@ -48,6 +51,8 @@ namespace VividRP.Runtime.PrimitiveScene
             m_ActiveCullRecords = new NativeList<VividPrimitiveCullRecord>(16, Allocator.Persistent);
             m_PrimitiveSlotToActiveIndex = new NativeList<int>(16, Allocator.Persistent);
             m_DrawSetSources = new NativeList<VividPrimitiveDrawSourceData>(16, Allocator.Persistent);
+            m_PendingStaticShadowInvalidationBounds =
+                new NativeList<VividStaticShadowInvalidationBounds>(16, Allocator.Persistent);
         }
 
         internal uint SceneToken { get; }
@@ -85,6 +90,24 @@ namespace VividRP.Runtime.PrimitiveScene
             {
                 ThrowIfDisposed();
                 return m_StaticShadowRevision;
+            }
+        }
+
+        internal NativeArray<VividStaticShadowInvalidationBounds> PendingStaticShadowInvalidationBounds
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_PendingStaticShadowInvalidationBounds.AsArray();
+            }
+        }
+
+        internal bool StaticShadowInvalidationRequiresFullRefresh
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_StaticShadowInvalidationRequiresFullRefresh;
             }
         }
 
@@ -172,7 +195,10 @@ namespace VividRP.Runtime.PrimitiveScene
                 m_ChangedPrimitiveCount++;
                 IncrementSceneRevision();
                 if (IsStaticShadowCaster(descriptor.Flags, descriptor.PassMask))
+                {
                     IncrementStaticShadowRevision();
+                    RecordStaticShadowInvalidation(descriptor.WorldBounds);
+                }
                 return handle;
             }
 
@@ -183,10 +209,27 @@ namespace VividRP.Runtime.PrimitiveScene
             if (Update(handle, descriptor))
             {
                 m_ChangedPrimitiveCount++;
-                if (wasStaticShadowCaster
-                    || IsStaticShadowCaster(descriptor.Flags, descriptor.PassMask))
+                bool isStaticShadowCaster = IsStaticShadowCaster(
+                    descriptor.Flags,
+                    descriptor.PassMask);
+                if (wasStaticShadowCaster || isStaticShadowCaster)
                 {
                     IncrementStaticShadowRevision();
+                    if (wasStaticShadowCaster)
+                    {
+                        RecordStaticShadowInvalidation(
+                            previousData.WorldBoundsMin,
+                            previousData.WorldBoundsMax);
+                    }
+                    if (isStaticShadowCaster
+                        && (!wasStaticShadowCaster
+                            || !BoundsAreEqual(
+                                previousData.WorldBoundsMin,
+                                previousData.WorldBoundsMax,
+                                descriptor.WorldBounds)))
+                    {
+                        RecordStaticShadowInvalidation(descriptor.WorldBounds);
+                    }
                 }
             }
             return handle;
@@ -229,8 +272,84 @@ namespace VividRP.Runtime.PrimitiveScene
             m_ChangedPrimitiveCount++;
             IncrementSceneRevision();
             if (removedStaticShadowCaster)
+            {
                 IncrementStaticShadowRevision();
+                RecordStaticShadowInvalidation(
+                    removedData.WorldBoundsMin,
+                    removedData.WorldBoundsMax);
+            }
             return true;
+        }
+
+        internal void InvalidateStaticShadowCaster(EntityId sourceEntityId)
+        {
+            ThrowIfDisposed();
+            if (sourceEntityId.Equals(EntityId.None)
+                || !m_PrimitivesByEntityId.TryGetValue(sourceEntityId, out VividPrimitiveHandle handle)
+                || !IsValid(handle))
+            {
+                return;
+            }
+
+            VividPrimitiveData data = PrimitiveTable[handle.Index];
+            if (!IsStaticShadowCaster(data.Flags, (VividInstancePassMask)data.PassMask))
+                return;
+
+            IncrementStaticShadowRevision();
+            RecordStaticShadowInvalidation(data.WorldBoundsMin, data.WorldBoundsMax);
+        }
+
+        internal void InvalidateStaticAlphaTestShadowCasters()
+        {
+            ThrowIfDisposed();
+            for (int recordIndex = 0; recordIndex < m_ActiveCullRecords.Length; recordIndex++)
+            {
+                VividPrimitiveCullRecord record = m_ActiveCullRecords[recordIndex];
+                if (!IsStaticShadowCaster(record.Flags, record.PassMask))
+                    continue;
+
+                for (int sectionIndex = 0; sectionIndex < record.DrawSectionCount; sectionIndex++)
+                {
+                    VividPrimitiveDrawSectionData section =
+                        DrawSectionTable[(int)record.DrawSectionOffset + sectionIndex];
+                    if ((section.Flags & VividPrimitiveDrawSectionFlags.Valid) == 0
+                        || (MaterialTable[(int)section.MaterialIndex].RendererListID
+                            & VividRendererListID.AlphaTest) == 0)
+                    {
+                        continue;
+                    }
+
+                    IncrementStaticShadowRevision();
+                    RecordStaticShadowInvalidation(
+                        new float4(record.BoundsMin, 0.0f),
+                        new float4(record.BoundsMax, 0.0f));
+                    break; // One bounds entry per primitive, even with several alpha sections.
+                }
+            }
+        }
+
+        internal void InvalidateAllStaticShadows()
+        {
+            ThrowIfDisposed();
+            IncrementStaticShadowRevision();
+            RequireFullStaticShadowInvalidation();
+        }
+
+        internal void RequireFullStaticShadowInvalidation()
+        {
+            ThrowIfDisposed();
+            m_PendingStaticShadowInvalidationBounds.Clear();
+            m_StaticShadowInvalidationRequiresFullRefresh = true;
+        }
+
+        internal void AcknowledgeStaticShadowInvalidations(uint revision)
+        {
+            ThrowIfDisposed();
+            if (revision != m_StaticShadowRevision)
+                return;
+
+            m_PendingStaticShadowInvalidationBounds.Clear();
+            m_StaticShadowInvalidationRequiresFullRefresh = false;
         }
 
         internal bool TryGetHandle(EntityId sourceEntityId, out VividPrimitiveHandle handle)
@@ -468,6 +587,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 m_PrimitiveSlotToActiveIndex.Dispose();
             if (m_DrawSetSources.IsCreated)
                 m_DrawSetSources.Dispose();
+            if (m_PendingStaticShadowInvalidationBounds.IsCreated)
+                m_PendingStaticShadowInvalidationBounds.Dispose();
             m_IsDisposed = true;
         }
 
@@ -940,11 +1061,60 @@ namespace VividRP.Runtime.PrimitiveScene
                 : m_StaticShadowRevision + 1u;
         }
 
+        private void RecordStaticShadowInvalidation(Bounds worldBounds)
+        {
+            Vector3 minimum = worldBounds.min;
+            Vector3 maximum = worldBounds.max;
+            RecordStaticShadowInvalidation(
+                new float4(minimum.x, minimum.y, minimum.z, 0.0f),
+                new float4(maximum.x, maximum.y, maximum.z, 0.0f));
+        }
+
+        private void RecordStaticShadowInvalidation(float4 minimum, float4 maximum)
+        {
+            if (m_StaticShadowInvalidationRequiresFullRefresh)
+                return;
+
+            if (!math.all(math.isfinite(minimum.xyz))
+                || !math.all(math.isfinite(maximum.xyz))
+                || math.any(maximum.xyz < minimum.xyz)
+                || m_PendingStaticShadowInvalidationBounds.Length
+                    >= MaxPendingStaticShadowInvalidationBounds)
+            {
+                RequireFullStaticShadowInvalidation();
+                return;
+            }
+
+            m_PendingStaticShadowInvalidationBounds.Add(
+                new VividStaticShadowInvalidationBounds
+                {
+                    BoundsMin = minimum,
+                    BoundsMax = maximum,
+                });
+        }
+
+        private static bool BoundsAreEqual(
+            float4 previousMinimum,
+            float4 previousMaximum,
+            Bounds currentBounds)
+        {
+            Vector3 currentMinimum = currentBounds.min;
+            Vector3 currentMaximum = currentBounds.max;
+            return previousMinimum.x == currentMinimum.x
+                && previousMinimum.y == currentMinimum.y
+                && previousMinimum.z == currentMinimum.z
+                && previousMaximum.x == currentMaximum.x
+                && previousMaximum.y == currentMaximum.y
+                && previousMaximum.z == currentMaximum.z;
+        }
+
         private static bool IsStaticShadowCaster(
             VividPrimitiveFlags flags,
             VividInstancePassMask passMask)
         {
             return (flags & VividPrimitiveFlags.Static) != 0
+                && (flags & (VividPrimitiveFlags.Valid | VividPrimitiveFlags.Disabled))
+                    == VividPrimitiveFlags.Valid
                 && (passMask & VividInstancePassMask.Shadows) != 0;
         }
 
@@ -963,7 +1133,7 @@ namespace VividRP.Runtime.PrimitiveScene
         {
             if (m_IsDisposed)
                 throw new ObjectDisposedException(nameof(VividPrimitiveScene));
-        }
+        } 
 
         private static float4x4 ToFloat4x4(Matrix4x4 value)
         {

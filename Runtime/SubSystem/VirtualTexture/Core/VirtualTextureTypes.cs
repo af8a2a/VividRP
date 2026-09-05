@@ -573,7 +573,8 @@ namespace VividRP.Runtime
             VirtualTextureFeedbackBufferState feedbackState,
             VirtualTextureSpaceShaderParams shaderParams,
             int[] mipOffsets,
-            Vector4[] layerFallbacks)
+            Vector4[] layerFallbacks,
+            ulong samplingRevision = 0ul)
         {
             BindingIndex = bindingIndex;
             AllocationId = allocationId;
@@ -593,6 +594,7 @@ namespace VividRP.Runtime
             ShaderParams = shaderParams;
             MipOffsets = mipOffsets;
             LayerFallbacks = layerFallbacks ?? Array.Empty<Vector4>();
+            SamplingRevision = samplingRevision;
         }
 
         public int BindingIndex { get; }
@@ -631,6 +633,10 @@ namespace VividRP.Runtime
 
         public Vector4[] LayerFallbacks { get; }
 
+        // Snapshot of page-table changes (including eviction/reveal) and in-place
+        // resident uploads. Upload acknowledgement must not reset this identity.
+        internal ulong SamplingRevision { get; }
+
         public bool HasFeedback => FeedbackRequests != null
                                    && FeedbackCounter != null
                                    && FeedbackResidentHash != null
@@ -663,7 +669,8 @@ namespace VividRP.Runtime
                 FeedbackState,
                 ShaderParams,
                 MipOffsets,
-                LayerFallbacks);
+                LayerFallbacks,
+                SamplingRevision);
         }
     }
 

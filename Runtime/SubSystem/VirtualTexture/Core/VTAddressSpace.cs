@@ -62,6 +62,7 @@ namespace VividRP.Runtime
         private readonly List<VTRequest> m_LiveProducerRequests = new();
         private uint m_CachedPendingRequestRevision;
         private uint m_ResidentRefreshRequestRevision;
+        private uint m_ResidentContentRevision;
         private uint m_LastRetiredPendingRequestRevision;
         private uint m_LastRetiredResidentRefreshRequestRevision;
         private int m_PendingOrderCacheBuildCount;
@@ -725,7 +726,9 @@ namespace VividRP.Runtime
                 feedbackState,
                 m_ShaderParams,
                 m_MipOffsets,
-                m_LayerFallbacks);
+                m_LayerFallbacks,
+                ((ulong)(uint)m_PageTableUpdater.PendingUploadVersion << 32)
+                    | m_ResidentContentRevision);
         }
 
         public void Dispose()
@@ -1434,7 +1437,12 @@ namespace VividRP.Runtime
             }
 
             if (RemoveResidentRefreshRequest(request))
+            {
+                // A streamed mip tail can replace its bootstrap pixels in-place,
+                // without changing any page-table entry.
+                m_ResidentContentRevision = unchecked(m_ResidentContentRevision + 1u);
                 return true;
+            }
 
             if (!m_ResidencyManager.TryCommitRequest(
                     Descriptor,

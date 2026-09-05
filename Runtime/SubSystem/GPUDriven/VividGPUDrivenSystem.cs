@@ -59,7 +59,9 @@ namespace VividRP.Runtime.GPUDriven
         private int m_ScheduledMainViewFrameIndex = -1;
         private uint m_ScheduledMainViewSceneRevision;
         private uint m_ShadowCacheRevision = 1u;
-        private uint m_StaticShadowCacheRevision = 1u;
+        private GraphicsBuffer m_ShadowVirtualTexturePageTable;
+        private ulong m_ShadowVirtualTextureSamplingRevision;
+        private float m_ShadowVirtualTextureMipBias;
         private int m_ShadowCullingContextCount;
         private bool m_IsDisposed;
 
@@ -299,7 +301,33 @@ namespace VividRP.Runtime.GPUDriven
 
         internal uint ShadowCacheRevision => m_ShadowCacheRevision;
 
-        internal uint StaticShadowCacheRevision => m_StaticShadowCacheRevision;
+        internal void UpdateVirtualTextureShadowInvalidations(VividVirtualTextureFrameData frameData)
+        {
+            if (m_TextureBackend is not IGPUDrivenVirtualTextureBackend backend)
+                return;
+
+            VirtualTextureSpaceBinding binding = default;
+            frameData?.TryGetBindingForAllocation(backend.VirtualTextureAllocationId, out binding);
+            GraphicsBuffer pageTable = binding.IsValid ? binding.PageTableBuffer : null;
+            ulong samplingRevision = binding.IsValid ? binding.SamplingRevision : 0ul;
+            float mipBias = binding.IsValid
+                ? VirtualTextureSystem.ResolveAdaptiveMipBias(binding.SpaceId, frameData.AdaptiveMipBias)
+                : 0.0f;
+            if (ReferenceEquals(m_ShadowVirtualTexturePageTable, pageTable)
+                && m_ShadowVirtualTextureSamplingRevision == samplingRevision
+                && m_ShadowVirtualTextureMipBias.Equals(mipBias))
+            {
+                return;
+            }
+
+            // Track the same allocation and resolved bias as the caster shader.
+            // Until texture-to-caster dependencies exist, localize conservatively
+            // to all static alpha casters, preserving unrelated opaque pages.
+            PrimitiveScene.InvalidateStaticAlphaTestShadowCasters();
+            m_ShadowVirtualTexturePageTable = pageTable;
+            m_ShadowVirtualTextureSamplingRevision = samplingRevision;
+            m_ShadowVirtualTextureMipBias = mipBias;
+        }
 
         internal bool IsMainViewRendererBatchActive(VividRendererListID batchKey)
         {
@@ -509,7 +537,6 @@ namespace VividRP.Runtime.GPUDriven
                     }
                 }
 
-                uint previousStaticShadowRevision = PrimitiveScene.StaticShadowRevision;
                 m_PrimitiveSceneAdapter.Synchronize(
                     PrimitiveScene,
                     VividMeshletRendererDatabase.instance,
@@ -517,15 +544,10 @@ namespace VividRP.Runtime.GPUDriven
                     staticDataChanged,
                     materialDataChanged,
                     Time.frameCount);
-                if (staticDataChanged
-                    || materialDataChanged
-                    || previousStaticShadowRevision != PrimitiveScene.StaticShadowRevision)
-                {
-                    m_StaticShadowCacheRevision = m_StaticShadowCacheRevision == uint.MaxValue
-                        ? 1u
-                        : m_StaticShadowCacheRevision + 1u;
-                }
-
+                m_SceneDataBuilder.InvalidateChangedStaticShadowCasters(
+                    PrimitiveScene,
+                    VividMeshletRendererDatabase.instance,
+                    m_PrimitiveSceneAdapter);
                 m_PrimitiveSceneBufferSet.Upload(PrimitiveScene);
 
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameUploadBuffersMarker.Auto())
@@ -649,10 +671,13 @@ namespace VividRP.Runtime.GPUDriven
             int cascadeCount = Mathf.Min(
                 shadowData.cascadeCount,
                 VividShadowData.MaxCascadeCount);
+            bool clipmapActive = shadowData.clipmaps.Count > 0;
+            if (clipmapActive)
+                cascadeCount = shadowData.clipmaps.BuildCandidateUnion(shadowData);
             return drawSetSystem.Schedule(
                 camera,
-                shadowData.viewMatrices,
-                shadowData.projMatrices,
+                clipmapActive ? shadowData.clipmaps.CandidateViews : shadowData.viewMatrices,
+                clipmapActive ? shadowData.clipmaps.CandidateProjections : shadowData.projMatrices,
                 cascadeCount,
                 VividInstancePassMask.Shadows,
                 cullAgainstNearPlane: false,

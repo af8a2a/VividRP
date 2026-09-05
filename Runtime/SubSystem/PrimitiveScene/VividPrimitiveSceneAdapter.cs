@@ -17,7 +17,13 @@ namespace VividRP.Runtime.PrimitiveScene
         private readonly List<VividPrimitiveDrawSectionDescriptor> m_SectionDescriptors = new();
         private readonly HashSet<EntityId> m_CurrentPrimitiveIds = new(new EntityIdComparer());
         private readonly List<EntityId> m_RemovedPrimitiveIds = new();
+        private readonly HashSet<EntityId> m_LastResourceJournalIds = new(new EntityIdComparer());
         private bool m_RequiresFullResync = true;
+
+        internal bool LastSyncCoveredResourceChange(EntityId sourceId)
+        {
+            return m_LastResourceJournalIds.Contains(sourceId);
+        }
 
         internal void Synchronize(
             VividPrimitiveScene primitiveScene,
@@ -40,10 +46,22 @@ namespace VividRP.Runtime.PrimitiveScene
                 database.ConsumePrimitiveChanges(m_Changes, out bool journalRequiresFullResync);
                 bool fullResync = m_RequiresFullResync || journalRequiresFullResync;
                 bool rebuildLegacyBridge = fullResync || staticDataChanged || materialDataChanged;
+                m_LastResourceJournalIds.Clear();
+                for (int index = 0; index < m_Changes.Count; index++)
+                {
+                    if ((m_Changes[index].Flags
+                        & (VividMeshletRendererChangeFlags.Added
+                            | VividMeshletRendererChangeFlags.Removed
+                            | VividMeshletRendererChangeFlags.Resources)) != 0)
+                    {
+                        m_LastResourceJournalIds.Add(m_Changes[index].EntityId);
+                    }
+                }
                 try
                 {
                     if (fullResync)
                     {
+                        primitiveScene.InvalidateAllStaticShadows();
                         ReconcileAll(primitiveScene, database);
                         primitiveScene.RecordFullResync();
                     }
@@ -116,7 +134,13 @@ namespace VividRP.Runtime.PrimitiveScene
                 return;
             }
 
+            uint previousStaticShadowRevision = primitiveScene.StaticShadowRevision;
             RegisterOrUpdate(primitiveScene, trackedData, trackedResources);
+            if ((change.Flags & VividMeshletRendererChangeFlags.Resources) != 0
+                && primitiveScene.StaticShadowRevision == previousStaticShadowRevision)
+            {
+                primitiveScene.InvalidateStaticShadowCaster(change.EntityId);
+            }
         }
 
         private void RegisterOrUpdate(
@@ -257,7 +281,8 @@ namespace VividRP.Runtime.PrimitiveScene
             VividPrimitiveFlags flags = VividPrimitiveFlags.None;
             if ((rendererFlags & VividMeshletRendererFlags.Valid) != 0)
                 flags |= VividPrimitiveFlags.Valid;
-            if ((rendererFlags & VividMeshletRendererFlags.Static) != 0)
+            if ((rendererFlags & VividMeshletRendererFlags.Static) != 0
+                && (rendererFlags & VividMeshletRendererFlags.Skinned) == 0)
                 flags |= VividPrimitiveFlags.Static;
             if ((rendererFlags & VividMeshletRendererFlags.Skinned) != 0)
                 flags |= VividPrimitiveFlags.Skinned;

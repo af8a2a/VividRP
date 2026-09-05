@@ -4,6 +4,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven.Meshlets;
+using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -47,6 +48,16 @@ namespace VividRP.Runtime.GPUDriven
         private readonly HashSet<EntityId> m_CurrentReferencedFallbackMaterialIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_PreviousReferencedTerrainDataIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_CurrentReferencedTerrainDataIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_ChangedMeshletAssetIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_ChangedMaterialProxyIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_ChangedFallbackMaterialIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_ChangedTerrainDataIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_ChangedShadowSourceIds = new(s_EntityIdComparer);
+        private Dictionary<(EntityId entityId, int subMeshIndex), VividGPUDrivenInstanceSourceData>
+            m_PreviousShadowSources = new(s_EntityIdSubMeshIndexComparer);
+        private Dictionary<(EntityId entityId, int subMeshIndex), VividGPUDrivenInstanceSourceData>
+            m_CurrentShadowSources = new(s_EntityIdSubMeshIndexComparer);
+        private bool m_ShadowChangesRequireFullRefresh;
         private readonly HashSet<(EntityId entityId, int subMeshIndex)> m_MissingProxyWarningKeys = new(s_EntityIdSubMeshIndexComparer);
         private readonly List<VividMeshletCollectionAsset> m_CurrentReferencedMeshletAssets = new();
         private readonly List<VividMeshletCollectionAsset> m_TrackedMeshletAssets = new();
@@ -111,6 +122,16 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(textureBackend));
             }
 
+            m_ChangedMeshletAssetIds.Clear();
+            m_ChangedMaterialProxyIds.Clear();
+            m_ChangedFallbackMaterialIds.Clear();
+            m_ChangedTerrainDataIds.Clear();
+            m_ChangedShadowSourceIds.Clear();
+            // Global changes cannot be explained by any object's resource journal.
+            m_ShadowChangesRequireFullRefresh = !m_HasBuiltStaticData
+                || !ReferenceEquals(m_PreviousTextureBackend, textureBackend)
+                || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision;
+
             if (CanSkipBuild(database, textureBackend))
             {
                 materialDataChanged = false;
@@ -134,10 +155,10 @@ namespace VividRP.Runtime.GPUDriven
                     staticDataChanged = true;
                 }
 
-                if (!staticDataChanged && HasTrackedMeshletAssetVersionChanges(database))
-                {
+                bool meshletAssetVersionsChanged =
+                    HasTrackedMeshletAssetVersionChanges(database);
+                if (!staticDataChanged && meshletAssetVersionsChanged)
                     staticDataChanged = true;
-                }
 
                 materialDataChanged = staticDataChanged
                                       || !ReferenceEquals(m_PreviousTextureBackend, textureBackend);
@@ -146,30 +167,30 @@ namespace VividRP.Runtime.GPUDriven
                     materialDataChanged = true;
                 }
 
-                if (!materialDataChanged && HasTrackedMaterialProxyVersionChanges(database, textureBackend))
-                {
+                bool materialProxyVersionsChanged =
+                    HasTrackedMaterialProxyVersionChanges(database, textureBackend);
+                if (!materialDataChanged && materialProxyVersionsChanged)
                     materialDataChanged = true;
-                }
 
                 if (!materialDataChanged && !AreEntityIdSetsEqual(m_CurrentReferencedFallbackMaterialIds, m_PreviousReferencedFallbackMaterialIds))
                 {
                     materialDataChanged = true;
                 }
 
-                if (!materialDataChanged && HaveFallbackMaterialsChanged(m_CurrentReferencedFallbackMaterials))
-                {
+                bool fallbackMaterialsChanged = HaveFallbackMaterialsChanged(
+                    m_CurrentReferencedFallbackMaterials);
+                if (!materialDataChanged && fallbackMaterialsChanged)
                     materialDataChanged = true;
-                }
 
                 if (!materialDataChanged && !AreEntityIdSetsEqual(m_CurrentReferencedTerrainDataIds, m_PreviousReferencedTerrainDataIds))
                 {
                     materialDataChanged = true;
                 }
 
-                if (!materialDataChanged && HasTrackedTerrainMaterialVersionChanges(database))
-                {
+                bool terrainMaterialVersionsChanged =
+                    HasTrackedTerrainMaterialVersionChanges(database);
+                if (!materialDataChanged && terrainMaterialVersionsChanged)
                     materialDataChanged = true;
-                }
 
                 if (!materialDataChanged && m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision)
                 {
@@ -242,6 +263,7 @@ namespace VividRP.Runtime.GPUDriven
             {
                 instanceDataChanged = !AreInstanceDataListsEqual(sceneData.MutableInstances, m_PreviousInstanceData);
                 UpdatePreviousInstanceData(sceneData.MutableInstances);
+                TrackShadowSourceChanges(sceneData.InstanceSources);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataSwapReferencesMarker.Auto())
@@ -260,6 +282,143 @@ namespace VividRP.Runtime.GPUDriven
             m_PreviousDatabaseInstanceRevision = database.InstanceRevision;
             m_PreviousMeshletAssetGlobalContentRevision = VividMeshletCollectionAsset.GlobalContentRevision;
             return staticDataChanged;
+        }
+
+        internal void InvalidateChangedStaticShadowCasters(
+            VividPrimitiveScene primitiveScene,
+            VividMeshletRendererDatabase database,
+            VividPrimitiveSceneAdapter adapter)
+        {
+            if (primitiveScene.StaticShadowInvalidationRequiresFullRefresh)
+                return;
+
+            bool requiresFullRefresh = m_ShadowChangesRequireFullRefresh;
+            foreach (EntityId sourceId in m_ChangedShadowSourceIds)
+            {
+                // A different object's journal or tracked content does not cover
+                // this source disappearing, appearing, or changing its resources.
+                if (!adapter.LastSyncCoveredResourceChange(sourceId))
+                {
+                    requiresFullRefresh = true;
+                    break;
+                }
+            }
+            if (requiresFullRefresh)
+            {
+                primitiveScene.InvalidateAllStaticShadows();
+                return;
+            }
+
+            bool hasTrackedContentChanges = m_ChangedMeshletAssetIds.Count > 0
+                || m_ChangedMaterialProxyIds.Count > 0
+                || m_ChangedFallbackMaterialIds.Count > 0
+                || m_ChangedTerrainDataIds.Count > 0;
+            if (!hasTrackedContentChanges)
+                return;
+
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData =
+                database.rendererData;
+            IReadOnlyList<VividMeshletRendererResources> rendererResources =
+                database.rendererResources;
+            int rendererCount = Mathf.Min(
+                rendererData.Count,
+                rendererResources.Count);
+            for (int rendererIndex = 0;
+                 rendererIndex < rendererCount;
+                 rendererIndex++)
+            {
+                VividMeshletRendererResources resources =
+                    rendererResources[rendererIndex];
+                if (!ReferencesChangedShadowContent(resources))
+                    continue;
+
+                primitiveScene.InvalidateStaticShadowCaster(
+                    rendererData[rendererIndex].meshletRendererEntityId);
+            }
+        }
+
+        internal void TrackShadowSourceChanges(
+            IReadOnlyList<VividGPUDrivenInstanceSourceData> sources)
+        {
+            m_ChangedShadowSourceIds.Clear();
+            m_CurrentShadowSources.Clear();
+            for (int index = 0; index < sources.Count; index++)
+            {
+                VividGPUDrivenInstanceSourceData source = sources[index];
+                var key = (source.PrimitiveEntityId, source.SourceSectionIndex);
+                if (!m_PreviousShadowSources.TryGetValue(key, out var previous)
+                    || EntityId.ToULong(previous.GeometryEntityId) != EntityId.ToULong(source.GeometryEntityId)
+                    || EntityId.ToULong(previous.MaterialEntityId) != EntityId.ToULong(source.MaterialEntityId)
+                    || previous.Flags != source.Flags)
+                {
+                    m_ChangedShadowSourceIds.Add(source.PrimitiveEntityId);
+                }
+                m_CurrentShadowSources.Add(key, source);
+            }
+            foreach (var previous in m_PreviousShadowSources)
+            {
+                if (!m_CurrentShadowSources.ContainsKey(previous.Key))
+                    m_ChangedShadowSourceIds.Add(previous.Value.PrimitiveEntityId);
+            }
+
+            // Own the snapshots: SceneData clears/rebuilds its source list in place.
+            var scratch = m_PreviousShadowSources;
+            m_PreviousShadowSources = m_CurrentShadowSources;
+            m_CurrentShadowSources = scratch;
+        }
+
+        private bool ReferencesChangedShadowContent(
+            in VividMeshletRendererResources resources)
+        {
+            if (resources.TerrainData != null
+                && m_ChangedTerrainDataIds.Contains(
+                    resources.TerrainData.GetEntityId()))
+            {
+                return true;
+            }
+
+            VividMeshletCollectionAsset[] meshletCollections =
+                resources.MeshletCollections;
+            for (int index = 0;
+                 meshletCollections != null && index < meshletCollections.Length;
+                 index++)
+            {
+                VividMeshletCollectionAsset asset = meshletCollections[index];
+                if (asset != null
+                    && m_ChangedMeshletAssetIds.Contains(asset.GetEntityId()))
+                {
+                    return true;
+                }
+            }
+
+            GPUDrivenMaterialProxy[] materialProxies = resources.MaterialProxies;
+            for (int index = 0;
+                 materialProxies != null && index < materialProxies.Length;
+                 index++)
+            {
+                GPUDrivenMaterialProxy materialProxy = materialProxies[index];
+                if (materialProxy != null
+                    && m_ChangedMaterialProxyIds.Contains(
+                        materialProxy.GetEntityId()))
+                {
+                    return true;
+                }
+            }
+
+            Material[] materials = resources.SharedMaterials;
+            for (int index = 0;
+                 materials != null && index < materials.Length;
+                 index++)
+            {
+                Material material = materials[index];
+                EntityId materialId = material != null
+                    ? material.GetEntityId()
+                    : EntityId.None;
+                if (m_ChangedFallbackMaterialIds.Contains(materialId))
+                    return true;
+            }
+
+            return false;
         }
 
         private bool CanSkipBuild(
@@ -617,6 +776,7 @@ namespace VividRP.Runtime.GPUDriven
         private bool HaveFallbackMaterialsChanged(
             List<FallbackMaterialReference> materialReferences)
         {
+            bool changed = false;
             for (int materialIndex = 0; materialIndex < materialReferences.Count; materialIndex++)
             {
                 FallbackMaterialReference materialReference = materialReferences[materialIndex];
@@ -628,11 +788,13 @@ namespace VividRP.Runtime.GPUDriven
                     || previousRevision
                     != ComputeFallbackMaterialRevision(materialReference.Material))
                 {
-                    return true;
+                    m_ChangedFallbackMaterialIds.Add(
+                        materialReference.MaterialId);
+                    changed = true;
                 }
             }
 
-            return false;
+            return changed;
         }
 
         private void SwapReferencedTerrainDataIds()
@@ -648,6 +810,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
             int rendererCount = m_RendererRenderability.Count;
+            bool changed = false;
 
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
@@ -669,12 +832,13 @@ namespace VividRP.Runtime.GPUDriven
                     if (!m_MeshMetadataByObjectId.TryGetValue(assetId, out MeshletAssetMetadata metadata) ||
                         metadata.AssetVersion != meshletCollection.ContentVersion)
                     {
-                        return true;
+                        m_ChangedMeshletAssetIds.Add(assetId);
+                        changed = true;
                     }
                 }
             }
 
-            return false;
+            return changed;
         }
 
         private bool HasTrackedMaterialProxyVersionChanges(
@@ -683,6 +847,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
             int rendererCount = m_RendererRenderability.Count;
+            bool changed = false;
 
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
@@ -710,18 +875,20 @@ namespace VividRP.Runtime.GPUDriven
                     if (!m_MaterialMetadataByObjectId.TryGetValue(materialProxyId, out MaterialMetadata metadata) ||
                         metadata.Revision != ComputeMaterialProxyRevision(materialProxy, textureBackend))
                     {
-                        return true;
+                        m_ChangedMaterialProxyIds.Add(materialProxyId);
+                        changed = true;
                     }
                 }
             }
 
-            return false;
+            return changed;
         }
 
         private bool HasTrackedTerrainMaterialVersionChanges(VividMeshletRendererDatabase database)
         {
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
             int rendererCount = m_RendererRenderability.Count;
+            bool changed = false;
 
             for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
@@ -742,11 +909,12 @@ namespace VividRP.Runtime.GPUDriven
                 if (!m_MaterialMetadataByObjectId.TryGetValue(terrainDataId, out MaterialMetadata metadata)
                     || metadata.Revision != revision)
                 {
-                    return true;
+                    m_ChangedTerrainDataIds.Add(terrainDataId);
+                    changed = true;
                 }
             }
 
-            return false;
+            return changed;
         }
 
         private void AppendRendererSceneData(

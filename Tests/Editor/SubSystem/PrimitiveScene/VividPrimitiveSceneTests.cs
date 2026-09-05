@@ -34,6 +34,9 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividPrimitiveGeometryData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividPrimitiveMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividLegacyInstanceMappingData>(), Is.EqualTo(16));
+            Assert.That(
+                UnsafeUtility.SizeOf<VividStaticShadowInvalidationBounds>(),
+                Is.EqualTo(32));
         }
 
         [Test]
@@ -730,6 +733,193 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StaticShadowInvalidations_TrackOldNewAndRemovedBounds()
+        {
+            using var scene = new VividPrimitiveScene();
+            EntityId source = CreateEntity("Static Shadow Invalidation Primitive");
+            VividPrimitiveFlags staticFlags = VividPrimitiveFlags.Valid
+                | VividPrimitiveFlags.Static;
+            var initialBounds = new Bounds(Vector3.zero, Vector3.one * 2.0f);
+            var movedBounds = new Bounds(Vector3.right * 4.0f, Vector3.one * 2.0f);
+
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+            scene.RegisterOrUpdate(CreateDescriptor(
+                source,
+                worldBounds: initialBounds,
+                flags: staticFlags));
+
+            Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.False);
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
+            AssertInvalidationBounds(
+                scene.PendingStaticShadowInvalidationBounds[0],
+                initialBounds);
+
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+            scene.RegisterOrUpdate(CreateDescriptor(
+                source,
+                objectToWorld: Matrix4x4.Translate(Vector3.right * 4.0f),
+                worldBounds: movedBounds,
+                flags: staticFlags));
+
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(2));
+            AssertInvalidationBounds(
+                scene.PendingStaticShadowInvalidationBounds[0],
+                initialBounds);
+            AssertInvalidationBounds(
+                scene.PendingStaticShadowInvalidationBounds[1],
+                movedBounds);
+
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+            scene.Remove(source);
+
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
+            AssertInvalidationBounds(
+                scene.PendingStaticShadowInvalidationBounds[0],
+                movedBounds);
+        }
+
+        [Test]
+        public void StaticShadowInvalidations_LocalizeResourceChangesAndFallbackForUnknownChanges()
+        {
+            using var scene = new VividPrimitiveScene();
+            EntityId source = CreateEntity("Static Shadow Resource Primitive");
+            VividPrimitiveFlags staticFlags = VividPrimitiveFlags.Valid
+                | VividPrimitiveFlags.Static;
+            var bounds = new Bounds(Vector3.up * 2.0f, Vector3.one * 3.0f);
+
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+            scene.RegisterOrUpdate(CreateDescriptor(
+                source,
+                worldBounds: bounds,
+                flags: staticFlags));
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+
+            scene.InvalidateStaticShadowCaster(source);
+
+            Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.False);
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
+            AssertInvalidationBounds(
+                scene.PendingStaticShadowInvalidationBounds[0],
+                bounds);
+
+            uint localizedRevision = scene.StaticShadowRevision;
+            scene.InvalidateAllStaticShadows();
+
+            Assert.That(scene.StaticShadowRevision, Is.Not.EqualTo(localizedRevision));
+            Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.True);
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.Zero);
+        }
+
+        [Test]
+        public void StaticShadowInvalidations_PreserveNewChangesAndFallbackOnOverflow()
+        {
+            using var scene = new VividPrimitiveScene();
+            EntityId source = CreateEntity("Static Shadow Journal Primitive");
+            scene.RegisterOrUpdate(CreateDescriptor(
+                source,
+                flags: VividPrimitiveFlags.Valid | VividPrimitiveFlags.Static));
+            uint cachedRevision = scene.StaticShadowRevision;
+            scene.AcknowledgeStaticShadowInvalidations(cachedRevision);
+
+            scene.InvalidateStaticShadowCaster(source);
+            scene.AcknowledgeStaticShadowInvalidations(cachedRevision);
+
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
+            for (int index = 0;
+                 index < VividPrimitiveScene.MaxPendingStaticShadowInvalidationBounds;
+                 index++)
+            {
+                scene.InvalidateStaticShadowCaster(source);
+            }
+
+            Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.True);
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.Zero);
+        }
+
+        [Test]
+        public void StaticAlphaShadowInvalidations_LocalizeOncePerCasterAndPreserveOtherChanges()
+        {
+            using var scene = new VividPrimitiveScene();
+            var geometry = CreateResourceKey(VividPrimitiveResourceDomain.MeshletGeometry, CreateEntity("VT Geometry"));
+            var alpha = CreateResourceKey(VividPrimitiveResourceDomain.MaterialProxy, CreateEntity("VT Alpha"));
+            var opaque = CreateResourceKey(VividPrimitiveResourceDomain.MaterialProxy, CreateEntity("VT Opaque"));
+            var sections = new[] { CreateSection(0, geometry, opaque), CreateSection(1, geometry, alpha), CreateSection(2, geometry, alpha) };
+            var staticFlags = VividPrimitiveFlags.Valid | VividPrimitiveFlags.Static;
+            var bounds = new Bounds(Vector3.right * 5f, Vector3.one * 2f);
+            scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("Static Alpha"), sections, worldBounds: bounds, flags: staticFlags));
+            scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("Dynamic Alpha"), sections));
+            scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("Disabled Alpha"), sections, flags: staticFlags | VividPrimitiveFlags.Disabled));
+            scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("Non-shadow Alpha"), sections, passMask: VividInstancePassMask.Main, flags: staticFlags));
+            EntityId removed = CreateEntity("Removed Alpha");
+            scene.RegisterOrUpdate(CreateDescriptor(removed, sections, flags: staticFlags));
+            scene.Remove(removed);
+            EntityId opaqueSource = CreateEntity("Static Opaque");
+            scene.RegisterOrUpdate(CreateDescriptor(opaqueSource, new[] { CreateSection(0, geometry, opaque) }, flags: staticFlags));
+            scene.UpdateMaterialPayload(alpha, 0u, new VividMaterialData { RendererListID = VividRendererListID.AlphaTest });
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+
+            uint revision = scene.StaticShadowRevision;
+            uint sceneRevision = scene.SceneRevision;
+            scene.InvalidateStaticAlphaTestShadowCasters();
+            Assert.That(scene.StaticShadowRevision, Is.EqualTo(revision + 1u));
+            Assert.That(scene.SceneRevision, Is.EqualTo(sceneRevision));
+            Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.False);
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
+            AssertInvalidationBounds(scene.PendingStaticShadowInvalidationBounds[0], bounds);
+
+            scene.AcknowledgeStaticShadowInvalidations(revision); // An older cache cannot consume the new VT change.
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
+            scene.InvalidateStaticShadowCaster(opaqueSource);
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(2));
+            scene.InvalidateAllStaticShadows();
+            scene.InvalidateStaticAlphaTestShadowCasters();
+            Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.True);
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.Zero);
+
+            for (int i = 0; i < 8; i++)
+            {
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                scene.InvalidateStaticAlphaTestShadowCasters();
+            }
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++)
+            {
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                scene.InvalidateStaticAlphaTestShadowCasters();
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+        }
+
+        [Test]
+        public void StaticShadowInvalidations_ReuseJournalWithoutManagedAllocation()
+        {
+            using var scene = new VividPrimitiveScene();
+            EntityId source = CreateEntity("Static Shadow Allocation Primitive");
+            scene.RegisterOrUpdate(CreateDescriptor(
+                source,
+                flags: VividPrimitiveFlags.Valid | VividPrimitiveFlags.Static));
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+
+            for (int index = 0; index < 4; index++)
+            {
+                scene.InvalidateStaticShadowCaster(source);
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+            }
+
+            long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < 32; index++)
+            {
+                scene.InvalidateStaticShadowCaster(source);
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+            }
+            long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread()
+                - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void Upload_EmptySceneCreatesPlaceholdersAndBuffersGrowWithoutShrinking()
         {
             using var scene = new VividPrimitiveScene();
@@ -858,6 +1048,24 @@ namespace VividRP.Editor.Tests
                 geometryKey,
                 materialKey,
                 VividPrimitiveDrawSectionFlags.Valid);
+        }
+
+        private static void AssertInvalidationBounds(
+            in VividStaticShadowInvalidationBounds actual,
+            Bounds expected)
+        {
+            Assert.That(
+                new Vector3(
+                    actual.BoundsMin.x,
+                    actual.BoundsMin.y,
+                    actual.BoundsMin.z),
+                Is.EqualTo(expected.min));
+            Assert.That(
+                new Vector3(
+                    actual.BoundsMax.x,
+                    actual.BoundsMax.y,
+                    actual.BoundsMax.z),
+                Is.EqualTo(expected.max));
         }
 
         private static VividInstanceData CreateLegacyInstance(uint materialIndex, uint topMeshLODStartIndex)

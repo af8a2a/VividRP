@@ -1,0 +1,143 @@
+#pragma kernel SampleTaps
+#pragma kernel ResolveReceivers
+#pragma kernel MarkFootprints
+#pragma kernel FilterFootprints
+#pragma kernel InspectBias
+#pragma kernel InspectTransition
+#pragma kernel InspectScreenNormal
+#pragma kernel ResolveScreenReceivers
+#pragma kernel InspectReceiverDiagnostics VIVID_VSM_RECEIVER_DEBUG
+#pragma kernel InspectReceiverFootprint VIVID_VSM_RECEIVER_DEBUG
+#pragma kernel UploadTestPools
+#pragma use_dxc
+
+// Exercise the shipping functions, not a second shader implementation.
+#include "../../../../Shaders/Core/Private/CSMShadowResolve.compute"
+
+StructuredBuffer<float4> _SamplingInputs;
+StructuredBuffer<int2> _SamplingOffsets;
+StructuredBuffer<float4> _SamplingNormals;
+RWStructuredBuffer<float2> _SamplingResults;
+int _SamplingCount;
+
+StructuredBuffer<uint> _TestStaticData;
+StructuredBuffer<uint> _TestDynamicData;
+RWTexture2D<uint> _TestStaticPool;
+RWTexture2D<uint> _TestDynamicPool;
+
+[numthreads(8, 8, 1)]
+void UploadTestPools(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= 16 || id.y >= 16) return;
+    uint index = id.y * 16 + id.x;
+    _TestStaticPool[id.xy] = _TestStaticData[index];
+    _TestDynamicPool[id.xy] = _TestDynamicData[index];
+}
+
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+RWStructuredBuffer<float4> _DiagnosticResults;
+
+[numthreads(64, 1, 1)]
+void InspectReceiverDiagnostics(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    g_VSMDebugLevels = -1;
+    g_VSMDebugBlend = 0;
+    g_VSMDebugWork = 0;
+    g_VSMDebugMissing = 0;
+    g_VSMDebugQuality = -1;
+    float shadow = ResolveVSMReceiver(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz);
+    _DiagnosticResults[id.x] = _VSMReceiverDebugMode == 6
+        ? (_VSMReceiverQuality.x > 0 ? g_VSMDebugQuality : -1) : _VSMReceiverDebugMode == 4
+        ? float4(g_VSMDebugWork, g_VSMDebugLevels.z >= 0 ? 1 : 0)
+        : _VSMReceiverDebugMode == 5 ? float4(g_VSMDebugMissing, shadow, 0, 0)
+        : float4(g_VSMDebugLevels, g_VSMDebugBlend);
+}
+
+[numthreads(64, 1, 1)]
+void InspectReceiverFootprint(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    _DiagnosticResults[id.x] = float4(VSMReceiverTexelFootprint(input.xyz,
+        _SamplingNormals[id.x].xyz, (int)input.w), 0, 0);
+}
+#endif
+
+[numthreads(64, 1, 1)]
+void SampleTaps(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    float shadow;
+    bool valid = TrySampleVSMVirtualTap(input.xy, _SamplingOffsets[id.x], input.z, (int)input.w, shadow);
+    _SamplingResults[id.x] = float2(valid ? 1.0 : 0.0, shadow);
+}
+
+[numthreads(64, 1, 1)]
+void ResolveReceivers(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    _SamplingResults[id.x] = float2(
+        ResolveVSMReceiver(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz), 0.0);
+}
+
+[numthreads(64, 1, 1)]
+void FilterFootprints(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    float shadow;
+    bool valid = TryFilterVSMProjection(input.xyz, _SamplingNormals[id.x], (int)input.w, shadow);
+    _SamplingResults[id.x] = float2(valid ? 1.0 : 0.0, shadow);
+}
+
+[numthreads(64, 1, 1)]
+void InspectBias(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    float3 normal = _SamplingNormals[id.x].xyz;
+    normal *= rsqrt(max(dot(normal, normal), 1e-8));
+    float4 bias = BuildVSMReceiverBias(_VSMProjections[(int)input.w], normal);
+    _SamplingResults[id.x] = input.z > 0.0 ? bias.xy : bias.zw;
+}
+
+[numthreads(64, 1, 1)]
+void InspectTransition(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    _SamplingResults[id.x] = float2(VSMTransitionWeight(input.x, input.y), 0.0);
+}
+
+[numthreads(64, 1, 1)]
+void InspectScreenNormal(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    uint2 pixel = uint2(input.xy);
+    float depth = _DepthTexture.Load(int3(pixel, 0));
+    float3 normal = ReconstructVSMReceiverNormal(pixel, depth, ReconstructWorldPosition(pixel, depth),
+        _SamplingNormals[id.x].xyz);
+    _SamplingResults[id.x] = input.z > 0.0 ? float2(normal.z, 0.0) : normal.xy;
+}
+
+[numthreads(64, 1, 1)]
+void ResolveScreenReceivers(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    uint2 pixel = uint2(_SamplingInputs[id.x].xy);
+    float depth = _DepthTexture.Load(int3(pixel, 0));
+    float3 position = ReconstructWorldPosition(pixel, depth);
+    float3 normal = ReconstructVSMReceiverNormal(pixel, depth, position, _SamplingNormals[id.x].xyz);
+    _SamplingResults[id.x] = float2(ResolveVSMReceiver(position, normal), 0.0);
+}
+
+[numthreads(64, 1, 1)]
+void MarkFootprints(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    MarkVSMReceiverPage(input.xy, (int)input.w);
+}

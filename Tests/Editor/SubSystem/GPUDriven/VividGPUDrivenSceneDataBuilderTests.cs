@@ -2734,6 +2734,149 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(0, false)] // Only B's tracked content changes.
+        [TestCase(1, true)]  // A stops drawing while B's content changes.
+        [TestCase(2, true)]  // B's resource journal does not cover A.
+        [TestCase(3, false)] // A's own resource journal covers its old bounds.
+        [TestCase(4, false)] // A's removal is covered, even after database compaction.
+        public void PrepareFrame_StaticShadowInvalidationRequiresCompleteCoverage(
+            int changeMode, bool requiresFullRefresh)
+        {
+            GameObject firstObject = null;
+            GameObject secondObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            GPUDrivenMaterialProxy firstProxy = null;
+            GPUDrivenMaterialProxy secondProxy = null;
+            VividMeshletCollectionAsset collection = null;
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("ShadowCoverageMesh");
+                material = CreateTestMaterial();
+                collection = CreateMeshletCollectionAsset("ShadowCoverageCollection", 0, 1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0, 0, 0), CreateVertex(1, 0, 0), CreateVertex(0, 1, 0) },
+                    new byte[] { 0, 1, 2 });
+                firstProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                secondProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                firstProxy.SourceMaterial = material;
+                secondProxy.SourceMaterial = material;
+                firstObject = CreateMeshletRendererObject("ShadowCoverageA", mesh,
+                    new[] { material }, out MeshletRenderer firstRenderer);
+                secondObject = CreateMeshletRendererObject("ShadowCoverageB", mesh,
+                    new[] { material }, out MeshletRenderer secondRenderer);
+                firstObject.isStatic = true;
+                secondObject.isStatic = true;
+                secondObject.transform.position = new Vector3(100, 0, 0);
+                firstRenderer.SetMeshletCollections(new[] { collection });
+                secondRenderer.SetMeshletCollections(new[] { collection });
+                firstRenderer.SetMaterialProxies(new[] { firstProxy });
+                secondRenderer.SetMaterialProxies(new[] { secondProxy });
+                var database = VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(firstRenderer);
+                database.UpdateRendererData(secondRenderer);
+                using var system = new VividGPUDrivenSystem(new FakeBindlessTextureDescriptorAllocator(16));
+                system.PrepareFrame(reportStats: false);
+                var scene = system.PrimitiveScene;
+                Assert.That(system.SceneData.InstanceCount, Is.EqualTo(2));
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                uint cachedRevision = scene.StaticShadowRevision;
+                uint bindingRevision = system.TextureBindingRevision;
+
+                secondProxy.Cutoff += 0.125f;
+                if (changeMode >= 1 && changeMode <= 3)
+                    firstProxy.Model = GPUDrivenMaterialProxyModel.DualSlab; // Missing definition: fail closed.
+                if (changeMode == 2)
+                    database.UpdateRendererData(secondRenderer);
+                if (changeMode == 3)
+                    database.UpdateRendererData(firstRenderer);
+                if (changeMode == 4)
+                    firstObject.SetActive(false);
+
+                system.PrepareFrame(reportStats: false);
+                Assert.That(system.SceneData.InstanceCount, Is.EqualTo(changeMode == 0 ? 2 : 1));
+                Assert.That(system.TextureBindingRevision, Is.EqualTo(bindingRevision));
+                Assert.That(scene.StaticShadowRevision, Is.Not.EqualTo(cachedRevision));
+                Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.EqualTo(requiresFullRefresh));
+                if (!requiresFullRefresh)
+                {
+                    bool coversFirst = false;
+                    bool coversSecond = false;
+                    foreach (var bounds in scene.PendingStaticShadowInvalidationBounds)
+                    {
+                        coversFirst |= bounds.BoundsMin.x < 10f;
+                        coversSecond |= bounds.BoundsMin.x > 90f;
+                    }
+                    Assert.That(coversFirst, Is.EqualTo(changeMode != 0));
+                    Assert.That(coversSecond, Is.True);
+                }
+            }
+            finally
+            {
+                DestroyTestObjects(firstObject, secondObject, mesh, material, firstProxy, secondProxy, collection);
+            }
+        }
+
+        [Test]
+        public void ShadowSourceSnapshots_TrackExactSectionsAndReuseStorageWithoutAllocations()
+        {
+            var first = new GameObject("ShadowSourceSnapshotA");
+            var second = new GameObject("ShadowSourceSnapshotB");
+            try
+            {
+                EntityId a = first.GetEntityId();
+                EntityId b = second.GetEntityId();
+                var a0 = new VividGPUDrivenInstanceSourceData(a, a, a, 0, VividGPUDrivenInstanceSourceFlags.MaterialProxy);
+                var a1 = new VividGPUDrivenInstanceSourceData(a, a, a, 1, VividGPUDrivenInstanceSourceFlags.MaterialProxy);
+                var b0 = new VividGPUDrivenInstanceSourceData(b, b, b, 0, VividGPUDrivenInstanceSourceFlags.MaterialProxy);
+                var baseline = new[] { a0, a1, b0 };
+                var reordered = new[] { b0, a1, a0 };
+                var changed = new[] { a0,
+                    new VividGPUDrivenInstanceSourceData(a, a, b, 1, VividGPUDrivenInstanceSourceFlags.MaterialProxy),
+                    new VividGPUDrivenInstanceSourceData(b, a, b, 0, VividGPUDrivenInstanceSourceFlags.MaterialProxy) };
+                var flagsChanged = new[] { a0, a1,
+                    new VividGPUDrivenInstanceSourceData(b, b, b, 0, VividGPUDrivenInstanceSourceFlags.TerrainMaterial) };
+                var removed = new[] { a0 };
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                var changedIds = (HashSet<EntityId>)typeof(VividGPUDrivenSceneDataBuilder)
+                    .GetField("m_ChangedShadowSourceIds", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(builder);
+                builder.TrackShadowSourceChanges(baseline);
+                builder.TrackShadowSourceChanges(reordered);
+                Assert.That(changedIds, Is.Empty);
+                builder.TrackShadowSourceChanges(changed);
+                Assert.That(changedIds, Is.EquivalentTo(new[] { a, b }));
+                builder.TrackShadowSourceChanges(baseline);
+                builder.TrackShadowSourceChanges(flagsChanged);
+                Assert.That(changedIds, Is.EquivalentTo(new[] { b }));
+                builder.TrackShadowSourceChanges(removed);
+                Assert.That(changedIds, Is.EquivalentTo(new[] { a, b }));
+
+                // Both dictionary snapshots and the changed-ID set are warmed,
+                // including removal/reappearance, before measuring steady reuse.
+                for (int index = 0; index < 8; index++)
+                {
+                    builder.TrackShadowSourceChanges(baseline);
+                    builder.TrackShadowSourceChanges(changed);
+                    builder.TrackShadowSourceChanges(removed);
+                }
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < 256; index++)
+                {
+                    builder.TrackShadowSourceChanges(baseline);
+                    builder.TrackShadowSourceChanges(changed);
+                    builder.TrackShadowSourceChanges(removed);
+                }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+            }
+            finally
+            {
+                DestroyTestObjects(first, second);
+            }
+        }
+
         private static MaterialGraphCompilationResult CreateCompilationResult(
             CompiledMaterialProgram program)
         {

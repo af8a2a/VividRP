@@ -1,0 +1,7 @@
+case,status,width,height,virtual_resolution,pcf,physical_page_budget,resident,requested,new_assignments,overflow,roi_preferred_level,roi_sampled_level,world_texel_m,texel_y_screen_px,tooth_height_px,gpu_total_median_ms,gpu_total_p95_ms,allocate_median_ms,cull_median_ms,raster_median_ms,unity_raster_median_ms,resolve_feedback_median_ms,notes
+Sponza_2K_Hard,capture_quality_only,1920,1080,2048,0,256,73,73,0,0,2,2,0.0078125,5.09,4-5,,,,,,,,vsm-issue.rdc EID1959; timings unmeasured
+Sponza_2K_PCF,pending,1920,1080,2048,1,256,,,,,,,,,,,,,,,,,
+Sponza_4K_Hard,pending,1920,1080,4096,0,256,,,,,,,,,,,,,,,,,
+Sponza_4K_PCF,pending,1920,1080,4096,1,256,,,,,,,,,,,,,,,,,
+Sponza_8K_Hard,pending,1920,1080,8192,0,256,,,,,,,,,,,,,,,,,
+Sponza_8K_PCF,pending,1920,1080,8192,1,256,,,,,,,,,,,,,,,,,

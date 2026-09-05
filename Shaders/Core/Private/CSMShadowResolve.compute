@@ -1,4 +1,15 @@
 #pragma kernel CSMShadowResolve
+#pragma kernel VSMReceiverDebug VIVID_VSM_RECEIVER_DEBUG
+#pragma kernel VSMPrototypeResetReceiverFeedback
+#pragma kernel VSMPrototypeAllocatePages
+#pragma kernel VSMResetPhysicalOwners
+#pragma kernel VSMRemapPages
+#pragma kernel VSMPrototypeMarkAllAllocatedPagesDirty
+#pragma kernel VSMPrototypeInvalidateStaticPages
+#pragma kernel VSMPrototypeClearPhysicalPages
+#pragma kernel VSMPrototypeFinalizeDirtyPages
+#pragma kernel VSMPrototypePrepareMeshletPageRequests
+#pragma kernel VSMPrototypeCullMeshletsToPages
 #pragma kernel CSMShadowClearTiles
 #pragma kernel CSMShadowClassifyTiles
 #pragma kernel CSMShadowResolveTiles
@@ -16,6 +27,9 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapAddressing.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapProjection.hlsl"
 
 Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;
@@ -23,6 +37,30 @@ Texture2DArray<float> _CSMShadowAtlas;
 Texture2D<uint> _VSMPrototypeStaticPhysicalPage;
 Texture2D<uint> _VSMPrototypeDynamicPhysicalPage;
 StructuredBuffer<uint> _VSMPrototypePageTable;
+RWStructuredBuffer<uint> _VSMPrototypeWritablePageTable;
+RWStructuredBuffer<uint4> _VSMPrototypePageMetadata;
+RWStructuredBuffer<uint> _VSMPrototypePhysicalPageOwners;
+RWStructuredBuffer<uint> _VSMPrototypeAllocatorCounters;
+StructuredBuffer<uint> _VSMPreviousPageTable;
+StructuredBuffer<uint4> _VSMPreviousPageMetadata;
+StructuredBuffer<int4> _VSMProjectionRemap;
+
+struct VSMPrototypeStaticInvalidationBounds
+{
+    float4 BoundsMin;
+    float4 BoundsMax;
+};
+
+StructuredBuffer<VSMPrototypeStaticInvalidationBounds>
+    _VSMPrototypeStaticInvalidationBounds;
+StructuredBuffer<VividMeshletRenderRequestPacked> _VSMPrototypeSourceMeshletRequests;
+ByteAddressBuffer _VSMPrototypeSourceMeshletIndirectArgs;
+RWStructuredBuffer<uint4> _VSMPrototypeMeshletPageRequests;
+RWByteAddressBuffer _VSMPrototypeMeshletPageIndirectArgs;
+// Count followed by the relevant virtual pages (at most the physical budget).
+RWStructuredBuffer<uint> _VSMPrototypeMeshletRasterPages;
+RWTexture2D<uint> _VSMPrototypeStaticPhysicalPageRW;
+RWTexture2D<uint> _VSMPrototypeDynamicPhysicalPageRW;
 RWTexture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _CSMShadowFilterSource;
 RWTexture2D<float> _CSMShadowFilterTexture;
@@ -44,10 +82,18 @@ float4   _CSMCascadeWorldTexelSizes;
 float4   _CSMCascadeBorders;
 int      _CSMShadowQuality;
 int      _VSMPrototypeEnabled;
+float4   _VSMReceiverParameters; // PCF radius (0/1), constant bias in texels, slope bias, reserved
 int      _VSMPrototypePageSize;
 int      _VSMPrototypeVirtualResolution;
 int      _VSMPrototypePagesPerAxis;
 int      _VSMPrototypePhysicalPagesPerRow;
+int      _VSMPrototypePageTableEntryCount;
+int      _VSMPrototypePhysicalPageCapacity;
+int      _VSMPrototypeStaticInvalidationBoundsCount;
+int      _VSMPrototypeRequestEnabled;
+int      _VSMPrototypeFeedbackFrameIndex;
+int      _VSMPrototypeSourceRequestsPerCascadeCapacity;
+int      _VSMPrototypeCasterLayer;
 float    _CSMLightAngularDiameter;
 int      _CSMFrameIndex;
 int      _CSMPCSSBlockerSampleCount;
@@ -80,6 +126,657 @@ static const float kPCSSGoldenAngle = 2.39996323;
 static const float kPCSSTwoPi = 6.28318531;
 static const float kDegreesToRadians = 0.01745329251;
 static const float kFixedUniformDepthBias = 1.0 / 65536.0;
+static const uint kVSMPageRequested = 1u << 0;
+static const uint kVSMPageAllocated = 1u << 1;
+static const uint kVSMPageDirty = 1u << 2;
+static const uint kVSMPageCached = 1u << 3;
+static const uint kVSMPageStatic = 1u << 4;
+static const uint kVSMPageDynamic = 1u << 5;
+// Debug-only events in metadata.w; never participate in rendering decisions.
+static const uint kVSMPageDebugEvicted = 1u << 6;
+static const uint kVSMPageDebugOverflow = 1u << 7;
+// Live feedback priority, cleared together with Requested after allocation.
+static const uint kVSMPageCoarseRequested = 1u << 8;
+static const uint kVSMPageRequestMask = kVSMPageRequested | kVSMPageCoarseRequested;
+static const uint kVSMMaxPagesPerMeshletRequest = 4u;
+
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+// Thread-local instrumentation exists only in the opt-in diagnostic kernel.
+static int3 g_VSMDebugLevels;
+static float g_VSMDebugBlend;
+static uint3 g_VSMDebugWork; // attempted taps, completed comparisons, attempted levels
+static uint g_VSMDebugMissing; // unmapped=1, dirty=2, inconsistent=4, outside=8
+static float4 g_VSMDebugQuality; // desired LOD, minimum covered, selected, footprint/target
+#endif
+
+uint GetVSMSourceDrawArgsIndex(
+    uint cascadeIndex,
+    uint rendererListIndex)
+{
+    return cascadeIndex * VIVIDRENDERERLISTID_COUNT
+        + rendererListIndex;
+}
+
+uint GetVSMPageDrawArgsAddress(uint rendererListIndex)
+{
+    return GetIndirectDrawArgsByteAddress(rendererListIndex);
+}
+
+bool IsVSMCasterPageRelevant(uint virtualPageIndex)
+{
+    if (virtualPageIndex >= (uint)_VSMPrototypePageTableEntryCount
+        || _VSMPrototypePageTable[virtualPageIndex] == 0u)
+    {
+        return false;
+    }
+
+    const uint flags = _VSMPrototypePageMetadata[virtualPageIndex].x;
+    if ((flags & kVSMPageAllocated) == 0u)
+        return false;
+
+    return _VSMPrototypeCasterLayer != 0
+        || (flags & kVSMPageDirty) != 0u;
+}
+
+void AppendVSMPageMeshletRequest(
+    uint rendererListIndex,
+    VividMeshletRenderRequestPacked sourceRequest,
+    uint virtualPageIndex,
+    uint cascadeIndex)
+{
+    const uint drawArgsAddress = GetVSMPageDrawArgsAddress(
+        rendererListIndex);
+    uint localRequestIndex;
+    _VSMPrototypeMeshletPageIndirectArgs.InterlockedAdd(
+        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET,
+        1u,
+        localRequestIndex);
+    const uint startInstance = _VSMPrototypeMeshletPageIndirectArgs.Load(
+        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
+    _VSMPrototypeMeshletPageRequests[startInstance + localRequestIndex] =
+        uint4(
+            sourceRequest.InstanceID_LOD,
+            sourceRequest.MeshletID,
+            virtualPageIndex,
+            cascadeIndex);
+}
+
+[numthreads(1, 1, 1)]
+void VSMPrototypePrepareMeshletPageRequests(
+    uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint rasterPageCount = 0u;
+    for (uint physicalPage = 0u;
+         physicalPage < (uint)_VSMPrototypePhysicalPageCapacity;
+         physicalPage++)
+    {
+        const uint owner = _VSMPrototypePhysicalPageOwners[physicalPage];
+        if (owner != 0u && IsVSMCasterPageRelevant(owner - 1u))
+            _VSMPrototypeMeshletRasterPages[1u + rasterPageCount++] = owner - 1u;
+    }
+    _VSMPrototypeMeshletRasterPages[0] = rasterPageCount;
+
+    uint outputStartInstance = 0u;
+    for (uint rendererListIndex = 0u;
+         rendererListIndex < VIVIDRENDERERLISTID_COUNT;
+         rendererListIndex++)
+    {
+        uint sourceRequestCount = 0u;
+        for (uint cascadeIndex = 0u;
+             cascadeIndex < (uint)_VSMProjectionCount;
+             cascadeIndex++)
+        {
+            const uint sourceArgsIndex = GetVSMSourceDrawArgsIndex(
+                cascadeIndex,
+                rendererListIndex);
+            const uint sourceArgsAddress = GetIndirectDrawArgsByteAddress(
+                sourceArgsIndex);
+            sourceRequestCount += _VSMPrototypeSourceMeshletIndirectArgs.Load(
+                sourceArgsAddress
+                    + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET);
+        }
+
+        const uint outputArgsAddress = GetVSMPageDrawArgsAddress(
+            rendererListIndex);
+        _VSMPrototypeMeshletPageIndirectArgs.Store4(
+            outputArgsAddress,
+            uint4(
+                VIVID_MAX_MESHLET_INDICES,
+                0u,
+                0u,
+                outputStartInstance));
+        outputStartInstance += sourceRequestCount
+            * kVSMMaxPagesPerMeshletRequest;
+        // Small requests grow from the front; large records grow from the back.
+        // A source emits either <= 4 small records or one large record, never both.
+        _VSMPrototypeMeshletPageIndirectArgs.Store4(
+            GetVSMPageDrawArgsAddress(rendererListIndex + VIVIDRENDERERLISTID_COUNT),
+            uint4(VIVID_MAX_MESHLET_INDICES, 0u, 0u, outputStartInstance));
+    }
+}
+
+bool GetVSMPageRange(
+    VividMeshletRenderRequestPacked sourceRequest,
+    uint cascadeIndex,
+    out uint2 minPage,
+    out uint2 maxPage)
+{
+    minPage = 0u;
+    maxPage = 0u;
+    if (sourceRequest.InstanceID_LOD >= _InstanceDataCount
+        || sourceRequest.MeshletID >= _MeshletCount)
+    {
+        return false;
+    }
+
+    const VividInstanceData instanceData = PullInstanceData(
+        sourceRequest.InstanceID_LOD);
+    const VividDecodedMeshlet meshlet = PullMeshletData(
+        sourceRequest.MeshletID);
+    const float4 sphereWS = TransformSphere(
+        meshlet.BoundingSphere,
+        instanceData.ObjectToWorldMatrix);
+    const float4x4 worldToShadow = _VSMProjections[cascadeIndex].worldToShadow;
+    const float4 centerShadow = mul(
+        worldToShadow,
+        float4(sphereWS.xyz, 1.0));
+    const float inverseW = rcp(max(abs(centerShadow.w), 1e-6));
+    const float2 centerUV = centerShadow.xy * inverseW;
+    const float2 radiusUV = sphereWS.w * float2(
+        length(float3(
+            worldToShadow._m00,
+            worldToShadow._m01,
+            worldToShadow._m02)),
+        length(float3(
+            worldToShadow._m10,
+            worldToShadow._m11,
+            worldToShadow._m12))) * inverseW;
+    const float2 minUV = centerUV - radiusUV;
+    const float2 maxUV = centerUV + radiusUV;
+    if (any(maxUV < 0.0) || any(minUV > 1.0))
+        return false;
+
+    const uint virtualResolution = (uint)max(
+        _VSMPrototypeVirtualResolution,
+        1);
+    const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
+    const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
+    const uint2 minVirtualTexel = VividVSMUVToVirtualTexel(
+        minUV, virtualResolution);
+    const uint2 maxVirtualTexel = VividVSMUVToVirtualTexel(
+        maxUV, virtualResolution);
+    minPage = min(minVirtualTexel / pageSize, pagesPerAxis - 1u);
+    maxPage = min(maxVirtualTexel / pageSize, pagesPerAxis - 1u);
+    return all(maxPage >= minPage);
+}
+
+[numthreads(64, 1, 1)]
+void VSMPrototypeCullMeshletsToPages(
+    uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint localRequestIndex = dispatchThreadID.x;
+    const uint cascadeIndex = dispatchThreadID.y;
+    const uint rendererListIndex = dispatchThreadID.z;
+    if (localRequestIndex
+            >= (uint)_VSMPrototypeSourceRequestsPerCascadeCapacity
+        || cascadeIndex >= (uint)_VSMProjectionCount
+        || rendererListIndex >= VIVIDRENDERERLISTID_COUNT)
+    {
+        return;
+    }
+
+    const uint sourceArgsIndex = GetVSMSourceDrawArgsIndex(
+        cascadeIndex,
+        rendererListIndex);
+    const uint sourceArgsAddress = GetIndirectDrawArgsByteAddress(
+        sourceArgsIndex);
+    const uint sourceRequestCount =
+        _VSMPrototypeSourceMeshletIndirectArgs.Load(
+            sourceArgsAddress
+                + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET);
+    if (localRequestIndex >= sourceRequestCount)
+        return;
+
+    const uint sourceStartInstance =
+        _VSMPrototypeSourceMeshletIndirectArgs.Load(
+            sourceArgsAddress
+                + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
+    const VividMeshletRenderRequestPacked sourceRequest =
+        _VSMPrototypeSourceMeshletRequests[
+            sourceStartInstance + localRequestIndex];
+
+    uint2 minPage;
+    uint2 maxPage;
+    if (!GetVSMPageRange(
+            sourceRequest,
+            cascadeIndex,
+            minPage,
+            maxPage))
+    {
+        return;
+    }
+
+    const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
+    const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
+    const uint coveredPageCount = (maxPage.x - minPage.x + 1u)
+        * (maxPage.y - minPage.y + 1u);
+    if (coveredPageCount > kVSMMaxPagesPerMeshletRequest)
+    {
+        for (uint pageY = minPage.y; pageY <= maxPage.y; pageY++)
+        {
+            for (uint pageX = minPage.x; pageX <= maxPage.x; pageX++)
+            {
+                const uint virtualPageIndex = cascadeIndex
+                        * pagesPerCascade
+                    + pageY * pagesPerAxis
+                    + pageX;
+                if (!IsVSMCasterPageRelevant(virtualPageIndex))
+                    continue;
+
+                const uint rasterPageCount = _VSMPrototypeMeshletRasterPages[0];
+                if (rasterPageCount == 0u)
+                    return;
+                const uint argsAddress = GetVSMPageDrawArgsAddress(
+                    rendererListIndex + VIVIDRENDERERLISTID_COUNT);
+                uint firstInstance;
+                _VSMPrototypeMeshletPageIndirectArgs.InterlockedAdd(
+                    argsAddress + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET,
+                    rasterPageCount,
+                    firstInstance);
+                const uint requestEnd = _VSMPrototypeMeshletPageIndirectArgs.Load(
+                    argsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
+                _VSMPrototypeMeshletPageRequests[
+                    requestEnd - 1u - firstInstance / rasterPageCount] = uint4(
+                        sourceRequest.InstanceID_LOD,
+                        sourceRequest.MeshletID,
+                        cascadeIndex * pagesPerCascade + minPage.y * pagesPerAxis + minPage.x,
+                        cascadeIndex * pagesPerCascade + maxPage.y * pagesPerAxis + maxPage.x);
+                return;
+            }
+        }
+        return;
+    }
+
+    for (uint pageY = minPage.y; pageY <= maxPage.y; pageY++)
+    {
+        for (uint pageX = minPage.x; pageX <= maxPage.x; pageX++)
+        {
+            const uint virtualPageIndex = cascadeIndex * pagesPerCascade
+                + pageY * pagesPerAxis
+                + pageX;
+            if (!IsVSMCasterPageRelevant(virtualPageIndex))
+                continue;
+
+            AppendVSMPageMeshletRequest(
+                rendererListIndex,
+                sourceRequest,
+                virtualPageIndex,
+                cascadeIndex);
+        }
+    }
+}
+
+[numthreads(64, 1, 1)]
+void VSMPrototypeResetReceiverFeedback(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint virtualPageIndex = dispatchThreadID.x;
+    if (virtualPageIndex >= (uint)_VSMPrototypePageTableEntryCount)
+        return;
+
+    uint4 metadata = _VSMPrototypePageMetadata[virtualPageIndex];
+    metadata.x &= ~kVSMPageRequestMask;
+    // A different camera's same-frame requests must not survive as either
+    // receiver demand or eviction protection. Keep depth/cache ownership intact.
+    metadata.z = 0u;
+    _VSMPrototypePageMetadata[virtualPageIndex] = metadata;
+}
+
+[numthreads(64, 1, 1)]
+void VSMResetPhysicalOwners(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < (uint)_VSMPrototypePhysicalPageCapacity)
+        _VSMPrototypePhysicalPageOwners[id.x] = 0u;
+}
+
+[numthreads(64, 1, 1)]
+void VSMRemapPages(uint3 id : SV_DispatchThreadID)
+{
+    uint dest = id.x;
+    if (dest >= (uint)_VSMPrototypePageTableEntryCount)
+        return;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint perLevel = axis * axis;
+    uint level = dest / perLevel;
+    uint page = dest % perLevel;
+    int4 remap = _VSMProjectionRemap[level];
+    int2 sourceXY = int2(page % axis, page / axis) + remap.xy;
+    uint table = 0u;
+    uint4 metadata = 0u;
+    if (remap.z == 0 && all(sourceXY >= 0) && all(sourceXY < (int)axis))
+    {
+        uint source = level * perLevel + (uint)sourceXY.y * axis + (uint)sourceXY.x;
+        table = _VSMPreviousPageTable[source];
+        metadata = _VSMPreviousPageMetadata[source];
+    }
+    _VSMPrototypeWritablePageTable[dest] = table;
+    _VSMPrototypePageMetadata[dest] = metadata;
+    if (table != 0u)
+        _VSMPrototypePhysicalPageOwners[table - 1u] = dest + 1u;
+}
+
+[numthreads(1, 1, 1)]
+void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    // Clipmap scrolling leaves holes. Slot identity must remain stable because
+    // it addresses cached depth; never compact the physical pools themselves.
+    uint allocatedPageCount = 0u;
+    for (uint slot = 0u; slot < (uint)_VSMPrototypePhysicalPageCapacity; slot++)
+        allocatedPageCount += _VSMPrototypePhysicalPageOwners[slot] != 0u ? 1u : 0u;
+    uint requestedPageCount = 0u;
+    uint newlyAllocatedPageCount = 0u;
+    uint overflowPageCount = 0u;
+
+    // Snapshot before allocation clears request bits or evicts a later-index page.
+    // Resolve's next-frame feedback updates x/z, leaving this submission visible.
+    for (uint page = 0u; page < (uint)_VSMPrototypePageTableEntryCount; page++)
+    {
+        uint4 metadata = _VSMPrototypePageMetadata[page];
+        metadata.w = metadata.x & ~kVSMPageRequestMask;
+        if (metadata.z == (uint)_VSMPrototypeFeedbackFrameIndex)
+            metadata.w |= metadata.x & kVSMPageRequestMask;
+        _VSMPrototypePageMetadata[page] = metadata;
+    }
+
+    // Fill the fallback chain from coarse to fine. Protecting only the terminal
+    // level lets fine requests starve every intermediate level in a full pool,
+    // so transitions jump straight from fine detail to the lowest resolution.
+    uint levelCount = (uint)max(_VSMProjectionCount, 1);
+    uint pagesPerLevel = (uint)_VSMPrototypePageTableEntryCount / levelCount;
+    for (uint phase = 0u; phase < 2u; phase++)
+    {
+        bool canEvictPages = true;
+        for (uint requestIndex = 0u;
+             requestIndex < (uint)_VSMPrototypePageTableEntryCount;
+             requestIndex++)
+        {
+            uint virtualPageIndex = phase == 0u ? requestIndex
+                : (levelCount - 1u - requestIndex / pagesPerLevel) * pagesPerLevel
+                    + requestIndex % pagesPerLevel;
+            uint4 metadata = _VSMPrototypePageMetadata[virtualPageIndex];
+            bool coarseRequest = (metadata.x & kVSMPageCoarseRequested) != 0u;
+            if ((metadata.x & kVSMPageRequested) == 0u || coarseRequest != (phase == 0u))
+                continue;
+
+            if (metadata.z != (uint)_VSMPrototypeFeedbackFrameIndex)
+            {
+                metadata.x &= ~kVSMPageRequestMask;
+                _VSMPrototypePageMetadata[virtualPageIndex] = metadata;
+                continue;
+            }
+
+            requestedPageCount++;
+            if ((metadata.x & kVSMPageAllocated) == 0u)
+            {
+                const uint physicalPageCapacity =
+                    (uint)_VSMPrototypePhysicalPageCapacity;
+                uint physicalPageIndex = physicalPageCapacity;
+                for (uint freeSlot = 0u; freeSlot < physicalPageCapacity; freeSlot++)
+                {
+                    if (_VSMPrototypePhysicalPageOwners[freeSlot] == 0u)
+                    {
+                        physicalPageIndex = freeSlot;
+                        break;
+                    }
+                }
+                if (physicalPageIndex == physicalPageCapacity && canEvictPages)
+                {
+                    uint oldestRequestedFrame = 0xffffffffu;
+                    for (uint candidateIndex = 0u;
+                         candidateIndex < physicalPageCapacity;
+                         candidateIndex++)
+                    {
+                        const uint owner =
+                            _VSMPrototypePhysicalPageOwners[candidateIndex] - 1u;
+                        const uint4 candidateMetadata = _VSMPrototypePageMetadata[owner];
+                        const uint lastRequestedFrame = candidateMetadata.z;
+                        // Keep resident request bits until allocation finishes. A
+                        // reset timestamp alone (including frame zero) is not demand.
+                        if ((candidateMetadata.x & kVSMPageRequested) != 0u
+                            && lastRequestedFrame == (uint)_VSMPrototypeFeedbackFrameIndex
+                            && ((candidateMetadata.x & kVSMPageCoarseRequested) != 0u
+                                || (!coarseRequest && owner / pagesPerLevel >= virtualPageIndex / pagesPerLevel)))
+                            continue;
+
+                        if (physicalPageIndex == physicalPageCapacity
+                            || lastRequestedFrame < oldestRequestedFrame)
+                        {
+                            physicalPageIndex = candidateIndex;
+                            oldestRequestedFrame = lastRequestedFrame;
+                        }
+                    }
+
+                    // Once all residents are protected for this priority, later misses overflow.
+                    canEvictPages = physicalPageIndex < physicalPageCapacity;
+                }
+
+                if (physicalPageIndex < physicalPageCapacity)
+                {
+                    if (_VSMPrototypePhysicalPageOwners[physicalPageIndex] != 0u)
+                    {
+                        const uint evictedVirtualPage =
+                            _VSMPrototypePhysicalPageOwners[physicalPageIndex] - 1u;
+                        uint4 evictedMetadata =
+                            _VSMPrototypePageMetadata[evictedVirtualPage];
+                        // Preserve demand when a coarse request displaces requested
+                        // detail; phase 1 must still account for its miss/overflow.
+                        evictedMetadata.x &= kVSMPageRequestMask;
+                        evictedMetadata.y = 0u;
+                        evictedMetadata.w = kVSMPageDebugEvicted | (evictedMetadata.w & kVSMPageRequestMask);
+                        _VSMPrototypePageMetadata[evictedVirtualPage] = evictedMetadata;
+                        _VSMPrototypeWritablePageTable[evictedVirtualPage] = 0u;
+                    }
+                    else
+                    {
+                        // New allocation into a free slot, possibly a scroll hole.
+                        allocatedPageCount++;
+                    }
+
+                    uint encodedPhysicalPage = physicalPageIndex + 1u;
+                    metadata.x = (metadata.x | kVSMPageAllocated
+                        | kVSMPageDirty
+                        | kVSMPageStatic
+                        | kVSMPageDynamic) & ~kVSMPageCached;
+                    metadata.y = encodedPhysicalPage;
+                    metadata.w = metadata.x;
+                    _VSMPrototypeWritablePageTable[virtualPageIndex] =
+                        encodedPhysicalPage;
+                    _VSMPrototypePhysicalPageOwners[physicalPageIndex] =
+                        virtualPageIndex + 1u;
+                    newlyAllocatedPageCount++;
+                }
+                else
+                {
+                    overflowPageCount++;
+                    metadata.w |= kVSMPageDebugOverflow;
+                }
+            }
+
+            if ((metadata.x & kVSMPageAllocated) == 0u)
+                metadata.x &= ~kVSMPageRequestMask;
+            _VSMPrototypePageMetadata[virtualPageIndex] = metadata;
+        }
+    }
+
+    for (uint physicalPageIndex = 0u; physicalPageIndex < (uint)_VSMPrototypePhysicalPageCapacity; physicalPageIndex++)
+    {
+        if (_VSMPrototypePhysicalPageOwners[physicalPageIndex] == 0u)
+            continue;
+        const uint owner = _VSMPrototypePhysicalPageOwners[physicalPageIndex] - 1u;
+        _VSMPrototypePageMetadata[owner].x &= ~kVSMPageRequestMask;
+    }
+
+    _VSMPrototypeAllocatorCounters[0] = allocatedPageCount;
+    _VSMPrototypeAllocatorCounters[1] = requestedPageCount;
+    _VSMPrototypeAllocatorCounters[2] = newlyAllocatedPageCount;
+    _VSMPrototypeAllocatorCounters[3] = overflowPageCount;
+}
+
+[numthreads(64, 1, 1)]
+void VSMPrototypeMarkAllAllocatedPagesDirty(
+    uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint virtualPageIndex = dispatchThreadID.x;
+    if (virtualPageIndex >= (uint)_VSMPrototypePageTableEntryCount)
+        return;
+
+    uint4 metadata = _VSMPrototypePageMetadata[virtualPageIndex];
+    if ((metadata.x & kVSMPageAllocated) == 0u)
+        return;
+
+    metadata.x = (metadata.x | kVSMPageDirty) & ~kVSMPageCached;
+    _VSMPrototypePageMetadata[virtualPageIndex] = metadata;
+}
+
+[numthreads(1, 1, 1)]
+void VSMPrototypeInvalidateStaticPages(
+    uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint boundsIndex = dispatchThreadID.x;
+    const uint cascadeIndex = dispatchThreadID.y;
+    if (boundsIndex >= (uint)_VSMPrototypeStaticInvalidationBoundsCount
+        || cascadeIndex >= (uint)_VSMProjectionCount)
+    {
+        return;
+    }
+
+    const VSMPrototypeStaticInvalidationBounds invalidation =
+        _VSMPrototypeStaticInvalidationBounds[boundsIndex];
+    float2 minimumUV = float2(FLT_MAX, FLT_MAX);
+    float2 maximumUV = float2(-FLT_MAX, -FLT_MAX);
+    [unroll]
+    for (uint cornerIndex = 0u; cornerIndex < 8u; cornerIndex++)
+    {
+        const float3 cornerWS = float3(
+            (cornerIndex & 1u) != 0u
+                ? invalidation.BoundsMax.x
+                : invalidation.BoundsMin.x,
+            (cornerIndex & 2u) != 0u
+                ? invalidation.BoundsMax.y
+                : invalidation.BoundsMin.y,
+            (cornerIndex & 4u) != 0u
+                ? invalidation.BoundsMax.z
+                : invalidation.BoundsMin.z);
+        const float4 cornerShadow = mul(
+            _VSMProjections[cascadeIndex].worldToShadow,
+            float4(cornerWS, 1.0));
+        const float inverseW = rcp(max(abs(cornerShadow.w), 1e-6));
+        const float2 cornerUV = cornerShadow.xy * inverseW;
+        minimumUV = min(minimumUV, cornerUV);
+        maximumUV = max(maximumUV, cornerUV);
+    }
+
+    if (!all(isfinite(minimumUV))
+        || !all(isfinite(maximumUV))
+        || any(maximumUV < 0.0)
+        || any(minimumUV > 1.0))
+    {
+        return;
+    }
+
+    const uint virtualResolution = (uint)max(
+        _VSMPrototypeVirtualResolution,
+        1);
+    const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
+    const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
+    const uint2 minimumVirtualTexel = VividVSMUVToVirtualTexel(
+        minimumUV, virtualResolution);
+    const uint2 maximumVirtualTexel = VividVSMUVToVirtualTexel(
+        maximumUV, virtualResolution);
+    const uint2 minimumPage = min(
+        minimumVirtualTexel / pageSize,
+        pagesPerAxis - 1u);
+    const uint2 maximumPage = min(
+        maximumVirtualTexel / pageSize,
+        pagesPerAxis - 1u);
+    const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
+    for (uint pageY = minimumPage.y; pageY <= maximumPage.y; pageY++)
+    {
+        for (uint pageX = minimumPage.x; pageX <= maximumPage.x; pageX++)
+        {
+            const uint virtualPageIndex = cascadeIndex * pagesPerCascade
+                + pageY * pagesPerAxis
+                + pageX;
+            if (virtualPageIndex >= (uint)_VSMPrototypePageTableEntryCount)
+                continue;
+
+            const uint flags =
+                _VSMPrototypePageMetadata[virtualPageIndex].x;
+            if ((flags & kVSMPageAllocated) == 0u)
+                continue;
+
+            uint originalFlags;
+            InterlockedOr(
+                _VSMPrototypePageMetadata[virtualPageIndex].x,
+                kVSMPageDirty,
+                originalFlags);
+            InterlockedAnd(
+                _VSMPrototypePageMetadata[virtualPageIndex].x,
+                ~kVSMPageCached,
+                originalFlags);
+        }
+    }
+}
+
+[numthreads(8, 8, 1)]
+void VSMPrototypeClearPhysicalPages(
+    uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint physicalPageIndex = dispatchThreadID.z;
+    if (physicalPageIndex >= (uint)_VSMPrototypePhysicalPageCapacity
+        || dispatchThreadID.x >= (uint)_VSMPrototypePageSize
+        || dispatchThreadID.y >= (uint)_VSMPrototypePageSize)
+    {
+        return;
+    }
+
+    uint encodedVirtualPage =
+        _VSMPrototypePhysicalPageOwners[physicalPageIndex];
+    if (encodedVirtualPage == 0u)
+        return;
+
+    uint virtualPageIndex = encodedVirtualPage - 1u;
+    uint flags = _VSMPrototypePageMetadata[virtualPageIndex].x;
+    uint2 physicalPage = uint2(
+        physicalPageIndex % (uint)_VSMPrototypePhysicalPagesPerRow,
+        physicalPageIndex / (uint)_VSMPrototypePhysicalPagesPerRow);
+    uint2 physicalTexel = physicalPage * (uint)_VSMPrototypePageSize
+        + dispatchThreadID.xy;
+    _VSMPrototypeDynamicPhysicalPageRW[physicalTexel] = 0u;
+    if ((flags & kVSMPageDirty) != 0u)
+        _VSMPrototypeStaticPhysicalPageRW[physicalTexel] = 0u;
+}
+
+[numthreads(64, 1, 1)]
+void VSMPrototypeFinalizeDirtyPages(
+    uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint virtualPageIndex = dispatchThreadID.x;
+    if (virtualPageIndex >= (uint)_VSMPrototypePageTableEntryCount)
+        return;
+
+    uint4 metadata = _VSMPrototypePageMetadata[virtualPageIndex];
+    if ((metadata.x & (kVSMPageAllocated | kVSMPageDirty))
+        != (kVSMPageAllocated | kVSMPageDirty))
+    {
+        return;
+    }
+
+    metadata.x = (metadata.x | kVSMPageCached) & ~kVSMPageDirty;
+    // Preserve local/full invalidation as dirty/redrawn, not an immediate cache hit.
+    metadata.w = (metadata.w | kVSMPageDirty) & ~kVSMPageCached;
+    _VSMPrototypePageMetadata[virtualPageIndex] = metadata;
+}
+
 bool IsSkyPixel(float deviceDepth)
 {
     return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
@@ -176,6 +873,43 @@ float3 ReconstructWorldPosition(uint2 pixelCoord, float deviceDepth)
     return ComputeWorldSpacePosition(uv, deviceDepth, _CSMInvViewProjMatrix);
 }
 
+float3 ReconstructVSMReceiverNormal(uint2 pixelCoord, float deviceDepth,
+    float3 positionWS, float3 fallbackNormal)
+{
+    // A normal map describes shading, not the plane stored in the shadow pool.
+    // Use the nearest-depth one-sided derivative on each axis to avoid crossing
+    // silhouettes. Four depth loads, but only two additional world reconstructions.
+    int2 pixel = int2(pixelCoord);
+    int2 limit = int2(_CSMOutputWidth, _CSMOutputHeight) - 1;
+    int2 left = max(pixel - int2(1, 0), 0);
+    int2 right = min(pixel + int2(1, 0), limit);
+    int2 down = max(pixel - int2(0, 1), 0);
+    int2 up = min(pixel + int2(0, 1), limit);
+    float4 depths = float4(_DepthTexture.Load(int3(left, 0)), _DepthTexture.Load(int3(right, 0)),
+        _DepthTexture.Load(int3(down, 0)), _DepthTexture.Load(int3(up, 0)));
+    float4 error = abs(depths - deviceDepth);
+    error.x = left.x == pixel.x || IsSkyPixel(depths.x) ? 1e20 : error.x;
+    error.y = right.x == pixel.x || IsSkyPixel(depths.y) ? 1e20 : error.y;
+    error.z = down.y == pixel.y || IsSkyPixel(depths.z) ? 1e20 : error.z;
+    error.w = up.y == pixel.y || IsSkyPixel(depths.w) ? 1e20 : error.w;
+    if (min(error.x, error.y) >= 1e20 || min(error.z, error.w) >= 1e20)
+        return fallbackNormal;
+    float3 dx = error.x <= error.y
+        ? positionWS - ReconstructWorldPosition(uint2(left), depths.x)
+        : ReconstructWorldPosition(uint2(right), depths.y) - positionWS;
+    float3 dy = error.z <= error.w
+        ? positionWS - ReconstructWorldPosition(uint2(down), depths.z)
+        : ReconstructWorldPosition(uint2(up), depths.w) - positionWS;
+    float3 normal = cross(dx, dy);
+    float lengthSquared = dot(normal, normal);
+    if (lengthSquared < 1e-20)
+        return fallbackNormal;
+    normal *= rsqrt(lengthSquared);
+    // Only the hemisphere comes from the shading normal; its normal-map slope
+    // must not enter the normal offset or receiver-plane depth correction.
+    return dot(normal, fallbackNormal) < 0.0 ? -normal : normal;
+}
+
 int SelectCascade(float3 positionWS, out float distFromSphere)
 {
     distFromSphere = 1.0;
@@ -202,7 +936,7 @@ bool UseVirtualShadowMapPrototype(int cascadeIndex)
 {
     return _VSMPrototypeEnabled != 0
         && cascadeIndex >= 0
-        && cascadeIndex < _CSMCascadeCount;
+        && cascadeIndex < _VSMProjectionCount;
 }
 
 int GetShadowMapResolution(int cascadeIndex)
@@ -293,39 +1027,82 @@ int2 ShadowUVToTexelCoord(float2 shadowUV, int cascadeIndex)
     return int2(saturate(shadowUV) * (GetShadowMapResolution(cascadeIndex) - 1));
 }
 
-bool TryResolveVSMPhysicalTexel(
-    float2 shadowUV,
-    int cascadeIndex,
-    out int2 physicalTexel)
+void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex)
+{
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    // Replaying the resolver for inspection must not alter live receiver feedback.
+    return;
+#else
+    if (_VSMPrototypeRequestEnabled == 0
+        || cascadeIndex < 0 || cascadeIndex >= _VSMProjectionCount)
+        return;
+
+    int2 virtualTexel;
+    uint resolution = (uint)_VSMPrototypeVirtualResolution;
+    if (!VividVSMTryOffsetVirtualTexel(shadowUV, int2(0, 0), resolution, virtualTexel))
+        return;
+    uint pageSize = (uint)_VSMPrototypePageSize;
+    uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
+    // A one-texel halo covers neighboring hard taps without duplicating border
+    // storage. Emit once per distinct page, at most four even at a page corner.
+    uint2 minPage = (uint2)max(virtualTexel - 1, 0) / pageSize;
+    uint2 maxPage = (uint2)min(virtualTexel + 1, (int)resolution - 1) / pageSize;
+    uint request = kVSMPageRequested;
+    if (cascadeIndex == _VSMProjectionCount - 1)
+        request |= kVSMPageCoarseRequested;
+    for (uint y = minPage.y; y <= maxPage.y; y++)
+    {
+        for (uint x = minPage.x; x <= maxPage.x; x++)
+        {
+            uint page = (uint)cascadeIndex * pagesPerAxis * pagesPerAxis + y * pagesPerAxis + x;
+            InterlockedOr(_VSMPrototypePageMetadata[page].x, request);
+            InterlockedMax(_VSMPrototypePageMetadata[page].z, (uint)_CSMFrameIndex);
+        }
+    }
+#endif
+}
+
+bool TryResolveVSMPhysicalTexel(int2 virtualTexel, int cascadeIndex, out int2 physicalTexel)
 {
     physicalTexel = 0;
-    if (!UseVirtualShadowMapPrototype(cascadeIndex))
+    if (!UseVirtualShadowMapPrototype(cascadeIndex)
+        || any(virtualTexel < 0) || any(virtualTexel >= _VSMPrototypeVirtualResolution))
         return false;
-
-    uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
-    uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
-    uint physicalPagesPerRow = (uint)max(
-        _VSMPrototypePhysicalPagesPerRow,
-        1);
-    uint2 virtualTexel = (uint2)ShadowUVToTexelCoord(
-        shadowUV,
-        cascadeIndex);
-    uint2 virtualPage = virtualTexel / pageSize;
-    uint2 texelInPage = virtualTexel % pageSize;
-    uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
-    uint pageTableIndex = (uint)cascadeIndex * pagesPerCascade
-        + virtualPage.y * pagesPerAxis
-        + virtualPage.x;
-    uint encodedPhysicalPage = _VSMPrototypePageTable[pageTableIndex];
-    if (encodedPhysicalPage == 0u)
+    uint pageSize = (uint)_VSMPrototypePageSize;
+    uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
+    uint2 virtualPage = (uint2)virtualTexel / pageSize;
+    uint2 texelInPage = (uint2)virtualTexel % pageSize;
+    uint page = (uint)cascadeIndex * pagesPerAxis * pagesPerAxis
+        + virtualPage.y * pagesPerAxis + virtualPage.x;
+    uint encoded = _VSMPrototypePageTable[page];
+    uint4 metadata = _VSMPrototypePageMetadata[page];
+    // An empty but completed page is valid (lit); unmapped or dirty pages are
+    // unavailable, not an implicit lit sample to blend into an existing shadow.
+    if (encoded == 0u || metadata.y != encoded
+        || (metadata.x & (kVSMPageAllocated | kVSMPageDirty)) != kVSMPageAllocated)
+    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugMissing |= encoded == 0u ? 1u : 0u;
+        g_VSMDebugMissing |= (metadata.x & kVSMPageDirty) != 0u ? 2u : 0u;
+        g_VSMDebugMissing |= metadata.y != encoded
+            || (encoded != 0u && (metadata.x & kVSMPageAllocated) == 0u) ? 4u : 0u;
+#endif
         return false;
-
-    uint physicalPageIndex = encodedPhysicalPage - 1u;
-    uint2 physicalPage = uint2(
-        physicalPageIndex % physicalPagesPerRow,
-        physicalPageIndex / physicalPagesPerRow);
-    physicalTexel = (int2)(physicalPage * pageSize + texelInPage);
+    }
+    uint slot = encoded - 1u;
+    uint rowSize = (uint)_VSMPrototypePhysicalPagesPerRow;
+    physicalTexel = (int2)(uint2(slot % rowSize, slot / rowSize) * pageSize + texelInPage);
     return true;
+}
+
+bool TryResolveVSMPhysicalTexel(float2 shadowUV, int cascadeIndex, out int2 physicalTexel)
+{
+    physicalTexel = 0;
+    int2 virtualTexel;
+    if (!VividVSMTryOffsetVirtualTexel(shadowUV, int2(0, 0),
+            (uint)_VSMPrototypeVirtualResolution, virtualTexel))
+        return false;
+    return TryResolveVSMPhysicalTexel(virtualTexel, cascadeIndex, physicalTexel);
 }
 
 uint LoadCombinedVSMDepth(int2 physicalTexel)
@@ -335,6 +1112,33 @@ uint LoadCombinedVSMDepth(int2 physicalTexel)
     uint dynamicRawDepth = _VSMPrototypeDynamicPhysicalPage.Load(
         int3(physicalTexel, 0));
     return max(staticRawDepth, dynamicRawDepth);
+}
+
+// One hard comparison. Every offset tap resolves its own virtual page; this is
+// the cross-page contract used by both the hard reference and PCF.
+bool TrySampleVSMVirtualTap(float2 shadowUV, int2 offset, float depth, int index, out float shadow)
+{
+    shadow = 1.0;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugWork.x++;
+#endif
+    int2 virtualTexel, physicalTexel;
+    if (!VividVSMTryOffsetVirtualTexel(shadowUV, offset,
+            (uint)_VSMPrototypeVirtualResolution, virtualTexel))
+    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugMissing |= 8u;
+#endif
+        return false;
+    }
+    if (!TryResolveVSMPhysicalTexel(virtualTexel, index, physicalTexel))
+        return false;
+    uint rawDepth = LoadCombinedVSMDepth(physicalTexel);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugWork.y++;
+#endif
+    shadow = rawDepth != 0u && IsShadowMapDepthCloser(asfloat(rawDepth), depth) ? 0.0 : 1.0;
+    return true;
 }
 
 float SampleCSMShadowMap(float2 shadowUV, float depth, int cascadeIndex)
@@ -893,7 +1697,7 @@ bool TryClassifyCascadeShadow(
     shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
     float2 shadowUV = shadowCoord.xy + ComputeShadowUVJitter(pixelCoord, cascadeIndex);
     shadowUV = ClampShadowMapUV(shadowUV, cascadeIndex);
-
+    // Conventional CSM coordinates must never enter clipmap feedback.
     prefilteredShadow = SampleShadowPCF3x3(shadowUV, shadowCoord.z, cascadeIndex);
     return true;
 }
@@ -1107,6 +1911,192 @@ void CSMShadowBilateralFilterV(
     _CSMShadowFilterTexture[pixelCoord] = FilterCSMShadow(pixelCoord, int2(0, 1));
 }
 
+// Bias lives at the receiver for both caster backends. The pool contains raw
+// depth, so neither raster-bias state nor a fixed device-depth offset is part of
+// VSM cache content. xy is dz per virtual texel; z is signed comparison bias;
+// w is the angle-scaled world normal offset. normalWS is normalized (or zero).
+float4 BuildVSMReceiverBias(VividVSMProjection projection, float3 normalWS)
+{
+    float3 rowX = projection.worldToShadow[0].xyz;
+    float3 rowY = projection.worldToShadow[1].xyz;
+    float3 rowZ = projection.worldToShadow[2].xyz;
+    float depthScale = length(rowZ);
+    float3 axisZ = rowZ / max(depthScale, 1e-8);
+    float nZ = dot(normalWS, axisZ);
+    float texelDepth = projection.parameters.x * depthScale;
+    float2 nXY = float2(dot(normalWS, rowX / max(length(rowX), 1e-8)),
+        dot(normalWS, rowY / max(length(rowY), 1e-8)));
+    float denominator = nZ < 0.0 ? min(nZ, -1e-3) : max(nZ, 1e-3);
+    // Grazing planes have an unbounded slope; cap correction to four world
+    // texels of light-axis depth per tap axis, and cap the slope bias likewise.
+    float2 gradient = clamp(-nXY / denominator, -4.0, 4.0) * texelDepth;
+    float slope = min(max(abs(gradient.x), abs(gradient.y)) * _VSMReceiverParameters.z,
+        4.0 * texelDepth);
+    float constant = max(_VSMReceiverParameters.y * texelDepth,
+        _VSMReceiverParameters.y > 0.0 ? 1.0 / 8388608.0 : 0.0);
+    float comparisonBias = constant + slope;
+#if !UNITY_REVERSED_Z
+    comparisonBias = -comparisonBias;
+#endif
+    float normalOffset = projection.parameters.x * projection.parameters.y
+        * sqrt(saturate(1.0 - nZ * nZ));
+    return float4(gradient, comparisonBias, normalOffset);
+}
+
+float VSMTentWeight(float offsetFromCenter)
+{
+    return max(1.5 - abs(offsetFromCenter), 0.0);
+}
+
+bool TryFilterVSMProjection(float3 coord, float4 bias, int index, out float shadow)
+{
+    shadow = 1.0;
+    float2 centerOffset = frac(coord.xy * (float)_VSMPrototypeVirtualResolution) - 0.5;
+    if (_VSMReceiverParameters.x < 0.5)
+    {
+        // A point lookup still samples the texel center, not the receiver UV.
+        // Correct that sub-texel displacement on sloped planes in Hard mode too.
+        float depth = saturate(coord.z + bias.z - dot(bias.xy, centerOffset));
+        return TrySampleVSMVirtualTap(coord.xy, int2(0, 0), depth, index, shadow);
+    }
+
+    float sum = 0.0;
+    float weightSum = 0.0;
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            float2 tapOffset = float2(x, y) - centerOffset;
+            float weight = VSMTentWeight(tapOffset.x) * VSMTentWeight(tapOffset.y);
+            if (weight <= 0.0)
+                continue;
+            // Compare at the tap's receiver-plane depth, not at the center's
+            // depth. The full positive-weight footprint must be available;
+            // partial kernels are not brightened or renormalized around holes.
+            float tapShadow;
+            float depth = saturate(coord.z + bias.z + dot(bias.xy, tapOffset));
+            if (!TrySampleVSMVirtualTap(coord.xy, int2(x, y), depth, index, tapShadow))
+                return false;
+            sum += weight * tapShadow;
+            weightSum += weight;
+        }
+    }
+    shadow = sum / weightSum;
+    return true;
+}
+
+float VSMTransitionWeight(float edge, float border)
+{
+    if (border <= 0.0)
+        return 0.0;
+    float t = saturate((edge - (0.5 - border)) / border);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+// Reproject the original world receiver (including THIS level's normal bias)
+// at every fallback level. Reusing a fine UV/depth or shifting a physical texel
+// would sample unrelated data after clipmap scrolling.
+bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
+    bool sampleDepth, out float shadow)
+{
+    shadow = 1.0;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    if (!sampleDepth) return false;
+    g_VSMDebugWork.z++;
+#endif
+    VividVSMProjection projection = _VSMProjections[index];
+    float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-8));
+    float4 bias = BuildVSMReceiverBias(projection, normal);
+    float3 biasedPosition = positionWS + normal * bias.w;
+    float3 coord = mul(projection.worldToShadow, float4(biasedPosition, 1.0)).xyz;
+    if (!all(coord >= 0.0) || !all(coord <= 1.0))
+    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugMissing |= 8u;
+#endif
+        return false;
+    }
+    MarkVSMReceiverPage(coord.xy, index);
+    if (!sampleDepth || _VSMPrototypeEnabled == 0)
+        return false;
+    return TryFilterVSMProjection(coord, bias, index, shadow);
+}
+
+#include "VSMReceiverQuality.hlsl"
+
+float ResolveVSMReceiver(float3 positionWS, float3 normalWS)
+{
+    bool densityPolicy = _VSMReceiverQuality.x > 0;
+    float densityBlend = 0;
+    int firstLevel = 0;
+    [branch]
+    if (densityPolicy)
+        firstLevel = SelectVSMDensityLevel(positionWS, normalWS, densityBlend);
+    if (firstLevel < 0) return 1.0;
+    for (int index = firstLevel; index < _VSMProjectionCount; index++)
+    {
+        VividVSMProjection projection = _VSMProjections[index];
+        float2 relative = mul(projection.worldToShadow,
+            float4(positionWS - projection.selectionSphere.xyz, 0.0)).xy * 2;
+        float edge = max(abs(relative.x), abs(relative.y));
+        if (!densityPolicy && edge >= 0.5)
+            continue;
+        float maxDistance = projection.parameters.w;
+        float distance = length(positionWS - projection.selectionSphere.xyz);
+        if (distance >= maxDistance)
+            return 1.0;
+        float border = projection.parameters.z;
+        float blend = densityPolicy ? densityBlend : VSMTransitionWeight(edge, border);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugLevels.x = index;
+        g_VSMDebugBlend = blend;
+#endif
+        float shadow = 1.0;
+        float transition = 1.0;
+        int sampledLevel = -1;
+        bool hasTransition = false;
+        for (int level = index; level < _VSMProjectionCount; level++)
+        {
+            // Request the whole fallback chain even when fine depth is available.
+            // The last level is prioritized by the allocator to back future misses.
+            bool needSample = sampledLevel < 0 || (sampledLevel == index && blend > 0.0 && !hasTransition);
+            float sampleShadow;
+            if (!TryEvaluateVSMProjection(positionWS, normalWS, level, needSample, sampleShadow))
+                continue;
+            if (sampledLevel < 0)
+            {
+                sampledLevel = level;
+                shadow = sampleShadow;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+                g_VSMDebugLevels.y = level;
+#endif
+            }
+            else
+            {
+                transition = sampleShadow;
+                hasTransition = true;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+                g_VSMDebugLevels.z = level;
+#endif
+            }
+        }
+        // Missing transition coverage must not brighten a valid primary sample.
+        // If the primary already fell back, it must not be blended a second time.
+        if (sampledLevel == index && hasTransition)
+            shadow = lerp(shadow, transition, blend);
+        float fade = saturate((maxDistance - distance) / max(maxDistance * 0.2, 1e-5));
+        return lerp(1.0, shadow, fade);
+    }
+    // No complete level covers the receiver: explicit terminal lit policy.
+    return 1.0;
+}
+
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+#include "VSMReceiverDebug.hlsl"
+#endif
+
 [numthreads(8, 8, 1)]
 void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -1124,6 +2114,18 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
     float3 positionWS = ReconstructWorldPosition(pixelCoord, deviceDepth);
+
+    if (_VSMPrototypeEnabled != 0 || _VSMPrototypeRequestEnabled != 0)
+    {
+        float3 vsmNormal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
+        vsmNormal = ReconstructVSMReceiverNormal(pixelCoord, deviceDepth, positionWS, vsmNormal);
+        float vsmShadow = ResolveVSMReceiver(positionWS, vsmNormal);
+        if (_VSMPrototypeEnabled != 0)
+        {
+            _DirectionalShadowTexture[pixelCoord] = vsmShadow;
+            return;
+        }
+    }
 
     // Cascade selection
     float relDistance;

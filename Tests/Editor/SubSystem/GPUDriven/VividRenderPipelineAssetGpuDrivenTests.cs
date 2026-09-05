@@ -514,13 +514,11 @@ namespace VividRP.Editor.Tests
             string virtualDraw = SliceSource(
                 source,
                 "private bool DrawVirtualShadowMapPrototypePages(",
-                "private void DrawUnityVirtualShadowMapCascade(");
+                "private void BindVirtualShadowMapPageManagementBuffers(");
 
-            int buildContexts = prepareMeshletDraws.IndexOf("BuildShadowCullingContext(");
             int complete = prepareMeshletDraws.IndexOf("system.CompleteShadowDrawSet(");
 
-            Assert.That(buildContexts, Is.GreaterThanOrEqualTo(0));
-            Assert.That(complete, Is.GreaterThan(buildContexts));
+            Assert.That(complete, Is.GreaterThanOrEqualTo(0));
             StringAssert.Contains("m_PrimitiveShadowDrawSet", prepareMeshletDraws);
             StringAssert.DoesNotContain("system.CullShadowCascades(", prepareMeshletDraws);
             StringAssert.Contains("meshletContext.AggregateDrawSet", conventionalDraw);
@@ -529,6 +527,35 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("meshletContext.StaticDrawSet", virtualDraw);
             StringAssert.Contains("meshletContext.DynamicDrawSet", virtualDraw);
             StringAssert.DoesNotContain("meshletContext.AggregateDrawSet", virtualDraw);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_CachesTheSubmittedCullingSnapshot()
+        {
+            string source = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string prepare = SliceSource(source, "public override void Prepare(", "public override void Record(");
+            string prepareMeshlets = SliceSource(source,
+                "private void PrepareMeshletRendering(", "private bool TryValidateMeshletVirtualShadowMapReadiness(");
+            string prepareVsm = SliceSource(source,
+                "private void PrepareVirtualShadowMapPrototype(", "private void PrepareMeshletRendering(");
+            string recordMeshlets = SliceSource(source,
+                "private bool TryPrepareMeshletShadowDraws(", "private static bool HasMeshletShadowShaderResources(");
+
+            int prepareMeshletIndex = prepare.IndexOf("PrepareMeshletRendering(");
+            Assert.That(prepareMeshletIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(prepare.IndexOf("PrepareVirtualShadowMapPrototype("), Is.GreaterThan(prepareMeshletIndex));
+            StringAssert.Contains("BuildLODSelectionContext(out m_ShadowLODSelectionContext)", prepareMeshlets);
+            StringAssert.Contains("BuildShadowCullingContext(", prepareMeshlets);
+            StringAssert.Contains("cameraData.camera.cullingMask", prepareVsm);
+            StringAssert.Contains("Projections.Generation", prepareVsm);
+            StringAssert.Contains("PrepareClipmaps(clipmaps)", prepareVsm);
+            StringAssert.DoesNotContain("m_ShadowLODSelectionContext", prepareVsm);
+            StringAssert.Contains("m_ClipmapCullingContexts", recordMeshlets);
+            StringAssert.Contains("m_ClipmapLODContext", recordMeshlets);
+            StringAssert.Contains("m_ShadowLODSelectionContext", recordMeshlets);
+            StringAssert.Contains("m_ShadowCullingContexts", recordMeshlets);
+            StringAssert.DoesNotContain("BuildLODSelectionContext", recordMeshlets);
+            StringAssert.DoesNotContain("BuildShadowCullingContext(", recordMeshlets);
         }
 
         [Test]
@@ -638,7 +665,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VirtualShadowMapPrototype_UsesFullyResidentPageTableAndHardShadowResolve()
+        public void VirtualShadowMapPrototype_UsesSparseRequestedPagesAndHardShadowResolve()
         {
             string passSource = ReadRuntimeSource(
                 "Runtime",
@@ -704,18 +731,22 @@ namespace VividRP.Editor.Tests
                 passSource);
             StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, staticPhysicalPage)", passSource);
             StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, dynamicPhysicalPage)", passSource);
-            StringAssert.Contains("nativeCmd.SetBufferData(", passSource);
-            StringAssert.Contains("BuildFullyResidentPageTable(", passSource);
+            StringAssert.DoesNotContain("nativeCmd.SetBufferData(", passSource);
+            StringAssert.Contains("BuildUnmappedPageTable(", passSource);
+            StringAssert.Contains("MaxPhysicalPageCount = 256", passSource);
+            StringAssert.Contains("VSMPrototypeAllocatePages", passSource);
+            StringAssert.Contains("VSMPrototypeClearPhysicalPages", passSource);
             StringAssert.Contains("TextureDimension.Tex2DArray", passSource);
             StringAssert.Contains("AccessFlags.Write", passSource);
             StringAssert.Contains("m_VirtualShadowMapPrototypeMaterials", passSource);
             StringAssert.Contains(
-                "m_VirtualShadowMapPrototypeMaterials);",
+                "DrawMeshletVirtualShadowMapPages(",
                 passSource);
             StringAssert.DoesNotContain(
                 "SetVirtualShadowMapPrototypeKeyword(",
                 passSource);
-            StringAssert.Contains("DrawUnityVirtualShadowMapCascade(nativeCmd, cascadeIndex)", passSource);
+            StringAssert.Contains("Projections.GetRasterMatrix(", passSource);
+            StringAssert.Contains("nativeCmd.DrawRendererList(rendererList)", passSource);
             StringAssert.Contains("nativeCmd.EnableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
             StringAssert.Contains("nativeCmd.DisableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
             StringAssert.Contains("m_HasUnityShadowCasters", passSource);
@@ -733,6 +764,8 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", casterSource);
             StringAssert.Contains("RWTexture2D<uint> _VSMPrototypePhysicalPage : register(u0)", casterAbiSource);
             StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", casterAbiSource);
+            StringAssert.Contains("StructuredBuffer<uint4> _VSMPrototypePageMetadata", casterAbiSource);
+            StringAssert.Contains("kVividVSMPageDirty", casterAbiSource);
             StringAssert.Contains("encodedPhysicalPage - 1u", casterAbiSource);
             StringAssert.Contains("InterlockedMax(", casterAbiSource);
             StringAssert.Contains("VividWriteVSMDepth(packedInput.positionCS)", standardCasterSource);
@@ -747,7 +780,7 @@ namespace VividRP.Editor.Tests
                     "#pragma require randomwrite : VIVID_VSM_CASTER",
                     supportedUnityCasterSources[shaderIndex]);
                 StringAssert.Contains(
-                    "\"VividVSMCaster\" = \"True\"",
+                    "\"VividVSMCaster\" = \"2\"",
                     supportedUnityCasterSources[shaderIndex]);
             }
             StringAssert.Contains("AccessFlags.Read", resolvePassSource);
@@ -755,13 +788,50 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("Texture2D<uint> _VSMPrototypeDynamicPhysicalPage", resolveSource);
             StringAssert.Contains("max(staticRawDepth, dynamicRawDepth)", resolveSource);
             StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", resolveSource);
+            StringAssert.Contains("RWStructuredBuffer<uint4> _VSMPrototypePageMetadata", resolveSource);
+            StringAssert.Contains("void MarkVSMReceiverPage(", resolveSource);
+            StringAssert.Contains("void VSMPrototypeAllocatePages(", resolveSource);
+            StringAssert.Contains("void VSMPrototypeClearPhysicalPages(", resolveSource);
+            StringAssert.Contains("overflowPageCount", resolveSource);
             StringAssert.Contains("TryResolveVSMPhysicalTexel(", resolveSource);
             StringAssert.Contains("return SampleCSMShadowMap(shadowUV, receiverDepth, cascadeIndex)", resolveSource);
             StringAssert.Contains("asfloat(", resolveSource);
             StringAssert.Contains("UseVirtualShadowMapPrototype(cascadeIndex)", resolveSource);
             StringAssert.Contains("EnsurePhysicalPageForBinding()", resolvePassSource);
+            StringAssert.Contains("AccessFlags.ReadWrite", resolvePassSource);
+            StringAssert.Contains("MarkReceiverFeedbackProduced(", resolvePassSource);
             StringAssert.Contains("staticVirtualShadowMapPage", resolvePassSource);
             StringAssert.Contains("dynamicVirtualShadowMapPage", resolvePassSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_FeedbackIsCameraScopedAndResetBeforeBothResolvePaths()
+        {
+            string pass = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string resolve = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowResolvePass.cs");
+            string shader = ReadRuntimeSource("Shaders", "Core", "Private", "CSMShadowResolve.compute");
+            string prepare = SliceSource(pass,
+                "private void PrepareVirtualShadowMapPrototype(", "private void PrepareMeshletRendering(");
+            string record = SliceSource(resolve, "public override void Record(", "public override void Dispose(");
+            string release = SliceSource(pass, "private static void ReleaseAllocatedResources(", "private static RTHandle AllocatePhysicalPage(");
+            string reset = SliceSource(shader, "void VSMPrototypeResetReceiverFeedback(", "void VSMResetPhysicalOwners(");
+            int resetIndex = record.IndexOf("RequiresReceiverFeedbackReset(");
+            int tiledIndex = record.IndexOf("RecordTiledScreenSpaceResolve(");
+            int fullIndex = record.IndexOf("RecordFullScreenCSMResolve(");
+            int producedIndex = record.IndexOf("MarkReceiverFeedbackProduced(");
+
+            StringAssert.Contains("HasReceiverFeedbackForFrame(\n                    EntityId.ToULong(cameraData.camera.GetEntityId()),", prepare.Replace("\r\n", "\n"));
+            Assert.That(resetIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(tiledIndex, Is.GreaterThan(resetIndex));
+            Assert.That(fullIndex, Is.GreaterThan(resetIndex));
+            Assert.That(producedIndex, Is.GreaterThan(tiledIndex));
+            Assert.That(producedIndex, Is.GreaterThan(fullIndex));
+            StringAssert.Contains("m_CameraEntityId, m_FrameIndex", record);
+            StringAssert.Contains("MarkReceiverFeedbackProduced(0ul, -1)", release);
+            StringAssert.Contains("metadata.x &= ~kVSMPageRequestMask", reset);
+            StringAssert.Contains("metadata.z = 0u", reset);
+            StringAssert.DoesNotContain("metadata.y =", reset);
+            StringAssert.DoesNotContain("PhysicalPageOwners", reset);
         }
 
         [Test]
@@ -789,7 +859,7 @@ namespace VividRP.Editor.Tests
                 "VividPrimitiveDrawSetJobs.cs");
 
             StringAssert.Contains("VirtualShadowMapPrototypeCacheKey", passSource);
-            StringAssert.Contains("gpuDrivenSystem.StaticShadowCacheRevision", passSource);
+            StringAssert.Contains("gpuDrivenSystem.PrimitiveScene.StaticShadowRevision", passSource);
             StringAssert.Contains("gpuDrivenSystem.TextureBindingRevision", passSource);
             StringAssert.Contains("RequiresStaticCacheRefresh(", passSource);
             StringAssert.Contains("TryUseCachedStaticPages(", passSource);
@@ -820,7 +890,7 @@ namespace VividRP.Editor.Tests
             string virtualDraw = SliceSource(
                 source,
                 "private bool DrawVirtualShadowMapPrototypePages(",
-                "private void DrawUnityVirtualShadowMapCascade(");
+                "private void BindVirtualShadowMapPageManagementBuffers(");
 
             int virtualAttempt = record.IndexOf("DrawVirtualShadowMapPrototypePages(");
             int fallbackBranch = record.IndexOf("if (!vsmCompleted)");
@@ -836,6 +906,177 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VirtualShadowMapPrototype_MeshletPathBuildsBoundedPageRequests()
+        {
+            string passSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string cullSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "CSMShadowResolve.compute");
+            string casterSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferShadowCasterPass.shader");
+
+            StringAssert.Contains(
+                "EnsureMeshletPageRequestCapacity(",
+                passSource);
+            StringAssert.Contains(
+                "MaxPageRequestsPerMeshlet = 4",
+                passSource);
+            StringAssert.Contains(
+                "VSMPrototypePrepareMeshletPageRequests",
+                cullSource);
+            StringAssert.Contains(
+                "VSMPrototypeCullMeshletsToPages",
+                cullSource);
+            StringAssert.Contains(
+                "coveredPageCount > kVSMMaxPagesPerMeshletRequest",
+                cullSource);
+            StringAssert.DoesNotContain("kVSMInvalidVirtualPage", cullSource);
+            StringAssert.Contains("_VSMPrototypeMeshletRasterPages", cullSource);
+            StringAssert.Contains("requestMode < 2", passSource);
+            StringAssert.Contains("GetIndirectInstanceID(input.instanceID)", casterSource);
+            StringAssert.DoesNotContain("virtualPageIndex == 0xffffffffu", casterSource);
+            StringAssert.Contains(
+                "VIVID_VSM_PAGE_CASTER",
+                casterSource);
+            StringAssert.Contains(
+                "SV_ClipDistance0",
+                casterSource);
+            StringAssert.Contains(
+                "SV_RenderTargetArrayIndex",
+                casterSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_StaticChangesInvalidateOnlyProjectedPages()
+        {
+            string passSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string sceneSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "PrimitiveScene",
+                "VividPrimitiveScene.cs");
+            string sceneBuilderSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSceneDataBuilder.cs");
+            string sceneAdapterSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "PrimitiveScene",
+                "VividPrimitiveSceneAdapter.cs");
+            string cullSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "CSMShadowResolve.compute");
+
+            StringAssert.Contains("PendingStaticShadowInvalidationBounds", sceneSource);
+            StringAssert.Contains("previousData.WorldBoundsMin", sceneSource);
+            StringAssert.Contains("removedData.WorldBoundsMin", sceneSource);
+            StringAssert.Contains("InvalidateAllStaticShadows()", sceneSource);
+            StringAssert.Contains("primitiveScene.InvalidateAllStaticShadows()", sceneAdapterSource);
+            StringAssert.Contains("m_ChangedMaterialProxyIds", sceneBuilderSource);
+            StringAssert.Contains(
+                "InvalidateChangedStaticShadowCasters(",
+                sceneBuilderSource);
+            StringAssert.Contains("UploadStaticInvalidationBounds(", passSource);
+            StringAssert.Contains("UpdateVirtualTextureShadowInvalidations(m_VirtualTextureFrameData)", passSource);
+            Assert.That(passSource.IndexOf("UpdateVirtualTextureShadowInvalidations(m_VirtualTextureFrameData)", System.StringComparison.Ordinal),
+                Is.LessThan(passSource.IndexOf("new VirtualShadowMapPrototypeCacheKey(", System.StringComparison.Ordinal)));
+            StringAssert.Contains("RequiresFullStaticCacheRefresh(", passSource);
+            StringAssert.Contains("VSMPrototypeInvalidateStaticPages", cullSource);
+            StringAssert.Contains("_VSMPrototypeStaticInvalidationBounds", cullSource);
+            StringAssert.Contains("InterlockedOr(", cullSource);
+            StringAssert.Contains("kVSMPageDirty", cullSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_AddressingIsSharedAcrossAllPageConsumers()
+        {
+            string computeSource = ReadRuntimeSource(
+                "Shaders", "Core", "Private", "CSMShadowResolve.compute");
+            string casterSource = ReadRuntimeSource(
+                "Shaders", "Core", "Public", "Shadow", "VividVirtualShadowMapCaster.hlsl");
+
+            StringAssert.Contains("VividVirtualShadowMapAddressing.hlsl", computeSource);
+            StringAssert.Contains("VividVirtualShadowMapAddressing.hlsl", casterSource);
+            StringAssert.Contains("VividVSMUVToVirtualTexel(", SliceSource(
+                computeSource, "bool GetVSMPageRange(", "void VSMPrototypeCullMeshletsToPages("));
+            StringAssert.Contains("VividVSMUVToVirtualTexel(", SliceSource(
+                computeSource, "void VSMPrototypeInvalidateStaticPages(", "void VSMPrototypeClearPhysicalPages("));
+            StringAssert.Contains("VividVSMTryOffsetVirtualTexel(", SliceSource(
+                computeSource, "void MarkVSMReceiverPage(", "bool TryResolveVSMPhysicalTexel("));
+            string resolveSource = SliceSource(
+                computeSource, "bool TryResolveVSMPhysicalTexel(", "uint LoadCombinedVSMDepth(");
+            StringAssert.Contains("VividVSMTryOffsetVirtualTexel(", resolveSource);
+            StringAssert.DoesNotContain("ShadowUVToTexelCoord(", resolveSource);
+            StringAssert.DoesNotContain("* (virtualResolution - 1u)", computeSource);
+            StringAssert.Contains("VividVSMRasterPositionToVirtualTexel(", casterSource);
+        }
+
+        [Test]
+        public void VSMProjectionConsumers_DoNotReadFixedCSMProjectionArrays()
+        {
+            string compute = ReadRuntimeSource("Shaders", "Core", "Private", "CSMShadowResolve.compute");
+            string management = SliceSource(compute, "void VSMPrototypePrepareMeshletPageRequests(",
+                "void VSMPrototypeFinalizeDirtyPages(");
+            string sampling = SliceSource(compute, "bool TryEvaluateVSMProjection(", "void CSMShadowResolve(");
+            foreach (string consumer in new[] { management, sampling })
+            {
+                StringAssert.Contains("_VSMProjections", consumer);
+                StringAssert.Contains("_VSMProjectionCount", consumer);
+                StringAssert.DoesNotContain("_CSMViewProjMatrices", consumer);
+                StringAssert.DoesNotContain("_CSMCascadeCount", consumer);
+            }
+            StringAssert.Contains("MarkVSMReceiverPage(coord.xy, index)", sampling);
+            string raster = ReadRuntimeSource("Shaders", "Core", "Private", "GPUDriven",
+                "VisibilityBufferShadowCasterPass.shader");
+            StringAssert.DoesNotContain("_VividShadowVP", raster);
+            StringAssert.Contains("_VSMProjections[cascadeIndex].worldToClip", raster);
+            StringAssert.Contains("VividVSMToRasterClip(", raster);
+            StringAssert.Contains("VividWriteVSMPageDepth(input.positionCS, input.virtualPageIndex)", raster);
+        }
+
+        [Test]
+        public void VSMQuality_KeepsCasterDepthUnbiasedAndBindsReceiverControls()
+        {
+            string pass = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string record = SliceSource(pass, "public override void Record(", "private void RecordVirtualShadowMapLayout(");
+            int virtualDraw = record.IndexOf("vsmCompleted = DrawVirtualShadowMapPrototypePages(");
+            int zeroBias = record.IndexOf("SetGlobalDepthBias(0.0f, 0.0f)");
+            int csmBias = record.IndexOf("SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias)");
+            Assert.That(zeroBias, Is.GreaterThanOrEqualTo(0));
+            Assert.That(virtualDraw, Is.GreaterThan(zeroBias));
+            Assert.That(csmBias, Is.GreaterThan(virtualDraw));
+            Assert.That(record.IndexOf("DrawConventionalShadowMap("), Is.GreaterThan(csmBias));
+            string prepare = SliceSource(pass, "private void PrepareVirtualShadowMapPrototype(", "private void PrepareMeshletRendering(");
+            StringAssert.DoesNotContain("m_SlopeScaleDepthBias", prepare);
+            string resolve = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowResolvePass.cs");
+            StringAssert.Contains("csmSettings.virtualShadowMapPCF.value", resolve);
+            StringAssert.Contains("shadowData.depthBias, shadowData.slopeScaleDepthBias", resolve);
+            StringAssert.Contains("SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters)", resolve);
+            string compute = ReadRuntimeSource("Shaders", "Core", "Private", "CSMShadowResolve.compute");
+            StringAssert.Contains("vsmNormal = ReconstructVSMReceiverNormal(pixelCoord, deviceDepth, positionWS, vsmNormal)", compute);
+            string filter = SliceSource(compute, "bool TryFilterVSMProjection(", "float VSMTransitionWeight(");
+            StringAssert.Contains("coord.z + bias.z - dot(bias.xy, centerOffset)", filter);
+        }
+
+        [Test]
         public void VirtualShadowMapPrototypeShaders_ImportWithoutErrors()
         {
             const string computeAssetPath =
@@ -847,6 +1088,21 @@ namespace VividRP.Editor.Tests
                 AssetDatabase.LoadAssetAtPath<ComputeShader>(computeAssetPath);
             Assert.That(resolveCompute, Is.Not.Null, computeAssetPath);
             Assert.That(resolveCompute.HasKernel("CSMShadowResolve"), Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMPrototypeAllocatePages"), Is.True);
+            Assert.That(
+                resolveCompute.HasKernel("VSMPrototypeMarkAllAllocatedPagesDirty"),
+                Is.True);
+            Assert.That(
+                resolveCompute.HasKernel("VSMPrototypeInvalidateStaticPages"),
+                Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMPrototypeClearPhysicalPages"), Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMPrototypeFinalizeDirtyPages"), Is.True);
+            Assert.That(
+                resolveCompute.HasKernel("VSMPrototypePrepareMeshletPageRequests"),
+                Is.True);
+            Assert.That(
+                resolveCompute.HasKernel("VSMPrototypeCullMeshletsToPages"),
+                Is.True);
 
             ShaderMessage[] computeErrors = ShaderUtil
                 .GetComputeShaderMessages(resolveCompute)
@@ -926,7 +1182,7 @@ namespace VividRP.Editor.Tests
                     shader.FindPassTagValue(
                         passIndex,
                         new ShaderTagId("VividVSMCaster")),
-                    Is.EqualTo(new ShaderTagId("True")),
+                    Is.EqualTo(new ShaderTagId("2")),
                     shaderName);
                 ShaderUtil.CompilePass(material, passIndex);
                 ShaderMessage[] errors = ShaderUtil

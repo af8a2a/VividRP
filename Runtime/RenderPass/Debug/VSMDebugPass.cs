@@ -9,9 +9,20 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         [InspectorName("Device Depth")]
         DeviceDepth = 0,
+        [InspectorName("Depth Coverage (Occupancy)")]
         Occupancy = 1,
         [InspectorName("Depth Heat Map")]
         DepthHeatMap = 2,
+        [InspectorName("Page States (Shared Map / Static Cache)")]
+        PageStates = 3,
+        Requested = 4,
+        Allocated = 5,
+        [InspectorName("Dirty / Redrawn")]
+        Dirty = 6,
+        Cached = 7,
+        Unmapped = 8,
+        Evicted = 9,
+        Overflow = 10,
     }
 
     public enum VSMDebugPoolMode
@@ -37,6 +48,11 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_VSMDebugExposure");
         private static readonly int VSMDebugPoolModeId =
             Shader.PropertyToID("_VSMDebugPoolMode");
+        private static readonly int PageTableId = Shader.PropertyToID("_VSMPrototypePageTable");
+        private static readonly int PageMetadataId = Shader.PropertyToID("_VSMPrototypePageMetadata");
+        private static readonly int AllocatorCountersId = Shader.PropertyToID("_VSMPrototypeAllocatorCounters");
+        private static readonly int PageLayoutId = Shader.PropertyToID("_VSMDebugPageLayout");
+        private static readonly int OutputSizeId = Shader.PropertyToID("_VSMDebugOutputSize");
 
         [RenderGraphResource(
             Name = "OutputTexture",
@@ -45,7 +61,9 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_OutputTexture;
 
-        [SerializeField]
+        [SerializeField, Tooltip("Page modes show the current camera's completed VSM submission. "
+            + "Pool and Exposure affect only depth views. Header: RES resident, REQ requested, "
+            + "NEW assignments (including reuse), OVF overflow. Hatched output means no current snapshot.")]
         private VSMDebugVisualizationMode m_VisualizationMode =
             VSMDebugVisualizationMode.DeviceDepth;
 
@@ -60,6 +78,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureHandle m_DynamicPhysicalPageHandle;
         private bool m_PhysicalPageAvailable;
         private bool m_ShouldSkipExecution;
+        private bool m_PageStateResourcesAvailable;
+        private ulong m_CameraEntityId;
+        private int m_FrameIndex;
 
         public VSMDebugVisualizationMode VisualizationMode
         {
@@ -112,6 +133,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_StaticPhysicalPageHandle = default;
             m_DynamicPhysicalPageHandle = default;
             m_PhysicalPageAvailable = false;
+            m_PageStateResourcesAvailable = false;
 
             var settings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             bool prototypeEnabled = settings != null
@@ -120,20 +142,40 @@ namespace VividRP.Runtime.RenderPass.Core
                 && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform()
                 && VirtualShadowMapPrototypeRuntime.EnsurePhysicalPageForBinding())
             {
-                m_StaticPhysicalPageHandle = PassRecorder.ImportTextureForPass(
-                    this,
-                    VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
-                    AccessFlags.Read);
-                m_DynamicPhysicalPageHandle = PassRecorder.ImportTextureForPass(
-                    this,
-                    VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage,
-                    AccessFlags.Read);
+                if (IsPageStateMode(m_VisualizationMode))
+                {
+                    if (VirtualShadowMapPrototypeRuntime.HasPageRequestResources)
+                    {
+                        bool tableValid = PassRecorder.ImportBufferForPass(
+                            this, VirtualShadowMapPrototypeRuntime.PageTable, AccessFlags.Read).IsValid();
+                        bool metadataValid = PassRecorder.ImportBufferForPass(
+                            this, VirtualShadowMapPrototypeRuntime.PageMetadata, AccessFlags.Read).IsValid();
+                        bool countersValid = PassRecorder.ImportBufferForPass(
+                            this, VirtualShadowMapPrototypeRuntime.AllocatorCounters, AccessFlags.Read).IsValid();
+                        m_PageStateResourcesAvailable = tableValid && metadataValid && countersValid;
+                    }
+                }
+                else
+                {
+                    m_StaticPhysicalPageHandle = PassRecorder.ImportTextureForPass(
+                        this,
+                        VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
+                        AccessFlags.Read);
+                    m_DynamicPhysicalPageHandle = PassRecorder.ImportTextureForPass(
+                        this,
+                        VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage,
+                        AccessFlags.Read);
+                }
             }
 
             m_PhysicalPageAvailable = m_StaticPhysicalPageHandle.IsValid()
                 && m_DynamicPhysicalPageHandle.IsValid();
 
             var cameraData = frameData?.GetOrCreate<VividCameraData>();
+            m_CameraEntityId = cameraData?.camera != null
+                ? EntityId.ToULong(cameraData.camera.GetEntityId()) : 0ul;
+            m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
+                ? cameraData.frameIndex : Time.frameCount;
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             int width = RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(
                 cameraData?.actualWidth ?? 0,
@@ -155,6 +197,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
+            var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
+            if (IsPageStateMode(m_VisualizationMode)
+                && m_PageStateResourcesAvailable
+                && VirtualShadowMapPrototypeRuntime.HasPageRequestResources
+                && VirtualShadowMapPrototypeRuntime.HasPageDebugSnapshot(m_CameraEntityId, m_FrameIndex))
+            {
+                BindPageStateResources(mpb);
+                mpb.SetInt(VSMDebugVisualizationModeId, (int)NormalizeVisualizationMode(m_VisualizationMode));
+                mpb.SetVector(OutputSizeId, new Vector4(
+                    m_OutputTexture.desc.Width, m_OutputTexture.desc.Height, 0f, 0f));
+                CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 1);
+                return;
+            }
+
             RTHandle staticPhysicalPage =
                 VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
             RTHandle dynamicPhysicalPage =
@@ -165,11 +221,10 @@ namespace VividRP.Runtime.RenderPass.Core
             Texture dynamicPhysicalPageTexture = dynamicPhysicalPage != null
                 ? dynamicPhysicalPage.ResolveTexture()
                 : null;
-            bool pageAvailable = m_PhysicalPageAvailable
+            bool pageAvailable = !IsPageStateMode(m_VisualizationMode) && m_PhysicalPageAvailable
                 && staticPhysicalPageTexture != null
                 && dynamicPhysicalPageTexture != null;
 
-            var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(
                 VSMPrototypeStaticPhysicalPageId,
                 staticPhysicalPageTexture != null
@@ -202,11 +257,32 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DynamicPhysicalPageHandle = default;
             m_PhysicalPageAvailable = false;
             m_ShouldSkipExecution = false;
+            m_PageStateResourcesAvailable = false;
+            m_CameraEntityId = 0ul;
+            m_FrameIndex = -1;
+        }
+
+        internal static bool IsPageStateMode(VSMDebugVisualizationMode mode)
+        {
+            return mode >= VSMDebugVisualizationMode.PageStates && mode <= VSMDebugVisualizationMode.Overflow;
+        }
+
+        internal static void BindPageStateResources(MaterialPropertyBlock properties)
+        {
+            properties.SetBuffer(PageTableId, VirtualShadowMapPrototypeRuntime.PageTable);
+            properties.SetBuffer(PageMetadataId, VirtualShadowMapPrototypeRuntime.PageMetadata);
+            properties.SetBuffer(AllocatorCountersId, VirtualShadowMapPrototypeRuntime.AllocatorCounters);
+            properties.SetVector(PageLayoutId, new Vector4(
+                VirtualShadowMapPrototypeRuntime.PagesPerAxis,
+                VirtualShadowMapPrototypeRuntime.PageTableEntryCount,
+                VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, 0f));
         }
 
         internal static VSMDebugVisualizationMode NormalizeVisualizationMode(
             VSMDebugVisualizationMode mode)
         {
+            if (IsPageStateMode(mode))
+                return mode;
             return mode switch
             {
                 VSMDebugVisualizationMode.DeviceDepth => VSMDebugVisualizationMode.DeviceDepth,

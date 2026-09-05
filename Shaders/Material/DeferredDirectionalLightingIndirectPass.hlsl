@@ -1,21 +1,11 @@
 #ifndef VIVIDRP_DEFERRED_DIRECTIONAL_LIGHTING_INDIRECT_PASS_INCLUDED
 #define VIVIDRP_DEFERRED_DIRECTIONAL_LIGHTING_INDIRECT_PASS_INCLUDED
 
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/HdrpLitLighting.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LightingLoop.hlsl"
-
-TEXTURE2D_X(_GBuffer0);
-TEXTURE2D_X(_GBuffer1);
-TEXTURE2D_X(_GBuffer2);
-TEXTURE2D_X(_GBuffer3);
-TEXTURE2D_X(_GBuffer4);
-TEXTURE2D_X_FLOAT(_DepthTexture);
+// Retained raster entrypoint; use the same resources and Surface Summary ABI
+// as DeferredLit.compute, including _DiffuseIrradiance, Sidecar and Slab LUT.
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividDeferredLighting.hlsl"
 
 StructuredBuffer<uint> _MaterialPixelIndices;
-
 uint _LightingWidth;
 uint _LightingHeight;
 
@@ -23,182 +13,19 @@ struct Attributes
 {
     uint vertexID : SV_VertexID;
     uint instanceID : SV_InstanceID;
-    UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct Varyings
 {
     float4 positionCS : SV_POSITION;
     nointerpolation uint2 pixelCoord : TEXCOORD0;
-    nointerpolation float2 uv : TEXCOORD1;
     UNITY_VERTEX_OUTPUT_STEREO
 };
-
-bool IsSkyPixel(float deviceDepth)
-{
-    return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
-}
-
-float3 GetDeferredViewDirectionWS(float3 positionWS)
-{
-    if (unity_OrthoParams.w > 0.5)
-        return TransformViewToWorldDir(float3(0.0, 0.0, -1.0), true);
-
-    return SafeNormalize(_WorldSpaceCameraPos.xyz - positionWS);
-}
-
-VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
-{
-    float4 rt0 = LOAD_TEXTURE2D_X(_GBuffer0, pixelCoord);
-    float4 rt1 = LOAD_TEXTURE2D_X(_GBuffer1, pixelCoord);
-    float4 rt2 = LOAD_TEXTURE2D_X(_GBuffer2, pixelCoord);
-    float4 rt3 = LOAD_TEXTURE2D_X(_GBuffer3, pixelCoord);
-    float4 rt4 = LOAD_TEXTURE2D_X(_GBuffer4, pixelCoord);
-    return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3, rt4);
-}
-
-VividIndirectLighting EvaluateDeferredReflectionProbeIndirectLighting(
-    VividLightingLoopContext lightLoop,
-    VividIndirectLighting indirectLighting,
-    VividGBufferSurfaceData surfaceData,
-    VividLitBSDFData bsdfData,
-    VividPreLightData preLightData,
-    float3 positionWS,
-    float3 viewDirectionWS)
-{
-    float3 probeDirectionWS;
-    float probePerceptualRoughness;
-    GetVividReflectionProbeSampleInputs(
-        surfaceData,
-        preLightData,
-        viewDirectionWS,
-        probeDirectionWS,
-        probePerceptualRoughness);
-
-    float3 weightedProbeRadiance;
-    float reflectionProbeWeight;
-    if (!VividLightingLoop::TryEvaluateReflectionProbes(
-            lightLoop,
-            positionWS,
-            surfaceData.normalWS,
-            probeDirectionWS,
-            probePerceptualRoughness,
-            weightedProbeRadiance,
-            reflectionProbeWeight))
-    {
-        return indirectLighting;
-    }
-
-    float3 weightedCoatProbeRadiance = 0.0;
-    if (NeedsVividClearCoatReflectionProbeSample(bsdfData))
-    {
-        float3 coatProbeDirectionWS;
-        float coatProbePerceptualRoughness;
-        float coatProbeWeight;
-        GetVividClearCoatReflectionProbeSampleInputs(
-            surfaceData,
-            bsdfData,
-            preLightData,
-            coatProbeDirectionWS,
-            coatProbePerceptualRoughness);
-        VividLightingLoop::TryEvaluateReflectionProbes(
-            lightLoop,
-            positionWS,
-            surfaceData.normalWS,
-            coatProbeDirectionWS,
-            coatProbePerceptualRoughness,
-            weightedCoatProbeRadiance,
-            coatProbeWeight);
-    }
-
-    return ApplyVividReflectionProbeSpecularLighting(
-        indirectLighting,
-        weightedProbeRadiance,
-        reflectionProbeWeight,
-        weightedCoatProbeRadiance,
-        surfaceData,
-        bsdfData,
-        preLightData,
-        viewDirectionWS);
-}
-
-float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
-{
-    float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
-    VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
-    VividPreLightData preLightData = GetVividPreLightData(viewDirectionWS, surfaceData, bsdfData);
-    VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
-    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
-
-    AccumulateIndirectLighting(
-        EvaluateDeferredReflectionProbeIndirectLighting(
-            lightLoop,
-            EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData),
-            surfaceData,
-            bsdfData,
-            preLightData,
-            positionWS,
-            viewDirectionWS),
-        aggregateLighting);
-
-    [loop]
-    for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
-    {
-        DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
-        AccumulateDirectLighting(
-            EvaluateBSDF_Directional(
-                surfaceData,
-                bsdfData,
-                preLightData,
-                viewDirectionWS,
-                directionalLight),
-            aggregateLighting);
-    }
-
-    uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
-
-    [loop]
-    for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
-    {
-        PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
-        AccumulateDirectLighting(
-            EvaluateBSDF_Punctual(
-                surfaceData,
-                bsdfData,
-                preLightData,
-                positionWS,
-                viewDirectionWS,
-            punctualLight),
-            aggregateLighting);
-    }
-
-    uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
-
-    [loop]
-    for (uint localAreaLightIndex = 0; localAreaLightIndex < areaLightCount; localAreaLightIndex++)
-    {
-        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, localAreaLightIndex);
-        AccumulateDirectLighting(
-            EvaluateBSDF_Area(
-                surfaceData,
-                bsdfData,
-                preLightData,
-                positionWS,
-                viewDirectionWS,
-                areaLight),
-            aggregateLighting);
-    }
-
-    VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;
-    PostEvaluateBSDF(surfaceData, bsdfData, preLightData, aggregateLighting, lightLoopOutput);
-    return CombineVividLightLoopOutput(lightLoopOutput);
-}
 
 Varyings Vert(Attributes input)
 {
     Varyings output;
 
-    UNITY_SETUP_INSTANCE_ID(input);
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     uint width = max(_LightingWidth, 1u);
@@ -213,7 +40,6 @@ Varyings Vert(Attributes input)
     output.positionCS = ApplyPretransformRotation(output.positionCS);
 #endif
     output.pixelCoord = pixelCoord;
-    output.uv = uv;
     return output;
 }
 
@@ -221,14 +47,14 @@ float4 Frag(Varyings input) : SV_Target
 {
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-    float deviceDepth = LOAD_TEXTURE2D_X(_DepthTexture, input.pixelCoord).r;
-    if (IsSkyPixel(deviceDepth))
+    uint2 pixelCoord = input.pixelCoord;
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+    // These entrypoints shade surfaces; the caller owns sky/background rendering.
+    if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
         return float4(0.0, 0.0, 0.0, 1.0);
 
-    VividGBufferSurfaceData surfaceData = LoadVividGBuffer(input.pixelCoord);
-    float3 positionWS = ComputeWorldSpacePosition(input.uv, deviceDepth, UNITY_MATRIX_I_VP);
-    float3 lighting = EvaluateDeferredDirectionalLighting(surfaceData, input.pixelCoord, positionWS);
-    return float4(VividApplyPreExposure(lighting), 1.0);
+    float4 debugLighting;
+    return float4(VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting), 1.0);
 }
 
 #endif

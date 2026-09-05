@@ -10,7 +10,7 @@
 #include "VividAreaLightCommon.hlsl"
 #include "LTCAreaLight.hlsl"
 
-#define VIVID_SIMPLE_SLAB_DEFERRED_LIGHTING_VERSION 3u
+#define VIVID_SIMPLE_SLAB_DEFERRED_LIGHTING_VERSION 4u
 
 struct VividSimpleSlabPreLightData
 {
@@ -152,7 +152,7 @@ VividSimpleSlabDeferredLighting VividComposeSimpleSlabDeferredLighting(
     result.indirectDiffuseLighting = indirectLighting.diffuse;
     result.screenSpaceReplaceableSpecularLighting = indirectLighting.singleScatterSpecular;
     result.screenSpaceReflectionFGD = energy.singleScatterSpecularAlbedo;
-    // ClearDeferredLit owns emission. Neither albedo nor energy is applied again here.
+    // The pixel compositor owns emission. Neither albedo nor energy is applied again here.
     return result;
 }
 

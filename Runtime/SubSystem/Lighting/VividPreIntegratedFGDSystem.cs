@@ -8,7 +8,6 @@ namespace VividRP.Runtime
 {
     internal sealed class VividPreIntegratedFGDSystem : VividSubsystem<VividPreIntegratedFGDSystem>
     {
-        private VividPreIntegratedFGDTextures m_Textures;
         private VividSlabLut m_SlabLut;
 
 #if UNITY_EDITOR
@@ -30,8 +29,6 @@ namespace VividRP.Runtime
         protected override void OnDeinitialize()
         {
             FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
-            m_Textures?.Dispose();
-            m_Textures = null;
             m_SlabLut?.Dispose();
             m_SlabLut = null;
         }
@@ -75,15 +72,15 @@ namespace VividRP.Runtime
 
         private void PrepareFrameCore(ContextContainer frameData, CommandBuffer cmd)
         {
-            m_Textures ??= new VividPreIntegratedFGDTextures();
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            m_Textures.Create(resources, cmd);
             m_SlabLut ??= new VividSlabLut();
             bool slabLutReady = m_SlabLut.Create(
                 resources?.SlabLutCompute, cmd);
 
             var data = frameData.GetOrCreate<VividPreIntegratedFGDData>();
-            data.SetTextures(m_Textures.GGXDisneyDiffuseTexture, m_Textures.CharlieAndFabricTexture);
+            // All default Deferred entrypoints use the native Slab LUT. Legacy
+            // FGD tools remain available, but are no longer baked every session.
+            data.SetTextures(null, null);
             data.slabLutTexture = slabLutReady ? m_SlabLut.Texture : null;
         }
     }

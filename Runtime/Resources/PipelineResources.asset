@@ -235,6 +235,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 989e5534ed28a5945be618cc59fa2983, type: 3}
   - ResourceName: Shaders/Core/Private/VirtualShadowMap/Debug/VSMDebug
     ResourceObject: {fileID: 4800000, guid: e6505fc15aea3bd42bf6101f5fe0e874, type: 3}
+  - ResourceName: Shaders/Core/Private/VividSlabLut.compute
+    ResourceObject: {fileID: 7200000, guid: 7b097fdaf2a165c409be2e8eb48b016d, type: 3}
   - ResourceName: Shaders/Core/Private/Volumetric/LocalVolumetricFogVoxelize
     ResourceObject: {fileID: 4800000, guid: 9c6d7eaf1b78d6340b9bfa881a13e069, type: 3}
   - ResourceName: Shaders/Core/Private/Volumetric/VolumetricDensity.compute

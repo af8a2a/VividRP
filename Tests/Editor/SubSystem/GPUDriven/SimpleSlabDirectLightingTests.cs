@@ -13,7 +13,7 @@ namespace VividRP.Editor.Tests
         private const string HeaderRelativePath =
             "Shaders/Core/Public/VividSimpleSlabDirectLighting.hlsl";
         private const string DeferredRelativePath =
-            "Shaders/Material/DeferredLit.compute";
+            "Shaders/Core/Public/VividDeferredLighting.hlsl";
         private const string ComputeRelativePath =
             "Tests/Editor/SubSystem/GPUDriven/"
             + "SimpleSlabDirectLightingTests.compute";

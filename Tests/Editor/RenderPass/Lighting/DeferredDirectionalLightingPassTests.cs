@@ -146,7 +146,8 @@ namespace VividRP.Editor.Tests
                 "DeferredLit.compute");
 
             Assert.That(File.Exists(path), Is.True, path);
-            string source = File.ReadAllText(path);
+            string source = File.ReadAllText(path) + File.ReadAllText(Path.Combine(
+                package.resolvedPath, "Shaders", "Core", "Public", "VividDeferredLighting.hlsl"));
 
             StringAssert.Contains("SurfaceSummaryGBuffer.hlsl", source);
             StringAssert.Contains("Texture2D<float4> _DiffuseIrradiance;", source);
@@ -154,7 +155,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("EvaluateDeferredFastSlabLighting", source);
             StringAssert.Contains("BuildVividSimpleSlabData", source);
             StringAssert.Contains("VIVID_DEFERRED_CLASS_BIT_FAST_SLAB", source);
-            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_ERROR", source);
+            StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_UNLIT", source);
             StringAssert.Contains("float3(1.0, 0.0, 1.0)", source);
             StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB", source);
             StringAssert.Contains("VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB", source);
@@ -177,7 +178,8 @@ namespace VividRP.Editor.Tests
                 "Material",
                 "DeferredLit.compute");
 
-            string source = File.ReadAllText(path);
+            string source = File.ReadAllText(path) + File.ReadAllText(Path.Combine(
+                package.resolvedPath, "Shaders", "Core", "Public", "VividDeferredLighting.hlsl"));
             string compactSource = string.Concat(
                 source.Where(character => !char.IsWhiteSpace(character)));
 
@@ -195,7 +197,7 @@ namespace VividRP.Editor.Tests
                 "if(!TryLoadVividDualSlabLayerData(pixelCoord,topLayer))",
                 compactSource);
             StringAssert.Contains(
-                "_LightingDebugTexture[pixelCoord]=float4(1.0,0.0,1.0,1.0);return;",
+                "debugLighting=float4(1.0,0.0,1.0,1.0);returnVividApplyPreExposure(float3(1.0,0.0,1.0));",
                 compactSource);
             StringAssert.Contains(
                 "coefficient*coefficient-0.16*max(diffuseAlbedo,0.0)",

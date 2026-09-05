@@ -18,7 +18,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void FastAndDualSlab_OwnLightingWithoutLegacyBsdfOrFgd()
         {
-            string source = Read("Shaders/Material/DeferredLit.compute");
+            string source = Read("Shaders/Core/Public/VividDeferredLighting.hlsl");
             int start = source.IndexOf("VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(", StringComparison.Ordinal);
             Assert.That(start, Is.GreaterThanOrEqualTo(0));
             int end = source.IndexOf("float3 VividDeferredFresnelSchlick(", start, StringComparison.Ordinal);
@@ -42,6 +42,25 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("result.screenSpaceReflectionFGD = energy.singleScatterSpecularAlbedo;", header);
             StringAssert.Contains("result.screenSpaceReplaceableSpecularLighting = indirectLighting.singleScatterSpecular;", header);
             StringAssert.Contains("preExposedReplaceableSpecular * reflectionWeight", source);
+        }
+
+        [Test]
+        public void DeferredEntryPoints_ShareNativeSurfacePixelContract()
+        {
+            foreach (string path in new[]
+            {
+                "Shaders/Material/DeferredLit.compute",
+                "Shaders/Material/ShaderPass/SimpleDeferredLitPass.hlsl",
+                "Shaders/Material/DeferredDirectionalLightingIndirectPass.hlsl"
+            })
+            {
+                string source = Read(path);
+                StringAssert.Contains("VividDeferredLighting.hlsl", source, path);
+                StringAssert.Contains("VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting)", source, path);
+                foreach (string legacy in new[] { "HdrpLitLighting.hlsl", "UnpackVividGBufferSurfaceData",
+                    "EvaluateBSDF_", "_GBuffer4", "_MainLightColor", "_AmbientColor" })
+                    StringAssert.DoesNotContain(legacy, source, path);
+            }
         }
 
         // Focused shader test: packed GBuffer -> production classification/indirect args ->
@@ -149,18 +168,56 @@ namespace VividRP.Editor.Tests
             fixture.Run(false, 0, true, false, environment: 6, dualMode: dualMode, layerWeight: layerWeight);
         }
 
+        // Both raster entrypoints use the same independent reference as compute.
+        // The non-sky pixels include metal/dielectric, AO-zero, Unlit and SSR opt-out.
+        [TestCase(0, true, 0.0f, true, false)]
+        [TestCase(0, false, 1.0f, true, false)]
+        [TestCase(0, true, 0.4f, false, false)]
+        [TestCase(1, true, 0.4f, true, true)]
+        [TestCase(2, true, 0.4f, true, true)]
+        [TestCase(2, false, 1.0f, true, false)]
+        [TestCase(2, true, 1.0f, false, false)]
+        [TestCase(3, false, 1.0f, true, true)]
+        public void RasterDeferredEntryPoints_MatchNativeComputeContract(
+            int dualMode, bool directLights, float ssrWeight, bool lutReady, bool mixedTile)
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Compute and GPU readback required.");
+            RTHandles.Initialize(1, 1);
+            using var fixture = new PixelFixture();
+            fixture.Run(directLights, ssrWeight, lutReady, mixedTile, environment: 5,
+                dualMode: dualMode, verifyRaster: true);
+        }
+
+        [TestCase(3, true)]  // Reserved GeneralSlab, dispatched through variant 1
+        [TestCase(3, false)] // Unlit emission survives missing LUT in the same tile
+        [TestCase(5, true)]  // Reserved Subsurface
+        [TestCase(14, true)] // Reserved CatchAll material class (not the tile variant)
+        [TestCase(6, true)]  // Unknown class sanitized to Error
+        public void UnsupportedDeferredClass_IsDiagnosticAcrossComputeAndRaster(int exportClass, bool lutReady)
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+                Assert.Ignore("Compute and GPU readback required.");
+            RTHandles.Initialize(1, 1);
+            using var fixture = new PixelFixture();
+            fixture.Run(true, 0.4f, lutReady, false, verifyRaster: true, overrideClass: exportClass);
+        }
+
         private sealed class PixelFixture : IDisposable
         {
             private readonly List<Object> m_Objects = new();
             private readonly List<ComputeBuffer> m_Buffers = new();
             private readonly VividSlabLut m_Lut = new();
             private readonly CommandBuffer m_Cmd = new();
+            private readonly MaterialPropertyBlock m_RasterProperties = new();
+            private ComputeShader m_Production;
 
             internal void Run(bool directLights, float ssrWeight, bool lutReady, bool mixedTile,
                 int environment = 0, bool ssrEnabled = true, int areaCase = 0,
-                int dualMode = 0, float layerWeight = 0.4f)
+                int dualMode = 0, float layerWeight = 0.4f, bool verifyRaster = false, int overrideClass = 0)
             {
                 ComputeShader production = Load("Shaders/Material/DeferredLit.compute");
+                m_Production = production;
                 ComputeShader control = Load("Tests/Editor/SubSystem/GPUDriven/SimpleSlabDeferredLightingTests.compute");
                 ComputeShader classifier = Load("Shaders/Material/MaterialClassification.compute");
                 Assert.That(m_Lut.Create(Load("Shaders/Core/Private/VividSlabLut.compute")), Is.True);
@@ -168,6 +225,8 @@ namespace VividRP.Editor.Tests
                 int reference = control.FindKernel("ReferenceLighting");
                 int clear = production.FindKernel("ClearDeferredLit");
                 int variant = mixedTile ? 3 : (dualMode > 0 && layerWeight > 0 ? 2 : 0);
+                if (overrideClass != 0)
+                    variant = Mathf.Max(variant, overrideClass == 3 ? 1 : 3);
                 int shade = production.FindKernel("DeferredLit_Variant" + variant);
                 var gbuffers = new RenderTexture[5];
                 for (int i = 0; i < gbuffers.Length; ++i)
@@ -257,20 +316,20 @@ namespace VividRP.Editor.Tests
 
                 foreach (ComputeShader shader in new[] { production, control })
                 {
-                    m_Cmd.SetComputeVectorParam(shader, "_VividScreenSize", new Vector4(8, 8, 0.125f, 0.125f));
-                    m_Cmd.SetComputeMatrixParam(shader, "_VividGlstateMatrixProjection", Matrix4x4.identity);
+                    Vector(shader, "_VividScreenSize", new Vector4(8, 8, 0.125f, 0.125f));
+                    Matrix(shader, "_VividGlstateMatrixProjection", Matrix4x4.identity);
                     Matrix4x4 view = Matrix4x4.identity;
                     if (environment == 5)
                     {
                         view.SetRow(0, new Vector4(0.6f, 0, -0.8f, 0));
                         view.SetRow(2, new Vector4(0.8f, 0, 0.6f, 0));
                     }
-                    m_Cmd.SetComputeMatrixParam(shader, "_VividMatrixV", view);
-                    m_Cmd.SetComputeMatrixParam(shader, "_VividMatrixInvVP", Matrix4x4.identity);
-                    m_Cmd.SetComputeMatrixParam(shader, "_PixelCoordToViewDirWS", Matrix4x4.identity);
-                    m_Cmd.SetComputeVectorParam(shader, "_SkyTextureTint", Vector4.one);
-                    m_Cmd.SetComputeVectorParam(shader, "_SkyTextureParams", new Vector4(1, 0, environment == 0 ? 0 : 1, 1));
-                    m_Cmd.SetComputeVectorParam(shader, "_ReflectionAtlasCubeData", Vector4.zero);
+                    Matrix(shader, "_VividMatrixV", view);
+                    Matrix(shader, "_VividMatrixInvVP", Matrix4x4.identity);
+                    Matrix(shader, "_PixelCoordToViewDirWS", Matrix4x4.identity);
+                    Vector(shader, "_SkyTextureTint", Vector4.one);
+                    Vector(shader, "_SkyTextureParams", new Vector4(1, 0, environment == 0 ? 0 : 1, 1));
+                    Vector(shader, "_ReflectionAtlasCubeData", Vector4.zero);
                     Int(shader, "_DirectionalLightCount", directLights ? 1 : 0);
                     Int(shader, "_PunctualLightCount", directLights ? 1 : 0);
                     Int(shader, "_AreaLightCount", directLights ? 1 : 0);
@@ -325,6 +384,7 @@ namespace VividRP.Editor.Tests
                 Int(control, "_TestEnvironment", environment);
                 Int(control, "_TestSSREnabled", ssrEnabled ? 1 : 0);
                 Int(control, "_TestDualMode", dualMode);
+                Int(control, "_TestOverrideClass", overrideClass);
                 m_Cmd.SetComputeFloatParam(control, "_TestLayerWeight", layerWeight);
                 m_Cmd.DispatchCompute(control, prepare, 1, 1, 1);
                 Int(classifier, "_ClassificationWidth", 8);
@@ -358,6 +418,57 @@ namespace VividRP.Editor.Tests
                 // the dispatch to check that accumulation is cleared each time.
                 Graphics.ExecuteCommandBuffer(m_Cmd);
                 AssertPixels(lighting, referencePixels, environment == 6, dualMode == 2);
+
+                if (verifyRaster)
+                    AssertRasterPixels(referencePixels);
+            }
+
+            private void AssertRasterPixels(Vector4[] referencePixels)
+            {
+                Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(VividPackagePathUtility.GetPreferredAssetPath(
+                    "Tests/Editor/SubSystem/GPUDriven/SimpleSlabRasterDeferredTests.shader"));
+                Assert.That(shader, Is.Not.Null);
+                foreach (ShaderMessage message in ShaderUtil.GetShaderMessages(shader))
+                    Assert.That(message.severity.ToString(), Is.Not.EqualTo("Error"), message.message);
+                Material material = Track(new Material(shader));
+                material.DisableKeyword("PROBE_VOLUMES_L1");
+                material.DisableKeyword("PROBE_VOLUMES_L2");
+                RenderTexture target = Target(GraphicsFormat.R32G32B32A32_SFloat);
+                // Raster entrypoints explicitly leave sky/background to their caller.
+                for (int i = 7; i < referencePixels.Length; i += 8)
+                    referencePixels[i] = new Vector4(0, 0, 0, 1);
+                var pixelIndices = new uint[64];
+                for (uint i = 0; i < pixelIndices.Length; ++i)
+                    pixelIndices[i] = 63u - i;
+                m_RasterProperties.SetBuffer("_MaterialPixelIndices", Buffer(pixelIndices));
+                m_RasterProperties.SetInt("_LightingWidth", 8);
+                m_RasterProperties.SetInt("_LightingHeight", 8);
+                // Isolate camera globals from an Editor render's globally-bound
+                // constant buffer; do not mutate the interactive frame's state.
+                var globals = new ShaderVariablesGlobal
+                {
+                    _VividScreenSize = m_RasterProperties.GetVector("_VividScreenSize"),
+                    _VividGlstateMatrixProjection = m_RasterProperties.GetMatrix("_VividGlstateMatrixProjection"),
+                    _VividMatrixV = m_RasterProperties.GetMatrix("_VividMatrixV"),
+                    _VividMatrixInvVP = m_RasterProperties.GetMatrix("_VividMatrixInvVP")
+                };
+                m_RasterProperties.SetConstantBuffer(ShaderVariablesGlobal.ConstantBufferShaderId,
+                    Buffer(new[] { globals }, ComputeBufferType.Constant), 0, Marshal.SizeOf<ShaderVariablesGlobal>());
+
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    m_Cmd.Clear();
+                    m_Cmd.SetRenderTarget(target);
+                    m_Cmd.SetViewport(new Rect(0, 0, 8, 8));
+                    m_Cmd.ClearRenderTarget(false, true, Color.clear);
+                    m_Cmd.DrawProcedural(Matrix4x4.identity, material, pass,
+                        pass == 0 ? MeshTopology.Triangles : MeshTopology.Points,
+                        pass == 0 ? 3 : 1, pass == 0 ? 1 : 64, m_RasterProperties);
+                    Graphics.ExecuteCommandBuffer(m_Cmd);
+                    AssertPixels(target, referencePixels, false, false);
+                    Graphics.ExecuteCommandBuffer(m_Cmd);
+                    AssertPixels(target, referencePixels, false, false);
+                }
             }
 
             private static void AssertPixels(RenderTexture target, Vector4[] expected, bool whiteEnvironment, bool verticalLayer)
@@ -367,10 +478,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(request.hasError, Is.False);
                 var actual = request.GetData<Vector4>();
                 for (int i = 0; i < expected.Length; ++i)
-                    for (int c = 0; c < 3; ++c)
+                    for (int c = 0; c < 4; ++c)
                     {
                         Assert.That(actual[i][c], Is.EqualTo(expected[i][c]).Within(0.003f), $"pixel {i}, channel {c}");
-                        if (whiteEnvironment && i % 8 != 7)
+                        if (whiteEnvironment && c < 3 && i % 8 != 7)
                             Assert.That(actual[i][c], Is.InRange(0.0f, 1.253f), "unit environment times AO 0.5 and exposure 2.5");
                         // White base and top opacity == green diffuse albedo:
                         // vertical composition preserves unit green energy.
@@ -418,11 +529,31 @@ namespace VividRP.Editor.Tests
                 buffer.SetData(data);
                 return buffer;
             }
-            private void Texture(ComputeShader shader, int kernel, string name, Texture texture) =>
+            private void Texture(ComputeShader shader, int kernel, string name, Texture texture)
+            {
                 m_Cmd.SetComputeTextureParam(shader, kernel, Shader.PropertyToID(name), texture);
-            private void Bind(ComputeShader shader, int kernel, string name, ComputeBuffer buffer) =>
+                if (shader == m_Production) m_RasterProperties.SetTexture(name, texture);
+            }
+            private void Bind(ComputeShader shader, int kernel, string name, ComputeBuffer buffer)
+            {
                 m_Cmd.SetComputeBufferParam(shader, kernel, Shader.PropertyToID(name), buffer);
-            private void Int(ComputeShader shader, string name, int value) => m_Cmd.SetComputeIntParam(shader, name, value);
+                if (shader == m_Production) m_RasterProperties.SetBuffer(name, buffer);
+            }
+            private void Int(ComputeShader shader, string name, int value)
+            {
+                m_Cmd.SetComputeIntParam(shader, name, value);
+                if (shader == m_Production) m_RasterProperties.SetInt(name, value);
+            }
+            private void Vector(ComputeShader shader, string name, Vector4 value)
+            {
+                m_Cmd.SetComputeVectorParam(shader, name, value);
+                if (shader == m_Production) m_RasterProperties.SetVector(name, value);
+            }
+            private void Matrix(ComputeShader shader, string name, Matrix4x4 value)
+            {
+                m_Cmd.SetComputeMatrixParam(shader, name, value);
+                if (shader == m_Production) m_RasterProperties.SetMatrix(name, value);
+            }
             public void Dispose()
             {
                 m_Cmd.Dispose();

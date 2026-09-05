@@ -1,387 +1,295 @@
-# Vivid Simple Slab V1
+# Vivid Simple Slab V1 — frozen contract
 
-Phase 8 uses this contract to replace the HDRP-derived deferred BSDF without
-changing the Surface Summary GBuffer ABI. The contract describes an opaque,
-isotropic, single-normal-basis Slab. It is intentionally smaller than Unreal
-Substrate's full Slab and OpenPBR Surface.
+Phase 8.8 freezes the first default real-time BSDF and its Deferred integration.
+This document describes the final implementation, superseding the intermediate
+8.0–8.7 migration notes. Contract freeze and runtime acceptance are separate:
+the GPU, resource-sync and image checks below must pass before declaring a
+release validated.
 
-## Frozen inputs
+## Version and change policy
 
-All color values are finite, non-negative values in the active linear working
-color space. Values written through the Surface Summary ABI are representable
-in `[0, 1]`.
+| Contract/component | Frozen value | Source |
+| --- | --- | --- |
+| Slab inputs / fingerprint schema | 1 / 1 | `SimpleSlabContract` |
+| Input convention fingerprint | `0x26E2E47BB6B790D8` | `SimpleSlabContract.Fingerprint` |
+| Analytic BSDF kernel | 1 | `SimpleSlabBSDFKernelVersion` |
+| Directional/punctual adapter | 2 | `SimpleSlabDirectLightingVersion` |
+| Energy model | 1 | `SimpleSlabEnergyVersion` |
+| Deferred evaluator | 4 | `SimpleSlabDeferredLightingVersion` |
+| Native Slab LUT | 1, 64² RGBA16F, 4096 samples | `VividSlabLut` |
+| Surface Summary / Dual Sidecar ABI | 1 / 1 | `SurfaceSummaryGBuffer.hlsl` |
+
+The input fingerprint identifies the four inputs and evaluation conventions;
+it is not a compiled-shader hash or a seal over the whole light loop. The
+version set is pinned by `SimpleSlabContractTests`; C#/HLSL agreement is also
+checked by the kernel, direct, energy and Deferred tests.
+
+Changes to inputs, roughness/Fresnel conventions or the energy model require
+reviewing the Slab contract version and fingerprint. Changes to lighting
+semantics require the corresponding evaluator version and new regression
+baselines. LUT channel/coordinate/format/integration changes require reviewing
+its version and rebuilding it. A source-only refactor preserving results does
+not require a new material program ID.
+
+Evaluator version 4 makes reserved GeneralSlab/Subsurface/CatchAll material
+classes diagnostic. It keeps Fast/Dual lighting formulas from version 3.
+MaterialProgram compiler versions, Catalog hashes and serialized payloads are
+unchanged: generated material programs export Slab inputs, while the pipeline
+owns BSDF evaluation. A future export/layout change must follow the existing
+Deferred Export and Catalog invalidation contracts.
+
+## Supported material contract
+
+V1 implements an opaque, isotropic Slab with one normal basis. The default
+StandardLit authoring path and general MaterialProgram exports supply:
 
 | Order | Semantic | Type | Range |
 | --- | --- | --- | --- |
-| 0 | `DiffuseAlbedo` | `float3` | `[0, 1]` |
-| 1 | `SpecularF0` | `float3` | `[0, 1]` |
-| 2 | `PerceptualRoughness` | `float` | `[0, 1]` |
-| 3 | `NormalWS` | `float3` | finite, normalized before evaluation |
+| 0 | `DiffuseAlbedo` | `float3` | finite, linear, [0, 1] |
+| 1 | `SpecularF0` | `float3` | finite, linear, [0, 1] |
+| 2 | `PerceptualRoughness` | `float` | [0, 1] |
+| 3 | `NormalWS` | `float3` | finite, normalized |
 
-Ambient occlusion, emissive radiance, baked diffuse irradiance, coverage, SSR,
-and decal policy are material outputs outside the BSDF. AO affects indirect
-lighting only. Emission is added after direct and indirect lighting.
+Coverage, ambient occlusion, emission, diffuse irradiance, SSR and decal flags
+are material outputs outside the BSDF. Alpha testing happens in Coverage.
+No transmission, anisotropy, fuzz, clear coat or subsurface lobe is part of
+this default kernel. Dual Slab supports exactly two Slabs using horizontal mix
+or the approximate vertical layer described below.
 
-## Frozen evaluation conventions
+| Export / condition | Default Deferred behavior |
+| --- | --- |
+| Empty / Unlit | Preserve emission; no BSDF or LUT required |
+| FastSlab | One native Slab |
+| DualSlab | Two native Slabs; valid Sidecar required |
+| GeneralSlab / Subsurface / CatchAll material class | Pre-exposed magenta diagnostic |
+| Error / unknown class / invalid Surface Summary tag | Pre-exposed magenta diagnostic |
+| Missing LUT on lit pixels / missing Dual Sidecar | Pre-exposed magenta diagnostic |
+| Sky | Compute clear samples sky; raster surface entrypoints return black/alpha one |
 
-- Diffuse model: Lambert.
-- Specular model: isotropic GGX with height-correlated Smith visibility.
-- Fresnel model: Schlick with stored `F0` and derived achromatic `F90`.
-- Energy model: directional-albedo multiple-scattering compensation plus
-  interface transmission applied to the diffuse medium.
-- The directional BSDF response includes the `NdotL` cosine.
+The CatchAll *tile variant* still shades mixed Fast/Dual/Unlit/Error tiles. It
+does not imply support for the reserved CatchAll *material class*. Classification
+selects one most-capable variant per tile; shading does not silently substitute
+another BSDF for an unsupported class.
+
+## Analytic and energy conventions
+
+Directions are normalized caller inputs. Direct responses include `NdotL`;
+backfacing view/light directions return zero. All colors use the active linear
+working space.
+
+- Lambert diffuse.
+- Isotropic GGX with height-correlated Smith visibility.
+- Schlick Fresnel with stored F0 and derived achromatic F90.
 - `alpha = max(saturate(PerceptualRoughness)^2, 0.002)`.
-- `F90 = saturate(50 * average(saturate(F0)))`. A gray `F0` of `0.02`
-  therefore reaches an `F90` of one without adding a GBuffer field.
+- `F90 = saturate(50 * average(saturate(F0)))`.
 
-The directional-albedo LUT representation is specified below by Phase 8.3.
-Changing any convention above requires a new contract version and fingerprint.
+`VividSimpleSlabBSDF.hlsl` owns the uncompensated analytic kernel.
+`VividSimpleSlabEnergy.hlsl` adds a reciprocal Kulla-Conty-style MS lobe and
+transmitted Lambert medium. For unit-Fresnel single-scatter directional albedo
+`E`, loss `L=1-E`, Schlick-weighted albedo `B`, and cosine-weighted averages:
 
-## Frozen calibration cases
+```text
+Favg        = F0 + (F90 - F0) / 21
+C           = Favg² * (1 - Lavg) / (1 - Favg * Lavg)
+Sss(v)      = F0 * (1 - L(v) - B(v)) + F90 * B(v)
+Sms(v)      = C * L(v)
+S(v)        = Sss(v) + Sms(v)
+f_ms(v,l)   = C * L(v) * L(l) / (pi * Lavg)
+f_diff(v,l) = DiffuseAlbedo * (1-S(v)) * (1-S(l)) / (pi * (1-Savg))
+```
 
-| Case | Diffuse Albedo | F0 | Perceptual Roughness | Derived F90 | Alpha |
+Both evaluated lobes include `NdotL`. Zero-loss/transmission denominators are
+guarded; no output luminance clamp hides energy gain. The model's white-
+environment integral is `S(v) + DiffuseAlbedo * (1-S(v))`, bounded by one per
+channel. White diffuse media and unit conductors preserve unit energy, subject
+to LUT quadrature, interpolation and quantization error. Reciprocity applies
+to individual Slabs; it is not claimed for the approximate vertical operator.
+
+| Calibration case | Diffuse albedo | F0 | Roughness | F90 | Alpha |
 | --- | --- | --- | ---: | ---: | ---: |
-| Black absorber | `(0, 0, 0)` | `(0, 0, 0)` | 0.5 | 0 | 0.25 |
-| Low-F0 dielectric | `(0.18, 0.18, 0.18)` | `(0.01, 0.01, 0.01)` | 0.5 | 0.5 | 0.25 |
-| Default plastic | `(0.18, 0.18, 0.18)` | `(0.04, 0.04, 0.04)` | 0.5 | 1 | 0.25 |
-| Smooth plastic | `(0.18, 0.18, 0.18)` | `(0.04, 0.04, 0.04)` | 0 | 1 | 0.002 |
-| Copper-like conductor | `(0, 0, 0)` | `(0.95, 0.64, 0.54)` | 0.25 | 1 | 0.0625 |
+| Black absorber | (0, 0, 0) | (0, 0, 0) | 0.5 | 0 | 0.25 |
+| Low-F0 dielectric | (0.18, 0.18, 0.18) | (0.01, 0.01, 0.01) | 0.5 | 0.5 | 0.25 |
+| Default plastic | (0.18, 0.18, 0.18) | (0.04, 0.04, 0.04) | 0.5 | 1 | 0.25 |
+| Smooth plastic | (0.18, 0.18, 0.18) | (0.04, 0.04, 0.04) | 0 | 1 | 0.002 |
+| Copper-like conductor | (0, 0, 0) | (0.95, 0.64, 0.54) | 0.25 | 1 | 0.0625 |
 
-## Phase 8.1 analytic kernel
+## LUT and resource lifetime
 
-`VividSimpleSlabBSDF.hlsl` owns the first Vivid-native BSDF implementation. It
-has no dependency on HDRP's `BSDF.hlsl` or the legacy
-`HdrpLitLighting.hlsl`. Version 1 provides:
+The LUT uses linear RGBA16F, bilinear/clamp, no mips: 32 KiB persistent storage.
+Coordinates are `x=sqrt(saturate(NdotV))`, `y=PerceptualRoughness`, on an
+endpoint grid with half-texel remapping at sampling. Channels are
+`(B, L, Bavg, Lavg)`. Loss is stored directly to preserve near-mirror precision.
 
-- Lambert diffuse;
-- isotropic GGX normal distribution;
-- height-correlated Smith visibility;
-- the V1 derived-F90 Schlick Fresnel function;
-- colored diffuse and specular directional responses that include `NdotL`.
+The first compute dispatch uses 4096 deterministic Heitz visible-normal
+samples per texel with the same alpha clamp and correlated Smith model as
+direct lighting. It accumulates loss directly. The second dispatch integrates
+the quantized rows using the exact cosine-weighted integral of their piecewise-
+linear interpolation. Temporary bake storage is released after both dispatches.
 
-The normal, view direction, and light direction are normalized caller inputs.
-Backfacing view or light directions return zero. Directional-albedo
-multiple-scattering compensation, IBL integration, LTC area lights, and the
-production Deferred switch remain outside the 8.1 kernel boundary.
+`VividPreIntegratedFGDSystem` owns/prepares the native LUT and publishes it
+through `VividPreIntegratedFGDData.slabLutTexture`; `DeferredLightingPass`
+imports and binds it independently of the legacy FGD validity flag. Stable
+frames reuse the texture and record no bake commands or managed allocations.
+Device texture loss, shader replacement, source reimport/deletion/movement and
+subsystem disposal invalidate it. A missing shader releases the cached LUT;
+restoring it requires a fresh bake. `VividSlabLutPostprocessor` tracks all
+direct bake includes across imported/deleted/moved/moved-from asset arrays.
 
-## Phase 8.2 direct lighting
+The default subsystem no longer creates the legacy GGX/Disney and Charlie/
+Fabric FGD textures. Their utility classes, resource fields and shader assets
+remain available for explicit compatibility use. LTC is still a shared resource.
 
-The production deferred Fast Slab and Dual Slab paths evaluate directional and
-punctual lights through `VividSimpleSlabDirectLighting.hlsl`. Light color,
-direction normalization, resolved directional shadows, punctual distance/range
-attenuation, spot attenuation, and dual-slab weights are applied outside the
-BSDF kernel.
+`VividRPCoreResources.SlabLutCompute` must be populated by the normal
+`PipelineResourceUpdater` sync. In the target Unity project, import the package
+and use the PipelineResources Inspector **Recollect** button if needed. Commit
+Unity-generated metadata and the synchronized resource asset together. Never
+hand-edit their GUIDs. The serialized-container regression checks the actual
+runtime resource entry; merely finding the shader with AssetDatabase is
+insufficient for a player build.
 
-HDRP-derived code remains responsible for indirect lighting, reflection probes,
-SSR integration, and LTC area lights. The two paths accumulate separately so
-the HDRP post-evaluation stage cannot recolor Lambert output or apply its
-specular energy compensation to Vivid's direct response.
+## Direct, indirect and final composition
 
-## Phase 8.3 energy and Vivid Slab LUT
+Directional/punctual lights use the full energy-aware analytic kernel. Color,
+distance/range/spot attenuation, main directional shadow and layer weights are
+outside the BSDF. Only the main directional light consumes the resolved
+directional shadow. Material AO times GTAO affects indirect lighting only.
 
-`VividSimpleSlabEnergy.hlsl` version 1 adds a reciprocal Kulla-Conty-style
-multiple-scattering lobe and a transmitted Lambert medium. This is Vivid's
-chosen real-time approximation, not a claim of binary or image equivalence
-with Unreal or an exact microfacet random walk. The analytic 8.1 kernel remains
-available as the uncompensated single-scattering baseline.
+Diffuse GI priority is baked irradiance, then APV, then ambient SH.
+Indirect diffuse uses `DiffuseAlbedo * (1-S(v))`.
+Environment single scattering uses the existing dominant reflection direction,
+GGX roughness-to-mip convention and `Sss(v)`. Nonzero MS samples around N at
+the roughest GGX mip, with amplitude `Sms(v)`. Each lobe traverses the
+reflection-probe hierarchy independently; face fades depend on direction.
+Probe radiance is already weighted and the uncovered weight belongs to sky.
 
-For unit-Fresnel single-scatter directional albedo `E`, loss `L = 1 - E`,
-Schlick-weighted albedo `B`, and cosine-weighted hemispherical averages:
+The MS sample is a broad-lobe real-time approximation, not an exact Lambert
+or directional-loss convolution. Constant-environment energy is preserved;
+small bright environment features can differ from the direct kernel integral.
 
-```
-Favg       = F0 + (F90 - F0) / 21
-C          = Favg^2 * (1 - Lavg) / (1 - Favg * Lavg)
-S(v)       = F0 * (1 - L(v) - B(v)) + F90 * B(v) + C * L(v)
-f_ms(v,l)  = C * L(v) * L(l) / (pi * Lavg)
-f_diff(v,l)= DiffuseAlbedo * (1-S(v)) * (1-S(l)) / (pi * (1-Savg))
-```
+SSR supplies uncolored linear incident radiance plus confidence:
 
-`f_ms` is added to the GGX single-scattering lobe; both final lobes include
-`NdotL` on output. The normalized diffuse transmission is Vivid's opaque-medium
-approximation: its directional integral is `DiffuseAlbedo * (1-S(v))`.
-Therefore the combined white-environment response is
-`S(v) + DiffuseAlbedo * (1-S(v))`, bounded by one per channel. A unit conductor
-or a white diffuse medium preserves unit energy. This statement is exact for
-the model's integrals, subject to numerical integration/interpolation error in
-the implementation. Zero-loss denominators are guarded; no output luminance
-clamp is used to hide energy gain. Reciprocity applies to each individual Slab,
-not to the existing approximate vertical layer operator.
-
-### LUT representation and lifetime
-
-- `64 x 64`, linear `RGBA16F`, bilinear/clamp, no mips: 32 KiB persistent storage.
-- `x = sqrt(saturate(NdotV))`, `y = saturate(PerceptualRoughness)`, endpoint grid
-  with half-texel remapping at sampling. Stored channels: `R=B`, `G=L`,
-  `B=Bavg`, `A=Lavg`. Storing loss avoids cancellation near a perfect mirror.
-- First compute dispatch uses 4096 deterministic visible-normal samples per
-  texel with the same alpha clamp and height-correlated Smith model as direct
-  lighting. Loss is accumulated directly, not subtracted from a rounded sum.
-- Second dispatch integrates each quantized directional row with the exact
-  cosine-weighted integral of its piecewise-linear interpolation. The average
-  channels therefore describe the same texture used by the light loop.
-- `VividSlabLut` owns the texture; the existing frame FGD subsystem prepares it,
-  and Deferred imports/binds it through frame context. Build scratch storage is
-  released after the two dispatches. Stable frames allocate/dispatch nothing
-  for LUT preparation. Device texture loss, source reimport, shader replacement,
-  and subsystem disposal invalidate it. Relevant shader includes are tracked
-  by `VividSlabLutPostprocessor`.
-- `VividRPCoreResources.SlabLutCompute` is collected by the normal resource sync
-  pipeline. Generated `PipelineResources.asset` must not be hand-edited. A
-  missing LUT produces magenta on lit Slab pixels instead of silently using an
-  incompatible legacy LUT. Unlit/emission clearing is unaffected.
-
-### Production bridge and remaining work
-
-Fast and Dual Slab directional/punctual lights now use the energy-aware kernel.
-View-dependent energy is prepared once per Slab, and light-dependent LUT data
-is read per light. AO and exposure remain outside the kernel.
-
-The existing environment/probe/SSR/LTC infrastructure consumes `S(v)` for
-specular and `1-S(v)` for diffuse, with the old HDRP specular compensation
-disabled. LTC diffuse uses the identity Lambert transform. These paths use a
-directional-albedo approximation: the broad MS energy still shares the
-specular prefilter/LTC shape. Separating its environment convolution and
-fitting dedicated area-light shapes remain later work; Phase 8.3 does not
-claim exact arbitrary-environment or area-light agreement. Existing Dual Slab
-composition weights are unchanged. No Surface Summary, material ABI, or
-Frozen Catalog payload changes are required.
-
-`SimpleSlabEnergyTests` covers the real GPU bake, 90 white-furnace cases
-(including black absorber, low F0, copper, and minimum roughness), reciprocity,
-independent double-precision hemisphere quadrature, source/format contracts,
-device-loss/source invalidation, and warmed zero-allocation preparation.
-Furnace tolerance is 1.5% for GPU integration and half-precision LUT error.
-The existing direct-light test uses a synthetic zero-loss LUT to isolate light
-scaling; the earlier AOT/SSR routing test uses an explicitly synthetic F90 LUT,
-not a physical white-furnace reference.
-
-## Phase 8.4 main FastSlab Deferred switch
-
-`EvaluateDeferredFastSlabLighting` is now the production FastSlab entrypoint.
-It consumes the Surface Summary directly and uses the Vivid-native preparation,
-indirect lighting, LTC adapter, and composition in
-`VividSimpleSlabDeferredLighting.hlsl` (version 1). It no longer constructs
-`VividGBufferSurfaceData` / `VividLitBSDFData` or calls the legacy
-`GetVividPreLightData`, `EvaluateBSDF_Env`, `EvaluateBSDF_Area`, or
-`PostEvaluateBSDF` functions. There is no FastSlab legacy fallback switch.
-
-The new entrypoint applies albedo, interface transmission, and specular energy
-only at their lobe evaluations. Its result contains colored direct/indirect
-radiance plus the SSR factor, with no emission or pre-exposure. The main pass
-keeps the existing rules:
-
-- Material AO times GTAO affects indirect lighting only.
-- Baked diffuse irradiance takes precedence over APV, then ambient SH fallback.
-- Reflection-probe hierarchy radiance is already weighted and is not weighted
-  a second time. Remaining probe weight is filled by the sky.
-- SSR replaces indirect specular only; it does not erase direct highlights or
-  reapply AO. Receive-SSR flags still gate this operation.
-- `ClearDeferredLit` adds emission once, including Unlit pixels. Exposure is
-  applied once at the final render-target boundary. Missing LUT and invalid
-  exports retain diagnostic output.
-
-Neutral sky sampling and area-light geometry were extracted into
-`VividSkyLighting.hlsl` and `VividAreaLightCommon.hlsl`, shared with legacy
-consumers without changing their formulas. Dual Slab remains on the explicit
-legacy adapter for now, using the 8.3 Slab energy weights. The legacy headers
-and FGD resources are therefore still present for that path; this phase does
-not claim to remove HDRP-derived shading repository-wide. The IBL dominant
-direction, prefilter convention, and LTC GGX fit are unchanged. Separately
-convolving multiple-scatter energy or replacing LTC fits remains later work.
-
-No changes to MaterialClassification's tile policy, the GBuffer ABI, material
-program IDs, Frozen Catalog assets, or render-loop managed allocations are
-required. Mixed tiles still select the most capable deferred variant; FastSlab
-pixels within a CatchAll tile use the same new FastSlab entrypoint.
-
-`SimpleSlabDeferredLightingTests` records packed GBuffer inputs, the production
-tile classifier and indirect-argument builder, then production Clear/Deferred
-dispatches. It covers arbitrary colored F0, rough conductor, low F0, AO-zero,
-Unlit, sky, mixed Error/FastSlab tiles, missing LUT, directional shadow,
-punctual/rectangle lighting, partial/full SSR and receive flags, emission,
-pre-exposure, and independence from legacy FGD contents. The lighting oracle
-uses the 8.3 direct kernel, explicit uniform-environment arithmetic, and the
-8.3 legacy area adapter rather than the new FastSlab composition. These are
-focused shader tests, not a replacement for the existing full-SRP pixel tests.
-
-## Phase 8.5 IBL, reflection probes, SSR and area lights
-
-The FastSlab deferred evaluator is now version 2. It separates the LUT's
-directional specular energy into single scattering `Sss(v)` and multiple
-scattering `Sms(v) = C * L(v)`, retaining `S(v) = Sss(v) + Sms(v)` for direct
-lighting and diffuse transmission. This does not change the Slab contract,
-LUT format/bake, Surface Summary, or material/Catalog fingerprints.
-
-### Environment and probe integration
-
-- Single scattering uses the existing GGX dominant direction and perceptual
-  roughness-to-mip convention, multiplied by `Sss(v)`.
-- Multiple scattering independently samples the normal direction at perceptual
-  roughness one (the widest available sky/probe prefilter), multiplied by
-  `Sms(v)`. It no longer follows the narrow GGX reflection. Zero MS energy
-  bypasses this extra evaluation.
-- Each lobe evaluates probe hierarchy coverage independently: probe face fades
-  depend on direction. The existing sorted probe order, influence volume,
-  box projection, atlas mapping/padding, multiplier, and invalid-entry fallback
-  are retained. Already-weighted probe radiance is added once; only uncovered
-  weight samples the sky contribution.
-- Baked irradiance / APV / ambient SH priority and diffuse transmission are
-  unchanged. Material AO times GTAO multiplies the two environment lobes once.
-
-This is an explicit **real-time broad-lobe approximation**, not a new
-directional-loss convolution. The roughest GGX mip is not an exact Lambert
-convolution or the exact `L(l)` convolution of the 8.3 direct model. Constant
-environment energy is preserved, but agreement for small bright environment
-features is not claimed. There are no new textures, cache invalidation rules,
-or per-frame managed allocations. Nonzero MS adds one sky lookup and one
-additional probe hierarchy traversal (up to one atlas lookup per contributing
-probe); exact GPU cost still needs scene profiling.
-
-### SSR replacement contract
-
-SSR supplies linear, uncolored incident reflection radiance plus confidence;
-the receiving material's response is applied in Deferred, not the SSR producer.
-FastSlab now exports an explicit `screenSpaceReplaceableSpecularLighting`:
-
-```
-environmentSS = SS radiance * Sss(v) * AO
-environmentMS = broad radiance * Sms(v) * AO
-specular      = directSpecular + environmentMS
-              + (1-confidence) * environmentSS
-              + confidence * SSRradiance * Sss(v)
+```text
+specular = directSpecular + environmentMS
+         + (1-confidence) * environmentSS
+         + confidence * SSRradiance * Sss(v)
 ```
 
-Receive-SSR flags and the global enable still gate confidence. SSR does not
-erase MS, direct lighting, or emission, and receives no additional AO factor.
-Pre-exposure is applied once at the output boundary. The indirect debug target
-continues to show pre-SSR diffuse plus both environment specular lobes.
+Environment SS/MS include indirect AO. SSR receives no additional AO factor.
+Receive flags and the global enable gate confidence. Direct light, MS and
+emission are preserved; the debug target shows pre-SSR indirect diffuse+SS+MS.
 
-### Area-light adapter
+Rectangle/tube lights use the shared geometry, range, sidedness and barn-door
+logic. GGX LTC weights single scattering; identity Lambert LTC weights MS and
+transmitted diffuse. These broad shapes, the GGX fit and rectangle clipped-
+sphere horizon approximation are retained approximations, not exact integration
+of the full angular BSDF.
 
-Directional/punctual lighting retains the full reciprocal 8.3 kernel. Rectangle
-and tube lights now use the existing GGX LTC shape only for `Sss(v)`. MS uses
-the identity Lambert LTC shape with amplitude `Sms(v)`; transmitted diffuse
-uses that same broad shape with amplitude `DiffuseAlbedo * (1-S(v))`.
-Thus all three lobe amplitudes preserve the same white-environment budget,
-without assigning the MS energy to the narrow highlight. Range attenuation,
-rectangle sidedness, barn doors and the existing tube geometry are retained.
+`VividDeferredLighting.hlsl` owns material decoding, Fast/Dual light loops
+and final pixel composition for compute and both raster entrypoints. It returns
+complete pre-exposed surface lighting, adding emission exactly once. Compute
+clear initializes sky/emission for unscheduled pixels; scheduled pixels
+overwrite with that complete result.
 
-Both the Lambert MS shape and the diffuse transmission shape remain
-directional-albedo approximations, not exact integrations of the 8.3 angular
-kernel. The existing GGX fit and rectangle clipped-sphere horizon approximation
-are retained; a dedicated loss-lobe fit, exact convolution and angular-error
-calibration remain future work. Dual Slab deliberately remains on its explicit
-8.3/8.4 legacy environment/area/SSR adapter; this phase changes FastSlab only.
+## Dual Slab composition
 
-### Regression coverage
-
-`SimpleSlabDeferredLightingTests` now contains 20 production pixel cases plus
-the source-boundary test. In addition to the 8.4 cases, it uses mip-colored sky
-and two probe atlas slices to distinguish narrow/broad samples, partial probe
-coverage and sky fill, saturated overlapping coverage, multipliers, invalid
-entries, and differing N/R face fades. Partial/full/disabled SSR checks preserve
-MS, AO policy and receive flags. Rectangle, tube, backface, range and barn-door
-cases use a synthetic non-identity GGX transform distinct from Lambert.
-The rectangle oracle numerically integrates the vector form factor at 64 x 64
-samples and then applies the retained horizon approximation; it does not call
-the new area-light adapter or claim an exact physical-rectangle reference.
-The tube test retains the existing line primitive and independently combines
-its lobe weights. These are production Classify + indirect Deferred shader
-tests, not full-SRP captures or proof of the physical accuracy of the fits.
-
-## Phase 8.6 native Dual Slab migration
-
-Deferred evaluator version 3 migrates both Dual Slab closures onto the same
-Vivid-native preparation, directional/punctual kernels, split SS/MS environment
-sampling, reflection-probe hierarchy and area-light adapter as FastSlab.
-The light lists and shadow samples remain shared between the closures. Each
-Slab prepares its own roughness-dependent LUT energy and LTC transform once.
-There is no legacy lighting fallback in the production Deferred shader.
-
-The existing Sidecar and layer operators are preserved. With top weight `w`,
-opacity `O` recovered by the existing ABI-v1 StandardLit metallic-workflow rule,
-top directional energy `S_top(v)`, and V1 Schlick Fresnel `F_top`:
+Sidecar V1 stores top diffuse albedo/F0/roughness/weight and shares the base
+normal, AO and irradiance. Each Slab prepares its own LUT energy and LTC once;
+light lists and resolved shadow samples are shared. With top weight `w`,
+recovered top opacity `O`, top energy `S_top(v)` and Schlick `F_top`:
 
 | Contribution | Horizontal base weight | Vertical base weight | Top weight |
 | --- | --- | --- | --- |
-| Directional / punctual | `1-w` | `1-w + w*(1-F_top(v))*(1-F_top(l))*(1-O)` | `w` |
-| Diffuse GI / environment SS+MS / area | `1-w` | `1-w + w*(1-S_top(v))*(1-O)` | `w` |
-| SSR single-scatter response | `1-w` | Same as environment | `w` |
+| Directional / punctual | 1-w | 1-w + w*(1-F_top(v))*(1-F_top(l))*(1-O) | w |
+| GI / environment SS+MS / area | 1-w | 1-w + w*(1-S_top(v))*(1-O) | w |
+| SSR single-scatter response | 1-w | Same as environment | w |
 
-The old SSR `lerp` was inconsistent with vertical environment transmission.
-SSR now removes the **weighted sum of the two environment SS lobes**, and adds
-the SSR radiance multiplied by `baseWeight*Sss_base + w*Sss_top`. Both MS lobes,
-direct light and emission remain intact. Layer weights, albedo, interface
-transmission, AO and exposure are not applied a second time in composition.
-The shared material emission is still written once by `ClearDeferredLit`.
+SSR removes the weighted sum of both environment SS lobes and adds its radiance
+times `baseWeight*Sss_base + w*Sss_top`. Both MS lobes remain. There is one
+SSR trace/confidence signal for both layers, even when their roughness differs.
 
-This migration does not redefine vertical layering as an exact physical BSDF.
-The existing opacity recovery (including dark-color ambiguity), shared normal,
-shared irradiance/AO policy, and approximate vertical transmittance are retained.
-The Sidecar still supplies no independent top normal or opacity semantic.
-There is still one SSR radiance/confidence signal, reused for both closures;
-different layer roughnesses do not produce two independently traced/denoised
-reflections. The 8.5 broad-environment and LTC approximations also apply per
-layer. More general closure transport remains a separate contract change.
+Opacity recovery retains the StandardLit metallic-workflow quadratic, including
+its dielectric-biased dark-color ambiguity. The Sidecar has no independent
+top normal or opacity. Exact physical vertical transport is outside V1.
+Zero-weight materials export FastSlab upstream; quantized Sidecar alpha zero
+is the missing/invalid sentinel and must not silently downgrade a Dual pixel.
 
-### Resource and compatibility boundary
+## Integration boundary and cost
 
-- Production `DeferredLit.compute` no longer includes `HdrpLitLighting.hlsl`
-  or legacy `GBuffer.hlsl`, constructs legacy BSDF/pre-light structures, or
-  calls legacy environment/area/post-evaluation functions.
-- `DeferredLightingPass` no longer constructs, imports or binds the legacy
-  GGX/Disney and Charlie/Fabric FGD textures. Only the native Slab LUT is
-  imported from the existing shared frame-data owner; its availability is
-  independent of the legacy FGD validity flag. Missing LUT remains diagnostic.
-- The shared FGD subsystem, LTC resources and legacy shaders used by other
-  paths are not deleted. No generated resource asset or package path changes
-  are required.
-- Material program IDs, Catalog hashes, Surface Summary, Sidecar formats,
-  valid-weight sentinel, tile policy and zero-weight producer downgrade are
-  unchanged. Invalid Dual Sidecar data still produces magenta, including at
-  weight zero; a valid zero-weight material is exported as FastSlab upstream.
+Production uses `DeferredLit.compute`; `DeferredDirectionalLightingPass`
+inherits that path. The retained `SimpleDeferredLitPass.hlsl` and
+`DeferredDirectionalLightingIndirectPass.hlsl` share its surface evaluator,
+but have no production ShaderLab wrapper/caller in this repository. Their
+test wrapper exercises fullscreen triangles and indexed pixel points.
 
-### Regression coverage
+PostSurfaceSummary consumers retain their existing ABI. Independent
+Experimental Closure shading, ray-hit indirect lighting, legacy raster material
+producers and the OpenPBR calibration renderer are outside this default path.
+No production shader entrypoint includes `HdrpLitLighting.hlsl`.
 
-The focused production classifier/indirect-Deferred fixture adds 21 Dual Slab
-pixel cases (41 total with the 8.4/8.5 cases): horizontal/vertical mixes,
-zero-weight FastSlab exports, minimum valid Sidecar weight, full top weight,
-different layer F0/roughness, partial/full SSR, direct lighting, probe/sky
-mixing, rectangle/tube/barn doors, AO-zero, receive flags, Unlit, missing LUT,
-invalid Sidecar and mixed Fast/Dual/Error tiles. The oracle combines separate
-per-Slab responses using known fixture opacity rather than calling production
-layer composition or copying its metallic-recovery quadratic. White-environment
-cases check the energy bound and the green-channel unit-energy identity for a
-white base with matched top opacity/diffuse albedo. These checks concern the
-retained environment approximation, not exact vertical direct-light transport.
+FastSlab uses one view LUT sample plus one per analytic light, one LTC lookup,
+and up to two environment/probe evaluations when MS is nonzero. Dual prepares
+two Slabs; a valid Sidecar adds two texture loads. MS can add one sky lookup
+and a second probe traversal per Slab. These are structural costs, not measured
+GPU timings. Scene GPU time, full-render-loop allocation on all threads, and
+quality/performance comparisons remain acceptance work.
 
-Tests no longer bind any legacy FGD texture, including the existing AOT
-Resolve/Classify/Deferred fixture. Source-boundary checks reject legacy lighting
-dependencies for both Fast and Dual. A warmed `DeferredLightingPass.Prepare`
-allocation regression verifies stable descriptor reuse and zero managed bytes.
-GPU tests and full-SRP visual acceptance still need execution in a compatible
-Unity Editor; DXC and managed compilation alone do not establish pixel results.
+## Validation and release acceptance
 
-## Image validation
+`Tools~/Validate-SimpleSlab.ps1` compiles against the real package/Core RP
+includes. From the package root:
 
-For image baselines, use a linear HDR target, fixed exposure, no temporal
-accumulation, the same camera and normal field, and separate direct-white-light
-and white-environment captures. The current HDRP-derived deferred output is the
-regression baseline; the existing OpenPBR path tracer is the physical reference
-for the opaque, isotropic, coat/fuzz/SSS/transmission-disabled common subset.
+```powershell
+./Tools~/Validate-SimpleSlab.ps1 -DxcPath C:/VulkanSDK/1.4.350.0/Bin/dxc.exe -CorePackageRoot ../CoreRP
+```
 
-Image equality with Unreal or OpenPBR is not part of V1. Required invariants are
-finite non-negative output, reciprocity of the BSDF kernel, monotonic roughness
-broadening, normal-incidence F0, derived grazing response, and white-furnace
-energy not exceeding one.
+It checks 27 Deferred compute/raster variants (APV off/L1/L2), three production
+classification kernels, two bake kernels and seven focused test kernels.
+It uses temporary include junctions and removes only those junctions and empty
+directories. It does not import assets or run Unity tests.
+
+| Gate | Coverage / required evidence |
+| --- | --- |
+| Contract and versions | `SimpleSlabContractTests`, C#/HLSL constants and fixed version set |
+| Kernel | `SimpleSlabBSDFKernelTests`, frozen analytic baselines, reciprocity, backfaces |
+| Direct lights | `SimpleSlabDirectLightingTests`, light scaling and native integration |
+| Energy/LUT | `SimpleSlabEnergyTests`, actual bake, 90 furnace cases, 25 reciprocity cases, independent double quadrature, invalidation and stable/missing-source zero allocation |
+| Deferred pixels | `SimpleSlabDeferredLightingTests`: 41 original compute cases, 8 raster scenarios, 5 reserved/invalid-class scenarios; raster scenarios exercise both entries and repeat draws |
+| Render integration | `DeferredDirectionalLightingPassTests`, `PreIntegratedFGDFrameContextTests`, `MaterialProgramAotGpuTests` production RenderGraph and Resolve/Classify/Deferred routes |
+| Serialized resources | `PipelineResourcesContainerEditorTests.FrozenSimpleSlabLut_IsPublishedByTheSerializedRuntimeContainer` |
+| Visual acceptance | Fixed-exposure linear HDR captures: dielectric/metal, roughness sweep, grazing view, white environment, direct, probe/SSR and both Dual operators |
+| Performance | Warm-frame Unity Profiler GC on all relevant threads; representative Fast/Dual GPU timings |
+
+Furnace tolerance is 0.015 per channel; independent rough-lobe LUT quadrature
+tolerance is 0.004; reciprocity error is below 2e-5. Deferred pixel tolerance
+is 0.003 including emission/exposure. The Deferred oracle shares the separately
+tested direct kernel but independently combines layer, environment and SSR
+weights. Rectangle checks numerically integrate its vector form factor before
+the retained horizon approximation. The older AOT routing test's synthetic
+F90 LUT is not a physical furnace reference.
+
+Use identical camera/normal fields, fixed exposure, no temporal accumulation,
+and separate direct-white-light and white-environment captures. Preserve any
+available pre-migration HDRP images as regression baselines. OpenPBR is the
+physical reference for the common opaque/isotropic, coat/fuzz/SSS/transmission-
+disabled subset; image equality with Unreal or OpenPBR is not a V1 requirement.
+
+At the 2026-09-05 freeze handoff, 39 DXC entrypoints/variants and the managed
+Runtime/Editor/test build passed (temporary installed a6 references). Thirty
+pure managed numerical, version and source-invalidation checks also passed,
+without invoking Unity Test Runner or native graphics APIs.
+
+Target-project asset import/resource sync,
+Unity GPU/GC tests, images and timings have not been verified. The checked-in
+resource container still lacks the Slab LUT entry and several Phase 8 assets
+await Unity-generated metadata. Unity MCP is connected to a different project;
+its console state cannot certify this workspace. The target project/csproj
+still reference 6000.7.0a5 while installed Unity references are a6. Managed
+compilation uses temporary a6 references, without changing project versions.
+A successful DXC/managed build does not close these acceptance gates.
 
 ## References
 
-- [Unreal Engine: Overview of Substrate Materials](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine)
-- The in-repository OpenPBR 1.1 implementation under
-  `Shaders/Material/ShaderPass/OpenPBR` is the calibration oracle.
-- [Filament: energy compensation derivation](https://google.github.io/filament/main/filament.html#materialsystem/improvingthebrdfs/energylossinspecularreflectance)
-  documents the Kulla-Conty additional lobe used here, rather than Filament's
-  later scaled-GGX approximation.
-- [Heitz: Sampling the GGX Distribution of Visible Normals](https://jcgt.org/published/0007/04/01/paper.pdf)
-  supplies the visible-normal sampling construction used for baking.
+- [Unreal Substrate overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine)
+- In-repository OpenPBR 1.1: `Shaders/Material/ShaderPass/OpenPBR`.
+- [Filament energy compensation derivation](https://google.github.io/filament/main/filament.html#materialsystem/improvingthebrdfs/energylossinspecularreflectance)
+- [Heitz visible-normal sampling](https://jcgt.org/published/0007/04/01/paper.pdf)

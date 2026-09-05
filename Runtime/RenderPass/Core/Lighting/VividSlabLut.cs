@@ -44,7 +44,10 @@ namespace VividRP.Runtime
         internal bool Create(ComputeShader shader, CommandBuffer cmd = null)
         {
             if (shader == null)
+            {
+                Dispose();
                 return false;
+            }
             if (m_Shader == shader && m_SourceRevision == s_SourceRevision
                 && m_Texture != null && m_Texture.rt.IsCreated())
                 return true;

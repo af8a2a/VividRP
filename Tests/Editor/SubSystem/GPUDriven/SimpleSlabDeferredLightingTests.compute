@@ -22,6 +22,7 @@ uint _TestMixedTile;
 uint _TestEnvironment;
 uint _TestSSREnabled;
 uint _TestDualMode;
+uint _TestOverrideClass;
 float _TestLayerWeight;
 
 // The fixture's mip levels are constant-colored, so expected filtering and
@@ -117,6 +118,8 @@ VividSurfaceSummaryData TestSummary(uint column)
     if (_TestDualMode != 0u && _TestLayerWeight > 0 && column != 3u
         && exportClass == VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB)
         exportClass = VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB;
+    if (_TestOverrideClass != 0u && column == 5u)
+        exportClass = _TestOverrideClass;
     summary.deferredExportHeader = VividBuildDeferredExportHeader(exportClass,
         _TestDualMode == 2u, true, column != 1u && column != 6u, false);
     if (column == 2u)
@@ -225,7 +228,8 @@ void ReferenceLighting(uint3 id : SV_DispatchThreadID)
     bool dual = exportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB;
     float3 expected;
     if (id.x == 7u) expected = _TestEnvironment == 6u ? 1 : float3(0.2f, 0.4f, 0.6f);
-    else if (exportClass == VIVID_DEFERRED_EXPORT_CLASS_ERROR
+    else if ((_TestOverrideClass != 0u && id.x == 5u)
+        || exportClass == VIVID_DEFERRED_EXPORT_CLASS_ERROR
         || (_TestLutReady == 0u && id.x != 4u) || (dual && _TestDualMode == 3u))
         expected = float3(1, 0, 1);
     else if (id.x == 4u) expected = summary.emissive;

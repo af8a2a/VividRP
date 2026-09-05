@@ -1,8 +1,8 @@
 #ifndef VIVIDRP_SIMPLE_SLAB_CONTRACT_INCLUDED
 #define VIVIDRP_SIMPLE_SLAB_CONTRACT_INCLUDED
 
-// Phase 8.0 freezes this contract without switching the production deferred
-// evaluator. C# SimpleSlabContract is the source of truth for these constants.
+// Frozen Simple Slab V1 inputs and conventions used by production Deferred.
+// C# SimpleSlabContract is the source of truth for these constants.
 #define VIVID_SIMPLE_SLAB_CONTRACT_VERSION 1u
 #define VIVID_SIMPLE_SLAB_FINGERPRINT_VERSION 1u
 #define VIVID_SIMPLE_SLAB_FINGERPRINT_LO 0xB6B790D8u

@@ -20,7 +20,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains($"#define VIVID_SLAB_LUT_RESOLUTION {VividSlabLut.Resolution}", header);
             StringAssert.Contains($"#define VIVID_SLAB_LUT_SAMPLE_COUNT {VividSlabLut.SampleCount}u", header);
             StringAssert.Contains($"#define VIVID_SIMPLE_SLAB_ENERGY_VERSION {MaterialProgramContract.SimpleSlabEnergyVersion}u", header);
-            string deferred = Read("Shaders/Material/DeferredLit.compute");
+            string deferred = Read("Shaders/Core/Public/VividDeferredLighting.hlsl");
             StringAssert.DoesNotContain("ApplyVividSlabEnergyToLegacyPreLight", deferred);
             StringAssert.Contains("VividSimpleSlabEnergy baseEnergy = basePreLightData.energy;", deferred);
             StringAssert.Contains("VividSimpleSlabEnergy topEnergy = topPreLightData.energy;", deferred);
@@ -122,6 +122,18 @@ namespace VividRP.Editor.Tests
                 VividSlabLut.InvalidateSource();
                 Assert.That(lut.Create(shader), Is.True);
                 Assert.That(lut.Texture, Is.Not.SameAs(original));
+                original = lut.Texture;
+                Assert.That(lut.Create(null), Is.False);
+                Assert.That(lut.Texture, Is.Null, "Missing source must release the previously valid LUT.");
+                cmd.Clear();
+                for (int i = 0; i < 16; ++i) lut.Create(null, cmd);
+                before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 128; ++i) lut.Create(null, cmd);
+                allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(cmd.sizeInBytes, Is.Zero);
+                Assert.That(lut.Create(shader), Is.True);
+                Assert.That(lut.Texture, Is.Not.SameAs(original));
                 lut.Dispose();
                 Assert.That(lut.Texture, Is.Null);
                 Assert.That(lut.Create(null), Is.False);
@@ -137,6 +149,27 @@ namespace VividRP.Editor.Tests
             Assert.That(texture.desc.ColorFormat, Is.EqualTo(VividSlabLut.Format));
             Assert.That(texture.desc.Width, Is.EqualTo(VividSlabLut.Resolution));
             Assert.That(texture.desc.UseMipMap, Is.False);
+        }
+
+        [TestCase("VividSlabLut.compute")]
+        [TestCase("VividSlabLutIntegration.hlsl")]
+        [TestCase("VividSimpleSlabEnergy.hlsl")]
+        [TestCase("VividSimpleSlabBSDF.hlsl")]
+        [TestCase("VividSimpleSlabContract.hlsl")]
+        public void SourceChanges_InvalidateLutForImportDeleteAndBothMoveEndpoints(string file)
+        {
+            string[] empty = Array.Empty<string>();
+            foreach (string root in new[] { "Packages/com.vivid.render-pipelines",
+                "Packages/com.af8a2a.vividrp", "Packages/VividRP", "Packages/Custom_URP" })
+            {
+                string[] changed = { root + "/Shaders/Core/Public/" + file };
+                Assert.That(VividSlabLutPostprocessor.ShouldInvalidateLut(changed, empty, empty, empty), Is.True);
+                Assert.That(VividSlabLutPostprocessor.ShouldInvalidateLut(empty, changed, empty, empty), Is.True);
+                Assert.That(VividSlabLutPostprocessor.ShouldInvalidateLut(empty, empty, changed, empty), Is.True);
+                Assert.That(VividSlabLutPostprocessor.ShouldInvalidateLut(empty, empty, empty, changed), Is.True);
+            }
+            string[] unrelated = { "Assets/Material.mat", "Assets/" + file + ".meta" };
+            Assert.That(VividSlabLutPostprocessor.ShouldInvalidateLut(unrelated, empty, empty, empty), Is.False);
         }
 
         // Uniform solid-angle midpoint quadrature: deliberately not the GPU VNDF sampler.

@@ -265,6 +265,13 @@ directories. It does not import assets or run Unity tests.
 lights at `NdotV = 1, 1e-5, 0, -0.6, -1`: both lobes must remain finite,
 positive for front-facing views and exactly zero otherwise.
 
+The production RenderGraph pixel test runs both an emission-only case and a
+unit white conductor under a constant colored environment, with pre-exposure 2.
+The latter must return emission plus environment radiance; Clear alone cannot
+pass. Debug RGB contains pre-exposed indirect lighting and alpha remains zero
+because SSR is disabled. This uses the pipeline-owned native LUT and normal
+sky resource import, not synthetic LUTs or manually dispatched Deferred shaders.
+
 Furnace tolerance is 0.015 per channel; independent rough-lobe LUT quadrature
 tolerance is 0.004; reciprocity error is below 2e-5. Deferred pixel tolerance
 is 0.003 including emission/exposure. The Deferred oracle shares the separately

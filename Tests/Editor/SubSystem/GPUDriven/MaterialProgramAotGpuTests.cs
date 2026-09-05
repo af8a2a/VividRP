@@ -234,12 +234,16 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void ProductionRenderGraph_VisibilityResolveClassifyAndLight_EndToEndOnGpu()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ProductionRenderGraph_VisibilityResolveClassifyAndLight_EndToEndOnGpu(bool environmentLighting)
         {
             const int width = 8;
             const int height = 8;
             const int variantCount = 4;
+            const float preExposure = 2.0f;
+            var emission = new Color(0.125f, 0.25f, 0.5f, 1.0f);
+            var environmentRadiance = new Color(0.25f, 0.5f, 1.0f, 1.0f);
 
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
                 Assert.Ignore("A graphics device is required for the production RenderGraph pixel-loop validation.");
@@ -271,6 +275,9 @@ namespace VividRP.Editor.Tests
             AssertUsableComputeShader(
                 resources.DeferredLitCompute,
                 "production Deferred Lit resource");
+            AssertUsableComputeShader(
+                resources.SlabLutCompute,
+                "production Slab LUT resource");
 
             var buffers = new List<GraphicsBuffer>();
             var objects = new List<Object>();
@@ -318,8 +325,8 @@ namespace VividRP.Editor.Tests
                 {
                     CreatePixelLoopMaterialData(
                         new float4(1.0f),
-                        new float3(0.125f, 0.25f, 0.5f),
-                        metallic: 0.0f),
+                        new float3(emission.r, emission.g, emission.b),
+                        metallic: 1.0f),
                 };
                 VividSurfaceBindingData[] surfaceBindings =
                 {
@@ -414,7 +421,7 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer preExposureBuffer = TrackBuffer(
                     CreateStructuredBuffer(new[]
                     {
-                        new float4(1.0f, 0.0f, 0.0f, 0.0f),
+                        new float4(preExposure, 0.0f, 0.0f, 0.0f),
                     }));
                 GraphicsBuffer ambientProbeBuffer = TrackBuffer(
                     CreateStructuredBuffer(new float4[7]));
@@ -446,8 +453,9 @@ namespace VividRP.Editor.Tests
                 var camera = cameraObject.AddComponent<Camera>();
                 camera.enabled = false;
                 camera.targetTexture = lightingCapture;
-                camera.transform.position = new Vector3(0.0f, 0.0f, -1.0f);
-                camera.transform.rotation = Quaternion.identity;
+                // Look at the triangle's +Z normal from its front hemisphere.
+                camera.transform.position = new Vector3(0.0f, 0.0f, 1.0f);
+                camera.transform.rotation = Quaternion.Euler(0.0f, 180.0f, 0.0f);
                 camera.orthographic = true;
                 camera.orthographicSize = 1.0f;
                 camera.nearClipPlane = 0.1f;
@@ -481,7 +489,26 @@ namespace VividRP.Editor.Tests
                     compiledPasses[2],
                     Is.TypeOf<MaterialClassificationPass>());
                 Assert.That(compiledPasses[3], Is.TypeOf<DeferredLightingPass>());
-                PassRecorder.GetFrameData().GetOrCreate<VividSkyData>().Reset();
+                var skyData = PassRecorder.GetFrameData().GetOrCreate<VividSkyData>();
+                skyData.Reset();
+                if (environmentLighting)
+                {
+                    // Unit conductor: SS + MS albedo is one, so a constant
+                    // environment has a closed-form result independent of LUT texels.
+                    var sky = TrackObject(new Cubemap(2, TextureFormat.RGBAFloat, true)
+                    {
+                        filterMode = FilterMode.Trilinear,
+                    });
+                    for (int face = 0; face < 6; ++face)
+                    {
+                        sky.SetPixels(new[] { environmentRadiance, environmentRadiance,
+                            environmentRadiance, environmentRadiance }, (CubemapFace)face, 0);
+                        sky.SetPixels(new[] { environmentRadiance }, (CubemapFace)face, 1);
+                    }
+                    sky.Apply(false, false);
+                    skyData.activeSkyType = SkyType.HDRI;
+                    skyData.specularCubemap = sky;
+                }
                 PassRecorder.GetFrameData()
                     .GetOrCreate<VividScreenSpaceReflectionData>()
                     .Reset();
@@ -595,14 +622,24 @@ namespace VividRP.Editor.Tests
                     gbuffer0Readback.GetPixel(4, 4),
                     0xC2,
                     "Production Visibility and Resolve must emit the StandardLit Deferred Export header.");
+                // Clear alone only writes emission and zero debug. The lit case
+                // therefore proves that the classified FastSlab dispatch ran.
                 AssertColor(
                     lightingReadback.GetPixel(4, 4),
-                    new Color(0.125f, 0.25f, 0.5f, 1.0f),
-                    "Production Deferred must preserve emission after classifying the lit tile.");
+                    new Color(
+                        (emission.r + (environmentLighting ? environmentRadiance.r : 0.0f)) * preExposure,
+                        (emission.g + (environmentLighting ? environmentRadiance.g : 0.0f)) * preExposure,
+                        (emission.b + (environmentLighting ? environmentRadiance.b : 0.0f)) * preExposure,
+                        1.0f),
+                    "Production Deferred must add native Slab environment lighting to emission exactly once.");
                 AssertColor(
                     debugReadback.GetPixel(4, 4),
-                    new Color(0.0f, 0.0f, 0.0f, 1.0f),
-                    "Production Deferred FastSlab dispatch must shade the classified tile.");
+                    new Color(
+                        environmentLighting ? environmentRadiance.r * preExposure : 0.0f,
+                        environmentLighting ? environmentRadiance.g * preExposure : 0.0f,
+                        environmentLighting ? environmentRadiance.b * preExposure : 0.0f,
+                        0.0f),
+                    "Debug RGB is pre-SSR indirect lighting; alpha is zero when SSR is disabled, not a dispatch marker.");
             }
             finally
             {

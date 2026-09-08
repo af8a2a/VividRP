@@ -1,0 +1,35 @@
+using UnityEngine;
+using UnityEditor;
+using UnityEditorInternal;
+using System.IO;
+internal class CommandScript : IRunCommand
+{
+    static bool enabledBefore, editorBefore;
+    static int remaining;
+    static readonly EditorApplication.CallbackFunction callback = Tick;
+    public void Execute(ExecutionResult result)
+    {
+        if (Application.dataPath != "E:/VividRP_Reborn/Assets") return;
+        enabledBefore = ProfilerDriver.enabled;
+        editorBefore = ProfilerDriver.profileEditor;
+        ProfilerDriver.profileEditor = true;
+        ProfilerDriver.enabled = true;
+        remaining = 60;
+        EditorApplication.update += callback;
+        result.Log("Started bounded 60-update Editor Profiler capture; restores prior flags automatically.");
+    }
+    static void Tick()
+    {
+        if (--remaining > 0)
+        {
+            EditorApplication.QueuePlayerLoopUpdate();
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+            return;
+        }
+        EditorApplication.update -= callback;
+        ProfilerDriver.enabled = enabledBefore;
+        ProfilerDriver.profileEditor = editorBefore;
+        File.WriteAllText("E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-bnd1/profiler-range.txt",
+            ProfilerDriver.firstFrameIndex + "," + ProfilerDriver.lastFrameIndex);
+    }
+}

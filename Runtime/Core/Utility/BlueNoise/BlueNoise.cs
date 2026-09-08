@@ -275,6 +275,32 @@ namespace VividRP.Runtime
         }
 
 
+        public void Bind(CommandBuffer cmd, ComputeShader cs, int kernel)
+        {
+            if (m_ScramblingTile1SPP != null)
+                cmd.SetComputeTextureParam(cs, kernel, s_ScramblingTile1SPPId, m_ScramblingTile1SPP);
+            if (m_RankingTile1SPP != null)
+                cmd.SetComputeTextureParam(cs, kernel, s_RankingTile1SPPId, m_RankingTile1SPP);
+            if (m_ScramblingTile8SPP != null)
+                cmd.SetComputeTextureParam(cs, kernel, s_ScramblingTile8SPPId, m_ScramblingTile8SPP);
+            if (m_RankingTile8SPP != null)
+                cmd.SetComputeTextureParam(cs, kernel, s_RankingTile8SPPId, m_RankingTile8SPP);
+            if (m_ScramblingTile != null)
+            {
+                cmd.SetComputeTextureParam(cs, kernel, s_ScramblingTileId, m_ScramblingTile);
+                cmd.SetComputeTextureParam(cs, kernel, s_ScramblingTile256SPPId, m_ScramblingTile);
+            }
+            if (m_RankingTile != null)
+            {
+                cmd.SetComputeTextureParam(cs, kernel, s_RankingTileId, m_RankingTile);
+                cmd.SetComputeTextureParam(cs, kernel, s_RankingTile256SPPId, m_RankingTile);
+            }
+            if (m_OwenScrambledSequence != null)
+                cmd.SetComputeTextureParam(cs, kernel, s_OwenScrambledSequenceId, m_OwenScrambledSequence);
+            if (m_SobolMatricesBuffer != null)
+                cmd.SetComputeBufferParam(cs, kernel, s_SobolMatricesBufferId, m_SobolMatricesBuffer);
+        }
+
         public void Bind(ComputeCommandBuffer cmd, ComputeShader cs, int kernel)
         {
             if (m_ScramblingTile1SPPHandle.IsValid())

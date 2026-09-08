@@ -100,6 +100,27 @@ namespace VividRP.Editor.Tests
             finally { UnityEngine.Object.DestroyImmediate(settings); }
         }
 
+        [Test]
+        public void SMRT_StableExplicitBlueNoiseBindingDoesNotAllocate()
+        {
+            bool ownsBlueNoise = BlueNoise.Instance == null;
+            BlueNoise.Initialize();
+            using var cmd = new CommandBuffer();
+            try
+            {
+                var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                    "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
+                int kernel = shader.FindKernel("CSMShadowResolve");
+                var noise = BlueNoise.Instance;
+                for (int i = 0; i < 32; i++) { cmd.Clear(); noise.Bind(cmd, shader, kernel); }
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++) { cmd.Clear(); noise.Bind(cmd, shader, kernel); }
+                long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(bytes, Is.Zero);
+            }
+            finally { if (ownsBlueNoise) BlueNoise.Cleanup(); }
+        }
+
         private static void RecordSMRT(CommandBuffer cmd, CascadedShadowSettingsVolume settings, ComputeShader shader)
         {
             cmd.Clear();

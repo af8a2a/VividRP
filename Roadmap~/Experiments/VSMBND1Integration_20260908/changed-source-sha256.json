@@ -1,0 +1,10 @@
+{
+  "Runtime/Core/Utility/BlueNoise/BlueNoise.cs": "cebcd2362e1f181be90c1ba853fc034f3fc8a77278e6ade75d46ec87dfa9b844",
+  "Runtime/RenderPass/Core/CSMShadowResolvePass.cs": "d62ae57a3ff4eaff29fe83b93868f2fdd68f26264f6de638211f99296feeb22f",
+  "Runtime/RenderPass/Debug/VSMReceiverDebugPass.cs": "1cc9eecce6b6c96e430c7294772a7e2be70324d4891894970387f6f392c54d27",
+  "Editor/Tools/VSMQualityReproduction.cs": "ed9557827e60e643a53c6e9bd97a4c44f8dcbf4822acffa916184229f04da538",
+  "Shaders/Core/Private/VSMSMRT.hlsl": "1a16595aa0604c2efa228af481e510262776a3007b093fd3bc6f9052110da3b2",
+  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.cs": "adfd758c71bd5473e509de56ae264c0d0e71f9c948bf6b947f7e8f5c651faa0e",
+  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute": "e9cb32fe791c516444f1c5035b86e4b5f106e3f163a4d511876d1339514d8905",
+  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapReceiverQualityTests.cs": "7c9f112c8094701f3e170c08534407650515f8a941602a1538cb96fc8773bba6"
+}

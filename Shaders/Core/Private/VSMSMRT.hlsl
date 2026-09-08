@@ -3,6 +3,8 @@
 // t is world distance along the central light axis; lateral motion follows the
 // sampled light disk until the bound, then continues parallel to the light.
 
+#include "../Public/BlueNoise.hlsl"
+
 bool HasVSMSMRTFootprint(float2 uv, int index)
 {
     int halo = (int)ceil(VSMFilterGuard(index, true) * _VSMPrototypeVirtualResolution);
@@ -20,24 +22,25 @@ bool HasVSMSMRTFootprint(float2 uv, int index)
     return true;
 }
 
-float2 VSMSMRTDiskSample(uint2 pixel, uint frame, uint ray, uint count)
+float2 VSMSMRTPhase(uint2 pixel, uint frame, uint dimension)
+{
+    // Reuse the 1SPP tiles with the full 256-frame sequence, not the static
+    // 1SPP sample-index mask. These are phases for a stratified ray set, not STBN.
+    return float2(GetBNDSequenceSample1SPPTemporal(pixel, frame, dimension),
+        GetBNDSequenceSample1SPPTemporal(pixel, frame, dimension + 1u));
+}
+
+float2 VSMSMRTDiskSample(float2 phase, uint ray, uint count)
 {
     // Equal-area radial strata with a temporally rotated low-discrepancy angle.
-    // Pixel Cranley-Patterson rotation decorrelates neighbors; not blue noise.
-    uint seed = GetVSMStochasticSeed(pixel, 0u);
-    float2 rotation = float2(seed >> 8, VSMStochasticHash(seed) >> 8) / 16777216.0;
-    float2 phase = frac(rotation + (frame & 65535u) * float2(0.754877666, 0.569840296));
     float radius = sqrt((ray + phase.x) / count);
     float sine, cosine;
     sincos(kPCSSTwoPi * frac(ray * 0.618033989 + phase.y), sine, cosine);
     return radius * float2(cosine, sine);
 }
 
-float2 VSMSMRTReceiverOffset(uint2 pixel, uint frame, uint ray, uint count)
+float2 VSMSMRTReceiverOffset(float2 phase, uint ray, uint count)
 {
-    uint seed = GetVSMStochasticSeed(pixel, 0x51633e2du);
-    float2 rotation = float2(seed >> 8, VSMStochasticHash(seed) >> 8) / 16777216.0;
-    float2 phase = frac(rotation + (frame & 65535u) * float2(0.438579021, 0.318309886));
     // Shifted Hammersley points integrate the existing two-texel PCF support
     // for every supported count (including odd counts). Independent of light size.
     float2 samplePoint = float2((float)ray / count, reversebits(ray) * 2.3283064365386963e-10);
@@ -123,6 +126,11 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, out flo
     float slope = _VSMSMRTParameters.w / projection.parameters.x;
     int rays = clamp((int)_VSMSMRTParameters.x, 4, 8);
     int steps = clamp((int)_VSMSMRTParameters.y, 4, 8);
+    // Fetch once per receiver/projection, independent of the ray count.
+    float2 diskPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 0u);
+    float2 receiverPhase = 0;
+    if (_VSMReceiverParameters.x >= 0.5)
+        receiverPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 2u);
     float sum = 0;
     [loop]
     for (int ray = 0; ray < rays; ray++)
@@ -130,11 +138,11 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, out flo
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
         g_VSMDebugSMRT.x++;
 #endif
-        float2 disk = VSMSMRTDiskSample(pixel, (uint)_CSMFrameIndex, (uint)ray, (uint)rays);
+        float2 disk = VSMSMRTDiskSample(diskPhase, (uint)ray, (uint)rays);
         float3 origin = coord;
         if (_VSMReceiverParameters.x >= 0.5)
         {
-            float2 jitter = VSMSMRTReceiverOffset(pixel, (uint)_CSMFrameIndex, (uint)ray, (uint)rays);
+            float2 jitter = VSMSMRTReceiverOffset(receiverPhase, (uint)ray, (uint)rays);
             float2 originalTexel = coord.xy * _VSMPrototypeVirtualResolution;
             float2 sampleTexel = floor(originalTexel + jitter) + 0.5;
             origin.xy = sampleTexel / _VSMPrototypeVirtualResolution;

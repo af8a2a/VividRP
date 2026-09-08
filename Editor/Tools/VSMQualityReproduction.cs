@@ -368,6 +368,7 @@ namespace VividRP.Editor
         private void Bind(CommandBuffer cmd, VividCameraData camera, VividShadowData shadow, VividLightData lightData, CascadedShadowSettingsVolume settings,
             Texture depth, Texture normal, Texture sourceShadow)
         {
+            BlueNoise.Instance?.Bind(cmd, m_Compute, m_Kernel);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[0], depth);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[1], normal);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[2], sourceShadow);

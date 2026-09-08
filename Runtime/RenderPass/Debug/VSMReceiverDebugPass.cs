@@ -19,7 +19,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     // Opt-in graph node: absent from the shipping graph means no diagnostic
     // dispatch, texture, readback, or per-pixel instrumentation in normal resolve.
-    public sealed class VSMReceiverDebugPass : ComputePass
+    public sealed class VSMReceiverDebugPass : ComputePass, IBlueNoiseConsumerPass
     {
         private static readonly int DepthId = Shader.PropertyToID("_DepthTexture");
         private static readonly int NormalId = Shader.PropertyToID("_GBuffer1");
@@ -154,6 +154,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_Depth.innerHandle.IsValid() || !m_Normal.innerHandle.IsValid()
                 || !m_Shadow.innerHandle.IsValid() || !m_Output.innerHandle.IsValid() || !m_Data.innerHandle.IsValid()) return;
             var cmd = context.cmd;
+            BlueNoise.Instance?.Bind(cmd, m_Compute, m_Kernel);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, DepthId, m_Depth.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, NormalId, m_Normal.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, ShadowId, m_Shadow.innerHandle);

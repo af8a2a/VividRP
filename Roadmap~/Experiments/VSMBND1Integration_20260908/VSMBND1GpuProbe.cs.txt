@@ -1,0 +1,379 @@
+using System;
+using System.IO;
+using Unity.Mathematics;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
+using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
+using Object = UnityEngine.Object;
+namespace VividRP.Editor {
+internal static class VSMBND1GpuProbe {
+static int checks;
+static void Check(bool value, string message) { checks++; if(!value) throw new InvalidOperationException(message); }
+[MenuItem("Tools/VividRP/Diagnostics/Run Temporary VSM BND1 GPU Probe")]
+static void Run() {
+ if(Application.dataPath != "E:/VividRP_Reborn/Assets") throw new InvalidOperationException("Wrong project");
+ checks=0; string error=null;
+ try { Phases(); Bindings(); Rays(); Sparse(); Entry(); Contact(); Gap(); Grazing(); Fallback(); Parameters(); }
+ catch(Exception e) { error=e.ToString(); }
+ string report="GPU="+SystemInfo.graphicsDeviceType+" checks="+checks+" error="+(error??"none");
+ File.WriteAllText("E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-bnd1/gpu.txt",report); Debug.Log(report);
+}
+static void SetDepth(Fixture f,int x,int y,float depth) {
+ int slot=(int)f.TableData[y/4*2+x/4]-1;
+ f.StaticData[(slot/4*4+y%4)*16+slot%4*4+x%4]=math.asuint(depth);
+}
+static void Rays() {
+ using var f=new Fixture();
+ for(int p=0;p<12;p++)f.Map(p,11-p);
+ f.Shader.SetVector("_VSMSMRTParameters",new Vector4(4,8,10,.5f));
+ for(int y=0;y<8;y++)SetDepth(f,4,y,.3f);
+ f.Upload();
+ var inputs=new float4[400];var rays=new float4[400];var expected=new bool[400];
+ for(int i=0;i<400;i++) {
+  float x=2.051f+i%20*.18f,slope=-.6f+i/20*.06f;
+  inputs[i]=new float4(x/8,.45f,.2f,0);rays[i]=new float4(slope,0,3,0);
+  float hit=x+slope*2;expected[i]=hit>=4&&hit<5;
+ }
+ var result=f.Run("TraceSMRTRays",inputs,normals:rays);
+ for(int i=0;i<400;i++){Check(result[i].x==1,"complete ray "+i);Check(result[i].y==(expected[i]?0:1),"analytic rod "+i+" actual="+result[i]);}
+ // Bounded tail retains a far blocker; running off the map stays unavailable.
+ for(int p=0;p<12;p++)f.Map(p,11-p);
+ SetDepth(f,4,3,.8f);f.Upload();
+ inputs=new[]{new float4(3.75f/8,3.5f/8,.2f,0)};
+ result=f.Run("TraceSMRTRays",inputs,normals:new[]{new float4(.5f,0,1,0)});
+ Check(result[0].x==1&&result[0].y==0,"far tail");
+ Check(f.Run("TraceSMRTRays",inputs,normals:new[]{new float4(-10,0,10,0)})[0].x==0,"out of map unknown");
+}
+static void Sparse() {
+ using var f=new Fixture();for(int p=0;p<12;p++)f.Map(p,11-p);
+ f.Shader.SetVector("_VSMSMRTParameters",new Vector4(4,4,1,.5f));
+ var inputs=new[]{new float4(.48f,.48f,.2f,0)};
+ for(int frame=0;frame<32;frame++) {
+  f.Shader.SetInt("_CSMFrameIndex",frame);f.MetadataData[3].x=10;f.Upload();
+  var a=f.Run("FilterSMRTFootprints",inputs)[0];Check(a.x==1&&a.y==1,"valid empty");
+  f.MetadataData[3].x|=4;f.Upload();Check(f.Run("FilterSMRTFootprints",inputs)[0].x==0,"dirty union");
+  f.MetadataData[3].x=10;uint slot=f.TableData[3];f.TableData[3]=0;f.Upload();
+  Check(f.Run("FilterSMRTFootprints",inputs)[0].x==0,"missing union");f.TableData[3]=slot;
+ }
+ // Zero-angle/reference equivalence across an actual partly occluded hierarchy.
+ for(int p=0;p<12;p++)f.Map(p,11-p,p%2==0?.8f:0);f.Upload();
+ f.Shader.SetVector("_VSMReceiverParameters",new Vector4(1,0,0,0));
+ f.Shader.SetVector("_VSMSMRTParameters",Vector4.zero);
+ var position=new[]{new float4(.1f,.1f,0,0)};float baseline=f.Run("ResolveReceivers",position)[0].x;
+ f.Shader.SetVector("_VSMSMRTParameters",new Vector4(4,8,10,0));
+ Check(f.Run("ResolveReceivers",position)[0].x==baseline,"zero angle exact PCF");
+}
+static void Entry() {
+ using var f=new Fixture();for(int p=0;p<12;p++)f.Map(p,11-p);
+ for(int y=0;y<8;y++)for(int x=4;x<8;x++)SetDepth(f,x,y,.205f);f.Upload();
+ f.Shader.SetVector("_VSMReceiverParameters",new Vector4(1,0,0,0));
+ var receiver=new[]{new float4(.1f,.1f,-.3f,0)};
+ float baseline=f.Run("ResolveReceivers",receiver)[0].x;
+ f.Shader.SetVector("_VSMSMRTParameters",new Vector4(4,4,1,.5f));
+ float soft=f.Run("ResolveReceivers",receiver)[0].x;
+ float direct=f.Run("FilterSMRTFootprints",new[]{new float4(.51f,.51f,.2f,0)})[0].y;
+ Check(baseline>.1f&&baseline<.9f&&soft==direct&&soft!=baseline,"entry must select SMRT output PCF="+baseline+" soft="+soft+" direct="+direct);
+}
+static void Contact() {
+ using var f=new Fixture();for(int p=0;p<12;p++)f.Map(p,11-p);
+ var projection=f.ProjectionData[0];projection.Parameters.x=.01f;
+ projection.WorldToShadow.m22=.05f;f.ProjectionData[0]=projection;
+ float tangent=Mathf.Tan(.25f*Mathf.Deg2Rad);
+ f.Shader.SetVector("_VSMSMRTParameters",new Vector4(8,8,2,tangent));
+ var inputs=new float4[2048];
+ string report="distance,x,visibility,analytic,error\n";
+ foreach(float distance in new[]{.1f,.5f,1.5f,5f})foreach(float x in new[]{3.8f,4.2f}) {
+  for(int y=0;y<8;y++)for(int xx=4;xx<8;xx++)SetDepth(f,xx,y,.2f+distance*.05f);f.Upload();
+  for(int i=0;i<inputs.Length;i++)inputs[i]=new float4(x/8,.48f,.2f,0);
+  var a=f.Run("FilterSMRTFootprints",inputs);float sum=0;
+  for(int i=0;i<a.Length;i++){Check(a[i].x==1,"contact complete");sum+=a[i].y;}
+  float q=Mathf.Clamp((4-x)*.01f/(Mathf.Min(distance,2)*tangent),-1,1);
+  float analytic=1-(Mathf.Acos(q)-q*Mathf.Sqrt(1-q*q))/Mathf.PI;
+  float actual=sum/a.Length;
+  Check(Mathf.Abs(actual-analytic)<.035f,"contact analytic distance="+distance+" x="+x+" measured="+actual+" expected="+analytic);
+  report+=distance+","+x+","+actual+","+analytic+","+Mathf.Abs(actual-analytic)+"\n";
+ }
+ File.WriteAllText("E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-bnd1/contact.csv",report);
+}
+static void Gap() {
+ using var f=new Fixture();for(int p=0;p<12;p++)f.Map(p,11-p);
+ f.Shader.SetVector("_VSMSMRTParameters",new Vector4(4,8,10,.5f));
+ SetDepth(f,3,3,.3f);SetDepth(f,4,3,.45f);f.Upload();
+ var input=new[]{new float4(3.5f/8,3.5f/8,.2f,0)};var ray=new[]{new float4(.5f,0,4,0)};
+ Check(f.Run("TraceSMRTRays",input,normals:ray)[0].y==0,"one cell hidden layer gap fill");
+ SetDepth(f,4,3,0);f.Upload();Check(f.Run("TraceSMRTRays",input,normals:ray)[0].y==1,"gap fill never bridges empty");
+}
+static void Grazing() {
+ using var f=new Fixture();for(int p=0;p<12;p++)f.Map(p,11-p);
+ var p0=f.ProjectionData[0];p0.Parameters.x=.01f;p0.WorldToShadow.m22=.05f;f.ProjectionData[0]=p0;
+ f.Shader.SetVector("_VSMReceiverParameters",new Vector4(1,0,0,0));
+ float tangent=Mathf.Tan(.25f*Mathf.Deg2Rad);
+ var input=new float4[128];var bias=new float4[128];
+ foreach(float gx in new[]{-.002f,0,.002f})foreach(float gy in new[]{-.002f,.002f}) {
+  for(int y=0;y<8;y++)for(int x=0;x<8;x++)SetDepth(f,x,y,.2f+(x-3.5f)*gx+(y-3.5f)*gy);
+  for(int i=0;i<128;i++) {float x=3.6f+(i%16)*.05f,y=3.6f+(i/16)*.1f;
+   input[i]=new float4(x/8,y/8,.2f+(x-4)*gx+(y-4)*gy,0);bias[i]=new float4(gx,gy,.0005f,0);}
+  f.Upload();
+  for(int rays=4;rays<=8;rays++) {
+   f.Shader.SetVector("_VSMSMRTParameters",new Vector4(rays,8,2,tangent));
+   var a=f.Run("FilterSMRTFootprints",input,normals:bias);
+   for(int i=0;i<128;i++)Check(a[i].x==1&&a[i].y==1,"unoccluded sloped receiver count="+rays+" sample="+i+" actual="+a[i]);
+  }
+ }
+}
+static void Fallback() {
+ using var f=new Fixture();for(int p=0;p<12;p++)f.Map(p,11-p,p>=4&&p<8?.8f:0);
+ f.Shader.SetVector("_VSMSMRTParameters",new Vector4(4,4,1,.5f));
+ var input=new[]{new float4(0,0,0,0)};
+ f.MetadataData[3].x|=4;f.Upload();Check(f.Run("ResolveReceivers",input)[0].x==0,"dirty fine retries full shadowed parent");
+ uint[] requests=new uint[12];for(int p=0;p<12;p++)requests[p]=f.MetadataData[p].x&3841u;
+ for(int p=0;p<12;p++)f.Map(p,11-p,p>=4&&p<8?.8f:0);f.Upload();f.Run("ResolveReceivers",input);
+ for(int p=0;p<12;p++)Check((f.MetadataData[p].x&3841u)==requests[p],"residency independent SMRT feedback");
+ // All soft supports extend outside these tiny maps; complete PCF is still valid.
+ for(int p=0;p<12;p++)f.Map(p,11-p,.8f);
+ f.Shader.SetVector("_VSMReceiverParameters",new Vector4(1,0,0,0));
+ f.Shader.SetVector("_VSMSMRTParameters",new Vector4(4,8,100,.5f));f.Upload();
+ Check(f.Run("ResolveReceivers",input)[0].x==0,"terminal full PCF fallback retains occlusion");
+}
+static void Parameters() {
+ var s=ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();using var cmd=new CommandBuffer();
+ try {
+ Check(VirtualShadowMapReceiverQuality.BuildSMRTParameters(s,.5f)==Vector4.zero,"default off");
+ s.virtualShadowMapSMRT.value=true;
+ Check(VirtualShadowMapReceiverQuality.BuildSMRTParameters(s,0)==Vector4.zero,"zero angle");
+ var shader=AssetDatabase.LoadAssetAtPath<ComputeShader>("Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
+ for(int i=0;i<100;i++)Record(cmd,s,shader);long before=GC.GetAllocatedBytesForCurrentThread();
+ for(int i=0;i<10000;i++)Record(cmd,s,shader);long bytes=GC.GetAllocatedBytesForCurrentThread()-before;
+ Check(bytes==0,"stable managed allocation="+bytes);
+ }finally{Object.DestroyImmediate(s);}
+}
+static void Record(CommandBuffer cmd,CascadedShadowSettingsVolume s,ComputeShader shader){cmd.Clear();cmd.SetComputeVectorParam(shader,VirtualShadowMapReceiverQuality.SMRTParametersId,VirtualShadowMapReceiverQuality.BuildSMRTParameters(s,.5f));}
+
+static void Phases() {
+ using var f=new Fixture();var inputs=new float4[1024];var rayData=new float4[1024];
+ foreach(int2 pixel in new[]{new int2(19,37),new int2(127,0),new int2(513,1025)})for(int count=4;count<=8;count++) {
+  for(int frame=0;frame<256;frame++)for(int mode=0;mode<4;mode++) {
+   int i=frame*4+mode;inputs[i]=new float4(pixel.x,pixel.y,frame,mode);rayData[i]=new float4(frame%count,count,0,0);
+  }
+  var a=f.Run("InspectSMRTSamples",inputs,normals:rayData);var visited=new bool[4,256];
+  for(int frame=0;frame<256;frame++) {
+   int i=frame*4;
+   for(int dim=0;dim<4;dim++) {
+    float phase=a[i+dim/2][dim%2];Check(phase>=0&&phase<1,"phase bounds");int bin=Mathf.FloorToInt(phase*256);
+    Check(!visited[dim,bin],"full temporal permutation dim="+dim+" frame="+frame);visited[dim,bin]=true;
+   }
+   float radius=math.lengthsq(a[i+2]);int ray=frame%count;
+   Check(radius>=(float)ray/count-1e-6f&&radius<=(float)(ray+1)/count+1e-6f,"radial strata");
+   Check(math.all(a[i+3]>=-1)&&math.all(a[i+3]<=1),"receiver support");
+  }
+  for(int i=0;i<inputs.Length;i++)inputs[i].z+=256;
+  var b=f.Run("InspectSMRTSamples",inputs,normals:rayData);
+  for(int i=0;i<inputs.Length;i++)Check(math.all(a[i]==b[i]),"256-frame wrap");
+ }
+}
+static void Bindings() {
+ var source=AssetDatabase.LoadAssetAtPath<ComputeShader>("Packages/com.vivid.render-pipelines/Editor/Tools/VSMBND1Sampling.compute");
+ var shader=Object.Instantiate(source);using var cmd=new CommandBuffer();
+ using var input=new GraphicsBuffer(GraphicsBuffer.Target.Structured,1,16);
+ using var normal=new GraphicsBuffer(GraphicsBuffer.Target.Structured,1,16);
+ using var output=new GraphicsBuffer(GraphicsBuffer.Target.Structured,1,8);
+ try {
+  int kernel=shader.FindKernel("InspectSMRTSamples");BlueNoise.Initialize();
+  var sample=new[]{new float4(19,37,17,0)};input.SetData(sample);normal.SetData(new[]{new float4(0,4,0,0)});
+  shader.SetInt("_SamplingCount",1);shader.SetBuffer(kernel,"_SamplingInputs",input);shader.SetBuffer(kernel,"_SamplingNormals",normal);shader.SetBuffer(kernel,"_SamplingResults",output);
+  shader.SetTexture(kernel,"_SobolScramblingTile1SPP",Texture2D.blackTexture);
+  shader.SetTexture(kernel,"_SobolRankingTile1SPP",Texture2D.blackTexture);
+  shader.SetTexture(kernel,"_SobolOwenScrambledSequence",Texture2D.blackTexture);
+  BlueNoise.Instance.Bind(cmd,shader,kernel);cmd.DispatchCompute(shader,kernel,1,1,1);Graphics.ExecuteCommandBuffer(cmd);
+  var actual=new float2[1];output.GetData(actual);using var f=new Fixture();var expected=f.Run("InspectSMRTSamples",sample,normals:new[]{new float4(0,4,0,0)});
+  Check(math.all(actual[0]==expected[0]),"explicit compute binding replaces stale textures");
+  for(int i=0;i<100;i++){cmd.Clear();BlueNoise.Instance.Bind(cmd,shader,kernel);}
+  long before=GC.GetAllocatedBytesForCurrentThread();
+  for(int i=0;i<10000;i++){cmd.Clear();BlueNoise.Instance.Bind(cmd,shader,kernel);}
+  long bytes=GC.GetAllocatedBytesForCurrentThread()-before;
+  Check(bytes==0,"BlueNoise binding allocation="+bytes);
+  File.WriteAllText("E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-bnd1/binding.txt","stable CommandBuffer binding: "+bytes+" bytes / 10000 calls; 100 warm-up calls");
+ }finally{Object.DestroyImmediate(shader);}
+}
+        private sealed class Fixture : IDisposable
+        {
+            internal readonly ComputeShader Shader;
+            internal readonly uint[] TableData = new uint[12];
+            internal readonly uint4[] MetadataData = new uint4[12];
+            internal readonly uint[] OwnerData = new uint[16];
+            internal readonly uint[] StaticData = new uint[256], DynamicData = new uint[256];
+            internal readonly VirtualShadowMapProjection[] ProjectionData = new VirtualShadowMapProjection[3];
+            internal readonly GraphicsBuffer Table = new(GraphicsBuffer.Target.Structured, 12, 4);
+            internal readonly GraphicsBuffer Metadata = new(GraphicsBuffer.Target.Structured, 12, 16);
+            internal readonly GraphicsBuffer Owners = new(GraphicsBuffer.Target.Structured, 16, 4);
+            internal readonly GraphicsBuffer Counters = new(GraphicsBuffer.Target.Structured, 4, 4);
+            private readonly GraphicsBuffer m_Projections = new(GraphicsBuffer.Target.Structured, 3, 160);
+            // Integer pools support Load/Store, not filtered Sample. Texture2D's
+            // constructor validates Sample usage on Unity 6.7; use the same UAV
+            // resource type as production and upload through a tiny test kernel.
+            private readonly RenderTexture m_Static = CreatePool();
+            private readonly RenderTexture m_Dynamic = CreatePool();
+            private readonly GraphicsBuffer m_StaticUpload = new(GraphicsBuffer.Target.Structured, 256, 4);
+            private readonly GraphicsBuffer m_DynamicUpload = new(GraphicsBuffer.Target.Structured, 256, 4);
+            private readonly ComputeShader m_UploadShader;
+            private readonly BlueNoiseResources m_BlueNoise = PipelineResourceManager.Get<BlueNoiseResources>();
+
+            private void BindBlueNoise(int kernel)
+            {
+                Shader.SetTexture(kernel, "_SobolScramblingTile1SPP", m_BlueNoise.ScramblingTile1SPP);
+                Shader.SetTexture(kernel, "_SobolRankingTile1SPP", m_BlueNoise.RankingTile1SPP);
+                Shader.SetTexture(kernel, "_SobolOwenScrambledSequence", m_BlueNoise.OwenScrambledSequence);
+            }
+
+            private static RenderTexture CreatePool()
+            {
+                var texture = new RenderTexture(new RenderTextureDescriptor(16, 16)
+                {
+                    graphicsFormat = GraphicsFormat.R32_UInt,
+                    depthStencilFormat = GraphicsFormat.None,
+                    enableRandomWrite = true,
+                    msaaSamples = 1,
+                });
+                Check(texture.Create(), "Create pool");
+                return texture;
+            }
+
+            internal Fixture(bool allocator = false)
+            {
+                string path = allocator ? "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"
+                    : "Packages/com.vivid.render-pipelines/Editor/Tools/VSMBND1Sampling.compute";
+                var source = AssetDatabase.LoadAssetAtPath<ComputeShader>(path);
+                Check(source != null, path);
+                Shader = Object.Instantiate(source);
+                m_UploadShader = allocator ? Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                    "Packages/com.vivid.render-pipelines/Editor/Tools/VSMBND1Sampling.compute")) : Shader;
+                Shader.SetInt("_VSMPrototypeEnabled", 1);
+                Shader.SetVector("_VSMReceiverParameters", Vector4.zero);
+                Shader.SetVector("_VSMReceiverQuality", Vector4.zero);
+                Shader.SetVector("_VSMSMRTParameters", Vector4.zero);
+                Shader.SetMatrix("_VSMReceiverViewProjection", Matrix4x4.identity);
+                Shader.SetInt("_CSMOutputWidth", 8); Shader.SetInt("_CSMOutputHeight", 8);
+                Shader.SetInt("_VSMPrototypeRequestEnabled", 1);
+                Shader.SetInt("_VSMProjectionCount", 3);
+                Shader.SetInt("_VSMPrototypeVirtualResolution", 8);
+                Shader.SetInt("_VSMPrototypePageSize", 4);
+                Shader.SetInt("_VSMPrototypePagesPerAxis", 2);
+                Shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 4);
+                Shader.SetInt("_VSMPrototypePageTableEntryCount", 12);
+                Shader.SetInt("_VSMPrototypePhysicalPageCapacity", 16);
+                Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", 7);
+                Shader.SetInt("_CSMFrameIndex", 7);
+                Shader.SetInts("_SamplingPixel", 0, 0);
+                for (int i = 0; i < 3; i++)
+                {
+                    Matrix4x4 matrix = Matrix4x4.identity;
+                    matrix.m00 = matrix.m11 = 0.1f / (1 << i);
+                    matrix.m03 = matrix.m13 = matrix.m23 = 0.5f;
+                    ProjectionData[i] = new VirtualShadowMapProjection
+                    {
+                        WorldToShadow = matrix,
+                        SelectionSphere = new Vector4(0, 0, 0, -5 * (1 << i)),
+                        Parameters = new Vector4(1 << i, 0, 0.1f, 100),
+                    };
+                }
+            }
+
+            internal void Map(int page, int slot, float staticDepth = 0, float dynamicDepth = 0)
+            {
+                TableData[page] = (uint)slot + 1;
+                MetadataData[page] = new uint4(10, (uint)slot + 1, 7, 8);
+                OwnerData[slot] = (uint)page + 1;
+                for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
+                {
+                    int pixel = (slot / 4 * 4 + y) * 16 + slot % 4 * 4 + x;
+                    StaticData[pixel] = math.asuint(staticDepth);
+                    DynamicData[pixel] = math.asuint(dynamicDepth);
+                }
+            }
+
+            internal void Upload()
+            {
+                Table.SetData(TableData); Metadata.SetData(MetadataData); Owners.SetData(OwnerData);
+                Counters.SetData(new uint[4]); m_Projections.SetData(ProjectionData);
+                m_StaticUpload.SetData(StaticData); m_DynamicUpload.SetData(DynamicData);
+                int upload = m_UploadShader.FindKernel("UploadTestPools");
+                m_UploadShader.SetBuffer(upload, "_TestStaticData", m_StaticUpload);
+                m_UploadShader.SetBuffer(upload, "_TestDynamicData", m_DynamicUpload);
+                m_UploadShader.SetTexture(upload, "_TestStaticPool", m_Static);
+                m_UploadShader.SetTexture(upload, "_TestDynamicPool", m_Dynamic);
+                m_UploadShader.Dispatch(upload, 2, 2, 1);
+            }
+
+            internal float2[] Run(string kernelName, float4[] inputs, int2[] offsets = null, float4[] normals = null,
+                Texture2D depth = null)
+            {
+                int kernel = Shader.FindKernel(kernelName);
+                BindBlueNoise(kernel);
+                using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, inputs.Length, 16);
+                using var offset = new GraphicsBuffer(GraphicsBuffer.Target.Structured, inputs.Length, 8);
+                using var normal = new GraphicsBuffer(GraphicsBuffer.Target.Structured, inputs.Length, 16);
+                using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, inputs.Length, 8);
+                input.SetData(inputs); offset.SetData(offsets ?? new int2[inputs.Length]);
+                normal.SetData(normals ?? new float4[inputs.Length]);
+                Shader.SetInt("_SamplingCount", inputs.Length);
+                Shader.SetBuffer(kernel, "_SamplingInputs", input);
+                bool inspectOnly = kernelName == "InspectBias" || kernelName == "InspectTransition"
+                    || kernelName == "InspectScreenNormal" || kernelName == "InspectVSMStochasticSample"
+                    || kernelName == "InspectVSMStochasticTexelOffset" || kernelName == "InspectSMRTSamples";
+                if (depth != null)
+                {
+                    Shader.SetTexture(kernel, "_DepthTexture", depth);
+                    Shader.SetInt("_CSMOutputWidth", depth.width);
+                    Shader.SetInt("_CSMOutputHeight", depth.height);
+                }
+                if (!inspectOnly) Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
+                if (kernelName != "MarkFootprints")
+                {
+                    Shader.SetBuffer(kernel, "_SamplingResults", output);
+                    if (!inspectOnly)
+                    {
+                        Shader.SetBuffer(kernel, "_VSMPrototypePageTable", Table);
+                        Shader.SetTexture(kernel, "_VSMPrototypeStaticPhysicalPage", m_Static);
+                        Shader.SetTexture(kernel, "_VSMPrototypeDynamicPhysicalPage", m_Dynamic);
+                    }
+                    if (kernelName == "SampleTaps") Shader.SetBuffer(kernel, "_SamplingOffsets", offset);
+                    else if (kernelName != "InspectTransition" && kernelName != "InspectVSMStochasticSample"
+                        && kernelName != "InspectVSMStochasticTexelOffset")
+                    {
+                        Shader.SetBuffer(kernel, "_SamplingNormals", normal);
+                        if (kernelName != "FilterFootprints" && kernelName != "InspectScreenNormal")
+                            Shader.SetBuffer(kernel, "_VSMProjections", m_Projections);
+                    }
+                }
+                Shader.Dispatch(kernel, (inputs.Length + 63) / 64, 1, 1);
+                var result = new float2[inputs.Length];
+                if (kernelName != "MarkFootprints") output.GetData(result);
+                Metadata.GetData(MetadataData);
+                return result;
+            }
+
+            internal void Allocate()
+            {
+                int kernel = Shader.FindKernel("VSMPrototypeAllocatePages");
+                Shader.SetBuffer(kernel, "_VSMPrototypeWritablePageTable", Table);
+                Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
+                Shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", Owners);
+                Shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", Counters);
+                Shader.Dispatch(kernel, 1, 1, 1);
+                Table.GetData(TableData); Metadata.GetData(MetadataData); Owners.GetData(OwnerData);
+            }
+
+            public void Dispose()
+            {
+                Table.Dispose(); Metadata.Dispose(); Owners.Dispose(); Counters.Dispose(); m_Projections.Dispose();
+                m_StaticUpload.Dispose(); m_DynamicUpload.Dispose();
+                m_Static.Release(); m_Dynamic.Release();
+                if (m_UploadShader != Shader) Object.DestroyImmediate(m_UploadShader);
+                Object.DestroyImmediate(m_Static); Object.DestroyImmediate(m_Dynamic); Object.DestroyImmediate(Shader);
+            }
+        }
+
+}}

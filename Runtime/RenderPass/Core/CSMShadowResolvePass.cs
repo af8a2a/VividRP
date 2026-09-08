@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class CSMShadowResolvePass : ComputePass
+    public sealed class CSMShadowResolvePass : ComputePass, IBlueNoiseConsumerPass
     {
 #if UNITY_EDITOR
         // Opt-in diagnostics run after resolve with this camera's live graph resources.
@@ -668,6 +668,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void BindCommonTextures(ComputeCommandBuffer cmd, int kernel)
         {
+            BlueNoise.Instance?.Bind(cmd, m_ResolveCompute, kernel);
             TextureHandle staticVirtualShadowMapPage =
                 m_VirtualShadowMapPrototypeStaticPhysicalPage.IsValid()
                 ? m_VirtualShadowMapPrototypeStaticPhysicalPage

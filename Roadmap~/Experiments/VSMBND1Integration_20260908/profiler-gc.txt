@@ -1,0 +1,83 @@
+frames=35..45 threadViews=1540 BlueNoiseOrCSMScopes=209 scopedGCAllocSamples=0 wholeCaptureGCAllocSamples=38302 profilerEnabled=False profileEditor=False
+frame=35 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3463
+frame=35 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=36 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3331
+frame=36 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=36 thread=#2808 scopeCount=0 scopeGcCount=0 totalThreadGcCount=6
+frame=36 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=87
+frame=36 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=87
+frame=36 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=36 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=36 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=87
+frame=36 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=37 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3453
+frame=37 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=37 thread=#2808 scopeCount=0 scopeGcCount=0 totalThreadGcCount=6
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=4
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=93
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=3
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=32
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=28
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=94
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=8
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=92
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=12
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=4
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=37 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=38 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3331
+frame=38 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=38 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=38 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=38 thread=Timer-Scheduler scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=39 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3331
+frame=39 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=40 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3331
+frame=40 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=40 thread=#2808 scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=40 thread=#4324 scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=40 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=87
+frame=40 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=40 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=87
+frame=40 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=41 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3420
+frame=41 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=41 thread=#4324 scopeCount=0 scopeGcCount=0 totalThreadGcCount=4
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=10
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=4
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=10
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=5
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=25
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=92
+frame=41 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=94
+frame=42 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3333
+frame=42 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=43 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3325
+frame=43 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=43 thread=#4324 scopeCount=0 scopeGcCount=0 totalThreadGcCount=4
+frame=43 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=43 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=87
+frame=44 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3364
+frame=44 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0
+frame=44 thread=#4324 scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=44 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=10
+frame=44 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=44 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=44 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=44 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=94
+frame=44 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=2
+frame=44 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=44 thread=Thread Pool Worker scopeCount=0 scopeGcCount=0 totalThreadGcCount=1
+frame=45 thread=Main Thread scopeCount=17 scopeGcCount=0 totalThreadGcCount=3323
+frame=45 thread=Render Thread scopeCount=2 scopeGcCount=0 totalThreadGcCount=0

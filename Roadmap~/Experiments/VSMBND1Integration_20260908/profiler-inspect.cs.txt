@@ -1,0 +1,48 @@
+using UnityEngine;
+using UnityEditor;
+using UnityEditorInternal;
+using System.IO;
+using System.Text;
+internal class CommandScript : IRunCommand
+{
+    public void Execute(ExecutionResult result)
+    {
+        var report = new StringBuilder();
+        int threadViews = 0, scopes = 0, scopedAlloc = 0, totalAlloc = 0;
+        for (int index = 35; index <= 45; index++)
+        {
+            for (int thread = 0; thread < 256; thread++)
+            {
+                using (var frame = ProfilerDriver.GetRawFrameDataView(index, thread))
+                {
+                    if (!frame.valid) break;
+                    threadViews++;
+                    int threadAlloc = 0, threadScopes = 0, threadScopedAlloc = 0;
+                    for (int i = 0; i < frame.sampleCount; i++)
+                    {
+                        string name = frame.GetSampleName(i);
+                        if (name == "GC.Alloc") threadAlloc++;
+                        if (name == null) continue;
+                        if (!name.Contains("CSMShadowResolve") && !name.Contains("BlueNoise")) continue;
+                        threadScopes++;
+                        int pending = 1, count = 0;
+                        for (int j = i; pending > 0 && j < frame.sampleCount; j++)
+                        {
+                            pending += frame.GetSampleChildrenCount(j) - 1;
+                            if (frame.GetSampleName(j) == "GC.Alloc") count++;
+                        }
+                        threadScopedAlloc += count;
+                        if (count != 0) report.AppendLine("ALLOCATION " + index + " " + frame.threadName + " " + name + " count=" + count);
+                    }
+                    scopes += threadScopes; scopedAlloc += threadScopedAlloc; totalAlloc += threadAlloc;
+                    if (threadScopes != 0 || threadAlloc != 0)
+                        report.AppendLine("frame=" + index + " thread=" + frame.threadName + " scopeCount=" + threadScopes + " scopeGcCount=" + threadScopedAlloc + " totalThreadGcCount=" + threadAlloc);
+                }
+            }
+        }
+        string summary = "frames=35..45 threadViews=" + threadViews + " BlueNoiseOrCSMScopes=" + scopes + " scopedGCAllocSamples=" + scopedAlloc + " wholeCaptureGCAllocSamples=" + totalAlloc + " profilerEnabled=" + ProfilerDriver.enabled + " profileEditor=" + ProfilerDriver.profileEditor;
+        report.Insert(0, summary + "\n");
+        File.WriteAllText("E:/VividRP_Reborn/Packages/VividRP/Roadmap~/Experiments/VSMBND1Integration_20260908/profiler-gc.txt", report.ToString());
+        result.Log(summary);
+    }
+}

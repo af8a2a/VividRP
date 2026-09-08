@@ -17,7 +17,7 @@
 #pragma use_dxc
 
 // Exercise the shipping functions, not a second shader implementation.
-#include "../../../../Shaders/Core/Private/CSMShadowResolve.compute"
+#include "VSMBND1Body.hlsl"
 
 StructuredBuffer<float4> _SamplingInputs;
 StructuredBuffer<int2> _SamplingOffsets;

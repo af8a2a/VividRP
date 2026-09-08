@@ -36,6 +36,14 @@ namespace VividRP.Editor.Tests
             private readonly GraphicsBuffer m_StaticUpload = new(GraphicsBuffer.Target.Structured, 256, 4);
             private readonly GraphicsBuffer m_DynamicUpload = new(GraphicsBuffer.Target.Structured, 256, 4);
             private readonly ComputeShader m_UploadShader;
+            private readonly BlueNoiseResources m_BlueNoise = PipelineResourceManager.Get<BlueNoiseResources>();
+
+            private void BindBlueNoise(int kernel)
+            {
+                Shader.SetTexture(kernel, "_SobolScramblingTile1SPP", m_BlueNoise.ScramblingTile1SPP);
+                Shader.SetTexture(kernel, "_SobolRankingTile1SPP", m_BlueNoise.RankingTile1SPP);
+                Shader.SetTexture(kernel, "_SobolOwenScrambledSequence", m_BlueNoise.OwenScrambledSequence);
+            }
 
             private static RenderTexture CreatePool()
             {
@@ -120,6 +128,7 @@ namespace VividRP.Editor.Tests
                 Texture2D depth = null)
             {
                 int kernel = Shader.FindKernel(kernelName);
+                BindBlueNoise(kernel);
                 using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, inputs.Length, 16);
                 using var offset = new GraphicsBuffer(GraphicsBuffer.Target.Structured, inputs.Length, 8);
                 using var normal = new GraphicsBuffer(GraphicsBuffer.Target.Structured, inputs.Length, 16);
@@ -130,7 +139,7 @@ namespace VividRP.Editor.Tests
                 Shader.SetBuffer(kernel, "_SamplingInputs", input);
                 bool inspectOnly = kernelName == "InspectBias" || kernelName == "InspectTransition"
                     || kernelName == "InspectScreenNormal" || kernelName == "InspectVSMStochasticSample"
-                    || kernelName == "InspectVSMStochasticTexelOffset";
+                    || kernelName == "InspectVSMStochasticTexelOffset" || kernelName == "InspectSMRTSamples";
                 if (depth != null)
                 {
                     Shader.SetTexture(kernel, "_DepthTexture", depth);
@@ -178,6 +187,7 @@ namespace VividRP.Editor.Tests
                 Matrix4x4? viewProjection = null, Vector3? receiverNormal = null, int screenSize = 8)
             {
                 int kernel = Shader.FindKernel(footprint ? "InspectReceiverFootprint" : "InspectReceiverDiagnostics");
+                BindBlueNoise(kernel);
                 using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
                 using var normal = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
                 using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
@@ -208,6 +218,7 @@ namespace VividRP.Editor.Tests
                 RenderTexture output, RenderTexture data, int mode)
             {
                 int kernel = Shader.FindKernel("VSMReceiverDebug");
+                BindBlueNoise(kernel);
                 Shader.SetInt("_VSMReceiverDebugMode", mode);
                 Shader.SetInt("_CSMOutputWidth", depth.width); Shader.SetInt("_CSMOutputHeight", depth.height);
                 Shader.SetMatrix("_CSMInvViewProjMatrix", ScreenInverse());
@@ -232,6 +243,45 @@ namespace VividRP.Editor.Tests
                 m_Static.Release(); m_Dynamic.Release();
                 if (m_UploadShader != Shader) Object.DestroyImmediate(m_UploadShader);
                 Object.DestroyImmediate(m_Static); Object.DestroyImmediate(m_Dynamic); Object.DestroyImmediate(Shader);
+            }
+        }
+
+        [Test]
+        public void SMRT_BND1PhasesAdvanceAcross256FramesAndKeepRayStrataAndReceiverSupport()
+        {
+            using var f = new Fixture();
+            var inputs = new float4[256 * 4];
+            var rays = new float4[inputs.Length];
+            for (int count = 4; count <= 8; count++)
+            {
+                for (int frame = 0; frame < 256; frame++) for (int mode = 0; mode < 4; mode++)
+                {
+                    int i = frame * 4 + mode;
+                    inputs[i] = new float4(19, 37, frame, mode);
+                    rays[i] = new float4(frame % count, count, 0, 0);
+                }
+                var samples = f.Run("InspectSMRTSamples", inputs, normals: rays);
+                var visited = new bool[4, 256];
+                for (int frame = 0; frame < 256; frame++)
+                {
+                    int i = frame * 4;
+                    for (int dim = 0; dim < 4; dim++)
+                    {
+                        float phase = samples[i + dim / 2][dim % 2];
+                        Assert.That(phase, Is.InRange(0f, .99999994f));
+                        int bin = Mathf.FloorToInt(phase * 256);
+                        Assert.That(visited[dim, bin], Is.False, "Temporal sequence must not use the static 1SPP mask");
+                        visited[dim, bin] = true;
+                    }
+                    int ray = frame % count;
+                    float radiusSquared = math.lengthsq(samples[i + 2]);
+                    Assert.That(radiusSquared, Is.InRange((float)ray / count - 1e-6f, (float)(ray + 1) / count + 1e-6f));
+                    Assert.That(samples[i + 3].x, Is.InRange(-1f, 1f));
+                    Assert.That(samples[i + 3].y, Is.InRange(-1f, 1f));
+                }
+                for (int i = 0; i < inputs.Length; i++) inputs[i].z += 256;
+                var repeated = f.Run("InspectSMRTSamples", inputs, normals: rays);
+                CollectionAssert.AreEqual(samples, repeated, "Full temporal sequence repeats at 256 frames");
             }
         }
 

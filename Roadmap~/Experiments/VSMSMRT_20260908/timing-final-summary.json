@@ -1,0 +1,1432 @@
+{
+  "pcf512_a": {
+    "status": "completed_with_warnings",
+    "samples": 816,
+    "counters": [
+      425,
+      419,
+      0,
+      0
+    ],
+    "comparable": false,
+    "issues": [
+      "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability."
+    ],
+    "metrics": {
+      "frame_interval_ms": {
+        "name": "frame_interval_ms",
+        "availability": "available",
+        "median": "6.0625495389103889",
+        "p95": "6.9046979770064354",
+        "min": "3.8199049886316061",
+        "max": "14.376799575984478",
+        "validSamples": 816
+      },
+      "cpu_frame_ms": {
+        "name": "cpu_frame_ms",
+        "availability": "available",
+        "median": "6.0447000000000006",
+        "p95": "7.1947",
+        "min": "4.3194",
+        "max": "14.3894",
+        "validSamples": 816
+      },
+      "gpu_frame_ms": {
+        "name": "gpu_frame_ms",
+        "availability": "available",
+        "median": "6.0184320000000007",
+        "p95": "6.715648",
+        "min": "5.102848",
+        "max": "7.406848",
+        "validSamples": 814
+      },
+      "cpu_render_thread_ms": {
+        "name": "cpu_render_thread_ms",
+        "availability": "available",
+        "median": "2.0614",
+        "p95": "2.7482",
+        "min": "1.5796",
+        "max": "6.0788",
+        "validSamples": 816
+      },
+      "gc_allocated_in_editor_frame_bytes": {
+        "name": "gc_allocated_in_editor_frame_bytes",
+        "availability": "available",
+        "median": "14551",
+        "p95": "20961",
+        "min": "14551",
+        "max": "173050",
+        "validSamples": 816
+      },
+      "VSM.LayoutRemap_gpu_ms": {
+        "name": "VSM.LayoutRemap_gpu_ms",
+        "availability": "available",
+        "median": "0.001024",
+        "p95": "0.001024",
+        "min": "0.000768",
+        "max": "0.005376",
+        "validSamples": 816
+      },
+      "VSM.Allocate_gpu_ms": {
+        "name": "VSM.Allocate_gpu_ms",
+        "availability": "available",
+        "median": "0.378112",
+        "p95": "0.463616",
+        "min": "0.370176",
+        "max": "0.47615999999999997",
+        "validSamples": 816
+      },
+      "VSM.InvalidateStatic_gpu_ms": {
+        "name": "VSM.InvalidateStatic_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ClearPhysicalPages_gpu_ms": {
+        "name": "VSM.ClearPhysicalPages_gpu_ms",
+        "availability": "available",
+        "median": "0.062464",
+        "p95": "0.07168",
+        "min": "0.061695999999999994",
+        "max": "0.732672",
+        "validSamples": 816
+      },
+      "VSM.StaticCasterCull_gpu_ms": {
+        "name": "VSM.StaticCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0.243968",
+        "p95": "0.508416",
+        "min": "0.23219199999999998",
+        "max": "0.81792",
+        "validSamples": 816
+      },
+      "VSM.DynamicCasterCull_gpu_ms": {
+        "name": "VSM.DynamicCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0",
+        "p95": "0.000256",
+        "min": "0",
+        "max": "0.000256",
+        "validSamples": 816
+      },
+      "VSM.PageCull_gpu_ms": {
+        "name": "VSM.PageCull_gpu_ms",
+        "availability": "available",
+        "median": "0.224768",
+        "p95": "0.397312",
+        "min": "0.18867199999999998",
+        "max": "0.722432",
+        "validSamples": 816
+      },
+      "VSM.StaticRaster_gpu_ms": {
+        "name": "VSM.StaticRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.0076799999999999993",
+        "p95": "0.009984",
+        "min": "0.003072",
+        "max": "0.397312",
+        "validSamples": 816
+      },
+      "VSM.DynamicRaster_gpu_ms": {
+        "name": "VSM.DynamicRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.03968",
+        "p95": "0.04224",
+        "min": "0.021759999999999998",
+        "max": "0.071424",
+        "validSamples": 816
+      },
+      "VSM.UnityCompatibilityRaster_gpu_ms": {
+        "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.FinalizePages_gpu_ms": {
+        "name": "VSM.FinalizePages_gpu_ms",
+        "availability": "available",
+        "median": "0.002304",
+        "p95": "0.002816",
+        "min": "0.001792",
+        "max": "0.023295999999999997",
+        "validSamples": 816
+      },
+      "VSM.ResetFeedback_gpu_ms": {
+        "name": "VSM.ResetFeedback_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ResolveAndFeedback_gpu_ms": {
+        "name": "VSM.ResolveAndFeedback_gpu_ms",
+        "availability": "available",
+        "median": "1.9521279999999999",
+        "p95": "2.445824",
+        "min": "1.697792",
+        "max": "3.015168",
+        "validSamples": 816
+      }
+    }
+  },
+  "pcf512_b": {
+    "status": "completed_with_warnings",
+    "samples": 350,
+    "counters": [
+      425,
+      419,
+      0,
+      0
+    ],
+    "comparable": false,
+    "issues": [
+      "Frame intervals over 100 ms retained; investigate before comparing.",
+      "Fresh whole-frame GPU coverage is below 95%; Frame Timing Stats enabled is not evidence of valid data.",
+      "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability."
+    ],
+    "metrics": {
+      "frame_interval_ms": {
+        "name": "frame_interval_ms",
+        "availability": "available",
+        "median": "8.6112990975379944",
+        "p95": "48.243701457977295",
+        "min": "5.15170069411397",
+        "max": "136.39919459819794",
+        "validSamples": 350
+      },
+      "cpu_frame_ms": {
+        "name": "cpu_frame_ms",
+        "availability": "available",
+        "median": "8.64155",
+        "p95": "49.4597",
+        "min": "4.5815",
+        "max": "143.477",
+        "validSamples": 350
+      },
+      "gpu_frame_ms": {
+        "name": "gpu_frame_ms",
+        "availability": "available",
+        "median": "5.383936",
+        "p95": "5.848064",
+        "min": "4.694784",
+        "max": "6.102272",
+        "validSamples": 329
+      },
+      "cpu_render_thread_ms": {
+        "name": "cpu_render_thread_ms",
+        "availability": "available",
+        "median": "3.3608000000000002",
+        "p95": "4.3974",
+        "min": "2.3879",
+        "max": "6.0221",
+        "validSamples": 350
+      },
+      "gc_allocated_in_editor_frame_bytes": {
+        "name": "gc_allocated_in_editor_frame_bytes",
+        "availability": "available",
+        "median": "14551",
+        "p95": "42065",
+        "min": "14551",
+        "max": "150327",
+        "validSamples": 350
+      },
+      "VSM.LayoutRemap_gpu_ms": {
+        "name": "VSM.LayoutRemap_gpu_ms",
+        "availability": "available",
+        "median": "0.001024",
+        "p95": "0.0012799999999999999",
+        "min": "0.000768",
+        "max": "0.004096",
+        "validSamples": 350
+      },
+      "VSM.Allocate_gpu_ms": {
+        "name": "VSM.Allocate_gpu_ms",
+        "availability": "available",
+        "median": "0.354304",
+        "p95": "0.41625599999999996",
+        "min": "0.348416",
+        "max": "0.42624",
+        "validSamples": 350
+      },
+      "VSM.InvalidateStatic_gpu_ms": {
+        "name": "VSM.InvalidateStatic_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ClearPhysicalPages_gpu_ms": {
+        "name": "VSM.ClearPhysicalPages_gpu_ms",
+        "availability": "available",
+        "median": "0.063232",
+        "p95": "0.064256",
+        "min": "0.061439999999999995",
+        "max": "0.07168",
+        "validSamples": 350
+      },
+      "VSM.StaticCasterCull_gpu_ms": {
+        "name": "VSM.StaticCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0.23910399999999998",
+        "p95": "0.245248",
+        "min": "0.23091199999999998",
+        "max": "0.52223999999999993",
+        "validSamples": 350
+      },
+      "VSM.DynamicCasterCull_gpu_ms": {
+        "name": "VSM.DynamicCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0",
+        "p95": "0.000256",
+        "min": "0",
+        "max": "0.000256",
+        "validSamples": 350
+      },
+      "VSM.PageCull_gpu_ms": {
+        "name": "VSM.PageCull_gpu_ms",
+        "availability": "available",
+        "median": "0.2208",
+        "p95": "0.226816",
+        "min": "0.21273599999999998",
+        "max": "0.503552",
+        "validSamples": 350
+      },
+      "VSM.StaticRaster_gpu_ms": {
+        "name": "VSM.StaticRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.0076799999999999993",
+        "p95": "0.009984",
+        "min": "0.003072",
+        "max": "0.012032",
+        "validSamples": 350
+      },
+      "VSM.DynamicRaster_gpu_ms": {
+        "name": "VSM.DynamicRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.039424",
+        "p95": "0.041984",
+        "min": "0.034816",
+        "max": "0.043008",
+        "validSamples": 350
+      },
+      "VSM.UnityCompatibilityRaster_gpu_ms": {
+        "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.FinalizePages_gpu_ms": {
+        "name": "VSM.FinalizePages_gpu_ms",
+        "availability": "available",
+        "median": "0.002048",
+        "p95": "0.0025599999999999998",
+        "min": "0.001792",
+        "max": "0.002816",
+        "validSamples": 350
+      },
+      "VSM.ResetFeedback_gpu_ms": {
+        "name": "VSM.ResetFeedback_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ResolveAndFeedback_gpu_ms": {
+        "name": "VSM.ResolveAndFeedback_gpu_ms",
+        "availability": "available",
+        "median": "1.630464",
+        "p95": "2.111744",
+        "min": "1.3859839999999999",
+        "max": "2.2464",
+        "validSamples": 350
+      }
+    }
+  },
+  "smrt4x8_a": {
+    "status": "completed_with_warnings",
+    "samples": 543,
+    "counters": [
+      454,
+      446,
+      0,
+      0
+    ],
+    "comparable": false,
+    "issues": [
+      "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability."
+    ],
+    "metrics": {
+      "frame_interval_ms": {
+        "name": "frame_interval_ms",
+        "availability": "available",
+        "median": "7.7894981950521469",
+        "p95": "16.569005325436592",
+        "min": "5.1736962050199509",
+        "max": "47.7461963891983",
+        "validSamples": 543
+      },
+      "cpu_frame_ms": {
+        "name": "cpu_frame_ms",
+        "availability": "available",
+        "median": "7.7786",
+        "p95": "18.3494",
+        "min": "4.738",
+        "max": "47.1086",
+        "validSamples": 543
+      },
+      "gpu_frame_ms": {
+        "name": "gpu_frame_ms",
+        "availability": "available",
+        "median": "5.801216",
+        "p95": "6.321408",
+        "min": "5.200896",
+        "max": "6.855424",
+        "validSamples": 526
+      },
+      "cpu_render_thread_ms": {
+        "name": "cpu_render_thread_ms",
+        "availability": "available",
+        "median": "3.2755",
+        "p95": "4.2961",
+        "min": "2.3913",
+        "max": "11.5004",
+        "validSamples": 543
+      },
+      "gc_allocated_in_editor_frame_bytes": {
+        "name": "gc_allocated_in_editor_frame_bytes",
+        "availability": "available",
+        "median": "14551",
+        "p95": "28953",
+        "min": "14551",
+        "max": "182210",
+        "validSamples": 543
+      },
+      "VSM.LayoutRemap_gpu_ms": {
+        "name": "VSM.LayoutRemap_gpu_ms",
+        "availability": "available",
+        "median": "0.001024",
+        "p95": "0.0012799999999999999",
+        "min": "0.000768",
+        "max": "0.0051199999999999996",
+        "validSamples": 543
+      },
+      "VSM.Allocate_gpu_ms": {
+        "name": "VSM.Allocate_gpu_ms",
+        "availability": "available",
+        "median": "0.39039999999999997",
+        "p95": "0.483072",
+        "min": "0.379648",
+        "max": "0.50047999999999992",
+        "validSamples": 543
+      },
+      "VSM.InvalidateStatic_gpu_ms": {
+        "name": "VSM.InvalidateStatic_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ClearPhysicalPages_gpu_ms": {
+        "name": "VSM.ClearPhysicalPages_gpu_ms",
+        "availability": "available",
+        "median": "0.063744",
+        "p95": "0.069632",
+        "min": "0.061952",
+        "max": "0.437504",
+        "validSamples": 543
+      },
+      "VSM.StaticCasterCull_gpu_ms": {
+        "name": "VSM.StaticCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0.2432",
+        "p95": "0.251392",
+        "min": "0.233728",
+        "max": "0.64358399999999993",
+        "validSamples": 543
+      },
+      "VSM.DynamicCasterCull_gpu_ms": {
+        "name": "VSM.DynamicCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0",
+        "p95": "0.000256",
+        "min": "0",
+        "max": "0.000768",
+        "validSamples": 543
+      },
+      "VSM.PageCull_gpu_ms": {
+        "name": "VSM.PageCull_gpu_ms",
+        "availability": "available",
+        "median": "0.22527999999999998",
+        "p95": "0.231936",
+        "min": "0.216576",
+        "max": "0.625408",
+        "validSamples": 543
+      },
+      "VSM.StaticRaster_gpu_ms": {
+        "name": "VSM.StaticRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.0076799999999999993",
+        "p95": "0.010239999999999999",
+        "min": "0.003072",
+        "max": "0.294912",
+        "validSamples": 543
+      },
+      "VSM.DynamicRaster_gpu_ms": {
+        "name": "VSM.DynamicRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.038655999999999996",
+        "p95": "0.040704",
+        "min": "0.033024",
+        "max": "0.065024",
+        "validSamples": 543
+      },
+      "VSM.UnityCompatibilityRaster_gpu_ms": {
+        "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.FinalizePages_gpu_ms": {
+        "name": "VSM.FinalizePages_gpu_ms",
+        "availability": "available",
+        "median": "0.002048",
+        "p95": "0.0025599999999999998",
+        "min": "0.001792",
+        "max": "0.003072",
+        "validSamples": 543
+      },
+      "VSM.ResetFeedback_gpu_ms": {
+        "name": "VSM.ResetFeedback_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ResolveAndFeedback_gpu_ms": {
+        "name": "VSM.ResolveAndFeedback_gpu_ms",
+        "availability": "available",
+        "median": "1.755136",
+        "p95": "2.16064",
+        "min": "1.5196159999999999",
+        "max": "2.578688",
+        "validSamples": 543
+      }
+    }
+  },
+  "smrt4x8_b": {
+    "status": "completed_with_warnings",
+    "samples": 441,
+    "counters": [
+      454,
+      447,
+      0,
+      0
+    ],
+    "comparable": false,
+    "issues": [
+      "Fresh whole-frame GPU coverage is below 95%; Frame Timing Stats enabled is not evidence of valid data.",
+      "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability."
+    ],
+    "metrics": {
+      "frame_interval_ms": {
+        "name": "frame_interval_ms",
+        "availability": "available",
+        "median": "8.6274938657879829",
+        "p95": "24.766396731138229",
+        "min": "5.2275015041232109",
+        "max": "68.2142972946167",
+        "validSamples": 441
+      },
+      "cpu_frame_ms": {
+        "name": "cpu_frame_ms",
+        "availability": "available",
+        "median": "8.512",
+        "p95": "25.6028",
+        "min": "4.6724",
+        "max": "69.6708",
+        "validSamples": 441
+      },
+      "gpu_frame_ms": {
+        "name": "gpu_frame_ms",
+        "availability": "available",
+        "median": "5.398272",
+        "p95": "5.982464",
+        "min": "4.796416",
+        "max": "6.419712",
+        "validSamples": 416
+      },
+      "cpu_render_thread_ms": {
+        "name": "cpu_render_thread_ms",
+        "availability": "available",
+        "median": "3.3921",
+        "p95": "4.5453",
+        "min": "2.4485",
+        "max": "14.4661",
+        "validSamples": 441
+      },
+      "gc_allocated_in_editor_frame_bytes": {
+        "name": "gc_allocated_in_editor_frame_bytes",
+        "availability": "available",
+        "median": "14551",
+        "p95": "32122",
+        "min": "14551",
+        "max": "130746",
+        "validSamples": 441
+      },
+      "VSM.LayoutRemap_gpu_ms": {
+        "name": "VSM.LayoutRemap_gpu_ms",
+        "availability": "available",
+        "median": "0.001024",
+        "p95": "0.0012799999999999999",
+        "min": "0.000768",
+        "max": "0.0048639999999999994",
+        "validSamples": 441
+      },
+      "VSM.Allocate_gpu_ms": {
+        "name": "VSM.Allocate_gpu_ms",
+        "availability": "available",
+        "median": "0.379648",
+        "p95": "0.472064",
+        "min": "0.37248",
+        "max": "0.48512",
+        "validSamples": 441
+      },
+      "VSM.InvalidateStatic_gpu_ms": {
+        "name": "VSM.InvalidateStatic_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ClearPhysicalPages_gpu_ms": {
+        "name": "VSM.ClearPhysicalPages_gpu_ms",
+        "availability": "available",
+        "median": "0.063232",
+        "p95": "0.064",
+        "min": "0.061439999999999995",
+        "max": "0.326656",
+        "validSamples": 441
+      },
+      "VSM.StaticCasterCull_gpu_ms": {
+        "name": "VSM.StaticCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0.24345599999999998",
+        "p95": "0.252672",
+        "min": "0.23449599999999998",
+        "max": "0.611328",
+        "validSamples": 441
+      },
+      "VSM.DynamicCasterCull_gpu_ms": {
+        "name": "VSM.DynamicCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0",
+        "p95": "0.000256",
+        "min": "0",
+        "max": "0.000256",
+        "validSamples": 441
+      },
+      "VSM.PageCull_gpu_ms": {
+        "name": "VSM.PageCull_gpu_ms",
+        "availability": "available",
+        "median": "0.22527999999999998",
+        "p95": "0.231424",
+        "min": "0.21631999999999998",
+        "max": "0.46182399999999996",
+        "validSamples": 441
+      },
+      "VSM.StaticRaster_gpu_ms": {
+        "name": "VSM.StaticRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.007936",
+        "p95": "0.010496",
+        "min": "0.003072",
+        "max": "0.19584",
+        "validSamples": 441
+      },
+      "VSM.DynamicRaster_gpu_ms": {
+        "name": "VSM.DynamicRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.038911999999999995",
+        "p95": "0.040959999999999996",
+        "min": "0.034304",
+        "max": "0.04736",
+        "validSamples": 441
+      },
+      "VSM.UnityCompatibilityRaster_gpu_ms": {
+        "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.FinalizePages_gpu_ms": {
+        "name": "VSM.FinalizePages_gpu_ms",
+        "availability": "available",
+        "median": "0.002048",
+        "p95": "0.0025599999999999998",
+        "min": "0.001536",
+        "max": "0.003328",
+        "validSamples": 441
+      },
+      "VSM.ResetFeedback_gpu_ms": {
+        "name": "VSM.ResetFeedback_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ResolveAndFeedback_gpu_ms": {
+        "name": "VSM.ResolveAndFeedback_gpu_ms",
+        "availability": "available",
+        "median": "1.387008",
+        "p95": "1.8611199999999999",
+        "min": "1.157888",
+        "max": "2.3349759999999997",
+        "validSamples": 441
+      }
+    }
+  },
+  "smrt8x4_a": {
+    "status": "completed_with_warnings",
+    "samples": 704,
+    "counters": [
+      439,
+      434,
+      0,
+      0
+    ],
+    "comparable": false,
+    "issues": [
+      "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability."
+    ],
+    "metrics": {
+      "frame_interval_ms": {
+        "name": "frame_interval_ms",
+        "availability": "available",
+        "median": "7.090848172083497",
+        "p95": "7.72470235824585",
+        "min": "6.1939978040754795",
+        "max": "14.04610276222229",
+        "validSamples": 704
+      },
+      "cpu_frame_ms": {
+        "name": "cpu_frame_ms",
+        "availability": "available",
+        "median": "7.05765",
+        "p95": "8.1781",
+        "min": "4.7347",
+        "max": "14.3928",
+        "validSamples": 704
+      },
+      "gpu_frame_ms": {
+        "name": "gpu_frame_ms",
+        "availability": "available",
+        "median": "7.0348799999999994",
+        "p95": "7.638016",
+        "min": "6.137856",
+        "max": "8.130304",
+        "validSamples": 702
+      },
+      "cpu_render_thread_ms": {
+        "name": "cpu_render_thread_ms",
+        "availability": "available",
+        "median": "2.0635000000000003",
+        "p95": "2.747",
+        "min": "1.6991",
+        "max": "8.3068",
+        "validSamples": 704
+      },
+      "gc_allocated_in_editor_frame_bytes": {
+        "name": "gc_allocated_in_editor_frame_bytes",
+        "availability": "available",
+        "median": "14551",
+        "p95": "21163",
+        "min": "14551",
+        "max": "173258",
+        "validSamples": 704
+      },
+      "VSM.LayoutRemap_gpu_ms": {
+        "name": "VSM.LayoutRemap_gpu_ms",
+        "availability": "available",
+        "median": "0.001024",
+        "p95": "0.0012799999999999999",
+        "min": "0.001024",
+        "max": "0.560896",
+        "validSamples": 704
+      },
+      "VSM.Allocate_gpu_ms": {
+        "name": "VSM.Allocate_gpu_ms",
+        "availability": "available",
+        "median": "0.386816",
+        "p95": "0.480768",
+        "min": "0.38144",
+        "max": "0.48563199999999995",
+        "validSamples": 704
+      },
+      "VSM.InvalidateStatic_gpu_ms": {
+        "name": "VSM.InvalidateStatic_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ClearPhysicalPages_gpu_ms": {
+        "name": "VSM.ClearPhysicalPages_gpu_ms",
+        "availability": "available",
+        "median": "0.068352",
+        "p95": "0.07551999999999999",
+        "min": "0.067583999999999991",
+        "max": "0.498432",
+        "validSamples": 704
+      },
+      "VSM.StaticCasterCull_gpu_ms": {
+        "name": "VSM.StaticCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0.247552",
+        "p95": "0.58163199999999993",
+        "min": "0.23679999999999998",
+        "max": "1.143552",
+        "validSamples": 704
+      },
+      "VSM.DynamicCasterCull_gpu_ms": {
+        "name": "VSM.DynamicCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0",
+        "p95": "0.000256",
+        "min": "0",
+        "max": "0.000256",
+        "validSamples": 704
+      },
+      "VSM.PageCull_gpu_ms": {
+        "name": "VSM.PageCull_gpu_ms",
+        "availability": "available",
+        "median": "0.22784",
+        "p95": "0.419328",
+        "min": "0.188416",
+        "max": "1.12384",
+        "validSamples": 704
+      },
+      "VSM.StaticRaster_gpu_ms": {
+        "name": "VSM.StaticRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.0076799999999999993",
+        "p95": "0.010239999999999999",
+        "min": "0.003328",
+        "max": "0.45183999999999996",
+        "validSamples": 704
+      },
+      "VSM.DynamicRaster_gpu_ms": {
+        "name": "VSM.DynamicRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.039424",
+        "p95": "0.042496",
+        "min": "0.035072",
+        "max": "0.67123199999999994",
+        "validSamples": 704
+      },
+      "VSM.UnityCompatibilityRaster_gpu_ms": {
+        "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.FinalizePages_gpu_ms": {
+        "name": "VSM.FinalizePages_gpu_ms",
+        "availability": "available",
+        "median": "0.002304",
+        "p95": "0.002816",
+        "min": "0.002048",
+        "max": "0.025088",
+        "validSamples": 704
+      },
+      "VSM.ResetFeedback_gpu_ms": {
+        "name": "VSM.ResetFeedback_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ResolveAndFeedback_gpu_ms": {
+        "name": "VSM.ResolveAndFeedback_gpu_ms",
+        "availability": "available",
+        "median": "2.4152319999999996",
+        "p95": "2.913792",
+        "min": "2.068736",
+        "max": "3.302912",
+        "validSamples": 704
+      }
+    }
+  },
+  "smrt8x4_b": {
+    "status": "completed_with_warnings",
+    "samples": 395,
+    "counters": [
+      439,
+      433,
+      0,
+      0
+    ],
+    "comparable": false,
+    "issues": [
+      "Fresh whole-frame GPU coverage is below 95%; Frame Timing Stats enabled is not evidence of valid data.",
+      "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability."
+    ],
+    "metrics": {
+      "frame_interval_ms": {
+        "name": "frame_interval_ms",
+        "availability": "available",
+        "median": "9.002302773296833",
+        "p95": "31.819704920053482",
+        "min": "5.48660010099411",
+        "max": "71.574300527572632",
+        "validSamples": 395
+      },
+      "cpu_frame_ms": {
+        "name": "cpu_frame_ms",
+        "availability": "available",
+        "median": "9.0796",
+        "p95": "35.9788",
+        "min": "5.2607",
+        "max": "91.3014",
+        "validSamples": 395
+      },
+      "gpu_frame_ms": {
+        "name": "gpu_frame_ms",
+        "availability": "available",
+        "median": "5.693696",
+        "p95": "6.270464",
+        "min": "5.089536",
+        "max": "6.61376",
+        "validSamples": 373
+      },
+      "cpu_render_thread_ms": {
+        "name": "cpu_render_thread_ms",
+        "availability": "available",
+        "median": "3.4092",
+        "p95": "4.4406",
+        "min": "2.4777",
+        "max": "6.485",
+        "validSamples": 395
+      },
+      "gc_allocated_in_editor_frame_bytes": {
+        "name": "gc_allocated_in_editor_frame_bytes",
+        "availability": "available",
+        "median": "14551",
+        "p95": "28936",
+        "min": "14551",
+        "max": "329919",
+        "validSamples": 395
+      },
+      "VSM.LayoutRemap_gpu_ms": {
+        "name": "VSM.LayoutRemap_gpu_ms",
+        "availability": "available",
+        "median": "0.001024",
+        "p95": "0.0012799999999999999",
+        "min": "0.000768",
+        "max": "0.0051199999999999996",
+        "validSamples": 395
+      },
+      "VSM.Allocate_gpu_ms": {
+        "name": "VSM.Allocate_gpu_ms",
+        "availability": "available",
+        "median": "0.38246399999999997",
+        "p95": "0.473856",
+        "min": "0.37504",
+        "max": "0.491008",
+        "validSamples": 395
+      },
+      "VSM.InvalidateStatic_gpu_ms": {
+        "name": "VSM.InvalidateStatic_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ClearPhysicalPages_gpu_ms": {
+        "name": "VSM.ClearPhysicalPages_gpu_ms",
+        "availability": "available",
+        "median": "0.063232",
+        "p95": "0.064",
+        "min": "0.061183999999999995",
+        "max": "0.257536",
+        "validSamples": 395
+      },
+      "VSM.StaticCasterCull_gpu_ms": {
+        "name": "VSM.StaticCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0.241664",
+        "p95": "0.24806399999999998",
+        "min": "0.230656",
+        "max": "0.606464",
+        "validSamples": 395
+      },
+      "VSM.DynamicCasterCull_gpu_ms": {
+        "name": "VSM.DynamicCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0",
+        "p95": "0.000256",
+        "min": "0",
+        "max": "0.000256",
+        "validSamples": 395
+      },
+      "VSM.PageCull_gpu_ms": {
+        "name": "VSM.PageCull_gpu_ms",
+        "availability": "available",
+        "median": "0.22425599999999998",
+        "p95": "0.229632",
+        "min": "0.214272",
+        "max": "0.23091199999999998",
+        "validSamples": 395
+      },
+      "VSM.StaticRaster_gpu_ms": {
+        "name": "VSM.StaticRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.0076799999999999993",
+        "p95": "0.00896",
+        "min": "0.003072",
+        "max": "0.012544",
+        "validSamples": 395
+      },
+      "VSM.DynamicRaster_gpu_ms": {
+        "name": "VSM.DynamicRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.039424",
+        "p95": "0.041728",
+        "min": "0.033535999999999996",
+        "max": "0.0448",
+        "validSamples": 395
+      },
+      "VSM.UnityCompatibilityRaster_gpu_ms": {
+        "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.FinalizePages_gpu_ms": {
+        "name": "VSM.FinalizePages_gpu_ms",
+        "availability": "available",
+        "median": "0.002048",
+        "p95": "0.0025599999999999998",
+        "min": "0.001536",
+        "max": "0.003072",
+        "validSamples": 395
+      },
+      "VSM.ResetFeedback_gpu_ms": {
+        "name": "VSM.ResetFeedback_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ResolveAndFeedback_gpu_ms": {
+        "name": "VSM.ResolveAndFeedback_gpu_ms",
+        "availability": "available",
+        "median": "1.6163839999999998",
+        "p95": "2.067456",
+        "min": "1.3826559999999999",
+        "max": "2.538496",
+        "validSamples": 395
+      }
+    }
+  },
+  "smrt8x8_a": {
+    "status": "completed_with_warnings",
+    "samples": 475,
+    "counters": [
+      454,
+      448,
+      0,
+      0
+    ],
+    "comparable": false,
+    "issues": [
+      "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability."
+    ],
+    "metrics": {
+      "frame_interval_ms": {
+        "name": "frame_interval_ms",
+        "availability": "available",
+        "median": "7.4072987772524357",
+        "p95": "25.366801768541336",
+        "min": "5.1536988466978073",
+        "max": "77.008605003356934",
+        "validSamples": 475
+      },
+      "cpu_frame_ms": {
+        "name": "cpu_frame_ms",
+        "availability": "available",
+        "median": "7.5129",
+        "p95": "25.2625",
+        "min": "4.5859",
+        "max": "81.7041",
+        "validSamples": 475
+      },
+      "gpu_frame_ms": {
+        "name": "gpu_frame_ms",
+        "availability": "available",
+        "median": "5.930752",
+        "p95": "6.597888",
+        "min": "5.311232",
+        "max": "7.141376",
+        "validSamples": 454
+      },
+      "cpu_render_thread_ms": {
+        "name": "cpu_render_thread_ms",
+        "availability": "available",
+        "median": "3.166",
+        "p95": "4.3555",
+        "min": "2.0777",
+        "max": "12.7412",
+        "validSamples": 475
+      },
+      "gc_allocated_in_editor_frame_bytes": {
+        "name": "gc_allocated_in_editor_frame_bytes",
+        "availability": "available",
+        "median": "14551",
+        "p95": "32932",
+        "min": "14551",
+        "max": "231244",
+        "validSamples": 475
+      },
+      "VSM.LayoutRemap_gpu_ms": {
+        "name": "VSM.LayoutRemap_gpu_ms",
+        "availability": "available",
+        "median": "0.001024",
+        "p95": "0.0012799999999999999",
+        "min": "0",
+        "max": "0.005888",
+        "validSamples": 475
+      },
+      "VSM.Allocate_gpu_ms": {
+        "name": "VSM.Allocate_gpu_ms",
+        "availability": "available",
+        "median": "0.37196799999999997",
+        "p95": "0.437504",
+        "min": "0.039168",
+        "max": "0.454144",
+        "validSamples": 475
+      },
+      "VSM.InvalidateStatic_gpu_ms": {
+        "name": "VSM.InvalidateStatic_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ClearPhysicalPages_gpu_ms": {
+        "name": "VSM.ClearPhysicalPages_gpu_ms",
+        "availability": "available",
+        "median": "0.063744",
+        "p95": "0.070144",
+        "min": "0.061439999999999995",
+        "max": "1.687808",
+        "validSamples": 475
+      },
+      "VSM.StaticCasterCull_gpu_ms": {
+        "name": "VSM.StaticCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0.245504",
+        "p95": "0.254976",
+        "min": "0.14668799999999999",
+        "max": "0.627968",
+        "validSamples": 475
+      },
+      "VSM.DynamicCasterCull_gpu_ms": {
+        "name": "VSM.DynamicCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0",
+        "p95": "0.000256",
+        "min": "0",
+        "max": "0.018432",
+        "validSamples": 475
+      },
+      "VSM.PageCull_gpu_ms": {
+        "name": "VSM.PageCull_gpu_ms",
+        "availability": "available",
+        "median": "0.227072",
+        "p95": "0.235264",
+        "min": "0.124928",
+        "max": "0.60927999999999993",
+        "validSamples": 475
+      },
+      "VSM.StaticRaster_gpu_ms": {
+        "name": "VSM.StaticRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.0076799999999999993",
+        "p95": "0.011007999999999999",
+        "min": "0.003072",
+        "max": "0.37376",
+        "validSamples": 475
+      },
+      "VSM.DynamicRaster_gpu_ms": {
+        "name": "VSM.DynamicRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.038911999999999995",
+        "p95": "0.041728",
+        "min": "0.000256",
+        "max": "0.044031999999999995",
+        "validSamples": 475
+      },
+      "VSM.UnityCompatibilityRaster_gpu_ms": {
+        "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.FinalizePages_gpu_ms": {
+        "name": "VSM.FinalizePages_gpu_ms",
+        "availability": "available",
+        "median": "0.002304",
+        "p95": "0.0025599999999999998",
+        "min": "0.001536",
+        "max": "0.068096",
+        "validSamples": 475
+      },
+      "VSM.ResetFeedback_gpu_ms": {
+        "name": "VSM.ResetFeedback_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ResolveAndFeedback_gpu_ms": {
+        "name": "VSM.ResolveAndFeedback_gpu_ms",
+        "availability": "available",
+        "median": "1.4612479999999999",
+        "p95": "1.843712",
+        "min": "0.0076799999999999993",
+        "max": "2.16192",
+        "validSamples": 475
+      }
+    }
+  },
+  "smrt8x8_b": {
+    "status": "completed_with_warnings",
+    "samples": 358,
+    "counters": [
+      454,
+      451,
+      0,
+      0
+    ],
+    "comparable": false,
+    "issues": [
+      "Frame intervals over 100 ms retained; investigate before comparing.",
+      "Fresh whole-frame GPU coverage is below 95%; Frame Timing Stats enabled is not evidence of valid data.",
+      "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability."
+    ],
+    "metrics": {
+      "frame_interval_ms": {
+        "name": "frame_interval_ms",
+        "availability": "available",
+        "median": "10.459353681653738",
+        "p95": "34.816693514585495",
+        "min": "5.4833050817251205",
+        "max": "100.52309930324554",
+        "validSamples": 358
+      },
+      "cpu_frame_ms": {
+        "name": "cpu_frame_ms",
+        "availability": "available",
+        "median": "9.98965",
+        "p95": "35.6733",
+        "min": "4.9679",
+        "max": "93.2574",
+        "validSamples": 358
+      },
+      "gpu_frame_ms": {
+        "name": "gpu_frame_ms",
+        "availability": "available",
+        "median": "6.3719680000000007",
+        "p95": "6.997248",
+        "min": "5.664",
+        "max": "8.108032",
+        "validSamples": 326
+      },
+      "cpu_render_thread_ms": {
+        "name": "cpu_render_thread_ms",
+        "availability": "available",
+        "median": "3.5206",
+        "p95": "4.3065",
+        "min": "2.4976",
+        "max": "9.2043",
+        "validSamples": 358
+      },
+      "gc_allocated_in_editor_frame_bytes": {
+        "name": "gc_allocated_in_editor_frame_bytes",
+        "availability": "available",
+        "median": "14551",
+        "p95": "44699",
+        "min": "14551",
+        "max": "130798",
+        "validSamples": 358
+      },
+      "VSM.LayoutRemap_gpu_ms": {
+        "name": "VSM.LayoutRemap_gpu_ms",
+        "availability": "available",
+        "median": "0.001024",
+        "p95": "0.0012799999999999999",
+        "min": "0.000768",
+        "max": "0.379392",
+        "validSamples": 358
+      },
+      "VSM.Allocate_gpu_ms": {
+        "name": "VSM.Allocate_gpu_ms",
+        "availability": "available",
+        "median": "0.368384",
+        "p95": "0.434944",
+        "min": "0.363008",
+        "max": "0.441088",
+        "validSamples": 358
+      },
+      "VSM.InvalidateStatic_gpu_ms": {
+        "name": "VSM.InvalidateStatic_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ClearPhysicalPages_gpu_ms": {
+        "name": "VSM.ClearPhysicalPages_gpu_ms",
+        "availability": "available",
+        "median": "0.063232",
+        "p95": "0.064512",
+        "min": "0.061439999999999995",
+        "max": "0.363776",
+        "validSamples": 358
+      },
+      "VSM.StaticCasterCull_gpu_ms": {
+        "name": "VSM.StaticCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0.2432",
+        "p95": "0.249856",
+        "min": "0.23296",
+        "max": "0.784384",
+        "validSamples": 358
+      },
+      "VSM.DynamicCasterCull_gpu_ms": {
+        "name": "VSM.DynamicCasterCull_gpu_ms",
+        "availability": "available",
+        "median": "0",
+        "p95": "0.000256",
+        "min": "0",
+        "max": "0.000256",
+        "validSamples": 358
+      },
+      "VSM.PageCull_gpu_ms": {
+        "name": "VSM.PageCull_gpu_ms",
+        "availability": "available",
+        "median": "0.22527999999999998",
+        "p95": "0.231424",
+        "min": "0.21606399999999998",
+        "max": "0.6208",
+        "validSamples": 358
+      },
+      "VSM.StaticRaster_gpu_ms": {
+        "name": "VSM.StaticRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.0076799999999999993",
+        "p95": "0.010239999999999999",
+        "min": "0.003072",
+        "max": "0.012032",
+        "validSamples": 358
+      },
+      "VSM.DynamicRaster_gpu_ms": {
+        "name": "VSM.DynamicRaster_gpu_ms",
+        "availability": "available",
+        "median": "0.039424",
+        "p95": "0.041984",
+        "min": "0.029183999999999998",
+        "max": "0.043519999999999996",
+        "validSamples": 358
+      },
+      "VSM.UnityCompatibilityRaster_gpu_ms": {
+        "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.FinalizePages_gpu_ms": {
+        "name": "VSM.FinalizePages_gpu_ms",
+        "availability": "available",
+        "median": "0.002048",
+        "p95": "0.0025599999999999998",
+        "min": "0.001792",
+        "max": "0.0038399999999999997",
+        "validSamples": 358
+      },
+      "VSM.ResetFeedback_gpu_ms": {
+        "name": "VSM.ResetFeedback_gpu_ms",
+        "availability": "no_samples_or_not_executed",
+        "median": "",
+        "p95": "",
+        "min": "",
+        "max": "",
+        "validSamples": 0
+      },
+      "VSM.ResolveAndFeedback_gpu_ms": {
+        "name": "VSM.ResolveAndFeedback_gpu_ms",
+        "availability": "available",
+        "median": "1.8266879999999999",
+        "p95": "2.2630399999999997",
+        "min": "1.573632",
+        "max": "2.809088",
+        "validSamples": 358
+      }
+    }
+  }
+}

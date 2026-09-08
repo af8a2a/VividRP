@@ -62,6 +62,7 @@ namespace VividRP.Editor.Tests
                 Shader.SetInt("_VSMPrototypeEnabled", 1);
                 Shader.SetVector("_VSMReceiverParameters", Vector4.zero);
                 Shader.SetVector("_VSMReceiverQuality", Vector4.zero);
+                Shader.SetVector("_VSMSMRTParameters", Vector4.zero);
                 Shader.SetMatrix("_VSMReceiverViewProjection", Matrix4x4.identity);
                 Shader.SetInt("_CSMOutputWidth", 8); Shader.SetInt("_CSMOutputHeight", 8);
                 Shader.SetInt("_VSMPrototypeRequestEnabled", 1);
@@ -231,6 +232,152 @@ namespace VividRP.Editor.Tests
                 m_Static.Release(); m_Dynamic.Release();
                 if (m_UploadShader != Shader) Object.DestroyImmediate(m_UploadShader);
                 Object.DestroyImmediate(m_Static); Object.DestroyImmediate(m_Dynamic); Object.DestroyImmediate(Shader);
+            }
+        }
+
+        [Test]
+        public void SMRT_TraversesThinCellsWithoutBridgingEmptyDepthOrLockingCentralShadow()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 10, .5f));
+            // A one-texel rod at x=4, t=2. It is an independent geometric slab:
+            // a ray hits exactly when its x at t=2 lies in [4,5), at any y.
+            for (int y = 0; y < 8; y++) SetSMRTDepth(f, 4, y, .3f);
+            f.Upload();
+            var inputs = new float4[400]; var rays = new float4[400]; var expected = new bool[400];
+            for (int i = 0; i < inputs.Length; i++)
+            {
+                float x = 2.051f + (i % 20) * .18f, slope = -.6f + (i / 20) * .06f;
+                inputs[i] = new float4(x / 8, .45f, .2f, 0);
+                rays[i] = new float4(slope, 0, 3, 0);
+                float hitX = x + slope * 2;
+                expected[i] = hitX >= 4 && hitX < 5;
+            }
+            float2[] result = f.Run("TraceSMRTRays", inputs, normals: rays);
+            for (int i = 0; i < result.Length; i++)
+            {
+                Assert.That(result[i].x, Is.EqualTo(1), "Complete ray " + i);
+                Assert.That(result[i].y, Is.EqualTo(expected[i] ? 0 : 1), "Analytic rod " + i);
+            }
+        }
+
+        private static void SetSMRTDepth(Fixture f, int x, int y, float depth)
+        {
+            int slot = (int)f.TableData[y / 4 * 2 + x / 4] - 1;
+            f.StaticData[(slot / 4 * 4 + y % 4) * 16 + slot % 4 * 4 + x % 4] = math.asuint(depth);
+        }
+
+        [Test]
+        public void SMRT_ParallelTailPreservesFarOccludersAndExhaustionIsUnavailable()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 4, 1, .5f));
+            SetSMRTDepth(f, 4, 3, .8f); f.Upload(); // t=12, well beyond the bend at t=1.
+            var inputs = new[] { new float4(3.75f / 8, 3.5f / 8, .2f, 0) };
+            Assert.That(f.Run("TraceSMRTRays", inputs, normals: new[] { new float4(.5f, 0, 1, 0) })[0],
+                Is.EqualTo(new float2(1, 0)));
+            Assert.That(f.Run("TraceSMRTRays", inputs, normals: new[] { new float4(-10, 0, 10, 0) })[0].x,
+                Is.Zero, "Out-of-map/budget failure cannot become a clear ray");
+        }
+
+        [Test]
+        public void SMRT_FootprintValidityDoesNotDependOnRandomPhase()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 4, 1, .5f));
+            var input = new[] { new float4(.48f, .48f, .2f, 0) };
+            for (int frame = 0; frame < 16; frame++)
+            {
+                f.Shader.SetInt("_CSMFrameIndex", frame);
+                f.MetadataData[3].x = 10; f.Upload();
+                Assert.That(f.Run("FilterSMRTFootprints", input)[0], Is.EqualTo(new float2(1, 1)), "Empty resident pages");
+                f.MetadataData[3].x |= 4; f.Upload();
+                Assert.That(f.Run("FilterSMRTFootprints", input)[0].x, Is.Zero, "Dirty union invalidates all phases");
+            }
+        }
+
+        [Test]
+        public void SMRT_ResolveEntryUsesSoftOutputWithoutPCFOverwritingItsOutParameter()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            for (int y = 0; y < 8; y++) for (int x = 4; x < 8; x++) SetSMRTDepth(f, x, y, .205f);
+            f.Upload();
+            f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 0));
+            var receiver = new[] { new float4(.1f, .1f, -.3f, 0) };
+            float pcf = f.Run("ResolveReceivers", receiver)[0].x;
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 4, 1, .5f));
+            Assert.That(pcf, Is.InRange(.1f, .9f));
+            float soft = f.Run("FilterSMRTFootprints", new[] { new float4(.51f, .51f, .2f, 0) })[0].y;
+            Assert.That(soft, Is.Not.EqualTo(pcf));
+            Assert.That(f.Run("ResolveReceivers", receiver)[0].x, Is.EqualTo(soft));
+        }
+
+        [Test]
+        public void SMRT_MissingFineSupportRetriesParentThenCompletePCFWithoutLosingOcclusion()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page, page >= 4 && page < 8 ? .8f : 0);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 4, 1, .5f));
+            var receiver = new[] { new float4(0, 0, 0, 0) };
+            f.MetadataData[3].x |= 4; f.Upload();
+            Assert.That(f.Run("ResolveReceivers", receiver)[0].x, Is.Zero);
+            var requested = new uint[12];
+            for (int page = 0; page < 12; page++) requested[page] = f.MetadataData[page].x & 3841u;
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page, page >= 4 && page < 8 ? .8f : 0);
+            f.Upload(); f.Run("ResolveReceivers", receiver);
+            for (int page = 0; page < 12; page++)
+                Assert.That(f.MetadataData[page].x & 3841u, Is.EqualTo(requested[page]));
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page, .8f);
+            f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 0));
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 100, .5f)); f.Upload();
+            Assert.That(f.Run("ResolveReceivers", receiver)[0].x, Is.Zero);
+        }
+
+        [Test]
+        public void SMRT_BoundedGapFillDoesNotExtendAcrossEmptyDepth()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 10, .5f));
+            SetSMRTDepth(f, 3, 3, .3f); SetSMRTDepth(f, 4, 3, .45f); f.Upload();
+            var receiver = new[] { new float4(3.5f / 8, 3.5f / 8, .2f, 0) };
+            var ray = new[] { new float4(.5f, 0, 4, 0) };
+            Assert.That(f.Run("TraceSMRTRays", receiver, normals: ray)[0].y, Is.Zero);
+            SetSMRTDepth(f, 4, 3, 0); f.Upload();
+            Assert.That(f.Run("TraceSMRTRays", receiver, normals: ray)[0], Is.EqualTo(new float2(1, 1)));
+        }
+
+        [Test]
+        public void SMRT_SlopedUnoccludedReceiverStaysLitWithOriginIntegrationAndOddRayCounts()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            var projection = f.ProjectionData[0];
+            projection.Parameters.x = .01f; projection.WorldToShadow.m22 = .05f;
+            f.ProjectionData[0] = projection;
+            f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 0));
+            var input = new float4[128]; var bias = new float4[128];
+            foreach (float gx in new[] { -.002f, 0, .002f }) foreach (float gy in new[] { -.002f, .002f })
+            {
+                for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++)
+                    SetSMRTDepth(f, x, y, .2f + (x - 3.5f) * gx + (y - 3.5f) * gy);
+                for (int i = 0; i < input.Length; i++)
+                {
+                    float x = 3.6f + i % 16 * .05f, y = 3.6f + i / 16 * .1f;
+                    input[i] = new float4(x / 8, y / 8, .2f + (x - 4) * gx + (y - 4) * gy, 0);
+                    bias[i] = new float4(gx, gy, .0005f, 0);
+                }
+                f.Upload();
+                for (int rays = 4; rays <= 8; rays++)
+                {
+                    f.Shader.SetVector("_VSMSMRTParameters", new Vector4(rays, 8, 2, Mathf.Tan(.25f * Mathf.Deg2Rad)));
+                    var output = f.Run("FilterSMRTFootprints", input, normals: bias);
+                    foreach (float2 sample in output) Assert.That(sample, Is.EqualTo(new float2(1, 1)));
+                }
             }
         }
 

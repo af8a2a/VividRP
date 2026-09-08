@@ -195,6 +195,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_VirtualShadowMapPrototypeActive;
         private Vector4 m_VSMReceiverParameters;
         private Vector4 m_VSMReceiverQuality;
+        private Vector4 m_VSMSMRTParameters;
         private bool m_VirtualShadowMapRequestCollectionActive;
         private TextureHandle m_VirtualShadowMapPrototypeStaticPhysicalPage;
         private TextureHandle m_VirtualShadowMapPrototypeDynamicPhysicalPage;
@@ -421,6 +422,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings);
+            m_VSMSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(csmSettings, m_LightAngularDiameter);
             m_VSMReceiverParameters = new Vector4(csmSettings != null && csmSettings.virtualShadowMapPCF.value ? 1 : 0,
                 shadowData.depthBias, shadowData.slopeScaleDepthBias,
                 csmSettings != null && csmSettings.virtualShadowMapStochasticFiltering.value ? 1 : 0);
@@ -737,6 +739,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ParametersId, m_VSMReceiverQuality);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ViewProjMatrix);
             cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters);
+            cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTParametersId, m_VSMSMRTParameters);
             cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapProjectionSet.CountId,
                 VirtualShadowMapPrototypeRuntime.Projections.Count);
             cmd.SetComputeMatrixArrayParam(m_ResolveCompute, CSMViewProjMatricesId, m_ViewProjMatrices);

@@ -1,0 +1,3 @@
+400 moving camera layouts: all projections except level3/depth basis/camera selection unchanged; nested one-page guard; world-page alignment passed.
+100 warmup + 1000 stable focused Update calls: GC.GetAllocatedBytesForCurrentThread delta=0.
+Focused diagnostic self-check, not Unity Test Framework. Capture readback allocations excluded.

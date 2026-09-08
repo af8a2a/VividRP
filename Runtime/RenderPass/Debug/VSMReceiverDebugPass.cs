@@ -14,6 +14,7 @@ namespace VividRP.Runtime.RenderPass.Core
         SamplingWork,
         Availability,
         QualityPolicy,
+        SMRTWork,
     }
 
     // Opt-in graph node: absent from the shipping graph means no diagnostic
@@ -70,6 +71,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_InvViewProjection;
         private Vector4 m_Parameters;
         private Vector4 m_Quality;
+        private Vector4 m_SMRTParameters;
         private TextureHandle m_Static, m_Dynamic;
         private BufferHandle m_Table, m_Metadata, m_Projections;
 
@@ -119,6 +121,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ViewProjection = camera.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             m_InvViewProjection = m_ViewProjection.inverse;
             m_Quality = VirtualShadowMapReceiverQuality.BuildParameters(settings);
+            var lightData = frameData.GetOrCreate<VividLightData>();
+            float angle = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
+            if (DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out _, out var additional)
+                && additional != null) angle = additional.angularDiameter;
+            m_SMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angle);
             m_Parameters = new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0,
                 shadow.depthBias, shadow.slopeScaleDepthBias, settings.virtualShadowMapStochasticFiltering.value ? 1 : 0);
             m_Static = PassRecorder.ImportTextureForPass(this, VirtualShadowMapPrototypeRuntime.StaticPhysicalPage, AccessFlags.Read);
@@ -137,7 +144,7 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         internal static VSMReceiverDebugMode NormalizeMode(VSMReceiverDebugMode mode) =>
-            mode >= VSMReceiverDebugMode.PreferredLevel && mode <= VSMReceiverDebugMode.QualityPolicy
+            mode >= VSMReceiverDebugMode.PreferredLevel && mode <= VSMReceiverDebugMode.SMRTWork
                 ? mode : VSMReceiverDebugMode.TexelFootprint;
 
         public override void Record(ComputePassContext context)
@@ -163,6 +170,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.ParametersId, m_Quality);
             cmd.SetComputeMatrixParam(m_Compute, InvViewProjectionId, m_InvViewProjection);
             cmd.SetComputeVectorParam(m_Compute, ParametersId, m_Parameters);
+            cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.SMRTParametersId, m_SMRTParameters);
             cmd.SetComputeIntParam(m_Compute, FrameIndexId, m_FrameIndex);
             cmd.SetComputeIntParam(m_Compute, WidthId, m_Output.desc.Width);
             cmd.SetComputeIntParam(m_Compute, HeightId, m_Output.desc.Height);

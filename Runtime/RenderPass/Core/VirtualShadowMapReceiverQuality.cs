@@ -8,6 +8,15 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal static readonly int ParametersId = Shader.PropertyToID("_VSMReceiverQuality");
         internal static readonly int ViewProjectionId = Shader.PropertyToID("_VSMReceiverViewProjection");
+        internal static readonly int SMRTParametersId = Shader.PropertyToID("_VSMSMRTParameters");
+
+        internal static Vector4 BuildSMRTParameters(CascadedShadowSettingsVolume settings, float angularDiameter)
+            => settings == null || !settings.virtualShadowMapSMRT.value || angularDiameter <= 0
+                ? Vector4.zero : new Vector4(
+                    settings.virtualShadowMapSMRTRayCount.value,
+                    settings.virtualShadowMapSMRTSamplesPerRay.value,
+                    settings.virtualShadowMapSMRTMaxRayLength.value,
+                    Mathf.Tan(Mathf.Min(angularDiameter, 10) * (0.5f * Mathf.Deg2Rad)));
 
         internal static Vector4 BuildParameters(CascadedShadowSettingsVolume settings)
             => settings == null ? Vector4.zero : BuildParameters(

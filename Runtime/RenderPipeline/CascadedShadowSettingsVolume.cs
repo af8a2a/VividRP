@@ -30,10 +30,18 @@ namespace VividRP.Runtime
         public ClampedFloatParameter virtualShadowMapTargetTexelPixels = new(1, 0.25f, 8);
         [Tooltip("Receiver quality only: -1 halves the target texel footprint (finer); +1 doubles it (coarser). Does not change First Level, virtual resolution or the page budget. Requires Screen Density.")]
         public ClampedFloatParameter virtualShadowMapResolutionLodBias = new(0, -4, 4);
-        [Tooltip("Enable VSM filtering, using two-texel-wide area PCF with up to nine comparisons by default. Off keeps the single-point hard-shadow reference; missing filter footprints fall back as a whole to a coarser level.")]
+        [Tooltip("Enable VSM filtering, using two-texel-wide area PCF with up to nine comparisons by default. With SMRT, integrate this footprint at ray origins to preserve contact anti-aliasing. Off keeps the single-point hard-shadow reference; missing filter footprints fall back as a whole to a coarser level.")]
         public BoolParameter virtualShadowMapPCF = new(false);
         [Tooltip("Experimental nine-comparison stratified disk filter with frame-varying samples. Requires VSM PCF; radius is one virtual texel. Intended for comparison with area PCF under temporal anti-aliasing.")]
         public BoolParameter virtualShadowMapStochasticFiltering = new(false);
+        [Tooltip("Experimental directional SMRT contact-hardening soft shadows. Uses the light's Angular Diameter (clamped to 10 degrees for SMRT); zero angle preserves the PCF/hard reference. Incomplete footprints retry coarser levels, then the reference filter.")]
+        public BoolParameter virtualShadowMapSMRT = new(false);
+        [Tooltip("Shadow rays per pixel. More rays reduce temporal noise; requires temporal anti-aliasing.")]
+        public ClampedIntParameter virtualShadowMapSMRTRayCount = new(4, 4, 8);
+        [Tooltip("Maximum depth cells visited per ray. More samples allow a wider penumbra without skipping thin casters.")]
+        public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 4, 8);
+        [Tooltip("Maximum distance in world units over which rays diverge. Beyond this distance they continue parallel to the light, retaining distant occlusion with a bounded penumbra. Also limited by the per-ray cell budget.")]
+        public ClampedFloatParameter virtualShadowMapSMRTMaxRayLength = new(10, 0.1f, 100);
         [Tooltip("Width of transitions to the next available level. Screen Density uses this fraction of a LOD step and the projection coverage border; legacy selection uses the selection radius. 0 disables blending.")]
         public ClampedFloatParameter virtualShadowMapTransition = new(0.2f, 0f, 0.5f);
         public ClampedIntParameter cascadeCount = new(DefaultCascadeCount, 1, 4);

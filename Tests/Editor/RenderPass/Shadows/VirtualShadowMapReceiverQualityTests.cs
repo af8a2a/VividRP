@@ -1,5 +1,6 @@
 using System;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
@@ -72,6 +73,38 @@ namespace VividRP.Editor.Tests
             for (int i = 0; i < 256; i++) RecordQuality(cmd);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.That(allocated, Is.Zero);
+        }
+
+        [Test]
+        public void SMRT_ZeroAnglePreservesReferenceAndStableBindingDoesNotAllocate()
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            using var cmd = new CommandBuffer();
+            try
+            {
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, .5f), Is.EqualTo(Vector4.zero));
+                settings.virtualShadowMapSMRT.value = true;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, 0), Is.EqualTo(Vector4.zero));
+                Vector4 parameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, .5f);
+                Assert.That(parameters.x, Is.EqualTo(4)); Assert.That(parameters.y, Is.EqualTo(8));
+                Assert.That(parameters.w, Is.EqualTo(Mathf.Tan(.25f * Mathf.Deg2Rad)).Within(1e-7));
+                var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                    "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
+                Assert.That(shader, Is.Not.Null);
+                for (int i = 0; i < 32; i++) RecordSMRT(cmd, settings, shader);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++) RecordSMRT(cmd, settings, shader);
+                long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(bytes, Is.Zero);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        private static void RecordSMRT(CommandBuffer cmd, CascadedShadowSettingsVolume settings, ComputeShader shader)
+        {
+            cmd.Clear();
+            cmd.SetComputeVectorParam(shader, VirtualShadowMapReceiverQuality.SMRTParametersId,
+                VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, .5f));
         }
 
         private static void RecordQuality(CommandBuffer cmd)

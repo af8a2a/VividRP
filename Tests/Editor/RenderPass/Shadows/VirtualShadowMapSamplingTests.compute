@@ -1,3 +1,5 @@
+#pragma kernel TraceSMRTRays
+#pragma kernel FilterSMRTFootprints
 #pragma kernel SampleTaps
 #pragma kernel ResolveReceivers
 #pragma kernel MarkFootprints
@@ -161,4 +163,27 @@ void MarkFootprints(uint3 id : SV_DispatchThreadID)
     float4 input = _SamplingInputs[id.x];
     // z carries the primary/transition/parent role bits for shared-page feedback checks.
     MarkVSMReceiverPage(input.xy, (int)input.w, (uint)input.z);
+}
+
+[numthreads(64, 1, 1)]
+void TraceSMRTRays(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    float4 ray = _SamplingNormals[id.x];
+    float visibility;
+    bool valid = TryTraceVSMSMRTRay(input.xyz, ray.xy, 0.05, ray.z,
+        ray.w, (int)_VSMSMRTParameters.y, (int)input.w, visibility);
+    _SamplingResults[id.x] = float2(valid ? 1 : 0, visibility);
+}
+
+[numthreads(64, 1, 1)]
+void FilterSMRTFootprints(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    float visibility;
+    bool valid = TryFilterVSMSMRT(input.xyz, _SamplingNormals[id.x], (int)input.w,
+        uint2(id.x, _SamplingPixel.y), visibility);
+    _SamplingResults[id.x] = float2(valid ? 1 : 0, visibility);
 }

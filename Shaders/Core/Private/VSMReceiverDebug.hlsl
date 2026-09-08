@@ -20,6 +20,7 @@ void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
     g_VSMDebugWork = 0;
     g_VSMDebugMissing = 0;
     g_VSMDebugQuality = -1;
+    g_VSMDebugSMRT = 0;
     float depth = _DepthTexture.Load(int3(pixel, 0));
     // -2 is sky; -1 is unavailable/outside selection. Neither is valid lit depth.
     if (IsSkyPixel(depth))
@@ -70,6 +71,11 @@ void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
         data = _VSMReceiverQuality.x > 0 ? g_VSMDebugQuality : -1;
         color = data.w < 0 ? float3(1, 0, 1)
             : lerp(float3(0, 0.7, 0), float3(1, 0, 0), saturate((data.w - 1) / 3));
+    }
+    if (_VSMReceiverDebugMode == 7)
+    {
+        data = float4(g_VSMDebugSMRT);
+        color = float3(saturate(data.y / max(data.x, 1)), saturate(data.z), saturate(data.w));
     }
     _VSMReceiverDebugData[pixel] = data;
     _VSMReceiverDebugOutput[pixel] = float4(color, 1);

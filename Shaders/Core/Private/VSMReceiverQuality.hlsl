@@ -25,7 +25,7 @@ float2 VSMReceiverTexelFootprint(float3 positionWS, float3 normalWS, int level)
                   length((deltaY.xy * center.w - center.xy * deltaY.w) * scale));
 }
 
-int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, out float blend)
+int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, bool smrt, out float blend)
 {
     blend = 0;
     if (_VSMProjectionCount <= 0) return -1;
@@ -45,13 +45,13 @@ int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, out float blend)
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
     g_VSMDebugQuality = float4(desiredLOD, -1, -1, -1);
 #endif
-    float guard = _VSMReceiverParameters.x >= 0.5 ? 1.5 / _VSMPrototypeVirtualResolution : 0;
     for (int level = 0; level < _VSMProjectionCount; level++)
     {
+        float guard = VSMFilterGuard(level, smrt);
         VividVSMProjection p = _VSMProjections[level];
         float4 bias = BuildVSMReceiverBias(p, normal);
         float3 coord = mul(p.worldToShadow, float4(positionWS + normal * bias.w, 1)).xyz;
-        // Coverage, including normal offset and PCF map-edge guard, is a hard
+        // Coverage, including normal offset and filter map-edge guard, is a hard
         // constraint independent of requested density and current residency.
         if (any(coord.xy < guard) || any(coord.xy >= 1 - guard) || coord.z < 0 || coord.z > 1)
             continue;
@@ -69,4 +69,9 @@ int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, out float blend)
         return level;
     }
     return -1;
+}
+
+int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, out float blend)
+{
+    return SelectVSMDensityLevel(positionWS, normalWS, UseVSMSMRT(), blend);
 }

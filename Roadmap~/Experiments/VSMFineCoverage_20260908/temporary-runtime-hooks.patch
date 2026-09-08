@@ -1,0 +1,124 @@
+diff --git a/Runtime/RenderPass/Core/CSMShadowPass.cs b/Runtime/RenderPass/Core/CSMShadowPass.cs
+index b33f95cb..79bb2472 100644
+--- a/Runtime/RenderPass/Core/CSMShadowPass.cs
++++ b/Runtime/RenderPass/Core/CSMShadowPass.cs
+@@ -2564,7 +2564,12 @@ namespace VividRP.Runtime.RenderPass.Core
+     internal static class VirtualShadowMapPrototypeRuntime
+     {
+         internal const int PageSize = 128;
++        #if UNITY_EDITOR
++        internal static int EditorPhysicalPageLimit = 256;
++        internal const int MaxPhysicalPageCount = 512;
++#else
+         internal const int MaxPhysicalPageCount = 256;
++#endif
+         internal const int MaxPageRequestsPerMeshlet = 4;
+         private const int MeshletPageRequestStride = sizeof(uint) * 4;
+         private const int StaticInvalidationBoundsStride = sizeof(float) * 8;
+@@ -3232,7 +3237,11 @@ namespace VividRP.Runtime.RenderPass.Core
+                 resolvedPagesPerAxis
+                     * resolvedPagesPerAxis
+                     * resolvedCascadeCount,
++#if UNITY_EDITOR
++                Mathf.Clamp(EditorPhysicalPageLimit, 1, MaxPhysicalPageCount));
++#else
+                 MaxPhysicalPageCount);
++#endif
+         }
+ 
+         internal static uint[] BuildUnmappedPageTable(
+diff --git a/Runtime/RenderPass/Core/VirtualShadowMapClipmapLayout.cs b/Runtime/RenderPass/Core/VirtualShadowMapClipmapLayout.cs
+index a6ff04c3..6106bd88 100644
+--- a/Runtime/RenderPass/Core/VirtualShadowMapClipmapLayout.cs
++++ b/Runtime/RenderPass/Core/VirtualShadowMapClipmapLayout.cs
+@@ -8,6 +8,11 @@ namespace VividRP.Runtime.RenderPass.Core
+     // hysteresis, but ownership changes never inherit another camera/light's interval.
+     internal sealed class VirtualShadowMapClipmapLayout
+     {
++#if UNITY_EDITOR
++        // Temporary fine-coverage experiment, not a serialized or player setting.
++        internal delegate void PageOriginOverride(VirtualShadowMapClipmapLayout layout, int level, ref long x, ref long y);
++        internal static PageOriginOverride EditorOverridePageOrigin;
++#endif
+         internal const int MaxLevels = 16;
+         internal const int MinResolution = 512;
+         internal readonly Matrix4x4[] Views = new Matrix4x4[MaxLevels];
+@@ -78,6 +83,9 @@ namespace VividRP.Runtime.RenderPass.Core
+                 float pageWorldSize = 2 * radius / pagesPerAxis;
+                 long x = (long)Math.Floor((double)cameraLS.x / pageWorldSize) - pagesPerAxis / 2;
+                 long y = (long)Math.Floor((double)cameraLS.y / pageWorldSize) - pagesPerAxis / 2;
++#if UNITY_EDITOR
++                EditorOverridePageOrigin?.Invoke(this, i, ref x, ref y);
++#endif
+                 float centerX = (float)((double)x * pageWorldSize + radius);
+                 float centerY = (float)((double)y * pageWorldSize + radius);
+                 Matrix4x4 view = worldToLight;
+diff --git a/Runtime/RenderPass/Core/VirtualShadowMapReceiverQuality.cs b/Runtime/RenderPass/Core/VirtualShadowMapReceiverQuality.cs
+index e70abb64..38b27d8a 100644
+--- a/Runtime/RenderPass/Core/VirtualShadowMapReceiverQuality.cs
++++ b/Runtime/RenderPass/Core/VirtualShadowMapReceiverQuality.cs
+@@ -6,6 +6,9 @@ namespace VividRP.Runtime.RenderPass.Core
+     // caster culling or static-cache invalidation.
+     internal static class VirtualShadowMapReceiverQuality
+     {
++#if UNITY_EDITOR
++        internal static float EditorCoverageTransitionScale;
++#endif
+         internal static readonly int ParametersId = Shader.PropertyToID("_VSMReceiverQuality");
+         internal static readonly int ViewProjectionId = Shader.PropertyToID("_VSMReceiverViewProjection");
+ 
+@@ -17,6 +20,12 @@ namespace VividRP.Runtime.RenderPass.Core
+ 
+         internal static Vector4 BuildParameters(bool enabled, float targetTexelPixels, float lodBias)
+             => new(enabled ? 1 : 0,
+-                Mathf.Clamp(targetTexelPixels, 0.25f, 8) * Mathf.Pow(2, Mathf.Clamp(lodBias, -4, 4)), 0, 0);
++                Mathf.Clamp(targetTexelPixels, 0.25f, 8) * Mathf.Pow(2, Mathf.Clamp(lodBias, -4, 4)),
++#if UNITY_EDITOR
++                EditorCoverageTransitionScale,
++#else
++                0,
++#endif
++                0);
+     }
+ }
+diff --git a/Shaders/Core/Private/VSMReceiverQuality.hlsl b/Shaders/Core/Private/VSMReceiverQuality.hlsl
+index 6e88ad54..85816595 100644
+--- a/Shaders/Core/Private/VSMReceiverQuality.hlsl
++++ b/Shaders/Core/Private/VSMReceiverQuality.hlsl
+@@ -2,6 +2,9 @@
+ // not depend on these uniforms. Resolve, feedback and debug use this same choice.
+ float4 _VSMReceiverQuality; // enabled, target pixels per texel including LOD bias, reserved
+ float4x4 _VSMReceiverViewProjection;
++#if defined(VIVID_VSM_RECEIVER_DEBUG)
++static float4 g_VSMDebugTransition;
++#endif
+ 
+ // Project virtual texel axes onto the geometric receiver plane, then the screen.
+ // These are local axis lengths, not a singular-value bound in every direction.
+@@ -28,6 +31,9 @@ float2 VSMReceiverTexelFootprint(float3 positionWS, float3 normalWS, int level)
+ int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, out float blend)
+ {
+     blend = 0;
++#if defined(VIVID_VSM_RECEIVER_DEBUG)
++    g_VSMDebugTransition = -1;
++#endif
+     if (_VSMProjectionCount <= 0) return -1;
+     VividVSMProjection first = _VSMProjections[0];
+     if (length(positionWS - first.selectionSphere.xyz) >= first.parameters.w) return -1;
+@@ -60,9 +66,13 @@ int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, out float blend)
+ #endif
+         if (level < desired) continue;
+         float edge = max(abs(coord.x - 0.5), abs(coord.y - 0.5));
+-        blend = VSMTransitionWeight(edge + guard, p.parameters.z);
+-        if (level == desired)
+-            blend = max(blend, VSMTransitionWeight(frac(lod) * 0.5, p.parameters.z));
++        float scale = _VSMReceiverQuality.z > 0 ? _VSMReceiverQuality.z : 1;
++        float coverageBlend = VSMTransitionWeight(edge + guard, p.parameters.z * scale);
++        float lodBlend = level == desired ? VSMTransitionWeight(frac(lod) * 0.5, p.parameters.z) : 0;
++        blend = max(coverageBlend, lodBlend);
++#if defined(VIVID_VSM_RECEIVER_DEBUG)
++        g_VSMDebugTransition = float4(coverageBlend, lodBlend, p.parameters.z * scale, 0.5 - edge - guard);
++#endif
+ #if defined(VIVID_VSM_RECEIVER_DEBUG)
+         g_VSMDebugQuality.zw = float2(level, worst >= 0 ? worst * exp2((float)level) / target : -1);
+ #endif

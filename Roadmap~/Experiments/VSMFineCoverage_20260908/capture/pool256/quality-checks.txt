@@ -1,0 +1,1 @@
+All configured coverage scales preserve enabled/density target/reserved-w. 100 warmup + 10000 calls allocated 0 bytes on this thread.

@@ -333,7 +333,7 @@ namespace VividRP.Editor
             // CoreRP explicitly exposes internals to VividRP.Editor. Readbacks must follow
             // their diagnostic dispatches in the same command buffer, before outputs are reused.
             var cmd = context.cmd.m_WrappedCommandBuffer;
-            Bind(cmd, camera, context.Get<VividShadowData>(), settings, depth, normal, shadow);
+            Bind(cmd, camera, context.Get<VividShadowData>(), context.Get<VividLightData>(), settings, depth, normal, shadow);
             if (m_Report.roiOnly)
             {
                 // Fixed storage per scheduled capture preserves consecutive frame identity
@@ -365,7 +365,7 @@ namespace VividRP.Editor
             cmd.RequestAsyncReadback(VirtualShadowMapPrototypeRuntime.AllocatorCounters, m_CounterCallback);
         }
 
-        private void Bind(CommandBuffer cmd, VividCameraData camera, VividShadowData shadow, CascadedShadowSettingsVolume settings,
+        private void Bind(CommandBuffer cmd, VividCameraData camera, VividShadowData shadow, VividLightData lightData, CascadedShadowSettingsVolume settings,
             Texture depth, Texture normal, Texture sourceShadow)
         {
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[0], depth);
@@ -383,6 +383,11 @@ namespace VividRP.Editor
             cmd.SetComputeMatrixParam(m_Compute, VirtualShadowMapReceiverQuality.ViewProjectionId, vp);
             cmd.SetComputeMatrixParam(m_Compute, s_Ids[10], vp.inverse);
             cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.ParametersId, VirtualShadowMapReceiverQuality.BuildParameters(settings));
+            float angle = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
+            if (DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out _, out var additional)
+                && additional != null) angle = additional.angularDiameter;
+            cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.SMRTParametersId,
+                VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angle));
             cmd.SetComputeVectorParam(m_Compute, s_Ids[11], new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0, shadow.depthBias, shadow.slopeScaleDepthBias, settings.virtualShadowMapStochasticFiltering.value ? 1 : 0));
             cmd.SetComputeIntParam(m_Compute, s_Ids[12], m_Width); cmd.SetComputeIntParam(m_Compute, s_Ids[13], m_Height);
             cmd.SetComputeIntParam(m_Compute, s_Ids[14], 1);

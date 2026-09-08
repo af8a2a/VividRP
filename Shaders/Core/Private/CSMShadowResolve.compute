@@ -83,6 +83,7 @@ float4   _CSMCascadeBorders;
 int      _CSMShadowQuality;
 int      _VSMPrototypeEnabled;
 float4   _VSMReceiverParameters; // PCF enabled, constant bias in texels, slope bias, stochastic filter
+float4   _VSMSMRTParameters; // ray count (zero disables), cell budget, max world length, tan angular radius
 int      _VSMPrototypePageSize;
 int      _VSMPrototypeVirtualResolution;
 int      _VSMPrototypePagesPerAxis;
@@ -158,9 +159,10 @@ static const uint kVSMMaxPagesPerMeshletRequest = 4u;
 // Thread-local instrumentation exists only in the opt-in diagnostic kernel.
 static int3 g_VSMDebugLevels;
 static float g_VSMDebugBlend;
-static uint3 g_VSMDebugWork; // attempted taps, completed comparisons, attempted levels
+static uint3 g_VSMDebugWork; // attempted queries, completed combined-depth reads, attempted levels
 static uint g_VSMDebugMissing; // unmapped=1, dirty=2, inconsistent=4, outside=8
 static float4 g_VSMDebugQuality; // desired LOD, minimum covered, selected, footprint/target
+static uint4 g_VSMDebugSMRT; // rays, unoccluded parallel tails, failed footprints, final PCF fallback
 #endif
 
 uint GetVSMSourceDrawArgsIndex(
@@ -1078,7 +1080,30 @@ int2 ShadowUVToTexelCoord(float2 shadowUV, int cascadeIndex)
     return int2(saturate(shadowUV) * (GetShadowMapResolution(cascadeIndex) - 1));
 }
 
-void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex, uint requestRole)
+bool UseVSMSMRT()
+{
+    return _VSMSMRTParameters.x >= 4 && _VSMSMRTParameters.w > 0;
+}
+
+float VSMSMRTRayLength(int index)
+{
+    // A 2D DDA visits at most N cells if its Manhattan displacement is < N-2.
+    // Use the entire disk's bound, independent of ray phase and page residency.
+    float radius = (clamp(_VSMSMRTParameters.y, 4, 8) - 2.001) * 0.70710678;
+    return min(_VSMSMRTParameters.z, radius * _VSMProjections[index].parameters.x
+        / max(_VSMSMRTParameters.w, 1e-8));
+}
+
+float VSMFilterGuard(int index, bool smrt)
+{
+    float radius = _VSMReceiverParameters.x >= 0.5 ? 1.5 : 0;
+    if (smrt)
+        radius += VSMSMRTRayLength(index) * _VSMSMRTParameters.w
+            / _VSMProjections[index].parameters.x + 0.001;
+    return radius / _VSMPrototypeVirtualResolution;
+}
+
+void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex, uint requestRole, int halo)
 {
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
     // Replaying the resolver for inspection must not alter live receiver feedback.
@@ -1094,10 +1119,9 @@ void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex, uint requestRole)
         return;
     uint pageSize = (uint)_VSMPrototypePageSize;
     uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
-    // A one-texel halo covers neighboring hard taps without duplicating border
-    // storage. Emit once per distinct page, at most four even at a page corner.
-    uint2 minPage = (uint2)max(virtualTexel - 1, 0) / pageSize;
-    uint2 maxPage = (uint2)min(virtualTexel + 1, (int)resolution - 1) / pageSize;
+    // One stable union for all ray phases, emitted once per distinct page.
+    uint2 minPage = (uint2)max(virtualTexel - halo, 0) / pageSize;
+    uint2 maxPage = (uint2)min(virtualTexel + halo, (int)resolution - 1) / pageSize;
     uint request = kVSMPageRequested | requestRole;
     if (cascadeIndex == _VSMProjectionCount - 1)
         request |= kVSMPageCoarseRequested;
@@ -1111,6 +1135,11 @@ void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex, uint requestRole)
         }
     }
 #endif
+}
+
+void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex, uint requestRole)
+{
+    MarkVSMReceiverPage(shadowUV, cascadeIndex, requestRole, 1);
 }
 
 void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex)
@@ -2153,11 +2182,13 @@ float VSMTransitionWeight(float edge, float border)
     return t * t * (3.0 - 2.0 * t);
 }
 
+#include "VSMSMRT.hlsl"
+
 // Reproject the original world receiver (including THIS level's normal bias)
 // at every fallback level. Reusing a fine UV/depth or shifting a physical texel
 // would sample unrelated data after clipmap scrolling.
 bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
-    bool sampleDepth, uint2 pixel, uint requestRole, out bool covered, out float shadow)
+    bool sampleDepth, uint2 pixel, uint requestRole, bool smrt, out bool covered, out float shadow)
 {
     covered = false;
     shadow = 1.0;
@@ -2178,10 +2209,22 @@ bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
         return false;
     }
     covered = true;
-    MarkVSMReceiverPage(coord.xy, index, requestRole);
+    int halo = smrt ? (int)ceil(VSMFilterGuard(index, true) * _VSMPrototypeVirtualResolution) : 1;
+    MarkVSMReceiverPage(coord.xy, index, requestRole, halo);
     if (!sampleDepth || _VSMPrototypeEnabled == 0)
         return false;
+    // HLSL conditional expressions may evaluate both operands and overwrite the
+    // shared out parameter. Keep the two filters behind an actual branch.
+    [branch]
+    if (smrt) return TryFilterVSMSMRT(coord, bias, index, pixel, shadow);
     return TryFilterVSMProjection(coord, bias, index, pixel, shadow);
+}
+
+bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
+    bool sampleDepth, uint2 pixel, uint requestRole, out bool covered, out float shadow)
+{
+    return TryEvaluateVSMProjection(positionWS, normalWS, index, sampleDepth, pixel,
+        requestRole, UseVSMSMRT(), covered, shadow);
 }
 
 bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
@@ -2193,15 +2236,16 @@ bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
 
 #include "VSMReceiverQuality.hlsl"
 
-float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)
+float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bool smrt, out bool unavailable)
 {
+    unavailable = false;
     bool densityPolicy = _VSMReceiverQuality.x > 0;
     float densityBlend = 0;
     int firstLevel = 0;
     [branch]
     if (densityPolicy)
-        firstLevel = SelectVSMDensityLevel(positionWS, normalWS, densityBlend);
-    if (firstLevel < 0) return 1.0;
+        firstLevel = SelectVSMDensityLevel(positionWS, normalWS, smrt, densityBlend);
+    if (firstLevel < 0) { unavailable = true; return 1.0; }
     for (int index = firstLevel; index < _VSMProjectionCount; index++)
     {
         VividVSMProjection projection = _VSMProjections[index];
@@ -2234,7 +2278,7 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)
             float sampleShadow;
             bool covered;
             bool sampled = TryEvaluateVSMProjection(positionWS, normalWS, level, needSample, pixel,
-                requestRole, covered, sampleShadow);
+                requestRole, smrt, covered, sampleShadow);
             if (covered)
                 requestRole = requestRole == kVSMPagePrimaryRequested
                     ? kVSMPageParentRequested | (blend > 0.0 ? kVSMPageTransitionRequested : 0u) : 0u;
@@ -2260,11 +2304,30 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)
         // If the primary already fell back, it must not be blended a second time.
         if (sampledLevel == index && hasTransition)
             shadow = lerp(shadow, transition, blend);
+        unavailable = sampledLevel < 0;
         float fade = saturate((maxDistance - distance) / max(maxDistance * 0.2, 1e-5));
         return lerp(1.0, shadow, fade);
     }
     // No complete level covers the receiver: explicit terminal lit policy.
+    unavailable = true;
     return 1.0;
+}
+
+float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)
+{
+    bool smrt = UseVSMSMRT();
+    bool unavailable;
+    float shadow = ResolveVSMReceiverMode(positionWS, normalWS, pixel, smrt, unavailable);
+    if (smrt && unavailable)
+    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugSMRT.w++;
+#endif
+        // Retry the complete existing PCF hierarchy only after all soft estimates
+        // failed. Never clamp a valid penumbra against a hard central reference.
+        shadow = ResolveVSMReceiverMode(positionWS, normalWS, pixel, false, unavailable);
+    }
+    return shadow;
 }
 
 float ResolveVSMReceiver(float3 positionWS, float3 normalWS)

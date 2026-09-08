@@ -1,0 +1,2258 @@
+{
+  "static": [
+    {
+      "step": 0,
+      "coarser": 18196,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 115,
+          "finer": 0,
+          "shadow_mae": 0.0035751739051193,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 1,
+      "coarser": 18192,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 111,
+          "finer": 0,
+          "shadow_mae": 0.003579565789550543,
+          "shadow_max": 0.7275390625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 2,
+      "coarser": 20813,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 110,
+          "finer": 0,
+          "shadow_mae": 0.0036285973619669676,
+          "shadow_max": 0.7280235290527344
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 3,
+      "coarser": 20822,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 113,
+          "finer": 0,
+          "shadow_mae": 0.003593115834519267,
+          "shadow_max": 0.72021484375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 4,
+      "coarser": 21056,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 110,
+          "finer": 0,
+          "shadow_mae": 0.003615671070292592,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 5,
+      "coarser": 18427,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003604569938033819,
+          "shadow_max": 0.7191162109375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 6,
+      "coarser": 16759,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 112,
+          "finer": 0,
+          "shadow_mae": 0.0035904166288673878,
+          "shadow_max": 0.728515625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 7,
+      "coarser": 19467,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003566126571968198,
+          "shadow_max": 0.731689453125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 8,
+      "coarser": 18196,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 115,
+          "finer": 0,
+          "shadow_mae": 0.0035751739051193,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 9,
+      "coarser": 18192,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 111,
+          "finer": 0,
+          "shadow_mae": 0.003579565789550543,
+          "shadow_max": 0.7275390625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 10,
+      "coarser": 20813,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 110,
+          "finer": 0,
+          "shadow_mae": 0.0036285973619669676,
+          "shadow_max": 0.7280235290527344
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 11,
+      "coarser": 20822,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 113,
+          "finer": 0,
+          "shadow_mae": 0.003593115834519267,
+          "shadow_max": 0.72021484375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 12,
+      "coarser": 21056,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 110,
+          "finer": 0,
+          "shadow_mae": 0.003615671070292592,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 13,
+      "coarser": 18427,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003604569938033819,
+          "shadow_max": 0.7191162109375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 14,
+      "coarser": 16759,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 112,
+          "finer": 0,
+          "shadow_mae": 0.0035904166288673878,
+          "shadow_max": 0.728515625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 15,
+      "coarser": 19467,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003566126571968198,
+          "shadow_max": 0.731689453125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 16,
+      "coarser": 18196,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 115,
+          "finer": 0,
+          "shadow_mae": 0.0035751739051193,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 17,
+      "coarser": 18192,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 111,
+          "finer": 0,
+          "shadow_mae": 0.003579565789550543,
+          "shadow_max": 0.7275390625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 18,
+      "coarser": 20813,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 110,
+          "finer": 0,
+          "shadow_mae": 0.0036285973619669676,
+          "shadow_max": 0.7280235290527344
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 19,
+      "coarser": 20822,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 113,
+          "finer": 0,
+          "shadow_mae": 0.003593115834519267,
+          "shadow_max": 0.72021484375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 20,
+      "coarser": 21056,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 110,
+          "finer": 0,
+          "shadow_mae": 0.003615671070292592,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 21,
+      "coarser": 18427,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003604569938033819,
+          "shadow_max": 0.7191162109375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 22,
+      "coarser": 16759,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 112,
+          "finer": 0,
+          "shadow_mae": 0.0035904166288673878,
+          "shadow_max": 0.728515625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 23,
+      "coarser": 19467,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003566126571968198,
+          "shadow_max": 0.731689453125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 24,
+      "coarser": 18196,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 115,
+          "finer": 0,
+          "shadow_mae": 0.0035751739051193,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 25,
+      "coarser": 18192,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 111,
+          "finer": 0,
+          "shadow_mae": 0.003579565789550543,
+          "shadow_max": 0.7275390625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 26,
+      "coarser": 20813,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 110,
+          "finer": 0,
+          "shadow_mae": 0.0036285973619669676,
+          "shadow_max": 0.7280235290527344
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 27,
+      "coarser": 20822,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 113,
+          "finer": 0,
+          "shadow_mae": 0.003593115834519267,
+          "shadow_max": 0.72021484375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 28,
+      "coarser": 21056,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 110,
+          "finer": 0,
+          "shadow_mae": 0.003615671070292592,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 29,
+      "coarser": 18427,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003604569938033819,
+          "shadow_max": 0.7191162109375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 30,
+      "coarser": 16759,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 112,
+          "finer": 0,
+          "shadow_mae": 0.0035904166288673878,
+          "shadow_max": 0.728515625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 31,
+      "coarser": 19467,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003566126571968198,
+          "shadow_max": 0.731689453125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    }
+  ],
+  "translate": [
+    {
+      "step": 0,
+      "coarser": 18196,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 4.163630933362583e-07,
+          "shadow_max": 0.00048828125
+        },
+        "ledge": {
+          "coarser": 115,
+          "finer": 0,
+          "shadow_mae": 0.0035757592413574457,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 7.600495450788003e-07,
+          "shadow_max": 0.00048828125
+        }
+      }
+    },
+    {
+      "step": 4,
+      "coarser": 28534,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 111,
+          "finer": 0,
+          "shadow_mae": 0.0031303975265473127,
+          "shadow_max": 0.69189453125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 8,
+      "coarser": 43102,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 94,
+          "finer": 0,
+          "shadow_mae": 0.0021433180663734674,
+          "shadow_max": 0.71728515625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 3.6744397675647633e-06,
+          "shadow_max": 0.1455078125
+        }
+      }
+    },
+    {
+      "step": 12,
+      "coarser": 41208,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 16,
+      "coarser": 35787,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 20,
+      "coarser": 42535,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 24,
+      "coarser": 38794,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 28,
+      "coarser": 20600,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 32,
+      "coarser": 15953,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 36,
+      "coarser": 23759,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 40,
+      "coarser": 32705,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 44,
+      "coarser": 39814,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 48,
+      "coarser": 28991,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 52,
+      "coarser": 35633,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 56,
+      "coarser": 36333,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 4,
+          "finer": 0,
+          "shadow_mae": 6.960355221963255e-06,
+          "shadow_max": 0.2171630859375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 60,
+      "coarser": 23529,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 68,
+          "finer": 0,
+          "shadow_mae": 0.001921226386912167,
+          "shadow_max": 0.6923828125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 64,
+      "coarser": 16464,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 56,
+          "finer": 0,
+          "shadow_mae": 0.0016674780054017901,
+          "shadow_max": 0.7027587890625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 68,
+      "coarser": 22652,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 55,
+          "finer": 0,
+          "shadow_mae": 0.001739885425195098,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 72,
+      "coarser": 18886,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 56,
+          "finer": 0,
+          "shadow_mae": 0.0016674780054017901,
+          "shadow_max": 0.7027587890625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 76,
+      "coarser": 20188,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 55,
+          "finer": 0,
+          "shadow_mae": 0.001739885425195098,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 80,
+      "coarser": 18822,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 56,
+          "finer": 0,
+          "shadow_mae": 0.0016674780054017901,
+          "shadow_max": 0.7027587890625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 84,
+      "coarser": 20188,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 55,
+          "finer": 0,
+          "shadow_mae": 0.001739885425195098,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 88,
+      "coarser": 18822,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 56,
+          "finer": 0,
+          "shadow_mae": 0.0016674780054017901,
+          "shadow_max": 0.7027587890625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 92,
+      "coarser": 20188,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 55,
+          "finer": 0,
+          "shadow_mae": 0.001739885425195098,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 95,
+      "coarser": 19007,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 52,
+          "finer": 0,
+          "shadow_mae": 0.0016770963557064533,
+          "shadow_max": 0.6497802734375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    }
+  ],
+  "yaw": [
+    {
+      "step": 0,
+      "coarser": 18196,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 4.163630933362583e-07,
+          "shadow_max": 0.00048828125
+        },
+        "ledge": {
+          "coarser": 115,
+          "finer": 0,
+          "shadow_mae": 0.0035757592413574457,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 7.600495450788003e-07,
+          "shadow_max": 0.00048828125
+        }
+      }
+    },
+    {
+      "step": 4,
+      "coarser": 21425,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 106,
+          "finer": 0,
+          "shadow_mae": 0.003408122807741165,
+          "shadow_max": 0.7333984375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 8,
+      "coarser": 16726,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 92,
+          "finer": 0,
+          "shadow_mae": 0.002764281816780567,
+          "shadow_max": 0.720703125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 12,
+      "coarser": 20750,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 98,
+          "finer": 0,
+          "shadow_mae": 0.0026886207051575184,
+          "shadow_max": 0.70556640625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 16,
+      "coarser": 30830,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 97,
+          "finer": 0,
+          "shadow_mae": 0.0027889476623386145,
+          "shadow_max": 0.6793212890625
+        },
+        "arches": {
+          "coarser": 22,
+          "finer": 0,
+          "shadow_mae": 2.9779299438814633e-05,
+          "shadow_max": 0.2822265625
+        }
+      }
+    },
+    {
+      "step": 20,
+      "coarser": 16327,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 142,
+          "finer": 0,
+          "shadow_mae": 0.0027503767050802708,
+          "shadow_max": 0.6708984375
+        },
+        "arches": {
+          "coarser": 98,
+          "finer": 0,
+          "shadow_mae": 4.4709791836794466e-05,
+          "shadow_max": 0.45928955078125
+        }
+      }
+    },
+    {
+      "step": 24,
+      "coarser": 24260,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 178,
+          "finer": 0,
+          "shadow_mae": 0.0028442388866096735,
+          "shadow_max": 0.6873779296875
+        },
+        "arches": {
+          "coarser": 125,
+          "finer": 0,
+          "shadow_mae": 2.3132093701860867e-05,
+          "shadow_max": 0.37744140625
+        }
+      }
+    },
+    {
+      "step": 28,
+      "coarser": 26507,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 137,
+          "finer": 0,
+          "shadow_mae": 0.0027690662536770105,
+          "shadow_max": 0.701171875
+        },
+        "arches": {
+          "coarser": 87,
+          "finer": 0,
+          "shadow_mae": 3.911490421160124e-05,
+          "shadow_max": 0.534912109375
+        }
+      }
+    },
+    {
+      "step": 32,
+      "coarser": 20887,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 102,
+          "finer": 0,
+          "shadow_mae": 0.002764942357316613,
+          "shadow_max": 0.7015380859375
+        },
+        "arches": {
+          "coarser": 13,
+          "finer": 0,
+          "shadow_mae": 3.0049024644540623e-05,
+          "shadow_max": 0.29345703125
+        }
+      }
+    },
+    {
+      "step": 36,
+      "coarser": 25550,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 99,
+          "finer": 0,
+          "shadow_mae": 0.0027526395861059427,
+          "shadow_max": 0.713134765625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 40,
+      "coarser": 24429,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 97,
+          "finer": 0,
+          "shadow_mae": 0.0027922370936721563,
+          "shadow_max": 0.6982421875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 44,
+      "coarser": 24195,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 111,
+          "finer": 0,
+          "shadow_mae": 0.00350200361572206,
+          "shadow_max": 0.734375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 48,
+      "coarser": 26434,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 113,
+          "finer": 0,
+          "shadow_mae": 0.0035466032568365335,
+          "shadow_max": 0.71630859375
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 52,
+      "coarser": 22751,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 107,
+          "finer": 0,
+          "shadow_mae": 0.0035949067678302526,
+          "shadow_max": 0.720947265625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 56,
+      "coarser": 26840,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 103,
+          "finer": 0,
+          "shadow_mae": 0.003184677567332983,
+          "shadow_max": 0.72509765625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 60,
+      "coarser": 27304,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 102,
+          "finer": 0,
+          "shadow_mae": 0.0031806305050849915,
+          "shadow_max": 0.69873046875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 64,
+      "coarser": 30490,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 102,
+          "finer": 0,
+          "shadow_mae": 0.003154079895466566,
+          "shadow_max": 0.7080078125
+        },
+        "arches": {
+          "coarser": 3,
+          "finer": 0,
+          "shadow_mae": 0.00015644112136214972,
+          "shadow_max": 0.6884765625
+        }
+      }
+    },
+    {
+      "step": 68,
+      "coarser": 31488,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 100,
+          "finer": 0,
+          "shadow_mae": 0.0030560512095689774,
+          "shadow_max": 0.7017822265625
+        },
+        "arches": {
+          "coarser": 23,
+          "finer": 0,
+          "shadow_mae": 0.00037929651443846524,
+          "shadow_max": 0.63818359375
+        }
+      }
+    },
+    {
+      "step": 72,
+      "coarser": 31569,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 100,
+          "finer": 0,
+          "shadow_mae": 0.0031022175680845976,
+          "shadow_max": 0.7167282104492188
+        },
+        "arches": {
+          "coarser": 30,
+          "finer": 0,
+          "shadow_mae": 0.0003803873551078141,
+          "shadow_max": 0.6689453125
+        }
+      }
+    },
+    {
+      "step": 76,
+      "coarser": 31318,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 100,
+          "finer": 0,
+          "shadow_mae": 0.0030233461875468493,
+          "shadow_max": 0.7078857421875
+        },
+        "arches": {
+          "coarser": 17,
+          "finer": 0,
+          "shadow_mae": 0.0002852098841685802,
+          "shadow_max": 0.59228515625
+        }
+      }
+    },
+    {
+      "step": 80,
+      "coarser": 34841,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 101,
+          "finer": 0,
+          "shadow_mae": 0.0031988422852009535,
+          "shadow_max": 0.681884765625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 7.321752491407096e-05,
+          "shadow_max": 0.6229248046875
+        }
+      }
+    },
+    {
+      "step": 84,
+      "coarser": 30877,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 101,
+          "finer": 0,
+          "shadow_mae": 0.0031852908432483673,
+          "shadow_max": 0.71044921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 88,
+      "coarser": 28489,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 100,
+          "finer": 0,
+          "shadow_mae": 0.0032084013801068068,
+          "shadow_max": 0.7071533203125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 92,
+      "coarser": 20458,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 108,
+          "finer": 0,
+          "shadow_mae": 0.0036962609738111496,
+          "shadow_max": 0.698486328125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 96,
+      "coarser": 18444,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 114,
+          "finer": 0,
+          "shadow_mae": 0.0035485923290252686,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 100,
+      "coarser": 23754,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003591820364817977,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 104,
+      "coarser": 18444,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 4.163630933362583e-07,
+          "shadow_max": 0.00048828125
+        },
+        "ledge": {
+          "coarser": 114,
+          "finer": 0,
+          "shadow_mae": 0.0035491776652634144,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 7.600495450788003e-07,
+          "shadow_max": 0.00048828125
+        }
+      }
+    },
+    {
+      "step": 108,
+      "coarser": 24050,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003591820364817977,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 112,
+      "coarser": 17021,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 114,
+          "finer": 0,
+          "shadow_mae": 0.0035485923290252686,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 116,
+      "coarser": 24050,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003591820364817977,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 120,
+      "coarser": 17021,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 114,
+          "finer": 0,
+          "shadow_mae": 0.0035485923290252686,
+          "shadow_max": 0.7041015625
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 124,
+      "coarser": 24050,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 109,
+          "finer": 0,
+          "shadow_mae": 0.003591820364817977,
+          "shadow_max": 0.7294921875
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    },
+    {
+      "step": 127,
+      "coarser": 20921,
+      "finer": 0,
+      "regions": {
+        "roof": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        },
+        "ledge": {
+          "coarser": 107,
+          "finer": 0,
+          "shadow_mae": 0.0035366809461265802,
+          "shadow_max": 0.731689453125
+        },
+        "arches": {
+          "coarser": 0,
+          "finer": 0,
+          "shadow_mae": 0.0,
+          "shadow_max": 0.0
+        }
+      }
+    }
+  ]
+}

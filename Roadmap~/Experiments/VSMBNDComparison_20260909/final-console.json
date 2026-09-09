@@ -1,0 +1,17 @@
+{
+  "query": {
+    "Types": [
+      "Error"
+    ],
+    "SinceTimestamp": "2026-09-09T13:10:00Z",
+    "Count": 15
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"message\": \"Retrieved 0 log entries.\",\n  \"data\": []\n}"
+      }
+    ]
+  }
+}

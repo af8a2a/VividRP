@@ -1,0 +1,48 @@
+{
+  "restoredUtc": "2026-09-09T14:56:31.0831400Z",
+  "files": [
+    {
+      "path": "Runtime/RenderPass/Core/CSMShadowPass.cs",
+      "sha256": "F103B17ACE754C29F2038C9116400949C09E56711E738535430A1B1B91323449",
+      "matchesOriginal": true
+    },
+    {
+      "path": "Runtime/RenderPass/Core/CSMShadowResolvePass.cs",
+      "sha256": "D62AE57A3FF4EAFF29FE83B93868F2FDD68F26264F6DE638211F99296FEEB22F",
+      "matchesOriginal": true
+    },
+    {
+      "path": "Runtime/RenderPass/Core/PostProcessing/TSR/TSRUpscalerPass.cs",
+      "sha256": "9EADAFB2BB23598A14AD22F97BAEDF083093293E7BF29C5BFD95B0B5E16FE0D6",
+      "matchesOriginal": true
+    },
+    {
+      "path": "Shaders/Core/Private/VSMSMRT.hlsl",
+      "sha256": "1A16595AA0604C2EFA228AF481E510262776A3007B093FD3BC6F9052110DA3B2",
+      "matchesOriginal": true
+    },
+    {
+      "path": "Shaders/Core/Private/TSR/TSRRejectShading.compute",
+      "sha256": "598E9309A5554C2BA7FA8B19570C07FF2857399266DC64CC9F156C557B13CFA0",
+      "matchesOriginal": false
+    },
+    {
+      "path": "Shaders/Core/Private/TSR/TSRUpdateHistory.compute",
+      "sha256": "5AE5FEE4557A243820285001CD4BAD9AAD6BFCCEE49B34CF412E7F6FAF4B7B7D",
+      "matchesOriginal": true
+    },
+    {
+      "path": "Shaders/Core/Private/TSR/TSRResolveHistory.compute",
+      "sha256": "2A089AD394E113A57E678F72EE9F4D61983235F5E2B89A4F468710BE1D14438B",
+      "matchesOriginal": true
+    }
+  ],
+  "removedOwnedTemporaryAssets": [
+    "E:\\VividRP_Reborn\\Packages\\VividRP\\Editor\\Tools\\TSRLocalClampProbe.cs",
+    "E:\\VividRP_Reborn\\Packages\\VividRP\\Editor\\Tools\\TSRLocalClampProbe.cs.meta",
+    "E:\\VividRP_Reborn\\Packages\\VividRP\\Editor\\Tools\\VSMBNDCompareAudit.compute",
+    "E:\\VividRP_Reborn\\Packages\\VividRP\\Editor\\Tools\\VSMBNDCompareAudit.compute.meta"
+  ],
+  "finalMixUnchanged": true,
+  "sceneSettingsMatchInitial": true
+}

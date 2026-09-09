@@ -1,0 +1,5 @@
+camera=Camera_1
+position=(0.0202028491, 7.662983, -2.4306047)
+rotation=(359.226349, 3.03022361, 0.450279)
+light=Directional Light
+lightLocalRotation=(59.46513, 355.087921, 0.466982663)

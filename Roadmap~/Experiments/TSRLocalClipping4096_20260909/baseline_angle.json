@@ -1,0 +1,1611 @@
+{
+  "frames": 288,
+  "states": {
+    "Active": 288
+  },
+  "settings_match": true,
+  "localClamp": 0.0,
+  "clampRelaxation": 0.0,
+  "mixRetention": 0.0,
+  "overflow_max": 0,
+  "missing_max": 0,
+  "replay_error_max": 0.0004882216453552246,
+  "post_stop": [
+    {
+      "step": 64,
+      "after_stop": 0,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.012336754240095615,
+          "ledge": 0.009574661031365395,
+          "arches": 0.005977357272058725
+        }
+      }
+    },
+    {
+      "step": 68,
+      "after_stop": 4,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0072265504859387875,
+          "ledge": 0.005810032598674297,
+          "arches": 0.004639680031687021
+        }
+      }
+    },
+    {
+      "step": 72,
+      "after_stop": 8,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0054031312465667725,
+          "ledge": 0.003549606539309025,
+          "arches": 0.0038015563040971756
+        }
+      }
+    },
+    {
+      "step": 76,
+      "after_stop": 12,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0036854231730103493,
+          "ledge": 0.0033151444513350725,
+          "arches": 0.0038106769789010286
+        }
+      }
+    },
+    {
+      "step": 80,
+      "after_stop": 16,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0034997807815670967,
+          "ledge": 0.0028920783661305904,
+          "arches": 0.003053300781175494
+        }
+      }
+    },
+    {
+      "step": 84,
+      "after_stop": 20,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0027219783514738083,
+          "ledge": 0.0022885554935783148,
+          "arches": 0.003229585476219654
+        }
+      }
+    },
+    {
+      "step": 88,
+      "after_stop": 24,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0023654678370803595,
+          "ledge": 0.002075520344078541,
+          "arches": 0.0035057030618190765
+        }
+      }
+    },
+    {
+      "step": 92,
+      "after_stop": 28,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.002044647466391325,
+          "ledge": 0.002126405481249094,
+          "arches": 0.0032617233227938414
+        }
+      }
+    },
+    {
+      "step": 96,
+      "after_stop": 32,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0020098728127777576,
+          "ledge": 0.002415586495772004,
+          "arches": 0.0037401393055915833
+        }
+      }
+    },
+    {
+      "step": 100,
+      "after_stop": 36,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0018794460920616984,
+          "ledge": 0.0018511638045310974,
+          "arches": 0.003669582074508071
+        }
+      }
+    },
+    {
+      "step": 104,
+      "after_stop": 40,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0017252113902941346,
+          "ledge": 0.0024268922861665487,
+          "arches": 0.0032269402872771025
+        }
+      }
+    },
+    {
+      "step": 108,
+      "after_stop": 44,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0017668295186012983,
+          "ledge": 0.002548869699239731,
+          "arches": 0.003618666436523199
+        }
+      }
+    },
+    {
+      "step": 112,
+      "after_stop": 48,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0019723728764802217,
+          "ledge": 0.0022686829324811697,
+          "arches": 0.0031031619291752577
+        }
+      }
+    },
+    {
+      "step": 116,
+      "after_stop": 52,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0015988954110071063,
+          "ledge": 0.0024663032963871956,
+          "arches": 0.0036962341982871294
+        }
+      }
+    },
+    {
+      "step": 120,
+      "after_stop": 56,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001442825305275619,
+          "ledge": 0.0019766183104366064,
+          "arches": 0.003466940950602293
+        }
+      }
+    },
+    {
+      "step": 124,
+      "after_stop": 60,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001946443342603743,
+          "ledge": 0.0017625929322093725,
+          "arches": 0.003309868508949876
+        }
+      }
+    },
+    {
+      "step": 128,
+      "after_stop": 64,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0016697465907782316,
+          "ledge": 0.0019551257137209177,
+          "arches": 0.0032559854444116354
+        }
+      }
+    },
+    {
+      "step": 132,
+      "after_stop": 68,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.002417581621557474,
+          "ledge": 0.002600372303277254,
+          "arches": 0.0036760689690709114
+        }
+      }
+    },
+    {
+      "step": 136,
+      "after_stop": 72,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0022079928312450647,
+          "ledge": 0.0018873633816838264,
+          "arches": 0.003849517786875367
+        }
+      }
+    },
+    {
+      "step": 140,
+      "after_stop": 76,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0021893419325351715,
+          "ledge": 0.002076823962852359,
+          "arches": 0.0038839951157569885
+        }
+      }
+    },
+    {
+      "step": 144,
+      "after_stop": 80,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001415572944097221,
+          "ledge": 0.0017848971765488386,
+          "arches": 0.004017616622149944
+        }
+      }
+    },
+    {
+      "step": 148,
+      "after_stop": 84,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0022992114536464214,
+          "ledge": 0.00200295471586287,
+          "arches": 0.0035430171992629766
+        }
+      }
+    },
+    {
+      "step": 152,
+      "after_stop": 88,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001802349230274558,
+          "ledge": 0.0018151234835386276,
+          "arches": 0.0029957180377095938
+        }
+      }
+    },
+    {
+      "step": 156,
+      "after_stop": 92,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0018347870791330934,
+          "ledge": 0.0024979140143841505,
+          "arches": 0.003907831851392984
+        }
+      }
+    },
+    {
+      "step": 160,
+      "after_stop": 96,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001548991072922945,
+          "ledge": 0.0020068432204425335,
+          "arches": 0.0032453746534883976
+        }
+      }
+    },
+    {
+      "step": 164,
+      "after_stop": 100,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0020593602675944567,
+          "ledge": 0.002643546089529991,
+          "arches": 0.003215871285647154
+        }
+      }
+    },
+    {
+      "step": 168,
+      "after_stop": 104,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0017267345683649182,
+          "ledge": 0.0020817890763282776,
+          "arches": 0.0032917901407927275
+        }
+      }
+    },
+    {
+      "step": 172,
+      "after_stop": 108,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0015072227688506246,
+          "ledge": 0.002065069507807493,
+          "arches": 0.003284930717200041
+        }
+      }
+    },
+    {
+      "step": 176,
+      "after_stop": 112,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001537504605948925,
+          "ledge": 0.0018275566399097443,
+          "arches": 0.002917875535786152
+        }
+      }
+    },
+    {
+      "step": 180,
+      "after_stop": 116,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0019043496577069163,
+          "ledge": 0.0018829917535185814,
+          "arches": 0.0030272866133600473
+        }
+      }
+    },
+    {
+      "step": 184,
+      "after_stop": 120,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001289903768338263,
+          "ledge": 0.002197511028498411,
+          "arches": 0.003424728289246559
+        }
+      }
+    },
+    {
+      "step": 188,
+      "after_stop": 124,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0019614112097769976,
+          "ledge": 0.0022116678301244974,
+          "arches": 0.0032700581941753626
+        }
+      }
+    },
+    {
+      "step": 192,
+      "after_stop": 128,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0016305255703628063,
+          "ledge": 0.002274556318297982,
+          "arches": 0.003547301283106208
+        }
+      }
+    },
+    {
+      "step": 196,
+      "after_stop": 132,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.002101835096254945,
+          "ledge": 0.0022912160493433475,
+          "arches": 0.0033347634598612785
+        }
+      }
+    },
+    {
+      "step": 200,
+      "after_stop": 136,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0014770666602998972,
+          "ledge": 0.0016126446425914764,
+          "arches": 0.003762778826057911
+        }
+      }
+    },
+    {
+      "step": 204,
+      "after_stop": 140,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0018837170209735632,
+          "ledge": 0.002299987245351076,
+          "arches": 0.0032103639096021652
+        }
+      }
+    },
+    {
+      "step": 208,
+      "after_stop": 144,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0024105326738208532,
+          "ledge": 0.0022552446462213993,
+          "arches": 0.0034294782672077417
+        }
+      }
+    },
+    {
+      "step": 212,
+      "after_stop": 148,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0015456890687346458,
+          "ledge": 0.0023918969091027975,
+          "arches": 0.0036270027048885822
+        }
+      }
+    },
+    {
+      "step": 216,
+      "after_stop": 152,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0021019410341978073,
+          "ledge": 0.0019133908208459616,
+          "arches": 0.0032162610441446304
+        }
+      }
+    },
+    {
+      "step": 220,
+      "after_stop": 156,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0015201328787952662,
+          "ledge": 0.0022437339648604393,
+          "arches": 0.004265579394996166
+        }
+      }
+    },
+    {
+      "step": 224,
+      "after_stop": 160,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0019395970739424229,
+          "ledge": 0.002011997625231743,
+          "arches": 0.003008544910699129
+        }
+      }
+    },
+    {
+      "step": 228,
+      "after_stop": 164,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0017188576748594642,
+          "ledge": 0.002369048772379756,
+          "arches": 0.0031594466418027878
+        }
+      }
+    },
+    {
+      "step": 232,
+      "after_stop": 168,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0023263476323336363,
+          "ledge": 0.002086048945784569,
+          "arches": 0.0035892261657863855
+        }
+      }
+    },
+    {
+      "step": 236,
+      "after_stop": 172,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001776535646058619,
+          "ledge": 0.0028848820365965366,
+          "arches": 0.0035788328386843204
+        }
+      }
+    },
+    {
+      "step": 240,
+      "after_stop": 176,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.002047481946647167,
+          "ledge": 0.0025046870578080416,
+          "arches": 0.003264612751081586
+        }
+      }
+    },
+    {
+      "step": 244,
+      "after_stop": 180,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0017101564444601536,
+          "ledge": 0.0022376850247383118,
+          "arches": 0.00328846531920135
+        }
+      }
+    },
+    {
+      "step": 248,
+      "after_stop": 184,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0019813724793493748,
+          "ledge": 0.002077030949294567,
+          "arches": 0.003076129825785756
+        }
+      }
+    },
+    {
+      "step": 252,
+      "after_stop": 188,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0014279226306825876,
+          "ledge": 0.0025105453096330166,
+          "arches": 0.0030685821548104286
+        }
+      }
+    },
+    {
+      "step": 256,
+      "after_stop": 192,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.00123963737860322,
+          "ledge": 0.0019099981291219592,
+          "arches": 0.0027720665093511343
+        }
+      }
+    },
+    {
+      "step": 260,
+      "after_stop": 196,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0013879709877073765,
+          "ledge": 0.0021948337089270353,
+          "arches": 0.0030940298456698656
+        }
+      }
+    },
+    {
+      "step": 264,
+      "after_stop": 200,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0016016884474083781,
+          "ledge": 0.002106528030708432,
+          "arches": 0.0028747303877025843
+        }
+      }
+    },
+    {
+      "step": 268,
+      "after_stop": 204,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.001898750546388328,
+          "ledge": 0.001955001847818494,
+          "arches": 0.002849904354661703
+        }
+      }
+    },
+    {
+      "step": 272,
+      "after_stop": 208,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0017027957364916801,
+          "ledge": 0.0018807707820087671,
+          "arches": 0.0033066989853978157
+        }
+      }
+    },
+    {
+      "step": 276,
+      "after_stop": 212,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0019234728533774614,
+          "ledge": 0.0023757435847073793,
+          "arches": 0.003416601801291108
+        }
+      }
+    },
+    {
+      "step": 280,
+      "after_stop": 216,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.00123995216563344,
+          "ledge": 0.0020435857586562634,
+          "arches": 0.0027322815731167793
+        }
+      }
+    },
+    {
+      "step": 284,
+      "after_stop": 220,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.0015393986832350492,
+          "ledge": 0.0023412040900439024,
+          "arches": 0.0029320132452994585
+        }
+      }
+    },
+    {
+      "step": 287,
+      "after_stop": 223,
+      "matches": {
+        "jitter": true,
+        "shaderFrameSeed": true,
+        "cameraPosition": true,
+        "cameraEuler": true,
+        "gpuVP": true
+      },
+      "error": {
+        "shadow": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "source": {
+          "roof": 0.0,
+          "ledge": 0.0,
+          "arches": 0.0
+        },
+        "output": {
+          "roof": 0.002298643346875906,
+          "ledge": 0.0026088107842952013,
+          "arches": 0.004040248692035675
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "shadow": {
+    "max_component_delta": 0.0,
+    "fraction_different_components": 0.0,
+    "region_luma_rms": {
+      "roof": 0.0,
+      "ledge": 0.0,
+      "arches": 0.0
+    }
+  },
+  "source": {
+    "max_component_delta": 0.0,
+    "fraction_different_components": 0.0,
+    "region_luma_rms": {
+      "roof": 0.0,
+      "ledge": 0.0,
+      "arches": 0.0
+    }
+  }
+}

@@ -14,6 +14,63 @@ namespace VividRP.Editor.Tests
         public void RequireComputeDevice()
             => Assume.That(SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback, Is.True);
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LocalClipping_StableNoisyReceiverRestoresAtMostHalfTheClippedHistory(bool waveOps)
+        {
+            if (waveOps) Assume.That(SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D12
+                || SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan, Is.True);
+            using var fixture = new Fixture(waveOps);
+            var input = LocalClippingInput();
+            Snapshot clipped = fixture.Run(input);
+            input.LumaInstability = 1;
+            Snapshot relaxed = fixture.Run(input);
+            float displacement = input.History.r - clipped.AcceptedHistory.r;
+            Assert.That(displacement, Is.GreaterThan(0.02f));
+            Assert.That(relaxed.AcceptedHistory.r - clipped.AcceptedHistory.r, Is.GreaterThan(0.005f));
+            Assert.That(relaxed.AcceptedHistory.r - clipped.AcceptedHistory.r, Is.LessThanOrEqualTo(displacement * 0.5f + 0.001f));
+            Assert.That(relaxed.PendingState, Is.Zero);
+            Assert.That(relaxed.SampleCount, Is.EqualTo(16));
+        }
+
+        [TestCase(0)] // Receiver motion.
+        [TestCase(1)] // Invalid history depth despite a stationary motion vector.
+        [TestCase(2)] // Immature history.
+        [TestCase(3)] // Pending lighting confirmation from the preceding frame.
+        [TestCase(4)] // A silhouette inside the reconstruction footprint.
+        [TestCase(5)] // Discontinuous receiver.
+        public void LocalClipping_UnreliableHistoryRetainsFullClipping(int reason)
+        {
+            using var fixture = new Fixture();
+            var input = LocalClippingInput();
+            if (reason == 0) input.MotionPixels = 0.5f;
+            if (reason == 1) input.HistoryDepth = 0.56f;
+            if (reason == 2) input.HistorySamples = 2;
+            if (reason == 3) input.PreviousState = 6;
+            if (reason == 4) input.NearbyDepthFeatureOffset = new Vector2Int(3, 3);
+            if (reason == 5) input.DepthError = 0.03f;
+            Snapshot clipped = fixture.Run(input);
+            input.LumaInstability = 1;
+            Snapshot guarded = fixture.Run(input);
+            Assert.That(ColorError(guarded.AcceptedHistory, clipped.AcceptedHistory), Is.LessThan(0.001f));
+        }
+
+        [TestCase(0.6f, 0.55f)]
+        [TestCase(0.2f, 0.8f)]
+        [TestCase(0.8f, 0.2f)]
+        public void LocalClipping_UniformLightingStepDoesNotRestoreOutdatedColor(float history, float current)
+        {
+            using var fixture = new Fixture();
+            Snapshot result = fixture.Run(new Input { History = Gray(history), Current = Gray(current),
+                NeighborhoodLow = current, NeighborhoodHigh = current, LumaInstability = 1 });
+            Assert.That(ColorError(result.AcceptedHistory, Gray(current)), Is.LessThan(0.001f));
+        }
+
+        private static Input LocalClippingInput() => new Input
+        {
+            Current = Gray(0.55f), History = Gray(0.6f), NeighborhoodLow = 0.48f, NeighborhoodHigh = 0.52f
+        };
+
         [TestCase(1)]
         [TestCase(2)]
         [TestCase(3)]

@@ -23,6 +23,19 @@ float4 _RenderSize;
 float4 _OutputSize;
 float4 _TSRRejectionParams;
 
+float TSR_ReconstructionDepthError(int2 coord, int2 renderSize, float depthError)
+{
+    [unroll]
+    for (int y = -3; y <= 3; y += 2)
+    {
+        [unroll]
+        for (int x = -3; x <= 3; x += 2)
+            depthError = max(depthError,
+                _DepthError[clamp(coord + int2(x, y), int2(0, 0), renderSize - 1)]);
+    }
+    return depthError;
+}
+
 [numthreads(8, 8, 1)]
 void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -37,6 +50,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 currentColor = TSR_SampleCatmullRom(_InputColor, uv, float2(renderSize)).rgb;
     float3 historyColor = _ReprojectedHistoryColor[pixelCoord].rgb;
+    float3 unclippedHistoryColor = historyColor;
     float2 historyMeta = _ReprojectedHistoryMeta[pixelCoord];
 
     float3 clampMin;
@@ -113,15 +127,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
             // Reconstruction can carry silhouette coverage into nearby pixels.
             // Each depth-error value already covers a 3x3 source neighborhood;
             // overlapping samples protect the surrounding reconstruction footprint.
-            float reconstructionDepthError = depthError;
-            [unroll]
-            for (int y = -3; y <= 3; y += 2)
-            {
-                [unroll]
-                for (int x = -3; x <= 3; x += 2)
-                    reconstructionDepthError = max(reconstructionDepthError,
-                        _DepthError[clamp(renderCoord + int2(x, y), int2(0, 0), renderSize - 1)]);
-            }
+            float reconstructionDepthError = TSR_ReconstructionDepthError(renderCoord, renderSize, depthError);
             candidateChange = reconstructionDepthError <= receiverDepthScale * 0.02;
         }
         uint count = continuing ? previousCount + 1u : 1u;
@@ -140,6 +146,38 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     // discards primary history; stationary lighting (-2) shortens its accumulation.
     float shadingState = stationaryShadingChange ? -2.0
         : (historyMeta.x > 0.5 && colorRejected ? -1.0 : pendingShadingChange);
+    // Only relax a mature, stationary history on a continuous receiver. Existing
+    // luma instability is a noise hint, not evidence that a lighting change is safe.
+    // Pending confirmation also blocks relaxation, before lighting is confirmed.
+    bool stableHistory = accepted && continuousReceiver && historyMeta.x >= 4.0
+        && motionPixels < 0.5 && reprojectionBoundary < 0.25
+        && depthDiff <= min(depthTolerance, receiverDepthScale * 0.02)
+        && shadingState == 0.0 && _ReprojectedResurrectionColor[pixelCoord].a == 0.0;
+    if (stableHistory && lumaInstability > 0.15)
+    {
+        float3 neighborhoodCenter = 0.5 * (clampMin + clampMax);
+        float neighborhoodRange = (clampMax.x - clampMin.x) / max(abs(neighborhoodCenter.x), 0.2);
+        float3 neighborhoodVALU = TSR_RGBToYCoCgVALU(max(TSR_YCoCgToRGB(neighborhoodCenter), 0.0));
+        float3 unclippedVALU = TSR_RGBToYCoCgVALU(unclippedHistoryColor);
+        float neighborhoodLumaDiff = abs(unclippedVALU.x - neighborhoodVALU.x)
+            / max(max(abs(unclippedVALU.x), abs(neighborhoodVALU.x)), 0.2);
+        float neighborhoodChromaDiff = length(unclippedVALU.yz - neighborhoodVALU.yz);
+        // Keep full clipping for flat lighting steps and histories incompatible
+        // with the neighborhood, even when temporal instability is high.
+        float noiseConfidence = smoothstep(0.15, 0.5, lumaInstability)
+            * smoothstep(0.01, 0.05, neighborhoodRange);
+        float colorConfidence = (1.0 - smoothstep(baseLumaThreshold * 0.5, baseLumaThreshold, neighborhoodLumaDiff))
+            * (1.0 - smoothstep(chromaThreshold * 0.5, chromaThreshold, neighborhoodChromaDiff));
+        float relaxation = 0.5 * noiseConfidence * colorConfidence
+            * saturate(1.0 - motionPixels * 2.0) * saturate(1.0 - reprojectionBoundary * 4.0);
+        // Do not restore coverage from a nearby silhouette through reconstruction.
+        if (relaxation > 0.0 && any(abs(historyColor - unclippedHistoryColor) > 1e-6)
+            && TSR_ReconstructionDepthError(renderCoord, renderSize, depthError) <= receiverDepthScale * 0.02)
+        {
+            historyColor = lerp(historyColor, unclippedHistoryColor, relaxation);
+        }
+    }
+
     _AcceptedHistoryColor[pixelCoord] = float4(accepted ? historyColor : currentColor, shadingState);
     _RejectionMask[pixelCoord] = accepted ? 1.0 : 0.0;
 }

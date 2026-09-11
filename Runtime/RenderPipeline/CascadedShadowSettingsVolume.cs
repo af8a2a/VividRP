@@ -44,9 +44,9 @@ namespace VividRP.Runtime
         public BoolParameter virtualShadowMapSMRTJointSampling = new(false);
         [Tooltip("Shadow rays per pixel. More rays reduce temporal noise; requires temporal anti-aliasing.")]
         public ClampedIntParameter virtualShadowMapSMRTRayCount = new(4, 4, 8);
-        [Tooltip("Maximum depth cells visited per ray. More samples allow a wider penumbra without skipping thin casters.")]
+        [Tooltip("Depth-cell budget per intermediate clipmap segment. Longer rays continue through coarser levels along the same direction. The coarsest map visits enough cells to finish the configured world length, so total reads can exceed this value. More samples retain fine detail farther from the receiver.")]
         public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 4, 8);
-        [Tooltip("Maximum distance in world units over which rays diverge. Beyond this distance they continue parallel to the light, retaining distant occlusion with a bounded penumbra. Also limited by the per-ray cell budget.")]
+        [Tooltip("Maximum distance in world units over which rays diverge. Fine-to-coarse clipmap continuation preserves this distance independently of texel size and segment budget. Beyond this explicit limit rays continue parallel to the light; incomplete map coverage or residency retries the reference filter.")]
         public ClampedFloatParameter virtualShadowMapSMRTMaxRayLength = new(10, 0.1f, 100);
         [Tooltip("Width of transitions across fractional LOD steps with Screen Density, or selection radii with legacy selection. 0 disables this component of blending.")]
         public ClampedFloatParameter virtualShadowMapTransition = new(0.2f, 0f, 0.5f);

@@ -1,0 +1,115 @@
+using System;
+using System.IO;
+using Unity.Mathematics;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using Object = UnityEngine.Object;
+
+namespace VividRP.Editor
+{
+    // Explicit, synchronous diagnostic. Never used by the render loop or NUnit.
+    internal static class VSMSMRTGeometryProbe
+    {
+        [MenuItem("Tools/VividRP/Diagnostics/Run SMRT Geometry Reference")]
+        private static void Run()
+        {
+            if (EditorApplication.isPlaying) throw new InvalidOperationException("Run this isolated probe in Edit mode.");
+            const string path = "Packages/com.vivid.render-pipelines/Editor/Tools/VSMSMRTGeometryProbe.compute";
+            string root = UnityEditor.PackageManager.PackageInfo.FindForAssetPath(path).resolvedPath;
+            string work = Path.Combine(root, "Temp~/smrt-geometry");
+            int completed = 0;
+            string error = null;
+            ComputeShader shader = null;
+            try
+            {
+                shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(path));
+                using var reader = new BinaryReader(File.OpenRead(Path.Combine(work, "inputs.bin")));
+                using var writer = new BinaryWriter(File.Create(Path.Combine(work, "gpu.bin")));
+                int cases = reader.ReadInt32(); writer.Write(cases);
+                for (int i = 0; i < cases; i++)
+                {
+                    Compare(shader, reader, writer);
+                    completed++;
+                }
+                if (reader.BaseStream.Position != reader.BaseStream.Length) throw new InvalidDataException("Trailing input data");
+            }
+            catch (Exception e) { error = e.ToString(); }
+            finally
+            {
+                if (shader != null) Object.DestroyImmediate(shader);
+                string status = "gpu=" + SystemInfo.graphicsDeviceType + " device=" + SystemInfo.graphicsDeviceName
+                    + " unity=" + Application.unityVersion + " completed=" + completed + " error=" + (error ?? "none");
+                File.WriteAllText(Path.Combine(work, "gpu-status.txt"), status);
+                if (error != null) Debug.LogError(status); else Debug.Log(status);
+            }
+        }
+
+        private static RenderTexture Pool(int size)
+        {
+            var texture = new RenderTexture(new RenderTextureDescriptor(size, size)
+            {
+                graphicsFormat = GraphicsFormat.R32_UInt, depthStencilFormat = GraphicsFormat.None,
+                enableRandomWrite = true, msaaSamples = 1,
+            });
+            if (!texture.Create())
+            {
+                Object.DestroyImmediate(texture);
+                throw new InvalidOperationException("Cannot create depth pool");
+            }
+            return texture;
+        }
+
+        private static float4[] ReadVectors(BinaryReader reader, int count)
+        {
+            var values = new float4[count];
+            for (int i = 0; i < count; i++) values[i] = new float4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            return values;
+        }
+
+        private static void Compare(ComputeShader shader, BinaryReader reader, BinaryWriter writer)
+        {
+            int size = reader.ReadInt32(), count = reader.ReadInt32(), budget = reader.ReadInt32();
+            var depth = new float[size * size];
+            for (int i = 0; i < depth.Length; i++) depth[i] = reader.ReadSingle();
+            var origins = ReadVectors(reader, count);
+            var rays = ReadVectors(reader, count);
+            using var upload = new GraphicsBuffer(GraphicsBuffer.Target.Structured, depth.Length, 4);
+            using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
+            using var directions = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
+            using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * 4, 8);
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            RenderTexture staticPool = null, dynamicPool = null;
+            try
+            {
+                staticPool = Pool(size); dynamicPool = Pool(size);
+                upload.SetData(depth); input.SetData(origins); directions.SetData(rays);
+                table.SetData(new uint[] { 1 }); metadata.SetData(new[] { new uint4(10, 1, 7, 8) });
+                shader.SetInt("_VSMPrototypeEnabled", 1); shader.SetInt("_VSMProjectionCount", 1);
+                shader.SetInt("_VSMPrototypeVirtualResolution", size); shader.SetInt("_VSMPrototypePageSize", size);
+                shader.SetInt("_VSMPrototypePagesPerAxis", 1); shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 1);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", 1); shader.SetInt("_VSMPrototypePhysicalPageCapacity", 1);
+                int kernel = shader.FindKernel("UploadGeometryDepth");
+                shader.SetBuffer(kernel, "_GeometryDepth", upload);
+                shader.SetTexture(kernel, "_GeometryStatic", staticPool); shader.SetTexture(kernel, "_GeometryDynamic", dynamicPool);
+                shader.Dispatch(kernel, (size + 7) / 8, (size + 7) / 8, 1);
+                kernel = shader.FindKernel("CompareGeometryRays");
+                shader.SetInt("_GeometryCount", count); shader.SetInt("_GeometryBudget", budget);
+                shader.SetBuffer(kernel, "_GeometryOrigins", input); shader.SetBuffer(kernel, "_GeometryRays", directions);
+                shader.SetBuffer(kernel, "_GeometryResults", output);
+                shader.SetBuffer(kernel, "_VSMPrototypePageTable", table); shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                shader.SetTexture(kernel, "_VSMPrototypeStaticPhysicalPage", staticPool);
+                shader.SetTexture(kernel, "_VSMPrototypeDynamicPhysicalPage", dynamicPool);
+                shader.Dispatch(kernel, (count + 63) / 64, 1, 1);
+                var values = new float2[count * 4]; output.GetData(values);
+                for (int i = 0; i < values.Length; i++) { writer.Write(values[i].x); writer.Write(values[i].y); }
+            }
+            finally
+            {
+                if (staticPool != null) Object.DestroyImmediate(staticPool);
+                if (dynamicPool != null) Object.DestroyImmediate(dynamicPool);
+            }
+        }
+    }
+}

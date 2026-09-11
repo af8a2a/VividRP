@@ -85,7 +85,7 @@ float4   _CSMCascadeBorders;
 int      _CSMShadowQuality;
 int      _VSMPrototypeEnabled;
 float4   _VSMReceiverParameters; // PCF enabled, constant bias in texels, slope bias, stochastic filter
-float4   _VSMSMRTParameters; // ray count (zero disables), cell budget, max world length, tan angular radius
+float4   _VSMSMRTParameters; // ray count (zero disables), cells per clipmap segment, max world length, tan angular radius
 int      _VSMPrototypePageSize;
 int      _VSMPrototypeVirtualResolution;
 int      _VSMPrototypePagesPerAxis;
@@ -1096,8 +1096,11 @@ bool UseVSMSMRT()
 
 float VSMSMRTRayLength(int index)
 {
-    // A 2D DDA visits at most N cells if its Manhattan displacement is < N-2.
-    // Use the entire disk's bound, independent of ray phase and page residency.
+    // End of this clipmap segment, measured from the original ray origin.
+    // The next clipmap continues the SAME ray; only the configured world length
+    // starts the parallel tail. The phase-independent bound limits each segment.
+    // The terminal map must finish the requested length even without another LOD.
+    if (index == _VSMProjectionCount - 1) return _VSMSMRTParameters.z;
     float radius = (clamp(_VSMSMRTParameters.y, 4, 8) - 2.001) * 0.70710678;
     return min(_VSMSMRTParameters.z, radius * _VSMProjections[index].parameters.x
         / max(_VSMSMRTParameters.w, 1e-8));
@@ -2212,6 +2215,25 @@ bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
     float4 bias = BuildVSMReceiverBias(projection, normal);
     float3 biasedPosition = positionWS + normal * bias.w;
     float3 coord = mul(projection.worldToShadow, float4(biasedPosition, 1.0)).xyz;
+    if (smrt)
+    {
+        // Every finer start can continue through this level. Mark around the
+        // unbiased receiver, enclosing all finer normal offsets and PCF origins.
+        // This stays one level walk, rather than marking each continuation chain.
+        float2 center = mul(projection.worldToShadow, float4(positionWS, 1)).xy;
+        float radius = VSMSMRTRayLength(index) * _VSMSMRTParameters.w / projection.parameters.x;
+        float originGuard = (_VSMReceiverParameters.x >= 0.5 ? 1.5 : 0) + abs(projection.parameters.y);
+        int halo = (int)ceil(radius + originGuard + 0.001);
+        float guard = (float)halo / _VSMPrototypeVirtualResolution;
+        if (all(center >= -guard) && all(center < 1 + guard))
+        {
+            // A finer normal-biased origin can be covered even when the original
+            // receiver is just outside. Clamp only the marking center: its halo
+            // then conservatively encloses the part overlapping this projection.
+            float halfTexel = 0.5 / _VSMPrototypeVirtualResolution;
+            MarkVSMReceiverPage(clamp(center, halfTexel, 1 - halfTexel), index, requestRole, halo);
+        }
+    }
     if (!all(coord >= 0.0) || !all(coord <= 1.0))
     {
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
@@ -2220,8 +2242,7 @@ bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
         return false;
     }
     covered = true;
-    int halo = smrt ? (int)ceil(VSMFilterGuard(index, true) * _VSMPrototypeVirtualResolution) : 1;
-    MarkVSMReceiverPage(coord.xy, index, requestRole, halo);
+    if (!smrt) MarkVSMReceiverPage(coord.xy, index, requestRole, 1);
 #if defined(VIVID_VSM_MARK_RECEIVERS)
     // Compile out depth sampling: marking has no dependency on page residency,
     // the physical pools or the stochastic ray phase.
@@ -2294,8 +2315,13 @@ float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bo
             bool needSample = sampledLevel < 0 || (sampledLevel == index && blend > 0.0 && !hasTransition);
             float sampleShadow;
             bool covered;
+            // Coarse continuation depth is part of the primary soft estimate,
+            // not merely an optional parent fallback. Keep its allocation priority.
+            uint levelRole = requestRole;
+            if (smrt && level > index && VSMSMRTRayLength(level - 1) < _VSMSMRTParameters.z)
+                levelRole |= kVSMPagePrimaryRequested;
             bool sampled = TryEvaluateVSMProjection(positionWS, normalWS, level, needSample, pixel,
-                requestRole, smrt, covered, sampleShadow);
+                levelRole, smrt, covered, sampleShadow);
             if (covered)
                 requestRole = requestRole == kVSMPagePrimaryRequested
                     ? kVSMPageParentRequested | (blend > 0.0 ? kVSMPageTransitionRequested : 0u) : 0u;

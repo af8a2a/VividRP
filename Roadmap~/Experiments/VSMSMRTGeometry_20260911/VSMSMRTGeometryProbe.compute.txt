@@ -1,0 +1,95 @@
+// Experimental candidates only; rule zero calls the shipping function below.
+#pragma kernel UploadGeometryDepth
+#pragma kernel CompareGeometryRays
+#include "../../Shaders/Core/Private/CSMShadowResolve.compute"
+StructuredBuffer<float> _GeometryDepth;
+RWTexture2D<uint> _GeometryStatic;
+RWTexture2D<uint> _GeometryDynamic;
+StructuredBuffer<float4> _GeometryOrigins;
+StructuredBuffer<float4> _GeometryRays;
+RWStructuredBuffer<float2> _GeometryResults;
+int _GeometryCount, _GeometryBudget;
+
+[numthreads(8,8,1)]
+void UploadGeometryDepth(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint)_VSMPrototypeVirtualResolution)) return;
+    _GeometryStatic[id.xy] = asuint(_GeometryDepth[id.y * _VSMPrototypeVirtualResolution + id.x]);
+    _GeometryDynamic[id.xy] = 0;
+}
+
+bool TraceCandidate(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    float rayLength, float thickness, int budget, int index, int rule, out float visibility)
+{
+    if (rule == 2) thickness = 0;
+    visibility = 1;
+    float2 start = origin.xy * _VSMPrototypeVirtualResolution;
+    int2 cell = int2(floor(start));
+    int2 direction = int2(texelsPerWorld.x >= 0 ? 1 : -1, texelsPerWorld.y >= 0 ? 1 : -1);
+    float2 stepTime = 1 / max(abs(texelsPerWorld), 1e-20);
+    float2 boundary = float2(cell) + float2(direction.x > 0 ? 1 : 0, direction.y > 0 ? 1 : 0);
+    float2 nextTime = abs(boundary - start) * stepTime;
+    if (abs(texelsPerWorld.x) < 1e-10) nextTime.x = 1e20;
+    if (abs(texelsPerWorld.y) < 1e-10) nextTime.y = 1e20;
+    float enter = 0;
+    float previousSurface = -1;
+    [loop]
+    for (int sampleIndex = 0; sampleIndex < budget; sampleIndex++)
+    {
+        int2 physical;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugWork.x++;
+#endif
+        if (!TryResolveVSMPhysicalTexel(cell, index, physical)) return false;
+        uint rawDepth = LoadCombinedVSMDepth(physical);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugWork.y++;
+#endif
+        float exitTime = min(nextTime.x, nextTime.y);
+        bool tail = exitTime >= rayLength;
+        float surface = rawDepth == 0 ? -1 : (asfloat(rawDepth) - origin.z) / depthPerWorld;
+        // A texel represents a finite slab behind its front depth. Test the
+        // actual cell interval, not "in shadow at any step". Never interpolate
+        // a crossing across a depth discontinuity or a valid empty texel.
+        bool hit = surface > enter && (tail || surface - thickness <= exitTime);
+        // One-cell gap fill behind a nearer foreground layer. It cannot extend
+        // through empty depth or recursively propagate across multiple cells.
+        if (rule == 3) hit = surface > enter;
+        bool gap = rule == 0 && rawDepth != 0 && surface > previousSurface + thickness
+            && previousSurface > enter && previousSurface - thickness <= min(exitTime, rayLength);
+        if (hit || gap) { visibility = 0; return true; }
+        if (tail)
+        {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+            g_VSMDebugSMRT.y++;
+#endif
+            return true;
+        }
+        previousSurface = surface;
+        enter = exitTime;
+        // Cross both axes at a corner; never sample the two zero-length cells.
+        bool crossX = nextTime.x <= nextTime.y;
+        bool crossY = nextTime.y <= nextTime.x;
+        if (crossX) { cell.x += direction.x; nextTime.x += stepTime.x; }
+        if (crossY) { cell.y += direction.y; nextTime.y += stepTime.y; }
+    }
+    // Numerical/budget failure is unavailable, never an implicit clear ray.
+    return false;
+}
+
+
+[numthreads(64,1,1)]
+void CompareGeometryRays(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_GeometryCount) return;
+    float3 origin = _GeometryOrigins[id.x].xyz;
+    float4 ray = _GeometryRays[id.x];
+    float visibility;
+    bool valid = TryTraceVSMSMRTRay(origin, ray.xy, .01, ray.z, ray.w, _GeometryBudget, 0, visibility);
+    _GeometryResults[id.x * 4] = float2(valid ? 1 : 0, visibility);
+    for (int rule = 1; rule < 4; rule++)
+    {
+        valid = TraceCandidate(origin, ray.xy, .01, ray.z, ray.w, _GeometryBudget, 0, rule, visibility);
+        _GeometryResults[id.x * 4 + rule] = float2(valid ? 1 : 0, visibility);
+    }
+}

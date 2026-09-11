@@ -1,0 +1,21 @@
+{
+  "dxc": {
+    "profile": "cs_6_2",
+    "kernels": {
+      "UploadGeometryDepth": "passed",
+      "CompareGeometryRays": "passed"
+    }
+  },
+  "roslyn": {
+    "VividRP.Runtime": 0,
+    "VividRP.Editor": 0,
+    "VividRP.Editor.Tests": 0
+  },
+  "sourceTreeStable": true,
+  "beeResponsesStable": true,
+  "sceneStateUnchanged": true,
+  "stateDifferences": [],
+  "temporaryProbeAndMetasRemoved": true,
+  "productionShadersUnchanged": true,
+  "unityTestFramework": "Not run: interactive Editor open; isolated GPU diagnostic used."
+}

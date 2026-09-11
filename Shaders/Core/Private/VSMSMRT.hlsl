@@ -1,25 +1,54 @@
 // Directional single-depth-field ray tracing. This is a bounded texel-cell
 // approximation, not geometry ray tracing or a copy of Unreal's private SMRT.
-// t is world distance along the central light axis; lateral motion follows the
-// sampled light disk until the bound, then continues parallel to the light.
+// t is world distance along the central light axis. Clipmap segments keep the
+// original light-disk direction and world origin, including its receiver bias.
+// Only the configured maximum world length starts the parallel-light tail.
 
 #include "../Public/BlueNoise.hlsl"
 
+// Directional clipmaps share orthogonal axes but can scroll independently.
+// Reproject through their affine transforms, never assume UVs are concentric.
+float3 VSMSMRTProjectionScale(int fromIndex, int toIndex)
+{
+    VividVSMProjection from = _VSMProjections[fromIndex], to = _VSMProjections[toIndex];
+    float xy = from.parameters.x / to.parameters.x;
+    return float3(xy, xy,
+        length(to.worldToShadow[2].xyz) / length(from.worldToShadow[2].xyz));
+}
+
+float3 VSMSMRTReproject(float3 coord, int fromIndex, int toIndex, float3 scale)
+{
+    float4x4 from = _VSMProjections[fromIndex].worldToShadow;
+    float4x4 to = _VSMProjections[toIndex].worldToShadow;
+    return (coord - float3(from._m03, from._m13, from._m23)) * scale
+        + float3(to._m03, to._m13, to._m23);
+}
+
 bool HasVSMSMRTFootprint(float2 uv, int index)
 {
-    int halo = (int)ceil(VSMFilterGuard(index, true) * _VSMPrototypeVirtualResolution);
-    int2 center = int2(floor(uv * _VSMPrototypeVirtualResolution));
-    int2 low = center - halo, high = center + halo;
-    if (any(low < 0) || any(high >= _VSMPrototypeVirtualResolution)) return false;
-    int2 lowPage = low / _VSMPrototypePageSize, highPage = high / _VSMPrototypePageSize;
-    for (int y = lowPage.y; y <= highPage.y; y++)
-        for (int x = lowPage.x; x <= highPage.x; x++)
-        {
-            int2 physical;
-            if (!TryResolveVSMPhysicalTexel(int2(x, y) * _VSMPrototypePageSize, index, physical))
-                return false;
-        }
-    return true;
+    float originRadius = _VSMReceiverParameters.x >= 0.5 ? 1.5 * _VSMProjections[index].parameters.x : 0;
+    for (int level = index; level < _VSMProjectionCount; level++)
+    {
+        float end = VSMSMRTRayLength(level);
+        float3 scale = VSMSMRTProjectionScale(index, level);
+        float2 levelUV = VSMSMRTReproject(float3(uv, 0), index, level, scale).xy;
+        int halo = (int)ceil((end * _VSMSMRTParameters.w + originRadius)
+            / _VSMProjections[level].parameters.x + 0.001);
+        int2 center = int2(floor(levelUV * _VSMPrototypeVirtualResolution));
+        int2 low = center - halo, high = center + halo;
+        if (any(low < 0) || any(high >= _VSMPrototypeVirtualResolution)) return false;
+        int2 lowPage = low / _VSMPrototypePageSize, highPage = high / _VSMPrototypePageSize;
+        for (int y = lowPage.y; y <= highPage.y; y++)
+            for (int x = lowPage.x; x <= highPage.x; x++)
+            {
+                int2 physical;
+                if (!TryResolveVSMPhysicalTexel(int2(x, y) * _VSMPrototypePageSize, level, physical))
+                    return false;
+            }
+        if (end >= _VSMSMRTParameters.z) return true;
+    }
+    // No projection support is unavailable, not a shorter soft ray.
+    return false;
 }
 
 // Receiver-only BND index offset, shared by every ray in the stratified set.
@@ -52,18 +81,21 @@ float2 VSMSMRTReceiverOffset(float2 phase, uint ray, uint count)
 }
 
 bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorld,
-    float rayLength, float thickness, int budget, int index, out float visibility)
+    float startTime, float rayLength, bool parallelTail, float thickness, int budget, int index, out float visibility)
 {
     visibility = 1;
-    float2 start = origin.xy * _VSMPrototypeVirtualResolution;
+    float2 start = origin.xy * _VSMPrototypeVirtualResolution + texelsPerWorld * startTime;
     int2 cell = int2(floor(start));
     int2 direction = int2(texelsPerWorld.x >= 0 ? 1 : -1, texelsPerWorld.y >= 0 ? 1 : -1);
+    // At an exact boundary, a negative ray enters the cell on its left.
+    cell -= int2(direction.x < 0 && start.x == cell.x ? 1 : 0,
+                 direction.y < 0 && start.y == cell.y ? 1 : 0);
     float2 stepTime = 1 / max(abs(texelsPerWorld), 1e-20);
     float2 boundary = float2(cell) + float2(direction.x > 0 ? 1 : 0, direction.y > 0 ? 1 : 0);
-    float2 nextTime = abs(boundary - start) * stepTime;
+    float2 nextTime = startTime + abs(boundary - start) * stepTime;
     if (abs(texelsPerWorld.x) < 1e-10) nextTime.x = 1e20;
     if (abs(texelsPerWorld.y) < 1e-10) nextTime.y = 1e20;
-    float enter = 0;
+    float enter = startTime;
     float previousSurface = -1;
     [loop]
     for (int sampleIndex = 0; sampleIndex < budget; sampleIndex++)
@@ -78,7 +110,9 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
         g_VSMDebugWork.y++;
 #endif
         float exitTime = min(nextTime.x, nextTime.y);
-        bool tail = exitTime >= rayLength;
+        bool segmentEnd = exitTime >= rayLength;
+        bool tail = segmentEnd && parallelTail;
+        exitTime = min(exitTime, rayLength);
         float surface = rawDepth == 0 ? -1 : (asfloat(rawDepth) - origin.z) / depthPerWorld;
         // A texel represents a finite slab behind its front depth. Test the
         // actual cell interval, not "in shadow at any step". Never interpolate
@@ -89,10 +123,10 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
         bool gap = rawDepth != 0 && surface > previousSurface + thickness
             && previousSurface > enter && previousSurface - thickness <= min(exitTime, rayLength);
         if (hit || gap) { visibility = 0; return true; }
-        if (tail)
+        if (segmentEnd)
         {
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
-            g_VSMDebugSMRT.y++;
+            if (parallelTail) g_VSMDebugSMRT.y++;
 #endif
             return true;
         }
@@ -105,6 +139,46 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
         if (crossY) { cell.y += direction.y; nextTime.y += stepTime.y; }
     }
     // Numerical/budget failure is unavailable, never an implicit clear ray.
+    return false;
+}
+
+// Single-level contract used by focused cell-intersection diagnostics.
+bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    float rayLength, float thickness, int budget, int index, out float visibility)
+{
+    return TryTraceVSMSMRTRay(origin, texelsPerWorld, depthPerWorld,
+        0, rayLength, true, thickness, budget, index, visibility);
+}
+
+bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    int budget, int index, out float visibility)
+{
+    visibility = 1;
+    float startTime = 0;
+    for (int level = index; level < _VSMProjectionCount; level++)
+    {
+        float endTime = VSMSMRTRayLength(level);
+        bool last = endTime >= _VSMSMRTParameters.z;
+        float3 scale = VSMSMRTProjectionScale(index, level);
+        float3 levelOrigin = VSMSMRTReproject(origin, index, level, scale);
+        int segmentBudget = budget;
+        if (level == _VSMProjectionCount - 1)
+        {
+            // DDA cell count <= ceil(Manhattan displacement) + 2. The last
+            // available map finishes the world length instead of shortening it
+            // or forcing every long ray into PCF solely for lack of another LOD.
+            float distanceInTexels = (endTime - startTime) * _VSMSMRTParameters.w
+                / _VSMProjections[level].parameters.x;
+            segmentBudget = max(segmentBudget, (int)ceil(distanceInTexels * 1.41421357 + 0.001) + 2);
+        }
+        // Bias/jitter are already in origin. Do not apply a coarser receiver
+        // bias or restart at t=0, and never carry gap history across clipmaps.
+        if (!TryTraceVSMSMRTRay(levelOrigin, texelsPerWorld * scale.xy, depthPerWorld * scale.z,
+                startTime, endTime, last, 0.5 * _VSMProjections[level].parameters.x,
+                segmentBudget, level, visibility)) return false;
+        if (visibility == 0 || last) return true;
+        startTime = endTime;
+    }
     return false;
 }
 
@@ -126,7 +200,6 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, out flo
     // Apply the receiver bias once. PCF's receiver-plane gradient is not the
     // depth trajectory of a shadow ray leaving that surface.
     coord.z += bias.z;
-    float rayLength = VSMSMRTRayLength(index);
     float slope = _VSMSMRTParameters.w / projection.parameters.x;
     int rays = clamp((int)_VSMSMRTParameters.x, 4, 8);
     int steps = clamp((int)_VSMSMRTParameters.y, 4, 8);
@@ -155,8 +228,7 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, out flo
             origin.z += dot(bias.xy, sampleTexel - originalTexel);
         }
         float visibility;
-        if (!TryTraceVSMSMRTRay(origin, disk * slope, depthScale, rayLength,
-                0.5 * projection.parameters.x, steps, index, visibility)) return false;
+        if (!TryTraceVSMSMRTClipmaps(origin, disk * slope, depthScale, steps, index, visibility)) return false;
         sum += visibility;
     }
     shadow = sum / rays;

@@ -397,6 +397,56 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SMRT_ContinuationPreservesWorldRayAcrossScrolledAndRescaledClipmaps()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            for (int level = 0; level < 3; level++)
+            {
+                var p = f.ProjectionData[level];
+                p.WorldToShadow = Matrix4x4.identity;
+                p.WorldToShadow.m00 = p.WorldToShadow.m11 = 1f / (8 << level);
+                p.WorldToShadow.m03 = level == 1 ? .375f : .5f;
+                p.WorldToShadow.m13 = .5f;
+                p.WorldToShadow.m22 = level == 1 ? .1f : .05f;
+                p.WorldToShadow.m23 = level == 1 ? .4f : .2f;
+                f.ProjectionData[level] = p;
+            }
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 4, 6, .5f));
+            // Receiver x=-2, dx/dt=.5. The true ray reaches x=.5 at t=5;
+            // the former fine-level tail stopped diverging at t=2.827, x<0.
+            for (int y = 0; y < 8; y++) for (int x = 3; x < 8; x++)
+            {
+                int slot = (int)f.TableData[4 + y / 4 * 2 + x / 4] - 1;
+                f.StaticData[(slot / 4 * 4 + y % 4) * 16 + slot % 4 * 4 + x % 4] = math.asuint(.9f);
+            }
+            f.Upload();
+            var receiver = new[] { new float4(.25f, .5f, .2f, 0) };
+            var ray = new[] { new float4(.5f, 0, 0, 0) };
+            Assert.That(f.Run("TraceSMRTClipmaps", receiver, normals: ray)[0], Is.EqualTo(new float2(1, 0)));
+            // Without parents, the full disk no longer fits this fine map.
+            // The filter must reject the union, rather than depend on ray phase.
+            f.Shader.SetInt("_VSMProjectionCount", 1);
+            Assert.That(f.Run("FilterSMRTFootprints", receiver)[0].x, Is.Zero);
+        }
+
+        [Test]
+        public void SMRT_ContinuationDoesNotRestartBehindItsSegmentAndRequestsPrimaryDependencies()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page, page >= 4 ? .55f : 0);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 4, 6, .5f));
+            f.Upload();
+            // Parent surface t=1 lies behind the first segment end (t=2.827).
+            var receiver = new[] { new float4(.5f, .5f, .5f, 0) };
+            Assert.That(f.Run("TraceSMRTClipmaps", receiver, normals: new[] { new float4(.2f, 0, 0, 0) })[0],
+                Is.EqualTo(new float2(1, 1)));
+            f.Run("ResolveReceivers", new[] { new float4(0, 0, 0, 0) });
+            for (int page = 4; page < 12; page++)
+                Assert.That(f.MetadataData[page].x & 512u, Is.Not.Zero, "Continuation depth is a primary dependency");
+        }
+
+        [Test]
         public void SMRT_FootprintValidityDoesNotDependOnRandomPhase()
         {
             using var f = new Fixture();

@@ -1,0 +1,7 @@
+{
+  "Shaders/Core/Private/CSMShadowResolve.compute": "b220c0c3d18bef08e74cab508f285deb0c4d1e91ba71fa3574956a099df17d36",
+  "Shaders/Core/Private/VSMSMRT.hlsl": "1dd86c3b894423136b69cde86f76e7bd5387d5081dd044b74d51a4c89cce88e5",
+  "Runtime/RenderPipeline/CascadedShadowSettingsVolume.cs": "ec788fd188988a42c8770a79fced5232ad1d6a2c5b5f85a9c90fe1d4034757c1",
+  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute": "1b3aecebf5b9090f0ea2751e06d626b22c8b8f4329e2b61d527f9c25c90456c1",
+  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.cs": "5968c0aac3381d547a36f808d1c7af55e916605ee2f9d0674cc8c273c393da2b"
+}

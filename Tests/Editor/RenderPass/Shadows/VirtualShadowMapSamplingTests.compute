@@ -1,5 +1,6 @@
 #pragma kernel InspectSMRTSamples
 #pragma kernel TraceSMRTRays
+#pragma kernel TraceSMRTClipmaps
 #pragma kernel FilterSMRTFootprints
 #pragma kernel SampleTaps
 #pragma kernel ResolveReceivers
@@ -200,5 +201,16 @@ void FilterSMRTFootprints(uint3 id : SV_DispatchThreadID)
     float visibility;
     bool valid = TryFilterVSMSMRT(input.xyz, _SamplingNormals[id.x], (int)input.w,
         uint2(id.x, _SamplingPixel.y), visibility);
+    _SamplingResults[id.x] = float2(valid ? 1 : 0, visibility);
+}
+
+[numthreads(64, 1, 1)]
+void TraceSMRTClipmaps(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    float visibility;
+    bool valid = TryTraceVSMSMRTClipmaps(input.xyz, _SamplingNormals[id.x].xy,
+        0.05, (int)_VSMSMRTParameters.y, (int)input.w, visibility);
     _SamplingResults[id.x] = float2(valid ? 1 : 0, visibility);
 }

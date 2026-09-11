@@ -466,7 +466,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             VirtualShadowMapClipmapLayout clipmaps = m_ShadowData.clipmaps;
             int virtualResolution = clipmaps.Resolution;
-            if (clipmaps.Count <= 0 || !VirtualShadowMapPrototypeRuntime.EnsureResources(virtualResolution, clipmaps.Count))
+            if (clipmaps.Count <= 0 || !VirtualShadowMapPrototypeRuntime.EnsureResources(
+                    virtualResolution, clipmaps.Count, settings.virtualShadowMapPhysicalPageBudget.value))
             {
                 VirtualShadowMapPrototypeRuntime.MarkFallback(
                     VirtualShadowMapPrototypeFallbackReason.ResourceUnavailable);
@@ -2564,7 +2565,8 @@ namespace VividRP.Runtime.RenderPass.Core
     internal static class VirtualShadowMapPrototypeRuntime
     {
         internal const int PageSize = 128;
-        internal const int MaxPhysicalPageCount = 256;
+        internal const int DefaultPhysicalPageCount = 256;
+        internal const int MaxPhysicalPageCount = 1024;
         internal const int MaxPageRequestsPerMeshlet = 4;
         private const int MeshletPageRequestStride = sizeof(uint) * 4;
         private const int StaticInvalidationBoundsStride = sizeof(float) * 8;
@@ -2860,7 +2862,8 @@ namespace VividRP.Runtime.RenderPass.Core
             return s_StaticInvalidationBounds.IsValid();
         }
 
-        internal static bool EnsureResources(int virtualResolution, int cascadeCount)
+        internal static bool EnsureResources(int virtualResolution, int cascadeCount,
+            int pageBudget = DefaultPhysicalPageCount)
         {
             if (!IsSupportedOnCurrentPlatform())
             {
@@ -2883,7 +2886,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 * resolvedCascadeCount;
             int physicalPageCapacity = CalculatePhysicalPageCapacity(
                 pagesPerAxis,
-                resolvedCascadeCount);
+                resolvedCascadeCount, pageBudget);
             int physicalPagesPerRow = Mathf.CeilToInt(
                 Mathf.Sqrt(physicalPageCapacity));
             int physicalPageRows = CoreUtils.DivRoundUp(
@@ -3224,7 +3227,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal static int CalculatePhysicalPageCapacity(
             int pagesPerAxis,
-            int cascadeCount)
+            int cascadeCount, int pageBudget = DefaultPhysicalPageCount)
         {
             int resolvedPagesPerAxis = Mathf.Max(1, pagesPerAxis);
             int resolvedCascadeCount = Mathf.Max(1, cascadeCount);
@@ -3232,7 +3235,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 resolvedPagesPerAxis
                     * resolvedPagesPerAxis
                     * resolvedCascadeCount,
-                MaxPhysicalPageCount);
+                Mathf.Clamp(pageBudget, 1, MaxPhysicalPageCount));
         }
 
         internal static uint[] BuildUnmappedPageTable(

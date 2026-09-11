@@ -1,0 +1,162 @@
+{
+  "capture": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\bnd-joint-production-captures\\20260910_161322_644",
+  "note": "Missing counter means a missing page was encountered; successful coarser-level retries are included. Initial zero-miss assertion was unsuitable for the production 256-page pool. Final validation checks resolution, replay agreement and equal pressure across the toggle.",
+  "stages": {
+    "native_static": {
+      "frames": 64,
+      "all_active": true,
+      "uses_actual_camera_frame": true,
+      "joint_setting_matches": true,
+      "index_offset_matches": true,
+      "offset_range": [
+        0,
+        0
+      ],
+      "capacity_values": [
+        256
+      ],
+      "counter_min": [
+        256,
+        446,
+        0,
+        190
+      ],
+      "counter_max": [
+        256,
+        452,
+        5,
+        196
+      ],
+      "replay_error_max": 0.0004881620407104492,
+      "missing_page_encounters_max": 61409,
+      "level_resolution": {
+        "0": {
+          "receivers": 124488,
+          "unresolved": 0,
+          "resolved_level_counts": {
+            "1.0": 3783,
+            "2.0": 14783,
+            "3.0": 80364,
+            "4.0": 25510,
+            "5.0": 48
+          }
+        },
+        "63": {
+          "receivers": 124499,
+          "unresolved": 0,
+          "resolved_level_counts": {
+            "1.0": 3782,
+            "2.0": 14784,
+            "3.0": 80147,
+            "4.0": 25741,
+            "5.0": 45
+          }
+        }
+      }
+    },
+    "joint_static": {
+      "frames": 64,
+      "all_active": true,
+      "uses_actual_camera_frame": true,
+      "joint_setting_matches": true,
+      "index_offset_matches": true,
+      "offset_range": [
+        86,
+        94
+      ],
+      "capacity_values": [
+        256
+      ],
+      "counter_min": [
+        256,
+        446,
+        0,
+        190
+      ],
+      "counter_max": [
+        256,
+        452,
+        5,
+        196
+      ],
+      "replay_error_max": 0.00048804283142089844,
+      "missing_page_encounters_max": 61409,
+      "level_resolution": {
+        "0": {
+          "receivers": 124488,
+          "unresolved": 0,
+          "resolved_level_counts": {
+            "1.0": 3783,
+            "2.0": 14783,
+            "3.0": 80364,
+            "4.0": 25510,
+            "5.0": 48
+          }
+        },
+        "63": {
+          "receivers": 124499,
+          "unresolved": 0,
+          "resolved_level_counts": {
+            "1.0": 3782,
+            "2.0": 14784,
+            "3.0": 80147,
+            "4.0": 25741,
+            "5.0": 45
+          }
+        }
+      }
+    },
+    "native_return_static": {
+      "frames": 64,
+      "all_active": true,
+      "uses_actual_camera_frame": true,
+      "joint_setting_matches": true,
+      "index_offset_matches": true,
+      "offset_range": [
+        0,
+        0
+      ],
+      "capacity_values": [
+        256
+      ],
+      "counter_min": [
+        256,
+        446,
+        0,
+        190
+      ],
+      "counter_max": [
+        256,
+        452,
+        5,
+        196
+      ],
+      "replay_error_max": 0.0004881620407104492,
+      "missing_page_encounters_max": 61409,
+      "level_resolution": {
+        "0": {
+          "receivers": 124488,
+          "unresolved": 0,
+          "resolved_level_counts": {
+            "1.0": 3783,
+            "2.0": 14783,
+            "3.0": 80364,
+            "4.0": 25510,
+            "5.0": 48
+          }
+        },
+        "63": {
+          "receivers": 124499,
+          "unresolved": 0,
+          "resolved_level_counts": {
+            "1.0": 3782,
+            "2.0": 14784,
+            "3.0": 80147,
+            "4.0": 25741,
+            "5.0": 45
+          }
+        }
+      }
+    }
+  }
+}

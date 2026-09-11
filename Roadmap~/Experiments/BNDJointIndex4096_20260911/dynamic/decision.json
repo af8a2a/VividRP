@@ -1,0 +1,294 @@
+{
+  "dynamic": {
+    "light": {
+      "bnd_native": {
+        "all_post_stop_parameter_matches": true,
+        "overflow_max": 0,
+        "missing_max": 0,
+        "regions": {
+          "roof": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.00039305969767156057,
+              "first64_mean_rms": 0.00039304270467255265,
+              "tail64_mean_rms": 0.0003929363430121585,
+              "max_rms": 0.00045783258974552155
+            },
+            "output": {
+              "first32_mean_rms": 0.021222753188339993,
+              "first64_mean_rms": 0.011689583378029056,
+              "tail64_mean_rms": 0.0019012641449294547,
+              "max_rms": 0.09410574287176132
+            },
+            "sampled_output_t10": 12
+          },
+          "ledge": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.0002448919622111134,
+              "first64_mean_rms": 0.00024456167102471227,
+              "tail64_mean_rms": 0.0002788176617982304,
+              "max_rms": 0.0008194072870537639
+            },
+            "output": {
+              "first32_mean_rms": 0.05034703016281128,
+              "first64_mean_rms": 0.02644985077495221,
+              "tail64_mean_rms": 0.0022543506450293693,
+              "max_rms": 0.23580098152160645
+            },
+            "sampled_output_t10": 12
+          },
+          "arches": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.0002637617180880625,
+              "first64_mean_rms": 0.00026938557039102307,
+              "tail64_mean_rms": 0.00025473574436653187,
+              "max_rms": 0.00034676346695050597
+            },
+            "output": {
+              "first32_mean_rms": 0.04393461154541001,
+              "first64_mean_rms": 0.02463735401397571,
+              "tail64_mean_rms": 0.004765846684355946,
+              "max_rms": 0.19782961905002594
+            },
+            "sampled_output_t10": 12
+          }
+        }
+      },
+      "bnd_joint": {
+        "all_post_stop_parameter_matches": true,
+        "overflow_max": 0,
+        "missing_max": 0,
+        "regions": {
+          "roof": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.0003930359634978231,
+              "first64_mean_rms": 0.0003930387265427271,
+              "tail64_mean_rms": 0.0003929380823940258,
+              "max_rms": 0.00045783258974552155
+            },
+            "output": {
+              "first32_mean_rms": 0.0210795798629988,
+              "first64_mean_rms": 0.011622784200881142,
+              "tail64_mean_rms": 0.0018383369452374823,
+              "max_rms": 0.09243709594011307,
+              "first32_vs_bnd_change_percent": -0.6746218271993842
+            },
+            "sampled_output_t10": 16
+          },
+          "ledge": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.00024413881328655407,
+              "first64_mean_rms": 0.00024444843438686803,
+              "tail64_mean_rms": 0.00027850223020376525,
+              "max_rms": 0.000821372086647898
+            },
+            "output": {
+              "first32_mean_rms": 0.05032754596322775,
+              "first64_mean_rms": 0.026453659593244083,
+              "tail64_mean_rms": 0.0021907998974818516,
+              "max_rms": 0.23647111654281616,
+              "first32_vs_bnd_change_percent": -0.038699799214614305
+            },
+            "sampled_output_t10": 12
+          },
+          "arches": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.0002696902665775269,
+              "first64_mean_rms": 0.0002695570183277596,
+              "tail64_mean_rms": 0.0002562695675913025,
+              "max_rms": 0.0004065172979608178
+            },
+            "output": {
+              "first32_mean_rms": 0.04463590320665389,
+              "first64_mean_rms": 0.025113176787272096,
+              "tail64_mean_rms": 0.004271550309460829,
+              "max_rms": 0.19891130924224854,
+              "first32_vs_bnd_change_percent": 1.5962168244484154
+            },
+            "sampled_output_t10": 12
+          }
+        }
+      }
+    },
+    "translate": {
+      "bnd_native": {
+        "all_post_stop_parameter_matches": true,
+        "overflow_max": 0,
+        "missing_max": 0,
+        "regions": {
+          "roof": {
+            "shadow": {
+              "first32_mean_rms": 0.000852055090945214,
+              "first64_mean_rms": 0.0007789603259880096,
+              "tail64_mean_rms": 0.0004982580430805683,
+              "max_rms": 0.003992978483438492
+            },
+            "source": {
+              "first32_mean_rms": 0.0010365447014919482,
+              "first64_mean_rms": 0.0008596053339715581,
+              "tail64_mean_rms": 0.0004615013432853362,
+              "max_rms": 0.003588353283703327
+            },
+            "output": {
+              "first32_mean_rms": 0.024161289329640567,
+              "first64_mean_rms": 0.01315105576213682,
+              "tail64_mean_rms": 0.0019249018377569668,
+              "max_rms": 0.08610700070858002
+            },
+            "sampled_output_t10": 20
+          },
+          "ledge": {
+            "shadow": {
+              "first32_mean_rms": 0.035423324443399906,
+              "first64_mean_rms": 0.03538347710855305,
+              "tail64_mean_rms": 0.035261198220884096,
+              "max_rms": 0.03577173501253128
+            },
+            "source": {
+              "first32_mean_rms": 0.006253639759961516,
+              "first64_mean_rms": 0.0063335551240015775,
+              "tail64_mean_rms": 0.006304302389788277,
+              "max_rms": 0.007120336405932903
+            },
+            "output": {
+              "first32_mean_rms": 0.039738384541124105,
+              "first64_mean_rms": 0.022040933996322565,
+              "tail64_mean_rms": 0.003995573682272259,
+              "max_rms": 0.15285269916057587
+            },
+            "sampled_output_t10": 20
+          },
+          "arches": {
+            "shadow": {
+              "first32_mean_rms": 0.0009059768635779619,
+              "first64_mean_rms": 0.0009059768635779619,
+              "tail64_mean_rms": 0.0009947981247130562,
+              "max_rms": 0.002415938302874565
+            },
+            "source": {
+              "first32_mean_rms": 0.0006731598878104705,
+              "first64_mean_rms": 0.000676784881761705,
+              "tail64_mean_rms": 0.0006934165054083089,
+              "max_rms": 0.0016614248743280768
+            },
+            "output": {
+              "first32_mean_rms": 0.04491593991406262,
+              "first64_mean_rms": 0.0252660179103259,
+              "tail64_mean_rms": 0.004631902255556162,
+              "max_rms": 0.16652753949165344
+            },
+            "sampled_output_t10": 20
+          }
+        }
+      },
+      "bnd_joint": {
+        "all_post_stop_parameter_matches": true,
+        "overflow_max": 0,
+        "missing_max": 0,
+        "regions": {
+          "roof": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.0003930359634978231,
+              "first64_mean_rms": 0.0003930387265427271,
+              "tail64_mean_rms": 0.0003929380823940258,
+              "max_rms": 0.00045783258974552155
+            },
+            "output": {
+              "first32_mean_rms": 0.023997773183509707,
+              "first64_mean_rms": 0.013073216148768552,
+              "tail64_mean_rms": 0.0018523696344345808,
+              "max_rms": 0.08456824719905853,
+              "first32_vs_bnd_change_percent": -0.6767691239484508
+            },
+            "sampled_output_t10": 20
+          },
+          "ledge": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.00024413881328655407,
+              "first64_mean_rms": 0.00024444843438686803,
+              "tail64_mean_rms": 0.00027850223020376525,
+              "max_rms": 0.000821372086647898
+            },
+            "output": {
+              "first32_mean_rms": 0.03953500685747713,
+              "first64_mean_rms": 0.02114909709780477,
+              "tail64_mean_rms": 0.002166578217464335,
+              "max_rms": 0.1534404307603836,
+              "first32_vs_bnd_change_percent": -0.5117915234740034
+            },
+            "sampled_output_t10": 20
+          },
+          "arches": {
+            "shadow": {
+              "first32_mean_rms": 0.0,
+              "first64_mean_rms": 0.0,
+              "tail64_mean_rms": 0.0,
+              "max_rms": 0.0
+            },
+            "source": {
+              "first32_mean_rms": 0.0002696902665775269,
+              "first64_mean_rms": 0.0002695570183277596,
+              "tail64_mean_rms": 0.0002562695675913025,
+              "max_rms": 0.0004065172979608178
+            },
+            "output": {
+              "first32_mean_rms": 0.045025141327641904,
+              "first64_mean_rms": 0.025350142328534275,
+              "tail64_mean_rms": 0.004508721450453296,
+              "max_rms": 0.1661674976348877,
+              "first32_vs_bnd_change_percent": 0.24312396398298297
+            },
+            "sampled_output_t10": 20
+          }
+        }
+      }
+    }
+  }
+}

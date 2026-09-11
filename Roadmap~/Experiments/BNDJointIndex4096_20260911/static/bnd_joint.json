@@ -1,0 +1,104 @@
+{
+  "frames": 2080,
+  "all_active": true,
+  "parameter_matches": {
+    "width": true,
+    "height": true,
+    "resolution": true,
+    "capacity": true,
+    "cameraPosition": true,
+    "cameraEuler": true,
+    "jitter": true,
+    "gpuVP": true,
+    "lightIntensity": true,
+    "lightEuler": true,
+    "rays": true,
+    "steps": true,
+    "firstLevel": true,
+    "pcf": true,
+    "screenDensity": true,
+    "targetTexelPixels": true,
+    "resolutionLodBias": true,
+    "transition": true,
+    "depthBias": true,
+    "slopeBias": true,
+    "exposureMode": true,
+    "exposureManualEV100": true,
+    "exposureFixedScale": true,
+    "historySampleCount": true,
+    "jitterPhaseCount": true,
+    "tsrQuality": true,
+    "shaderFrameSeed": true,
+    "angle": true
+  },
+  "overflow_max": 0,
+  "missing_max": 0,
+  "replay_error_max": 0.0026078224182128906,
+  "distinct_indices_per_jitter": [
+    256,
+    256,
+    256,
+    256,
+    256,
+    256,
+    256,
+    256
+  ],
+  "regions": {
+    "roof": {
+      "fixed_rms": 0.004348419864915051,
+      "raw_single_frame_rms": 0.09450788855772806,
+      "raw_temporal_rms": 0.09440779758218257,
+      "output_temporal_rms": 0.017686028354187967
+    },
+    "ledge": {
+      "fixed_rms": 0.0034592050977627587,
+      "raw_single_frame_rms": 0.08087937517633051,
+      "raw_temporal_rms": 0.08080536633791867,
+      "output_temporal_rms": 0.01570022809086981
+    },
+    "arches": {
+      "fixed_rms": 0.0033295604359198155,
+      "raw_single_frame_rms": 0.08463426535398519,
+      "raw_temporal_rms": 0.08456874658709526,
+      "output_temporal_rms": 0.01706584581070199
+    }
+  },
+  "prefix_fixed_rms": {
+    "32": {
+      "roof": 0.04589651929289855,
+      "ledge": 0.03881069068792117,
+      "arches": 0.03982278350272236
+    },
+    "64": {
+      "roof": 0.03211520924810486,
+      "ledge": 0.026529331977871703,
+      "arches": 0.027394566640344422
+    },
+    "128": {
+      "roof": 0.023172388050491398,
+      "ledge": 0.019020799749088973,
+      "arches": 0.019706757565747444
+    },
+    "256": {
+      "roof": 0.017074642121121107,
+      "ledge": 0.01403600037580779,
+      "arches": 0.014185755161766187
+    },
+    "512": {
+      "roof": 0.011442973304118942,
+      "ledge": 0.009135557278948596,
+      "arches": 0.009350376578506016
+    },
+    "1024": {
+      "roof": 0.007486820212208184,
+      "ledge": 0.005983074728861789,
+      "arches": 0.005851390924645349
+    },
+    "2048": {
+      "roof": 0.004348419864915051,
+      "ledge": 0.0034592050977627587,
+      "arches": 0.0033295604359198155
+    }
+  }
+}

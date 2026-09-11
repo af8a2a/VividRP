@@ -137,6 +137,174 @@ namespace VividRP.Editor.Tests
             Assert.That(projections.Buffer, Is.SameAs(buffer));
         }
 
+        [TestCase(false, 512)]
+        [TestCase(false, 4096)]
+        [TestCase(true, 4096)]
+        [TestCase(false, 16384)]
+        public void ViewCoverage_RemainsNestedAcrossCameraAndProjectionChanges(bool orthographic, int resolution)
+        {
+            var go = new GameObject("VSM coverage test");
+            try
+            {
+                var camera = go.AddComponent<Camera>();
+                camera.orthographic = orthographic;
+                var view = new VividCameraData { camera = camera };
+                var focused = new VirtualShadowMapClipmapLayout();
+                var baseline = new VirtualShadowMapClipmapLayout();
+                var bounds = new Bounds(Vector3.zero, Vector3.one * 100);
+                using var projections = new VirtualShadowMapProjectionSet();
+                int pages = resolution / 128;
+                for (int step = 0; step < 160; step++)
+                {
+                    Vector3 position = new Vector3(Mathf.Sin(step * .13f) * 7, step * .01f, Mathf.Cos(step * .07f) * 5);
+                    camera.transform.SetPositionAndRotation(position, Quaternion.Euler(step * .3f, step * 7, 0));
+                    camera.fieldOfView = 35 + step % 80;
+                    camera.aspect = .6f + step % 17 * .1f;
+                    camera.orthographicSize = 2 + step % 9;
+                    camera.ResetProjectionMatrix();
+                    var light = Quaternion.Euler(35, 23, 0);
+                    baseline.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2);
+                    focused.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2, coverageView: view);
+                    Assert.That(focused.DepthMin, Is.EqualTo(baseline.DepthMin));
+                    Assert.That(focused.DepthMax, Is.EqualTo(baseline.DepthMax));
+                    Assert.That(focused.Views[0], Is.EqualTo(baseline.Views[0]));
+                    Assert.That(focused.Views[focused.Count - 1], Is.EqualTo(baseline.Views[baseline.Count - 1]));
+                    for (int i = 0; i + 1 < focused.Count; i++)
+                    {
+                        Assert.That(focused.OriginX[i] - focused.OriginX[i + 1] * 2, Is.InRange(1L, pages - 1L));
+                        Assert.That(focused.OriginY[i] - focused.OriginY[i + 1] * 2, Is.InRange(1L, pages - 1L));
+                        Assert.That(focused.Projections[i], Is.EqualTo(baseline.Projections[i]));
+                    }
+                    projections.PrepareClipmaps(focused);
+                    projections.CommitRecordedLayout();
+                }
+                focused.Update(camera.transform.position, Quaternion.Euler(35, 23, 0), bounds,
+                    150, resolution, 0, 1, 1, 2);
+                for (int i = 0; i < focused.Count; i++)
+                    Assert.That(focused.Views[i], Is.EqualTo(baseline.Views[i]));
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void ViewCoverage_ContextResetRetainsHysteresis()
+        {
+            var go = new GameObject("VSM coverage history test");
+            try
+            {
+                var camera = go.AddComponent<Camera>();
+                var view = new VividCameraData { camera = camera };
+                var continuous = new VirtualShadowMapClipmapLayout();
+                var resetEachFrame = new VirtualShadowMapClipmapLayout();
+                var bounds = new Bounds(Vector3.zero, Vector3.one * 100);
+                for (int frame = 0; frame < 400; frame++)
+                {
+                    camera.transform.SetPositionAndRotation(new Vector3(Mathf.Sin(frame * .1f) * .2f, 0, 0),
+                        Quaternion.Euler(0, 40 + Mathf.Sin(frame * .03f) * 5, 0));
+                    resetEachFrame.Reset();
+                    continuous.Update(camera.transform.position, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    resetEachFrame.Update(camera.transform.position, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    CollectionAssert.AreEqual(continuous.OriginX, resetEachFrame.OriginX);
+                    CollectionAssert.AreEqual(continuous.OriginY, resetEachFrame.OriginY);
+                }
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void ViewCoverage_StoppedCameraReturnsToCanonicalCoverage()
+        {
+            var go = new GameObject("VSM coverage stop test");
+            try
+            {
+                var camera = go.AddComponent<Camera>();
+                var view = new VividCameraData { camera = camera };
+                var layout = new VirtualShadowMapClipmapLayout();
+                var canonical = new VirtualShadowMapClipmapLayout();
+                var bounds = new Bounds(Vector3.zero, Vector3.one * 100);
+                for (int frame = 0; frame < 160; frame++)
+                {
+                    camera.transform.SetPositionAndRotation(new Vector3(Mathf.Sin(frame * .1f) * 2, 0, 0),
+                        Quaternion.Euler(0, 40 + Mathf.Sin(frame * .03f) * 15, 0));
+                    layout.Reset();
+                    layout.Update(camera.transform.position, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    canonical.Update(camera.transform.position, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2);
+                    canonical.Update(camera.transform.position, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    layout.Reset();
+                    layout.Update(camera.transform.position, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    CollectionAssert.AreEqual(canonical.OriginX, layout.OriginX);
+                    CollectionAssert.AreEqual(canonical.OriginY, layout.OriginY);
+                }
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void ViewCoverage_StablePreparationAllocatesZeroAndPreservesRecordedDepth()
+        {
+            var go = new GameObject("VSM coverage allocation test");
+            try
+            {
+                var camera = go.AddComponent<Camera>();
+                camera.transform.rotation = Quaternion.Euler(0, 45, 0);
+                var view = new VividCameraData { camera = camera };
+                var layout = new VirtualShadowMapClipmapLayout();
+                var bounds = new Bounds(Vector3.zero, Vector3.one * 100);
+                using var projections = new VirtualShadowMapProjectionSet();
+                for (int i = 0; i < 32; i++)
+                {
+                    layout.Reset();
+                    layout.Update(Vector3.zero, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    projections.PrepareClipmaps(layout);
+                    projections.CommitRecordedLayout();
+                }
+                var buffer = projections.Buffer;
+                ulong generation = projections.Generation;
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++)
+                {
+                    layout.Reset();
+                    layout.Update(Vector3.zero, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    projections.PrepareClipmaps(layout);
+                    projections.CommitRecordedLayout();
+                }
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(projections.Buffer, Is.SameAs(buffer));
+                Assert.That(projections.Generation, Is.EqualTo(generation));
+                Assert.That(projections.RequiresRemap, Is.False);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [TestCase(256)]
+        [TestCase(384)]
+        [TestCase(512)]
+        [TestCase(768)]
+        [TestCase(1024)]
+        public void PageBudget_ResizesAllPhysicalResourcesAndReusesTheStableConfiguration(int budget)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);
+                Assert.That(VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget), Is.True);
+                Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(budget));
+                Assert.That(VirtualShadowMapPrototypeRuntime.RasterDepth.rt.volumeDepth, Is.EqualTo(budget));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.count, Is.EqualTo(budget));
+                var pool = VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
+                for (int i = 0; i < 32; i++) VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget);
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++) VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget);
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage, Is.SameAs(pool));
+                VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);
+                Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(256));
+            }
+            finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); }
+        }
+
         private static VirtualShadowMapPrototypeCacheKey Key(ulong generation = 1, int mask = -1,
             int lod = -1, float error = 1)
             => new(1, 1, 1, 1, 8, 512, lod, error, 1, new Vector4(0, 0, 1, 0), mask, generation);

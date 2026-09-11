@@ -1,0 +1,159 @@
+using System;
+using System.IO;
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
+using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
+using Object = UnityEngine.Object;
+
+namespace VividRP.Editor
+{
+    internal static class VSMGeneralCoverageValidation
+    {
+        [Serializable] private sealed class Report
+        {
+            public int layouts, nestingChecks, changedIntermediateWindows, historyChecks, settledChecks;
+            public long layoutAllocatedBytes, resourcesAllocatedBytes;
+            public List<ResourceRecord> resources = new();
+        }
+        [Serializable] private sealed class ResourceRecord
+        {
+            public int budget, capacity;
+            public long staticPoolBytes, dynamicPoolBytes, pageDepthBytes, unityDepthBytes, bufferBytes;
+        }
+        private static void Check(bool value, string message)
+        {
+            if (!value) throw new InvalidOperationException(message);
+        }
+
+        [MenuItem("Tools/VividRP/Diagnostics/Validate Temporary VSM General Coverage")]
+        internal static void Run()
+        {
+            Check(!EditorApplication.isPlaying, "Run layout/resource diagnostic outside Play Mode.");
+            var report = new Report();
+            var go = new GameObject("Temporary VSM Coverage Validation") { hideFlags = HideFlags.HideAndDontSave };
+            try
+            {
+                var camera = go.AddComponent<Camera>();
+                camera.enabled = false;
+                var view = new VividCameraData { camera = camera };
+                var original = new VirtualShadowMapClipmapLayout();
+                var focused = new VirtualShadowMapClipmapLayout();
+                var continuous = new VirtualShadowMapClipmapLayout();
+                var canonical = new VirtualShadowMapClipmapLayout();
+                using var projections = new VirtualShadowMapProjectionSet();
+                var bounds = new Bounds(Vector3.zero, Vector3.one * 200);
+                foreach (int resolution in new[] { 512, 4096, 16384 })
+                for (int mode = 0; mode < 2; mode++)
+                {
+                    camera.orthographic = mode == 1;
+                    for (int frame = 0; frame < 300; frame++)
+                    {
+                        Vector3 position = new Vector3(Mathf.Sin(frame * .13f) * 7, frame * .01f, Mathf.Cos(frame * .07f) * 5);
+                        camera.transform.SetPositionAndRotation(position, Quaternion.Euler(frame * .4f - 60, frame * 7, frame % 25));
+                        camera.fieldOfView = 25 + frame % 95;
+                        camera.aspect = .6f + frame % 17 * .1f;
+                        camera.orthographicSize = 2 + frame % 9;
+                        camera.ResetProjectionMatrix();
+                        Quaternion light = Quaternion.Euler(10 + (frame / 60) * 15, frame / 30 * 23, 0);
+                        original.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2);
+                        focused.Reset();
+                        focused.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2, coverageView: view);
+                        continuous.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2, coverageView: view);
+                        for (int level = 0; level < focused.Count; level++)
+                        {
+                            Check(focused.OriginX[level] == continuous.OriginX[level] && focused.OriginY[level] == continuous.OriginY[level], "Reset lost coverage hysteresis.");
+                            report.historyChecks++;
+                        }
+                        Check(focused.CameraPosition == position, "Receiver selection moved.");
+                        Check(focused.DepthMin == original.DepthMin && focused.DepthMax == original.DepthMax, "View changed depth basis.");
+                        Check(focused.Views[0] == original.Views[0], "Nearest window moved.");
+                        Check(focused.Views[focused.Count - 1] == original.Views[original.Count - 1], "Terminal window moved.");
+                        int pages = resolution / 128;
+                        for (int i = 0; i + 1 < focused.Count; i++)
+                        {
+                            long dx = focused.OriginX[i] - focused.OriginX[i + 1] * 2;
+                            long dy = focused.OriginY[i] - focused.OriginY[i + 1] * 2;
+                            Check(dx >= 1 && dx <= pages - 1 && dy >= 1 && dy <= pages - 1, "Child escaped parent guard.");
+                            long oldDx = original.OriginX[i] - focused.OriginX[i + 1] * 2;
+                            long oldDy = original.OriginY[i] - focused.OriginY[i + 1] * 2;
+                            Check(oldDx >= 1 && oldDx <= pages - 1 && oldDy >= 1 && oldDy <= pages - 1, "Original child lost its parent.");
+                            Check(focused.Projections[i] == original.Projections[i], "Projection scale changed.");
+                            report.nestingChecks++;
+                            if (focused.Views[i] != original.Views[i]) report.changedIntermediateWindows++;
+                        }
+                        canonical.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2);
+                        canonical.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2, coverageView: view);
+                        focused.Reset();
+                        focused.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2, coverageView: view);
+                        continuous.Update(position, light, bounds, 150, resolution, 0, 1, 1, 2, coverageView: view);
+                        for (int level = 0; level < focused.Count; level++)
+                        {
+                            Check(focused.OriginX[level] == canonical.OriginX[level] && focused.OriginY[level] == canonical.OriginY[level], "Stopped view retained path-dependent coverage.");
+                            report.settledChecks++;
+                        }
+                        report.layouts++;
+                    }
+                }
+                camera.orthographic = false;
+                camera.transform.SetPositionAndRotation(Vector3.zero, Quaternion.Euler(0, 45, 0));
+                camera.ResetProjectionMatrix();
+                for (int i = 0; i < 100; i++)
+                {
+                    focused.Reset();
+                    focused.Update(Vector3.zero, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    projections.PrepareClipmaps(focused); projections.CommitRecordedLayout();
+                }
+                ulong generation = projections.Generation;
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 1000; i++)
+                {
+                    focused.Reset();
+                    focused.Update(Vector3.zero, Quaternion.identity, bounds, 150, 4096, 0, 1, 1, 2, coverageView: view);
+                    projections.PrepareClipmaps(focused); projections.CommitRecordedLayout();
+                }
+                report.layoutAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                Check(report.layoutAllocatedBytes == 0, "Stable focused layout allocated.");
+                Check(projections.Generation == generation && !projections.RequiresRemap, "Stable layout invalidated.");
+                var resourceProperties = typeof(VirtualShadowMapPrototypeRuntime).GetProperties(
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+                foreach (int budget in new[] { 256, 384, 512, 768, 1024, 384, 256 })
+                {
+                    Check(VirtualShadowMapPrototypeRuntime.EnsureResources(4096, focused.Count, budget), "Resource creation failed.");
+                    Check(VirtualShadowMapPrototypeRuntime.EnsureMeshletPageRequestCapacity(64), "Page draw resources failed.");
+                    var pool = VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
+                    var raster = VirtualShadowMapPrototypeRuntime.RasterDepth;
+                    Check(VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.count == budget && raster.rt.volumeDepth == budget, "Resource capacity mismatch.");
+                    Check(VirtualShadowMapPrototypeRuntime.MeshletRasterPages.count >= budget + 1, "Raster page list too small.");
+                    for (int i = 0; i < 100; i++) VirtualShadowMapPrototypeRuntime.EnsureResources(4096, focused.Count, budget);
+                    before = GC.GetAllocatedBytesForCurrentThread();
+                    for (int i = 0; i < 1000; i++)
+                    {
+                        VirtualShadowMapPrototypeRuntime.EnsureResources(4096, focused.Count, budget);
+                        VirtualShadowMapPrototypeRuntime.EnsureMeshletPageRequestCapacity(64);
+                    }
+                    long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                    report.resourcesAllocatedBytes += bytes;
+                    Check(bytes == 0 && ReferenceEquals(pool, VirtualShadowMapPrototypeRuntime.StaticPhysicalPage), "Stable resources recreated or allocated.");
+                    long buffers = 0;
+                    foreach (var property in resourceProperties)
+                        if (property.GetValue(null) is GraphicsBuffer buffer) buffers += (long)buffer.count * buffer.stride;
+                    report.resources.Add(new ResourceRecord {
+                        budget = budget, capacity = VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity,
+                        staticPoolBytes = (long)pool.rt.width * pool.rt.height * 4,
+                        dynamicPoolBytes = (long)pool.rt.width * pool.rt.height * 4,
+                        pageDepthBytes = (long)raster.rt.width * raster.rt.height * raster.rt.volumeDepth * 4,
+                        unityDepthBytes = (long)VirtualShadowMapPrototypeRuntime.UnityRasterDepth.rt.width
+                            * VirtualShadowMapPrototypeRuntime.UnityRasterDepth.rt.height * 4,
+                        bufferBytes = buffers });
+                }
+                string output = Path.GetFullPath("Packages/VividRP/Temp~/vsm-general/layout-resource-validation.json");
+                File.WriteAllText(output, JsonUtility.ToJson(report, true));
+                Debug.Log("VSM general coverage diagnostic passed: " + output);
+            }
+            finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); Object.DestroyImmediate(go); }
+        }
+    }
+}

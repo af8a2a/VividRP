@@ -1,0 +1,7 @@
+{
+  "Runtime/RenderPass/Core/CSMShadowPass.cs": true,
+  "Runtime/RenderPass/Core/CSMShadowResolvePass.cs": true,
+  "Runtime/RenderPass/Debug/VSMReceiverDebugPass.cs": true,
+  "Shaders/Core/Private/CSMShadowResolve.compute": true,
+  "Shaders/Core/Private/VSMSMRT.hlsl": true
+}

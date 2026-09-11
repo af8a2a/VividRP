@@ -733,7 +733,8 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, dynamicPhysicalPage)", passSource);
             StringAssert.DoesNotContain("nativeCmd.SetBufferData(", passSource);
             StringAssert.Contains("BuildUnmappedPageTable(", passSource);
-            StringAssert.Contains("MaxPhysicalPageCount = 256", passSource);
+            StringAssert.Contains("DefaultPhysicalPageCount = 256", passSource);
+            StringAssert.Contains("MaxPhysicalPageCount = 1024", passSource);
             StringAssert.Contains("VSMPrototypeAllocatePages", passSource);
             StringAssert.Contains("VSMPrototypeClearPhysicalPages", passSource);
             StringAssert.Contains("TextureDimension.Tex2DArray", passSource);

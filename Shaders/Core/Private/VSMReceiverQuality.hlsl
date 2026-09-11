@@ -1,6 +1,6 @@
 // Receiver policy only. Stable power-of-two projections and page identities do
 // not depend on these uniforms. Resolve, feedback and debug use this same choice.
-float4 _VSMReceiverQuality; // enabled, target pixels per texel including LOD bias, reserved
+float4 _VSMReceiverQuality; // enabled, target pixels per texel, coverage border, explicit coverage border
 float4x4 _VSMReceiverViewProjection;
 
 // Project virtual texel axes onto the geometric receiver plane, then the screen.
@@ -60,7 +60,8 @@ int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, bool smrt, out flo
 #endif
         if (level < desired) continue;
         float edge = max(abs(coord.x - 0.5), abs(coord.y - 0.5));
-        blend = VSMTransitionWeight(edge + guard, p.parameters.z);
+        float coverageBorder = _VSMReceiverQuality.w > 0 ? _VSMReceiverQuality.z : p.parameters.z;
+        blend = VSMTransitionWeight(edge + guard, coverageBorder);
         if (level == desired)
             blend = max(blend, VSMTransitionWeight(frac(lod) * 0.5, p.parameters.z));
 #if defined(VIVID_VSM_RECEIVER_DEBUG)

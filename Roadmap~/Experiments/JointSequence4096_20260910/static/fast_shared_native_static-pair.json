@@ -1,0 +1,13 @@
+{
+  "parameter_matches": {
+    "jitter": true,
+    "shaderFrameSeed": true,
+    "cameraPosition": true,
+    "cameraEuler": true,
+    "gpuVP": true,
+    "angle": true,
+    "capacity": true,
+    "lightIntensity": true,
+    "lightEuler": true
+  }
+}

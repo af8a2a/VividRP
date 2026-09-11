@@ -59,6 +59,9 @@ namespace VividRP.Editor
         private SerializedDataParameter m_EnableCSM;
         private SerializedDataParameter m_EnableVirtualShadowMapPrototype;
         private SerializedDataParameter m_VirtualShadowMapResolution;
+        private SerializedDataParameter m_VirtualShadowMapPhysicalPageBudget;
+        private SerializedDataParameter m_VirtualShadowMapViewCoverage;
+        private SerializedDataParameter m_VirtualShadowMapCoverageTransition;
         private SerializedDataParameter m_VirtualShadowMapFirstLevel;
         private SerializedDataParameter m_VirtualShadowMapScreenDensity;
         private SerializedDataParameter m_VirtualShadowMapTargetTexelPixels;
@@ -66,6 +69,7 @@ namespace VividRP.Editor
         private SerializedDataParameter m_VirtualShadowMapPCF;
         private SerializedDataParameter m_VirtualShadowMapStochasticFiltering;
         private SerializedDataParameter m_VirtualShadowMapSMRT;
+        private SerializedDataParameter m_VirtualShadowMapSMRTJointSampling;
         private SerializedDataParameter m_VirtualShadowMapSMRTRayCount;
         private SerializedDataParameter m_VirtualShadowMapSMRTSamplesPerRay;
         private SerializedDataParameter m_VirtualShadowMapSMRTMaxRayLength;
@@ -95,6 +99,9 @@ namespace VividRP.Editor
             m_EnableCSM = Unpack(fetcher.Find(x => x.enableCSM));
             m_EnableVirtualShadowMapPrototype = Unpack(fetcher.Find(x => x.enableVirtualShadowMapPrototype));
             m_VirtualShadowMapResolution = Unpack(fetcher.Find(x => x.virtualShadowMapResolution));
+            m_VirtualShadowMapPhysicalPageBudget = Unpack(fetcher.Find(x => x.virtualShadowMapPhysicalPageBudget));
+            m_VirtualShadowMapViewCoverage = Unpack(fetcher.Find(x => x.virtualShadowMapViewCoverage));
+            m_VirtualShadowMapCoverageTransition = Unpack(fetcher.Find(x => x.virtualShadowMapCoverageTransition));
             m_VirtualShadowMapFirstLevel = Unpack(fetcher.Find(x => x.virtualShadowMapFirstLevel));
             m_VirtualShadowMapScreenDensity = Unpack(fetcher.Find(x => x.virtualShadowMapScreenDensity));
             m_VirtualShadowMapTargetTexelPixels = Unpack(fetcher.Find(x => x.virtualShadowMapTargetTexelPixels));
@@ -102,6 +109,7 @@ namespace VividRP.Editor
             m_VirtualShadowMapPCF = Unpack(fetcher.Find(x => x.virtualShadowMapPCF));
             m_VirtualShadowMapStochasticFiltering = Unpack(fetcher.Find(x => x.virtualShadowMapStochasticFiltering));
             m_VirtualShadowMapSMRT = Unpack(fetcher.Find(x => x.virtualShadowMapSMRT));
+            m_VirtualShadowMapSMRTJointSampling = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTJointSampling));
             m_VirtualShadowMapSMRTRayCount = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTRayCount));
             m_VirtualShadowMapSMRTSamplesPerRay = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTSamplesPerRay));
             m_VirtualShadowMapSMRTMaxRayLength = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTMaxRayLength));
@@ -123,6 +131,8 @@ namespace VividRP.Editor
             PropertyField(m_EnableCSM, s_StateLabel);
             PropertyField(m_EnableVirtualShadowMapPrototype, s_EnableVirtualShadowMapPrototypeLabel);
             PropertyField(m_VirtualShadowMapResolution);
+            PropertyField(m_VirtualShadowMapPhysicalPageBudget);
+            PropertyField(m_VirtualShadowMapViewCoverage);
             PropertyField(m_VirtualShadowMapFirstLevel);
             PropertyField(m_VirtualShadowMapScreenDensity);
             PropertyField(m_VirtualShadowMapTargetTexelPixels);
@@ -130,10 +140,12 @@ namespace VividRP.Editor
             PropertyField(m_VirtualShadowMapPCF);
             PropertyField(m_VirtualShadowMapStochasticFiltering);
             PropertyField(m_VirtualShadowMapSMRT);
+            PropertyField(m_VirtualShadowMapSMRTJointSampling);
             PropertyField(m_VirtualShadowMapSMRTRayCount);
             PropertyField(m_VirtualShadowMapSMRTSamplesPerRay);
             PropertyField(m_VirtualShadowMapSMRTMaxRayLength);
             PropertyField(m_VirtualShadowMapTransition);
+            PropertyField(m_VirtualShadowMapCoverageTransition);
             PropertyField(m_MaxShadowDistance, s_MaxShadowDistanceLabel);
             PropertyField(m_ScreenSpaceShadowDenoise, s_ScreenSpaceShadowDenoiseLabel);
 

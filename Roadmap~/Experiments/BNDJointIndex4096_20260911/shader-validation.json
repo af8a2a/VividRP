@@ -1,0 +1,282 @@
+{
+  "total": 46,
+  "passed": 46,
+  "results": [
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowResolve",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowResolve",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMReceiverDebug",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMReceiverDebug",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeResetReceiverFeedback",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeResetReceiverFeedback",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeAllocatePages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeAllocatePages",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMResetPhysicalOwners",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMResetPhysicalOwners",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMRemapPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMRemapPages",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeMarkAllAllocatedPagesDirty",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeMarkAllAllocatedPagesDirty",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeInvalidateStaticPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeInvalidateStaticPages",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeClearPhysicalPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeClearPhysicalPages",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeFinalizeDirtyPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeFinalizeDirtyPages",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypePrepareMeshletPageRequests",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypePrepareMeshletPageRequests",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeCullMeshletsToPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeCullMeshletsToPages",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowClearTiles",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowClearTiles",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowClassifyTiles",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowClassifyTiles",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowResolveTiles",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowResolveTiles",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowCopyFilterSource",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowCopyFilterSource",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBilateralFilterH",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBilateralFilterH",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBilateralFilterV",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBilateralFilterV",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeLow",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeLow",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeMedium",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeMedium",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeHigh",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeHigh",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeVeryHigh",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeVeryHigh",
+      "variant": 1,
+      "exit_code": 0
+    },
+    {
+      "source": "Editor/Tools/VSMBNDCompareAudit.compute",
+      "kernel": "VSMBNDCompareAudit",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Editor/Tools/VSMBNDCompareAudit.compute",
+      "kernel": "VSMBNDCompareAudit",
+      "variant": 1,
+      "exit_code": 0
+    }
+  ]
+}

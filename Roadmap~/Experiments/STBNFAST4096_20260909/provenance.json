@@ -1,0 +1,19 @@
+{
+  "base_commit": "caa227a505cfab60ca57889a4880c3936a043718",
+  "comparison_capture": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\stbn-fast-captures\\20260909_152703_326",
+  "reference_capture": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\stbn-reference-captures\\20260909_154308_096",
+  "raw_frames_retained_locally": true,
+  "no_texture_assets_distributed": true,
+  "official_resources": [
+    {
+      "repository": "https://github.com/NVIDIA-RTX/STBN",
+      "commit": "48b2839e4d8b7f0202ac72c6b0ae720d235a5b8b",
+      "asset": "Assets/STBN.zip"
+    },
+    {
+      "repository": "https://github.com/electronicarts/fastnoise",
+      "commit": "2cf53e4bb510d07511fe63a312556d2a2e108c70",
+      "asset": "noise.zip"
+    }
+  ]
+}

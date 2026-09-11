@@ -22,8 +22,12 @@ bool HasVSMSMRTFootprint(float2 uv, int index)
     return true;
 }
 
+// Receiver-only BND index offset, shared by every ray in the stratified set.
+uint _VSMSMRTSampleIndexOffset;
+
 float2 VSMSMRTPhase(uint2 pixel, uint frame, uint dimension)
 {
+    frame += _VSMSMRTSampleIndexOffset;
     // Reuse the 1SPP tiles with the full 256-frame sequence, not the static
     // 1SPP sample-index mask. These are phases for a stratified ray set, not STBN.
     return float2(GetBNDSequenceSample1SPPTemporal(pixel, frame, dimension),

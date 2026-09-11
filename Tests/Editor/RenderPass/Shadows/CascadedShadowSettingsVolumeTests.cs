@@ -492,7 +492,7 @@ namespace VividRP.Editor.Tests
                 VirtualShadowMapPrototypeRuntime.CalculatePhysicalPageCapacity(
                     pagesPerAxis,
                     4),
-                Is.EqualTo(VirtualShadowMapPrototypeRuntime.MaxPhysicalPageCount));
+                Is.EqualTo(VirtualShadowMapPrototypeRuntime.DefaultPhysicalPageCount));
         }
 
         [Test]

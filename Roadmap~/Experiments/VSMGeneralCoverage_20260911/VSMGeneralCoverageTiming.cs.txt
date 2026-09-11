@@ -1,0 +1,71 @@
+using System;
+using System.IO;
+using UnityEditor;
+using UnityEngine;
+using VividRP.Runtime;
+namespace VividRP.Editor
+{
+    // Temporary timing harness. No image readback or compression during measurements.
+    internal static class VSMGeneralCoverageTiming
+    {
+        private static VSMBaselineSession session;
+        private static double started;
+        private static int stage;
+        private static string root;
+        private static readonly string[] Labels = { "base256_a", "base768_a", "view512005_a", "view768005_a", "view1024005_a",
+            "view1024005_b", "view768005_b", "view512005_b", "base768_b", "base256_b" };
+        private static readonly int[] Budgets = { 256,768,512,768,1024,1024,768,512,768,256 };
+        [MenuItem("Tools/VividRP/Diagnostics/Run Temporary VSM General Coverage Timing")]
+        internal static void Run()
+        {
+            if (Application.dataPath != "E:/VividRP_Reborn/Assets" || !EditorApplication.isPlaying || session != null)
+                throw new InvalidOperationException("Use VividRP_Reborn in Play Mode.");
+            root = "Packages/VividRP/Temp~/vsm-general-timing/" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fff");
+            Directory.CreateDirectory(root); stage = 0;
+            try { Begin(); }
+            catch { Finish(); throw; }
+            EditorApplication.update += Tick;
+            AssemblyReloadEvents.beforeAssemblyReload += Finish;
+        }
+        private static void Begin()
+        {
+            var settings = new VSMBaselineCase { name = Labels[stage], resolution = 4096, firstLevel = 0,
+                screenDensity = true, pcf = true, transition = .2f, maxDistance = 150, screenSpaceDenoise = true };
+            session = new VSMBaselineSession(Camera.main, new[] { settings }, 5, 5, 120, 4096,
+                root + "/" + Labels[stage], "General view coverage / physical budget; PCF, fixed camera", false);
+            var volume = (CascadedShadowSettingsVolume)typeof(VSMBaselineSession).GetField("m_Settings",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(session);
+            bool focused = Labels[stage].StartsWith("view", StringComparison.Ordinal);
+            volume.virtualShadowMapViewCoverage.Override(focused);
+            volume.virtualShadowMapPhysicalPageBudget.Override(Budgets[stage]);
+            volume.virtualShadowMapCoverageTransition.Override(Labels[stage].Contains("005") ? .05f : .2f);
+            volume.virtualShadowMapSMRT.Override(false);
+            volume.virtualShadowMapSMRTJointSampling.Override(false);
+            started = EditorApplication.timeSinceStartup;
+        }
+        private static void Tick()
+        {
+            if (session == null) return;
+            if (session.Tick())
+            {
+                long buffers = 0;
+                foreach (var property in typeof(VividRP.Runtime.RenderPass.Core.VirtualShadowMapPrototypeRuntime).GetProperties(
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic))
+                    if (property.GetValue(null) is GraphicsBuffer buffer) buffers += (long)buffer.count * buffer.stride;
+                File.WriteAllText(root + "/" + Labels[stage] + "/buffer-bytes.txt", buffers.ToString());
+                session.Finish("completed"); session.Dispose(); session = null;
+                if (++stage < Labels.Length) { Begin(); return; }
+                File.WriteAllText(root + "/status.txt", "complete"); Finish(); return;
+            }
+            if (session.IsFinished || EditorApplication.timeSinceStartup - started > 90)
+            { File.WriteAllText(root + "/status.txt", "incomplete stage=" + stage); Finish(); }
+        }
+        private static void Finish()
+        {
+            EditorApplication.update -= Tick;
+            AssemblyReloadEvents.beforeAssemblyReload -= Finish;
+            if (session != null) { session.Dispose(); session = null; }
+            if (EditorApplication.isPlaying) EditorApplication.isPlaying = false;
+        }
+    }
+}

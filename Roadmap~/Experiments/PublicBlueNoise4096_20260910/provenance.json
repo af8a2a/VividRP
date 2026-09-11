@@ -1,0 +1,8 @@
+{
+  "baseline": "caa227a505cfab60ca57889a4880c3936a043718",
+  "capture": "E:/VividRP_Reborn/Packages/VividRP/Temp~/public-noise-captures/20260910_132903_598",
+  "reference": "E:/VividRP_Reborn/Packages/VividRP/Temp~/stbn-reference-captures/20260909_154308_096",
+  "public_assets": "E:/VividRP_Reborn/Packages/VividRP/Temp~/public-noise",
+  "generated_fast256_used": false,
+  "user_constraint": "Use publicly pregenerated blue-noise atlases; no further FastNoise generation."
+}

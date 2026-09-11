@@ -1,0 +1,9 @@
+{
+  "Editor/VolumeEditor/CascadedShadowSettingsVolumeEditor.cs": "ebdb277186450352755b7e6ef558f5285dc954feb7d3b1247e251b78d53de88f",
+  "Runtime/RenderPipeline/CascadedShadowSettingsVolume.cs": "8a636f220a12beaa3f77339e45d4f89b235f6452cf9d0c4cce920bc279131835",
+  "Runtime/RenderPass/Core/CSMShadowResolvePass.cs": "e9e71004fdd9828d135c294f05aa628cf619da09bdfbbf4c171e6163c2bd3235",
+  "Runtime/RenderPass/Core/VirtualShadowMapReceiverQuality.cs": "ef50a93c93617d656d39b8407cf93afcc4548f5a5d2293fca814e94c7af55260",
+  "Runtime/RenderPass/Debug/VSMReceiverDebugPass.cs": "ad1a5f298b4631bfc543016c938321dd093376a17592a03d967a27e19d4c3bd2",
+  "Shaders/Core/Private/VSMSMRT.hlsl": "05df4235b43b547087572bd4108821cc9032ba95c59a6c2999e60ff06722b1b8",
+  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapReceiverQualityTests.cs": "a268bbb6cfd37844aaf3cbe53c1a4afa155cfc99ea299b936e0edfdf829aade8"
+}

@@ -67,6 +67,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_Ready;
         private ulong m_CameraId;
         private int m_FrameIndex;
+        private int m_SMRTSampleIndexOffset;
         private Matrix4x4 m_ViewProjection;
         private Matrix4x4 m_InvViewProjection;
         private Vector4 m_Parameters;
@@ -118,6 +119,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !VirtualShadowMapPrototypeRuntime.IsFramePrepared) return;
             m_CameraId = camera.camera != null ? EntityId.ToULong(camera.camera.GetEntityId()) : 0ul;
             m_FrameIndex = camera.frameIndex >= 0 ? camera.frameIndex : Time.frameCount;
+            m_SMRTSampleIndexOffset = VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(
+                settings, camera.additionalData, m_FrameIndex);
             m_ViewProjection = camera.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             m_InvViewProjection = m_ViewProjection.inverse;
             m_Quality = VirtualShadowMapReceiverQuality.BuildParameters(settings);
@@ -172,6 +175,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeMatrixParam(m_Compute, InvViewProjectionId, m_InvViewProjection);
             cmd.SetComputeVectorParam(m_Compute, ParametersId, m_Parameters);
             cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.SMRTParametersId, m_SMRTParameters);
+            cmd.SetComputeIntParam(m_Compute, VirtualShadowMapReceiverQuality.SMRTSampleIndexOffsetId, m_SMRTSampleIndexOffset);
             cmd.SetComputeIntParam(m_Compute, FrameIndexId, m_FrameIndex);
             cmd.SetComputeIntParam(m_Compute, WidthId, m_Output.desc.Width);
             cmd.SetComputeIntParam(m_Compute, HeightId, m_Output.desc.Height);

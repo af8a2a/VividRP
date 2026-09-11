@@ -1,0 +1,97 @@
+{
+  "frames": 512,
+  "states": {
+    "Active": 512
+  },
+  "settings_match": true,
+  "localClamp": 1.0,
+  "clampRelaxation": 0.0,
+  "mixRetention": 0.0,
+  "overflow_max": 0,
+  "missing_max": 0,
+  "replay_error_max": 0.0004882216453552246,
+  "temporal": {
+    "shadow": {
+      "roof": {
+        "same_jitter_rms": 0.08849319070577621,
+        "mean": 0.4543103277683258
+      },
+      "ledge": {
+        "same_jitter_rms": 0.0755874291062355,
+        "mean": 0.5121906399726868
+      },
+      "arches": {
+        "same_jitter_rms": 0.07924607396125793,
+        "mean": 0.6433595418930054
+      }
+    },
+    "source": {
+      "roof": {
+        "same_jitter_rms": 0.0676918551325798,
+        "mean": 0.28982922434806824
+      },
+      "ledge": {
+        "same_jitter_rms": 0.054952483624219894,
+        "mean": 0.4290846288204193
+      },
+      "arches": {
+        "same_jitter_rms": 0.053636644035577774,
+        "mean": 0.513907790184021
+      }
+    },
+    "output": {
+      "roof": {
+        "same_jitter_rms": 0.016187850385904312,
+        "mean": 0.25988587737083435
+      },
+      "ledge": {
+        "same_jitter_rms": 0.014601306989789009,
+        "mean": 0.3929547369480133
+      },
+      "arches": {
+        "same_jitter_rms": 0.015586874447762966,
+        "mean": 0.45812126994132996
+      }
+    }
+  },
+  "filtered_output_rms": {
+    "roof": 0.006358762737363577,
+    "ledge": 0.0056112827733159065,
+    "arches": 0.0057792626321315765
+  },
+  "history": {
+    "roof": {
+      "accepted_fraction": 1.0,
+      "clipped_fraction_gt_1e-3": 0.15136320153061225,
+      "clip_rms": 0.00897844135761261,
+      "stationary_confirm_fraction": 0.01385921556122449,
+      "count_p10_p50_p90": [
+        12.96875,
+        16.0,
+        16.0
+      ]
+    },
+    "ledge": {
+      "accepted_fraction": 0.9999522718594883,
+      "clipped_fraction_gt_1e-3": 0.1905147725645554,
+      "clip_rms": 0.021851852536201477,
+      "stationary_confirm_fraction": 0.00795389461626575,
+      "count_p10_p50_p90": [
+        4.2578125,
+        15.421875,
+        16.0
+      ]
+    },
+    "arches": {
+      "accepted_fraction": 1.0,
+      "clipped_fraction_gt_1e-3": 0.18164427297347777,
+      "clip_rms": 0.017527800053358078,
+      "stationary_confirm_fraction": 0.025769284646992904,
+      "count_p10_p50_p90": [
+        12.6015625,
+        15.9453125,
+        16.0
+      ]
+    }
+  }
+}

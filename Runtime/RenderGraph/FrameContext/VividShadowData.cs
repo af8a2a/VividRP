@@ -180,7 +180,8 @@ namespace VividRP.Runtime
                     VirtualShadowMapProjectionSet.ResolveResolution(csmSettings.virtualShadowMapResolution.value, cascadeResolution),
                     csmSettings.virtualShadowMapFirstLevel.value, normalBias,
                     EntityId.ToULong(cameraData.camera.GetEntityId()), EntityId.ToULong(light.GetEntityId()),
-                    csmSettings.virtualShadowMapTransition.value);
+                    csmSettings.virtualShadowMapTransition.value,
+                    csmSettings.virtualShadowMapViewCoverage.value ? cameraData : null);
             }
         }
 

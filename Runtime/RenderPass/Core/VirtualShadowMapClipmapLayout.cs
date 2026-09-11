@@ -21,6 +21,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal readonly Matrix4x4[] CandidateProjections = new Matrix4x4[VividShadowData.MaxCascadeCount + 1];
         private readonly Plane[] m_Planes = new Plane[6];
         private bool m_HasDepth;
+        private bool m_HadViewCoverage;
+        private int m_CoverageLevelCount;
+        private Matrix4x4 m_PreviousCoverageView, m_PreviousCoverageProjection;
         internal int Count { get; private set; }
         internal int Resolution { get; private set; }
         internal int FirstLevel { get; private set; }
@@ -38,10 +41,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal void Update(Vector3 cameraPosition, Quaternion rotation, Bounds casterBounds,
             float maxDistance, int resolution, int firstLevel, float normalBias,
-            ulong cameraId, ulong lightId, float transitionFraction = 0.2f)
+            ulong cameraId, ulong lightId, float transitionFraction = 0.2f, VividCameraData coverageView = null)
         {
             bool sameOwner = m_HasDepth && CameraId == cameraId && LightId == lightId
                 && Rotation.Equals(rotation);
+            bool retainOrigins = sameOwner && m_HadViewCoverage && Resolution == resolution
+                && FirstLevel == firstLevel;
             CameraId = cameraId;
             LightId = lightId;
             Rotation = rotation;
@@ -53,6 +58,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int lastLevel = Mathf.Max(firstLevel, Mathf.CeilToInt(Mathf.Log(Mathf.Max(maxDistance * 2, 1), 2)));
             FirstLevel = Mathf.Max(firstLevel, lastLevel - MaxLevels + 1);
             Count = lastLevel - FirstLevel + 1;
+            retainOrigins &= Count == m_CoverageLevelCount;
 
             Matrix4x4 worldToLight = Matrix4x4.Rotate(Quaternion.Inverse(rotation));
             Vector3 cameraLS = worldToLight.MultiplyPoint3x4(cameraPosition);
@@ -72,12 +78,12 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             int pagesPerAxis = Resolution / VirtualShadowMapPrototypeRuntime.PageSize;
+            UpdatePageOrigins(cameraLS, worldToLight, pagesPerAxis, coverageView, retainOrigins);
             for (int i = 0; i < Count; i++)
             {
                 float radius = Mathf.Pow(2, FirstLevel + i);
                 float pageWorldSize = 2 * radius / pagesPerAxis;
-                long x = (long)Math.Floor((double)cameraLS.x / pageWorldSize) - pagesPerAxis / 2;
-                long y = (long)Math.Floor((double)cameraLS.y / pageWorldSize) - pagesPerAxis / 2;
+                long x = OriginX[i], y = OriginY[i];
                 float centerX = (float)((double)x * pageWorldSize + radius);
                 float centerY = (float)((double)y * pageWorldSize + radius);
                 Matrix4x4 view = worldToLight;
@@ -109,6 +115,79 @@ namespace VividRP.Runtime.RenderPass.Core
                 Radii[i] = radius;
                 Centers[i] = centerWS;
             }
+        }
+
+        private void UpdatePageOrigins(Vector3 cameraLS, Matrix4x4 worldToLight, int pages,
+            VividCameraData view, bool retainOrigins)
+        {
+            bool focused = view?.camera != null;
+            bool orthographic = focused && view.camera.orthographic;
+            Vector2 low = Vector2.zero, high = Vector2.zero, forward = Vector2.zero;
+            float maxDepth = MaxDistance;
+            if (focused)
+            {
+                Matrix4x4 inverseProjection = view.nonJitteredProjectionMatrix.inverse;
+                Matrix4x4 viewToLight = worldToLight * view.inverseViewMatrix;
+                // Hysteresis suppresses remaps while moving. Once the view stops,
+                // restore the canonical window so coverage cannot depend on the route taken.
+                retainOrigins &= !viewToLight.Equals(m_PreviousCoverageView)
+                    || !inverseProjection.Equals(m_PreviousCoverageProjection);
+                m_PreviousCoverageView = viewToLight;
+                m_PreviousCoverageProjection = inverseProjection;
+                forward = viewToLight.MultiplyVector(Vector3.back);
+                maxDepth = Mathf.Min(maxDepth, view.camera.farClipPlane);
+                for (int corner = 0; corner < 4; corner++)
+                {
+                    Vector3 point = inverseProjection.MultiplyPoint(new Vector3(
+                        (corner & 1) == 0 ? -1 : 1, (corner & 2) == 0 ? -1 : 1, 0));
+                    if (orthographic) point.z = 0;
+                    else point /= Mathf.Max(-point.z, 1e-6f);
+                    Vector2 projected = viewToLight.MultiplyVector(point);
+                    low = Vector2.Min(low, projected);
+                    high = Vector2.Max(high, projected);
+                }
+            }
+
+            // Coarse to fine: every shifted window fits its chosen parent and
+            // still contains the original camera-centred child, with a page guard.
+            for (int i = Count - 1; i >= 0; i--)
+            {
+                float radius = Mathf.Pow(2, FirstLevel + i);
+                float page = 2 * radius / pages;
+                long x = (long)Math.Floor((double)cameraLS.x / page) - pages / 2;
+                long y = (long)Math.Floor((double)cameraLS.y / page) - pages / 2;
+                if (focused && i > 0 && i + 1 < Count)
+                {
+                    float width = 2 * radius - 2 * page;
+                    Vector2 span = high - low;
+                    float depth = orthographic
+                        ? Mathf.Min(maxDepth, Mathf.Min(
+                            Mathf.Max(0, width - span.x) / Mathf.Max(Mathf.Abs(forward.x), 1e-6f),
+                            Mathf.Max(0, width - span.y) / Mathf.Max(Mathf.Abs(forward.y), 1e-6f)))
+                        : Mathf.Min(maxDepth, width / Mathf.Max(Mathf.Max(span.x, span.y), 1e-6f));
+                    Vector2 offset = orthographic ? (low + high + forward * depth) * 0.5f
+                        : (low + high) * (0.5f * depth);
+                    x = FocusPageOrigin(cameraLS.x, offset.x, page, pages, OriginX[i], OriginX[i + 1], retainOrigins);
+                    y = FocusPageOrigin(cameraLS.y, offset.y, page, pages, OriginY[i], OriginY[i + 1], retainOrigins);
+                }
+                OriginX[i] = x;
+                OriginY[i] = y;
+            }
+            // ContextItem.Reset clears active output each frame, but retains this history.
+            m_CoverageLevelCount = Count;
+            m_HadViewCoverage = focused;
+        }
+
+        private static long FocusPageOrigin(float camera, float offset, float page, int pages,
+            long previous, long parent, bool retain)
+        {
+            double target = ((double)camera + offset) / page - pages / 2;
+            long origin = retain && target >= previous - 0.25 && target < previous + 1.25
+                ? previous : (long)Math.Floor(target);
+            long child = (long)Math.Floor((double)camera / (page * 0.5f)) - pages / 2;
+            long min = Math.Max(parent * 2 + 1, (long)Math.Ceiling((child - pages + 1) * 0.5));
+            long max = Math.Min(parent * 2 + pages - 1, (long)Math.Floor((child - 1) * 0.5));
+            return Math.Max(min, Math.Min(max, origin));
         }
 
         internal static void FitDepthInterval(float requiredMin, float requiredMax, out float min, out float max)

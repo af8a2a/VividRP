@@ -1,0 +1,17 @@
+{
+  "formal_static_frames": 4608,
+  "formal_followup_frames": 3264,
+  "priming_frames_excluded": 32,
+  "warm_frames_observed": [
+    513,
+    518,
+    519
+  ],
+  "all_archived_json_parse": true,
+  "source_sha256_matches_original": true,
+  "owned_editor_pid": 39452,
+  "owned_editor_exited": true,
+  "tracked_source_diff": "",
+  "production_default": "BND",
+  "scene_effective_resolution_restored": 2048
+}

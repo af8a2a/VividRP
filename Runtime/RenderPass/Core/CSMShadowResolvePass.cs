@@ -225,6 +225,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
         private float m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
         private int m_FrameIndex;
+        private int m_SMRTSampleIndexOffset;
         private ulong m_CameraEntityId;
         private int m_PCSSBlockerSampleCount = VividAdditionalLightData.DefaultDirLightPCSSBlockerSampleCount;
         private int m_PCSSFilterSampleCount = VividAdditionalLightData.DefaultDirLightPCSSFilterSampleCount;
@@ -315,6 +316,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BendQualitySettings = ResolveBendQualitySettings(m_ShadowQuality);
             m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
             m_FrameIndex = 0;
+            m_SMRTSampleIndexOffset = 0;
             m_CameraEntityId = 0ul;
             m_CascadeWorldTexelSizes = Vector4.zero;
             m_CascadeBorders = Vector4.zero;
@@ -421,6 +423,8 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
+            m_SMRTSampleIndexOffset = VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(
+                csmSettings, cameraData.additionalData, m_FrameIndex);
             m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings);
             m_VSMSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(csmSettings, m_LightAngularDiameter);
             m_VSMReceiverParameters = new Vector4(csmSettings != null && csmSettings.virtualShadowMapPCF.value ? 1 : 0,
@@ -566,6 +570,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TileCountX = 1;
             m_TileCountY = 1;
             m_FrameIndex = 0;
+            m_SMRTSampleIndexOffset = 0;
             m_CameraEntityId = 0ul;
             m_BendDispatchList = CreateEmptyBendDispatchList();
             m_BendDepthTextureSize = Vector4.zero;
@@ -741,6 +746,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeMatrixParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ViewProjMatrix);
             cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters);
             cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTParametersId, m_VSMSMRTParameters);
+            cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTSampleIndexOffsetId, m_SMRTSampleIndexOffset);
             cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapProjectionSet.CountId,
                 VirtualShadowMapPrototypeRuntime.Projections.Count);
             cmd.SetComputeMatrixArrayParam(m_ResolveCompute, CSMViewProjMatricesId, m_ViewProjMatrices);

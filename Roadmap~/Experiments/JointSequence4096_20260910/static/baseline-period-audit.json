@@ -1,0 +1,19 @@
+{
+  "same_bnd_sampling_phase_first_vs_second_cycle": [
+    {
+      "step": 0,
+      "max_abs": 0.25,
+      "changed_pixels": 18
+    },
+    {
+      "step": 20,
+      "max_abs": 0.00048828125,
+      "changed_pixels": 14
+    }
+  ],
+  "effect_on_512_frame_phase_mean_vs_repeating_second_cycle": {
+    "roof": 0.0,
+    "ledge": 6.000330781134488e-08,
+    "arches": 1.3346299298660112e-05
+  }
+}

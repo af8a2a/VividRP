@@ -646,13 +646,15 @@ namespace VividRP.Editor.Tests
             Assert.That(f.RunDiagnostic(receiver, 6, receiverNormal: Vector3.right).yz, Is.EqualTo(new float2(1, 1)));
         }
 
-        [Test]
-        public void DensityPolicy_TransitionsAtLodBoundaryWithoutBlendingFallbackTwice()
+        [TestCase(-1)]
+        [TestCase(0)]
+        [TestCase(.05f)]
+        public void DensityPolicy_TransitionsAtLodBoundaryWithoutBlendingFallbackTwice(float coverage)
         {
             using var f = new Fixture();
             for (int i = 0; i < 12; i++) f.Map(i, i, i < 4 ? 0.8f : 0);
             f.Upload();
-            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 4 * Mathf.Pow(2, 0.9f), 0));
+            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 4 * Mathf.Pow(2, 0.9f), 0, coverage));
             float4 levels = f.RunDiagnostic(float4.zero, 0);
             Assert.That(levels.xyz, Is.EqualTo(new float3(0, 0, 1)));
             Assert.That(levels.w, Is.EqualTo(0.5f).Within(1e-5));
@@ -661,6 +663,21 @@ namespace VividRP.Editor.Tests
             f.Upload();
             Assert.That(f.RunDiagnostic(float4.zero, 0).xyz, Is.EqualTo(new float3(0, 1, -1)));
             Assert.That(f.RunDiagnostic(float4.zero, 5).y, Is.EqualTo(1));
+        }
+
+        [TestCase(.2f, .5f)]
+        [TestCase(.05f, 0)]
+        [TestCase(0, 0)]
+        public void DensityPolicy_CoverageTransitionDoesNotChangePreferredLevel(float coverage, float blend)
+        {
+            using var f = new Fixture();
+            for (int i = 0; i < 12; i++) f.Map(i, i, i < 4 ? .8f : 0);
+            f.Upload();
+            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 4, 0, coverage));
+            float4 levels = f.RunDiagnostic(new float4(4.5f, 0, 0, 0), 0);
+            Assert.That(levels.xy, Is.EqualTo(new float2(0, 0)));
+            Assert.That(levels.w, Is.EqualTo(blend).Within(1e-5));
+            Assert.That(f.RunDiagnostic(new float4(4.5f, 0, 0, 0), 5).y, Is.EqualTo(blend).Within(1e-5));
         }
 
         [TestCase(false)]

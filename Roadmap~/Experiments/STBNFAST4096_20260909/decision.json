@@ -1,0 +1,171 @@
+{
+  "default": "BND retained",
+  "scope": "Official scalar textures drive the existing four-dimensional stratified SMRT phase estimator; not direct vector/cosine-disk sampling and not custom-generated FAST matched to TSR.",
+  "variants": {
+    "bnd": {
+      "roof": {
+        "final_output_temporal_rms_change_percent": 0.0,
+        "final_output_mean_change_percent": 0.0,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.015155419707298279,
+        "raw_shadow_single_frame_reference_error_rms": 0.09444345533847809,
+        "angle_early_recovery_rms": 0.005808893614970368,
+        "angle_early_recovery_change_percent": 0.0,
+        "light_early_recovery_rms": 0.035966991258335454,
+        "light_early_recovery_change_percent": 0.0
+      },
+      "ledge": {
+        "final_output_temporal_rms_change_percent": 0.0,
+        "final_output_mean_change_percent": 0.0,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.013649607077240944,
+        "raw_shadow_single_frame_reference_error_rms": 0.08084644377231598,
+        "angle_early_recovery_rms": 0.00479391269366108,
+        "angle_early_recovery_change_percent": 0.0,
+        "light_early_recovery_rms": 0.08912250306423686,
+        "light_early_recovery_change_percent": 0.0
+      },
+      "arches": {
+        "final_output_temporal_rms_change_percent": 0.0,
+        "final_output_mean_change_percent": 0.0,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.011882790364325047,
+        "raw_shadow_single_frame_reference_error_rms": 0.08460737764835358,
+        "angle_early_recovery_rms": 0.005257616963853065,
+        "angle_early_recovery_change_percent": 0.0,
+        "light_early_recovery_rms": 0.07523415450160448,
+        "light_early_recovery_change_percent": 0.0
+      }
+    },
+    "stbn": {
+      "roof": {
+        "final_output_temporal_rms_change_percent": -10.445326021986844,
+        "final_output_mean_change_percent": -0.14338157134001772,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.03346151486039162,
+        "raw_shadow_single_frame_reference_error_rms": 0.09448596090078354,
+        "angle_early_recovery_rms": 0.006057570955232082,
+        "angle_early_recovery_change_percent": 4.2809759782970636,
+        "light_early_recovery_rms": 0.03494552584006001,
+        "light_early_recovery_change_percent": -2.840007969915226
+      },
+      "ledge": {
+        "final_output_temporal_rms_change_percent": -8.780858241518995,
+        "final_output_mean_change_percent": -0.05753465882993858,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.02900131605565548,
+        "raw_shadow_single_frame_reference_error_rms": 0.08083231002092361,
+        "angle_early_recovery_rms": 0.004857027482994875,
+        "angle_early_recovery_change_percent": 1.3165610925132354,
+        "light_early_recovery_rms": 0.08907326334445047,
+        "light_early_recovery_change_percent": -0.05524948031464527
+      },
+      "arches": {
+        "final_output_temporal_rms_change_percent": -8.343470328286784,
+        "final_output_mean_change_percent": -0.06319093121649466,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.03020802140235901,
+        "raw_shadow_single_frame_reference_error_rms": 0.08458375930786133,
+        "angle_early_recovery_rms": 0.005924142010800896,
+        "angle_early_recovery_change_percent": 12.677322283656167,
+        "light_early_recovery_rms": 0.07574569860861302,
+        "light_early_recovery_change_percent": 0.6799360083160622
+      }
+    },
+    "fast_sep": {
+      "roof": {
+        "final_output_temporal_rms_change_percent": -17.96320808124765,
+        "final_output_mean_change_percent": -0.07422496091522568,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.04653078690171242,
+        "raw_shadow_single_frame_reference_error_rms": 0.09417347609996796,
+        "angle_early_recovery_rms": 0.00588353966926583,
+        "angle_early_recovery_change_percent": 1.2850304936397716,
+        "light_early_recovery_rms": 0.03556935991629499,
+        "light_early_recovery_change_percent": -1.1055451905455316
+      },
+      "ledge": {
+        "final_output_temporal_rms_change_percent": -17.040196967696364,
+        "final_output_mean_change_percent": -0.019431030308769692,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.040684204548597336,
+        "raw_shadow_single_frame_reference_error_rms": 0.08109225332736969,
+        "angle_early_recovery_rms": 0.004766702155026447,
+        "angle_early_recovery_change_percent": -0.5676060532060379,
+        "light_early_recovery_rms": 0.08915038138781671,
+        "light_early_recovery_change_percent": 0.03128090282624729
+      },
+      "arches": {
+        "final_output_temporal_rms_change_percent": -13.240059775534752,
+        "final_output_mean_change_percent": -0.03257794404869507,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.04239417240023613,
+        "raw_shadow_single_frame_reference_error_rms": 0.0844731330871582,
+        "angle_early_recovery_rms": 0.005680298340253094,
+        "angle_early_recovery_change_percent": 8.039409856329005,
+        "light_early_recovery_rms": 0.07510807434560376,
+        "light_early_recovery_change_percent": -0.16758366839627614
+      }
+    },
+    "fast_product": {
+      "roof": {
+        "final_output_temporal_rms_change_percent": -16.53031586539496,
+        "final_output_mean_change_percent": -0.0072585200462382815,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.04750356823205948,
+        "raw_shadow_single_frame_reference_error_rms": 0.09426956623792648,
+        "angle_early_recovery_rms": 0.006016690745610161,
+        "angle_early_recovery_change_percent": 3.57722389861419,
+        "light_early_recovery_rms": 0.03576663522212463,
+        "light_early_recovery_change_percent": -0.5570553143346202
+      },
+      "ledge": {
+        "final_output_temporal_rms_change_percent": -14.56490273574288,
+        "final_output_mean_change_percent": 0.0022601276471467813,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.04044068232178688,
+        "raw_shadow_single_frame_reference_error_rms": 0.08087186515331268,
+        "angle_early_recovery_rms": 0.0046564035658345085,
+        "angle_early_recovery_change_percent": -2.86841118338258,
+        "light_early_recovery_rms": 0.08920290837512976,
+        "light_early_recovery_change_percent": 0.09021886518936206
+      },
+      "arches": {
+        "final_output_temporal_rms_change_percent": -12.919967310735835,
+        "final_output_mean_change_percent": 0.04579260439678823,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.042467907071113586,
+        "raw_shadow_single_frame_reference_error_rms": 0.08491361141204834,
+        "angle_early_recovery_rms": 0.005244598243881611,
+        "angle_early_recovery_change_percent": -0.24761636423801248,
+        "light_early_recovery_rms": 0.07603438389624509,
+        "light_early_recovery_change_percent": 1.063651741608318
+      }
+    },
+    "fast_binomial": {
+      "roof": {
+        "final_output_temporal_rms_change_percent": -17.269747776996304,
+        "final_output_mean_change_percent": 0.09331727667667433,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.047698989510536194,
+        "raw_shadow_single_frame_reference_error_rms": 0.09462293237447739,
+        "angle_early_recovery_rms": 0.006098698622420843,
+        "angle_early_recovery_change_percent": 4.988988035580566,
+        "light_early_recovery_rms": 0.035519027591753335,
+        "light_early_recovery_change_percent": -1.2454855157735811
+      },
+      "ledge": {
+        "final_output_temporal_rms_change_percent": -15.287174658303604,
+        "final_output_mean_change_percent": -0.027978560034758182,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.04061460494995117,
+        "raw_shadow_single_frame_reference_error_rms": 0.08105123043060303,
+        "angle_early_recovery_rms": 0.00478937234244117,
+        "angle_early_recovery_change_percent": -0.09471076154377034,
+        "light_early_recovery_rms": 0.08914415565089819,
+        "light_early_recovery_change_percent": 0.024295308049993025
+      },
+      "arches": {
+        "final_output_temporal_rms_change_percent": -12.712407868882913,
+        "final_output_mean_change_percent": 0.012063013434460146,
+        "raw_shadow_fixed_phase_mean_reference_error_rms": 0.04234224930405617,
+        "raw_shadow_single_frame_reference_error_rms": 0.08492416143417358,
+        "angle_early_recovery_rms": 0.005937724449212736,
+        "angle_early_recovery_change_percent": 12.935660586070007,
+        "light_early_recovery_rms": 0.07492792235165002,
+        "light_early_recovery_change_percent": -0.4070387339143
+      }
+    }
+  },
+  "reference_uncertainty": {
+    "roof": 0.0029693159740418196,
+    "ledge": 0.0025329177733510733,
+    "arches": 0.0026640677824616432
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "run": {
+    "id": "2",
+    "testcasecount": "12",
+    "result": "Passed",
+    "total": "12",
+    "passed": "12",
+    "failed": "0",
+    "inconclusive": "0",
+    "skipped": "0",
+    "asserts": "0",
+    "engine-version": "3.5.0.0",
+    "clr-version": "4.0.30319.42000",
+    "start-time": "2026-09-10 16:11:59Z",
+    "end-time": "2026-09-10 16:11:59Z",
+    "duration": "0.3510733"
+  },
+  "cases": [
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_InactivePhaseCountsKeepTheOriginalIndex(-1)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_InactivePhaseCountsKeepTheOriginalIndex(0)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_InactivePhaseCountsKeepTheOriginalIndex(1)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_IndexRepeatsAfterACompleteJointPeriodNearFrameLimit",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_RequiresEnabledSMRTAndActiveTSRJitter",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_VisitsEveryBNDIndexAtEachJitterPhase(8)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_VisitsEveryBNDIndexAtEachJitterPhase(18)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_VisitsEveryBNDIndexAtEachJitterPhase(24)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_VisitsEveryBNDIndexAtEachJitterPhase(32)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_VisitsEveryBNDIndexAtEachJitterPhase(72)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_VisitsEveryBNDIndexAtEachJitterPhase(17)",
+      "result": "Passed"
+    },
+    {
+      "name": "VividRP.Editor.Tests.VirtualShadowMapReceiverQualityTests.SMRTJoint_VisitsEveryBNDIndexAtEachJitterPhase(31)",
+      "result": "Passed"
+    }
+  ]
+}

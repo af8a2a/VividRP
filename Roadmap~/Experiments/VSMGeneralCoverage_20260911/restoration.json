@@ -1,0 +1,78 @@
+{
+  "stableLines": {
+    "camera": {
+      "same": true,
+      "before": "Camera_1 position=(0.0202028491, 7.662983, -2.4306047) rotation=(359.226349, 3.03022361, 0.450279) fov=60",
+      "after": "Camera_1 position=(0.0202028491, 7.662983, -2.4306047) rotation=(359.226349, 3.03022361, 0.450279) fov=60"
+    },
+    "light": {
+      "same": true,
+      "before": "Directional Light localRotation=(59.46513, 355.087921, 0.466982663) intensity=115098.8",
+      "after": "Directional Light localRotation=(59.46513, 355.087921, 0.466982663) intensity=115098.8"
+    },
+    "angularDiameter": {
+      "same": true,
+      "before": "7.1",
+      "after": "7.1"
+    },
+    "temporarySpatialObjects": {
+      "same": true,
+      "before": "0",
+      "after": "0"
+    },
+    "play": {
+      "same": true,
+      "before": "False background=False timeScale=1 captureDelta=0",
+      "after": "False background=False timeScale=1 captureDelta=0"
+    }
+  },
+  "jsonDifferences": {
+    "cameraData": {},
+    "savedProfile": {
+      "virtualShadowMapPhysicalPageBudget": {
+        "before": null,
+        "after": {
+          "m_OverrideState": false,
+          "m_Value": 256
+        }
+      },
+      "virtualShadowMapViewCoverage": {
+        "before": null,
+        "after": {
+          "m_OverrideState": false,
+          "m_Value": false
+        }
+      },
+      "virtualShadowMapCoverageTransition": {
+        "before": null,
+        "after": {
+          "m_OverrideState": false,
+          "m_Value": 0.20000000298023224
+        }
+      }
+    },
+    "effectiveStack": {
+      "virtualShadowMapViewCoverage": {
+        "before": null,
+        "after": {
+          "m_OverrideState": false,
+          "m_Value": false
+        }
+      },
+      "virtualShadowMapPhysicalPageBudget": {
+        "before": null,
+        "after": {
+          "m_OverrideState": false,
+          "m_Value": 256
+        }
+      },
+      "virtualShadowMapCoverageTransition": {
+        "before": null,
+        "after": {
+          "m_OverrideState": false,
+          "m_Value": 0.20000000298023224
+        }
+      }
+    }
+  }
+}

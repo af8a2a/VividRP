@@ -1,0 +1,74 @@
+{
+    "layouts": 1800,
+    "nestingChecks": 16200,
+    "changedIntermediateWindows": 8731,
+    "historyChecks": 18000,
+    "settledChecks": 18000,
+    "layoutAllocatedBytes": 0,
+    "resourcesAllocatedBytes": 0,
+    "resources": [
+        {
+            "budget": 256,
+            "capacity": 256,
+            "staticPoolBytes": 16777216,
+            "dynamicPoolBytes": 16777216,
+            "pageDepthBytes": 16777216,
+            "unityDepthBytes": 16777216,
+            "bufferBytes": 419092
+        },
+        {
+            "budget": 384,
+            "capacity": 384,
+            "staticPoolBytes": 26214400,
+            "dynamicPoolBytes": 26214400,
+            "pageDepthBytes": 25165824,
+            "unityDepthBytes": 16777216,
+            "bufferBytes": 419604
+        },
+        {
+            "budget": 512,
+            "capacity": 512,
+            "staticPoolBytes": 34668544,
+            "dynamicPoolBytes": 34668544,
+            "pageDepthBytes": 33554432,
+            "unityDepthBytes": 16777216,
+            "bufferBytes": 420116
+        },
+        {
+            "budget": 768,
+            "capacity": 768,
+            "staticPoolBytes": 51380224,
+            "dynamicPoolBytes": 51380224,
+            "pageDepthBytes": 50331648,
+            "unityDepthBytes": 16777216,
+            "bufferBytes": 421140
+        },
+        {
+            "budget": 1024,
+            "capacity": 1024,
+            "staticPoolBytes": 67108864,
+            "dynamicPoolBytes": 67108864,
+            "pageDepthBytes": 67108864,
+            "unityDepthBytes": 16777216,
+            "bufferBytes": 422164
+        },
+        {
+            "budget": 384,
+            "capacity": 384,
+            "staticPoolBytes": 26214400,
+            "dynamicPoolBytes": 26214400,
+            "pageDepthBytes": 25165824,
+            "unityDepthBytes": 16777216,
+            "bufferBytes": 419604
+        },
+        {
+            "budget": 256,
+            "capacity": 256,
+            "staticPoolBytes": 16777216,
+            "dynamicPoolBytes": 16777216,
+            "pageDepthBytes": 16777216,
+            "unityDepthBytes": 16777216,
+            "bufferBytes": 419092
+        }
+    ]
+}

@@ -1,0 +1,1 @@
+4096 4x8, pool512, fixed7.1deg length10, NativeAA1920x1080 history16 sharpen0.483. BND native/joint f+floor(f/8) indexing and public STBN vec2 joint. Shared disk and receiver phases retain the stratified ray set. DDA, clipping, final mix and TSR jitter unchanged. Warm512, record2080 static; no generator. Readbacks are not GPU timing.

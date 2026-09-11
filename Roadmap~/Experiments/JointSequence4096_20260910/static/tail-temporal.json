@@ -1,0 +1,101 @@
+{
+  "window": [
+    32,
+    511
+  ],
+  "note": "480 samples / 60 per jitter; sensitivity check, not a complete joint period",
+  "stages": {
+    "bnd_static": {
+      "roof": 0.017990346084491782,
+      "ledge": 0.016518645486304676,
+      "arches": 0.017842185572158182
+    },
+    "fast_ray_joint_static": {
+      "roof": 0.018907120086266712,
+      "ledge": 0.018265112741602585,
+      "arches": 0.019710596707229404
+    },
+    "fast_ray_native_static": {
+      "roof": 0.01643150977689473,
+      "ledge": 0.01592549074597121,
+      "arches": 0.017138448870576875
+    },
+    "fast_shared_joint_static": {
+      "roof": 0.016570998618887552,
+      "ledge": 0.014892619419312489,
+      "arches": 0.016781300125859166
+    },
+    "fast_shared_native_static": {
+      "roof": 0.014427342102759335,
+      "ledge": 0.013116960028719319,
+      "arches": 0.01448205842149008
+    },
+    "stbn_ray_joint_static": {
+      "roof": 0.01983683447307554,
+      "ledge": 0.018946845288732073,
+      "arches": 0.020356263004584704
+    },
+    "stbn_ray_native_static": {
+      "roof": 0.018569729528414392,
+      "ledge": 0.01778283889689796,
+      "arches": 0.01911252101110069
+    },
+    "stbn_shared_joint_static": {
+      "roof": 0.017083364525322074,
+      "ledge": 0.015449804235723967,
+      "arches": 0.016827143143000295
+    },
+    "stbn_shared_native_static": {
+      "roof": 0.016162278607006173,
+      "ledge": 0.014579092208085356,
+      "arches": 0.015563156737300275
+    }
+  },
+  "change_percent": {
+    "bnd_static": {
+      "roof": 0.0,
+      "ledge": 0.0,
+      "arches": 0.0
+    },
+    "fast_ray_joint_static": {
+      "roof": 5.09592198765545,
+      "ledge": 10.572702566598903,
+      "arches": 10.471873681141286
+    },
+    "fast_ray_native_static": {
+      "roof": -8.6648489155015,
+      "ledge": -3.5908194822949713,
+      "arches": -3.9442292466650097
+    },
+    "fast_shared_joint_static": {
+      "roof": -7.889495059951901,
+      "ledge": -9.843579900908328,
+      "arches": -5.945938864992383
+    },
+    "fast_shared_native_static": {
+      "roof": -19.805088601401966,
+      "ledge": -20.593004798157544,
+      "arches": -18.8324862841434
+    },
+    "stbn_ray_joint_static": {
+      "roof": 10.263773581184665,
+      "ledge": 14.699751286753958,
+      "arches": 14.090636050493789
+    },
+    "stbn_ray_native_static": {
+      "roof": 3.22052417002725,
+      "ledge": 7.653129983577678,
+      "arches": 7.119842094484219
+    },
+    "stbn_shared_joint_static": {
+      "roof": -5.041490335483612,
+      "ledge": -6.470513889694319,
+      "arches": -5.689002757273243
+    },
+    "stbn_shared_native_static": {
+      "roof": -10.161380269729548,
+      "ledge": -11.741599998785436,
+      "arches": -12.773260459829627
+    }
+  }
+}

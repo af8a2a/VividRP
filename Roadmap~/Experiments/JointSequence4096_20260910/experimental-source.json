@@ -1,0 +1,7 @@
+{
+  "Runtime/RenderPass/Core/CSMShadowPass.cs": "d55eff397a438d6140f6af6c1f9d6674d4a0cec0258af1d6b392eb9111f5a82d",
+  "Runtime/RenderPass/Core/CSMShadowResolvePass.cs": "2aee5fa9c8e73f198c9c3687ea858feba2496295f130c6837315a7265e39dbd7",
+  "Runtime/RenderPass/Debug/VSMReceiverDebugPass.cs": "a51b0a60fb298ad723925ca504c1de89cd79af8090973587a462a4b39cdfd539",
+  "Shaders/Core/Private/CSMShadowResolve.compute": "fd46f0cba0e9068c1857d5d3f601a3421699521316c165a9fcf890690a1e3e27",
+  "Shaders/Core/Private/VSMSMRT.hlsl": "05cba34e894ca8a635ff216bee83f7821078906d2c202113959ccd1b98ca5729"
+}

@@ -1,0 +1,20 @@
+{
+  "matches": {
+    "jitter": true,
+    "gpuVP": true,
+    "cameraPosition": true,
+    "cameraEuler": true,
+    "angle": true,
+    "rays": true,
+    "steps": true,
+    "resolution": true,
+    "capacity": true,
+    "depthBias": true,
+    "slopeBias": true
+  },
+  "settled_raw_max_delta": {
+    "256": 0.0,
+    "287": 0.0,
+    "511": 0.0
+  }
+}

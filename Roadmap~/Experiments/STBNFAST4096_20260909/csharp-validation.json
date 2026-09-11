@@ -1,0 +1,43 @@
+{
+  "checkedUtc": "2026-09-09T15:26:33.1774244Z",
+  "projectRoot": "E:/VividRP_Reborn",
+  "compiler": "E:\\Unity\\6000.7.0a6\\Editor\\Data\\DotNetSdk\\sdk\\10.0.301\\Roslyn\\bincore\\csc.dll",
+  "compilerSha256": "DB6584E0D66AF6B5C7BBC7CC7C1D75EB47F9B50C8D629C6E537B710BADC172D4",
+  "sourceTreeStable": true,
+  "beeResponsesStable": true,
+  "results": [
+    {
+      "assembly": "VividRP.Runtime",
+      "exitCode": 0,
+      "log": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\stbn-fast\\csharp3\\VividRP.Runtime.log",
+      "originalResponse": "E:\\VividRP_Reborn\\Library\\Bee\\artifacts\\1900b0aE.dag\\VividRP.Runtime.rsp",
+      "originalResponseSha256": "F24C3F5840E897FD9500B74B0A930EE6354546AF4D4C344C381FE949444DE5DE",
+      "response": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\stbn-fast\\csharp3\\VividRP.Runtime.rsp",
+      "responseSha256": "44CD64441F3114F3DF595716B3997E4DDA873BCE9C11265066FDF5A396A803E8",
+      "referenceSha256": "FA5AABC9D63912CC05AD5E56821BB8774CF2BC5D66DAFFB272A913DFCA3B4720"
+    },
+    {
+      "assembly": "VividRP.Editor",
+      "exitCode": 0,
+      "log": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\stbn-fast\\csharp3\\VividRP.Editor.log",
+      "originalResponse": "E:\\VividRP_Reborn\\Library\\Bee\\artifacts\\1900b0aE.dag\\VividRP.Editor.rsp",
+      "originalResponseSha256": "8DA324F4CFDB5AFF60E72A7968B137BD357239958ACF17D7F1EB6E6623FBE9EF",
+      "response": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\stbn-fast\\csharp3\\VividRP.Editor.rsp",
+      "responseSha256": "60282785E1CD1276E270BB11BEC4A5FC5B0A32C18C6B4ED1775809FA4A4EBA6D",
+      "referenceSha256": "A6D7D2BB8CFC44B175BC0EB4F5127E1F32565CC5D27F956EBF04794D6BF5E94A"
+    },
+    {
+      "assembly": "VividRP.Editor.Tests",
+      "exitCode": 0,
+      "log": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\stbn-fast\\csharp3\\VividRP.Editor.Tests.log",
+      "originalResponse": "E:\\VividRP_Reborn\\Library\\Bee\\artifacts\\1900b0aE.dag\\VividRP.Editor.Tests.rsp",
+      "originalResponseSha256": "6E266DCC59FB073D23B6E4FC876A13316D086930C4E22C7D56C269EC29E99FA0",
+      "response": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\stbn-fast\\csharp3\\VividRP.Editor.Tests.rsp",
+      "responseSha256": "F4E84AF098BC882B12A1F002A2D6251F5F703E3B5F245B34CB583D754D51673D",
+      "referenceSha256": "BC322B5DDA0777BA601838881B5126F7E11DA5FCCD9AD0D29DB574BC6E4CB523"
+    }
+  ],
+  "rebuiltDependenciesUsed": true,
+  "unityTestFrameworkRun": false,
+  "reason": "Interactive Editor remains open. Compile Runtime, Editor and Tests only; no Unity or NUnit invocation."
+}

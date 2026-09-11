@@ -19,7 +19,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.virtualShadowMapScreenDensity.value, Is.False);
                 Assert.That(settings.virtualShadowMapTargetTexelPixels.value, Is.EqualTo(1));
                 Assert.That(settings.virtualShadowMapResolutionLodBias.value, Is.Zero);
-                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings), Is.EqualTo(new Vector4(0, 1, 0, 0)));
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings), Is.EqualTo(new Vector4(0, 1, 0.1f, 1)));
                 settings.virtualShadowMapTargetTexelPixels.value = 0;
                 settings.virtualShadowMapResolutionLodBias.value = -100;
                 Assert.That(settings.virtualShadowMapTargetTexelPixels.value, Is.EqualTo(0.25f));
@@ -119,6 +119,103 @@ namespace VividRP.Editor.Tests
                 Assert.That(bytes, Is.Zero);
             }
             finally { if (ownsBlueNoise) BlueNoise.Cleanup(); }
+        }
+
+        [TestCase(8)]
+        [TestCase(18)]
+        [TestCase(24)]
+        [TestCase(32)]
+        [TestCase(72)]
+        [TestCase(17)]
+        [TestCase(31)]
+        public void SMRTJoint_VisitsEveryBNDIndexAtEachJitterPhase(int phases)
+        {
+            for (int phase = 0; phase < phases; phase++)
+            {
+                var counts = new int[256];
+                for (int cycle = 0; cycle < 256; cycle++)
+                {
+                    int frame = cycle * phases + phase;
+                    int offset = VirtualShadowMapReceiverQuality.CalculateSMRTSampleIndexOffset(frame, phases);
+                    counts[(frame + offset) & 255]++;
+                    if ((phases & 1) != 0) Assert.That(offset, Is.Zero);
+                }
+                Assert.That(counts, Is.All.EqualTo(1), "Every index must occur once at a fixed jitter phase.");
+            }
+        }
+
+        [Test]
+        public void SMRTJoint_RequiresEnabledSMRTAndActiveTSRJitter()
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            var go = new GameObject("SMRT joint sampling test", typeof(Camera), typeof(VividAdditionalCameraData));
+            var camera = go.GetComponent<VividAdditionalCameraData>();
+            try
+            {
+                camera.enableTSR = true;
+                camera.SetTsrJitterData(Vector2.zero, 8);
+                settings.virtualShadowMapSMRT.value = true;
+                Assert.That(settings.virtualShadowMapSMRTJointSampling.value, Is.False);
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.Zero);
+                settings.virtualShadowMapSMRTJointSampling.value = true;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.EqualTo(1));
+                camera.ResetTsrJitterData();
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.Zero);
+                camera.SetTsrJitterData(Vector2.zero, 8);
+                camera.antialiasing = VividAntialiasingMode.TemporalAntiAliasing;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.Zero);
+                camera.enableTSR = true;
+                settings.virtualShadowMapSMRT.value = false;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.Zero);
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(null, camera, 8), Is.Zero);
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, null, 8), Is.Zero);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(go); UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [TestCase(-1)]
+        [TestCase(0)]
+        [TestCase(1)]
+        public void SMRTJoint_InactivePhaseCountsKeepTheOriginalIndex(int phases)
+        {
+            Assert.That(VirtualShadowMapReceiverQuality.CalculateSMRTSampleIndexOffset(int.MaxValue, phases), Is.Zero);
+            Assert.That(VirtualShadowMapReceiverQuality.CalculateSMRTSampleIndexOffset(-1, 8), Is.Zero);
+        }
+
+        [Test]
+        public void SMRTJoint_IndexRepeatsAfterACompleteJointPeriodNearFrameLimit()
+        {
+            const int period = 8 * 256;
+            for (int frame = int.MaxValue - 8; frame < int.MaxValue; frame++)
+            {
+                uint index = ((uint)frame + (uint)VirtualShadowMapReceiverQuality.CalculateSMRTSampleIndexOffset(frame, 8)) & 255u;
+                int earlier = frame - period;
+                uint repeated = ((uint)earlier + (uint)VirtualShadowMapReceiverQuality.CalculateSMRTSampleIndexOffset(earlier, 8)) & 255u;
+                Assert.That(index, Is.EqualTo(repeated));
+            }
+        }
+
+        [Test]
+        public void CoverageAndLodTransitions_AreIndependentAndCanBeZero()
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            try
+            {
+                settings.virtualShadowMapTransition.value = .4f;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).z, Is.EqualTo(.2f));
+                settings.virtualShadowMapCoverageTransition.Override(.05f);
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).z, Is.EqualTo(.025f));
+                settings.virtualShadowMapCoverageTransition.value = 0;
+                var parameters = VirtualShadowMapReceiverQuality.BuildParameters(settings);
+                Assert.That(parameters.z, Is.Zero);
+                Assert.That(parameters.w, Is.EqualTo(1));
+                Assert.That(settings.virtualShadowMapTransition.value, Is.EqualTo(.4f));
+                Assert.That(settings.virtualShadowMapViewCoverage.value, Is.False);
+                Assert.That(settings.virtualShadowMapPhysicalPageBudget.value, Is.EqualTo(256));
+                settings.virtualShadowMapPhysicalPageBudget.value = 10000;
+                Assert.That(settings.virtualShadowMapPhysicalPageBudget.value, Is.EqualTo(1024));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
         }
 
         private static void RecordSMRT(CommandBuffer cmd, CascadedShadowSettingsVolume settings, ComputeShader shader)

@@ -22,8 +22,12 @@ namespace VividRP.Runtime
         public BoolParameter enableVirtualShadowMapPrototype = new(false);
         [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to 128 texels (clipmaps use at least 512). Does not resize the CSM atlas or physical page budget.")]
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
+        [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]
+        public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, 1024);
         [Tooltip("Base-2 exponent of the finest directional clipmap radius in world units. Coarser levels double in size until Max Distance is covered.")]
         public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
+        [Tooltip("Shift intermediate clipmaps toward the non-jittered camera frustum while preserving page alignment and nested coverage. The nearest and farthest levels remain camera-centred.")]
+        public BoolParameter virtualShadowMapViewCoverage = new(false);
         [Tooltip("Select receiver levels by screen-space texel density within the existing stable projections. Off preserves P4 coverage selection. Does not resize projections, physical pools or invalidate cached caster depth.")]
         public BoolParameter virtualShadowMapScreenDensity = new(false);
         [Tooltip("Target screen pixels per virtual texel before LOD bias. Smaller requests finer levels, limited by finest-level coverage and page residency. Uses geometric receiver-plane axis footprints, not the normal map.")]
@@ -36,14 +40,18 @@ namespace VividRP.Runtime
         public BoolParameter virtualShadowMapStochasticFiltering = new(false);
         [Tooltip("Experimental directional SMRT contact-hardening soft shadows. Uses the light's Angular Diameter (clamped to 10 degrees for SMRT); zero angle preserves the PCF/hard reference. Incomplete footprints retry coarser levels, then the reference filter.")]
         public BoolParameter virtualShadowMapSMRT = new(false);
+        [Tooltip("Distribute SMRT samples across TSR jitter cycles to reduce persistent shadow grain. May slightly increase temporal noise. Has no effect without active TSR.")]
+        public BoolParameter virtualShadowMapSMRTJointSampling = new(false);
         [Tooltip("Shadow rays per pixel. More rays reduce temporal noise; requires temporal anti-aliasing.")]
         public ClampedIntParameter virtualShadowMapSMRTRayCount = new(4, 4, 8);
         [Tooltip("Maximum depth cells visited per ray. More samples allow a wider penumbra without skipping thin casters.")]
         public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 4, 8);
         [Tooltip("Maximum distance in world units over which rays diverge. Beyond this distance they continue parallel to the light, retaining distant occlusion with a bounded penumbra. Also limited by the per-ray cell budget.")]
         public ClampedFloatParameter virtualShadowMapSMRTMaxRayLength = new(10, 0.1f, 100);
-        [Tooltip("Width of transitions to the next available level. Screen Density uses this fraction of a LOD step and the projection coverage border; legacy selection uses the selection radius. 0 disables blending.")]
+        [Tooltip("Width of transitions across fractional LOD steps with Screen Density, or selection radii with legacy selection. 0 disables this component of blending.")]
         public ClampedFloatParameter virtualShadowMapTransition = new(0.2f, 0f, 0.5f);
+        [Tooltip("Width of the projection-edge transition with Screen Density. When not overridden, follows the LOD transition; smaller values retain fine detail closer to the coverage edge. 0 disables this component of blending.")]
+        public ClampedFloatParameter virtualShadowMapCoverageTransition = new(0.2f, 0f, 0.5f);
         public ClampedIntParameter cascadeCount = new(DefaultCascadeCount, 1, 4);
         public MinFloatParameter maxShadowDistance = new(DefaultMaxShadowDistance, 0.01f);
         public ClampedFloatParameter cascadeSplit1 = new(0.067f, 0f, 1f);

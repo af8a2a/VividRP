@@ -1,0 +1,149 @@
+{
+  "note": "Differences to BND finite-period means are not ground-truth errors. Periods are BND256, STBN64, FAST32; same-jitter means retain sampler-period bias.",
+  "results": {
+    "stbn_scalar": {
+      "shadow": {
+        "roof": {
+          "mean_delta": 0.0002118791890097782,
+          "phase_mean_difference_rms": 0.036494866013526917,
+          "gaussian_phase_mean_difference_rms": 0.009650588035583496
+        },
+        "ledge": {
+          "mean_delta": 9.424152813153341e-05,
+          "phase_mean_difference_rms": 0.03172244131565094,
+          "gaussian_phase_mean_difference_rms": 0.007858410477638245
+        },
+        "arches": {
+          "mean_delta": 3.146377275697887e-05,
+          "phase_mean_difference_rms": 0.03231025114655495,
+          "gaussian_phase_mean_difference_rms": 0.008492419496178627
+        }
+      },
+      "output": {
+        "roof": {
+          "mean_delta": -0.00036565688787959516,
+          "phase_mean_difference_rms": 0.007583849597722292,
+          "gaussian_phase_mean_difference_rms": 0.0034386792685836554
+        },
+        "ledge": {
+          "mean_delta": -0.00022578166681341827,
+          "phase_mean_difference_rms": 0.006557580549269915,
+          "gaussian_phase_mean_difference_rms": 0.0027985875494778156
+        },
+        "arches": {
+          "mean_delta": -0.0002949341433122754,
+          "phase_mean_difference_rms": 0.007317043840885162,
+          "gaussian_phase_mean_difference_rms": 0.0033078547567129135
+        }
+      }
+    },
+    "stbn_vec2": {
+      "shadow": {
+        "roof": {
+          "mean_delta": -3.2759686291683465e-05,
+          "phase_mean_difference_rms": 0.036415960639715195,
+          "gaussian_phase_mean_difference_rms": 0.009681898169219494
+        },
+        "ledge": {
+          "mean_delta": -4.683867882704362e-05,
+          "phase_mean_difference_rms": 0.03186802566051483,
+          "gaussian_phase_mean_difference_rms": 0.008267022669315338
+        },
+        "arches": {
+          "mean_delta": 0.00017665312043391168,
+          "phase_mean_difference_rms": 0.031936563551425934,
+          "gaussian_phase_mean_difference_rms": 0.008731512352824211
+        }
+      },
+      "output": {
+        "roof": {
+          "mean_delta": -6.188634870341048e-06,
+          "phase_mean_difference_rms": 0.007618499919772148,
+          "gaussian_phase_mean_difference_rms": 0.0033675178419798613
+        },
+        "ledge": {
+          "mean_delta": -8.517633432347793e-06,
+          "phase_mean_difference_rms": 0.006649763789027929,
+          "gaussian_phase_mean_difference_rms": 0.0027745242696255445
+        },
+        "arches": {
+          "mean_delta": 7.574147457489744e-05,
+          "phase_mean_difference_rms": 0.007221476640552282,
+          "gaussian_phase_mean_difference_rms": 0.0032471735030412674
+        }
+      }
+    },
+    "fast_scalar": {
+      "shadow": {
+        "roof": {
+          "mean_delta": -5.019830132368952e-05,
+          "phase_mean_difference_rms": 0.04874100163578987,
+          "gaussian_phase_mean_difference_rms": 0.012866215780377388
+        },
+        "ledge": {
+          "mean_delta": 0.0002546856412664056,
+          "phase_mean_difference_rms": 0.04273458570241928,
+          "gaussian_phase_mean_difference_rms": 0.01061239279806614
+        },
+        "arches": {
+          "mean_delta": 8.326499664690346e-05,
+          "phase_mean_difference_rms": 0.043855469673871994,
+          "gaussian_phase_mean_difference_rms": 0.01158723421394825
+        }
+      },
+      "output": {
+        "roof": {
+          "mean_delta": -0.00018946519412565976,
+          "phase_mean_difference_rms": 0.010054734535515308,
+          "gaussian_phase_mean_difference_rms": 0.004455015994608402
+        },
+        "ledge": {
+          "mean_delta": -8.081284613581374e-05,
+          "phase_mean_difference_rms": 0.008586371317505836,
+          "gaussian_phase_mean_difference_rms": 0.0035285239573568106
+        },
+        "arches": {
+          "mean_delta": -0.00015714111214037985,
+          "phase_mean_difference_rms": 0.010081911459565163,
+          "gaussian_phase_mean_difference_rms": 0.004436407703906298
+        }
+      }
+    },
+    "fast_vec2": {
+      "shadow": {
+        "roof": {
+          "mean_delta": -3.026845479325857e-05,
+          "phase_mean_difference_rms": 0.04925088956952095,
+          "gaussian_phase_mean_difference_rms": 0.013083038851618767
+        },
+        "ledge": {
+          "mean_delta": 5.9544752730289474e-05,
+          "phase_mean_difference_rms": 0.04218204319477081,
+          "gaussian_phase_mean_difference_rms": 0.010816753841936588
+        },
+        "arches": {
+          "mean_delta": 8.472418267047033e-05,
+          "phase_mean_difference_rms": 0.043749283999204636,
+          "gaussian_phase_mean_difference_rms": 0.011831863783299923
+        }
+      },
+      "output": {
+        "roof": {
+          "mean_delta": -7.098744390532374e-05,
+          "phase_mean_difference_rms": 0.009894603863358498,
+          "gaussian_phase_mean_difference_rms": 0.00421422254294157
+        },
+        "ledge": {
+          "mean_delta": -0.00011474555503809825,
+          "phase_mean_difference_rms": 0.00866816658526659,
+          "gaussian_phase_mean_difference_rms": 0.0036865093279629946
+        },
+        "arches": {
+          "mean_delta": -9.887267515296116e-05,
+          "phase_mean_difference_rms": 0.009750418365001678,
+          "gaussian_phase_mean_difference_rms": 0.004267813637852669
+        }
+      }
+    }
+  }
+}

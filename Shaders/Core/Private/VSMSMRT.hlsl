@@ -97,6 +97,7 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
     if (abs(texelsPerWorld.y) < 1e-10) nextTime.y = 1e20;
     float enter = startTime;
     float previousSurface = -1;
+    int2 pageLow = 0, pageHigh = 0, physicalOffset = 0;
     [loop]
     for (int sampleIndex = 0; sampleIndex < budget; sampleIndex++)
     {
@@ -104,7 +105,16 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
         g_VSMDebugWork.x++;
 #endif
-        if (!TryResolveVSMPhysicalTexel(cell, index, physical)) return false;
+        // Mappings are immutable during the resolve dispatch. Adjacent DDA
+        // cells reuse the validated physical page, including empty depth cells.
+        if (any(cell < pageLow) || any(cell >= pageHigh))
+        {
+            if (!TryResolveVSMPhysicalTexel(cell, index, physical)) return false;
+            pageLow = (cell / _VSMPrototypePageSize) * _VSMPrototypePageSize;
+            pageHigh = pageLow + _VSMPrototypePageSize;
+            physicalOffset = physical - cell;
+        }
+        else physical = cell + physicalOffset;
         uint rawDepth = LoadCombinedVSMDepth(physical);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
         g_VSMDebugWork.y++;

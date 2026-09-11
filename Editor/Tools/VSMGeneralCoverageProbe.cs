@@ -1,0 +1,529 @@
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
+using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
+using Object = UnityEngine.Object;
+
+namespace VividRP.Editor
+{
+    // Temporary diagnostic: readback, compression and allocations are not performance measurements.
+    internal sealed class VSMGeneralCoverageProbe : IDisposable
+    {
+
+        private static readonly string[] Variants = { "base256", "base512", "base768", "view256020", "view512020", "view512005", "view384005", "view768005" };
+        private static readonly int[] Budgets = { 256, 512, 768, 256, 512, 512, 384, 768 };
+        private static readonly float[] Scales = { .2f, .2f, .2f, .2f, .2f, .05f, .05f, .05f };
+        private int Budget => m_HighBudget ? 1024 : Budgets[Mathf.Max(0, m_Stage) / 3];
+        private bool Focused => m_Stage >= 9;
+        private bool m_SMRT, m_HighBudget;
+        private float m_MaxLength = 10;
+        [Serializable] private sealed class RunPlan { public bool smrt, highBudget; public float maxLength = 10; }
+        [Serializable] private sealed class LayoutRecord
+        {
+            public int count, firstLevel;
+            public long[] x, y;
+            public float[] radii;
+            public float depthMin, depthMax;
+        }
+
+        private const int RoiX = 680, RoiY = 170, RoiWidth = 560, RoiHeight = 650;
+        private const int Warmup = 128;
+        private static VSMGeneralCoverageProbe s_Active;
+        private static readonly string[] Scenarios = { "static", "translate", "yaw" };
+        private static readonly int[] DebugModes = { 0, 3, 4, 5, 6, 8, 9 };
+        private readonly Camera m_Camera;
+        private readonly VividAdditionalCameraData m_Additional;
+        private readonly Vector3 m_Position;
+        private readonly Quaternion m_Rotation;
+        private readonly bool m_Background;
+        private readonly float m_TimeScale, m_CaptureDelta;
+        private readonly string m_Root;
+        private readonly int m_FirstStage;
+        private Light m_Light;
+        private Quaternion m_LightRotation;
+        private GameObject m_VolumeObject;
+        private VolumeProfile m_Profile;
+        private CascadedShadowSettingsVolume m_Overrides;
+        private ComputeShader m_Shader;
+        private RenderTexture m_DebugOutput, m_DebugData;
+        private GraphicsBuffer m_Projections;
+        private VirtualShadowMapProjection[] m_Records;
+        private int m_Kernel, m_Stage, m_Step, m_WarmFrames, m_Pending;
+        private int m_LastBegin = -1, m_LastShadow = -1, m_LastEnd = -1, m_Width, m_Height;
+        private bool m_Measuring, m_StageDone, m_Disposed;
+        private static readonly Vector2 CaptureJitter = new Vector2(0.25f, -0.3888888955116272f);
+        private string m_Directory, m_Error;
+        private double m_StageStarted;
+        private FrameRecord m_Current;
+
+        [Serializable] private sealed class FrameRecord
+        {
+            public string variant, scenario, phase, state, fallback, effectiveAA, gpuVP, prefix, lightName, tsrQuality;
+            public string exposureMode, exposureImplementation;
+            public int stage, step, cameraFrame, unityFrame, warmFrames, width, height, resolution, capacity;
+            public int stackResolution, firstLevel;
+            public int shaderFrameSeed, replayMissingPixels, jitterPhaseCount, historySampleCount;
+            public Vector2 jitter;
+            public Vector3 cameraPosition, cameraEuler, lightEuler;
+            public float coverageScale, coverageTransition;
+            public bool capture;
+            public bool receiverSnapshot, temporalCaptured, historyCaptured, replayChecked;
+            public bool temporalShadingConfirmation = true;
+            public bool stationaryShadingResponse = true;
+            public bool screenDensity, stochasticFiltering, pcf, settingsMatch, viewCoverage, smrt;
+            public bool exposureEnabled, autoExposureEnabled, exposureHistoryValid;
+            public float depthBias, slopeBias, replayMaxError;
+            public float targetTexelPixels, resolutionLodBias, transition;
+            public float exposureManualEV100, exposureFixedScale, exposureCompensation, exposureDeltaTime, exposureForceTarget;
+            [NonSerialized] public int pending;
+        }
+
+        [Serializable] private sealed class ShaderSourceRecord
+        {
+            public string path, sha256;
+        }
+
+        [Serializable] private sealed class ShaderSourceManifest
+        {
+            public string utc;
+            public ShaderSourceRecord[] sources;
+        }
+
+        [MenuItem("Tools/VividRP/Diagnostics/Capture Temporary VSM General Coverage")]
+        private static void Run() => RunFromStage(0);
+
+        private static void RunFromStage(int firstStage)
+        {
+            if (s_Active != null) return;
+            if (Application.dataPath != "E:/VividRP_Reborn/Assets" || !EditorApplication.isPlaying)
+                throw new InvalidOperationException("Use VividRP_Reborn in Play Mode.");
+            var capture = new VSMGeneralCoverageProbe(Camera.main, firstStage);
+            s_Active = capture;
+            try { capture.Start(); }
+            catch { capture.Dispose(); s_Active = null; throw; }
+        }
+
+        [MenuItem("Tools/VividRP/Diagnostics/Stop Temporary VSM General Coverage")]
+        private static void Stop() => s_Active?.Finish("interrupted");
+
+        private VSMGeneralCoverageProbe(Camera camera, int firstStage)
+        {
+            if (camera == null || !camera.isActiveAndEnabled || !SystemInfo.supportsAsyncGPUReadback)
+                throw new InvalidOperationException("An active Game MainCamera and GPU readback are required.");
+            m_Camera = camera;
+            m_FirstStage = m_Stage = firstStage;
+            m_Additional = camera.GetComponent<VividAdditionalCameraData>();
+            if (m_Additional == null || m_Additional.tsrQuality != VividTsrQualityMode.NativeAA)
+                throw new InvalidOperationException("Preserve the existing NativeAA TSR configuration for this capture.");
+            m_Position = camera.transform.position; m_Rotation = camera.transform.rotation;
+            m_Background = Application.runInBackground;
+            m_TimeScale = Time.timeScale; m_CaptureDelta = Time.captureDeltaTime;
+            m_Root = Path.GetFullPath(Path.Combine(Application.dataPath,
+                "../Packages/VividRP/Temp~/vsm-general-captures", DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fff")));
+        }
+
+        private int StageLength => m_Stage < 0 ? 2 : m_Stage % 3 == 0 ? 32 : m_Stage % 3 == 1 ? 96 : 128;
+        private string Variant => m_HighBudget ? (Focused ? "view1024005" : "base1024") : m_Stage < 0 ? "calibration" : Variants[m_Stage / 3];
+        private float Scale => Scales[Mathf.Max(0, m_Stage) / 3];
+        private string Scenario => Scenarios[Mathf.Max(0, m_Stage) % 3];
+
+        private void Start()
+        {
+            Directory.CreateDirectory(m_Root);
+            File.WriteAllText(Path.Combine(m_Root, "original-settings.json"),
+                JsonUtility.ToJson(VividVolumeManagerUtility.GetCascadedShadowSettingsVolume()));
+            SaveShaderSources();
+            File.WriteAllText(Path.Combine(m_Root, "layout.txt"),
+                "General view-frustum coverage. Six 4096 configurations: base256/base512/view256020/view512020/view512005/view384005. LOD width .2. Empty pool each stage, >=128 warmup, first jitter aligned. Static32, translate96 (64 move,32 rest), yaw128 (96 move,32 rest). Current AA, fixed exposure12.252064. Captures are not performance measurements.");
+            m_Shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Editor/Tools/VSMGeneralCoverageAudit.compute"));
+            m_Shader.hideFlags = HideFlags.HideAndDontSave;
+            m_Kernel = m_Shader.FindKernel("VSMGeneralCoverageAudit");
+            string planPath = Path.GetFullPath("Packages/VividRP/Temp~/smrt-path/capture-plan.json");
+            if (File.Exists(planPath))
+            {
+                var plan = JsonUtility.FromJson<RunPlan>(File.ReadAllText(planPath));
+                m_SMRT = plan.smrt; m_HighBudget = plan.highBudget; m_MaxLength = plan.maxLength;
+                File.WriteAllText(Path.Combine(m_Root, "run-plan.json"), JsonUtility.ToJson(plan));
+                if (m_HighBudget) m_Stage = 21;
+            }
+            var mask = VividVolumeManagerUtility.ResolveVolumeLayerMask(m_Camera, m_Additional);
+            int layer = 0; while (layer < 32 && (mask.value & (1 << layer)) == 0) layer++;
+            if (layer == 32) throw new InvalidOperationException("Camera Volume layer mask is empty.");
+            m_VolumeObject = new GameObject("Temporary VSM General Coverage")
+                { hideFlags = HideFlags.HideAndDontSave, layer = layer };
+            var volume = m_VolumeObject.AddComponent<Volume>();
+            volume.isGlobal = true; volume.priority = float.MaxValue; volume.weight = 1;
+            m_Profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            m_Profile.hideFlags = HideFlags.HideAndDontSave;
+            m_Overrides = m_Profile.Add<CascadedShadowSettingsVolume>();
+            var fixedExposure = m_Profile.Add<AutoExposure>();
+            fixedExposure.enabled.Override(true);
+            fixedExposure.exposureMode.Override(AutoExposureExposureMode.Fixed);
+            fixedExposure.fixedExposure.Override(12.252064f);
+            fixedExposure.compensation.Override(0f);
+            volume.sharedProfile = m_Profile;
+            Application.runInBackground = true; Time.timeScale = 0; Time.captureDeltaTime = 1f / 60;
+            CSMShadowResolvePass.EditorReceiverCapture += ShadowCapture;
+            TSRUpscalerPass.EditorTemporalCapture += TemporalCapture;
+            RenderPipelineManager.beginCameraRendering += BeginCamera;
+            RenderPipelineManager.endCameraRendering += EndCamera;
+            EditorApplication.update += Update;
+            AssemblyReloadEvents.beforeAssemblyReload += BeforeReload;
+            EditorApplication.playModeStateChanged += PlayModeChanged;
+            BeginStage();
+            Debug.Log("VSM fine coverage capture started: " + m_Root);
+        }
+
+        private void SaveShaderSources()
+        {
+            string packageRoot = Path.GetFullPath(Path.Combine(Application.dataPath, "../Packages/VividRP"));
+            string shaderRoot = Path.Combine(packageRoot, "Shaders");
+            string[] paths = Directory.GetFiles(shaderRoot, "*.*", SearchOption.AllDirectories);
+            Array.Sort(paths, StringComparer.Ordinal);
+            var records = new List<ShaderSourceRecord>();
+            using var hash = SHA256.Create();
+            foreach (string path in paths)
+            {
+                string extension = Path.GetExtension(path);
+                if (extension != ".compute" && extension != ".hlsl" && extension != ".shader") continue;
+                using var stream = File.OpenRead(path);
+                records.Add(new ShaderSourceRecord {
+                    path = path.Substring(packageRoot.Length + 1).Replace('\\', '/'),
+                    sha256 = BitConverter.ToString(hash.ComputeHash(stream)).Replace("-", "").ToLowerInvariant() });
+            }
+            var manifest = new ShaderSourceManifest { utc = DateTime.UtcNow.ToString("O"), sources = records.ToArray() };
+            File.WriteAllText(Path.Combine(m_Root, "shader-source-sha256.json"), JsonUtility.ToJson(manifest, true));
+        }
+
+        private void BeginStage()
+        {
+            // Cold boundary, after previous readbacks completed; never part of measured frames.
+            AsyncGPUReadback.WaitAllRequests();
+            VirtualShadowMapPrototypeRuntime.ReleaseResources();
+            m_Camera.transform.SetPositionAndRotation(m_Position, m_Rotation);
+            if (m_Light != null) m_Light.transform.localRotation = m_LightRotation;
+            m_Overrides.virtualShadowMapResolution.Override(4096);
+            m_Overrides.virtualShadowMapPhysicalPageBudget.Override(Budget);
+            m_Overrides.virtualShadowMapViewCoverage.Override(Focused);
+            m_Overrides.virtualShadowMapCoverageTransition.Override(Scale);
+            m_Overrides.virtualShadowMapFirstLevel.Override(0);
+            m_Overrides.virtualShadowMapSMRT.Override(m_SMRT);
+            m_Overrides.virtualShadowMapSMRTJointSampling.Override(false);
+            m_Overrides.virtualShadowMapSMRTRayCount.Override(4);
+            m_Overrides.virtualShadowMapSMRTSamplesPerRay.Override(8);
+            m_Overrides.virtualShadowMapSMRTMaxRayLength.Override(m_MaxLength);
+            m_Overrides.virtualShadowMapTransition.Override(.2f);
+            m_Overrides.virtualShadowMapScreenDensity.Override(true);
+            m_Overrides.virtualShadowMapTargetTexelPixels.Override(1);
+            m_Overrides.virtualShadowMapResolutionLodBias.Override(0);
+            m_Overrides.virtualShadowMapPCF.Override(true);
+            m_Overrides.virtualShadowMapStochasticFiltering.Override(false);
+            m_Directory = Path.Combine(m_Root, Variant + "_" + Scenario);
+            Directory.CreateDirectory(m_Directory);
+
+            
+
+            m_Step = 0; m_WarmFrames = 0; m_Measuring = false; m_StageDone = false; m_Current = null;
+            m_LastBegin = m_LastShadow = m_LastEnd = -1;
+            m_StageStarted = EditorApplication.timeSinceStartup;
+            m_Additional.ResetPostProcessingHistory();
+        }
+
+        private void BeginCamera(ScriptableRenderContext context, Camera camera)
+        {
+            if (m_Disposed || camera != m_Camera || m_StageDone || m_LastBegin == Time.frameCount) return;
+            m_LastBegin = Time.frameCount;
+            Vector3 position = m_Position;
+            Quaternion rotation = m_Rotation;
+            if (m_Measuring && Scenario == "translate" && m_Step < 64)
+                position += new Vector3(1.5f, 0, 1.5f) * Mathf.Sin(Mathf.PI * m_Step / 63f);
+            if (m_Measuring && Scenario == "yaw" && m_Step < 96)
+                rotation = Quaternion.AngleAxis(12 * Mathf.Sin(2 * Mathf.PI * m_Step / 95f), Vector3.up) * m_Rotation;
+            camera.transform.SetPositionAndRotation(position, rotation);
+        }
+
+        private void EndCamera(ScriptableRenderContext context, Camera camera)
+        {
+            if (m_Disposed || camera != m_Camera || m_StageDone || m_LastEnd == Time.frameCount) return;
+            m_LastEnd = Time.frameCount;
+            if (!m_Measuring || m_Current == null || m_Current.unityFrame != Time.frameCount) return;
+            if (!m_Current.temporalCaptured) { m_Error = "Missing paired TSR capture at step " + m_Step; return; }
+            if (!m_Current.historyCaptured) { m_Error = "Missing paired TSR history capture at step " + m_Step; return; }
+            m_Current = null;
+            if (++m_Step >= StageLength) m_StageDone = true;
+        }
+
+        private void ShadowCapture(ComputePassContext context, Texture depth, Texture normal, Texture shadow)
+        {
+            var camera = context.Get<VividCameraData>();
+            if (m_Disposed || m_StageDone || camera.camera != m_Camera || m_LastShadow == Time.frameCount) return;
+            m_LastShadow = Time.frameCount;
+            var light = context.Get<VividLightData>().mainLight;
+            if (m_Light == null)
+            {
+                if (light == null || light.type != LightType.Directional) { m_Error = "No directional main light."; return; }
+                m_Light = light; m_LightRotation = light.transform.localRotation;
+                File.WriteAllText(Path.Combine(m_Root, "initial.txt"), "camera=" + m_Camera.name
+                    + "\nposition=" + m_Position.ToString("R") + "\nrotation=" + m_Rotation.eulerAngles.ToString("R")
+                    + "\nlight=" + light.name + "\nlightLocalRotation=" + m_LightRotation.eulerAngles.ToString("R"));
+            }
+            if (light != m_Light) { m_Error = "Main light changed during capture."; return; }
+            bool snapshot = VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(
+                EntityId.ToULong(m_Camera.GetEntityId()), camera.frameIndex >= 0 ? camera.frameIndex : Time.frameCount);
+            if (!m_Measuring)
+            {
+                if (++m_WarmFrames < Warmup || !snapshot) return;
+                if (m_Additional.tsrJitterOffset != CaptureJitter) return;
+                if (m_SMRT && (camera.frameIndex & 255) != 2) return;
+                m_Measuring = true;
+            }
+            m_Width = depth.width; m_Height = depth.height;
+            if (m_Width < RoiX + RoiWidth || m_Height < RoiY + RoiHeight) { m_Error = "Game frame is smaller than capture ROI."; return; }
+            var settings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
+            bool settingsMatch = settings.virtualShadowMapResolution.value == 4096
+                && settings.virtualShadowMapTransition.value == .2f
+                && VirtualShadowMapReceiverQuality.BuildParameters(settings).z == Scale * .5f
+                && settings.virtualShadowMapViewCoverage.value == Focused
+                && settings.virtualShadowMapPhysicalPageBudget.value == Budget
+                && settings.virtualShadowMapSMRT.value == m_SMRT
+                && settings.virtualShadowMapScreenDensity.value
+                && settings.virtualShadowMapTargetTexelPixels.value == 1
+                && settings.virtualShadowMapResolutionLodBias.value == 0
+                && settings.virtualShadowMapPCF.value && !settings.virtualShadowMapStochasticFiltering.value;
+            if (!settingsMatch) { m_Error = "Actual Volume stack does not match the spatial AA stage."; return; }
+            var shadowData = context.Get<VividShadowData>();
+            var exposureData = context.Get<VividExposureData>();
+            var vp = camera.GetGPUViewProjectionMatrix(true);
+            string phase = Scenario == "static" ? "steady" :
+                m_Step < (Scenario == "translate" ? 64 : 96) ? "move" : "post";
+            string prefix = "frame_" + m_Step.ToString("D3");
+            m_Current = new FrameRecord { capture = Scenario == "static" || m_Step % 4 == 0 || m_Step == StageLength - 1,
+                coverageScale = Scale, coverageTransition = Scale, historyCaptured = true, variant = Variant, scenario = Scenario, phase = phase, stage = m_Stage,
+                step = m_Step, cameraFrame = camera.frameIndex, unityFrame = Time.frameCount, warmFrames = m_WarmFrames,
+                width = m_Width, height = m_Height, jitter = m_Additional.tsrJitterOffset, prefix = prefix,
+                shaderFrameSeed = camera.frameIndex, lightName = m_Light.name, tsrQuality = m_Additional.tsrQuality.ToString(),
+                jitterPhaseCount = m_Additional.tsrJitterPhaseCount, historySampleCount = m_Additional.tsrHistorySampleCount,
+                cameraPosition = m_Camera.transform.position, cameraEuler = m_Camera.transform.eulerAngles,
+                lightEuler = m_Light.transform.localEulerAngles, gpuVP = vp.ToString("R"),
+                state = VirtualShadowMapPrototypeRuntime.FrameState.ToString(), fallback = VirtualShadowMapPrototypeRuntime.LastFallbackReason.ToString(),
+                resolution = VirtualShadowMapPrototypeRuntime.VirtualResolution, capacity = VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity,
+                stackResolution = settings.virtualShadowMapResolution.value, firstLevel = settings.virtualShadowMapFirstLevel.value,
+                screenDensity = settings.virtualShadowMapScreenDensity.value, targetTexelPixels = settings.virtualShadowMapTargetTexelPixels.value,
+                resolutionLodBias = settings.virtualShadowMapResolutionLodBias.value, stochasticFiltering = settings.virtualShadowMapStochasticFiltering.value,
+                viewCoverage = Focused, smrt = m_SMRT, pcf = settings.virtualShadowMapPCF.value, transition = settings.virtualShadowMapTransition.value, settingsMatch = settingsMatch,
+                effectiveAA = context.Get<VividAntialiasingData>().effectiveMode.ToString(), receiverSnapshot = snapshot,
+                depthBias = shadowData.depthBias, slopeBias = shadowData.slopeScaleDepthBias,
+                exposureMode = exposureData.settings.mode.ToString(), exposureImplementation = exposureData.implementation.ToString(),
+                exposureEnabled = exposureData.exposureEnabled, autoExposureEnabled = exposureData.autoExposureEnabled,
+                exposureHistoryValid = exposureData.hasValidHistory, exposureManualEV100 = exposureData.settings.manualEV100,
+                exposureFixedScale = exposureData.settings.fixedExposureScale, exposureCompensation = exposureData.settings.exposureCompensationAll,
+                exposureDeltaTime = exposureData.settings.deltaTime, exposureForceTarget = exposureData.settings.forceTarget };
+            var cmd = context.cmd.m_WrappedCommandBuffer;
+            SaveTexture(cmd, shadow, TextureFormat.RHalf, prefix + "_shadow.bin.gz");
+            SaveBuffer(cmd, VirtualShadowMapPrototypeRuntime.AllocatorCounters, prefix + "_counters.bin.gz");
+            if (m_Current.capture && snapshot && shadowData.clipmaps.Count > 0)
+            {
+                var capturedLayout = shadowData.clipmaps;
+                File.WriteAllText(Path.Combine(m_Directory, prefix + "_layout.json"), JsonUtility.ToJson(new LayoutRecord {
+                    count = capturedLayout.Count, firstLevel = capturedLayout.FirstLevel,
+                    x = capturedLayout.OriginX, y = capturedLayout.OriginY, radii = capturedLayout.Radii,
+                    depthMin = capturedLayout.DepthMin, depthMax = capturedLayout.DepthMax }));
+                SaveBuffer(cmd, VirtualShadowMapPrototypeRuntime.PhysicalPageOwners, prefix + "_owners.bin.gz");
+                SaveBuffer(cmd, VirtualShadowMapPrototypeRuntime.PageTable, prefix + "_pagetable.bin.gz");
+                SaveBuffer(cmd, VirtualShadowMapPrototypeRuntime.PageMetadata, prefix + "_metadata.bin.gz");
+                CaptureDebug(context, depth, normal, shadow, settings, shadowData, prefix);
+            }
+            if (m_Step == StageLength / 4 || m_Step == StageLength / 2 || m_Step == StageLength * 3 / 4)
+                m_Additional.RequestFinalFrameScreenshot(Path.Combine(m_Directory, "view_" + m_Step + ".png"));
+            if (m_Step == 0 || m_Step == StageLength - 1)
+                m_Additional.RequestFinalFrameScreenshot(Path.Combine(m_Directory, m_Step == 0 ? "first.png" : "last.png"));
+        }
+
+        private void CaptureDebug(ComputePassContext context, Texture depth, Texture normal, Texture shadow,
+            CascadedShadowSettingsVolume settings, VividShadowData shadowData, string prefix)
+        {
+            var layout = shadowData.clipmaps;
+            if (m_DebugData == null)
+            {
+                var descriptor = new RenderTextureDescriptor(m_Width / 4, m_Height / 4, GraphicsFormat.R32G32B32A32_SFloat, 0)
+                    { enableRandomWrite = true };
+                m_DebugData = new RenderTexture(descriptor); m_DebugOutput = new RenderTexture(descriptor);
+                m_DebugData.Create(); m_DebugOutput.Create();
+            }
+            if (m_Projections == null)
+            {
+                m_Projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, layout.Count, 160);
+                m_Records = new VirtualShadowMapProjection[layout.Count];
+            }
+            var cmd = context.cmd.m_WrappedCommandBuffer;
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, "_DepthTexture", depth);
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, "_GBuffer1", normal);
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, "_VSMReceiverDebugShadow", shadow);
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, "_VSMReceiverDebugOutput", m_DebugOutput);
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, "_VSMReceiverDebugData", m_DebugData);
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, "_VSMPrototypeStaticPhysicalPage", VirtualShadowMapPrototypeRuntime.StaticPhysicalPage);
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, "_VSMPrototypeDynamicPhysicalPage", VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage);
+            cmd.SetComputeBufferParam(m_Shader, m_Kernel, "_VSMPrototypePageTable", VirtualShadowMapPrototypeRuntime.PageTable);
+            cmd.SetComputeBufferParam(m_Shader, m_Kernel, "_VSMPrototypePageMetadata", VirtualShadowMapPrototypeRuntime.PageMetadata);
+            cmd.SetComputeBufferParam(m_Shader, m_Kernel, "_VSMProjections", m_Projections);
+            cmd.SetComputeIntParam(m_Shader, "_VSMProjectionCount", layout.Count);
+            var camera = context.Get<VividCameraData>();
+            var vp = camera.GetGPUViewProjectionMatrix(true);
+            cmd.SetComputeMatrixParam(m_Shader, "_VSMReceiverViewProjection", vp);
+            cmd.SetComputeMatrixParam(m_Shader, "_CSMInvViewProjMatrix", vp.inverse);
+            cmd.SetComputeVectorParam(m_Shader, "_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(settings));
+            cmd.SetComputeVectorParam(m_Shader, "_VSMReceiverParameters", new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0, shadowData.depthBias,
+                shadowData.slopeScaleDepthBias, settings.virtualShadowMapStochasticFiltering.value ? 1 : 0));
+            cmd.SetComputeVectorParam(m_Shader, VirtualShadowMapReceiverQuality.SMRTParametersId,
+                VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, 7.1f));
+            cmd.SetComputeIntParam(m_Shader, VirtualShadowMapReceiverQuality.SMRTSampleIndexOffsetId, 0);
+            BlueNoise.Instance?.Bind(cmd, m_Shader, m_Kernel);
+            cmd.SetComputeIntParam(m_Shader, "_CSMFrameIndex", camera.frameIndex);
+            cmd.SetComputeIntParam(m_Shader, "_CSMOutputWidth", m_Width); cmd.SetComputeIntParam(m_Shader, "_CSMOutputHeight", m_Height);
+            cmd.SetComputeIntParam(m_Shader, "_VSMPrototypeEnabled", 1);
+            cmd.SetComputeIntParam(m_Shader, "_VSMPrototypeVirtualResolution", layout.Resolution);
+            cmd.SetComputeIntParam(m_Shader, "_VSMPrototypePageSize", VirtualShadowMapPrototypeRuntime.PageSize);
+            cmd.SetComputeIntParam(m_Shader, "_VSMPrototypePagesPerAxis", VirtualShadowMapPrototypeRuntime.PagesPerAxis);
+            cmd.SetComputeIntParam(m_Shader, "_VSMPrototypePhysicalPagesPerRow", VirtualShadowMapPrototypeRuntime.PhysicalPagesPerRow);
+            for (int i = 0; i < layout.Count; i++)
+            {
+                var center = layout.CameraPosition;
+                m_Records[i] = new VirtualShadowMapProjection {
+                    WorldToClip = GL.GetGPUProjectionMatrix(layout.Projections[i], true) * layout.Views[i],
+                    WorldToShadow = VividShadowData.BuildWorldToShadowMatrix(layout.Projections[i], layout.Views[i]),
+                    SelectionSphere = new Vector4(center.x, center.y, center.z, -layout.Radii[i]),
+                    Parameters = new Vector4(2 * layout.Radii[i] / layout.Resolution, layout.NormalBias, layout.BlendBorder, layout.MaxDistance) };
+            }
+            cmd.SetBufferData(m_Projections, m_Records);
+            for (int index = 0; index < DebugModes.Length; index++)
+            {
+                int mode = m_Stage < 0 ? 7 : DebugModes[index];
+                cmd.SetComputeIntParam(m_Shader, "_VSMReceiverDebugMode", mode);
+                cmd.DispatchCompute(m_Shader, m_Kernel, (m_Width / 4 + 7) / 8, (m_Height / 4 + 7) / 8, 1);
+                SaveTexture(cmd, m_DebugData, TextureFormat.RGBAFloat, prefix + "_debug" + mode + ".bin.gz", mode == 5);
+                if (m_Stage < 0) break;
+            }
+
+        }
+
+        private void TemporalCapture(CommandBuffer cmd, Camera camera, int frameIndex, Texture source,
+            Texture output, Texture unsharp, Texture accept, Texture history, Texture motion)
+        {
+            if (m_Disposed || camera != m_Camera || m_Current == null || m_Current.temporalCaptured) return;
+            if (m_Current.cameraFrame != frameIndex || m_Current.unityFrame != Time.frameCount)
+            { m_Error = "CSM/TSR camera-frame mismatch."; return; }
+            if (output.width != m_Width || output.height != m_Height || source.width != m_Width || source.height != m_Height)
+            { m_Error = "TSR capture is not at native resolution."; return; }
+            string prefix = m_Current.prefix;
+            SaveTexture(cmd, source, TextureFormat.RGBAHalf, prefix + "_source.bin.gz");
+            SaveTexture(cmd, output, TextureFormat.RGBAHalf, prefix + "_output.bin.gz");
+            m_Current.temporalCaptured = true;
+        }
+
+        private void SaveTexture(CommandBuffer cmd, Texture texture, TextureFormat format, string file, bool replay = false)
+        {
+            if (!m_Current.capture) return;
+            string path = Path.Combine(m_Directory, file); var record = m_Current; m_Pending++; record.pending++;
+            if (texture == m_DebugData)
+            {
+                cmd.RequestAsyncReadback(texture, 0, format, request => CompleteReadback(request, path, record, replay));
+                return;
+            }
+            cmd.RequestAsyncReadback(texture, 0, RoiX, RoiWidth, m_Height - RoiY - RoiHeight, RoiHeight, 0, 1, format,
+                request => CompleteReadback(request, path, record, replay));
+        }
+
+        private void SaveBuffer(CommandBuffer cmd, GraphicsBuffer buffer, string file)
+        {
+            string path = Path.Combine(m_Directory, file); var record = m_Current; m_Pending++; record.pending++;
+            cmd.RequestAsyncReadback(buffer, request => CompleteReadback(request, path, record, false));
+        }
+
+        private void CompleteReadback(AsyncGPUReadbackRequest request, string path, FrameRecord record, bool replay)
+        {
+            try
+            {
+                if (request.hasError) { m_Error = "GPU readback failed: " + path; return; }
+                if (replay)
+                {
+                    var values = request.GetData<float>();
+                    for (int i = 0; i < values.Length; i += 4)
+                    {
+                        if (values[i] < 0) continue;
+                        if (values[i] > 0) record.replayMissingPixels++;
+                        record.replayMaxError = Mathf.Max(record.replayMaxError, values[i + 3]);
+                    }
+                    record.replayChecked = true;
+                }
+                byte[] bytes = request.GetData<byte>().ToArray();
+                using var stream = File.Create(path);
+                using var gzip = new GZipStream(stream, System.IO.Compression.CompressionLevel.Fastest);
+                gzip.Write(bytes, 0, bytes.Length);
+            }
+            catch (Exception exception) { m_Error = exception.ToString(); }
+            finally
+            {
+                m_Pending--; record.pending--;
+                if (record.pending == 0 && record.temporalCaptured && record.historyCaptured)
+                    File.AppendAllText(Path.Combine(Path.GetDirectoryName(path), "frames.jsonl"), JsonUtility.ToJson(record) + "\n");
+            }
+        }
+
+        private void Update()
+        {
+            if (m_Disposed) return;
+            if (m_Error != null) { Finish("error: " + m_Error); return; }
+            if (EditorApplication.timeSinceStartup - m_StageStarted > 240)
+            { Finish("timeout stage=" + m_Stage + " step=" + m_Step + " warm=" + m_WarmFrames); return; }
+            if (!m_StageDone || m_Pending != 0 || m_Additional.IsFinalFrameScreenshotPending()) return;
+            if (!File.Exists(Path.Combine(m_Directory, "first.png")) || !File.Exists(Path.Combine(m_Directory, "last.png"))) return;
+            File.WriteAllText(Path.Combine(m_Directory, "status.txt"), "complete frames=" + StageLength + " warm=" + m_WarmFrames);
+            ++m_Stage;
+            if (m_SMRT && m_Stage == 3) m_Stage = 6;
+            if ((m_SMRT || m_HighBudget) && m_Stage == 9) m_Stage = 21;
+            if (m_Stage < Variants.Length * 3) BeginStage(); else Finish("complete");
+        }
+
+        private void Finish(string status)
+        {
+            if (m_Disposed) return;
+            File.WriteAllText(Path.Combine(m_Root, "status.txt"), status);
+            Dispose(); s_Active = null;
+            Debug.Log("VSM fine coverage capture " + status + ": " + m_Root);
+            if (EditorApplication.isPlaying) EditorApplication.isPlaying = false;
+        }
+
+        private void BeforeReload() => Finish("interrupted by domain reload");
+        private void PlayModeChanged(PlayModeStateChange state)
+        { if (state == PlayModeStateChange.ExitingPlayMode) Finish("interrupted by Play Mode exit"); }
+
+        public void Dispose()
+        {
+            if (m_Disposed) return; m_Disposed = true;
+            CSMShadowResolvePass.EditorReceiverCapture -= ShadowCapture;
+            TSRUpscalerPass.EditorTemporalCapture -= TemporalCapture;
+            RenderPipelineManager.beginCameraRendering -= BeginCamera;
+            RenderPipelineManager.endCameraRendering -= EndCamera;
+            EditorApplication.update -= Update; AssemblyReloadEvents.beforeAssemblyReload -= BeforeReload;
+            EditorApplication.playModeStateChanged -= PlayModeChanged;
+            AsyncGPUReadback.WaitAllRequests();
+            if (m_Camera != null) m_Camera.transform.SetPositionAndRotation(m_Position, m_Rotation);
+            if (m_Light != null) m_Light.transform.localRotation = m_LightRotation;
+            Application.runInBackground = m_Background; Time.timeScale = m_TimeScale; Time.captureDeltaTime = m_CaptureDelta;
+            if (m_DebugData != null) { m_DebugData.Release(); Object.DestroyImmediate(m_DebugData); }
+            if (m_DebugOutput != null) { m_DebugOutput.Release(); Object.DestroyImmediate(m_DebugOutput); }
+            m_Projections?.Dispose();
+            if (m_Shader != null) Object.DestroyImmediate(m_Shader);
+            if (m_VolumeObject != null) Object.DestroyImmediate(m_VolumeObject);
+            if (m_Profile != null) Object.DestroyImmediate(m_Profile);
+        }
+    }
+}

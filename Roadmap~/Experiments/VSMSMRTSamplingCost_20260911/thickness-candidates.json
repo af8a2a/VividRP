@@ -1,0 +1,279 @@
+{
+  "1": {
+    "cases": 112,
+    "regressions": [
+      {
+        "id": 148,
+        "scene": "thin_sheet",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 6,
+        "new_fp": 0,
+        "old_fn": 0,
+        "new_fn": 3
+      },
+      {
+        "id": 149,
+        "scene": "thin_sheet",
+        "resolution": 512,
+        "budget": 8,
+        "old_fp": 3,
+        "new_fp": 0,
+        "old_fn": 0,
+        "new_fn": 3
+      },
+      {
+        "id": 160,
+        "scene": "solid_block",
+        "resolution": 128,
+        "budget": 4,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 216,
+        "new_fn": 243
+      },
+      {
+        "id": 178,
+        "scene": "solid_block",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 228,
+        "new_fn": 237
+      },
+      {
+        "id": 179,
+        "scene": "solid_block",
+        "resolution": 512,
+        "budget": 8,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 231,
+        "new_fn": 237
+      },
+      {
+        "id": 338,
+        "scene": "overlap",
+        "resolution": 128,
+        "budget": 4,
+        "old_fp": 435,
+        "new_fp": 435,
+        "old_fn": 282,
+        "new_fn": 309
+      },
+      {
+        "id": 356,
+        "scene": "overlap",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 438,
+        "new_fp": 435,
+        "old_fn": 246,
+        "new_fn": 264
+      },
+      {
+        "id": 357,
+        "scene": "overlap",
+        "resolution": 512,
+        "budget": 8,
+        "old_fp": 21,
+        "new_fp": 21,
+        "old_fn": 234,
+        "new_fn": 240
+      },
+      {
+        "id": 376,
+        "scene": "sloped_sheet",
+        "resolution": 256,
+        "budget": 4,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 0,
+        "new_fn": 20
+      },
+      {
+        "id": 386,
+        "scene": "sloped_sheet",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 0,
+        "new_fn": 89
+      },
+      {
+        "id": 387,
+        "scene": "sloped_sheet",
+        "resolution": 512,
+        "budget": 8,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 0,
+        "new_fn": 15
+      },
+      {
+        "id": 416,
+        "scene": "gap_trap",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 462,
+        "new_fp": 453,
+        "old_fn": 0,
+        "new_fn": 3
+      },
+      {
+        "id": 417,
+        "scene": "gap_trap",
+        "resolution": 512,
+        "budget": 8,
+        "old_fp": 15,
+        "new_fp": 12,
+        "old_fn": 51,
+        "new_fn": 54
+      },
+      {
+        "id": 428,
+        "scene": "gap_hidden",
+        "resolution": 128,
+        "budget": 4,
+        "old_fp": 300,
+        "new_fp": 300,
+        "old_fn": 252,
+        "new_fn": 279
+      },
+      {
+        "id": 436,
+        "scene": "gap_hidden",
+        "resolution": 256,
+        "budget": 4,
+        "old_fp": 303,
+        "new_fp": 300,
+        "old_fn": 168,
+        "new_fn": 177
+      },
+      {
+        "id": 446,
+        "scene": "gap_hidden",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 318,
+        "new_fp": 318,
+        "old_fn": 150,
+        "new_fn": 162
+      },
+      {
+        "id": 447,
+        "scene": "gap_hidden",
+        "resolution": 512,
+        "budget": 8,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 330,
+        "new_fn": 336
+      }
+    ],
+    "old_fp": 9438,
+    "new_fp": 9189,
+    "old_fn": 10071,
+    "new_fn": 10354
+  },
+  "2": {
+    "cases": 112,
+    "regressions": [
+      {
+        "id": 178,
+        "scene": "solid_block",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 228,
+        "new_fn": 231
+      },
+      {
+        "id": 356,
+        "scene": "overlap",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 438,
+        "new_fp": 438,
+        "old_fn": 246,
+        "new_fn": 249
+      },
+      {
+        "id": 386,
+        "scene": "sloped_sheet",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 0,
+        "new_fn": 29
+      },
+      {
+        "id": 436,
+        "scene": "gap_hidden",
+        "resolution": 256,
+        "budget": 4,
+        "old_fp": 303,
+        "new_fp": 300,
+        "old_fn": 168,
+        "new_fn": 171
+      },
+      {
+        "id": 446,
+        "scene": "gap_hidden",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 318,
+        "new_fp": 318,
+        "old_fn": 150,
+        "new_fn": 153
+      }
+    ],
+    "old_fp": 9438,
+    "new_fp": 9315,
+    "old_fn": 10071,
+    "new_fn": 10112
+  },
+  "4": {
+    "cases": 112,
+    "regressions": [
+      {
+        "id": 178,
+        "scene": "solid_block",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 0,
+        "new_fp": 0,
+        "old_fn": 228,
+        "new_fn": 231
+      },
+      {
+        "id": 356,
+        "scene": "overlap",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 438,
+        "new_fp": 438,
+        "old_fn": 246,
+        "new_fn": 249
+      },
+      {
+        "id": 446,
+        "scene": "gap_hidden",
+        "resolution": 512,
+        "budget": 4,
+        "old_fp": 318,
+        "new_fp": 318,
+        "old_fn": 150,
+        "new_fn": 153
+      }
+    ],
+    "old_fp": 9438,
+    "new_fp": 9354,
+    "old_fn": 10071,
+    "new_fn": 10080
+  }
+}

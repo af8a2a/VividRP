@@ -19,7 +19,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int BendWaveSize = 64;
         private const int BendMaxDispatchCount = 8;
         private const string KernelName = "CSMShadowResolve";
-        private const string ResetReceiverFeedbackKernelName = "VSMPrototypeResetReceiverFeedback";
         private const string ClearTilesKernelName = "CSMShadowClearTiles";
         private const string ClassifyTilesKernelName = "CSMShadowClassifyTiles";
         private const string ResolveTilesKernelName = "CSMShadowResolveTiles";
@@ -179,7 +178,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_ResolveCompute;
         private int m_Kernel = -1;
-        private int m_ResetReceiverFeedbackKernel = -1;
         private int m_ClearTilesKernel = -1;
         private int m_ClassifyTilesKernel = -1;
         private int m_ResolveTilesKernel = -1;
@@ -196,7 +194,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_VSMReceiverParameters;
         private Vector4 m_VSMReceiverQuality;
         private Vector4 m_VSMSMRTParameters;
-        private bool m_VirtualShadowMapRequestCollectionActive;
         private TextureHandle m_VirtualShadowMapPrototypeStaticPhysicalPage;
         private TextureHandle m_VirtualShadowMapPrototypeDynamicPhysicalPage;
         private BufferHandle m_VirtualShadowMapPrototypePageTable;
@@ -283,7 +280,6 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_Kernel = FindKernelOrInvalid(m_ResolveCompute, KernelName);
-            m_ResetReceiverFeedbackKernel = FindKernelOrInvalid(m_ResolveCompute, ResetReceiverFeedbackKernelName);
             m_ClearTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ClearTilesKernelName);
             m_ClassifyTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ClassifyTilesKernelName);
             m_ResolveTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ResolveTilesKernelName);
@@ -302,7 +298,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_VirtualShadowMapPrototypeActive = false;
-            m_VirtualShadowMapRequestCollectionActive = false;
             m_VirtualShadowMapPrototypeStaticPhysicalPage = default;
             m_VirtualShadowMapPrototypeDynamicPhysicalPage = default;
             m_VirtualShadowMapPrototypePageTable = default;
@@ -453,22 +448,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_VirtualShadowMapPrototypePageMetadata = PassRecorder.ImportBufferForPass(
                     this,
                     VirtualShadowMapPrototypeRuntime.PageMetadata,
-                    AccessFlags.ReadWrite);
+                    AccessFlags.Read);
             }
-
-            m_VirtualShadowMapRequestCollectionActive = csmSettings != null
-                && csmSettings.enableVirtualShadowMapPrototype.value
-                && m_CameraEntityId != 0ul
-                && m_ResetReceiverFeedbackKernel >= 0
-                && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform()
-                && VirtualShadowMapPrototypeRuntime.HasPageRequestResources
-                && VirtualShadowMapPrototypeRuntime.Projections.Count > 0
-                && m_VirtualShadowMapPrototypePageMetadata.IsValid();
-
-            // Feedback must visit every receiver, including fully-lit CSM tiles
-            // during bootstrap and Record-time fallback.
-            if (m_VirtualShadowMapRequestCollectionActive)
-                m_EnableTiledResolve = false;
 
             if (csmSettings != null
                 && csmSettings.enableVirtualShadowMapPrototype.value
@@ -498,29 +479,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var cmd = context.cmd;
 
-            m_VirtualShadowMapRequestCollectionActive &= VirtualShadowMapPrototypeRuntime.Projections.LayoutRecorded;
-            if (m_VirtualShadowMapRequestCollectionActive
-                && VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(
-                    m_CameraEntityId, m_FrameIndex))
-            {
-                using var feedbackScope = new ProfilingScope(cmd, VSMProfiling.ResetFeedback);
-                cmd.SetComputeBufferParam(
-                    m_ResolveCompute,
-                    m_ResetReceiverFeedbackKernel,
-                    VSMPrototypePageMetadataId,
-                    VirtualShadowMapPrototypeRuntime.PageMetadata);
-                cmd.SetComputeIntParam(
-                    m_ResolveCompute,
-                    VSMPrototypePageTableEntryCountId,
-                    VirtualShadowMapPrototypeRuntime.PageTableEntryCount);
-                cmd.DispatchCompute(
-                    m_ResolveCompute,
-                    m_ResetReceiverFeedbackKernel,
-                    CoreUtils.DivRoundUp(VirtualShadowMapPrototypeRuntime.PageTableEntryCount, 64),
-                    1,
-                    1);
-            }
-
             if (m_EnableTiledResolve
                 && m_TileListBuffer?.innerHandle.IsValid() == true
                 && m_DispatchIndirectArgsBuffer?.innerHandle.IsValid() == true)
@@ -533,8 +491,8 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             RecordBendScreenSpaceContactShadow(cmd);
-            if (m_VirtualShadowMapRequestCollectionActive)
-                VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(
+            if (m_VirtualShadowMapPrototypeActive && VirtualShadowMapPrototypeRuntime.IsFrameActive)
+                VirtualShadowMapPrototypeRuntime.MarkReceiverResolveProduced(
                     m_CameraEntityId, m_FrameIndex);
 #if UNITY_EDITOR
             EditorReceiverCapture?.Invoke(context, m_DepthTexture.innerHandle.ResolveTexture(),
@@ -546,7 +504,6 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_ResolveCompute = null;
             m_Kernel = -1;
-            m_ResetReceiverFeedbackKernel = -1;
             m_ClearTilesKernel = -1;
             m_ClassifyTilesKernel = -1;
             m_ResolveTilesKernel = -1;
@@ -560,7 +517,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_VirtualShadowMapPrototypeActive = false;
-            m_VirtualShadowMapRequestCollectionActive = false;
             m_VirtualShadowMapPrototypeStaticPhysicalPage = default;
             m_VirtualShadowMapPrototypeDynamicPhysicalPage = default;
             m_VirtualShadowMapPrototypePageTable = default;
@@ -583,7 +539,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private void RecordFullScreenCSMResolve(ComputeCommandBuffer cmd)
         {
             using var resolveScope = new ProfilingScope(cmd,
-                m_VirtualShadowMapRequestCollectionActive ? VSMProfiling.Resolve : null);
+                m_VirtualShadowMapPrototypeActive ? VSMProfiling.Resolve : null);
             BindCommonTextures(cmd, m_Kernel);
             BindShadowParameters(cmd);
 
@@ -772,7 +728,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(
                 m_ResolveCompute,
                 VSMPrototypeRequestEnabledId,
-                m_VirtualShadowMapRequestCollectionActive ? 1 : 0);
+                0);
             cmd.SetComputeIntParam(
                 m_ResolveCompute,
                 VSMPrototypePageSizeId,

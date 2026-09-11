@@ -1,0 +1,143 @@
+using System;
+using System.IO;
+using UnityEditor;
+using Unity.GraphToolkit.Editor;
+using UnityEngine;
+using UnityEngine.Rendering;
+using Unity.Mathematics;
+using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
+using VividRP.Editor.RenderGraph;
+using Object = UnityEngine.Object;
+namespace VividRP.Editor
+{
+    internal static class VSMCurrentFrameValidation
+    {
+        [Serializable] private sealed class Report
+        {
+            public int currentShadowIndex, currentDepthIndex, currentNormalIndex, currentResolveIndex;
+            public int templateShadowIndex, templateDepthIndex, templateNormalIndex, templateResolveIndex;
+            public int gpuCases, repeatedRequests, zeroFrameRequests;
+            public long stableCpuAllocatedBytes;
+        }
+        private static void Check(bool ok, string text) { if (!ok) throw new InvalidOperationException(text); }
+        [MenuItem("Tools/VividRP/Diagnostics/Validate Temporary VSM Current Frame")]
+        internal static void Run()
+        {
+            Check(!EditorApplication.isPlaying, "Use Edit Mode for the isolated GPU diagnostic.");
+            var report = new Report();
+            var asset = (VividRenderPipelineAsset)GraphicsSettings.currentRenderPipeline;
+            CheckGraph(asset.RenderGraphAsset, out report.currentShadowIndex, out report.currentDepthIndex,
+                out report.currentNormalIndex, out report.currentResolveIndex);
+            const string path = "Packages/com.vivid.render-pipelines/Editor/Tools/VSMCurrentTemplate.vrdg";
+            var graph = GraphDatabase.LoadGraph<RenderGraphEditorGraph>(path);
+            RenderGraphDrawObjectPassMigration.Migrate(graph, path);
+            GraphDatabase.SaveGraph(graph);
+            Check(!RenderGraphDrawObjectPassMigration.Migrate(graph, path), "Migration must be idempotent.");
+            var compiled = ScriptableObject.CreateInstance<RenderGraphData>();
+            RenderGraphCompiler.Compile(graph).ApplyTo(compiled);
+            try { CheckGraph(compiled, out report.templateShadowIndex, out report.templateDepthIndex,
+                out report.templateNormalIndex, out report.templateResolveIndex); }
+            finally { Object.DestroyImmediate(compiled); }
+
+            for (int mode = 0; mode < 3; mode++) CheckGpu(mode, report);
+            for (int i = 0; i < 128; i++) Step(i);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 10000; i++) Step(i);
+            report.stableCpuAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            Check(report.stableCpuAllocatedBytes == 0, "Stable CPU helpers allocated.");
+            VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(0, -1);
+            File.WriteAllText("Packages/VividRP/Temp~/vsm-current/diagnostic.json", JsonUtility.ToJson(report, true));
+            Debug.Log("VSM current-frame diagnostic passed: " + JsonUtility.ToJson(report));
+        }
+        private static void Step(int frame)
+        {
+            VirtualShadowMapPrototypeRuntime.BeginFrame();
+            VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(42, frame);
+            VirtualShadowMapPrototypeRuntime.MarkReceiverResolveProduced(42, frame);
+            Check(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(42, frame), "Current frame rejected.");
+            Check(!VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(42, frame + 1), "Old feedback consumed.");
+            VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(43, frame);
+            VirtualShadowMapReceiverQuality.BuildParameters(true, 1, 0, .05f);
+        }
+        private static void CheckGraph(RenderGraphData graph, out int shadow, out int depth, out int normal, out int resolve)
+        {
+            shadow = depth = normal = resolve = -1;
+            for (int i = 0; i < graph.Passes.Count; i++)
+            {
+                if (graph.Passes[i].PassType.StartsWith(typeof(CSMShadowPass).FullName, StringComparison.Ordinal)) shadow = i;
+                if (graph.Passes[i].PassType.StartsWith(typeof(CSMShadowResolvePass).FullName, StringComparison.Ordinal)) resolve = i;
+            }
+            Check(shadow >= 0 && resolve > shadow, "Missing or misordered CSM passes.");
+            foreach (var binding in graph.Passes[shadow].ResourceBindings)
+            {
+                if (binding.FieldName == "m_DepthTexture") depth = binding.SourcePassIndex;
+                if (binding.FieldName == "m_GBuffer1") normal = binding.SourcePassIndex;
+            }
+            Check(depth >= 0 && depth < shadow && normal >= 0 && normal < shadow, "Receiver inputs must precede shadow allocation.");
+            foreach (var field in new[] { "m_DepthTexture", "m_GBuffer1" })
+            {
+                var a = graph.Passes[shadow].ResourceBindings.Find(x => x.FieldName == field);
+                var b = graph.Passes[resolve].ResourceBindings.Find(x => x.FieldName == field);
+                Check(a.SourcePassIndex == b.SourcePassIndex && a.SourceFieldName == b.SourceFieldName,
+                    "Mark and resolve must share receiver inputs.");
+            }
+        }
+        private static void CheckGpu(int mode, Report report)
+        {
+            var shader = Object.Instantiate(PipelineResourceManager.Get<VividRPCoreResources>().CSMShadowResolveCompute);
+            var depth = new Texture2D(8, 8, TextureFormat.RFloat, false, true);
+            var normal = new Texture2D(8, 8, TextureFormat.RGBAFloat, false, true);
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 160);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 16);
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
+            using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            try
+            {
+                var records = new VirtualShadowMapProjection[3];
+                for (int i = 0; i < 3; i++)
+                {
+                    var matrix = Matrix4x4.identity; matrix.m00 = matrix.m11 = .1f / (1 << i);
+                    matrix.m03 = matrix.m13 = matrix.m23 = .5f;
+                    records[i] = new VirtualShadowMapProjection { WorldToShadow = matrix,
+                        SelectionSphere = new Vector4(0, 0, 0, -5 * (1 << i)), Parameters = new Vector4(1 << i, 0, .1f, 100) };
+                }
+                projections.SetData(records); metadata.SetData(new uint4[12]); table.SetData(new uint[12]); owners.SetData(new uint[16]);
+                var pixels = new float[64]; var normals = new Color[64];
+                for (int i = 0; i < 64; i++) { pixels[i] = .5f; normals[i] = new Color(.5f, .5f, 0, 0); }
+                depth.SetPixelData(pixels, 0); depth.Apply(); normal.SetPixels(normals); normal.Apply();
+                shader.SetInt("_CSMOutputWidth", 8); shader.SetInt("_CSMOutputHeight", 8);
+                shader.SetInt("_VSMProjectionCount", 3); shader.SetInt("_VSMPrototypeVirtualResolution", 8);
+                shader.SetInt("_VSMPrototypePageSize", 4); shader.SetInt("_VSMPrototypePagesPerAxis", 2);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", 12); shader.SetInt("_VSMPrototypePhysicalPageCapacity", 16);
+                shader.SetInt("_VSMPrototypeRequestEnabled", 1);
+                shader.SetMatrix("_CSMInvViewProjMatrix", Matrix4x4.identity); shader.SetMatrix("_VSMReceiverViewProjection", Matrix4x4.identity);
+                shader.SetVector("_VSMReceiverParameters", Vector4.zero);
+                shader.SetVector("_VSMReceiverQuality", new Vector4(mode > 0 ? 1 : 0, 1, .025f, 1));
+                shader.SetVector("_VSMSMRTParameters", mode == 2 ? new Vector4(4, 8, 10, .05f) : Vector4.zero);
+                int mark = shader.FindKernel("VSMMarkReceiverPages"), allocate = shader.FindKernel("VSMPrototypeAllocatePages");
+                shader.SetBuffer(mark, "_VSMProjections", projections); shader.SetBuffer(mark, "_VSMPrototypePageMetadata", metadata);
+                shader.SetTexture(mark, "_DepthTexture", depth); shader.SetTexture(mark, "_GBuffer1", normal);
+                shader.SetBuffer(allocate, "_VSMPrototypePageMetadata", metadata); shader.SetBuffer(allocate, "_VSMPrototypeWritablePageTable", table);
+                shader.SetBuffer(allocate, "_VSMPrototypePhysicalPageOwners", owners); shader.SetBuffer(allocate, "_VSMPrototypeAllocatorCounters", counters);
+                var result = new uint[4]; var data = new uint4[12]; int count = 0;
+                for (int frame = 0; frame < 3; frame++)
+                {
+                    if (frame == 2) { for (int i = 0; i < 64; i++) pixels[i] = SystemInfo.usesReversedZBuffer ? 0 : 1;
+                        depth.SetPixelData(pixels, 0); depth.Apply(); }
+                    int clear = shader.FindKernel(frame == 0 ? "VSMPrototypeResetReceiverFeedback" : "VSMPrototypeClearReceiverRequests");
+                    shader.SetBuffer(clear, "_VSMPrototypePageMetadata", metadata); shader.Dispatch(clear, 1, 1, 1);
+                    shader.SetInt("_CSMFrameIndex", frame); shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
+                    shader.Dispatch(mark, 1, 1, 1); shader.Dispatch(allocate, 1, 1, 1); counters.GetData(result);
+                    if (frame == 0) { count = (int)result[1]; Check(count > 0 && result[2] == count && result[3] == 0, "Cold frame demand/allocate failed."); report.zeroFrameRequests += count; }
+                    if (frame == 1) { Check(result[1] == count && result[2] == 0 && result[3] == 0, "Repeated requests failed."); report.repeatedRequests += (int)result[1]; }
+                    if (frame == 2) { Check(result[1] == 0, "Sky retained stale demand."); metadata.GetData(data);
+                        foreach (var m in data) if (m.y != 0) Check(m.z == 1, "Lost LRU age."); }
+                }
+                report.gpuCases++;
+            }
+            finally { Object.DestroyImmediate(shader); Object.DestroyImmediate(depth); Object.DestroyImmediate(normal); }
+        }
+    }
+}

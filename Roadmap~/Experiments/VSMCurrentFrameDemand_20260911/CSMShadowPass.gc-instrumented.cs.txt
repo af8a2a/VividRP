@@ -45,6 +45,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public sealed class CSMShadowPass : UnsafePass
     {
+#if UNITY_EDITOR
+        internal static long EditorReceiverMarkAllocatedBytes;
+#endif
         internal const string ShadowCasterShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass";
 
         private const int RendererListCount = (int)VividRendererListID.Count;
@@ -408,7 +411,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     else
                     {
                         var fallbackReason = VirtualShadowMapPrototypeFallbackReason.ReceiverFeedbackUnavailable;
-                        vsmCompleted = RecordReceiverPageRequests(nativeCmd) && DrawVirtualShadowMapPrototypePages(
+#if UNITY_EDITOR
+                        long markingStart = GC.GetAllocatedBytesForCurrentThread();
+#endif
+                        bool requestsRecorded = RecordReceiverPageRequests(nativeCmd);
+#if UNITY_EDITOR
+                        EditorReceiverMarkAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - markingStart;
+#endif
+                        vsmCompleted = requestsRecorded && DrawVirtualShadowMapPrototypePages(
                             nativeCmd,
                             in meshletContext,
                             out fallbackReason);

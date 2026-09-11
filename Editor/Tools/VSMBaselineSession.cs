@@ -17,12 +17,12 @@ namespace VividRP.Editor
         internal const int TimingSettleFrames = 8;
         internal static readonly string[] StageNames =
         {
-            "VSM.LayoutRemap", "VSM.Allocate", "VSM.InvalidateStatic", "VSM.ClearPhysicalPages",
+            "VSM.LayoutRemap", "VSM.MarkReceiverPages", "VSM.Allocate", "VSM.InvalidateStatic", "VSM.ClearPhysicalPages",
             "VSM.StaticCasterCull", "VSM.DynamicCasterCull", "VSM.PageCull", "VSM.StaticRaster",
-            "VSM.DynamicRaster", "VSM.UnityCompatibilityRaster", "VSM.FinalizePages", "VSM.ResetFeedback", "VSM.ResolveAndFeedback",
+            "VSM.DynamicRaster", "VSM.UnityCompatibilityRaster", "VSM.FinalizePages", "VSM.ResetFeedback", "VSM.Resolve",
         };
         private const int StageOffset = 5;
-        private static readonly int[] s_RequiredStages = { 0, 1, 3, 8, 10, 12 };
+        private static readonly int[] s_RequiredStages = { 0, 1, 2, 4, 9, 11, 13 };
         private static readonly string[] s_MetricNames = BuildMetricNames();
         private enum PauseKind { None, User, Editor, Camera, Timing, Error }
         private PauseKind m_Pause;

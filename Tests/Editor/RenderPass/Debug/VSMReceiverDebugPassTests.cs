@@ -47,9 +47,14 @@ namespace VividRP.Editor.Tests
                 VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(camera, 9);
                 Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(camera, 10), Is.False);
                 VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(camera, 10);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(camera, 10), Is.False);
+                VirtualShadowMapPrototypeRuntime.MarkReceiverResolveProduced(camera, 10);
                 Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(camera, 10), Is.True);
                 Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(0x20000002aul, 10), Is.False);
                 Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(camera, 11), Is.False);
+                VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(camera, 10);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(camera, 10), Is.False);
+                VirtualShadowMapPrototypeRuntime.MarkReceiverResolveProduced(camera, 10);
                 VirtualShadowMapPrototypeRuntime.MarkFallback(VirtualShadowMapPrototypeFallbackReason.ReceiverFeedbackUnavailable);
                 Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(camera, 10), Is.False);
             }

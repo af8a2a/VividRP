@@ -172,6 +172,24 @@ namespace VividRP.Editor.Tests
                 return result;
             }
 
+            internal void MarkScreen(Texture depth, Texture normal, int frame, bool resetAge)
+            {
+                int clear = Shader.FindKernel(resetAge ? "VSMPrototypeResetReceiverFeedback" : "VSMPrototypeClearReceiverRequests");
+                Shader.SetBuffer(clear, "_VSMPrototypePageMetadata", Metadata);
+                Shader.Dispatch(clear, 1, 1, 1);
+                int mark = Shader.FindKernel("VSMMarkReceiverPages");
+                Shader.SetInt("_CSMFrameIndex", frame);
+                Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
+                Shader.SetMatrix("_CSMInvViewProjMatrix", Matrix4x4.identity);
+                Shader.SetBuffer(mark, "_VSMProjections", m_Projections);
+                Shader.SetBuffer(mark, "_VSMPrototypePageMetadata", Metadata);
+                Shader.SetTexture(mark, "_DepthTexture", depth);
+                Shader.SetTexture(mark, "_GBuffer1", normal);
+                // No physical pool or page-table binding: cold start must work.
+                Shader.Dispatch(mark, 1, 1, 1);
+                Metadata.GetData(MetadataData);
+            }
+
             internal void Allocate()
             {
                 int kernel = Shader.FindKernel("VSMPrototypeAllocatePages");
@@ -244,6 +262,52 @@ namespace VividRP.Editor.Tests
                 if (m_UploadShader != Shader) Object.DestroyImmediate(m_UploadShader);
                 Object.DestroyImmediate(m_Static); Object.DestroyImmediate(m_Dynamic); Object.DestroyImmediate(Shader);
             }
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public void CurrentReceiverMarking_ColdStartAllocatesSameFrameAndClearsDepartedDemand(bool density, bool smrt)
+        {
+            using var f = new Fixture(allocator: true);
+            var depth = new Texture2D(8, 8, TextureFormat.RFloat, false, true);
+            var normal = new Texture2D(8, 8, TextureFormat.RGBAFloat, false, true);
+            try
+            {
+                var depths = new float[64]; var normals = new Color[64];
+                for (int i = 0; i < 64; i++) { depths[i] = .5f; normals[i] = new Color(.5f, .5f, 0, 0); }
+                depth.SetPixelData(depths, 0); depth.Apply(); normal.SetPixels(normals); normal.Apply();
+                f.Shader.SetVector("_VSMReceiverQuality", new Vector4(density ? 1 : 0, 1, .025f, 1));
+                f.Shader.SetVector("_VSMSMRTParameters", smrt ? new Vector4(4, 8, 10, .05f) : Vector4.zero);
+                f.Upload();
+                f.MarkScreen(depth, normal, 0, true);
+                int requested = 0;
+                var roles = new uint[f.MetadataData.Length];
+                for (int i = 0; i < roles.Length; i++) roles[i] = f.MetadataData[i].x & 3841u;
+                for (int i = 0; i < f.MetadataData.Length; i++)
+                    if ((f.MetadataData[i].x & 1) != 0) { requested++; Assert.That(f.MetadataData[i].z, Is.Zero); }
+                Assert.That(requested, Is.GreaterThan(0));
+                f.Allocate();
+                var counters = new uint[4]; f.Counters.GetData(counters);
+                Assert.That(counters[1], Is.EqualTo(requested));
+                Assert.That(counters[2], Is.EqualTo(requested));
+                Assert.That(counters[3], Is.Zero);
+                // Allocation consumes roles; the next marker must still request every receiver.
+                f.MarkScreen(depth, normal, 1, false);
+                for (int i = 0; i < roles.Length; i++) Assert.That(f.MetadataData[i].x & 3841u, Is.EqualTo(roles[i]));
+                f.Allocate();
+                f.Counters.GetData(counters);
+                Assert.That(counters[1], Is.EqualTo(requested));
+                Assert.That(counters[2], Is.Zero);
+                for (int i = 0; i < depths.Length; i++) depths[i] = SystemInfo.usesReversedZBuffer ? 0 : 1;
+                depth.SetPixelData(depths, 0); depth.Apply();
+                f.MarkScreen(depth, normal, 2, false); f.Allocate();
+                f.Counters.GetData(counters);
+                Assert.That(counters[1], Is.Zero, "Sky must not retain last frame's demand.");
+                for (int i = 0; i < f.MetadataData.Length; i++)
+                    if (f.TableData[i] != 0) Assert.That(f.MetadataData[i].z, Is.EqualTo(1), "LRU age survives ordinary request clearing.");
+            }
+            finally { Object.DestroyImmediate(depth); Object.DestroyImmediate(normal); }
         }
 
         [Test]

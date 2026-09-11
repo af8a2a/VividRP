@@ -88,6 +88,29 @@ namespace VividRP.Editor.RenderGraph
             EditorApplication.delayCall += () => PersistMigration(assetPath);
         }
 
+        internal static bool MigrateShadowReceiverInputs(RenderGraphEditorGraph graph)
+        {
+            bool changed = false;
+            foreach (var resolve in graph.GetNodes().OfType<RenderPassNodeData>())
+            {
+                if (resolve.GetPassType() != typeof(CSMShadowResolvePass)) continue;
+                var atlas = resolve.GetInputPortByName("m_CSMShadowAtlas")?.FirstConnectedPort;
+                if (!(atlas?.GetNode() is RenderPassNodeData shadow)
+                    || shadow.GetPassType() != typeof(CSMShadowPass)) continue;
+                changed |= ConnectReceiverInput(graph, resolve, shadow, "m_DepthTexture");
+                changed |= ConnectReceiverInput(graph, resolve, shadow, "m_GBuffer1");
+            }
+            return changed;
+        }
+
+        private static bool ConnectReceiverInput(RenderGraphEditorGraph graph,
+            RenderPassNodeData resolve, RenderPassNodeData shadow, string field)
+        {
+            var source = resolve.GetInputPortByName(field)?.FirstConnectedPort;
+            var input = shadow.GetInputPortByName(field);
+            return source != null && input != null && !input.IsConnected && graph.Connect(source, input);
+        }
+
         private static bool MigrateRecursive(
             RenderGraphEditorGraph graph,
             string assetPath,
@@ -106,6 +129,7 @@ namespace VividRP.Editor.RenderGraph
             // requires connected legacy nodes to be disconnected and persisted
             // before they can be removed safely on the next import.
             changed |= RenderGraphStandardOpaqueMigration.Migrate(graph, assetPath);
+            changed |= MigrateShadowReceiverInputs(graph);
 
             if (graph.SchemaVersion < RenderGraphEditorGraph.CurrentSchemaVersion)
             {

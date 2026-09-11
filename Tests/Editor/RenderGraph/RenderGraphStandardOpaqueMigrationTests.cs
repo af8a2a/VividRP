@@ -65,6 +65,40 @@ namespace VividRP.Editor.Tests
             internal override Type GetRegisteredPassType() => typeof(VisibilityBufferResolvePass);
         }
 
+        [Serializable]
+        private sealed class ShadowNode : RenderPassNodeData
+        {
+            internal override Type GetRegisteredPassType() => typeof(CSMShadowPass);
+        }
+        [Serializable]
+        private sealed class ShadowResolveNode : RenderPassNodeData
+        {
+            internal override Type GetRegisteredPassType() => typeof(CSMShadowResolvePass);
+        }
+
+        [Test]
+        public void MigrateShadowReceivers_SharesResolveInputsAndPreservesExplicitConnections()
+        {
+            var graph = new RenderGraphEditorGraph();
+            var depth = new PreDepthNode(); var normal = new GBufferNode();
+            var shadow = new ShadowNode(); var resolve = new ShadowResolveNode();
+            graph.AddNode(shadow); graph.AddNode(resolve); graph.AddNode(depth); graph.AddNode(normal);
+            var depthOutput = depth.GetOutputPortByName("m_DepthAttachment_Out");
+            var normalOutput = normal.GetOutputPortByName("m_GBuffer1_Out");
+            Assert.That(graph.Connect(shadow.GetOutputPortByName("m_ShadowAtlas"), resolve.GetInputPortByName("m_CSMShadowAtlas")), Is.True);
+            Assert.That(graph.Connect(depthOutput, resolve.GetInputPortByName("m_DepthTexture")), Is.True);
+            Assert.That(graph.Connect(normalOutput, resolve.GetInputPortByName("m_GBuffer1")), Is.True);
+            Assert.That(RenderGraphDrawObjectPassMigration.MigrateShadowReceiverInputs(graph), Is.True);
+            Assert.That(shadow.GetInputPortByName("m_DepthTexture").FirstConnectedPort, Is.SameAs(depthOutput));
+            Assert.That(shadow.GetInputPortByName("m_GBuffer1").FirstConnectedPort, Is.SameAs(normalOutput));
+            Assert.That(RenderGraphDrawObjectPassMigration.MigrateShadowReceiverInputs(graph), Is.False);
+            var explicitDepth = normal.GetOutputPortByName("m_GBufferDepth_Out");
+            graph.Disconnect(depthOutput, shadow.GetInputPortByName("m_DepthTexture"));
+            graph.Connect(explicitDepth, shadow.GetInputPortByName("m_DepthTexture"));
+            Assert.That(RenderGraphDrawObjectPassMigration.MigrateShadowReceiverInputs(graph), Is.False);
+            Assert.That(shadow.GetInputPortByName("m_DepthTexture").FirstConnectedPort, Is.SameAs(explicitDepth));
+        }
+
         [Test]
         public void Migrate_RewiresStandardTopology_AndDisconnectsLegacyProducerForPersistedCleanup()
         {

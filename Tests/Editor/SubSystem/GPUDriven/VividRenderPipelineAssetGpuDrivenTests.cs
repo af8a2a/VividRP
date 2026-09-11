@@ -800,39 +800,27 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("UseVirtualShadowMapPrototype(cascadeIndex)", resolveSource);
             StringAssert.Contains("EnsurePhysicalPageForBinding()", resolvePassSource);
             StringAssert.Contains("AccessFlags.ReadWrite", resolvePassSource);
-            StringAssert.Contains("MarkReceiverFeedbackProduced(", resolvePassSource);
+            StringAssert.Contains("MarkReceiverResolveProduced(", resolvePassSource);
             StringAssert.Contains("staticVirtualShadowMapPage", resolvePassSource);
             StringAssert.Contains("dynamicVirtualShadowMapPage", resolvePassSource);
         }
 
         [Test]
-        public void VirtualShadowMapPrototype_FeedbackIsCameraScopedAndResetBeforeBothResolvePaths()
+        public void VirtualShadowMapPrototype_MarksCurrentReceiversBeforeAllocation()
         {
             string pass = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
             string resolve = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowResolvePass.cs");
             string shader = ReadRuntimeSource("Shaders", "Core", "Private", "CSMShadowResolve.compute");
-            string prepare = SliceSource(pass,
-                "private void PrepareVirtualShadowMapPrototype(", "private void PrepareMeshletRendering(");
-            string record = SliceSource(resolve, "public override void Record(", "public override void Dispose(");
-            string release = SliceSource(pass, "private static void ReleaseAllocatedResources(", "private static RTHandle AllocatePhysicalPage(");
-            string reset = SliceSource(shader, "void VSMPrototypeResetReceiverFeedback(", "void VSMResetPhysicalOwners(");
-            int resetIndex = record.IndexOf("RequiresReceiverFeedbackReset(");
-            int tiledIndex = record.IndexOf("RecordTiledScreenSpaceResolve(");
-            int fullIndex = record.IndexOf("RecordFullScreenCSMResolve(");
-            int producedIndex = record.IndexOf("MarkReceiverFeedbackProduced(");
-
-            StringAssert.Contains("HasReceiverFeedbackForFrame(\n                    EntityId.ToULong(cameraData.camera.GetEntityId()),", prepare.Replace("\r\n", "\n"));
-            Assert.That(resetIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(tiledIndex, Is.GreaterThan(resetIndex));
-            Assert.That(fullIndex, Is.GreaterThan(resetIndex));
-            Assert.That(producedIndex, Is.GreaterThan(tiledIndex));
-            Assert.That(producedIndex, Is.GreaterThan(fullIndex));
-            StringAssert.Contains("m_CameraEntityId, m_FrameIndex", record);
-            StringAssert.Contains("MarkReceiverFeedbackProduced(0ul, -1)", release);
-            StringAssert.Contains("metadata.x &= ~kVSMPageRequestMask", reset);
-            StringAssert.Contains("metadata.z = 0u", reset);
-            StringAssert.DoesNotContain("metadata.y =", reset);
-            StringAssert.DoesNotContain("PhysicalPageOwners", reset);
+            string record = SliceSource(pass, "public override void Record(", "private bool RecordReceiverPageRequests(");
+            Assert.That(record.IndexOf("RecordReceiverPageRequests(nativeCmd)"),
+                Is.LessThan(record.IndexOf("DrawVirtualShadowMapPrototypePages(")));
+            StringAssert.DoesNotContain("m_FrameIndex - 1", pass);
+            StringAssert.DoesNotContain("MarkReceiverFeedbackProduced(", resolve);
+            StringAssert.Contains("MarkReceiverResolveProduced(", resolve);
+            StringAssert.Contains("#pragma kernel VSMMarkReceiverPages VIVID_VSM_MARK_RECEIVERS", shader);
+            string clear = SliceSource(shader, "void VSMPrototypeClearReceiverRequests(", "void VSMPrototypeResetReceiverFeedback(");
+            StringAssert.Contains(".x &= ~kVSMPageRequestMask", clear);
+            StringAssert.DoesNotContain(".z =", clear);
         }
 
         [Test]

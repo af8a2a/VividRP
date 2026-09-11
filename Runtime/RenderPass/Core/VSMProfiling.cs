@@ -5,6 +5,7 @@ namespace VividRP.Runtime.RenderPass.Core
     // Cached samplers: no frame-dependent names or recurring allocations.
     internal static class VSMProfiling
     {
+        internal static readonly ProfilingSampler MarkReceivers = new("VSM.MarkReceiverPages");
         internal static readonly ProfilingSampler Allocate = new("VSM.Allocate");
         internal static readonly ProfilingSampler Clear = new("VSM.ClearPhysicalPages");
         internal static readonly ProfilingSampler Finalize = new("VSM.FinalizePages");
@@ -16,7 +17,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static readonly ProfilingSampler PageCull = new("VSM.PageCull");
         internal static readonly ProfilingSampler StaticRaster = new("VSM.StaticRaster");
         internal static readonly ProfilingSampler UnityRaster = new("VSM.UnityCompatibilityRaster");
-        internal static readonly ProfilingSampler Resolve = new("VSM.ResolveAndFeedback");
+        internal static readonly ProfilingSampler Resolve = new("VSM.Resolve");
         internal static readonly ProfilingSampler ResetFeedback = new("VSM.ResetFeedback");
     }
 }

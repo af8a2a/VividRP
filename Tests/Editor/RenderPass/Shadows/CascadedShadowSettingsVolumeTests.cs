@@ -841,54 +841,32 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VirtualShadowMapPrototypeFeedback_IsConsumedOnlyByItsCameraAndFollowingFrame()
+        public void VirtualShadowMapPrototypeFeedback_IsConsumedOnlyByItsCameraAndCurrentFrame()
         {
-            const ulong cameraA = 0x10000002aul;
-            const ulong cameraB = 0x20000002aul;
+            const ulong cameraA = 0x10000002aul, cameraB = 0x20000002aul;
             try
             {
                 VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(cameraA, 10);
-
-                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedback, Is.True);
-                Assert.That(
-                    VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 11),
-                    Is.True);
-                Assert.That(
-                    VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraB, 11),
-                    Is.False);
-                Assert.That(
-                    VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 10),
-                    Is.False);
-                Assert.That(
-                    VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 12),
-                    Is.False);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 10), Is.True);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraB, 10), Is.False);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 11), Is.False);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 9), Is.False);
                 Assert.That(VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(cameraA, 11), Is.False);
                 Assert.That(VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(cameraB, 10), Is.True);
                 Assert.That(VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(cameraA, 10), Is.True);
                 Assert.That(VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(cameraA, 0), Is.True);
-
-                // Same-frame writes replace the owner, not just the frame number.
                 VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(cameraB, 10);
-                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 11), Is.False);
-                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraB, 11), Is.True);
-                VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(cameraA, 11);
-                VirtualShadowMapPrototypeRuntime.BeginFrame();
-                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 12), Is.True);
-                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraB, 12), Is.False);
-
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 10), Is.False);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraB, 10), Is.True);
                 VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(cameraA, 0);
-                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 1), Is.True);
-                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 0), Is.False);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 0), Is.True);
+                Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(cameraA, 1), Is.False);
                 VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(cameraA, -1);
                 Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedback, Is.False);
                 VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(0ul, 10);
                 Assert.That(VirtualShadowMapPrototypeRuntime.HasReceiverFeedback, Is.False);
-                Assert.That(VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(cameraA, 11), Is.True);
             }
-            finally
-            {
-                VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(0ul, -1);
-            }
+            finally { VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(0ul, -1); }
         }
 
         [Test]
@@ -909,7 +887,7 @@ namespace VividRP.Editor.Tests
                 for (int iteration = 0; iteration < 16; iteration++)
                 {
                     VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(42ul, 10);
-                    VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(42ul, 11);
+                    VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(42ul, 10);
                     VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(43ul, 11);
                 }
                 int hits = 0;
@@ -917,8 +895,8 @@ namespace VividRP.Editor.Tests
                 for (int iteration = 0; iteration < 4096; iteration++)
                 {
                     VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(42ul, 10);
-                    if (VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(42ul, 11)
-                        && !VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(43ul, 11)
+                    if (VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(42ul, 10)
+                        && !VirtualShadowMapPrototypeRuntime.HasReceiverFeedbackForFrame(43ul, 10)
                         && !VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(42ul, 11)
                         && VirtualShadowMapPrototypeRuntime.RequiresReceiverFeedbackReset(43ul, 11))
                         hits++;

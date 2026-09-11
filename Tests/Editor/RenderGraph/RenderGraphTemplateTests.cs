@@ -67,6 +67,10 @@ namespace VividRP.Editor.Tests
                 var deferredIndex = FindPassIndex<DeferredLightingPass>(result);
                 var csmShadowIndex = FindPassIndex<CSMShadowPass>(result);
                 var csmResolveIndex = FindPassIndex<CSMShadowResolvePass>(result);
+                Assert.That(resolveIndex, Is.LessThan(csmShadowIndex));
+                Assert.That(csmShadowIndex, Is.LessThan(csmResolveIndex));
+                AssertPassFieldBinding(result, csmShadowIndex, "m_DepthTexture", visibilityIndex, "m_Depth");
+                AssertPassFieldBinding(result, csmShadowIndex, "m_GBuffer1", resolveIndex, "m_GBuffer1");
                 Assert.That(preDepthIndex, Is.LessThan(visibilityIndex));
                 Assert.That(visibilityIndex, Is.LessThan(resolveIndex));
                 Assert.That(resolveIndex, Is.LessThan(classificationIndex));

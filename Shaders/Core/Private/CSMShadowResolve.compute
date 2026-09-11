@@ -1,5 +1,7 @@
-#pragma kernel CSMShadowResolve
+#pragma kernel CSMShadowResolve VIVID_VSM_RESOLVE_RECEIVERS
 #pragma kernel VSMReceiverDebug VIVID_VSM_RECEIVER_DEBUG
+#pragma kernel VSMMarkReceiverPages VIVID_VSM_MARK_RECEIVERS
+#pragma kernel VSMPrototypeClearReceiverRequests
 #pragma kernel VSMPrototypeResetReceiverFeedback
 #pragma kernel VSMPrototypeAllocatePages
 #pragma kernel VSMResetPhysicalOwners
@@ -12,7 +14,7 @@
 #pragma kernel VSMPrototypeCullMeshletsToPages
 #pragma kernel CSMShadowClearTiles
 #pragma kernel CSMShadowClassifyTiles
-#pragma kernel CSMShadowResolveTiles
+#pragma kernel CSMShadowResolveTiles VIVID_VSM_RESOLVE_RECEIVERS
 #pragma kernel CSMShadowCopyFilterSource
 #pragma kernel CSMShadowBilateralFilterH CSM_SHADOW_BILATERAL_FILTER_H
 #pragma kernel CSMShadowBilateralFilterV CSM_SHADOW_BILATERAL_FILTER_V
@@ -430,6 +432,13 @@ void VSMPrototypeCullMeshletsToPages(
                 cascadeIndex);
         }
     }
+}
+
+[numthreads(64, 1, 1)]
+void VSMPrototypeClearReceiverRequests(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < (uint)_VSMPrototypePageTableEntryCount)
+        _VSMPrototypePageMetadata[id.x].x &= ~kVSMPageRequestMask;
 }
 
 [numthreads(64, 1, 1)]
@@ -1105,8 +1114,8 @@ float VSMFilterGuard(int index, bool smrt)
 
 void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex, uint requestRole, int halo)
 {
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-    // Replaying the resolver for inspection must not alter live receiver feedback.
+#if defined(VIVID_VSM_RECEIVER_DEBUG) || defined(VIVID_VSM_RESOLVE_RECEIVERS)
+    // Sampling and inspection never mutate the demand consumed by allocation.
     return;
 #else
     if (_VSMPrototypeRequestEnabled == 0
@@ -2192,8 +2201,10 @@ bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
 {
     covered = false;
     shadow = 1.0;
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
+#if defined(VIVID_VSM_RECEIVER_DEBUG) || defined(VIVID_VSM_RESOLVE_RECEIVERS)
     if (!sampleDepth) return false;
+#endif
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
     g_VSMDebugWork.z++;
 #endif
     VividVSMProjection projection = _VSMProjections[index];
@@ -2211,6 +2222,11 @@ bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
     covered = true;
     int halo = smrt ? (int)ceil(VSMFilterGuard(index, true) * _VSMPrototypeVirtualResolution) : 1;
     MarkVSMReceiverPage(coord.xy, index, requestRole, halo);
+#if defined(VIVID_VSM_MARK_RECEIVERS)
+    // Compile out depth sampling: marking has no dependency on page residency,
+    // the physical pools or the stochastic ray phase.
+    return false;
+#else
     if (!sampleDepth || _VSMPrototypeEnabled == 0)
         return false;
     // HLSL conditional expressions may evaluate both operands and overwrite the
@@ -2218,6 +2234,7 @@ bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
     [branch]
     if (smrt) return TryFilterVSMSMRT(coord, bias, index, pixel, shadow);
     return TryFilterVSMProjection(coord, bias, index, pixel, shadow);
+#endif
 }
 
 bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
@@ -2273,7 +2290,7 @@ float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bo
         {
             // Roles follow geometric coverage and the intended blend, never page
             // residency. Missing primary depth must not promote its entire fallback
-            // chain (or suppress next-frame transition demand during bootstrap).
+            // chain (or suppress current-frame transition demand during bootstrap).
             bool needSample = sampledLevel < 0 || (sampledLevel == index && blend > 0.0 && !hasTransition);
             float sampleShadow;
             bool covered;
@@ -2337,6 +2354,22 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS)
 
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
 #include "VSMReceiverDebug.hlsl"
+#endif
+
+#if defined(VIVID_VSM_MARK_RECEIVERS)
+[numthreads(8, 8, 1)]
+void VSMMarkReceiverPages(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
+    float depth = _DepthTexture.Load(int3(id.xy, 0));
+    if (IsSkyPixel(depth)) return;
+    float3 position = ReconstructWorldPosition(id.xy, depth);
+    float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(id.xy, 0)).xy);
+    normal = ReconstructVSMReceiverNormal(id.xy, depth, position, normal);
+    // The same receiver walk emits primary, parent, transition and terminal
+    // roles. SMRT also requests its PCF fallback independently of residency.
+    ResolveVSMReceiver(position, normal, id.xy);
+}
 #endif
 
 [numthreads(8, 8, 1)]

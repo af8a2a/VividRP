@@ -383,6 +383,41 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SMRT_PageReuseTraversesShuffledPhysicalPagesInBothDirections()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            SetSMRTDepth(f, 2, 1, .4f); SetSMRTDepth(f, 5, 1, .4f); f.Upload();
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 5, 1));
+            var origins = new[] { new float4(1.5f / 8, 1.5f / 8, .2f, 0), new float4(6.5f / 8, 1.5f / 8, .2f, 0) };
+            var rays = new[] { new float4(1, 0, 5, .5f), new float4(-1, 0, 5, .5f) };
+            var result = f.Run("TraceSMRTRays", origins, normals: rays);
+            Assert.That(result[0], Is.EqualTo(new float2(1, 0)));
+            Assert.That(result[1], Is.EqualTo(new float2(1, 0)));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SMRT_PageReuseRejectsInvalidNextPage(bool reverse)
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 5, 1));
+            int nextPage = reverse ? 0 : 1;
+            var origin = new[] { new float4((reverse ? 6.5f : 1.5f) / 8, 1.5f / 8, .2f, 0) };
+            var ray = new[] { new float4(reverse ? -1 : 1, 0, 5, .5f) };
+            for (int fault = 0; fault < 3; fault++)
+            {
+                f.Map(nextPage, 11 - nextPage);
+                if (fault == 0) f.TableData[nextPage] = 0;
+                else if (fault == 1) f.MetadataData[nextPage].x |= 4;
+                else f.MetadataData[nextPage].y++;
+                f.Upload();
+                Assert.That(f.Run("TraceSMRTRays", origin, normals: ray)[0].x, Is.Zero);
+            }
+        }
+
+        [Test]
         public void SMRT_ParallelTailPreservesFarOccludersAndExhaustionIsUnavailable()
         {
             using var f = new Fixture();

@@ -1,0 +1,15 @@
+{
+  "removed": [
+    "Editor\\Tools\\VSMSMRTPathProbe.cs",
+    "Editor\\Tools\\VSMSMRTPathProbe.cs.meta",
+    "Editor\\Tools\\VSMSMRTPathProbe.compute",
+    "Editor\\Tools\\VSMSMRTPathProbe.compute.meta",
+    "Editor\\Tools\\VSMGeneralCoverageTiming.cs",
+    "Editor\\Tools\\VSMGeneralCoverageTiming.cs.meta",
+    "Editor\\Tools\\VSMGeneralCoverageProbe.cs",
+    "Editor\\Tools\\VSMGeneralCoverageProbe.cs.meta",
+    "Editor\\Tools\\VSMGeneralCoverageAudit.compute",
+    "Editor\\Tools\\VSMGeneralCoverageAudit.compute.meta"
+  ],
+  "verified_against_archived_sources": true
+}

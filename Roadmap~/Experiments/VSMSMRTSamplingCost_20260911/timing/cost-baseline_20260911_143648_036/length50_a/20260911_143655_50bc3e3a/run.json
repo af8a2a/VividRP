@@ -1,0 +1,1602 @@
+{
+    "schemaVersion": 3,
+    "startedUtc": "2026-09-11T14:36:55.3558096Z",
+    "finishedUtc": "2026-09-11T14:37:03.5251449Z",
+    "status": "completed_with_warnings",
+    "reason": "completed",
+    "lastError": "",
+    "revision": "SMRT straight clipmap continuation; focused 1024 pages",
+    "unityVersion": "6000.7.0a6",
+    "operatingSystem": "Windows 11  (10.0.26200)",
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "graphicsApi": "Direct3D12",
+    "graphicsDriver": "Direct3D 12 [level 12.2]",
+    "pipelineAsset": "Assets/New Vivid Render Pipeline Asset 1.asset",
+    "gpuMemoryMB": 15995,
+    "vSyncCount": 0,
+    "targetFrameRate": -1,
+    "minSamplesPerCase": 120,
+    "maxSamplesPerCase": 4096,
+    "completedCases": 1,
+    "processedCases": 1,
+    "comparableCases": 0,
+    "currentCase": 1,
+    "warmupSeconds": 4.0,
+    "measurementSeconds": 4.0,
+    "qualityShadowDistance": 40.0,
+    "frameTimingEnabled": true,
+    "requireFrameTimings": false,
+    "d3d12DebugStartupFlag": false,
+    "projectPath": "E:\\VividRP_Reborn",
+    "frameTimingSource": "editor_frames_unattributed",
+    "qualityStatus": "not_validated",
+    "cases": [
+        {
+            "name": "length50_a",
+            "resolution": 4096,
+            "pcf": true,
+            "stochasticFiltering": false,
+            "firstLevel": 0,
+            "maxDistance": 150.0,
+            "transition": 0.20000000298023224,
+            "screenDensity": true,
+            "targetTexelPixels": 1.0,
+            "lodBias": 0.0,
+            "screenSpaceDenoise": true,
+            "recorderRepaint": 2
+        }
+    ],
+    "results": [
+        {
+            "settings": {
+                "name": "length50_a",
+                "resolution": 4096,
+                "pcf": true,
+                "stochasticFiltering": false,
+                "firstLevel": 0,
+                "maxDistance": 150.0,
+                "transition": 0.20000000298023224,
+                "screenDensity": true,
+                "targetTexelPixels": 1.0,
+                "lodBias": 0.0,
+                "screenSpaceDenoise": true,
+                "recorderRepaint": 2
+            },
+            "status": "completed_with_warnings",
+            "reason": "",
+            "mainLightName": "Directional Light",
+            "mainLightScenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+            "pageCounterError": "",
+            "attempt": 0,
+            "observations": 226,
+            "selectedCameraFrames": 227,
+            "vsmActiveFrames": 227,
+            "settingsMismatchFrames": 0,
+            "longFramesOver100ms": 0,
+            "effectiveResolution": 4096,
+            "clipmapLevels": 10,
+            "physicalPageCapacity": 1024,
+            "renderWidth": 1920,
+            "renderHeight": 1080,
+            "segments": 1,
+            "duplicateTimings": 0,
+            "unavailableTimings": 0,
+            "regressedTimings": 0,
+            "cameraMoved": false,
+            "outputSizeChanged": false,
+            "finalPageCountersAvailable": true,
+            "samplingGoalMet": true,
+            "comparable": false,
+            "timingCoveragePassed": true,
+            "gpuTimingsBelow1ms": 1,
+            "observedWindowRepaints": 0,
+            "frameTimingSource": "editor_frames_unattributed",
+            "residencyStatus": "no_overflow_at_last_frame",
+            "qualityStatus": "not_validated",
+            "lowGpuTimingMedianIntervalSeconds": 0.0,
+            "measuredSeconds": 4.003358496315194,
+            "start": {
+                "scenes": [
+                    {
+                        "name": "Sponza",
+                        "path": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "active": true,
+                        "loaded": true,
+                        "dirty": false
+                    },
+                    {
+                        "name": "SponzaLightingDay",
+                        "path": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                        "active": false,
+                        "loaded": true,
+                        "dirty": false
+                    }
+                ],
+                "camera": {
+                    "name": "Camera_1",
+                    "scenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                    "position": {
+                        "x": 0.020202849060297012,
+                        "y": 7.662982940673828,
+                        "z": -2.4306046962738037
+                    },
+                    "eulerAngles": {
+                        "x": 359.2263488769531,
+                        "y": 3.0302236080169678,
+                        "z": 0.45027899742126465
+                    },
+                    "rotation": {
+                        "x": -0.0066449642181396484,
+                        "y": 0.02646632120013237,
+                        "z": 0.004106458276510239,
+                        "w": 0.99961918592453
+                    },
+                    "worldToCamera": {
+                        "e00": 0.9985653162002563,
+                        "e01": 0.007858053781092167,
+                        "e02": -0.05296706035733223,
+                        "e03": -0.20913197100162506,
+                        "e10": -0.00856152456253767,
+                        "e11": 0.9998779892921448,
+                        "e12": -0.013067501597106457,
+                        "e13": -7.693636894226074,
+                        "e20": -0.052857909351587296,
+                        "e21": -0.013502233661711216,
+                        "e22": -0.9985107779502869,
+                        "e23": -2.3224496841430664,
+                        "e30": 0.0,
+                        "e31": 0.0,
+                        "e32": 0.0,
+                        "e33": 1.0
+                    },
+                    "projection": {
+                        "e00": 0.9742785692214966,
+                        "e01": 0.0,
+                        "e02": 0.0,
+                        "e03": 0.0,
+                        "e10": 0.0,
+                        "e11": 1.7320507764816284,
+                        "e12": 0.0,
+                        "e13": 0.0,
+                        "e20": 0.0,
+                        "e21": 0.0,
+                        "e22": -1.0000200271606445,
+                        "e23": -0.02000020071864128,
+                        "e30": 0.0,
+                        "e31": 0.0,
+                        "e32": -1.0,
+                        "e33": 0.0
+                    },
+                    "fieldOfView": 60.0,
+                    "nearClip": 0.009999999776482582,
+                    "farClip": 1000.0,
+                    "orthographicSize": 5.0,
+                    "aspect": 1.7777777910232544,
+                    "focalLength": 12.901196479797363,
+                    "orthographic": false,
+                    "physicalCamera": false,
+                    "dynamicResolution": false,
+                    "sensorSize": {
+                        "x": 32.0,
+                        "y": 18.0
+                    },
+                    "lensShift": {
+                        "x": 0.0,
+                        "y": 0.0
+                    },
+                    "viewport": {
+                        "serializedVersion": "2",
+                        "x": 0.0,
+                        "y": 0.0,
+                        "width": 1.0,
+                        "height": 1.0
+                    },
+                    "pixelWidth": 1920,
+                    "pixelHeight": 1080,
+                    "scaledPixelWidth": 1920,
+                    "scaledPixelHeight": 1080,
+                    "cullingMask": -1
+                },
+                "lights": [
+                    {
+                        "name": "Area Light",
+                        "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "type": "Rectangle",
+                        "shadows": "Soft",
+                        "enabled": true,
+                        "active": true,
+                        "sun": false,
+                        "position": {
+                            "x": 3.0630760192871094,
+                            "y": 0.8290424346923828,
+                            "z": -3.8689332008361816
+                        },
+                        "eulerAngles": {
+                            "x": 57.45390701293945,
+                            "y": 307.0709228515625,
+                            "z": 354.0802917480469
+                        },
+                        "direction": {
+                            "x": 0.4292474389076233,
+                            "y": 0.842958927154541,
+                            "z": -0.3242947459220886
+                        },
+                        "rotation": {
+                            "x": -0.4498754143714905,
+                            "y": 0.3680553436279297,
+                            "z": -0.17337095737457275,
+                            "w": -0.7950409054756165
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 1.0,
+                            "b": 1.0,
+                            "a": 1.0
+                        },
+                        "intensity": 27983.23046875,
+                        "range": 2.3499999046325684,
+                        "spotAngle": 30.0,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 0.5
+                    },
+                    {
+                        "name": "Spot Light",
+                        "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "type": "Spot",
+                        "shadows": "None",
+                        "enabled": true,
+                        "active": true,
+                        "sun": false,
+                        "position": {
+                            "x": -0.6539999842643738,
+                            "y": 3.190000057220459,
+                            "z": -9.847999572753906
+                        },
+                        "eulerAngles": {
+                            "x": 85.45860290527344,
+                            "y": 89.10027313232422,
+                            "z": 1.2661778926849365
+                        },
+                        "direction": {
+                            "x": -0.0791693925857544,
+                            "y": 0.9968603849411011,
+                            "z": -0.0012433826923370361
+                        },
+                        "rotation": {
+                            "x": 0.4892139136791229,
+                            "y": 0.5099490880966187,
+                            "z": -0.47020190954208374,
+                            "w": 0.5287076830863953
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 1.0,
+                            "b": 1.0,
+                            "a": 1.0
+                        },
+                        "intensity": 24228.322265625,
+                        "range": 5.273412227630615,
+                        "spotAngle": 77.39628601074219,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 0.5
+                    },
+                    {
+                        "name": "Point Light (1)",
+                        "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "type": "Point",
+                        "shadows": "None",
+                        "enabled": true,
+                        "active": true,
+                        "sun": false,
+                        "position": {
+                            "x": -4.940000057220459,
+                            "y": 4.421011924743652,
+                            "z": -9.114999771118164
+                        },
+                        "eulerAngles": {
+                            "x": 3.2506494522094727,
+                            "y": 213.5113983154297,
+                            "z": 0.1347484439611435
+                        },
+                        "direction": {
+                            "x": 0.5512146353721619,
+                            "y": 0.05670410394668579,
+                            "z": 0.8324345350265503
+                        },
+                        "rotation": {
+                            "x": 0.007051417138427496,
+                            "y": -0.9571664333343506,
+                            "z": 0.027498072013258934,
+                            "w": 0.28814342617988586
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 1.0,
+                            "b": 1.0,
+                            "a": 1.0
+                        },
+                        "intensity": 3183.098876953125,
+                        "range": 1.671067237854004,
+                        "spotAngle": 30.0,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 0.5
+                    },
+                    {
+                        "name": "Directional Light",
+                        "scenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                        "type": "Directional",
+                        "shadows": "Soft",
+                        "enabled": true,
+                        "active": true,
+                        "sun": true,
+                        "position": {
+                            "x": 1.104139804840088,
+                            "y": 15.506471633911133,
+                            "z": -8.503470420837402
+                        },
+                        "eulerAngles": {
+                            "x": 59.46512985229492,
+                            "y": 355.0879211425781,
+                            "z": 0.4669826626777649
+                        },
+                        "direction": {
+                            "x": 0.04350399225950241,
+                            "y": 0.8613201379776001,
+                            "z": -0.5061967372894287
+                        },
+                        "rotation": {
+                            "x": -0.49534091353416443,
+                            "y": 0.03923029452562332,
+                            "z": -0.024788280948996544,
+                            "w": -0.8674583435058594
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 0.9431372284889221,
+                            "b": 0.8999999761581421,
+                            "a": 1.0
+                        },
+                        "intensity": 115098.7578125,
+                        "range": 10.0,
+                        "spotAngle": 30.0,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 7.099999904632568
+                    },
+                    {
+                        "name": "Point Light",
+                        "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "type": "Spot",
+                        "shadows": "None",
+                        "enabled": true,
+                        "active": true,
+                        "sun": false,
+                        "position": {
+                            "x": -0.3905887007713318,
+                            "y": 5.956563949584961,
+                            "z": -10.40559196472168
+                        },
+                        "eulerAngles": {
+                            "x": 83.28237915039063,
+                            "y": 149.7122039794922,
+                            "z": 179.3147430419922
+                        },
+                        "direction": {
+                            "x": -0.058996543288230896,
+                            "y": 0.9931347370147705,
+                            "z": 0.10100990533828735
+                        },
+                        "rotation": {
+                            "x": -0.7223935723304749,
+                            "y": 0.1692703813314438,
+                            "z": -0.19139429926872253,
+                            "w": -0.6425444483757019
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 1.0,
+                            "b": 1.0,
+                            "a": 1.0
+                        },
+                        "intensity": 23.743268966674805,
+                        "range": 7.315995693206787,
+                        "spotAngle": 16.755617141723633,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 0.5
+                    }
+                ],
+                "enabledGameCameras": 1,
+                "scaledTime": 11.980247264739228,
+                "unscaledTime": 35.1559248015873,
+                "timeScale": 1.0
+            },
+            "end": {
+                "scenes": [
+                    {
+                        "name": "Sponza",
+                        "path": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "active": true,
+                        "loaded": true,
+                        "dirty": false
+                    },
+                    {
+                        "name": "SponzaLightingDay",
+                        "path": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                        "active": false,
+                        "loaded": true,
+                        "dirty": false
+                    }
+                ],
+                "camera": {
+                    "name": "Camera_1",
+                    "scenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                    "position": {
+                        "x": 0.020202849060297012,
+                        "y": 7.662982940673828,
+                        "z": -2.4306046962738037
+                    },
+                    "eulerAngles": {
+                        "x": 359.2263488769531,
+                        "y": 3.0302236080169678,
+                        "z": 0.45027899742126465
+                    },
+                    "rotation": {
+                        "x": -0.0066449642181396484,
+                        "y": 0.02646632120013237,
+                        "z": 0.004106458276510239,
+                        "w": 0.99961918592453
+                    },
+                    "worldToCamera": {
+                        "e00": 0.9985653162002563,
+                        "e01": 0.007858053781092167,
+                        "e02": -0.05296706035733223,
+                        "e03": -0.20913197100162506,
+                        "e10": -0.00856152456253767,
+                        "e11": 0.9998779892921448,
+                        "e12": -0.013067501597106457,
+                        "e13": -7.693636894226074,
+                        "e20": -0.052857909351587296,
+                        "e21": -0.013502233661711216,
+                        "e22": -0.9985107779502869,
+                        "e23": -2.3224496841430664,
+                        "e30": 0.0,
+                        "e31": 0.0,
+                        "e32": 0.0,
+                        "e33": 1.0
+                    },
+                    "projection": {
+                        "e00": 0.9742785692214966,
+                        "e01": 0.0,
+                        "e02": 0.0,
+                        "e03": 0.0,
+                        "e10": 0.0,
+                        "e11": 1.7320507764816284,
+                        "e12": 0.0,
+                        "e13": 0.0,
+                        "e20": 0.0,
+                        "e21": 0.0,
+                        "e22": -1.0000200271606445,
+                        "e23": -0.02000020071864128,
+                        "e30": 0.0,
+                        "e31": 0.0,
+                        "e32": -1.0,
+                        "e33": 0.0
+                    },
+                    "fieldOfView": 60.0,
+                    "nearClip": 0.009999999776482582,
+                    "farClip": 1000.0,
+                    "orthographicSize": 5.0,
+                    "aspect": 1.7777777910232544,
+                    "focalLength": 12.901196479797363,
+                    "orthographic": false,
+                    "physicalCamera": false,
+                    "dynamicResolution": false,
+                    "sensorSize": {
+                        "x": 32.0,
+                        "y": 18.0
+                    },
+                    "lensShift": {
+                        "x": 0.0,
+                        "y": 0.0
+                    },
+                    "viewport": {
+                        "serializedVersion": "2",
+                        "x": 0.0,
+                        "y": 0.0,
+                        "width": 1.0,
+                        "height": 1.0
+                    },
+                    "pixelWidth": 1920,
+                    "pixelHeight": 1080,
+                    "scaledPixelWidth": 1920,
+                    "scaledPixelHeight": 1080,
+                    "cullingMask": -1
+                },
+                "lights": [
+                    {
+                        "name": "Area Light",
+                        "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "type": "Rectangle",
+                        "shadows": "Soft",
+                        "enabled": true,
+                        "active": true,
+                        "sun": false,
+                        "position": {
+                            "x": 3.0630760192871094,
+                            "y": 0.8290424346923828,
+                            "z": -3.8689332008361816
+                        },
+                        "eulerAngles": {
+                            "x": 57.45390701293945,
+                            "y": 307.0709228515625,
+                            "z": 354.0802917480469
+                        },
+                        "direction": {
+                            "x": 0.4292474389076233,
+                            "y": 0.842958927154541,
+                            "z": -0.3242947459220886
+                        },
+                        "rotation": {
+                            "x": -0.4498754143714905,
+                            "y": 0.3680553436279297,
+                            "z": -0.17337095737457275,
+                            "w": -0.7950409054756165
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 1.0,
+                            "b": 1.0,
+                            "a": 1.0
+                        },
+                        "intensity": 27983.23046875,
+                        "range": 2.3499999046325684,
+                        "spotAngle": 30.0,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 0.5
+                    },
+                    {
+                        "name": "Spot Light",
+                        "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "type": "Spot",
+                        "shadows": "None",
+                        "enabled": true,
+                        "active": true,
+                        "sun": false,
+                        "position": {
+                            "x": -0.6539999842643738,
+                            "y": 3.190000057220459,
+                            "z": -9.847999572753906
+                        },
+                        "eulerAngles": {
+                            "x": 85.45860290527344,
+                            "y": 89.10027313232422,
+                            "z": 1.2661778926849365
+                        },
+                        "direction": {
+                            "x": -0.0791693925857544,
+                            "y": 0.9968603849411011,
+                            "z": -0.0012433826923370361
+                        },
+                        "rotation": {
+                            "x": 0.4892139136791229,
+                            "y": 0.5099490880966187,
+                            "z": -0.47020190954208374,
+                            "w": 0.5287076830863953
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 1.0,
+                            "b": 1.0,
+                            "a": 1.0
+                        },
+                        "intensity": 24228.322265625,
+                        "range": 5.273412227630615,
+                        "spotAngle": 77.39628601074219,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 0.5
+                    },
+                    {
+                        "name": "Point Light (1)",
+                        "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "type": "Point",
+                        "shadows": "None",
+                        "enabled": true,
+                        "active": true,
+                        "sun": false,
+                        "position": {
+                            "x": -4.940000057220459,
+                            "y": 4.421011924743652,
+                            "z": -9.114999771118164
+                        },
+                        "eulerAngles": {
+                            "x": 3.2506494522094727,
+                            "y": 213.5113983154297,
+                            "z": 0.1347484439611435
+                        },
+                        "direction": {
+                            "x": 0.5512146353721619,
+                            "y": 0.05670410394668579,
+                            "z": 0.8324345350265503
+                        },
+                        "rotation": {
+                            "x": 0.007051417138427496,
+                            "y": -0.9571664333343506,
+                            "z": 0.027498072013258934,
+                            "w": 0.28814342617988586
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 1.0,
+                            "b": 1.0,
+                            "a": 1.0
+                        },
+                        "intensity": 3183.098876953125,
+                        "range": 1.671067237854004,
+                        "spotAngle": 30.0,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 0.5
+                    },
+                    {
+                        "name": "Directional Light",
+                        "scenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                        "type": "Directional",
+                        "shadows": "Soft",
+                        "enabled": true,
+                        "active": true,
+                        "sun": true,
+                        "position": {
+                            "x": 1.104139804840088,
+                            "y": 15.506471633911133,
+                            "z": -8.503470420837402
+                        },
+                        "eulerAngles": {
+                            "x": 59.46512985229492,
+                            "y": 355.0879211425781,
+                            "z": 0.4669826626777649
+                        },
+                        "direction": {
+                            "x": 0.04350399225950241,
+                            "y": 0.8613201379776001,
+                            "z": -0.5061967372894287
+                        },
+                        "rotation": {
+                            "x": -0.49534091353416443,
+                            "y": 0.03923029452562332,
+                            "z": -0.024788280948996544,
+                            "w": -0.8674583435058594
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 0.9431372284889221,
+                            "b": 0.8999999761581421,
+                            "a": 1.0
+                        },
+                        "intensity": 115098.7578125,
+                        "range": 10.0,
+                        "spotAngle": 30.0,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 7.099999904632568
+                    },
+                    {
+                        "name": "Point Light",
+                        "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                        "type": "Spot",
+                        "shadows": "None",
+                        "enabled": true,
+                        "active": true,
+                        "sun": false,
+                        "position": {
+                            "x": -0.3905887007713318,
+                            "y": 5.956563949584961,
+                            "z": -10.40559196472168
+                        },
+                        "eulerAngles": {
+                            "x": 83.28237915039063,
+                            "y": 149.7122039794922,
+                            "z": 179.3147430419922
+                        },
+                        "direction": {
+                            "x": -0.058996543288230896,
+                            "y": 0.9931347370147705,
+                            "z": 0.10100990533828735
+                        },
+                        "rotation": {
+                            "x": -0.7223935723304749,
+                            "y": 0.1692703813314438,
+                            "z": -0.19139429926872253,
+                            "w": -0.6425444483757019
+                        },
+                        "color": {
+                            "r": 1.0,
+                            "g": 1.0,
+                            "b": 1.0,
+                            "a": 1.0
+                        },
+                        "intensity": 23.743268966674805,
+                        "range": 7.315995693206787,
+                        "spotAngle": 16.755617141723633,
+                        "shadowStrength": 1.0,
+                        "depthBias": 1.0,
+                        "normalBias": 1.0,
+                        "slopeBias": 2.5,
+                        "angularDiameter": 0.5
+                    }
+                ],
+                "enabledGameCameras": 1,
+                "scaledTime": 16.14005386196145,
+                "unscaledTime": 39.315731398809525,
+                "timeScale": 1.0
+            },
+            "segmentStarts": [
+                {
+                    "scenes": [
+                        {
+                            "name": "Sponza",
+                            "path": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                            "active": true,
+                            "loaded": true,
+                            "dirty": false
+                        },
+                        {
+                            "name": "SponzaLightingDay",
+                            "path": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                            "active": false,
+                            "loaded": true,
+                            "dirty": false
+                        }
+                    ],
+                    "camera": {
+                        "name": "Camera_1",
+                        "scenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                        "position": {
+                            "x": 0.020202849060297012,
+                            "y": 7.662982940673828,
+                            "z": -2.4306046962738037
+                        },
+                        "eulerAngles": {
+                            "x": 359.2263488769531,
+                            "y": 3.0302236080169678,
+                            "z": 0.45027899742126465
+                        },
+                        "rotation": {
+                            "x": -0.0066449642181396484,
+                            "y": 0.02646632120013237,
+                            "z": 0.004106458276510239,
+                            "w": 0.99961918592453
+                        },
+                        "worldToCamera": {
+                            "e00": 0.9985653162002563,
+                            "e01": 0.007858053781092167,
+                            "e02": -0.05296706035733223,
+                            "e03": -0.20913197100162506,
+                            "e10": -0.00856152456253767,
+                            "e11": 0.9998779892921448,
+                            "e12": -0.013067501597106457,
+                            "e13": -7.693636894226074,
+                            "e20": -0.052857909351587296,
+                            "e21": -0.013502233661711216,
+                            "e22": -0.9985107779502869,
+                            "e23": -2.3224496841430664,
+                            "e30": 0.0,
+                            "e31": 0.0,
+                            "e32": 0.0,
+                            "e33": 1.0
+                        },
+                        "projection": {
+                            "e00": 0.9742785692214966,
+                            "e01": 0.0,
+                            "e02": 0.0,
+                            "e03": 0.0,
+                            "e10": 0.0,
+                            "e11": 1.7320507764816284,
+                            "e12": 0.0,
+                            "e13": 0.0,
+                            "e20": 0.0,
+                            "e21": 0.0,
+                            "e22": -1.0000200271606445,
+                            "e23": -0.02000020071864128,
+                            "e30": 0.0,
+                            "e31": 0.0,
+                            "e32": -1.0,
+                            "e33": 0.0
+                        },
+                        "fieldOfView": 60.0,
+                        "nearClip": 0.009999999776482582,
+                        "farClip": 1000.0,
+                        "orthographicSize": 5.0,
+                        "aspect": 1.7777777910232544,
+                        "focalLength": 12.901196479797363,
+                        "orthographic": false,
+                        "physicalCamera": false,
+                        "dynamicResolution": false,
+                        "sensorSize": {
+                            "x": 32.0,
+                            "y": 18.0
+                        },
+                        "lensShift": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "viewport": {
+                            "serializedVersion": "2",
+                            "x": 0.0,
+                            "y": 0.0,
+                            "width": 1.0,
+                            "height": 1.0
+                        },
+                        "pixelWidth": 1920,
+                        "pixelHeight": 1080,
+                        "scaledPixelWidth": 1920,
+                        "scaledPixelHeight": 1080,
+                        "cullingMask": -1
+                    },
+                    "lights": [
+                        {
+                            "name": "Area Light",
+                            "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                            "type": "Rectangle",
+                            "shadows": "Soft",
+                            "enabled": true,
+                            "active": true,
+                            "sun": false,
+                            "position": {
+                                "x": 3.0630760192871094,
+                                "y": 0.8290424346923828,
+                                "z": -3.8689332008361816
+                            },
+                            "eulerAngles": {
+                                "x": 57.45390701293945,
+                                "y": 307.0709228515625,
+                                "z": 354.0802917480469
+                            },
+                            "direction": {
+                                "x": 0.4292474389076233,
+                                "y": 0.842958927154541,
+                                "z": -0.3242947459220886
+                            },
+                            "rotation": {
+                                "x": -0.4498754143714905,
+                                "y": 0.3680553436279297,
+                                "z": -0.17337095737457275,
+                                "w": -0.7950409054756165
+                            },
+                            "color": {
+                                "r": 1.0,
+                                "g": 1.0,
+                                "b": 1.0,
+                                "a": 1.0
+                            },
+                            "intensity": 27983.23046875,
+                            "range": 2.3499999046325684,
+                            "spotAngle": 30.0,
+                            "shadowStrength": 1.0,
+                            "depthBias": 1.0,
+                            "normalBias": 1.0,
+                            "slopeBias": 2.5,
+                            "angularDiameter": 0.5
+                        },
+                        {
+                            "name": "Spot Light",
+                            "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                            "type": "Spot",
+                            "shadows": "None",
+                            "enabled": true,
+                            "active": true,
+                            "sun": false,
+                            "position": {
+                                "x": -0.6539999842643738,
+                                "y": 3.190000057220459,
+                                "z": -9.847999572753906
+                            },
+                            "eulerAngles": {
+                                "x": 85.45860290527344,
+                                "y": 89.10027313232422,
+                                "z": 1.2661778926849365
+                            },
+                            "direction": {
+                                "x": -0.0791693925857544,
+                                "y": 0.9968603849411011,
+                                "z": -0.0012433826923370361
+                            },
+                            "rotation": {
+                                "x": 0.4892139136791229,
+                                "y": 0.5099490880966187,
+                                "z": -0.47020190954208374,
+                                "w": 0.5287076830863953
+                            },
+                            "color": {
+                                "r": 1.0,
+                                "g": 1.0,
+                                "b": 1.0,
+                                "a": 1.0
+                            },
+                            "intensity": 24228.322265625,
+                            "range": 5.273412227630615,
+                            "spotAngle": 77.39628601074219,
+                            "shadowStrength": 1.0,
+                            "depthBias": 1.0,
+                            "normalBias": 1.0,
+                            "slopeBias": 2.5,
+                            "angularDiameter": 0.5
+                        },
+                        {
+                            "name": "Point Light (1)",
+                            "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                            "type": "Point",
+                            "shadows": "None",
+                            "enabled": true,
+                            "active": true,
+                            "sun": false,
+                            "position": {
+                                "x": -4.940000057220459,
+                                "y": 4.421011924743652,
+                                "z": -9.114999771118164
+                            },
+                            "eulerAngles": {
+                                "x": 3.2506494522094727,
+                                "y": 213.5113983154297,
+                                "z": 0.1347484439611435
+                            },
+                            "direction": {
+                                "x": 0.5512146353721619,
+                                "y": 0.05670410394668579,
+                                "z": 0.8324345350265503
+                            },
+                            "rotation": {
+                                "x": 0.007051417138427496,
+                                "y": -0.9571664333343506,
+                                "z": 0.027498072013258934,
+                                "w": 0.28814342617988586
+                            },
+                            "color": {
+                                "r": 1.0,
+                                "g": 1.0,
+                                "b": 1.0,
+                                "a": 1.0
+                            },
+                            "intensity": 3183.098876953125,
+                            "range": 1.671067237854004,
+                            "spotAngle": 30.0,
+                            "shadowStrength": 1.0,
+                            "depthBias": 1.0,
+                            "normalBias": 1.0,
+                            "slopeBias": 2.5,
+                            "angularDiameter": 0.5
+                        },
+                        {
+                            "name": "Directional Light",
+                            "scenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                            "type": "Directional",
+                            "shadows": "Soft",
+                            "enabled": true,
+                            "active": true,
+                            "sun": true,
+                            "position": {
+                                "x": 1.104139804840088,
+                                "y": 15.506471633911133,
+                                "z": -8.503470420837402
+                            },
+                            "eulerAngles": {
+                                "x": 59.46512985229492,
+                                "y": 355.0879211425781,
+                                "z": 0.4669826626777649
+                            },
+                            "direction": {
+                                "x": 0.04350399225950241,
+                                "y": 0.8613201379776001,
+                                "z": -0.5061967372894287
+                            },
+                            "rotation": {
+                                "x": -0.49534091353416443,
+                                "y": 0.03923029452562332,
+                                "z": -0.024788280948996544,
+                                "w": -0.8674583435058594
+                            },
+                            "color": {
+                                "r": 1.0,
+                                "g": 0.9431372284889221,
+                                "b": 0.8999999761581421,
+                                "a": 1.0
+                            },
+                            "intensity": 115098.7578125,
+                            "range": 10.0,
+                            "spotAngle": 30.0,
+                            "shadowStrength": 1.0,
+                            "depthBias": 1.0,
+                            "normalBias": 1.0,
+                            "slopeBias": 2.5,
+                            "angularDiameter": 7.099999904632568
+                        },
+                        {
+                            "name": "Point Light",
+                            "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                            "type": "Spot",
+                            "shadows": "None",
+                            "enabled": true,
+                            "active": true,
+                            "sun": false,
+                            "position": {
+                                "x": -0.3905887007713318,
+                                "y": 5.956563949584961,
+                                "z": -10.40559196472168
+                            },
+                            "eulerAngles": {
+                                "x": 83.28237915039063,
+                                "y": 149.7122039794922,
+                                "z": 179.3147430419922
+                            },
+                            "direction": {
+                                "x": -0.058996543288230896,
+                                "y": 0.9931347370147705,
+                                "z": 0.10100990533828735
+                            },
+                            "rotation": {
+                                "x": -0.7223935723304749,
+                                "y": 0.1692703813314438,
+                                "z": -0.19139429926872253,
+                                "w": -0.6425444483757019
+                            },
+                            "color": {
+                                "r": 1.0,
+                                "g": 1.0,
+                                "b": 1.0,
+                                "a": 1.0
+                            },
+                            "intensity": 23.743268966674805,
+                            "range": 7.315995693206787,
+                            "spotAngle": 16.755617141723633,
+                            "shadowStrength": 1.0,
+                            "depthBias": 1.0,
+                            "normalBias": 1.0,
+                            "slopeBias": 2.5,
+                            "angularDiameter": 0.5
+                        }
+                    ],
+                    "enabledGameCameras": 1,
+                    "scaledTime": 11.980247264739228,
+                    "unscaledTime": 35.1559248015873,
+                    "timeScale": 1.0
+                }
+            ],
+            "finalPageCounters": [
+                672,
+                668,
+                0,
+                0
+            ],
+            "metrics": [
+                {
+                    "name": "frame_interval_ms",
+                    "availability": "available",
+                    "median": "17.60339830070734",
+                    "p95": "18.666602671146393",
+                    "min": "6.02620467543602",
+                    "max": "52.340298891067505",
+                    "validSamples": 226
+                },
+                {
+                    "name": "cpu_frame_ms",
+                    "availability": "available",
+                    "median": "17.596449999999997",
+                    "p95": "19.0016",
+                    "min": "4.4212",
+                    "max": "53.0283",
+                    "validSamples": 226
+                },
+                {
+                    "name": "gpu_frame_ms",
+                    "availability": "available",
+                    "median": "17.58976",
+                    "p95": "18.541312",
+                    "min": "0.047104",
+                    "max": "19.0464",
+                    "validSamples": 226
+                },
+                {
+                    "name": "cpu_render_thread_ms",
+                    "availability": "available",
+                    "median": "2.3987499999999997",
+                    "p95": "3.0989",
+                    "min": "0.4932",
+                    "max": "3.4861",
+                    "validSamples": 226
+                },
+                {
+                    "name": "gc_allocated_in_editor_frame_bytes",
+                    "availability": "available",
+                    "median": "14539",
+                    "p95": "133205",
+                    "min": "14419",
+                    "max": "245671",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.LayoutRemap_gpu_ms",
+                    "availability": "available",
+                    "median": "0",
+                    "p95": "0",
+                    "min": "0",
+                    "max": "0.000256",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.MarkReceiverPages_gpu_ms",
+                    "availability": "available",
+                    "median": "4.127616",
+                    "p95": "4.50688",
+                    "min": "3.5489279999999996",
+                    "max": "4.860416",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.Allocate_gpu_ms",
+                    "availability": "available",
+                    "median": "0.66790399999999994",
+                    "p95": "0.68787199999999993",
+                    "min": "0.658432",
+                    "max": "0.875776",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.InvalidateStatic_gpu_ms",
+                    "availability": "no_samples_or_not_executed",
+                    "median": "",
+                    "p95": "",
+                    "min": "",
+                    "max": "",
+                    "validSamples": 0
+                },
+                {
+                    "name": "VSM.ClearPhysicalPages_gpu_ms",
+                    "availability": "available",
+                    "median": "0.133376",
+                    "p95": "0.13516799999999998",
+                    "min": "0.121088",
+                    "max": "0.423936",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.StaticCasterCull_gpu_ms",
+                    "availability": "available",
+                    "median": "0.366336",
+                    "p95": "0.62105599999999994",
+                    "min": "0.35584",
+                    "max": "0.931584",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.DynamicCasterCull_gpu_ms",
+                    "availability": "available",
+                    "median": "0",
+                    "p95": "0.000256",
+                    "min": "0",
+                    "max": "0.000256",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.PageCull_gpu_ms",
+                    "availability": "available",
+                    "median": "0.346496",
+                    "p95": "0.50892799999999994",
+                    "min": "0.314112",
+                    "max": "0.656384",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.StaticRaster_gpu_ms",
+                    "availability": "available",
+                    "median": "0.007424",
+                    "p95": "0.010496",
+                    "min": "0.003072",
+                    "max": "0.027648",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.DynamicRaster_gpu_ms",
+                    "availability": "available",
+                    "median": "0.08832",
+                    "p95": "0.094975999999999991",
+                    "min": "0.080384",
+                    "max": "0.56652799999999992",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.UnityCompatibilityRaster_gpu_ms",
+                    "availability": "no_samples_or_not_executed",
+                    "median": "",
+                    "p95": "",
+                    "min": "",
+                    "max": "",
+                    "validSamples": 0
+                },
+                {
+                    "name": "VSM.FinalizePages_gpu_ms",
+                    "availability": "available",
+                    "median": "0.004352",
+                    "p95": "0.005376",
+                    "min": "0.002048",
+                    "max": "0.006144",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.ResetFeedback_gpu_ms",
+                    "availability": "available",
+                    "median": "0",
+                    "p95": "0",
+                    "min": "0",
+                    "max": "0.000256",
+                    "validSamples": 226
+                },
+                {
+                    "name": "VSM.Resolve_gpu_ms",
+                    "availability": "available",
+                    "median": "4.60736",
+                    "p95": "5.095168",
+                    "min": "3.91296",
+                    "max": "5.3652479999999994",
+                    "validSamples": 226
+                }
+            ],
+            "issues": [
+                "Whole-frame timing source is not attributed to the selected camera; coverage alone cannot certify comparability.",
+                "Positive GPU timings below 1 ms retained as diagnostics; no numeric filtering applied."
+            ]
+        }
+    ],
+    "initialScene": {
+        "scenes": [
+            {
+                "name": "Sponza",
+                "path": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                "active": true,
+                "loaded": true,
+                "dirty": false
+            },
+            {
+                "name": "SponzaLightingDay",
+                "path": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                "active": false,
+                "loaded": true,
+                "dirty": false
+            }
+        ],
+        "camera": {
+            "name": "Camera_1",
+            "scenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+            "position": {
+                "x": 0.020202849060297012,
+                "y": 7.662982940673828,
+                "z": -2.4306046962738037
+            },
+            "eulerAngles": {
+                "x": 359.2263488769531,
+                "y": 3.0302236080169678,
+                "z": 0.45027899742126465
+            },
+            "rotation": {
+                "x": -0.0066449642181396484,
+                "y": 0.02646632120013237,
+                "z": 0.004106458276510239,
+                "w": 0.99961918592453
+            },
+            "worldToCamera": {
+                "e00": 0.9985653162002563,
+                "e01": 0.007858053781092167,
+                "e02": -0.05296706035733223,
+                "e03": -0.20913197100162506,
+                "e10": -0.00856152456253767,
+                "e11": 0.9998779892921448,
+                "e12": -0.013067501597106457,
+                "e13": -7.693636894226074,
+                "e20": -0.052857909351587296,
+                "e21": -0.013502233661711216,
+                "e22": -0.9985107779502869,
+                "e23": -2.3224496841430664,
+                "e30": 0.0,
+                "e31": 0.0,
+                "e32": 0.0,
+                "e33": 1.0
+            },
+            "projection": {
+                "e00": 0.9742785692214966,
+                "e01": 0.0,
+                "e02": 0.0,
+                "e03": 0.0,
+                "e10": 0.0,
+                "e11": 1.7320507764816284,
+                "e12": 0.0,
+                "e13": 0.0,
+                "e20": 0.0,
+                "e21": 0.0,
+                "e22": -1.0000200271606445,
+                "e23": -0.02000020071864128,
+                "e30": 0.0,
+                "e31": 0.0,
+                "e32": -1.0,
+                "e33": 0.0
+            },
+            "fieldOfView": 60.0,
+            "nearClip": 0.009999999776482582,
+            "farClip": 1000.0,
+            "orthographicSize": 5.0,
+            "aspect": 1.7777777910232544,
+            "focalLength": 12.901196479797363,
+            "orthographic": false,
+            "physicalCamera": false,
+            "dynamicResolution": false,
+            "sensorSize": {
+                "x": 32.0,
+                "y": 18.0
+            },
+            "lensShift": {
+                "x": 0.0,
+                "y": 0.0
+            },
+            "viewport": {
+                "serializedVersion": "2",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 1.0,
+                "height": 1.0
+            },
+            "pixelWidth": 1920,
+            "pixelHeight": 1080,
+            "scaledPixelWidth": 1920,
+            "scaledPixelHeight": 1080,
+            "cullingMask": -1
+        },
+        "lights": [
+            {
+                "name": "Area Light",
+                "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                "type": "Rectangle",
+                "shadows": "Soft",
+                "enabled": true,
+                "active": true,
+                "sun": false,
+                "position": {
+                    "x": 3.0630760192871094,
+                    "y": 0.8290424346923828,
+                    "z": -3.8689332008361816
+                },
+                "eulerAngles": {
+                    "x": 57.45390701293945,
+                    "y": 307.0709228515625,
+                    "z": 354.0802917480469
+                },
+                "direction": {
+                    "x": 0.4292474389076233,
+                    "y": 0.842958927154541,
+                    "z": -0.3242947459220886
+                },
+                "rotation": {
+                    "x": -0.4498754143714905,
+                    "y": 0.3680553436279297,
+                    "z": -0.17337095737457275,
+                    "w": -0.7950409054756165
+                },
+                "color": {
+                    "r": 1.0,
+                    "g": 1.0,
+                    "b": 1.0,
+                    "a": 1.0
+                },
+                "intensity": 27983.23046875,
+                "range": 2.3499999046325684,
+                "spotAngle": 30.0,
+                "shadowStrength": 1.0,
+                "depthBias": 1.0,
+                "normalBias": 1.0,
+                "slopeBias": 2.5,
+                "angularDiameter": 0.5
+            },
+            {
+                "name": "Spot Light",
+                "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                "type": "Spot",
+                "shadows": "None",
+                "enabled": true,
+                "active": true,
+                "sun": false,
+                "position": {
+                    "x": -0.6539999842643738,
+                    "y": 3.190000057220459,
+                    "z": -9.847999572753906
+                },
+                "eulerAngles": {
+                    "x": 85.45860290527344,
+                    "y": 89.10027313232422,
+                    "z": 1.2661778926849365
+                },
+                "direction": {
+                    "x": -0.0791693925857544,
+                    "y": 0.9968603849411011,
+                    "z": -0.0012433826923370361
+                },
+                "rotation": {
+                    "x": 0.4892139136791229,
+                    "y": 0.5099490880966187,
+                    "z": -0.47020190954208374,
+                    "w": 0.5287076830863953
+                },
+                "color": {
+                    "r": 1.0,
+                    "g": 1.0,
+                    "b": 1.0,
+                    "a": 1.0
+                },
+                "intensity": 24228.322265625,
+                "range": 5.273412227630615,
+                "spotAngle": 77.39628601074219,
+                "shadowStrength": 1.0,
+                "depthBias": 1.0,
+                "normalBias": 1.0,
+                "slopeBias": 2.5,
+                "angularDiameter": 0.5
+            },
+            {
+                "name": "Point Light (1)",
+                "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                "type": "Point",
+                "shadows": "None",
+                "enabled": true,
+                "active": true,
+                "sun": false,
+                "position": {
+                    "x": -4.940000057220459,
+                    "y": 4.421011924743652,
+                    "z": -9.114999771118164
+                },
+                "eulerAngles": {
+                    "x": 3.2506494522094727,
+                    "y": 213.5113983154297,
+                    "z": 0.1347484439611435
+                },
+                "direction": {
+                    "x": 0.5512146353721619,
+                    "y": 0.05670410394668579,
+                    "z": 0.8324345350265503
+                },
+                "rotation": {
+                    "x": 0.007051417138427496,
+                    "y": -0.9571664333343506,
+                    "z": 0.027498072013258934,
+                    "w": 0.28814342617988586
+                },
+                "color": {
+                    "r": 1.0,
+                    "g": 1.0,
+                    "b": 1.0,
+                    "a": 1.0
+                },
+                "intensity": 3183.098876953125,
+                "range": 1.671067237854004,
+                "spotAngle": 30.0,
+                "shadowStrength": 1.0,
+                "depthBias": 1.0,
+                "normalBias": 1.0,
+                "slopeBias": 2.5,
+                "angularDiameter": 0.5
+            },
+            {
+                "name": "Directional Light",
+                "scenePath": "Assets/ClassicSponza/Scenes/SponzaLightingDay.unity",
+                "type": "Directional",
+                "shadows": "Soft",
+                "enabled": true,
+                "active": true,
+                "sun": true,
+                "position": {
+                    "x": 1.104139804840088,
+                    "y": 15.506471633911133,
+                    "z": -8.503470420837402
+                },
+                "eulerAngles": {
+                    "x": 59.46512985229492,
+                    "y": 355.0879211425781,
+                    "z": 0.4669826626777649
+                },
+                "direction": {
+                    "x": 0.04350399225950241,
+                    "y": 0.8613201379776001,
+                    "z": -0.5061967372894287
+                },
+                "rotation": {
+                    "x": -0.49534091353416443,
+                    "y": 0.03923029452562332,
+                    "z": -0.024788280948996544,
+                    "w": -0.8674583435058594
+                },
+                "color": {
+                    "r": 1.0,
+                    "g": 0.9431372284889221,
+                    "b": 0.8999999761581421,
+                    "a": 1.0
+                },
+                "intensity": 115098.7578125,
+                "range": 10.0,
+                "spotAngle": 30.0,
+                "shadowStrength": 1.0,
+                "depthBias": 1.0,
+                "normalBias": 1.0,
+                "slopeBias": 2.5,
+                "angularDiameter": 7.099999904632568
+            },
+            {
+                "name": "Point Light",
+                "scenePath": "Assets/ClassicSponza/Scenes/Sponza.unity",
+                "type": "Spot",
+                "shadows": "None",
+                "enabled": true,
+                "active": true,
+                "sun": false,
+                "position": {
+                    "x": -0.3905887007713318,
+                    "y": 5.956563949584961,
+                    "z": -10.40559196472168
+                },
+                "eulerAngles": {
+                    "x": 83.28237915039063,
+                    "y": 149.7122039794922,
+                    "z": 179.3147430419922
+                },
+                "direction": {
+                    "x": -0.058996543288230896,
+                    "y": 0.9931347370147705,
+                    "z": 0.10100990533828735
+                },
+                "rotation": {
+                    "x": -0.7223935723304749,
+                    "y": 0.1692703813314438,
+                    "z": -0.19139429926872253,
+                    "w": -0.6425444483757019
+                },
+                "color": {
+                    "r": 1.0,
+                    "g": 1.0,
+                    "b": 1.0,
+                    "a": 1.0
+                },
+                "intensity": 23.743268966674805,
+                "range": 7.315995693206787,
+                "spotAngle": 16.755617141723633,
+                "shadowStrength": 1.0,
+                "depthBias": 1.0,
+                "normalBias": 1.0,
+                "slopeBias": 2.5,
+                "angularDiameter": 0.5
+            }
+        ],
+        "enabledGameCameras": 1,
+        "scaledTime": 7.967063059807256,
+        "unscaledTime": 31.142740596655326,
+        "timeScale": 1.0
+    },
+    "timingScope": "Whole-frame CPU/GPU, GC and GPU stage totals include Editor and all cameras. FrameTiming/GPU results are delayed and not synchronized to the observation frame. Missing/skipped data is unavailable, not zero. PageCull is nested in caster culling; do not sum stage quantiles."
+}

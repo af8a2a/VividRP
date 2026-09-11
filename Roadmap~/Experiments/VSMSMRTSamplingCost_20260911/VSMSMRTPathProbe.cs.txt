@@ -72,7 +72,7 @@ namespace VividRP.Editor
             int size = reader.ReadInt32(), count = reader.ReadInt32(), budget = reader.ReadInt32(), levels = reader.ReadInt32();
             float maxLength = reader.ReadSingle(), tangent = reader.ReadSingle();
             var projections = new VividRP.Runtime.RenderPass.Core.VirtualShadowMapProjection[levels];
-            var tableData = new uint[levels]; var metadataData = new uint4[levels];
+            var tableData = new uint[levels * 4]; var metadataData = new uint4[levels * 4];
             for (int level = 0; level < levels; level++)
             {
                 float w = reader.ReadSingle(); reader.ReadSingle();
@@ -81,18 +81,34 @@ namespace VividRP.Editor
                 matrix.m00 = matrix.m11 = 1 / (w * size); matrix.m22 = zs;
                 matrix.m03 = .5f - cx / (w * size); matrix.m13 = .5f - cy / (w * size); matrix.m23 = zo;
                 projections[level].WorldToShadow = matrix; projections[level].Parameters = new Vector4(w, 0, 0, 100);
-                tableData[level] = (uint)level + 1; metadataData[level] = new uint4(10, (uint)level + 1, 7, 8);
+                for (int page = level * 4; page < level * 4 + 4; page++)
+                {
+                    uint encoded = (uint)(levels * 4 - page);
+                    tableData[page] = encoded; metadataData[page] = new uint4(10, encoded, 7, 8);
+                }
             }
             var depth = new float[size * size * levels];
             for (int i = 0; i < depth.Length; i++) depth[i] = reader.ReadSingle();
+            // Reverse all physical slots; crossing a virtual edge cannot rely on
+            // physically adjacent pages, even within the same clipmap segment.
+            var physicalDepth = new float[depth.Length];
+            int pageSize = size / 2;
+            for (int level = 0; level < levels; level++) for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+            {
+                int page = level * 4 + y / pageSize * 2 + x / pageSize;
+                int slot = (int)tableData[page] - 1;
+                physicalDepth[(slot / 2 * pageSize + y % pageSize) * size + slot % 2 * pageSize + x % pageSize]
+                    = depth[(level * size + y) * size + x];
+            }
+            depth = physicalDepth;
             var origins = ReadVectors(reader, count);
             var rays = ReadVectors(reader, count);
             using var upload = new GraphicsBuffer(GraphicsBuffer.Target.Structured, depth.Length, 4);
             using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
             using var directions = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
             using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
-            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels, 4);
-            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels, 16);
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels * 4, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels * 4, 16);
             using var projectionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels, 160);
             projectionBuffer.SetData(projections);
             RenderTexture staticPool = null, dynamicPool = null;
@@ -103,9 +119,9 @@ namespace VividRP.Editor
                 table.SetData(tableData); metadata.SetData(metadataData);
                 shader.SetInt("_VSMPrototypeEnabled", 1); shader.SetInt("_VSMProjectionCount", levels);
                 shader.SetVector("_VSMSMRTParameters", new Vector4(4, budget, maxLength, tangent));
-                shader.SetInt("_VSMPrototypeVirtualResolution", size); shader.SetInt("_VSMPrototypePageSize", size);
-                shader.SetInt("_VSMPrototypePagesPerAxis", 1); shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 1);
-                shader.SetInt("_VSMPrototypePageTableEntryCount", levels); shader.SetInt("_VSMPrototypePhysicalPageCapacity", levels);
+                shader.SetInt("_VSMPrototypeVirtualResolution", size); shader.SetInt("_VSMPrototypePageSize", pageSize);
+                shader.SetInt("_VSMPrototypePagesPerAxis", 2); shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 2);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", levels * 4); shader.SetInt("_VSMPrototypePhysicalPageCapacity", levels * 4);
                 int kernel = shader.FindKernel("UploadGeometryDepth");
                 shader.SetBuffer(kernel, "_GeometryDepth", upload);
                 shader.SetTexture(kernel, "_GeometryStatic", staticPool); shader.SetTexture(kernel, "_GeometryDynamic", dynamicPool);

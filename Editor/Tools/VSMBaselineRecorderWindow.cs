@@ -164,6 +164,7 @@ namespace VividRP.Editor
         {
             try
             {
+                if (VividDiagnostics.IsRunning) throw new InvalidOperationException("Finish the active diagnostic before baseline recording.");
                 var session = new VSMBaselineSession(m_Camera != null ? m_Camera : Camera.main,
                     m_Cases, m_WarmupSeconds, m_MeasurementSeconds, m_MinSamplesPerCase, m_MaxSamplesPerCase,
                     m_OutputDirectory, m_Revision, m_RequireFrameTimings);

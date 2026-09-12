@@ -49,6 +49,7 @@ namespace VividRP.Editor
 
         private static void RunPreset(bool detailed, bool screenDensity, float targetTexelPixels = 1)
         {
+            if (VividDiagnostics.IsRunning) throw new InvalidOperationException("Finish the active diagnostic before quality capture.");
             if (s_Active != null) throw new InvalidOperationException("Quality reproduction is already active.");
             foreach (var recorder in Resources.FindObjectsOfTypeAll<VSMBaselineRecorderWindow>())
                 if (recorder.IsRecording) throw new InvalidOperationException("Finish the performance recording before quality capture.");

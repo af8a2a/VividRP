@@ -1,0 +1,124 @@
+{
+  "date": "2026-09-12",
+  "unity": "6000.7.0a6",
+  "graphicsApi": "DX12",
+  "python_tests_passed": 13,
+  "roslyn": {
+    "Editor": 0,
+    "Cli": 0,
+    "Tests": 0
+  },
+  "dxc": {
+    "CopyDepth": "pass"
+  },
+  "unity_import_compile": "pass",
+  "unity_test_framework_executed": false,
+  "unity_test_reason": "CLI detected the interactive Editor and refused launch. No UI or eval-based NUnit invocation.",
+  "live_profile": {
+    "path": "Temp~\\diagnostics-validation\\live-profile\\20260912_105440_f7709e0aefdf4bf9aef442a5731316ee",
+    "observations": 32,
+    "warmup": 16,
+    "major_markers_all_32_valid": true
+  },
+  "default_capture": {
+    "schemaVersion": 1,
+    "verified_channels": 8,
+    "scope": "Decoded bytes, SHA256 and supported descriptor lengths; not shadow correctness."
+  },
+  "layered_capture": {
+    "schemaVersion": 1,
+    "verified_channels": 10,
+    "scope": "Decoded bytes, SHA256 and supported descriptor lengths; not shadow correctness."
+  },
+  "pools": [
+    {
+      "file": "static-depth-pool.bin.gz",
+      "sourceFormat": "R32_UInt",
+      "storageFormat": "R32_UInt",
+      "sha256": "7ded691ddd73b7989274f02e163213062a919ca7f6467453a1e749ba0593a6f5",
+      "width": 2048,
+      "height": 2048,
+      "layers": 16,
+      "count": 0,
+      "stride": 0,
+      "bytes": 268435456
+    },
+    {
+      "file": "dynamic-depth-pool.bin.gz",
+      "sourceFormat": "R32_UInt",
+      "storageFormat": "R32_UInt",
+      "sha256": "a6d72ac7690f53be6ae46ba88506bd97302a093f7108472bd9efc3cefda06484",
+      "width": 2048,
+      "height": 2048,
+      "layers": 16,
+      "count": 0,
+      "stride": 0,
+      "bytes": 268435456
+    }
+  ],
+  "lifecycle": {
+    "snapshot_blocked": true,
+    "wrong_cancel_blocked": true,
+    "parallel_capture_blocked": true,
+    "owner_job_unchanged": true,
+    "cancelled": true,
+    "pending_zero": true
+  },
+  "state_checks": [
+    {
+      "capture": "Temp~\\diagnostics-validation\\live-profile\\20260912_105440_f7709e0aefdf4bf9aef442a5731316ee",
+      "unchanged": {
+        "camera": true,
+        "lights": true,
+        "scenes": true,
+        "settings": true,
+        "playMode": true
+      }
+    },
+    {
+      "capture": "Temp~\\diagnostics-validation\\live-capture\\20260912_105935_be44c4bdec6f4c1f947c77695fa1dec2",
+      "unchanged": {
+        "camera": true,
+        "lights": true,
+        "scenes": true,
+        "settings": true,
+        "playMode": true
+      }
+    },
+    {
+      "capture": "Temp~\\diagnostics-validation\\live-pools\\20260912_110107_eeab58ee2d134bf69dbf253850e6ace6",
+      "unchanged": {
+        "camera": true,
+        "lights": true,
+        "scenes": true,
+        "settings": true,
+        "playMode": true
+      }
+    }
+  ],
+  "source_sha256": {
+    "Editor/Tools/Diagnostics/RenderStageCapture.cs": "c4a6ae37fe1f2d2f881ea5c2e7f299420cf672ec18cf0f94573382f55fc02ffc",
+    "Editor/Tools/Diagnostics/VividDiagnostics.cs": "84c8c511aee906b6b144690149ae0ee8af2194ade1e950c3c013e4d7958838c2",
+    "Editor/Tools/Diagnostics/Pipeline/VividDiagnosticsCommands.cs": "3d11e2ee999b83668d6eecac13cca9c09726ab7ed8a58898a53f9b8bccb37b63",
+    "Editor/Tools/Diagnostics/Pipeline/VividRP.Diagnostics.Cli.asmdef": "53285e701e186ea1934df342f9275a28174d587ec410cc4b8b45ff02b928b48f",
+    "Editor/Tools/Diagnostics/VividDiagnosticCopy.compute": "2650df74c9a71514f3ed3fecbff31447a166255d621e839efb3ec4e980b05f09",
+    "Tools~/Diagnostics/vivid_diagnostics.py": "9d1d9ed02b76b4982586cac51a279590606a7794ff9543e91fc0ae3d58af1a6a",
+    "Tools~/Diagnostics/test_diagnostics.py": "f6cbb9ee87aab6cba09d453aa451721a62f3cebc4acc9083021e5a47b500c3c3",
+    "Tests/Editor/RenderPass/Shadows/VividDiagnosticsTests.cs": "f5ad04207db06e95b20b9df8074adc025eb1c46fb43f3a94b6032a96d30eb48b",
+    "Editor/Tools/VSMBaselineRecorderWindow.cs": "ce250f3f7baaea98580f68153243e5cd8361a56b2fec52fe530d54543a4deab5",
+    "Editor/Tools/VSMQualityReproduction.cs": "147e8792a42b9e15234a4592c73ae2a6f1496fde6d830d2722af30b811fabba1"
+  },
+  "limits": [
+    "GPU profiling has delayed all-camera scope; no GPU-frame identity claim.",
+    "Current-thread allocation regression compiled but not executed.",
+    "Live smoke runs validate tooling, not a new VSM performance/quality baseline.",
+    "Compilation/quit teardown path inspected; no user-requested Editor restart or play-mode switch was performed."
+  ],
+  "final_editor_state": {
+    "latest_job": "complete",
+    "pendingReadbacks": 0,
+    "compilationFailed": false,
+    "compiling": false,
+    "console_note": "Earlier failed direct depth readback logs remain in the console (including a seeded conversion error); no console clearing was performed. The replacement depth-copy capture and full layered capture completed and verified."
+  }
+}

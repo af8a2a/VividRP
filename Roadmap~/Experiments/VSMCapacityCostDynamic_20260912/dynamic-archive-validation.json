@@ -1,0 +1,612 @@
+{
+  "status": "pass",
+  "groups": {
+    "dynamic-256": {
+      "status": "pass",
+      "archive": "Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\raw\\dynamic-256",
+      "restored": "Temp~\\vsm-baseline\\verified-dynamic-256",
+      "original_source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\dynamic\\20260912_075412_506",
+      "manifest_sha256": "2587f8b0db3f1f71c045032fb948958bee6905099c7e631d925d705f0186ec16",
+      "case_count": 27,
+      "frame_metadata_count": 864,
+      "gpu_payload_count": 3456,
+      "case_metadata_count": 918,
+      "verified_file_count_including_root_metadata": 4379,
+      "decoded_case_bytes": 1792750794,
+      "archive_bytes": 83054112,
+      "aliases": {
+        "total": 2255,
+        "within_case": 255,
+        "across_cases": 2000,
+        "across_modes": 1729,
+        "across_scenarios": 792
+      },
+      "root_metadata_hashes": {
+        "request.json": {
+          "bytes": 596,
+          "sha256": "57b706c9aaee29547109a36bdd1982f2565556cdcee2aad77b6fa8b07c16bbfd"
+        },
+        "status.txt": {
+          "bytes": 8,
+          "sha256": "eebbf6457e46a7f63acdf9b97390f790ba443d60cfa44b607da7e5c40aa1cc1d"
+        },
+        "original-camera.json": {
+          "bytes": 1076,
+          "sha256": "c710487f432b907332be3be1fe93fabff7be66c04443f6e38028034c023139b0"
+        },
+        "original-light.json": {
+          "bytes": 1301,
+          "sha256": "3dc7736454383037d3ea201decf25458eacceaa8ef5a6071e402c12725f8128a"
+        },
+        "original-settings.json": {
+          "bytes": 3352,
+          "sha256": "1902cf65aa42983098b26b04ddc8bdfe1589c3359b3e3904bd1911bb8f3f8b92"
+        }
+      },
+      "ordered_case_file_length_sha256_digest": "8813a6936b656f28ec17fe846c3bd81e3d4a7261942522be0ad063dbff8ef98c",
+      "verification": "Every restored GPU payload compared byte-for-byte after gzip decode to the live original and to its manifest length/SHA256; JSON/text metadata compared as original bytes. Every alias compared byte-for-byte to its canonical restored payload. Every archive length/SHA256 and exact restored file set checked."
+    },
+    "dynamic-1024": {
+      "status": "pass",
+      "archive": "Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\raw\\dynamic-1024",
+      "restored": "Temp~\\vsm-baseline\\verified-dynamic-1024",
+      "original_source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\dynamic\\20260912_075856_113",
+      "manifest_sha256": "4af120bbad1b22a7f602201af451f912f3ea6bedf7ccfa4bb70b84f123ddabb5",
+      "case_count": 6,
+      "frame_metadata_count": 192,
+      "gpu_payload_count": 768,
+      "case_metadata_count": 204,
+      "verified_file_count_including_root_metadata": 977,
+      "decoded_case_bytes": 398390289,
+      "archive_bytes": 12885972,
+      "aliases": {
+        "total": 385,
+        "within_case": 205,
+        "across_cases": 180,
+        "across_modes": 0,
+        "across_scenarios": 180
+      },
+      "root_metadata_hashes": {
+        "request.json": {
+          "bytes": 488,
+          "sha256": "b86f5f0baf249f2e817837dd8e83bf5d4d9bd25d5e32858af3a94a6be9b12d73"
+        },
+        "status.txt": {
+          "bytes": 8,
+          "sha256": "eebbf6457e46a7f63acdf9b97390f790ba443d60cfa44b607da7e5c40aa1cc1d"
+        },
+        "original-camera.json": {
+          "bytes": 1076,
+          "sha256": "c710487f432b907332be3be1fe93fabff7be66c04443f6e38028034c023139b0"
+        },
+        "original-light.json": {
+          "bytes": 1301,
+          "sha256": "3dc7736454383037d3ea201decf25458eacceaa8ef5a6071e402c12725f8128a"
+        },
+        "original-settings.json": {
+          "bytes": 3352,
+          "sha256": "1902cf65aa42983098b26b04ddc8bdfe1589c3359b3e3904bd1911bb8f3f8b92"
+        }
+      },
+      "ordered_case_file_length_sha256_digest": "a6cdc9f9c26911dde2280f9057afe8fb5c28d5956ab9be1a748fbed6ff314951",
+      "verification": "Every restored GPU payload compared byte-for-byte after gzip decode to the live original and to its manifest length/SHA256; JSON/text metadata compared as original bytes. Every alias compared byte-for-byte to its canonical restored payload. Every archive length/SHA256 and exact restored file set checked."
+    }
+  },
+  "verified_at_utc": "2026-09-12T08:18:36.926247+00:00",
+  "scope": "Declared dynamic archive scope: request/status/original camera/light/settings, every case JSON/text metadata and reference/signal/world/pages GPU payload. Screenshots/progress and separate capacity buffers are outside this archive contract. Gzip container bytes may differ; original decoded GPU float bit patterns are exact, including NaN payloads and signed zero.",
+  "analyses": {
+    "dynamic_jump_0_1": {
+      "final_result": "Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\final-dynamic-quality-jump01.json",
+      "final_sha256": "b63b6056cb58800598877945cd63b7d0d7b14a8d7bf8116f69ba620e91fea92b",
+      "restored_rerun_result": "Temp~\\vsm-baseline\\verified-dynamic-quality-jump01.json",
+      "restored_rerun_sha256": "c8bde616a83041bd7af1d7879d8217c07407ad212deaa029086336b2ccfb36e0",
+      "command": "python Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/analyze-dynamic.py Temp~/vsm-baseline/verified-dynamic-256 --jump-threshold .1 --output Temp~/vsm-baseline/verified-dynamic-quality-jump01.json",
+      "ignored_fields": [
+        "top-level source"
+      ],
+      "strict_semantic_equal_ignoring_source_paths_only": true,
+      "difference_count": 0,
+      "canonical_semantic_sha256": "6e2ca97221ed7f6b836d1d4a078ea3dc9c4bd89bc8fe08daa2d96d254d4c8db7",
+      "original_source_paths_preserved": true
+    },
+    "dynamic_jump_0_5": {
+      "final_result": "Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\final-dynamic-quality-jump05.json",
+      "final_sha256": "3f6dfce2cc569ad1d096a4c64ce468fbb932bed68b8702a93d696dcf27ac91bf",
+      "restored_rerun_result": "Temp~\\vsm-baseline\\verified-dynamic-quality-jump05.json",
+      "restored_rerun_sha256": "de0efceeaf28b7426b35ec990344fe8e5bf310b2f4ff5ecaca98ac5a069e8dc7",
+      "command": "python Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/analyze-dynamic.py Temp~/vsm-baseline/verified-dynamic-256 --jump-threshold .5 --output Temp~/vsm-baseline/verified-dynamic-quality-jump05.json",
+      "ignored_fields": [
+        "top-level source"
+      ],
+      "strict_semantic_equal_ignoring_source_paths_only": true,
+      "difference_count": 0,
+      "canonical_semantic_sha256": "d9ef5766e10cc1ef668f0272e4ea85bef2ba6b5a84af790b4546b74add48de24",
+      "original_source_paths_preserved": true
+    },
+    "reference_convergence": {
+      "final_result": "Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\final-reference-convergence.json",
+      "final_sha256": "226ab9588bfdf386cf920ed7e8d0220b3aab5485dc514e584775762d80a4bc9a",
+      "restored_rerun_result": "Temp~\\vsm-baseline\\verified-reference-convergence.json",
+      "restored_rerun_sha256": "8619e899cb6e91be88911287c334d9473aa5d045dadedc82807648fdcce4c422",
+      "command": "python Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/analyze-reference-convergence.py Temp~/vsm-baseline/verified-dynamic-256 Temp~/vsm-baseline/verified-dynamic-1024 --output Temp~/vsm-baseline/verified-reference-convergence.json",
+      "ignored_fields": [
+        "top-level base_source",
+        "top-level higher_ray_source"
+      ],
+      "strict_semantic_equal_ignoring_source_paths_only": true,
+      "difference_count": 0,
+      "canonical_semantic_sha256": "87474f0e3809ee1d24de2f42f08709177bed3534c81be5ea6ad957c28eb1a2ff",
+      "original_source_paths_preserved": true
+    },
+    "selected_1024_three_modes": {
+      "final_result": "Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\selected-1024-three-modes.json",
+      "final_sha256": "983acbe6ef9788c80250edfc70d76983db1a604ebece2313afca17df62765854",
+      "restored_rerun_result": "Temp~\\vsm-baseline\\verified-selected-1024-three-modes.json",
+      "restored_rerun_sha256": "bf78a06257551b4fa45e9b99e32b860ff061a6d47fdea4559d284604db1e3463",
+      "command": "python Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/analyze-reference-convergence.py Temp~/vsm-baseline/verified-dynamic-256 Temp~/vsm-baseline/verified-dynamic-1024 --all-base-modes --output Temp~/vsm-baseline/verified-selected-1024-three-modes.json",
+      "ignored_fields": [
+        "top-level base_source",
+        "top-level higher_ray_source"
+      ],
+      "strict_semantic_equal_ignoring_source_paths_only": true,
+      "difference_count": 0,
+      "canonical_semantic_sha256": "ecb3caa3702a7aa6862ff1b216ff3242e7d865f7f9513cca2de2cf83237c4a28",
+      "original_source_paths_preserved": true
+    }
+  },
+  "script_sha256": {
+    "archive-dynamic.py": "23dee2bb12a4447e5aae7e641ce0517553e539b89e5fc1189cf6e647f41669a7",
+    "analyze-dynamic.py": "990a9f8aa396ae29b767d88ace99fcf1888257c8dde353aba8283544ee7c1895",
+    "analyze-reference-convergence.py": "7ccde9e5539199e9c3e9bc08915e41cb90c26b8f651f9a376127e84847e1a2a8"
+  },
+  "final_analysis_files_modified": true,
+  "metadata_normalization": {
+    "status": "metadata_only_all_quality_statistics_unchanged",
+    "backup_directory": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\pre-reproducibility-20260912_081718",
+    "old_validation_proof_sha256": "bed50492d61b9614648149f587df8ba99254a986ad9125a53b126ceeb7922aec",
+    "explanation": "Current parsers add fixture-backend and reference-mode provenance. Convergence now chooses one shared floor height; only three reported floor_y values shift by less than 1 micrometre. Every other preexisting value, including all quality statistics, is exactly equal.",
+    "outputs": {
+      "dynamic_jump_0_1": {
+        "file": "final-dynamic-quality-jump01.json",
+        "backup_sha256": "0c51842357bd9dc8c1c3a3f9edf05c0c1c45bb1bfa6d0354a58d4c4ffa4eb349",
+        "metadata_only": true,
+        "all_quality_statistics_unchanged": true,
+        "difference_count": 18,
+        "difference_kinds": {
+          "added": 18
+        },
+        "differences": [
+          {
+            "path": "$/pairing/camera_slide:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/camera_slide:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/camera_turn:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/camera_turn:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/deform:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet prebaked frame sequence"
+            ]
+          },
+          {
+            "path": "$/pairing/deform:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet prebaked frame sequence"
+            ]
+          },
+          {
+            "path": "$/pairing/receiver_lift:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/receiver_lift:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/receiver_slide:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/receiver_slide:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/static:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/static:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/sun_rotate:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/sun_rotate:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/sun_step:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/sun_step:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/thin_sweep:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/thin_sweep:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          }
+        ],
+        "original_source_paths_preserved": {
+          "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\dynamic\\20260912_075412_506"
+        },
+        "requires_update": true
+      },
+      "dynamic_jump_0_5": {
+        "file": "final-dynamic-quality-jump05.json",
+        "backup_sha256": "c0ef3854a3199051518d5d87f3a01a74b988a5c830eb24260dd4bf1f4be5e732",
+        "metadata_only": true,
+        "all_quality_statistics_unchanged": true,
+        "difference_count": 18,
+        "difference_kinds": {
+          "added": 18
+        },
+        "differences": [
+          {
+            "path": "$/pairing/camera_slide:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/camera_slide:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/camera_turn:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/camera_turn:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/deform:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet prebaked frame sequence"
+            ]
+          },
+          {
+            "path": "$/pairing/deform:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet prebaked frame sequence"
+            ]
+          },
+          {
+            "path": "$/pairing/receiver_lift:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/receiver_lift:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/receiver_slide:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/receiver_slide:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/static:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/static:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/sun_rotate:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/sun_rotate:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/sun_step:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/sun_step:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/pairing/thin_sweep:fixed4_vs_adaptive/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/pairing/thin_sweep:fixed4_vs_fixed8/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          }
+        ],
+        "original_source_paths_preserved": {
+          "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\dynamic\\20260912_075412_506"
+        },
+        "requires_update": true
+      },
+      "reference_convergence": {
+        "file": "final-reference-convergence.json",
+        "backup_sha256": "e5319785d8398148ec0e9f8dd4dcd2a8462620d063875b2caead95c734f61334",
+        "metadata_only": true,
+        "all_quality_statistics_unchanged": true,
+        "difference_count": 22,
+        "difference_kinds": {
+          "added": 19,
+          "value_changed": 3
+        },
+        "differences": [
+          {
+            "path": "$/all_base_modes_against_common_reference",
+            "kind": "added",
+            "value": false
+          },
+          {
+            "path": "$/cases/deform_adaptive/higher_reference_capture_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/deform_adaptive/original_production_output_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/deform_adaptive/floor_y",
+            "kind": "value_changed",
+            "old": -0.022273797541856766,
+            "current": -0.022274266928434372
+          },
+          {
+            "path": "$/cases/deform_adaptive/pairing/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet prebaked frame sequence"
+            ]
+          },
+          {
+            "path": "$/cases/receiver_lift_adaptive/higher_reference_capture_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/receiver_lift_adaptive/original_production_output_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/receiver_lift_adaptive/floor_y",
+            "kind": "value_changed",
+            "old": -0.022274937480688095,
+            "current": -0.022274266928434372
+          },
+          {
+            "path": "$/cases/receiver_lift_adaptive/pairing/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          },
+          {
+            "path": "$/cases/static_adaptive/higher_reference_capture_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/static_adaptive/original_production_output_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/static_adaptive/pairing/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/cases/sun_rotate_adaptive/higher_reference_capture_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/sun_rotate_adaptive/original_production_output_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/sun_rotate_adaptive/pairing/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/cases/sun_step_adaptive/higher_reference_capture_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/sun_step_adaptive/original_production_output_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/sun_step_adaptive/pairing/fixture_backends",
+            "kind": "added",
+            "value": [
+              "none"
+            ]
+          },
+          {
+            "path": "$/cases/thin_sweep_adaptive/higher_reference_capture_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/thin_sweep_adaptive/original_production_output_mode",
+            "kind": "added",
+            "value": "adaptive"
+          },
+          {
+            "path": "$/cases/thin_sweep_adaptive/floor_y",
+            "kind": "value_changed",
+            "old": -0.02227429673075676,
+            "current": -0.022274266928434372
+          },
+          {
+            "path": "$/cases/thin_sweep_adaptive/pairing/fixture_backends",
+            "kind": "added",
+            "value": [
+              "meshlet rigid"
+            ]
+          }
+        ],
+        "original_source_paths_preserved": {
+          "base_source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\dynamic\\20260912_075412_506",
+          "higher_ray_source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\dynamic\\20260912_075856_113"
+        },
+        "requires_update": true
+      },
+      "selected_1024_three_modes": {
+        "file": "selected-1024-three-modes.json",
+        "backup_sha256": "983acbe6ef9788c80250edfc70d76983db1a604ebece2313afca17df62765854",
+        "metadata_only": true,
+        "all_quality_statistics_unchanged": true,
+        "difference_count": 0,
+        "difference_kinds": {},
+        "differences": [],
+        "original_source_paths_preserved": {
+          "base_source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\dynamic\\20260912_075412_506",
+          "higher_ray_source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\dynamic\\20260912_075856_113"
+        },
+        "requires_update": false
+      }
+    }
+  }
+}

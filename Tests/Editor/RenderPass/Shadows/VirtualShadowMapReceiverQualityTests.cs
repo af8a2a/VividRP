@@ -11,6 +11,36 @@ namespace VividRP.Editor.Tests
     public sealed class VirtualShadowMapReceiverQualityTests
     {
         [Test]
+        public void SMRTHistory_StableDescriptorAndCameraLookupAllocateNoManagedMemory()
+        {
+            var cameraObject = new GameObject("VSM history allocation test");
+            var camera = cameraObject.AddComponent<Camera>();
+            using var states = new CameraRelativeSystem<CSMShadowResolvePass.ShadowHistoryState>();
+            var descriptor = RenderGraphTextureDesc.CreateColorTarget(33, 25,
+                UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat);
+            try
+            {
+                for (int i = 0; i < 64; i++)
+                {
+                    states.GetOrCreateBase(camera);
+                    CSMShadowResolvePass.ConfigureHistoryDescriptor(descriptor, 33, 25);
+                    CameraHistoryRenderGraphBridge.CreateDescriptor(descriptor);
+                }
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++)
+                {
+                    states.PurgeDestroyedCameras();
+                    states.GetOrCreateBase(camera);
+                    CSMShadowResolvePass.ConfigureHistoryDescriptor(descriptor, 33, 25);
+                    CameraHistoryRenderGraphBridge.CreateDescriptor(descriptor);
+                }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(cameraObject); }
+        }
+
+        [Test]
         public void Volume_DefaultsToLegacyAndClampsIndependentQualityInputs()
         {
             var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();

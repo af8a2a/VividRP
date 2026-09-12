@@ -53,6 +53,8 @@ bool HasVSMSMRTFootprint(float2 uv, int index)
 
 // Receiver-only BND index offset, shared by every ray in the stratified set.
 uint _VSMSMRTSampleIndexOffset;
+// Zero preserves fixed-budget callers and geometry diagnostics.
+static int g_VSMAdaptiveRayCount = 0;
 
 float2 VSMSMRTPhase(uint2 pixel, uint frame, uint dimension)
 {
@@ -233,7 +235,7 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, out flo
     // depth trajectory of a shadow ray leaving that surface.
     coord.z += bias.z;
     float slope = _VSMSMRTParameters.w / projection.parameters.x;
-    int rays = clamp((int)_VSMSMRTParameters.x, 4, 8);
+    int rays = g_VSMAdaptiveRayCount > 0 ? g_VSMAdaptiveRayCount : clamp((int)_VSMSMRTParameters.x, 4, 8);
     int steps = clamp((int)_VSMSMRTParameters.y, 4, 8);
     // Fetch once per receiver/projection, independent of the ray count.
     float2 diskPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 0u);

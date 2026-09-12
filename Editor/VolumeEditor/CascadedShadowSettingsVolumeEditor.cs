@@ -29,7 +29,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_MaxShadowDistanceLabel =
             EditorGUIUtility.TrTextContent("Max Distance", "Maximum distance from the camera that receives cascaded directional shadows.");
         private static readonly GUIContent s_ScreenSpaceShadowDenoiseLabel =
-            EditorGUIUtility.TrTextContent("Screen Space Denoise", "Applies the legacy tile-based bilateral filter to Very High screen-space CSM shadows.");
+            EditorGUIUtility.TrTextContent("Screen Space Denoise", "Filters screen-space CSM shadows and VSM SMRT shadows. SMRT can also accumulate a short validated history.");
         private static readonly GUIContent s_WorkingUnitLabel =
             EditorGUIUtility.TrTextContent("Working Unit", "Controls whether cascade splits are edited in meters or as a percentage of Max Distance.");
         private static readonly GUIContent s_CascadeCountLabel =
@@ -70,6 +70,8 @@ namespace VividRP.Editor
         private SerializedDataParameter m_VirtualShadowMapStochasticFiltering;
         private SerializedDataParameter m_VirtualShadowMapSMRT;
         private SerializedDataParameter m_VirtualShadowMapSMRTJointSampling;
+        private SerializedDataParameter m_VirtualShadowMapSMRTTemporalDenoise;
+        private SerializedDataParameter m_VirtualShadowMapSMRTAdaptiveRays;
         private SerializedDataParameter m_VirtualShadowMapSMRTRayCount;
         private SerializedDataParameter m_VirtualShadowMapSMRTSamplesPerRay;
         private SerializedDataParameter m_VirtualShadowMapSMRTMaxRayLength;
@@ -110,6 +112,8 @@ namespace VividRP.Editor
             m_VirtualShadowMapStochasticFiltering = Unpack(fetcher.Find(x => x.virtualShadowMapStochasticFiltering));
             m_VirtualShadowMapSMRT = Unpack(fetcher.Find(x => x.virtualShadowMapSMRT));
             m_VirtualShadowMapSMRTJointSampling = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTJointSampling));
+            m_VirtualShadowMapSMRTTemporalDenoise = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTTemporalDenoise));
+            m_VirtualShadowMapSMRTAdaptiveRays = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTAdaptiveRays));
             m_VirtualShadowMapSMRTRayCount = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTRayCount));
             m_VirtualShadowMapSMRTSamplesPerRay = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTSamplesPerRay));
             m_VirtualShadowMapSMRTMaxRayLength = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTMaxRayLength));
@@ -141,6 +145,8 @@ namespace VividRP.Editor
             PropertyField(m_VirtualShadowMapStochasticFiltering);
             PropertyField(m_VirtualShadowMapSMRT);
             PropertyField(m_VirtualShadowMapSMRTJointSampling);
+            PropertyField(m_VirtualShadowMapSMRTTemporalDenoise);
+            PropertyField(m_VirtualShadowMapSMRTAdaptiveRays);
             PropertyField(m_VirtualShadowMapSMRTRayCount);
             PropertyField(m_VirtualShadowMapSMRTSamplesPerRay);
             PropertyField(m_VirtualShadowMapSMRTMaxRayLength);

@@ -1,0 +1,16 @@
+{
+  "status": "pass",
+  "production_sources_unchanged_since_validation": true,
+  "production_source_count": 7,
+  "readme_missing_links": [],
+  "archive_verification_status": "pass",
+  "csharp_exit_codes": [
+    0,
+    0,
+    0
+  ],
+  "capacity_dxc_passed": 6,
+  "reference_dxc_passed": 3,
+  "git_diff_check_exit_code": 0,
+  "scope": "Final documentation/source-integrity check; no Unity Test Framework invocation."
+}

@@ -1,0 +1,64 @@
+{
+  "raster8": {
+    "capture": "Temp~/vsm-backfaces/captures/20260912_052029_231/eight_raw",
+    "frames": 32,
+    "point_visibility": 0.078125,
+    "stripe_mean_error": 0.011526864022016525,
+    "stripe_peak_error": 0.125,
+    "pixels_above_1_percent": 179,
+    "mean_cell_visits": 76.41104888916016,
+    "mean_depth_pair_reads": 409.2087707519531
+  },
+  "raster16": {
+    "capture": "Temp~/vsm-residual/captures/20260912_055158_234/sixteen_raw",
+    "frames": 32,
+    "point_visibility": 0.0,
+    "stripe_mean_error": 0.00013706140452995896,
+    "stripe_peak_error": 0.015625,
+    "pixels_above_1_percent": 1,
+    "mean_cell_visits": 59.02654266357422,
+    "mean_depth_pair_reads": 381.18096923828125
+  },
+  "filtered16": {
+    "capture": "Temp~/vsm-residual/captures/20260912_055158_234/sixteen_filtered",
+    "frames": 32,
+    "point_visibility": 0.0,
+    "stripe_mean_error": 0.00013691798085346818,
+    "stripe_peak_error": 0.005740731954574585,
+    "pixels_above_1_percent": 0,
+    "mean_cell_visits": 59.038909912109375,
+    "mean_depth_pair_reads": 381.2766418457031
+  },
+  "all8": {
+    "capture": "Temp~/vsm-residual/captures/20260912_054749_189/all8",
+    "frames": 32,
+    "point_visibility": 0.078125,
+    "stripe_mean_error": 0.011526864022016525,
+    "stripe_peak_error": 0.125,
+    "pixels_above_1_percent": 179
+  },
+  "all10": {
+    "capture": "Temp~/vsm-residual/captures/20260912_054749_189/all10",
+    "frames": 32,
+    "point_visibility": 0.0390625,
+    "stripe_mean_error": 0.0037417763378471136,
+    "stripe_peak_error": 0.0625,
+    "pixels_above_1_percent": 70
+  },
+  "all12": {
+    "capture": "Temp~/vsm-residual/captures/20260912_054749_189/all12",
+    "frames": 32,
+    "point_visibility": 0.0078125,
+    "stripe_mean_error": 0.0011376095935702324,
+    "stripe_peak_error": 0.03125,
+    "pixels_above_1_percent": 22
+  },
+  "all16": {
+    "capture": "Temp~/vsm-residual/captures/20260912_054749_189/all16",
+    "frames": 32,
+    "point_visibility": 0.0,
+    "stripe_mean_error": 0.00013706140452995896,
+    "stripe_peak_error": 0.0078125,
+    "pixels_above_1_percent": 0
+  }
+}

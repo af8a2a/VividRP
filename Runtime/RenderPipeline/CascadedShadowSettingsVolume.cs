@@ -42,7 +42,11 @@ namespace VividRP.Runtime
         public BoolParameter virtualShadowMapSMRT = new(false);
         [Tooltip("Distribute SMRT samples across TSR jitter cycles to reduce persistent shadow grain. May slightly increase temporal noise. Has no effect without active TSR.")]
         public BoolParameter virtualShadowMapSMRTJointSampling = new(false);
-        [Tooltip("Shadow rays per pixel. More rays reduce temporal noise; requires temporal anti-aliasing.")]
+        [Tooltip("Accumulate a short, depth/normal-validated shadow history with current-frame clamping. Requires Screen Space Denoise and SMRT; independent of camera anti-aliasing.")]
+        public BoolParameter virtualShadowMapSMRTTemporalDenoise = new(true);
+        [Tooltip("Use two rays in stable fully lit/shadowed regions, with periodic full-budget refresh. Penumbrae and invalid history use the configured ray count. Requires SMRT temporal denoising.")]
+        public BoolParameter virtualShadowMapSMRTAdaptiveRays = new(true);
+        [Tooltip("Maximum shadow rays per pixel. Adaptive rays retain this budget in penumbrae and on invalid history.")]
         public ClampedIntParameter virtualShadowMapSMRTRayCount = new(4, 4, 8);
         [Tooltip("Depth-cell budget per intermediate clipmap segment. Longer rays continue through coarser levels along the same direction. The coarsest map visits enough cells to finish the configured world length, so total reads can exceed this value. More samples retain fine detail farther from the receiver.")]
         public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 4, 8);

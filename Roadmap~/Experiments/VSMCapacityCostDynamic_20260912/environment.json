@@ -1,0 +1,1 @@
+{"date":"2026-09-12","unity":"6000.7.0a6","graphicsAPI":"Direct3D12","gpu":"NVIDIA GeForce RTX 5070 Ti","driver":"616.64","totalMemoryReportedMiB":16303,"deviceEvidence":"nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader","playMode":false,"width":1920,"height":1080,"aa":"None"}

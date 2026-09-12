@@ -1,0 +1,20 @@
+route=renderer_explicit_error mode=DynamicTransform step=0 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=renderer_explicit_error mode=DynamicTransform step=1 expected=1 actual=(1.00, 1.00, 1.00, 1.00) PASS
+route=renderer_explicit_error mode=DynamicTransform step=2 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=renderer_explicit_error mode=DynamicGeometryManualUpdate step=0 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=renderer_explicit_error mode=DynamicGeometryManualUpdate step=1 expected=1 actual=(1.00, 1.00, 1.00, 1.00) PASS
+route=renderer_explicit_error mode=DynamicGeometryManualUpdate step=2 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=renderer_explicit_standard mode=DynamicTransform step=0 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=renderer_explicit_standard mode=DynamicTransform step=1 expected=1 actual=(1.00, 1.00, 1.00, 1.00) PASS
+route=renderer_explicit_standard mode=DynamicTransform step=2 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=renderer_explicit_standard mode=DynamicGeometryManualUpdate step=0 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=renderer_explicit_standard mode=DynamicGeometryManualUpdate step=1 expected=1 actual=(1.00, 1.00, 1.00, 1.00) PASS
+route=renderer_explicit_standard mode=DynamicGeometryManualUpdate step=2 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=mesh_config_readd mode=DynamicTransform step=0 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=mesh_config_readd mode=DynamicTransform step=1 expected=1 actual=(1.00, 1.00, 1.00, 1.00) PASS
+route=mesh_config_readd mode=DynamicTransform step=2 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=mesh_config_readd mode=DynamicGeometryManualUpdate step=0 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+route=mesh_config_readd mode=DynamicGeometryManualUpdate step=1 expected=1 actual=(1.00, 1.00, 1.00, 1.00) PASS
+route=mesh_config_readd mode=DynamicGeometryManualUpdate step=2 expected=0 actual=(0.00, 0.00, 0.00, 0.00) PASS
+passed=18 failed=0; three routes x two update modes x three poses. Renderer routes use explicit per-submesh flags; mesh config route removes/re-adds and marks geometry dirty. Only an individually passing complete blocked-clear-blocked route validates an update path.
+PASS

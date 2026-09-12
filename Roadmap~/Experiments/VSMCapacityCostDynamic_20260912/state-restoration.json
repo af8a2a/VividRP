@@ -1,0 +1,7 @@
+{
+  "recorded_state_equal_ignoring_enumeration_order": true,
+  "original_scenes_clean": true,
+  "temporary_objects_zero": true,
+  "play_mode_false": true,
+  "scope": "Recorded camera/light transforms and serialized settings, Volume names/priorities/profile paths, scenes, play state, time scale, background setting. Volume enumeration order is not scene state."
+}

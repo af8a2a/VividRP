@@ -1,0 +1,90 @@
+{
+  "status": "pass",
+  "compiler": "C:\\VulkanSDK\\1.4.350.0\\Bin\\dxc.exe",
+  "compiler_sha256": "2f94ff0e55750801ee09a573be2c0fa90e632d12ec11c004fa0dbb5a8a9341d2",
+  "passed": 3,
+  "total": 3,
+  "results": [
+    {
+      "source": "VSMBaselineReference.compute.txt",
+      "entry": "ReferenceCapacity",
+      "target": "cs_6_5",
+      "exit_code": 0,
+      "source_sha256": "2450edd8c8fcce6ae82a93bf4ee9771f1247840138a10c35281b6a8fa51bb770",
+      "command": [
+        "C:\\VulkanSDK\\1.4.350.0\\Bin\\dxc.exe",
+        "-T",
+        "cs_6_5",
+        "-E",
+        "ReferenceCapacity",
+        "-enable-16bit-types",
+        "-D",
+        "SHADER_API_D3D11=1",
+        "-D",
+        "UNITY_COMPILER_DXC=1",
+        "-I",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-bnd-compare\\dxc2\\include",
+        "-I",
+        "E:/Unity/6000.7.0a6/Editor/Data/Resources/CGIncludes",
+        "-Fo",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\validation\\reference-dxc\\ReferenceCapacity.dxil",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\VSMBaselineReference.compute.txt"
+      ],
+      "log": "validation\\reference-dxc\\ReferenceCapacity.log"
+    },
+    {
+      "source": "VSMBaselineReference.compute.txt",
+      "entry": "ReferenceReceivers",
+      "target": "cs_6_5",
+      "exit_code": 0,
+      "source_sha256": "2450edd8c8fcce6ae82a93bf4ee9771f1247840138a10c35281b6a8fa51bb770",
+      "command": [
+        "C:\\VulkanSDK\\1.4.350.0\\Bin\\dxc.exe",
+        "-T",
+        "cs_6_5",
+        "-E",
+        "ReferenceReceivers",
+        "-enable-16bit-types",
+        "-D",
+        "SHADER_API_D3D11=1",
+        "-D",
+        "UNITY_COMPILER_DXC=1",
+        "-I",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-bnd-compare\\dxc2\\include",
+        "-I",
+        "E:/Unity/6000.7.0a6/Editor/Data/Resources/CGIncludes",
+        "-Fo",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\validation\\reference-dxc\\ReferenceReceivers.dxil",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\VSMBaselineReference.compute.txt"
+      ],
+      "log": "validation\\reference-dxc\\ReferenceReceivers.log"
+    },
+    {
+      "source": "VSMReferenceFixture.compute.txt",
+      "entry": "UploadReferencePools",
+      "target": "cs_6_5",
+      "exit_code": 0,
+      "source_sha256": "427f2e9be54a014f9ed2a8fe9e07f3b2d5d65cd66255581079b66538fe678f58",
+      "command": [
+        "C:\\VulkanSDK\\1.4.350.0\\Bin\\dxc.exe",
+        "-T",
+        "cs_6_5",
+        "-E",
+        "UploadReferencePools",
+        "-enable-16bit-types",
+        "-D",
+        "SHADER_API_D3D11=1",
+        "-D",
+        "UNITY_COMPILER_DXC=1",
+        "-I",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-bnd-compare\\dxc2\\include",
+        "-I",
+        "E:/Unity/6000.7.0a6/Editor/Data/Resources/CGIncludes",
+        "-Fo",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\validation\\reference-dxc\\UploadReferencePools.dxil",
+        "E:\\VividRP_Reborn\\Packages\\VividRP\\Roadmap~\\Experiments\\VSMCapacityCostDynamic_20260912\\VSMReferenceFixture.compute.txt"
+      ],
+      "log": "validation\\reference-dxc\\UploadReferencePools.log"
+    }
+  ]
+}

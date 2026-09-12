@@ -1,0 +1,48 @@
+{
+  "total": 6,
+  "passed": 6,
+  "results": [
+    {
+      "source": "VSMCapacityAudit.compute.txt",
+      "kernel": "VSMCapacityAuditPages",
+      "target": "cs_6_2",
+      "sha256": "9dd5e4806b1646dbe8e9d4294d0eebb76d2adfccf63276de09ccd03f8fccb9f1",
+      "exit_code": 0
+    },
+    {
+      "source": "VSMCapacityAudit.compute.txt",
+      "kernel": "VSMCapacityReduce",
+      "target": "cs_6_2",
+      "sha256": "9dd5e4806b1646dbe8e9d4294d0eebb76d2adfccf63276de09ccd03f8fccb9f1",
+      "exit_code": 0
+    },
+    {
+      "source": "VSMCapacityFixture.compute.txt",
+      "kernel": "VSMCapacityFixture",
+      "target": "cs_6_2",
+      "sha256": "c5800e33737ce9de858ab137ae8094c3f8f62f9180d1238507c82bd42d2d30cf",
+      "exit_code": 0
+    },
+    {
+      "source": "VSMCapacityFixture.compute.txt",
+      "kernel": "VSMCapacityClearLayers",
+      "target": "cs_6_2",
+      "sha256": "c5800e33737ce9de858ab137ae8094c3f8f62f9180d1238507c82bd42d2d30cf",
+      "exit_code": 0
+    },
+    {
+      "source": "capacity-dxc\\capacity-insertion.hlsl",
+      "kernel": "Vert",
+      "target": "vs_6_2",
+      "sha256": "7e6b81d9a5ae8f214e053632e79af702d5fb21d4d5502ddd285b63f1d840a9b6",
+      "exit_code": 0
+    },
+    {
+      "source": "capacity-dxc\\capacity-insertion.hlsl",
+      "kernel": "Frag",
+      "target": "ps_6_2",
+      "sha256": "7e6b81d9a5ae8f214e053632e79af702d5fb21d4d5502ddd285b63f1d840a9b6",
+      "exit_code": 0
+    }
+  ]
+}

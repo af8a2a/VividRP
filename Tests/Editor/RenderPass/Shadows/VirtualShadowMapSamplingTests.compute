@@ -1,3 +1,4 @@
+#pragma kernel InspectVSMHistory
 #pragma kernel InspectSMRTSamples
 #pragma kernel TraceSMRTRays
 #pragma kernel TraceSMRTClipmaps
@@ -17,9 +18,10 @@
 #pragma kernel InspectVSMStochasticTexelOffset
 #pragma kernel UploadTestPools
 #pragma use_dxc
+#pragma require Native16Bit
 
 // Exercise the shipping functions, not a second shader implementation.
-#include "../../../../Shaders/Core/Private/CSMShadowResolve.compute"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"
 
 StructuredBuffer<float4> _SamplingInputs;
 StructuredBuffer<int2> _SamplingOffsets;
@@ -223,4 +225,17 @@ void MarkCoalescedFootprints(uint3 id : SV_DispatchThreadID)
     if (id.x >= (uint)_SamplingCount || _SamplingNormals[id.x].y == 0) return;
     float4 input = _SamplingInputs[id.x];
     MarkVSMReceiverPage(input.xy, (int)input.z, (uint)input.w, (int)_SamplingNormals[id.x].x);
+}
+
+// Reprojection and adaptive policy run through the shipping helpers.
+[numthreads(64, 1, 1)]
+void InspectVSMHistory(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float3 world = _SamplingInputs[id.x].xyz;
+    float3 normal = _SamplingNormals[id.x].xyz;
+    uint2 pixel = uint2(_SamplingPixel);
+    float2 history;
+    bool valid = LoadVSMHistory(pixel, world, normal, history);
+    _SamplingResults[id.x] = float2(valid ? history.x : -1, VSMAdaptiveRayCount(pixel, world, normal));
 }

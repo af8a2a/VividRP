@@ -1,0 +1,2 @@
+Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute
+Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute

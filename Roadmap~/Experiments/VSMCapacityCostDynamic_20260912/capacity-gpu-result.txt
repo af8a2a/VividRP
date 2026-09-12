@@ -1,0 +1,22 @@
+Capacity audit: 12 page rows / 6 summary rows exactly match independent CPU oracle; all 64 fields checked.
+Metadata-owner mismatch: state 5 and excluded occupancy exactly match oracle; prior outputs overwritten.
+Production raster distinct=1 order=0 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=1 order=1 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=1 order=2 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=8 order=0 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=8 order=1 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=8 order=2 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=16 order=0 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=16 order=1 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=16 order=2 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=0
+Production raster distinct=17 order=0 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=1
+Production raster distinct=17 order=1 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=1
+Production raster distinct=17 order=2 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=1
+Production raster distinct=32 order=0 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=16
+Production raster distinct=32 order=1 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=16
+Production raster distinct=32 order=2 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=16
+Production raster distinct=64 order=0 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=48
+Production raster distinct=64 order=1 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=48
+Production raster distinct=64 order=2 repetitions=64 pools=2 nearest16 exact; known unique omitted/pixel=48
+Raster cases=36; full 16 layers occurs with both zero omitted (16 distinct) and nonzero omitted (17+ distinct). No real-scene overflow count is inferred.
+PASS. Standalone GPU diagnostics; Unity Test Framework was not invoked.

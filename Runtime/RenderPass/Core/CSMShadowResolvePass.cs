@@ -176,6 +176,38 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private RenderGraphTexture m_FilterTexture;
 
+        // The camera history service owns the persistent textures. These wrappers are
+        // bound explicitly so existing graph assets need no new resource connections.
+        private readonly RenderGraphTexture m_VSMHistoryPrevious = RenderGraphTexture.CreateInput("VSMShadowHistory", GraphicsFormat.R16G16B16A16_SFloat);
+        private readonly RenderGraphTexture m_VSMHistoryCurrent = RenderGraphTexture.CreateOutput("VSMShadowHistory", GraphicsFormat.R16G16B16A16_SFloat);
+        private readonly RenderGraphTexture m_VSMDepthPrevious = RenderGraphTexture.CreateInput("VSMShadowHistoryDepth", GraphicsFormat.R32_SFloat);
+        private readonly RenderGraphTexture m_VSMDepthCurrent = RenderGraphTexture.CreateOutput("VSMShadowHistoryDepth", GraphicsFormat.R32_SFloat);
+        private static readonly CameraHistoryId VSMHistoryId = CameraHistoryId.Create("VSMShadowHistory");
+        private static readonly CameraHistoryId VSMDepthHistoryId = CameraHistoryId.Create("VSMShadowHistoryDepth");
+        private static readonly int VSMHistoryPreviousId = Shader.PropertyToID("_VSMHistoryPrevious");
+        private static readonly int VSMHistoryCurrentId = Shader.PropertyToID("_VSMHistoryCurrent");
+        private static readonly int VSMDepthPreviousId = Shader.PropertyToID("_VSMDepthPrevious");
+        private static readonly int VSMDepthCurrentId = Shader.PropertyToID("_VSMDepthCurrent");
+        private static readonly int VSMHistoryParametersId = Shader.PropertyToID("_VSMHistoryParameters");
+        private static readonly int VSMPreviousViewProjectionId = Shader.PropertyToID("_VSMPreviousViewProjection");
+        private static readonly int VSMPreviousViewId = Shader.PropertyToID("_VSMPreviousView");
+        private static readonly int VSMCurrentViewId = Shader.PropertyToID("_VSMCurrentView");
+        private readonly CameraRelativeSystem<ShadowHistoryState> m_ShadowHistoryStates = new();
+        internal sealed class ShadowHistoryState : CameraRelativeState
+        {
+            internal Matrix4x4 ViewProjection, View;
+            internal Vector4 Light, Receiver, Quality, SMRT;
+            internal Vector4 Layout, FilterSettings;
+            internal bool Adaptive;
+            public override void Dispose() { }
+        }
+        private ShadowHistoryState m_ShadowHistoryState;
+        private CameraHistoryTexture m_ShadowHistory, m_ShadowDepthHistory;
+        private bool m_EnableVSMTemporal, m_HasVSMHistory, m_EnableAdaptiveRays;
+        private Matrix4x4 m_PreviousViewProjection, m_PreviousView, m_CurrentView;
+        private Vector4 m_VSMHistoryLayout, m_VSMHistoryFilterSettings;
+        private int m_VSMTemporalKernel = -1;
+
         private ComputeShader m_ResolveCompute;
         private int m_Kernel = -1;
         private int m_ClearTilesKernel = -1;
@@ -290,6 +322,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, BilateralFilterVKernelName);
             m_VSMBilateralFilterHKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterH");
             m_VSMBilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterV");
+            m_VSMTemporalKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowTemporalV");
 
             for (var i = 0; i < s_BendCompositeKernelNames.Length; i++)
                 m_BendCompositeKernels[i] = FindKernelOrInvalid(m_ResolveCompute, s_BendCompositeKernelNames[i]);
@@ -297,6 +330,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
+            m_EnableVSMTemporal = m_HasVSMHistory = m_EnableAdaptiveRays = false;
+            m_ShadowHistory = m_ShadowDepthHistory = null;
+            m_ShadowHistoryState = null;
             m_IsActive = false;
             m_EnableTiledResolve = false;
             m_EnableBilateralDenoise = false;
@@ -468,7 +504,81 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_EnableBilateralDenoise &= m_VSMSMRTParameters.x > 0f
                     && m_VSMBilateralFilterHKernel >= 0 && m_VSMBilateralFilterVKernel >= 0;
                 m_EnableBendComposite = false;
+                if (m_EnableBilateralDenoise && csmSettings.virtualShadowMapSMRTTemporalDenoise.value
+                    && m_VSMTemporalKernel >= 0 && cameraData.camera != null)
+                    PrepareVSMHistory(cameraData, frameData.GetOrCreate<VividTemporalData>(), csmSettings);
             }
+        }
+
+        private void PrepareVSMHistory(VividCameraData cameraData, VividTemporalData temporal,
+            CascadedShadowSettingsVolume settings)
+        {
+            m_ShadowHistoryStates.PurgeDestroyedCameras();
+            m_ShadowHistoryState = m_ShadowHistoryStates.GetOrCreateBase(cameraData.camera);
+            m_CurrentView = cameraData.camera.worldToCameraMatrix;
+            m_PreviousViewProjection = m_ShadowHistoryState.ViewProjection;
+            m_PreviousView = m_ShadowHistoryState.View;
+            m_VSMHistoryLayout = new Vector4(VirtualShadowMapPrototypeRuntime.VirtualResolution,
+                VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, settings.virtualShadowMapFirstLevel.value,
+                settings.maxShadowDistance.value);
+            m_VSMHistoryFilterSettings = new Vector4(m_NormalBias, settings.virtualShadowMapTransition.value,
+                settings.virtualShadowMapViewCoverage.value ? 1 : 0, 0);
+            m_EnableAdaptiveRays = settings.virtualShadowMapSMRTAdaptiveRays.value;
+            ConfigureHistoryDescriptor(m_VSMHistoryCurrent.desc, cameraData.actualWidth, cameraData.actualHeight);
+            ConfigureHistoryDescriptor(m_VSMDepthCurrent.desc, cameraData.actualWidth, cameraData.actualHeight);
+            bool signalValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, cameraData.camera,
+                VSMHistoryId, m_VSMHistoryPrevious, m_VSMHistoryCurrent, m_VSMHistoryCurrent.desc, out m_ShadowHistory);
+            bool depthValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, cameraData.camera,
+                VSMDepthHistoryId, m_VSMDepthPrevious, m_VSMDepthCurrent, m_VSMDepthCurrent.desc, out m_ShadowDepthHistory);
+            m_EnableVSMTemporal = m_ShadowHistory != null && m_ShadowDepthHistory != null;
+            m_HasVSMHistory = signalValid && depthValid && !temporal.isFirstFrame
+                && !temporal.resetPostProcessingHistory
+                && m_ShadowHistoryState.Light == m_LightDirectionWS
+                && m_ShadowHistoryState.Receiver == m_VSMReceiverParameters
+                && m_ShadowHistoryState.Quality == m_VSMReceiverQuality
+                && m_ShadowHistoryState.SMRT == m_VSMSMRTParameters
+                && m_ShadowHistoryState.Layout == m_VSMHistoryLayout
+                && m_ShadowHistoryState.FilterSettings == m_VSMHistoryFilterSettings
+                && m_ShadowHistoryState.Adaptive == m_EnableAdaptiveRays;
+        }
+
+        internal static void ConfigureHistoryDescriptor(RenderGraphTextureDesc descriptor, int width, int height)
+        {
+            descriptor.Width = width;
+            descriptor.Height = height;
+            descriptor.ClearBuffer = false;
+            descriptor.EnableRandomWrite = true;
+            descriptor.FilterMode = FilterMode.Point;
+            descriptor.WrapMode = TextureWrapMode.Clamp;
+        }
+
+        private void BindVSMHistory(ComputeCommandBuffer cmd, int kernel)
+        {
+            // Always bind compatible textures, even when the branch is disabled.
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, VSMHistoryPreviousId,
+                m_EnableVSMTemporal ? m_VSMHistoryPrevious.innerHandle : m_GBuffer1.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, VSMDepthPreviousId,
+                m_EnableVSMTemporal ? m_VSMDepthPrevious.innerHandle : m_DepthTexture.innerHandle);
+        }
+
+        private void RecordVSMHistory(ComputeCommandBuffer cmd)
+        {
+            BindFilterTextures(cmd, m_VSMTemporalKernel, m_FilterTexture, m_DirectionalShadowTexture);
+            BindVSMHistory(cmd, m_VSMTemporalKernel);
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_VSMTemporalKernel, VSMHistoryCurrentId, m_VSMHistoryCurrent.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_VSMTemporalKernel, VSMDepthCurrentId, m_VSMDepthCurrent.innerHandle);
+            cmd.DispatchCompute(m_ResolveCompute, m_VSMTemporalKernel, m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+            m_ShadowHistory.MarkWritten();
+            m_ShadowDepthHistory.MarkWritten();
+            m_ShadowHistoryState.ViewProjection = m_ViewProjMatrix;
+            m_ShadowHistoryState.View = m_CurrentView;
+            m_ShadowHistoryState.Light = m_LightDirectionWS;
+            m_ShadowHistoryState.Receiver = m_VSMReceiverParameters;
+            m_ShadowHistoryState.Quality = m_VSMReceiverQuality;
+            m_ShadowHistoryState.SMRT = m_VSMSMRTParameters;
+            m_ShadowHistoryState.Layout = m_VSMHistoryLayout;
+            m_ShadowHistoryState.FilterSettings = m_VSMHistoryFilterSettings;
+            m_ShadowHistoryState.Adaptive = m_EnableAdaptiveRays;
         }
 
         public override void Record(ComputePassContext context)
@@ -482,6 +592,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_DirectionalShadowTexture.innerHandle.IsValid())
                 return;
 
+            // A prepared VSM frame can still fail during raster. Never promote
+            // fallback CSM output to SMRT history or use it for the next ray budget.
+            m_EnableVSMTemporal &= VirtualShadowMapPrototypeRuntime.IsFrameActive;
             var cmd = context.cmd;
 
             if (m_EnableTiledResolve
@@ -507,6 +620,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
+            m_ShadowHistoryStates.Dispose();
+            m_VSMTemporalKernel = -1;
             m_ResolveCompute = null;
             m_Kernel = -1;
             m_ClearTilesKernel = -1;
@@ -519,6 +634,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMBilateralFilterVKernel = -1;
             for (var i = 0; i < m_BendCompositeKernels.Length; i++)
                 m_BendCompositeKernels[i] = -1;
+            m_EnableVSMTemporal = m_HasVSMHistory = m_EnableAdaptiveRays = false;
+            m_ShadowHistory = m_ShadowDepthHistory = null;
+            m_ShadowHistoryState = null;
             m_IsActive = false;
             m_EnableTiledResolve = false;
             m_EnableBilateralDenoise = false;
@@ -547,23 +665,40 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             using var resolveScope = new ProfilingScope(cmd,
                 m_VirtualShadowMapPrototypeActive ? VSMProfiling.Resolve : null);
-            BindCommonTextures(cmd, m_Kernel);
-            BindShadowParameters(cmd);
+            using (new ProfilingScope(cmd,
+                m_VirtualShadowMapPrototypeActive ? VSMProfiling.ResolveTrace : null))
+            {
+                BindCommonTextures(cmd, m_Kernel);
+                BindVSMHistory(cmd, m_Kernel);
+                BindShadowParameters(cmd);
 
-            cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
-                m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+                cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
+                    m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+            }
 
             // VSM resolves the full screen and does not produce the PCSS tile list.
             // Both filter passes write every pixel, so no copy/clear dispatch is needed.
             if (m_VirtualShadowMapPrototypeActive && m_EnableBilateralDenoise
                 && m_FilterTexture?.innerHandle.IsValid() == true)
             {
-                BindFilterTextures(cmd, m_VSMBilateralFilterHKernel, m_DirectionalShadowTexture, m_FilterTexture);
-                cmd.DispatchCompute(m_ResolveCompute, m_VSMBilateralFilterHKernel,
-                    m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
-                BindFilterTextures(cmd, m_VSMBilateralFilterVKernel, m_FilterTexture, m_DirectionalShadowTexture);
-                cmd.DispatchCompute(m_ResolveCompute, m_VSMBilateralFilterVKernel,
-                    m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+                using (new ProfilingScope(cmd, VSMProfiling.FilterHorizontal))
+                {
+                    BindFilterTextures(cmd, m_VSMBilateralFilterHKernel, m_DirectionalShadowTexture, m_FilterTexture);
+                    cmd.DispatchCompute(m_ResolveCompute, m_VSMBilateralFilterHKernel,
+                        m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+                }
+                using (new ProfilingScope(cmd, m_EnableVSMTemporal
+                    ? VSMProfiling.FilterTemporalVertical : VSMProfiling.FilterVertical))
+                {
+                    if (m_EnableVSMTemporal)
+                        RecordVSMHistory(cmd);
+                    else
+                    {
+                        BindFilterTextures(cmd, m_VSMBilateralFilterVKernel, m_FilterTexture, m_DirectionalShadowTexture);
+                        cmd.DispatchCompute(m_ResolveCompute, m_VSMBilateralFilterVKernel,
+                            m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+                    }
+                }
             }
         }
 
@@ -718,6 +853,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void BindShadowParameters(ComputeCommandBuffer cmd)
         {
+            cmd.SetComputeVectorParam(m_ResolveCompute, VSMHistoryParametersId,
+                new Vector4(m_EnableVSMTemporal && m_HasVSMHistory ? 1 : 0,
+                    m_EnableVSMTemporal && m_EnableAdaptiveRays ? 1 : 0, 4, 0));
+            cmd.SetComputeMatrixParam(m_ResolveCompute, VSMPreviousViewProjectionId, m_PreviousViewProjection);
+            cmd.SetComputeMatrixParam(m_ResolveCompute, VSMPreviousViewId, m_PreviousView);
+            cmd.SetComputeMatrixParam(m_ResolveCompute, VSMCurrentViewId, m_CurrentView);
             cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ParametersId, m_VSMReceiverQuality);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ViewProjMatrix);
             cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters);

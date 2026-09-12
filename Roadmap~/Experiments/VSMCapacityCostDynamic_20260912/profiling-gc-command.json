@@ -1,0 +1,4 @@
+{
+  "Code": "using System;\nusing System.IO;\nusing UnityEditor;\ninternal class CommandScript : IRunCommand\n{\n    public void Execute(ExecutionResult result)\n    {\n        if (!EditorApplication.ExecuteMenuItem(\"Tools/VividRP/Diagnostics/Validate VSM Profiling GC\"))\n            throw new Exception(\"Import VSMProfilingGCProbe.cs into the normal Editor assembly after active captures finish.\");\n        const string path = \"Packages/VividRP/Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/profiling-gc-result.txt\";\n        if (!File.Exists(path)) throw new Exception(\"Profiling GC menu did not produce a result.\");\n        string report = File.ReadAllText(path);\n        result.Log(report);\n        if (!report.TrimEnd().EndsWith(\"PASS\", StringComparison.Ordinal))\n            throw new Exception(\"Profiling GC did not pass; inspect the recorded result.\");\n    }\n}",
+  "Title": "执行正常Editor诊断菜单验证VSM ProfilingScope稳定路径GC"
+}

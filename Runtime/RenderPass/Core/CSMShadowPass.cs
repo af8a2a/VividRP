@@ -2656,7 +2656,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal static class VirtualShadowMapPrototypeRuntime
     {
         internal const int PageSize = 128;
-        internal const int DepthLayerCount = 8;
+        internal const int DepthLayerCount = 16;
         internal const int DefaultPhysicalPageCount = 256;
         internal const int MaxPhysicalPageCount = 1024;
         internal const int MaxPageRequestsPerMeshlet = 4;

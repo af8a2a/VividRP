@@ -1,0 +1,308 @@
+#pragma kernel ReferenceReceivers
+#pragma kernel ReferenceCapacity
+#pragma use_dxc
+#pragma require inlineraytracing
+#pragma require Native16Bit
+
+#include "UnityRayQuery.cginc"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapProjection.hlsl"
+
+RaytracingAccelerationStructure _ReferenceAcceleration;
+
+Texture2D<float> _ReferenceDepthTexture;
+Texture2D<float4> _ReferenceGBuffer1;
+RWTexture2D<float4> _ReferenceVisibility;
+Texture2D<float> _BaselineShadowTexture;
+Texture2D<float4> _BaselineHistory;
+RWTexture2D<float4> _BaselineSignal;
+RWTexture2D<float4> _BaselineWorld;
+int _BaselineHasHistory;
+float4x4 _ReferenceInvViewProjection;
+float4 _ReferenceLightDirection;
+float4 _ReferenceSunBasisX;
+float4 _ReferenceSunBasisY;
+float4 _ReferenceNormalBias; // x,y: world offsets; z,w unused.
+int _ReferenceScreenWidth;
+int _ReferenceScreenHeight;
+int _ReferenceROIOriginX;
+int _ReferenceROIOriginY;
+int _ReferenceGridWidth;
+int _ReferenceGridHeight;
+int _ReferencePixelStride;
+int _ReferenceRayCount;
+float _ReferenceTanAngularRadius;
+float _ReferenceRayMaxDistance;
+
+float ReferenceVisible(float3 origin, float3 direction)
+{
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = direction;
+    ray.TMin = 0.0;
+    ray.TMax = _ReferenceRayMaxDistance;
+    UnityRayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES
+        | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+    query.TraceRayInline(_ReferenceAcceleration, 0, 255, ray);
+    while (query.Proceed()) { }
+    return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
+}
+
+[numthreads(8, 8, 1)]
+void ReferenceReceivers(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_ReferenceGridWidth || id.y >= (uint)_ReferenceGridHeight)
+        return;
+    uint2 pixel = uint2(_ReferenceROIOriginX, _ReferenceROIOriginY)
+        + id.xy * (uint)_ReferencePixelStride;
+    if (pixel.x >= (uint)_ReferenceScreenWidth || pixel.y >= (uint)_ReferenceScreenHeight)
+    {
+        _ReferenceVisibility[id.xy] = -1.0;
+        _BaselineSignal[id.xy] = 0.0;
+        _BaselineWorld[id.xy] = 0.0;
+        return;
+    }
+    float depth = _ReferenceDepthTexture.Load(int3(pixel, 0));
+#if UNITY_REVERSED_Z
+    bool sky = depth <= 0.0;
+#else
+    bool sky = depth >= 1.0;
+#endif
+    if (sky)
+    {
+        _ReferenceVisibility[id.xy] = -1.0;
+        _BaselineSignal[id.xy] = float4(0.0, 0.0, depth, 0.0);
+        _BaselineWorld[id.xy] = 0.0;
+        return;
+    }
+    // Same pixel convention as production ReconstructWorldPosition. The common
+    // helper applies the platform convention; do not manually flip this UV.
+    float2 uv = (float2(pixel) + 0.5)
+        / float2(_ReferenceScreenWidth, _ReferenceScreenHeight);
+    float3 position = ComputeWorldSpacePosition(uv, depth, _ReferenceInvViewProjection);
+    float3 normal = DecodeVividNormalOct(_ReferenceGBuffer1.Load(int3(pixel, 0)).xy);
+    float historyAge = _BaselineHasHistory != 0
+        ? _BaselineHistory.Load(int3(pixel, 0)).y : 0.0;
+    _BaselineSignal[id.xy] = float4(_BaselineShadowTexture.Load(int3(pixel, 0)),
+        historyAge, depth, 1.0);
+    _BaselineWorld[id.xy] = float4(position, normal.y);
+    float3 origin0 = position + normal * _ReferenceNormalBias.x;
+    float3 origin1 = position + normal * _ReferenceNormalBias.y;
+    float3 direction = normalize(_ReferenceLightDirection.xyz);
+    uint count = (uint)max(_ReferenceRayCount, 1);
+    float2 visible = 0.0;
+    [loop]
+    for (uint sample = 0u; sample < count; sample++)
+    {
+        // Fixed full Hammersley disk each frame. No history, SMRT depth data,
+        // clipping, slabs, continuation or noise sequence participates here.
+        float radius = sqrt((sample + 0.5) / count) * _ReferenceTanAngularRadius;
+        float angle = reversebits(sample) * 2.3283064365386963e-10 * 6.28318530718;
+        float3 rayDirection = normalize(direction
+            + radius * cos(angle) * _ReferenceSunBasisX.xyz
+            + radius * sin(angle) * _ReferenceSunBasisY.xyz);
+        visible += float2(ReferenceVisible(origin0, rayDirection),
+            ReferenceVisible(origin1, rayDirection));
+    }
+    _ReferenceVisibility[id.xy] = float4(visible / count,
+        ReferenceVisible(origin0, direction), ReferenceVisible(origin1, direction));
+}
+
+StructuredBuffer<uint> _VSMPrototypePhysicalPageOwners;
+StructuredBuffer<uint> _VSMPrototypePageTable;
+Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
+Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
+RWStructuredBuffer<uint4> _CapacityCounts;
+RWStructuredBuffer<float4> _CapacityDiagnostics;
+RWStructuredBuffer<float> _CapacityReferenceDepths;
+int _VSMPrototypePageSize;
+int _VSMPrototypePagesPerAxis;
+int _VSMPrototypeVirtualResolution;
+int _VSMPrototypePhysicalPagesPerRow;
+int _VSMPrototypePhysicalPageCapacity;
+int _VSMPrototypePageTableEntryCount;
+int _CapacitySamplesPerPageAxis;
+int _CapacityStaticMask;
+int _CapacityDynamicMask;
+float _CapacityUniqueDepthToleranceWorld;
+float _CapacityProductionMatchToleranceWorld;
+
+static const uint kReferenceLayers = 64u;
+static const uint kProductionLayers = 16u;
+
+void ReferenceCapacityPool(uint outputIndex, uint pool, uint2 physicalTexel, RayDesc ray,
+    float depthScale, float nearDepth, float depthDirection)
+{
+    uint keys[kReferenceLayers];
+    float depths[kReferenceLayers];
+    [loop]
+    for (uint index = 0u; index < kReferenceLayers; index++)
+    {
+        keys[index] = 0xffffffffu;
+        depths[index] = -1.0;
+    }
+    uint candidates = 0u;
+    uint retained = 0u;
+    bool moreThan64 = false;
+    // Restrict the integer range to exact, representable float integers. This
+    // also records the actual epsilon through the documented formula below.
+    float epsilon = max(max(_CapacityUniqueDepthToleranceWorld, 1e-7),
+        ray.TMax / 16777214.0);
+    uint mask = (uint)(pool == 0u ? _CapacityStaticMask : _CapacityDynamicMask);
+    UnityRayQuery<RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    query.TraceRayInline(_ReferenceAcceleration, 0, mask, ray);
+    while (query.Proceed())
+    {
+        if (query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
+            continue;
+        // No candidate is committed, so traversal does not shorten TMax to
+        // the closest hit. Candidate count is deliberately not a layer count.
+        candidates++;
+        float candidateDepth = query.CandidateTriangleRayT();
+        uint key = (uint)floor(candidateDepth / epsilon + 0.5);
+        uint insertion = 0u;
+        [loop]
+        while (insertion < retained)
+        {
+            if (keys[insertion] >= key)
+                break;
+            insertion++;
+        }
+        bool duplicate = false;
+        if (insertion < retained)
+            duplicate = keys[insertion] == key;
+        if (duplicate)
+        {
+            depths[insertion] = min(depths[insertion], candidateDepth);
+            continue;
+        }
+        if (retained == kReferenceLayers)
+            moreThan64 = true;
+        if (insertion >= kReferenceLayers)
+            continue;
+        uint end = min(retained, kReferenceLayers - 1u);
+        [loop]
+        for (uint move = end; move > insertion; move--)
+        {
+            keys[move] = keys[move - 1u];
+            depths[move] = depths[move - 1u];
+        }
+        keys[insertion] = key;
+        depths[insertion] = candidateDepth;
+        retained = min(retained + 1u, kReferenceLayers);
+    }
+    [loop]
+    for (uint index = 0u; index < kReferenceLayers; index++)
+        _CapacityReferenceDepths[outputIndex * kReferenceLayers + index] = depths[index];
+
+    float productionDepths[kProductionLayers];
+    uint productionCount = 0u;
+    uint matched = 0u;
+    float maximumError = 0.0;
+    float summedError = 0.0;
+    float tolerance = max(_CapacityProductionMatchToleranceWorld, 1e-7);
+    [loop]
+    for (uint layer = 0u; layer < kProductionLayers; layer++)
+    {
+        uint raw = pool == 0u
+            ? _VSMPrototypeStaticPhysicalPage.Load(int4(physicalTexel, layer, 0))
+            : _VSMPrototypeDynamicPhysicalPage.Load(int4(physicalTexel, layer, 0));
+        productionDepths[layer] = raw == 0u ? -1.0
+            : (asfloat(raw) - nearDepth) / (depthDirection * depthScale);
+        if (raw == 0u)
+            continue;
+        productionCount++;
+        if (retained == 0u)
+            continue;
+        float nearestError = 1e30;
+        [loop]
+        for (uint index = 0u; index < retained; index++)
+            nearestError = min(nearestError, abs(productionDepths[layer] - depths[index]));
+        matched += nearestError <= tolerance ? 1u : 0u;
+        maximumError = max(maximumError, nearestError);
+        summedError += nearestError;
+    }
+    uint missingNear16 = 0u;
+    [loop]
+    for (uint index = 0u; index < min(retained, kProductionLayers); index++)
+    {
+        float nearestError = 1e30;
+        [loop]
+        for (uint layer = 0u; layer < kProductionLayers; layer++)
+            if (productionDepths[layer] >= 0.0)
+                nearestError = min(nearestError, abs(depths[index] - productionDepths[layer]));
+        missingNear16 += nearestError > tolerance ? 1u : 0u;
+    }
+    uint flags = 1u | (moreThan64 ? 2u : 0u)
+        | (retained == 0u && productionCount != 0u ? 4u : 0u)
+        | (retained != 0u && productionCount == 0u ? 8u : 0u);
+    _CapacityCounts[outputIndex] = uint4(candidates,
+        moreThan64 ? kReferenceLayers + 1u : retained, productionCount, matched);
+    bool hasComparison = retained != 0u && productionCount != 0u;
+    _CapacityDiagnostics[outputIndex] = float4(hasComparison ? maximumError : -1.0,
+        hasComparison ? summedError / productionCount : -1.0, missingNear16, flags);
+}
+
+[numthreads(8, 8, 1)]
+void ReferenceCapacity(uint3 id : SV_DispatchThreadID)
+{
+    uint samples = (uint)_CapacitySamplesPerPageAxis;
+    if (id.x >= samples || id.y >= samples
+        || id.z >= (uint)_VSMPrototypePhysicalPageCapacity)
+        return;
+    uint sampleIndex = (id.z * samples + id.y) * samples + id.x;
+    uint encodedOwner = _VSMPrototypePhysicalPageOwners[id.z];
+    uint owner = encodedOwner - 1u;
+    uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
+    uint pagesPerLevel = pagesPerAxis * pagesPerAxis;
+    uint level = owner / pagesPerLevel;
+    bool valid = encodedOwner != 0u && owner < (uint)_VSMPrototypePageTableEntryCount
+        && level < (uint)_VSMProjectionCount;
+    if (valid)
+        valid = _VSMPrototypePageTable[owner] == id.z + 1u;
+    if (!valid)
+    {
+        [loop]
+        for (uint pool = 0u; pool < 2u; pool++)
+        {
+            uint outputIndex = sampleIndex * 2u + pool;
+            _CapacityCounts[outputIndex] = 0u;
+            _CapacityDiagnostics[outputIndex] = float4(-1.0, -1.0, 0.0, 0.0);
+            [loop]
+            for (uint index = 0u; index < kReferenceLayers; index++)
+                _CapacityReferenceDepths[outputIndex * kReferenceLayers + index] = -1.0;
+        }
+        return;
+    }
+    uint pageSize = (uint)_VSMPrototypePageSize;
+    uint2 localTexel = min((uint2)floor((float2(id.xy) + 0.5) * pageSize / samples),
+        pageSize - 1u);
+    uint2 virtualPage = uint2(owner % pagesPerAxis, (owner % pagesPerLevel) / pagesPerAxis);
+    float2 uv = (virtualPage * pageSize + localTexel + 0.5)
+        / _VSMPrototypeVirtualResolution;
+    uint physicalRow = (uint)_VSMPrototypePhysicalPagesPerRow;
+    uint2 physicalTexel = uint2(id.z % physicalRow, id.z / physicalRow) * pageSize + localTexel;
+    // Directional projections are affine with orthogonal spatial rows. This
+    // reconstructs the actual center of this virtual texel at its near plane.
+    float4x4 matrix = _VSMProjections[level].worldToShadow;
+#if UNITY_REVERSED_Z
+    float nearDepth = 1.0;
+    float depthDirection = -1.0;
+#else
+    float nearDepth = 0.0;
+    float depthDirection = 1.0;
+#endif
+    float depthScale = length(matrix[2].xyz);
+    RayDesc ray;
+    ray.Origin = (uv.x - matrix[0].w) * matrix[0].xyz / dot(matrix[0].xyz, matrix[0].xyz)
+        + (uv.y - matrix[1].w) * matrix[1].xyz / dot(matrix[1].xyz, matrix[1].xyz)
+        + (nearDepth - matrix[2].w) * matrix[2].xyz / dot(matrix[2].xyz, matrix[2].xyz);
+    ray.Direction = depthDirection * matrix[2].xyz / depthScale;
+    ray.TMin = 0.0;
+    ray.TMax = 1.0 / depthScale;
+    [loop]
+    for (uint pool = 0u; pool < 2u; pool++)
+        ReferenceCapacityPool(sampleIndex * 2u + pool, pool, physicalTexel, ray,
+            depthScale, nearDepth, depthDirection);
+}

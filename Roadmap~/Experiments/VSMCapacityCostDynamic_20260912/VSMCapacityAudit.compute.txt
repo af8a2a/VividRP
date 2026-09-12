@@ -1,0 +1,151 @@
+#pragma kernel VSMCapacityAuditPages
+#pragma kernel VSMCapacityReduce
+#pragma use_dxc
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapAddressing.hlsl"
+
+// Diagnostic only: dispatch after raster/resolve, separately from GPU timing.
+// Page and aggregate rows contain 64 uints; see capacity-schema.md.
+Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
+Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
+StructuredBuffer<uint> _VSMPrototypePhysicalPageOwners;
+StructuredBuffer<uint> _VSMPrototypePageTable;
+StructuredBuffer<uint4> _VSMPrototypePageMetadata;
+RWStructuredBuffer<uint> _VSMCapacityPages;
+RWStructuredBuffer<uint> _VSMCapacitySummary;
+uint _VSMPrototypePageSize;
+uint _VSMPrototypePagesPerAxis;
+uint _VSMPrototypePhysicalPagesPerRow;
+uint _VSMPrototypePageTableEntryCount;
+uint _VSMPrototypePhysicalPageCapacity;
+uint _VSMProjectionCount;
+
+groupshared uint g_Capacity[64];
+
+[numthreads(64, 1, 1)]
+void VSMCapacityAuditPages(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    uint physicalPage = group.x, pool = group.y;
+    if (physicalPage >= _VSMPrototypePhysicalPageCapacity || pool >= 2) return;
+    g_Capacity[lane] = 0;
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0)
+    {
+        uint owner = _VSMPrototypePhysicalPageOwners[physicalPage];
+        g_Capacity[1] = owner;
+        g_Capacity[3] = 0xffffffffu;
+        if (owner != 0)
+        {
+            uint virtualPage = owner - 1;
+            if (virtualPage >= _VSMPrototypePageTableEntryCount)
+                g_Capacity[0] = 2; // Owner outside the virtual table.
+            else
+            {
+                uint level = virtualPage / (_VSMPrototypePagesPerAxis * _VSMPrototypePagesPerAxis);
+                g_Capacity[3] = level;
+                uint4 metadata = _VSMPrototypePageMetadata[virtualPage];
+                g_Capacity[2] = metadata.x;
+                g_Capacity[15] = metadata.y;
+                if (level >= _VSMProjectionCount) g_Capacity[0] = 2;
+                else if (_VSMPrototypePageTable[virtualPage] != physicalPage + 1) g_Capacity[0] = 3;
+                else if (metadata.y != physicalPage + 1) g_Capacity[0] = 5;
+                else if ((g_Capacity[2] & 2u) == 0) g_Capacity[0] = 4;
+                else
+                {
+                    g_Capacity[0] = 1;
+                    g_Capacity[4] = _VSMPrototypePageSize * _VSMPrototypePageSize;
+                }
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (g_Capacity[0] == 1)
+    {
+        uint2 origin = uint2(physicalPage % _VSMPrototypePhysicalPagesPerRow,
+            physicalPage / _VSMPrototypePhysicalPagesPerRow) * _VSMPrototypePageSize;
+        uint layerOccupied[VIVID_VSM_DEPTH_LAYER_COUNT];
+        [unroll]
+        for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++) layerOccupied[layer] = 0;
+        uint occupiedSlots = 0, emptyTexels = 0, lastNonempty = 0, maximum = 0;
+        uint inversions = 0, duplicates = 0, holeTexels = 0, invalidDepths = 0;
+        for (uint texel = lane; texel < g_Capacity[4]; texel += 64)
+        {
+            uint2 p = origin + uint2(texel % _VSMPrototypePageSize, texel / _VSMPrototypePageSize);
+            uint occupied = 0, previous = 0;
+            bool sawEmpty = false, hole = false;
+            [unroll]
+            for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
+            {
+                uint depth = pool == 0 ? _VSMPrototypeStaticPhysicalPage.Load(int4(p, layer, 0))
+                    : _VSMPrototypeDynamicPhysicalPage.Load(int4(p, layer, 0));
+                if (depth != 0)
+                {
+                    occupied++;
+                    layerOccupied[layer]++;
+                    hole = hole || sawEmpty;
+                    if (previous != 0)
+                    {
+                        inversions += depth > previous ? 1u : 0u;
+                        duplicates += depth == previous ? 1u : 0u;
+                    }
+                    invalidDepths += depth > asuint(1.0) ? 1u : 0u;
+                    if (layer == VIVID_VSM_DEPTH_LAYER_COUNT - 1) lastNonempty++;
+                }
+                else sawEmpty = true;
+                previous = depth;
+            }
+            occupiedSlots += occupied;
+            emptyTexels += occupied == 0 ? 1u : 0u;
+            maximum = max(maximum, occupied);
+            holeTexels += hole ? 1u : 0u;
+            // One shared histogram atomic per texel, not one per depth load.
+            InterlockedAdd(g_Capacity[32 + occupied], 1u);
+        }
+        InterlockedAdd(g_Capacity[5], occupiedSlots);
+        InterlockedAdd(g_Capacity[6], emptyTexels);
+        InterlockedAdd(g_Capacity[7], lastNonempty);
+        InterlockedMax(g_Capacity[8], maximum);
+        InterlockedAdd(g_Capacity[9], inversions);
+        InterlockedAdd(g_Capacity[10], duplicates);
+        InterlockedAdd(g_Capacity[11], holeTexels);
+        InterlockedAdd(g_Capacity[12], invalidDepths);
+        [unroll]
+        for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
+            InterlockedAdd(g_Capacity[16 + layer], layerOccupied[layer]);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0 && g_Capacity[0] == 1)
+    {
+        g_Capacity[13] = g_Capacity[4] - g_Capacity[6];
+        g_Capacity[14] = (g_Capacity[2] & 4u) != 0 ? 1u : 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    _VSMCapacityPages[(pool * _VSMPrototypePhysicalPageCapacity + physicalPage) * 64 + lane] = g_Capacity[lane];
+}
+
+// Row 0 is the pool total; rows 1..projectionCount are individual clipmaps.
+// Each thread owns one output column. Every output is overwritten each capture.
+[numthreads(64, 1, 1)]
+void VSMCapacityReduce(uint3 group : SV_GroupID, uint field : SV_GroupIndex)
+{
+    uint levelRow = group.x, pool = group.y;
+    if (levelRow > _VSMProjectionCount || pool >= 2) return;
+    uint value = 0;
+    for (uint page = 0; page < _VSMPrototypePhysicalPageCapacity; page++)
+    {
+        uint address = (pool * _VSMPrototypePhysicalPageCapacity + page) * 64;
+        uint state = _VSMCapacityPages[address];
+        uint level = _VSMCapacityPages[address + 3];
+        if (levelRow != 0 && (state == 0 || level != levelRow - 1)) continue;
+        if (field == 0) value += state != 0 ? 1u : 0u;
+        else if (field == 1) value += state == 0 ? 1u : 0u;
+        else if (field == 2) value += state == 1 ? 1u : 0u;
+        else if (field == 3) value += state > 1 ? 1u : 0u;
+        else if (state == 1 && field != 15)
+        {
+            uint pageValue = _VSMCapacityPages[address + field];
+            if (field == 8) value = max(value, pageValue);
+            else value += pageValue;
+        }
+    }
+    _VSMCapacitySummary[(pool * (_VSMProjectionCount + 1) + levelRow) * 64 + field] = value;
+}

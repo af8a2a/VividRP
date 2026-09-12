@@ -1,0 +1,1041 @@
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:500:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+    TEMPLATE_1_FLT_HALF(WaveReadLaneFirst, scalarValue, return scalarValue)
+    ^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:66:30: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:500:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:66:5: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:500:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:67:30: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:500:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:67:5: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:500:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:68:30: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:500:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:68:5: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:500:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:69:30: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:500:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:69:5: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+    TEMPLATE_3_FLT_HALF(Min3, a, b, c, return min(min(a, b), c))
+    ^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:513:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+    TEMPLATE_3_FLT_HALF(Max3, a, b, c, return max(max(a, b), c))
+    ^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:515:5: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_3_FLT_HALF(Avg3, a, b, c, return (a + b + c) * 0.33333333)
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:519:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_SWAP(Swap) // Define a Swap(a, b) function for all types
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:156:23: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float  a, inout min16float  b) { min16float  t = a; a = b; b = t; } \
+                      ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:156:44: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float  a, inout min16float  b) { min16float  t = a; a = b; b = t; } \
+                                           ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:156:67: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float  a, inout min16float  b) { min16float  t = a; a = b; b = t; } \
+                                                                  ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:157:23: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float2 a, inout min16float2 b) { min16float2 t = a; a = b; b = t; } \
+                      ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:157:44: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float2 a, inout min16float2 b) { min16float2 t = a; a = b; b = t; } \
+                                           ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:157:67: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float2 a, inout min16float2 b) { min16float2 t = a; a = b; b = t; } \
+                                                                  ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:158:23: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float3 a, inout min16float3 b) { min16float3 t = a; a = b; b = t; } \
+                      ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:158:44: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float3 a, inout min16float3 b) { min16float3 t = a; a = b; b = t; } \
+                                           ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:158:67: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float3 a, inout min16float3 b) { min16float3 t = a; a = b; b = t; } \
+                                                                  ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:159:23: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float4 a, inout min16float4 b) { min16float4 t = a; a = b; b = t; } \
+                      ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:159:44: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float4 a, inout min16float4 b) { min16float4 t = a; a = b; b = t; } \
+                                           ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:577:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:159:67: note: expanded from macro 'TEMPLATE_SWAP'
+    void FunctionName(inout min16float4 a, inout min16float4 b) { min16float4 t = a; a = b; b = t; } \
+                                                                  ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:684:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_1_FLT_HALF(Sq, x, return (x) * (x))
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:66:30: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:684:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:66:5: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:684:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:67:30: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:684:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:67:5: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:684:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:68:30: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:684:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:68:5: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:684:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:69:30: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:684:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:69:5: note: expanded from macro 'TEMPLATE_1_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_2_FLT_HALF(PositivePow, base, power, return pow(abs(base), power))
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:98:30: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:98:54: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:98:5: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:99:30: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:99:54: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:99:5: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:100:30: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:100:54: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:100:5: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:101:30: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:101:54: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:760:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:101:5: note: expanded from macro 'TEMPLATE_2_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_2_HALF(SafePositivePow, base, power, return pow(max(abs(base), min16float(HALF_EPS)), power))
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:794:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_2_HALF(SafePositivePow_half, base, power, return pow(max(abs(base), min16float(HALF_EPS)), power))
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:798:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_2_HALF(NearlyEqual_Half, a, b, return abs(a - b) / (abs(a) + abs(b)) < min16float(HALF_EPS))
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:108:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:109:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:110:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:30: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:54: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:815:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:111:5: note: expanded from macro 'TEMPLATE_2_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2) { FunctionBody; }
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_3_FLT_HALF(Remap01, x, rcpLength, startTimesRcpLength, return saturate(x * rcpLength - startTimesRcpLength))
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:856:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+TEMPLATE_3_FLT_HALF(Remap10, x, rcpLength, endTimesRcpLength, return saturate(endTimesRcpLength - x * rcpLength))
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:130:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float  FunctionName(min16float  Parameter1, min16float  Parameter2, min16float  Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:131:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float2 FunctionName(min16float2 Parameter1, min16float2 Parameter2, min16float2 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:132:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float3 FunctionName(min16float3 Parameter1, min16float3 Parameter2, min16float3 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:30: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:54: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                     ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:78: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+                                                                             ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:859:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl:133:5: note: expanded from macro 'TEMPLATE_3_FLT_HALF'
+    min16float4 FunctionName(min16float4 Parameter1, min16float4 Parameter2, min16float4 Parameter3) { FunctionBody; } \
+    ^
+In file included from E:\VividRP_Reborn\Packages\VividRP\Roadmap~\Experiments\VSMCapacityCostDynamic_20260912\VSMBaselineReference.compute.txt:8:
+In file included from E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl:4:
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1115:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex1D(sampler1D_h x, float v)       { return x.t.Sample(x.s, v); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1116:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex2D(sampler2D_h x, float2 v)      { return x.t.Sample(x.s, v); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1117:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex3D(sampler3D_h x, float3 v)      { return x.t.Sample(x.s, v); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1118:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 texCUBE(samplerCUBE_h x, float3 v)  { return x.t.Sample(x.s, v); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1120:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex1Dbias(sampler1D_h x, in float4 t)       { return x.t.SampleBias(x.s, t.x, t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1121:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex2Dbias(sampler2D_h x, in float4 t)       { return x.t.SampleBias(x.s, t.xy, t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1122:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex3Dbias(sampler3D_h x, in float4 t)       { return x.t.SampleBias(x.s, t.xyz, t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1123:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 texCUBEbias(samplerCUBE_h x, in float4 t)   { return x.t.SampleBias(x.s, t.xyz, t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1125:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex1Dlod(sampler1D_h x, in float4 t)        { return x.t.SampleLevel(x.s, t.x, t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1126:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex2Dlod(sampler2D_h x, in float4 t)        { return x.t.SampleLevel(x.s, t.xy, t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1127:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex3Dlod(sampler3D_h x, in float4 t)        { return x.t.SampleLevel(x.s, t.xyz, t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1128:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 texCUBElod(samplerCUBE_h x, in float4 t)    { return x.t.SampleLevel(x.s, t.xyz, t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1130:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex1Dgrad(sampler1D_h x, float t, float dx, float dy)           { return x.t.SampleGrad(x.s, t, dx, dy); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1131:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex2Dgrad(sampler2D_h x, float2 t, float2 dx, float2 dy)        { return x.t.SampleGrad(x.s, t, dx, dy); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1132:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex3Dgrad(sampler3D_h x, float3 t, float3 dx, float3 dy)        { return x.t.SampleGrad(x.s, t, dx, dy); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1133:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 texCUBEgrad(samplerCUBE_h x, float3 t, float3 dx, float3 dy)    { return x.t.SampleGrad(x.s, t, dx, dy); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1135:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex1D(sampler1D_h x, float t, float dx, float dy)           { return x.t.SampleGrad(x.s, t, dx, dy); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1136:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex2D(sampler2D_h x, float2 t, float2 dx, float2 dy)        { return x.t.SampleGrad(x.s, t, dx, dy); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1137:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex3D(sampler3D_h x, float3 t, float3 dx, float3 dy)        { return x.t.SampleGrad(x.s, t, dx, dy); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1138:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 texCUBE(samplerCUBE_h x, float3 t, float3 dx, float3 dy)    { return x.t.SampleGrad(x.s, t, dx, dy); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1140:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex1Dproj(sampler1D_h s, in float2 t)       { return tex1D(s, t.x / t.y); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1141:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex1Dproj(sampler1D_h s, in float4 t)       { return tex1D(s, t.x / t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1142:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex2Dproj(sampler2D_h s, in float3 t)       { return tex2D(s, t.xy / t.z); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1143:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex2Dproj(sampler2D_h s, in float4 t)       { return tex2D(s, t.xy / t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1144:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 tex3Dproj(sampler3D_h s, in float4 t)       { return tex3D(s, t.xyz / t.w); }
+^
+E:\VividRP_Reborn\Packages\VividRP\Temp~\vsm-bnd-compare\dxc2\include\Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl:1145:1: warning: 'min16float' is promoted to 'half' [-Wconversion]
+min16float4 texCUBEproj(samplerCUBE_h s, in float4 t)   { return texCUBE(s, t.xyz / t.w); }
+^
+

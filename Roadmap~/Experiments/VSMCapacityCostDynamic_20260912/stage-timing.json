@@ -1,0 +1,1580 @@
+[
+  {
+    "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\cost\\20260912_072119_372\\adaptive_forward\\stage-timing.csv",
+    "observation_count": 128,
+    "accepted_resolve_observation_count": 128,
+    "rejected_observations": {},
+    "stages": {
+      "VSM.LayoutRemap": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 0.0,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResetFeedback": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 2e-06,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.MarkReceiverPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.6408959999999999,
+          "mean": 0.645718,
+          "p10": 0.639232,
+          "p90": 0.6428159999999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Allocate": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.224512,
+          "mean": 0.22411599999999998,
+          "p10": 0.222208,
+          "p90": 0.22527999999999998
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.InvalidateStatic": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ClearPhysicalPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.08985599999999999,
+          "mean": 0.15512399999999998,
+          "p10": 0.0896,
+          "p90": 0.3716096
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.StaticCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.067712,
+          "mean": 0.10812,
+          "p10": 0.0659712,
+          "p90": 0.3436032
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 6.8e-05,
+          "p10": 0.0,
+          "p90": 0.000256
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.PageCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.048639999999999996,
+          "mean": 0.060396,
+          "p10": 0.04625919999999999,
+          "p90": 0.050432
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.StaticCasterCull",
+          "VSM.DynamicCasterCull"
+        ]
+      },
+      "VSM.StaticRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.007168,
+          "mean": 0.007078,
+          "p10": 0.006912,
+          "p90": 0.007424
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.FinalizePages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.002048,
+          "mean": 0.002176,
+          "p10": 0.002048,
+          "p90": 0.0025599999999999998
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.013056,
+          "mean": 0.013245999999999999,
+          "p10": 0.011264,
+          "p90": 0.015104
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.UnityCompatibilityRaster": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Resolve": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 9.550336,
+          "mean": 9.512597999999999,
+          "p10": 8.9206016,
+          "p90": 10.0409344
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResolveTrace": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 9.327744,
+          "mean": 9.274341999999999,
+          "p10": 8.676275200000001,
+          "p90": 9.8134272
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterHorizontal": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.064512,
+          "mean": 0.06606999999999999,
+          "p10": 0.064256,
+          "p90": 0.065024
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterVertical": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterTemporalVertical": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.157184,
+          "mean": 0.160502,
+          "p10": 0.155904,
+          "p90": 0.158464
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      }
+    },
+    "resolve_minus_paired_children_ms": {
+      "count": 128,
+      "median": 0.0012799999999995038,
+      "mean": 0.011683999999999944,
+      "p10": 0.0007680000000007681,
+      "p90": 0.0015360000000015361
+    },
+    "paired_remainder_below_minus_0_05_ms": 0,
+    "attribution": "Last completed global profiling-frame values. Camera frame/time label observation only; count one is necessary, not sufficient, for selected-camera attribution.",
+    "aggregation": "No parent/child or stage medians are added. Zero-count stages are missing measurements. PageCull can have two executions and is nested in both caster-cull parents."
+  },
+  {
+    "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\cost\\20260912_072119_372\\adaptive_reverse\\stage-timing.csv",
+    "observation_count": 128,
+    "accepted_resolve_observation_count": 128,
+    "rejected_observations": {},
+    "stages": {
+      "VSM.LayoutRemap": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 0.0,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResetFeedback": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 0.0,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.MarkReceiverPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.6410239999999999,
+          "mean": 0.6441199999999999,
+          "p10": 0.6396672,
+          "p90": 0.6428159999999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Allocate": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.224512,
+          "mean": 0.224232,
+          "p10": 0.222464,
+          "p90": 0.225536
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.InvalidateStatic": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ClearPhysicalPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.08985599999999999,
+          "mean": 0.170824,
+          "p10": 0.0896,
+          "p90": 0.37383679999999997
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.StaticCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.068352,
+          "mean": 0.10767199999999999,
+          "p10": 0.066304,
+          "p90": 0.34606079999999995
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 8.4e-05,
+          "p10": 0.0,
+          "p90": 0.000256
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.PageCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.048383999999999996,
+          "mean": 0.056656,
+          "p10": 0.046335999999999995,
+          "p90": 0.0502528
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.StaticCasterCull",
+          "VSM.DynamicCasterCull"
+        ]
+      },
+      "VSM.StaticRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.006912,
+          "mean": 0.007056,
+          "p10": 0.006912,
+          "p90": 0.007679999999999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.FinalizePages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.002048,
+          "mean": 0.002178,
+          "p10": 0.002048,
+          "p90": 0.0025599999999999998
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.013184,
+          "mean": 0.013151999999999999,
+          "p10": 0.011264,
+          "p90": 0.014924799999999998
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.UnityCompatibilityRaster": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Resolve": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 9.587328,
+          "mean": 9.548893999999999,
+          "p10": 8.9658624,
+          "p90": 9.970431999999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResolveTrace": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 9.349888,
+          "mean": 9.297331999999999,
+          "p10": 8.703615999999998,
+          "p90": 9.7464064
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterHorizontal": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.06476799999999999,
+          "mean": 0.06618399999999999,
+          "p10": 0.064256,
+          "p90": 0.065024
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterVertical": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterTemporalVertical": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.157184,
+          "mean": 0.166012,
+          "p10": 0.15616,
+          "p90": 0.15872
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      }
+    },
+    "resolve_minus_paired_children_ms": {
+      "count": 128,
+      "median": 0.0012799999999995038,
+      "mean": 0.01936600000000019,
+      "p10": 0.0010239999999992477,
+      "p90": 0.044646399999999836
+    },
+    "paired_remainder_below_minus_0_05_ms": 0,
+    "attribution": "Last completed global profiling-frame values. Camera frame/time label observation only; count one is necessary, not sufficient, for selected-camera attribution.",
+    "aggregation": "No parent/child or stage medians are added. Zero-count stages are missing measurements. PageCull can have two executions and is nested in both caster-cull parents."
+  },
+  {
+    "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\cost\\20260912_072119_372\\fixed_temporal_forward\\stage-timing.csv",
+    "observation_count": 128,
+    "accepted_resolve_observation_count": 128,
+    "rejected_observations": {},
+    "stages": {
+      "VSM.LayoutRemap": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 2e-06,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResetFeedback": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 4e-06,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.MarkReceiverPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.640512,
+          "mean": 0.653034,
+          "p10": 0.638976,
+          "p90": 0.643072
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Allocate": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.224512,
+          "mean": 0.224154,
+          "p10": 0.222208,
+          "p90": 0.225536
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.InvalidateStatic": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ClearPhysicalPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.090112,
+          "mean": 0.208112,
+          "p10": 0.08934399999999999,
+          "p90": 0.4694272
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.StaticCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.06848,
+          "mean": 0.133638,
+          "p10": 0.065792,
+          "p90": 0.4076799999999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 7e-05,
+          "p10": 0.0,
+          "p90": 0.000256
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.PageCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.048128,
+          "mean": 0.072672,
+          "p10": 0.045568,
+          "p90": 0.050432
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.StaticCasterCull",
+          "VSM.DynamicCasterCull"
+        ]
+      },
+      "VSM.StaticRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.007168,
+          "mean": 0.008409999999999999,
+          "p10": 0.0052224,
+          "p90": 0.007424
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.FinalizePages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.002304,
+          "mean": 0.0022299999999999998,
+          "p10": 0.002048,
+          "p90": 0.0025599999999999998
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.012799999999999999,
+          "mean": 0.01315,
+          "p10": 0.011264,
+          "p90": 0.015616
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.UnityCompatibilityRaster": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Resolve": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 11.104,
+          "mean": 11.224234,
+          "p10": 10.1268992,
+          "p90": 12.404863999999998
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResolveTrace": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 10.866688,
+          "mean": 10.96206,
+          "p10": 9.9013888,
+          "p90": 12.094643199999998
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterHorizontal": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.06527999999999999,
+          "mean": 0.072186,
+          "p10": 0.064512,
+          "p90": 0.06758399999999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterVertical": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterTemporalVertical": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.15744,
+          "mean": 0.172258,
+          "p10": 0.15616,
+          "p90": 0.159744
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      }
+    },
+    "resolve_minus_paired_children_ms": {
+      "count": 128,
+      "median": 0.0012799999999995038,
+      "mean": 0.017730000000000176,
+      "p10": 0.0007680000000007681,
+      "p90": 0.0015360000000015361
+    },
+    "paired_remainder_below_minus_0_05_ms": 0,
+    "attribution": "Last completed global profiling-frame values. Camera frame/time label observation only; count one is necessary, not sufficient, for selected-camera attribution.",
+    "aggregation": "No parent/child or stage medians are added. Zero-count stages are missing measurements. PageCull can have two executions and is nested in both caster-cull parents."
+  },
+  {
+    "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\cost\\20260912_072119_372\\fixed_temporal_reverse\\stage-timing.csv",
+    "observation_count": 128,
+    "accepted_resolve_observation_count": 128,
+    "rejected_observations": {},
+    "stages": {
+      "VSM.LayoutRemap": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 4e-06,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResetFeedback": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 2e-06,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.MarkReceiverPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.6410239999999999,
+          "mean": 0.6636219999999999,
+          "p10": 0.639488,
+          "p90": 0.7095807999999996
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Allocate": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.224512,
+          "mean": 0.224232,
+          "p10": 0.2223872,
+          "p90": 0.225536
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.InvalidateStatic": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ClearPhysicalPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.08985599999999999,
+          "mean": 0.148866,
+          "p10": 0.0896,
+          "p90": 0.3870464
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.StaticCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.068096,
+          "mean": 0.13655399999999998,
+          "p10": 0.066048,
+          "p90": 0.37212159999999994
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 7.599999999999999e-05,
+          "p10": 0.0,
+          "p90": 0.000256
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.PageCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.048895999999999995,
+          "mean": 0.07274,
+          "p10": 0.04651519999999999,
+          "p90": 0.0510208
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.StaticCasterCull",
+          "VSM.DynamicCasterCull"
+        ]
+      },
+      "VSM.StaticRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.007168,
+          "mean": 0.007212,
+          "p10": 0.0046336,
+          "p90": 0.007424
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.FinalizePages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.002048,
+          "mean": 0.002224,
+          "p10": 0.002048,
+          "p90": 0.0025599999999999998
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.013312,
+          "mean": 0.013496,
+          "p10": 0.011264,
+          "p90": 0.0156928
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.UnityCompatibilityRaster": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Resolve": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 10.692736,
+          "mean": 10.697756,
+          "p10": 10.0320512,
+          "p90": 11.2794112
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResolveTrace": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 10.438911999999998,
+          "mean": 10.465658,
+          "p10": 9.8095872,
+          "p90": 11.0555136
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterHorizontal": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.065024,
+          "mean": 0.06644,
+          "p10": 0.064512,
+          "p90": 0.065536
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterVertical": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterTemporalVertical": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.15744,
+          "mean": 0.15883999999999998,
+          "p10": 0.156416,
+          "p90": 0.158464
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      }
+    },
+    "resolve_minus_paired_children_ms": {
+      "count": 128,
+      "median": 0.0012799999999995038,
+      "mean": 0.006818000000000046,
+      "p10": 0.000947199999999704,
+      "p90": 0.0015359999999997598
+    },
+    "paired_remainder_below_minus_0_05_ms": 0,
+    "attribution": "Last completed global profiling-frame values. Camera frame/time label observation only; count one is necessary, not sufficient, for selected-camera attribution.",
+    "aggregation": "No parent/child or stage medians are added. Zero-count stages are missing measurements. PageCull can have two executions and is nested in both caster-cull parents."
+  },
+  {
+    "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\cost\\20260912_072119_372\\spatial_forward\\stage-timing.csv",
+    "observation_count": 128,
+    "accepted_resolve_observation_count": 128,
+    "rejected_observations": {},
+    "stages": {
+      "VSM.LayoutRemap": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 0.0,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResetFeedback": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 2e-06,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.MarkReceiverPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.6402559999999999,
+          "mean": 0.648876,
+          "p10": 0.6388992,
+          "p90": 0.643072
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Allocate": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.224512,
+          "mean": 0.22419599999999998,
+          "p10": 0.2221312,
+          "p90": 0.225536
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.InvalidateStatic": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ClearPhysicalPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.090112,
+          "mean": 0.206224,
+          "p10": 0.08934399999999999,
+          "p90": 0.4069888
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.StaticCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.068352,
+          "mean": 0.10037399999999999,
+          "p10": 0.0659712,
+          "p90": 0.0743168
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 7.4e-05,
+          "p10": 0.0,
+          "p90": 0.000256
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.PageCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.048383999999999996,
+          "mean": 0.064926,
+          "p10": 0.046335999999999995,
+          "p90": 0.0502528
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.StaticCasterCull",
+          "VSM.DynamicCasterCull"
+        ]
+      },
+      "VSM.StaticRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.007168,
+          "mean": 0.006726,
+          "p10": 0.003328,
+          "p90": 0.007424
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.FinalizePages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.002048,
+          "mean": 0.002176,
+          "p10": 0.002048,
+          "p90": 0.002304
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.013056,
+          "mean": 0.013108,
+          "p10": 0.011264,
+          "p90": 0.015616
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.UnityCompatibilityRaster": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Resolve": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 10.759167999999999,
+          "mean": 10.731038,
+          "p10": 10.0996608,
+          "p90": 11.3637632
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResolveTrace": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 10.57984,
+          "mean": 10.567872,
+          "p10": 9.844479999999999,
+          "p90": 11.2341504
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterHorizontal": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.064256,
+          "mean": 0.071756,
+          "p10": 0.063232,
+          "p90": 0.0664576
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterVertical": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.06476799999999999,
+          "mean": 0.06460199999999999,
+          "p10": 0.064,
+          "p90": 0.0651008
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterTemporalVertical": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      }
+    },
+    "resolve_minus_paired_children_ms": {
+      "count": 128,
+      "median": 0.0012799999999995038,
+      "mean": 0.02680800000000004,
+      "p10": 0.0007680000000007681,
+      "p90": 0.15646720000000086
+    },
+    "paired_remainder_below_minus_0_05_ms": 0,
+    "attribution": "Last completed global profiling-frame values. Camera frame/time label observation only; count one is necessary, not sufficient, for selected-camera attribution.",
+    "aggregation": "No parent/child or stage medians are added. Zero-count stages are missing measurements. PageCull can have two executions and is nested in both caster-cull parents."
+  },
+  {
+    "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-baseline\\cost\\20260912_072119_372\\spatial_reverse\\stage-timing.csv",
+    "observation_count": 128,
+    "accepted_resolve_observation_count": 128,
+    "rejected_observations": {},
+    "stages": {
+      "VSM.LayoutRemap": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 0.0,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResetFeedback": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 0.0,
+          "p10": 0.0,
+          "p90": 0.0
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.MarkReceiverPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.64128,
+          "mean": 0.644164,
+          "p10": 0.639488,
+          "p90": 0.6428927999999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Allocate": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.224512,
+          "mean": 0.22408799999999998,
+          "p10": 0.22195199999999998,
+          "p90": 0.225536
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.InvalidateStatic": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ClearPhysicalPages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.090112,
+          "mean": 0.187354,
+          "p10": 0.0896,
+          "p90": 0.3898624
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.StaticCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.068096,
+          "mean": 0.10137399999999999,
+          "p10": 0.066048,
+          "p90": 0.29030399999999973
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicCasterCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.0,
+          "mean": 7.2e-05,
+          "p10": 0.0,
+          "p90": 0.000256
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.PageCull": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.048639999999999996,
+          "mean": 0.05561,
+          "p10": 0.046003199999999994,
+          "p90": 0.050432
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.StaticCasterCull",
+          "VSM.DynamicCasterCull"
+        ]
+      },
+      "VSM.StaticRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.007168,
+          "mean": 0.007378,
+          "p10": 0.0068352,
+          "p90": 0.007756799999999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.FinalizePages": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.002048,
+          "mean": 0.002186,
+          "p10": 0.002048,
+          "p90": 0.002304
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.DynamicRaster": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.013312,
+          "mean": 0.013356,
+          "p10": 0.011519999999999999,
+          "p90": 0.0156928
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.UnityCompatibilityRaster": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.Resolve": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 10.201087999999999,
+          "mean": 10.220044,
+          "p10": 9.5211776,
+          "p90": 10.8226304
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": []
+      },
+      "VSM.ResolveTrace": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 10.062975999999999,
+          "mean": 10.067928,
+          "p10": 9.3896704,
+          "p90": 10.693196799999999
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterHorizontal": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.063488,
+          "mean": 0.07236,
+          "p10": 0.06297599999999999,
+          "p90": 0.064512
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterVertical": {
+        "gpu_ms": {
+          "count": 128,
+          "median": 0.064512,
+          "mean": 0.067158,
+          "p10": 0.064256,
+          "p90": 0.0651008
+        },
+        "sample_count_histogram_all_observations": {
+          "1": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      },
+      "VSM.FilterTemporalVertical": {
+        "gpu_ms": {
+          "count": 0,
+          "median": null,
+          "mean": null,
+          "p10": null,
+          "p90": null
+        },
+        "sample_count_histogram_all_observations": {
+          "0": 128
+        },
+        "inclusive_parents": [
+          "VSM.Resolve"
+        ]
+      }
+    },
+    "resolve_minus_paired_children_ms": {
+      "count": 128,
+      "median": 0.0012799999999995038,
+      "mean": 0.012598000000000081,
+      "p10": 0.0007680000000007681,
+      "p90": 0.0015359999999997598
+    },
+    "paired_remainder_below_minus_0_05_ms": 0,
+    "attribution": "Last completed global profiling-frame values. Camera frame/time label observation only; count one is necessary, not sufficient, for selected-camera attribution.",
+    "aggregation": "No parent/child or stage medians are added. Zero-count stages are missing measurements. PageCull can have two executions and is nested in both caster-cull parents."
+  }
+]

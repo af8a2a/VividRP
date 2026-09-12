@@ -1,0 +1,98 @@
+using System;
+using System.IO;
+using System.Text;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
+using VividRP.Runtime.RenderPass.Core;
+
+namespace VividRP.Editor
+{
+    // Temporary diagnostic menu only. Import after active capture has finished.
+    internal static class VSMProfilingGCProbe
+    {
+        private const string Output = "Packages/VividRP/Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/profiling-gc-result.txt";
+
+        [MenuItem("Tools/VividRP/Diagnostics/Validate VSM Profiling GC")]
+        private static void Run()
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Output));
+            File.WriteAllText(Output, "RUNNING\n");
+            // Direct access through the normal Editor assembly; no reflection,
+            // dynamic access or command namespace restriction bypass.
+            ProfilingSampler[] samplers = { VSMProfiling.ResolveTrace, VSMProfiling.FilterHorizontal,
+                VSMProfiling.FilterVertical, VSMProfiling.FilterTemporalVertical, VSMProfiling.Resolve };
+            string[] labels = { "ResolveTrace", "FilterHorizontal", "FilterVertical",
+                "FilterTemporalVertical", "nested spatial branch", "nested temporal branch", "null fallback" };
+            var bytes = new long[labels.Length];
+            const int warmup = 128, repetitions = 4096;
+            var command = new CommandBuffer();
+            try
+            {
+                for (int variant = 0; variant < labels.Length; variant++)
+                    for (int iteration = 0; iteration < warmup; iteration++)
+                        RecordCase(command, samplers, variant);
+                RecordLayout(command, samplers, true);
+                if (command.sizeInBytes == 0)
+                    throw new InvalidOperationException("Profiler command recording is disabled; refusing a vacuous allocation pass.");
+                GC.GetAllocatedBytesForCurrentThread();
+                GC.GetAllocatedBytesForCurrentThread();
+                for (int variant = 0; variant < labels.Length; variant++)
+                {
+                    long start = GC.GetAllocatedBytesForCurrentThread();
+                    for (int iteration = 0; iteration < repetitions; iteration++)
+                        RecordCase(command, samplers, variant);
+                    bytes[variant] = GC.GetAllocatedBytesForCurrentThread() - start;
+                }
+                bool passed = true;
+                var report = new StringBuilder();
+                for (int index = 0; index < labels.Length; index++)
+                {
+                    passed &= bytes[index] == 0;
+                    report.Append(labels[index]).Append(": warmed=").Append(warmup)
+                        .Append(" measured=").Append(repetitions).Append(" currentThreadBytes=")
+                        .Append(bytes[index]).AppendLine();
+                }
+                report.AppendLine("Actual production cached samplers, native CommandBuffer ProfilingScope overload."
+                    + " BaseCommandBuffer overload in CoreRP calls the same Begin/End with its wrapped native buffer."
+                    + " No shared CommandBufferHelpers state was changed.");
+                report.AppendLine("Only warmed marker recording is measured: no GPU submit, shader work, scene modification,"
+                    + " Unity Test Framework, all-thread profiling, or claim about entire Record/Prepare.");
+                report.AppendLine(passed ? "PASS" : "FAIL");
+                Directory.CreateDirectory(Path.GetDirectoryName(Output));
+                File.WriteAllText(Output, report.ToString());
+                Debug.Log(report.ToString());
+                if (!passed) throw new InvalidOperationException("Stable profiling marker path allocated managed memory; see profiling-gc-result.txt.");
+            }
+            catch (Exception error)
+            {
+                File.AppendAllText(Output, "FAIL " + error);
+                throw;
+            }
+            finally { command.Clear(); command.Dispose(); }
+        }
+
+        private static void RecordOne(CommandBuffer command, ProfilingSampler sampler)
+        {
+            using (new ProfilingScope(command, sampler)) { }
+        }
+
+        private static void RecordLayout(CommandBuffer command, ProfilingSampler[] samplers, bool temporal)
+        {
+            using (new ProfilingScope(command, samplers[4]))
+            {
+                using (new ProfilingScope(command, samplers[0])) { }
+                using (new ProfilingScope(command, samplers[1])) { }
+                using (new ProfilingScope(command, temporal ? samplers[3] : samplers[2])) { }
+            }
+        }
+
+        private static void RecordCase(CommandBuffer command, ProfilingSampler[] samplers, int variant)
+        {
+            command.Clear();
+            if (variant < 4) RecordOne(command, samplers[variant]);
+            else if (variant < 6) RecordLayout(command, samplers, variant == 5);
+            else RecordOne(command, null);
+        }
+    }
+}

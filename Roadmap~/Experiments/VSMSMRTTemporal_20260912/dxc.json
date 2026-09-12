@@ -1,0 +1,282 @@
+{
+  "total": 46,
+  "passed": 46,
+  "results": [
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowResolve",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMReceiverDebug",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMMarkReceiverPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeClearReceiverRequests",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeResetReceiverFeedback",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeAllocatePages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMResetPhysicalOwners",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMRemapPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeMarkAllAllocatedPagesDirty",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeInvalidateStaticPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeClearPhysicalPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeFinalizeDirtyPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypePrepareMeshletPageRequests",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMPrototypeCullMeshletsToPages",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowClearTiles",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowClassifyTiles",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowResolveTiles",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowCopyFilterSource",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBilateralFilterH",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBilateralFilterV",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMShadowBilateralFilterH",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMShadowBilateralFilterV",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "VSMShadowTemporalV",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeLow",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeMedium",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeHigh",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "kernel": "CSMShadowBendCompositeVeryHigh",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectVSMHistory",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectSMRTSamples",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "TraceSMRTRays",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "TraceSMRTClipmaps",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "FilterSMRTFootprints",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "SampleTaps",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "ResolveReceivers",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "MarkFootprints",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "MarkCoalescedFootprints",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "FilterFootprints",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectBias",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectTransition",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectScreenNormal",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "ResolveScreenReceivers",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectReceiverDiagnostics",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectReceiverFootprint",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectVSMStochasticSample",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "InspectVSMStochasticTexelOffset",
+      "variant": 0,
+      "exit_code": 0
+    },
+    {
+      "source": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute",
+      "kernel": "UploadTestPools",
+      "variant": 0,
+      "exit_code": 0
+    }
+  ]
+}

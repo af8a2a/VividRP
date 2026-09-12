@@ -2,7 +2,7 @@
 #define VIVIDRP_VIRTUAL_SHADOW_MAP_ADDRESSING_INCLUDED
 
 // Independent nearest surfaces; never fill the empty space between layers.
-#define VIVID_VSM_DEPTH_LAYER_COUNT 8
+#define VIVID_VSM_DEPTH_LAYER_COUNT 16
 
 // Callers provide a positive resolution. SV_Position is in non-negative
 // raster coordinates; truncation selects its pixel, including pixel centers.

@@ -316,9 +316,9 @@ namespace VividRP.Editor.Tests
         public void SMRT_BND1PhasesAdvanceAcross256FramesAndKeepRayStrataAndReceiverSupport()
         {
             using var f = new Fixture();
-            var inputs = new float4[256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount];
+            var inputs = new float4[256 * 4];
             var rays = new float4[inputs.Length];
-            for (int count = 4; count <= 8; count++)
+            foreach (int count in new[] { 2, 4, 5, 6, 7, 8 })
             {
                 for (int frame = 0; frame < 256; frame++) for (int mode = 0; mode < 4; mode++)
                 {
@@ -398,7 +398,7 @@ namespace VividRP.Editor.Tests
                 Array.Clear(f.DynamicData, 0, f.DynamicData.Length);
                 uint[] pool = dynamic ? f.DynamicData : f.StaticData;
                 for (int layer = 0; layer < hiddenLayer; layer++)
-                    pool[layer * 256 + pixel] = math.asuint(.9f - .05f * layer);
+                    pool[layer * 256 + pixel] = math.asuint(.9f - .02f * layer);
                 if (dynamic) f.StaticData[pixel] = math.asuint(.95f);
                 pool[hiddenLayer * 256 + pixel] = math.asuint(.3f);
                 f.Upload();
@@ -409,6 +409,26 @@ namespace VividRP.Editor.Tests
                 f.Upload();
                 Assert.That(f.Run("TraceSMRTRays", origins, normals: rays)[0], Is.EqualTo(new float2(1, 1)));
             }
+        }
+
+        [Test]
+        public void SMRT_DenseForegroundStackDoesNotDiscardTheArchOccluder()
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 4, .5f));
+            int slot = (int)f.TableData[1] - 1;
+            int pixel = (slot / 4 * 4 + 3) * 16 + slot % 4 * 4;
+            // A ray crosses this texel during t=[1,3]. The fifteen foreground
+            // surfaces are farther along the light axis (t=8.4..14); only the
+            // sixteenth, hidden surface at t=2 intersects the oblique ray.
+            for (int layer = 0; layer < 15; layer++)
+                f.StaticData[layer * 256 + pixel] = math.asuint(.9f - .02f * layer);
+            f.StaticData[15 * 256 + pixel] = math.asuint(.3f);
+            f.Upload();
+            var origin = new[] { new float4(3.5f / 8, 3.5f / 8, .2f, 0) };
+            var ray = new[] { new float4(.5f, 0, 4, 0) };
+            Assert.That(f.Run("TraceSMRTRays", origin, normals: ray)[0], Is.EqualTo(new float2(1, 0)));
         }
 
         private static void SetSMRTDepth(Fixture f, int x, int y, float depth)

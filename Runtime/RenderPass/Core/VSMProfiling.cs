@@ -18,6 +18,10 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static readonly ProfilingSampler StaticRaster = new("VSM.StaticRaster");
         internal static readonly ProfilingSampler UnityRaster = new("VSM.UnityCompatibilityRaster");
         internal static readonly ProfilingSampler Resolve = new("VSM.Resolve");
+        internal static readonly ProfilingSampler ResolveTrace = new("VSM.ResolveTrace");
+        internal static readonly ProfilingSampler FilterHorizontal = new("VSM.FilterHorizontal");
+        internal static readonly ProfilingSampler FilterVertical = new("VSM.FilterVertical");
+        internal static readonly ProfilingSampler FilterTemporalVertical = new("VSM.FilterTemporalVertical");
         internal static readonly ProfilingSampler ResetFeedback = new("VSM.ResetFeedback");
     }
 }

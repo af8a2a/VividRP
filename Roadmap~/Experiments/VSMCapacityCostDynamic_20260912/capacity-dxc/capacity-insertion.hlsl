@@ -1,0 +1,25 @@
+
+#pragma vertex Vert
+#pragma fragment Frag
+#pragma target 5.0
+#pragma require randomwrite
+#define VIVID_VSM_CASTER
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl"
+uint _CapacityDistinctCount;
+uint _CapacityOrder;
+struct Varyings { float4 position : SV_Position; nointerpolation uint depth : TEXCOORD0; };
+Varyings Vert(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
+{
+    uint index = instance % _CapacityDistinctCount;
+    if (_CapacityOrder == 1) index = _CapacityDistinctCount - 1 - index;
+    if (_CapacityOrder == 2) index = (index * 5) % _CapacityDistinctCount;
+    float depth = (index + 1) / 128.0;
+    Varyings output;
+    output.position = float4(vertex == 1 ? 3 : -1, vertex == 2 ? 3 : -1, depth, 1);
+    output.depth = asuint(depth);
+    return output;
+}
+void Frag(Varyings input)
+{
+    VividInsertVSMDepth(uint2(input.position.xy), input.depth);
+}

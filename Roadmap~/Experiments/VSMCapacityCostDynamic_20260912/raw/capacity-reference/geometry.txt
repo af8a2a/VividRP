@@ -1,0 +1,3 @@
+staticInstances=217 dynamicInstances=0 triangles=264754
+mask1=static meshlet && !skinned; mask2=dynamic meshlet and all Unity Renderer
+force opaque; no terrain/procedural/animated skinned reference; fixture=static

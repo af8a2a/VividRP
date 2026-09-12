@@ -1,0 +1,9 @@
+{
+  "Runtime/RenderPass/Core/CSMShadowPass.cs": "6c4560577089f42a57af30eb8c368f3dd3f544ae5dd8870589f1c294c1f33313",
+  "Runtime/RenderPass/Core/CSMShadowResolvePass.cs": "9245a10bed7f74056130c110d50490a35e0aa31db14f52ef81ecb9103bf9fb93",
+  "Runtime/RenderPass/Core/VSMProfiling.cs": "78f2f4fe3efd50d07fcb7ed11dcecb6bc7e733e257c8d4aa84971ca5ee26ed33",
+  "Runtime/RenderPipeline/CascadedShadowSettingsVolume.cs": "f7b19c9f8cda528476daa1cc1bcb0321c93eb676760bd50113297d5ede3528f1",
+  "Shaders/Core/Private/CSMShadowResolve.compute": "097d9d984926ef68651810f9b45b1466b8aea9fcb32515394d87c6cc9e812561",
+  "Shaders/Core/Private/VSMSMRT.hlsl": "4b29ecf1956ae72cb27cb5a4fd3d2a38c3a9370c286c112520e669976c9ced29",
+  "Shaders/Core/Public/Shadow/VividVirtualShadowMapAddressing.hlsl": "a57d472c32c364ba8b601de6980a6572dd87ea7c49a85010a45c4162eb4a85e5"
+}

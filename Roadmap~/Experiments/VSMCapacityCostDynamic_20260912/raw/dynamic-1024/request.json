@@ -1,0 +1,25 @@
+{
+    "scenarios": [
+        "static",
+        "thin_sweep",
+        "deform",
+        "receiver_lift",
+        "sun_rotate",
+        "sun_step"
+    ],
+    "modes": [
+        "adaptive"
+    ],
+    "frames": 32,
+    "referenceRays": 1024,
+    "stride": 4,
+    "originX": 482,
+    "originY": 162,
+    "width": 960,
+    "height": 720,
+    "capacityReference": false,
+    "timingOnly": false,
+    "capacityGrid": 8,
+    "fixtureForwardDistance": 5.0,
+    "floorHeight": -0.02227500081062317
+}

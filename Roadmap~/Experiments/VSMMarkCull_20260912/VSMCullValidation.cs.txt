@@ -1,0 +1,177 @@
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Unity.Mathematics;
+using UnityEditor;
+using UnityEngine;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.RenderPass.Core;
+using VividRP.Runtime.PrimitiveScene;
+using Object = UnityEngine.Object;
+namespace VividRP.Editor
+{
+    // Standalone GPU diagnostic with explicit CPU page/meshlet coverage oracle.
+    internal static class VSMCullValidation
+    {
+        private static void Check(bool ok, string reason) { if (!ok) throw new InvalidOperationException(reason); }
+        [MenuItem("Tools/VividRP/Diagnostics/Validate Temporary VSM Page Culling")]
+        private static void Run()
+        {
+            Check(!EditorApplication.isPlaying, "Use Edit Mode.");
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>("Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            int count = 0;
+            try
+            {
+                foreach (int capacity in new[] {1, 63, 64, 65, 256, 1024, 4096})
+                    for (int layer = 0; layer < 2; layer++)
+                        for (int dirty = 0; dirty < 4; dirty++)
+                        { Validate(shader, layer, dirty, capacity); count++; }
+                File.WriteAllText("Packages/VividRP/Temp~/mark-cull/culling.json", "{\"gpuCases\":" + count + ",\"mismatches\":0}");
+                Debug.Log("VSM page culling GPU diagnostic passed: " + count);
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+        private static void Validate(ComputeShader shader, int casterLayer, int dirtyMode, int capacity)
+        {
+            int prepare = shader.FindKernel("VSMPrototypePrepareMeshletPageRequests");
+            int cull = shader.FindKernel("VSMPrototypeCullMeshletsToPages");
+            const int pageCount = 256;
+            const int sourceCapacity = 24;
+            const int requestCapacity = sourceCapacity * 4;
+            int listCount = (int)VividRendererListID.Count;
+            var tableData = new uint[pageCount];
+            var metadataData = new uint4[pageCount];
+            var ownerData = new uint[capacity];
+            var relevant = new bool[pageCount];
+            int relevantCount = 0;
+            for (int page = 0; page < pageCount; page++)
+            {
+                // Full-pool stress plus sparse mappings and non-contiguous physical owners.
+                bool allocated = dirtyMode == 3 || page % 7 != 0;
+                bool dirty = dirtyMode == 3 || (dirtyMode == 1 && page == 9)
+                    || (dirtyMode == 2 && page % 11 == 9);
+                int physical = (page * 73 + 19) % pageCount;
+                allocated &= physical < capacity;
+                tableData[page] = allocated ? (uint)physical + 1u : 0u;
+                if (allocated) ownerData[physical] = (uint)page + 1u;
+                metadataData[page].x = allocated ? (dirty ? 6u : 10u) : 0u;
+                relevant[page] = allocated && (casterLayer != 0 || dirty);
+                if (relevant[page]) relevantCount++;
+            }
+            var sourceData = new VividMeshletRenderRequestPacked[sourceCapacity];
+            var sourceArgsData = new VividIndirectDrawArgs[listCount * 4];
+            int sourceIndex = 0;
+            for (int cascade = 0; cascade < 4; cascade++)
+            {
+                for (int list = 0; list < listCount; list++)
+                {
+                    if (list != 0 && list != listCount - 1) continue;
+                    sourceArgsData[cascade * listCount + list] = new VividIndirectDrawArgs
+                    {
+                        InstanceCount = 3, StartInstance = (uint)sourceIndex,
+                    };
+                    for (uint meshlet = 0; meshlet < 3; meshlet++)
+                        sourceData[sourceIndex++].MeshletID = meshlet;
+                }
+            }
+            var meshletData = new[]
+            {
+                new VividMeshlet { BoundingSphere = new float4(0.5f, 0.5f, 0, 0.5f) },
+                new VividMeshlet { BoundingSphere = new float4(0.1875f, 0.1875f, 0, 0.001f) },
+                new VividMeshlet { BoundingSphere = new float4(0.25f, 0.25f, 0, 0.2f) },
+            };
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, 16);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
+            using var sources = new GraphicsBuffer(GraphicsBuffer.Target.Structured, sourceCapacity, 8);
+            using var sourceArgs = new GraphicsBuffer(GraphicsBuffer.Target.Raw, listCount * 16, 4);
+            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, requestCapacity + 4, 16);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
+                listCount * 8, 4);
+            using var rasterPages = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity + 1, 4);
+            using var instances = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, Marshal.SizeOf<VividInstanceData>());
+            using var meshlets = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, Marshal.SizeOf<VividMeshlet>());
+            var requestData = new uint4[requestCapacity + 4];
+            for (int i = 0; i < requestData.Length; i++) requestData[i] = new uint4(0xeeeeeeeeu);
+            table.SetData(tableData); metadata.SetData(metadataData); owners.SetData(ownerData);
+            sources.SetData(sourceData); sourceArgs.SetData(sourceArgsData); requests.SetData(requestData);
+            instances.SetData(new[] { new VividInstanceData { ObjectToWorldMatrix = float4x4.identity } });
+            meshlets.SetData(meshletData);
+            shader.SetInt("_VSMProjectionCount", 4);
+            shader.SetInt("_VSMPrototypePageTableEntryCount", pageCount);
+            shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
+            shader.SetInt("_VSMPrototypeCasterLayer", casterLayer);
+            shader.SetInt("_VSMPrototypeSourceRequestsPerCascadeCapacity", sourceCapacity / 4);
+            shader.SetInt("_VSMPrototypeVirtualResolution", 1024);
+            shader.SetInt("_VSMPrototypePagesPerAxis", 8);
+            shader.SetInt("_VSMPrototypePageSize", 128);
+            shader.SetInt("_InstanceDataCount", 1); shader.SetInt("_MeshletCount", 3);
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 160);
+            var projectionData = new VirtualShadowMapProjection[4];
+            for (int i = 0; i < projectionData.Length; i++)
+                projectionData[i].WorldToShadow = Matrix4x4.identity;
+            projections.SetData(projectionData);
+            shader.SetBuffer(cull, "_VSMProjections", projections);
+            foreach (int kernel in new[] { prepare, cull })
+            {
+                shader.SetBuffer(kernel, "_VSMPrototypePageTable", table);
+                shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(kernel, "_VSMPrototypeSourceMeshletIndirectArgs", sourceArgs);
+                shader.SetBuffer(kernel, "_VSMPrototypeMeshletPageIndirectArgs", args);
+                shader.SetBuffer(kernel, "_VSMPrototypeMeshletRasterPages", rasterPages);
+            }
+            shader.SetBuffer(prepare, "_VSMPrototypePhysicalPageOwners", owners);
+            shader.SetBuffer(cull, "_VSMPrototypeSourceMeshletRequests", sources);
+            shader.SetBuffer(cull, "_VSMPrototypeMeshletPageRequests", requests);
+            shader.SetBuffer(cull, "_InstanceData", instances); shader.SetBuffer(cull, "_Meshlets", meshlets);
+            shader.Dispatch(prepare, 1, 1, 1);
+            shader.Dispatch(cull, 1, 4, listCount);
+            var argsData = new VividIndirectDrawArgs[listCount * 2];
+            var rasterPageData = new uint[capacity + 1];
+            requests.GetData(requestData); args.GetData(argsData); rasterPages.GetData(rasterPageData);
+            Check(rasterPageData[0] == relevantCount, "Raster count");
+            var seenPages = new bool[pageCount];
+            for (int i = 0; i < relevantCount; i++)
+            {
+                uint page = rasterPageData[i + 1];
+                Check(page < pageCount, "Page bounds");
+                Check(relevant[page] && !seenPages[page], "Unique relevant page");
+                seenPages[page] = true;
+            }
+            var actual = new int[listCount * 3 * pageCount];
+            for (int command = 0; command < argsData.Length; command++)
+            {
+                VividIndirectDrawArgs draw = argsData[command];
+                bool large = command >= listCount;
+                Check(draw.InstanceCount <= sourceCapacity * pageCount, "Draw count bounds");
+                for (uint local = 0; local < draw.InstanceCount; local++)
+                {
+                    uint address = large ? draw.StartInstance - 1u - local / rasterPageData[0]
+                        : draw.StartInstance + local;
+                    Check(address < requestCapacity, "Request address bounds");
+                    uint4 request = requestData[address];
+                    uint page = large ? rasterPageData[1u + local % rasterPageData[0]] : request.z;
+                    if (large && (page / 64 != request.w / 64
+                        || page % 8 < request.z % 8 || page % 8 > request.w % 8
+                        || page % 64 / 8 < request.z % 64 / 8 || page % 64 / 8 > request.w % 64 / 8))
+                        continue;
+                    Check(request.x == 0, "Instance");
+                    Check(request.y < 3, "Meshlet bounds");
+                    Check(page < pageCount, "Page bounds");
+                    actual[((command % listCount) * 3 + (int)request.y) * pageCount + (int)page]++;
+                }
+            }
+            for (int list = 0; list < listCount; list++)
+            for (int meshlet = 0; meshlet < 3; meshlet++)
+            for (int page = 0; page < pageCount; page++)
+            {
+                bool covered = meshlet == 0 || (meshlet == 1 ? page % 64 == 9
+                    : page % 8 <= 3 && page % 64 / 8 <= 3);
+                int expected = (list == 0 || list == listCount - 1) && covered && relevant[page] ? 1 : 0;
+                Check(actual[(list * 3 + meshlet) * pageCount + page] == expected, "Meshlet/page coverage");
+            }
+            for (int i = requestCapacity; i < requestData.Length; i++)
+                Check(math.all(requestData[i] == new uint4(0xeeeeeeeeu)), "Request guard");
+        }
+    }
+}

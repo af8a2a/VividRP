@@ -1,0 +1,99 @@
+using System;
+using System.IO;
+using UnityEditor;
+using UnityEngine;
+using Unity.Mathematics;
+using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
+using Object = UnityEngine.Object;
+namespace VividRP.Editor
+{
+    // Explicit isolated GPU diagnostic; does not run the Unity Test Framework.
+    internal static class VSMMarkEquivalence
+    {
+        [Serializable] private sealed class Report { public int cases, pixels, pages, mismatches; }
+        [MenuItem("Tools/VividRP/Diagnostics/Compare Temporary VSM Marking")]
+        private static void Run()
+        {
+            if (EditorApplication.isPlaying) throw new InvalidOperationException("Use Edit Mode.");
+            var shaders = new[] {
+                Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>("Packages/com.vivid.render-pipelines/Editor/Tools/VSMMarkReference.compute")),
+                Object.Instantiate(PipelineResourceManager.Get<VividRPCoreResources>().CSMShadowResolveCompute) };
+            var report = new Report();
+            try
+            {
+                for (int mode = 0; mode < 5; mode++)
+                    for (int pattern = 0; pattern < 8; pattern++)
+                        for (int size = 0; size < 4; size++)
+                            for (int frame = 0; frame < 3; frame++) Compare(shaders, mode, pattern, size, frame, report);
+                File.WriteAllText("Packages/VividRP/Temp~/mark-cull/equivalence.json", JsonUtility.ToJson(report, true));
+                Debug.Log("VSM marking equivalence passed: " + JsonUtility.ToJson(report));
+            }
+            finally { foreach (var shader in shaders) Object.DestroyImmediate(shader); }
+        }
+        private static void Compare(ComputeShader[] shaders, int mode, int pattern, int size, int frameIndex, Report report)
+        {
+            int[] widths = {1, 8, 17, 67}, heights = {1, 8, 11, 39}, frames = {0, 7, 257};
+            int width = widths[size], height = heights[size], frame = frames[frameIndex];
+            var depth = new Texture2D(width, height, TextureFormat.RFloat, false, true);
+            var normal = new Texture2D(width, height, TextureFormat.RGBAFloat, false, true);
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 160);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 192, 16);
+            try
+            {
+                var records = new VirtualShadowMapProjection[3];
+                for (int i = 0; i < records.Length; i++)
+                {
+                    var matrix = Matrix4x4.identity;
+                    matrix.m00 = matrix.m11 = .8f / (1 << i);
+                    matrix.m03 = .5f + ((pattern % 3) - 1) * .31f;
+                    matrix.m13 = .5f - ((pattern % 4) - 1) * .17f;
+                    matrix.m22 = .6f; matrix.m23 = .12f;
+                    records[i] = new VirtualShadowMapProjection { WorldToShadow = matrix,
+                        SelectionSphere = new Vector4(0, 0, 0, -5 * (1 << i)),
+                        Parameters = new Vector4(.04f * (1 << i), pattern % 2 == 0 ? .35f : -.25f, .2f, 100) };
+                }
+                projections.SetData(records);
+                var random = new System.Random(91 + pattern * 31 + size);
+                var pixels = new float[width * height]; var normals = new Color[pixels.Length];
+                for (int i = 0; i < pixels.Length; i++)
+                {
+                    bool sky = pattern == 0 || (pattern == 2 && i % 3 == 0) || (pattern == 3 && i % 5 != 0);
+                    pixels[i] = sky ? (SystemInfo.usesReversedZBuffer ? 0 : 1)
+                        : pattern < 4 ? .5f : .01f + .98f * (float)random.NextDouble();
+                    normals[i] = pattern < 3 ? new Color(.5f, .5f, 0, 0)
+                        : new Color((float)random.NextDouble(), (float)random.NextDouble(), 0, 0);
+                }
+                depth.SetPixelData(pixels, 0); depth.Apply(); normal.SetPixels(normals); normal.Apply();
+                var initial = new uint4[192]; var reference = new uint4[192]; var actual = new uint4[192];
+                for (int i = 0; i < initial.Length; i++) initial[i] = new uint4(
+                    (uint)random.Next(0, 4096), (uint)(i + 3), (uint)(i % 2 == 0 ? frame + 2 : Math.Max(0, frame - 1)), (uint)(i * 17));
+                for (int s = 0; s < shaders.Length; s++)
+                {
+                    var shader = shaders[s]; int kernel = shader.FindKernel("VSMMarkReceiverPages");
+                    metadata.SetData(initial);
+                    shader.SetInt("_CSMOutputWidth", width); shader.SetInt("_CSMOutputHeight", height);
+                    shader.SetInt("_VSMProjectionCount", 3); shader.SetInt("_VSMPrototypeVirtualResolution", 64);
+                    shader.SetInt("_VSMPrototypePageSize", 8); shader.SetInt("_VSMPrototypePagesPerAxis", 8);
+                    shader.SetInt("_VSMPrototypeRequestEnabled", mode == 4 ? 0 : 1);
+                    shader.SetInt("_CSMFrameIndex", frame);
+                    shader.SetMatrix("_CSMInvViewProjMatrix", Matrix4x4.identity);
+                    shader.SetMatrix("_VSMReceiverViewProjection", Matrix4x4.identity);
+                    shader.SetVector("_VSMReceiverParameters", new Vector4(1, .03f, .2f, 0));
+                    shader.SetVector("_VSMReceiverQuality", new Vector4(mode == 0 ? 0 : 1, 1, .05f, 1));
+                    shader.SetVector("_VSMSMRTParameters", mode >= 2 ? new Vector4(4, 8, mode == 3 ? 50 : 10, .12f) : Vector4.zero);
+                    shader.SetBuffer(kernel, "_VSMProjections", projections);
+                    shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                    shader.SetTexture(kernel, "_DepthTexture", depth); shader.SetTexture(kernel, "_GBuffer1", normal);
+                    shader.Dispatch(kernel, (width + 7) / 8, (height + 7) / 8, 1);
+                    metadata.GetData(s == 0 ? reference : actual);
+                }
+                for (int i = 0; i < actual.Length; i++)
+                    if (!math.all(actual[i] == reference[i]))
+                        throw new InvalidOperationException("Mark mismatch mode=" + mode + " pattern=" + pattern + " size=" + size + " frame=" + frame + " page=" + i + " expected=" + reference[i] + " actual=" + actual[i]);
+                report.cases++; report.pixels += pixels.Length; report.pages += actual.Length;
+            }
+            finally { Object.DestroyImmediate(depth); Object.DestroyImmediate(normal); }
+        }
+    }
+}

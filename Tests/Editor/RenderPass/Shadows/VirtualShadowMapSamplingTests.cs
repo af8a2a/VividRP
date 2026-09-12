@@ -885,6 +885,57 @@ namespace VividRP.Editor.Tests
                 Assert.That(result[i], Is.EqualTo(new float2(i == 2 ? 1 : 0, 1)));
         }
 
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(2)]
+        public void CurrentFrame_CoalescedRequestsPreservePerPageRolesAndAge(int pattern)
+        {
+            using var f = new Fixture();
+            const int count = 193;
+            int frame = pattern == 0 ? 0 : 17;
+            var inputs = new float4[count]; var halos = new float4[count];
+            var expected = new uint4[12];
+            for (int page = 0; page < 12; page++)
+            {
+                expected[page] = new uint4(10u, (uint)(page + 1), (uint)(page % 2 == 0 ? 0 : 19), 64u);
+                f.MetadataData[page] = expected[page];
+            }
+            for (int i = 0; i < count; i++)
+            {
+                int lane = i % 64;
+                int level = pattern == 2 ? (i / 7) % 3 : (i / 64) % 3;
+                uint role = lane % 3 == 0 ? 512u : lane % 3 == 1 ? 1024u : 2048u;
+                float x = lane < 32 ? .125f : .625f, y = i % 5 == 0 ? .625f : .125f;
+                int halo = pattern == 1 && lane == 0 ? 7 : pattern == 2 ? lane % 5 : 0;
+                // Inactive first lanes, partial waves, mixed LODs, map boundaries,
+                // and long halos must preserve each page's exact role union.
+                bool active = lane % 11 != 0 || pattern == 1;
+                if (pattern == 2 && lane % 13 == 0) x = lane % 2 == 0 ? 1f : -.01f;
+                inputs[i] = new float4(x, y, level, role); halos[i] = new float4(halo, active ? 1 : 0, 0, 0);
+                if (!active || x < 0 || x >= 1) continue;
+                int tx = Mathf.FloorToInt(x * 8), ty = Mathf.FloorToInt(y * 8);
+                for (int py = Mathf.Max(0, ty - halo) / 4; py <= Mathf.Min(7, ty + halo) / 4; py++)
+                for (int px = Mathf.Max(0, tx - halo) / 4; px <= Mathf.Min(7, tx + halo) / 4; px++)
+                {
+                    int page = level * 4 + py * 2 + px;
+                    expected[page].x |= 1u | role | (level == 2 ? 256u : 0u);
+                    expected[page].z = Math.Max(expected[page].z, (uint)frame);
+                }
+            }
+            f.Upload();
+            using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
+            using var haloInput = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
+            input.SetData(inputs); haloInput.SetData(halos);
+            int kernel = f.Shader.FindKernel("MarkCoalescedFootprints");
+            f.Shader.SetInt("_SamplingCount", count); f.Shader.SetInt("_CSMFrameIndex", frame);
+            f.Shader.SetBuffer(kernel, "_SamplingInputs", input);
+            f.Shader.SetBuffer(kernel, "_SamplingNormals", haloInput);
+            f.Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", f.Metadata);
+            f.Shader.Dispatch(kernel, (count + 63) / 64, 1, 1);
+            f.Metadata.GetData(f.MetadataData);
+            Assert.That(f.MetadataData, Is.EqualTo(expected));
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public void MissingFine_ReprojectsWorldPositionDepthAndLevelBias(bool normalBias)

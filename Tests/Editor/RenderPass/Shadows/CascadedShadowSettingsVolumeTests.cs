@@ -1163,13 +1163,19 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [TestCase(0, 0)]
-        [TestCase(0, 1)]
-        [TestCase(0, 2)]
-        [TestCase(0, 3)]
-        [TestCase(1, 0)]
+        [TestCase(0, 0, 256)]
+        [TestCase(0, 1, 256)]
+        [TestCase(0, 2, 256)]
+        [TestCase(0, 3, 256)]
+        [TestCase(1, 0, 256)]
+        [TestCase(0, 3, 1)]
+        [TestCase(0, 3, 63)]
+        [TestCase(0, 3, 64)]
+        [TestCase(0, 3, 65)]
+        [TestCase(0, 0, 4096)]
+        [TestCase(1, 2, 1024)]
         public void VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(
-            int casterLayer, int dirtyMode)
+            int casterLayer, int dirtyMode, int physicalCapacity)
         {
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             ComputeShader shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -1183,7 +1189,7 @@ namespace VividRP.Editor.Tests
             int listCount = (int)VividRendererListID.Count;
             var tableData = new uint[pageCount];
             var metadataData = new TestPageMetadata[pageCount];
-            var ownerData = new uint[pageCount];
+            var ownerData = new uint[physicalCapacity];
             var relevant = new bool[pageCount];
             int relevantCount = 0;
             for (int page = 0; page < pageCount; page++)
@@ -1193,8 +1199,9 @@ namespace VividRP.Editor.Tests
                 bool dirty = dirtyMode == 3 || (dirtyMode == 1 && page == 9)
                     || (dirtyMode == 2 && page % 11 == 9);
                 int physical = (page * 73 + 19) % pageCount;
+                allocated &= physical < physicalCapacity;
                 tableData[page] = allocated ? (uint)physical + 1u : 0u;
-                ownerData[physical] = allocated ? (uint)page + 1u : 0u;
+                if (allocated) ownerData[physical] = (uint)page + 1u;
                 metadataData[page].Flags = allocated ? (dirty ? 6u : 10u) : 0u;
                 relevant[page] = allocated && (casterLayer != 0 || dirty);
                 if (relevant[page]) relevantCount++;
@@ -1223,13 +1230,13 @@ namespace VividRP.Editor.Tests
             };
             using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, 4);
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, 16);
-            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, 4);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, physicalCapacity, 4);
             using var sources = new GraphicsBuffer(GraphicsBuffer.Target.Structured, sourceCapacity, 8);
             using var sourceArgs = new GraphicsBuffer(GraphicsBuffer.Target.Raw, listCount * 16, 4);
             using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, requestCapacity + 4, 16);
             using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
                 listCount * 8, 4);
-            using var rasterPages = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount + 1, 4);
+            using var rasterPages = new GraphicsBuffer(GraphicsBuffer.Target.Structured, physicalCapacity + 1, 4);
             using var instances = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, Marshal.SizeOf<VividInstanceData>());
             using var meshlets = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, Marshal.SizeOf<VividMeshlet>());
             var requestData = new uint4[requestCapacity + 4];
@@ -1240,7 +1247,7 @@ namespace VividRP.Editor.Tests
             meshlets.SetData(meshletData);
             shader.SetInt("_VSMProjectionCount", 4);
             shader.SetInt("_VSMPrototypePageTableEntryCount", pageCount);
-            shader.SetInt("_VSMPrototypePhysicalPageCapacity", pageCount);
+            shader.SetInt("_VSMPrototypePhysicalPageCapacity", physicalCapacity);
             shader.SetInt("_VSMPrototypeCasterLayer", casterLayer);
             shader.SetInt("_VSMPrototypeSourceRequestsPerCascadeCapacity", sourceCapacity / 4);
             shader.SetInt("_VSMPrototypeVirtualResolution", 1024);
@@ -1268,7 +1275,7 @@ namespace VividRP.Editor.Tests
             shader.Dispatch(prepare, 1, 1, 1);
             shader.Dispatch(cull, 1, 4, listCount);
             var argsData = new VividIndirectDrawArgs[listCount * 2];
-            var rasterPageData = new uint[pageCount + 1];
+            var rasterPageData = new uint[physicalCapacity + 1];
             requests.GetData(requestData); args.GetData(argsData); rasterPages.GetData(rasterPageData);
             Assert.That(rasterPageData[0], Is.EqualTo(relevantCount));
             var seenPages = new bool[pageCount];

@@ -5,6 +5,7 @@
 #pragma kernel SampleTaps
 #pragma kernel ResolveReceivers
 #pragma kernel MarkFootprints
+#pragma kernel MarkCoalescedFootprints VIVID_VSM_MARK_RECEIVERS
 #pragma kernel FilterFootprints
 #pragma kernel InspectBias
 #pragma kernel InspectTransition
@@ -213,4 +214,13 @@ void TraceSMRTClipmaps(uint3 id : SV_DispatchThreadID)
     bool valid = TryTraceVSMSMRTClipmaps(input.xyz, _SamplingNormals[id.x].xy,
         0.05, (int)_VSMSMRTParameters.y, (int)input.w, visibility);
     _SamplingResults[id.x] = float2(valid ? 1 : 0, visibility);
+}
+
+// Exact role/age union under divergent and partially active waves.
+[numthreads(64, 1, 1)]
+void MarkCoalescedFootprints(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount || _SamplingNormals[id.x].y == 0) return;
+    float4 input = _SamplingInputs[id.x];
+    MarkVSMReceiverPage(input.xy, (int)input.z, (uint)input.w, (int)_SamplingNormals[id.x].x);
 }

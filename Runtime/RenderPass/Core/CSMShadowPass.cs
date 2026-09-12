@@ -2656,6 +2656,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal static class VirtualShadowMapPrototypeRuntime
     {
         internal const int PageSize = 128;
+        internal const int DepthLayerCount = 8;
         internal const int DefaultPhysicalPageCount = 256;
         internal const int MaxPhysicalPageCount = 1024;
         internal const int MaxPageRequestsPerMeshlet = 4;
@@ -3004,10 +3005,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 && s_StaticPhysicalPage.rt != null
                 && s_StaticPhysicalPage.rt.width == physicalPageWidth
                 && s_StaticPhysicalPage.rt.height == physicalPageHeight
+                && s_StaticPhysicalPage.rt.volumeDepth == DepthLayerCount
                 && s_DynamicPhysicalPage != null
                 && s_DynamicPhysicalPage.rt != null
                 && s_DynamicPhysicalPage.rt.width == physicalPageWidth
                 && s_DynamicPhysicalPage.rt.height == physicalPageHeight
+                && s_DynamicPhysicalPage.rt.volumeDepth == DepthLayerCount
                 && s_RasterDepth != null
                 && s_RasterDepth.rt != null
                 && s_RasterDepth.rt.width == PageSize
@@ -3395,12 +3398,12 @@ namespace VividRP.Runtime.RenderPass.Core
             return RTHandles.Alloc(
                 width,
                 height,
-                slices: 1,
+                slices: DepthLayerCount,
                 depthBufferBits: DepthBits.None,
                 colorFormat: GraphicsFormat.R32_UInt,
                 filterMode: FilterMode.Point,
                 wrapMode: TextureWrapMode.Clamp,
-                dimension: TextureDimension.Tex2D,
+                dimension: TextureDimension.Tex2DArray,
                 enableRandomWrite: true,
                 useMipMap: false,
                 autoGenerateMips: false,

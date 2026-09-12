@@ -30,8 +30,8 @@ int2 _SamplingPixel;
 
 StructuredBuffer<uint> _TestStaticData;
 StructuredBuffer<uint> _TestDynamicData;
-RWTexture2D<uint> _TestStaticPool;
-RWTexture2D<uint> _TestDynamicPool;
+RWTexture2DArray<uint> _TestStaticPool;
+RWTexture2DArray<uint> _TestDynamicPool;
 
 // input: pixel.xy, frame, mode (disk phase / receiver phase / disk / receiver).
 // normal.xy carries ray index and ray count.
@@ -51,9 +51,9 @@ void InspectSMRTSamples(uint3 id : SV_DispatchThreadID)
 void UploadTestPools(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= 16 || id.y >= 16) return;
-    uint index = id.y * 16 + id.x;
-    _TestStaticPool[id.xy] = _TestStaticData[index];
-    _TestDynamicPool[id.xy] = _TestDynamicData[index];
+    uint index = id.z * 256 + id.y * 16 + id.x;
+    _TestStaticPool[id] = _TestStaticData[index];
+    _TestDynamicPool[id] = _TestDynamicData[index];
 }
 
 #if defined(VIVID_VSM_RECEIVER_DEBUG)

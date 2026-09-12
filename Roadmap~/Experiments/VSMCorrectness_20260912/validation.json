@@ -1,0 +1,23 @@
+{
+  "shader_entries": 44,
+  "shader_passed": 44,
+  "csharp_assemblies": 3,
+  "filter_gpu_cases": 4,
+  "allocations": {
+    "warmup": 64,
+    "samples": 128,
+    "total_bytes": 0,
+    "max_bytes": 0,
+    "scope": "main-thread full-screen VSM resolve Record including both filters"
+  },
+  "unity_tests_run": false,
+  "temporary_objects": 0,
+  "volume_json_restored": true,
+  "camera_and_light_restored": true,
+  "geometric_light_leak_fixed": false,
+  "production_sources": {
+    "Runtime\\RenderPass\\Core\\CSMShadowResolvePass.cs": "5e3f9661a765bc37ed204cc48680c406c4cf7224cab34b91b0a9422cce0c776a",
+    "Shaders\\Core\\Private\\CSMShadowResolve.compute": "1261ed19ca6d16f9da512a2dec23a656fb889ec5305725e6e78bb0d4fca24b07",
+    "Shaders\\Core\\Private\\VSMSMRT.hlsl": "4edb8721d63d62a09e4d6733dae121580f029e4b0940dd481958e00eb7ad2e65"
+  }
+}

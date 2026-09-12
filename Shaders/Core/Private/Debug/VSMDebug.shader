@@ -25,8 +25,8 @@ Shader "Hidden/VividRP/VSMDebug"
             #define VIVID_VSM_DEBUG_POOL_STATIC 1
             #define VIVID_VSM_DEBUG_POOL_DYNAMIC 2
 
-            Texture2D<uint> _VSMPrototypeStaticPhysicalPage;
-            Texture2D<uint> _VSMPrototypeDynamicPhysicalPage;
+            Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
+            Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
             int _VSMPrototypeAvailable;
             int _VSMDebugVisualizationMode;
             int _VSMDebugPoolMode;
@@ -71,15 +71,16 @@ Shader "Hidden/VividRP/VSMDebug"
 
                 uint pageWidth;
                 uint pageHeight;
-                _VSMPrototypeStaticPhysicalPage.GetDimensions(pageWidth, pageHeight);
+                uint layers;
+                _VSMPrototypeStaticPhysicalPage.GetDimensions(pageWidth, pageHeight, layers);
                 uint2 pageSize = max(uint2(pageWidth, pageHeight), 1u);
                 uint2 texel = min(
                     uint2(saturate(input.uv) * pageSize),
                     pageSize - 1u);
                 uint staticRawDepth = _VSMPrototypeStaticPhysicalPage.Load(
-                    int3(texel, 0));
+                    int4(texel, 0, 0));
                 uint dynamicRawDepth = _VSMPrototypeDynamicPhysicalPage.Load(
-                    int3(texel, 0));
+                    int4(texel, 0, 0));
                 uint rawDepth = _VSMDebugPoolMode == VIVID_VSM_DEBUG_POOL_STATIC
                     ? staticRawDepth
                     : (_VSMDebugPoolMode == VIVID_VSM_DEBUG_POOL_DYNAMIC

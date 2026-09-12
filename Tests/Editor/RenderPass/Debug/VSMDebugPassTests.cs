@@ -260,14 +260,21 @@ namespace VividRP.Editor.Tests
                 graphicsFormat = GraphicsFormat.R32G32B32A32_SFloat,
                 depthStencilFormat = GraphicsFormat.None,
             });
+            var pool = new RenderTexture(new RenderTextureDescriptor(1, 1)
+            {
+                graphicsFormat = GraphicsFormat.R32_UInt, depthStencilFormat = GraphicsFormat.None,
+                dimension = TextureDimension.Tex2DArray, volumeDepth = VirtualShadowMapPrototypeRuntime.DepthLayerCount,
+                enableRandomWrite = true,
+            });
             try
             {
+                pool.Create();
                 target.Create();
                 var properties = new MaterialPropertyBlock();
                 properties.SetInt("_VSMPrototypeAvailable", 0);
                 properties.SetInt("_VSMDebugVisualizationMode", (int)VSMDebugVisualizationMode.PageStates);
-                properties.SetTexture("_VSMPrototypeStaticPhysicalPage", Texture2D.blackTexture);
-                properties.SetTexture("_VSMPrototypeDynamicPhysicalPage", Texture2D.blackTexture);
+                properties.SetTexture("_VSMPrototypeStaticPhysicalPage", pool);
+                properties.SetTexture("_VSMPrototypeDynamicPhysicalPage", pool);
                 using var command = new CommandBuffer();
                 command.SetRenderTarget(target);
                 command.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1, properties);
@@ -281,6 +288,8 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
+                pool.Release();
+                UnityEngine.Object.DestroyImmediate(pool);
                 target.Release();
                 UnityEngine.Object.DestroyImmediate(target);
                 UnityEngine.Object.DestroyImmediate(material);
@@ -394,8 +403,8 @@ namespace VividRP.Editor.Tests
             Assert.That(File.Exists(path), Is.True, path);
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("Texture2D<uint> _VSMPrototypeStaticPhysicalPage", source);
-            StringAssert.Contains("Texture2D<uint> _VSMPrototypeDynamicPhysicalPage", source);
+            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage", source);
+            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage", source);
             StringAssert.Contains("max(staticRawDepth, dynamicRawDepth)", source);
             StringAssert.Contains("asfloat(rawDepth)", source);
             StringAssert.Contains("VIVID_VSM_DEBUG_OCCUPANCY", source);

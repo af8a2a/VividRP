@@ -1,3 +1,8 @@
+#pragma kernel VSMCopyReceiverData
+#pragma kernel VSMGeneralCoverageAudit
+#pragma use_dxc
+#pragma require Native16Bit
+#define VIVID_VSM_RECEIVER_DEBUG
 #pragma kernel CSMShadowResolve VIVID_VSM_RESOLVE_RECEIVERS
 #pragma kernel VSMReceiverDebug VIVID_VSM_RECEIVER_DEBUG
 #pragma kernel VSMMarkReceiverPages VIVID_VSM_MARK_RECEIVERS
@@ -18,8 +23,6 @@
 #pragma kernel CSMShadowCopyFilterSource
 #pragma kernel CSMShadowBilateralFilterH CSM_SHADOW_BILATERAL_FILTER_H
 #pragma kernel CSMShadowBilateralFilterV CSM_SHADOW_BILATERAL_FILTER_V
-#pragma kernel VSMShadowBilateralFilterH
-#pragma kernel VSMShadowBilateralFilterV
 #pragma kernel CSMShadowBendCompositeLow VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=24 HARD_SHADOW_SAMPLES=2 FADE_OUT_SAMPLES=4 TRACK_HIT_UV=0
 #pragma kernel CSMShadowBendCompositeMedium VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=40 HARD_SHADOW_SAMPLES=4 FADE_OUT_SAMPLES=6 TRACK_HIT_UV=0
 #pragma kernel CSMShadowBendCompositeHigh VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=60 HARD_SHADOW_SAMPLES=4 FADE_OUT_SAMPLES=8 TRACK_HIT_UV=0
@@ -38,8 +41,8 @@
 Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;
 Texture2DArray<float> _CSMShadowAtlas;
-Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
-Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
+Texture2D<uint> _VSMPrototypeStaticPhysicalPage;
+Texture2D<uint> _VSMPrototypeDynamicPhysicalPage;
 StructuredBuffer<uint> _VSMPrototypePageTable;
 RWStructuredBuffer<uint> _VSMPrototypeWritablePageTable;
 RWStructuredBuffer<uint4> _VSMPrototypePageMetadata;
@@ -63,8 +66,8 @@ RWStructuredBuffer<uint4> _VSMPrototypeMeshletPageRequests;
 RWByteAddressBuffer _VSMPrototypeMeshletPageIndirectArgs;
 // Count followed by the relevant virtual pages (at most the physical budget).
 RWStructuredBuffer<uint> _VSMPrototypeMeshletRasterPages;
-RWTexture2DArray<uint> _VSMPrototypeStaticPhysicalPageRW;
-RWTexture2DArray<uint> _VSMPrototypeDynamicPhysicalPageRW;
+RWTexture2D<uint> _VSMPrototypeStaticPhysicalPageRW;
+RWTexture2D<uint> _VSMPrototypeDynamicPhysicalPageRW;
 RWTexture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _CSMShadowFilterSource;
 RWTexture2D<float> _CSMShadowFilterTexture;
@@ -809,12 +812,9 @@ void VSMPrototypeClearPhysicalPages(
         physicalPageIndex / (uint)_VSMPrototypePhysicalPagesPerRow);
     uint2 physicalTexel = physicalPage * (uint)_VSMPrototypePageSize
         + dispatchThreadID.xy;
-    for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
-    {
-        _VSMPrototypeDynamicPhysicalPageRW[uint3(physicalTexel, layer)] = 0u;
-        if ((flags & kVSMPageDirty) != 0u)
-            _VSMPrototypeStaticPhysicalPageRW[uint3(physicalTexel, layer)] = 0u;
-    }
+    _VSMPrototypeDynamicPhysicalPageRW[physicalTexel] = 0u;
+    if ((flags & kVSMPageDirty) != 0u)
+        _VSMPrototypeStaticPhysicalPageRW[physicalTexel] = 0u;
 }
 
 [numthreads(64, 1, 1)]
@@ -1229,16 +1229,13 @@ bool TryResolveVSMPhysicalTexel(float2 shadowUV, int cascadeIndex, out int2 phys
     return TryResolveVSMPhysicalTexel(virtualTexel, cascadeIndex, physicalTexel);
 }
 
-uint2 LoadVSMDepthLayer(int2 physicalTexel, uint layer)
-{
-    return uint2(_VSMPrototypeStaticPhysicalPage.Load(int4(physicalTexel, layer, 0)),
-        _VSMPrototypeDynamicPhysicalPage.Load(int4(physicalTexel, layer, 0)));
-}
-
 uint LoadCombinedVSMDepth(int2 physicalTexel)
 {
-    uint2 depths = LoadVSMDepthLayer(physicalTexel, 0);
-    return max(depths.x, depths.y);
+    uint staticRawDepth = _VSMPrototypeStaticPhysicalPage.Load(
+        int3(physicalTexel, 0));
+    uint dynamicRawDepth = _VSMPrototypeDynamicPhysicalPage.Load(
+        int3(physicalTexel, 0));
+    return max(staticRawDepth, dynamicRawDepth);
 }
 
 // One hard comparison. Every offset tap resolves its own virtual page; this is
@@ -2038,24 +2035,6 @@ void CSMShadowBilateralFilterV(
     _CSMShadowFilterTexture[pixelCoord] = FilterCSMShadow(pixelCoord, int2(0, 1));
 }
 
-// VSM has no PCSS penumbra tile list. Filter all receivers, including samples
-// that happened to be fully lit/shadowed in this low-ray-count frame.
-[numthreads(8, 8, 1)]
-void VSMShadowBilateralFilterH(uint3 dispatchThreadID : SV_DispatchThreadID)
-{
-    if (dispatchThreadID.x >= (uint)_CSMOutputWidth || dispatchThreadID.y >= (uint)_CSMOutputHeight)
-        return;
-    _CSMShadowFilterTexture[dispatchThreadID.xy] = FilterCSMShadow(dispatchThreadID.xy, int2(1, 0));
-}
-
-[numthreads(8, 8, 1)]
-void VSMShadowBilateralFilterV(uint3 dispatchThreadID : SV_DispatchThreadID)
-{
-    if (dispatchThreadID.x >= (uint)_CSMOutputWidth || dispatchThreadID.y >= (uint)_CSMOutputHeight)
-        return;
-    _CSMShadowFilterTexture[dispatchThreadID.xy] = FilterCSMShadow(dispatchThreadID.xy, int2(0, 1));
-}
-
 // Bias lives at the receiver for both caster backends. The pool contains raw
 // depth, so neither raster-bias state nor a fixed device-depth offset is part of
 // VSM cache content. xy is dz per virtual texel; z is signed comparison bias;
@@ -2242,7 +2221,258 @@ float VSMTransitionWeight(float edge, float border)
     return t * t * (3.0 - 2.0 * t);
 }
 
-#include "VSMSMRT.hlsl"
+// Directional single-depth-field ray tracing. This is a bounded texel-cell
+// approximation, not geometry ray tracing or a copy of Unreal's private SMRT.
+// t is world distance along the central light axis. Clipmap segments keep the
+// original light-disk direction and world origin, including its receiver bias.
+// Only the configured maximum world length starts the parallel-light tail.
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
+int _CandidateRule;
+
+// Directional clipmaps share orthogonal axes but can scroll independently.
+// Reproject through their affine transforms, never assume UVs are concentric.
+float3 VSMSMRTProjectionScale(int fromIndex, int toIndex)
+{
+    VividVSMProjection from = _VSMProjections[fromIndex], to = _VSMProjections[toIndex];
+    float xy = from.parameters.x / to.parameters.x;
+    return float3(xy, xy,
+        length(to.worldToShadow[2].xyz) / length(from.worldToShadow[2].xyz));
+}
+
+float3 VSMSMRTReproject(float3 coord, int fromIndex, int toIndex, float3 scale)
+{
+    float4x4 from = _VSMProjections[fromIndex].worldToShadow;
+    float4x4 to = _VSMProjections[toIndex].worldToShadow;
+    return (coord - float3(from._m03, from._m13, from._m23)) * scale
+        + float3(to._m03, to._m13, to._m23);
+}
+
+bool HasVSMSMRTFootprint(float2 uv, int index)
+{
+    float originRadius = _VSMReceiverParameters.x >= 0.5 ? 1.5 * _VSMProjections[index].parameters.x : 0;
+    for (int level = index; level < _VSMProjectionCount; level++)
+    {
+        float end = VSMSMRTRayLength(level);
+        float3 scale = VSMSMRTProjectionScale(index, level);
+        float2 levelUV = VSMSMRTReproject(float3(uv, 0), index, level, scale).xy;
+        int halo = (int)ceil((end * _VSMSMRTParameters.w + originRadius)
+            / _VSMProjections[level].parameters.x + 0.001);
+        int2 center = int2(floor(levelUV * _VSMPrototypeVirtualResolution));
+        int2 low = center - halo, high = center + halo;
+        if (any(low < 0) || any(high >= _VSMPrototypeVirtualResolution)) return false;
+        int2 lowPage = low / _VSMPrototypePageSize, highPage = high / _VSMPrototypePageSize;
+        for (int y = lowPage.y; y <= highPage.y; y++)
+            for (int x = lowPage.x; x <= highPage.x; x++)
+            {
+                int2 physical;
+                if (!TryResolveVSMPhysicalTexel(int2(x, y) * _VSMPrototypePageSize, level, physical))
+                    return false;
+            }
+        if (end >= _VSMSMRTParameters.z) return true;
+    }
+    // No projection support is unavailable, not a shorter soft ray.
+    return false;
+}
+
+// Receiver-only BND index offset, shared by every ray in the stratified set.
+uint _VSMSMRTSampleIndexOffset;
+
+float2 VSMSMRTPhase(uint2 pixel, uint frame, uint dimension)
+{
+    frame += _VSMSMRTSampleIndexOffset;
+    // Reuse the 1SPP tiles with the full 256-frame sequence, not the static
+    // 1SPP sample-index mask. These are phases for a stratified ray set, not STBN.
+    return float2(GetBNDSequenceSample1SPPTemporal(pixel, frame, dimension),
+        GetBNDSequenceSample1SPPTemporal(pixel, frame, dimension + 1u));
+}
+
+float2 VSMSMRTDiskSample(float2 phase, uint ray, uint count)
+{
+    // Equal-area radial strata with a temporally rotated low-discrepancy angle.
+    float radius = sqrt((ray + phase.x) / count);
+    float sine, cosine;
+    sincos(kPCSSTwoPi * frac(ray * 0.618033989 + phase.y), sine, cosine);
+    return radius * float2(cosine, sine);
+}
+
+float2 VSMSMRTReceiverOffset(float2 phase, uint ray, uint count)
+{
+    // Shifted Hammersley points integrate the existing two-texel PCF support
+    // for every supported count (including odd counts). Independent of light size.
+    float2 samplePoint = float2((float)ray / count, reversebits(ray) * 2.3283064365386963e-10);
+    return 2 * frac(samplePoint + phase) - 1;
+}
+
+bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    float startTime, float rayLength, bool parallelTail, float thickness, int budget, int index, out float visibility)
+{
+    visibility = 1;
+    float2 start = origin.xy * _VSMPrototypeVirtualResolution + texelsPerWorld * startTime;
+    int2 cell = int2(floor(start));
+    int2 direction = int2(texelsPerWorld.x >= 0 ? 1 : -1, texelsPerWorld.y >= 0 ? 1 : -1);
+    // At an exact boundary, a negative ray enters the cell on its left.
+    cell -= int2(direction.x < 0 && start.x == cell.x ? 1 : 0,
+                 direction.y < 0 && start.y == cell.y ? 1 : 0);
+    float2 stepTime = 1 / max(abs(texelsPerWorld), 1e-20);
+    float2 boundary = float2(cell) + float2(direction.x > 0 ? 1 : 0, direction.y > 0 ? 1 : 0);
+    float2 nextTime = startTime + abs(boundary - start) * stepTime;
+    if (abs(texelsPerWorld.x) < 1e-10) nextTime.x = 1e20;
+    if (abs(texelsPerWorld.y) < 1e-10) nextTime.y = 1e20;
+    float enter = startTime;
+    float previousSurface = -1;
+    int2 pageLow = 0, pageHigh = 0, physicalOffset = 0;
+    [loop]
+    for (int sampleIndex = 0; sampleIndex < budget; sampleIndex++)
+    {
+        int2 physical;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugWork.x++;
+#endif
+        // Mappings are immutable during the resolve dispatch. Adjacent DDA
+        // cells reuse the validated physical page, including empty depth cells.
+        if (any(cell < pageLow) || any(cell >= pageHigh))
+        {
+            if (!TryResolveVSMPhysicalTexel(cell, index, physical)) return false;
+            pageLow = (cell / _VSMPrototypePageSize) * _VSMPrototypePageSize;
+            pageHigh = pageLow + _VSMPrototypePageSize;
+            physicalOffset = physical - cell;
+        }
+        else physical = cell + physicalOffset;
+        uint rawDepth = LoadCombinedVSMDepth(physical);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugWork.y++;
+#endif
+        float exitTime = min(nextTime.x, nextTime.y);
+        bool segmentEnd = exitTime >= rayLength;
+        bool tail = segmentEnd && parallelTail;
+        exitTime = min(exitTime, rayLength);
+        float surface = rawDepth == 0 ? -1 : (asfloat(rawDepth) - origin.z) / depthPerWorld;
+        // A texel represents a finite slab behind its front depth. Test the
+        // actual cell interval, not "in shadow at any step". Never interpolate
+        // a crossing across a depth discontinuity or a valid empty texel.
+        float candidateThickness=thickness * (_CandidateRule==1 ? 4 : _CandidateRule==2 ? 16 : _CandidateRule==3 ? 64 : 1);
+        bool hit = surface > enter && (tail || surface - candidateThickness <= exitTime);
+        if (_CandidateRule==4) hit=surface>enter;
+        if (_CandidateRule==5 && previousSurface>enter && surface>enter) hit=true;
+        // One-cell gap fill behind a nearer foreground layer. It cannot extend
+        // through empty depth or recursively propagate across multiple cells.
+        bool gap = rawDepth != 0 && surface > previousSurface + thickness
+            && previousSurface > enter && previousSurface - thickness <= min(exitTime, rayLength);
+        if (hit || gap) { visibility = 0; return true; }
+        if (segmentEnd)
+        {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+            if (parallelTail) g_VSMDebugSMRT.y++;
+#endif
+            return true;
+        }
+        previousSurface = surface;
+        enter = exitTime;
+        // Cross both axes at a corner; never sample the two zero-length cells.
+        bool crossX = nextTime.x <= nextTime.y;
+        bool crossY = nextTime.y <= nextTime.x;
+        if (crossX) { cell.x += direction.x; nextTime.x += stepTime.x; }
+        if (crossY) { cell.y += direction.y; nextTime.y += stepTime.y; }
+    }
+    // Numerical/budget failure is unavailable, never an implicit clear ray.
+    return false;
+}
+
+// Single-level contract used by focused cell-intersection diagnostics.
+bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    float rayLength, float thickness, int budget, int index, out float visibility)
+{
+    return TryTraceVSMSMRTRay(origin, texelsPerWorld, depthPerWorld,
+        0, rayLength, true, thickness, budget, index, visibility);
+}
+
+bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    int budget, int index, out float visibility)
+{
+    visibility = 1;
+    float startTime = 0;
+    for (int level = index; level < _VSMProjectionCount; level++)
+    {
+        float endTime = VSMSMRTRayLength(level);
+        bool last = endTime >= _VSMSMRTParameters.z;
+        float3 scale = VSMSMRTProjectionScale(index, level);
+        float3 levelOrigin = VSMSMRTReproject(origin, index, level, scale);
+        int segmentBudget = budget;
+        if (level == _VSMProjectionCount - 1)
+        {
+            // DDA cell count <= ceil(Manhattan displacement) + 2. The last
+            // available map finishes the world length instead of shortening it
+            // or forcing every long ray into PCF solely for lack of another LOD.
+            float distanceInTexels = (endTime - startTime) * _VSMSMRTParameters.w
+                / _VSMProjections[level].parameters.x;
+            segmentBudget = max(segmentBudget, (int)ceil(distanceInTexels * 1.41421357 + 0.001) + 2);
+        }
+        // Bias/jitter are already in origin. Do not apply a coarser receiver
+        // bias or restart at t=0, and never carry gap history across clipmaps.
+        if (!TryTraceVSMSMRTRay(levelOrigin, texelsPerWorld * scale.xy, depthPerWorld * scale.z,
+                startTime, endTime, last, 0.5 * _VSMProjections[level].parameters.x,
+                segmentBudget, level, visibility)) return false;
+        if (visibility == 0 || last) return true;
+        startTime = endTime;
+    }
+    return false;
+}
+
+bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, out float shadow)
+{
+    shadow = 1;
+    if (!HasVSMSMRTFootprint(coord.xy, index))
+    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugSMRT.z++;
+#endif
+        return false;
+    }
+    VividVSMProjection projection = _VSMProjections[index];
+    float depthScale = length(projection.worldToShadow[2].xyz);
+#if !UNITY_REVERSED_Z
+    depthScale = -depthScale;
+#endif
+    // Apply the receiver bias once. PCF's receiver-plane gradient is not the
+    // depth trajectory of a shadow ray leaving that surface.
+    coord.z += bias.z;
+    float slope = _VSMSMRTParameters.w / projection.parameters.x;
+    int rays = clamp((int)_VSMSMRTParameters.x, 4, 8);
+    int steps = clamp((int)_VSMSMRTParameters.y, 4, 8);
+    // Fetch once per receiver/projection, independent of the ray count.
+    float2 diskPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 0u);
+    float2 receiverPhase = 0;
+    if (_VSMReceiverParameters.x >= 0.5)
+        receiverPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 2u);
+    float sum = 0;
+    [loop]
+    for (int ray = 0; ray < rays; ray++)
+    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugSMRT.x++;
+#endif
+        float2 disk = VSMSMRTDiskSample(diskPhase, (uint)ray, (uint)rays);
+        float3 origin = coord;
+        if (_VSMReceiverParameters.x >= 0.5)
+        {
+            float2 jitter = VSMSMRTReceiverOffset(receiverPhase, (uint)ray, (uint)rays);
+            float2 originalTexel = coord.xy * _VSMPrototypeVirtualResolution;
+            float2 sampleTexel = floor(originalTexel + jitter) + 0.5;
+            origin.xy = sampleTexel / _VSMPrototypeVirtualResolution;
+            // Reconstruct the new origin on the receiver plane, once. The ray
+            // thereafter follows its light direction, not this depth gradient.
+            origin.z += dot(bias.xy, sampleTexel - originalTexel);
+        }
+        float visibility;
+        if (!TryTraceVSMSMRTClipmaps(origin, disk * slope, depthScale, steps, index, visibility)) return false;
+        sum += visibility;
+    }
+    shadow = sum / rays;
+    return true;
+}
+
+
 
 // Reproject the original world receiver (including THIS level's normal bias)
 // at every fallback level. Reusing a fine UV/depth or shifting a physical texel
@@ -2320,7 +2550,7 @@ bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
     return TryEvaluateVSMProjection(positionWS, normalWS, index, sampleDepth, uint2(0, 0), 0u, covered, shadow);
 }
 
-#include "VSMReceiverQuality.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VSMReceiverQuality.hlsl"
 
 float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bool smrt, out bool unavailable)
 {
@@ -2427,7 +2657,7 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS)
 }
 
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
-#include "VSMReceiverDebug.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VSMReceiverDebug.hlsl"
 #endif
 
 #if defined(VIVID_VSM_MARK_RECEIVERS)
@@ -2526,4 +2756,107 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
     shadow = lerp(1.0, shadow, distanceFade);
 
     _DirectionalShadowTexture[pixelCoord] = shadow;
+}
+
+[numthreads(8, 8, 1)]
+void VSMGeneralCoverageAudit(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_CSMOutputWidth / 4 || id.y >= (uint)_CSMOutputHeight / 4) return;
+    uint2 pixel = id.xy * 4 + 2;
+    g_VSMDebugLevels = -1;
+    g_VSMDebugBlend = 0;
+    g_VSMDebugWork = 0;
+    g_VSMDebugSMRT = 0;
+    g_VSMDebugMissing = 0;
+    g_VSMDebugQuality = -1;
+    float depth = _DepthTexture.Load(int3(pixel, 0));
+    // -2 is sky; -1 is unavailable/outside selection. Neither is valid lit depth.
+    if (IsSkyPixel(depth))
+    {
+        _VSMReceiverDebugData[id.xy] = -2.0;
+        _VSMReceiverDebugOutput[id.xy] = float4(0, 0, 0, 1);
+        return;
+    }
+    float3 position = ReconstructWorldPosition(pixel, depth);
+    if (_VSMReceiverDebugMode == 7)
+    {
+        _VSMReceiverDebugData[id.xy] = float4(position, 1);
+        _VSMReceiverDebugOutput[id.xy] = 0;
+        return;
+    }
+    float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixel, 0)).xy);
+    normal = ReconstructVSMReceiverNormal(pixel, depth, position, normal);
+    float shadow = ResolveVSMReceiver(position, normal, pixel);
+    float4 data = float4(g_VSMDebugLevels, g_VSMDebugBlend);
+    float3 color = VSMReceiverLevelColor(g_VSMDebugLevels.x);
+    if (_VSMReceiverDebugMode == 1)
+        color = VSMReceiverLevelColor(g_VSMDebugLevels.y);
+    else if (_VSMReceiverDebugMode == 2)
+    {
+        int fallback = g_VSMDebugLevels.y - g_VSMDebugLevels.x;
+        color = g_VSMDebugLevels.y < 0 ? float3(1, 0, 1)
+            : lerp(float3(0, 0.7, 0), float3(1, 0, 0), saturate(fallback / 4.0));
+    }
+    else if (_VSMReceiverDebugMode == 3)
+    {
+        int level = g_VSMDebugLevels.y;
+        float2 footprint = VSMReceiverTexelFootprint(position, normal, level);
+        data = float4(footprint, level >= 0 ? _VSMProjections[level].parameters.x : 0,
+            all(footprint >= 0) ? 1 : 0);
+        float worst = max(footprint.x, footprint.y);
+        color = worst < 0 ? float3(1, 0, 1)
+            : lerp(float3(0, 0.7, 0), float3(1, 0, 0), saturate((worst - 1) / 3));
+    }
+    else if (_VSMReceiverDebugMode == 4)
+    {
+        data = float4(g_VSMDebugWork, g_VSMDebugLevels.z >= 0 ? 1 : 0);
+        color = lerp(float3(0, 0.15, 0.5), float3(1, 0.1, 0), saturate(data.x / 36));
+    }
+    else if (_VSMReceiverDebugMode == 5)
+    {
+        float source = _VSMReceiverDebugShadow.Load(int3(pixel, 0));
+        data = float4(g_VSMDebugMissing, shadow, source, abs(shadow - source));
+        color = g_VSMDebugLevels.x < 0 ? float3(0.3, 0.3, 0.3)
+            : g_VSMDebugLevels.y < 0 ? float3(1, 0, 1)
+            : g_VSMDebugMissing != 0 ? float3(1, 0.6, 0) : float3(0, 0.7, 0);
+    }
+    else if (_VSMReceiverDebugMode == 6)
+    {
+        data = _VSMReceiverQuality.x > 0 ? g_VSMDebugQuality : -1;
+        color = data.w < 0 ? float3(1, 0, 1)
+            : lerp(float3(0, 0.7, 0), float3(1, 0, 0), saturate((data.w - 1) / 3));
+    }
+    if (_VSMReceiverDebugMode == 8)
+    {
+        data = -1;
+        int level = (int)g_VSMDebugQuality.z;
+        if (level >= 0)
+        {
+            normal = normalize(normal);
+            VividVSMProjection p = _VSMProjections[level];
+            float4 bias = BuildVSMReceiverBias(p, normal);
+            float3 coord = mul(p.worldToShadow, float4(position + normal * bias.w, 1)).xyz;
+            float edge = max(abs(coord.x - .5), abs(coord.y - .5));
+            float guard = VSMFilterGuard(level, UseVSMSMRT());
+            float border = _VSMReceiverQuality.w > 0 ? _VSMReceiverQuality.z : p.parameters.z;
+            float lod = clamp(g_VSMDebugQuality.x, 0, _VSMProjectionCount - 1);
+            data = float4(VSMTransitionWeight(edge + guard, border),
+                level == (int)floor(lod) ? VSMTransitionWeight(frac(lod) * .5, p.parameters.z) : 0,
+                border, .5 - edge - guard);
+        }
+        color = data.x.xxx;
+    }
+    if (_VSMReceiverDebugMode == 9) { data = float4(g_VSMDebugSMRT); color = 0; }
+    _VSMReceiverDebugData[id.xy] = data;
+    _VSMReceiverDebugOutput[id.xy] = float4(color, 1);
+}
+
+RWTexture2D<float> _VSMCaptureDepth;
+RWTexture2D<float4> _VSMCaptureNormal;
+[numthreads(8, 8, 1)]
+void VSMCopyReceiverData(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
+    _VSMCaptureDepth[id.xy] = _DepthTexture.Load(int3(id.xy, 0));
+    _VSMCaptureNormal[id.xy] = _GBuffer1.Load(int3(id.xy, 0));
 }

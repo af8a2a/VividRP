@@ -21,7 +21,7 @@ namespace VividRP.Editor.Tests
             internal readonly uint[] TableData = new uint[12];
             internal readonly uint4[] MetadataData = new uint4[12];
             internal readonly uint[] OwnerData = new uint[16];
-            internal readonly uint[] StaticData = new uint[256], DynamicData = new uint[256];
+            internal readonly uint[] StaticData = new uint[256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount], DynamicData = new uint[256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount];
             internal readonly VirtualShadowMapProjection[] ProjectionData = new VirtualShadowMapProjection[3];
             internal readonly GraphicsBuffer Table = new(GraphicsBuffer.Target.Structured, 12, 4);
             internal readonly GraphicsBuffer Metadata = new(GraphicsBuffer.Target.Structured, 12, 16);
@@ -33,8 +33,8 @@ namespace VividRP.Editor.Tests
             // resource type as production and upload through a tiny test kernel.
             private readonly RenderTexture m_Static = CreatePool();
             private readonly RenderTexture m_Dynamic = CreatePool();
-            private readonly GraphicsBuffer m_StaticUpload = new(GraphicsBuffer.Target.Structured, 256, 4);
-            private readonly GraphicsBuffer m_DynamicUpload = new(GraphicsBuffer.Target.Structured, 256, 4);
+            private readonly GraphicsBuffer m_StaticUpload = new(GraphicsBuffer.Target.Structured, 256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount, 4);
+            private readonly GraphicsBuffer m_DynamicUpload = new(GraphicsBuffer.Target.Structured, 256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount, 4);
             private readonly ComputeShader m_UploadShader;
             private readonly BlueNoiseResources m_BlueNoise = PipelineResourceManager.Get<BlueNoiseResources>();
 
@@ -53,6 +53,8 @@ namespace VividRP.Editor.Tests
                     depthStencilFormat = GraphicsFormat.None,
                     enableRandomWrite = true,
                     msaaSamples = 1,
+                    dimension = TextureDimension.Tex2DArray,
+                    volumeDepth = VirtualShadowMapPrototypeRuntime.DepthLayerCount,
                 });
                 Assert.That(texture.Create(), Is.True);
                 return texture;
@@ -121,7 +123,7 @@ namespace VividRP.Editor.Tests
                 m_UploadShader.SetBuffer(upload, "_TestDynamicData", m_DynamicUpload);
                 m_UploadShader.SetTexture(upload, "_TestStaticPool", m_Static);
                 m_UploadShader.SetTexture(upload, "_TestDynamicPool", m_Dynamic);
-                m_UploadShader.Dispatch(upload, 2, 2, 1);
+                m_UploadShader.Dispatch(upload, 2, 2, VirtualShadowMapPrototypeRuntime.DepthLayerCount);
             }
 
             internal float2[] Run(string kernelName, float4[] inputs, int2[] offsets = null, float4[] normals = null,
@@ -314,7 +316,7 @@ namespace VividRP.Editor.Tests
         public void SMRT_BND1PhasesAdvanceAcross256FramesAndKeepRayStrataAndReceiverSupport()
         {
             using var f = new Fixture();
-            var inputs = new float4[256 * 4];
+            var inputs = new float4[256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount];
             var rays = new float4[inputs.Length];
             for (int count = 4; count <= 8; count++)
             {
@@ -373,6 +375,39 @@ namespace VividRP.Editor.Tests
             {
                 Assert.That(result[i].x, Is.EqualTo(1), "Complete ray " + i);
                 Assert.That(result[i].y, Is.EqualTo(expected[i] ? 0 : 1), "Analytic rod " + i);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SMRT_HiddenSurfacesRemainIndependentAcrossEveryLayerAndCasterPool(bool dynamic)
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 4, .5f));
+            var origins = new[] { new float4(3.5f / 8, 3.5f / 8, .2f, 0) };
+            var rays = new[] { new float4(.5f, 0, 4, 0) };
+            // The ray crosses texel x=4 during t=[1,3]. A hidden surface at
+            // t=2 intersects; the foreground t>=6 surfaces do not. Empty x=5
+            // at the parallel tail prevents a central hard-shadow shortcut.
+            int slot = (int)f.TableData[1] - 1;
+            int pixel = (slot / 4 * 4 + 3) * 16 + slot % 4 * 4;
+            for (int hiddenLayer = 0; hiddenLayer < VirtualShadowMapPrototypeRuntime.DepthLayerCount; hiddenLayer++)
+            {
+                Array.Clear(f.StaticData, 0, f.StaticData.Length);
+                Array.Clear(f.DynamicData, 0, f.DynamicData.Length);
+                uint[] pool = dynamic ? f.DynamicData : f.StaticData;
+                for (int layer = 0; layer < hiddenLayer; layer++)
+                    pool[layer * 256 + pixel] = math.asuint(.9f - .05f * layer);
+                if (dynamic) f.StaticData[pixel] = math.asuint(.95f);
+                pool[hiddenLayer * 256 + pixel] = math.asuint(.3f);
+                f.Upload();
+                Assert.That(f.Run("TraceSMRTRays", origins, normals: rays)[0], Is.EqualTo(new float2(1, 0)));
+                // Move the hidden surface behind the receiver. The interval
+                // between it and the foreground must remain empty, not solid.
+                pool[hiddenLayer * 256 + pixel] = math.asuint(.1f);
+                f.Upload();
+                Assert.That(f.Run("TraceSMRTRays", origins, normals: rays)[0], Is.EqualTo(new float2(1, 1)));
             }
         }
 
@@ -600,11 +635,15 @@ namespace VividRP.Editor.Tests
             {
                 graphicsFormat = GraphicsFormat.R8G8B8A8_UNorm, depthStencilFormat = GraphicsFormat.None,
                 enableRandomWrite = true, msaaSamples = 1,
+                    dimension = TextureDimension.Tex2DArray,
+                    volumeDepth = VirtualShadowMapPrototypeRuntime.DepthLayerCount,
             });
             var data = new RenderTexture(new RenderTextureDescriptor(8, 8)
             {
                 graphicsFormat = GraphicsFormat.R32G32B32A32_SFloat, depthStencilFormat = GraphicsFormat.None,
                 enableRandomWrite = true, msaaSamples = 1,
+                    dimension = TextureDimension.Tex2DArray,
+                    volumeDepth = VirtualShadowMapPrototypeRuntime.DepthLayerCount,
             });
             try
             {

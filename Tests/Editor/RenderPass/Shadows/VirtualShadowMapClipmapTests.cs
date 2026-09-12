@@ -2,6 +2,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -292,6 +293,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(budget));
                 Assert.That(VirtualShadowMapPrototypeRuntime.RasterDepth.rt.volumeDepth, Is.EqualTo(budget));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.count, Is.EqualTo(budget));
+                Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage.rt.dimension, Is.EqualTo(TextureDimension.Tex2DArray));
+                Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage.rt.volumeDepth, Is.EqualTo(VirtualShadowMapPrototypeRuntime.DepthLayerCount));
+                Assert.That(VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage.rt.volumeDepth, Is.EqualTo(VirtualShadowMapPrototypeRuntime.DepthLayerCount));
                 var pool = VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
                 for (int i = 0; i < 32; i++) VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget);
                 long before = System.GC.GetAllocatedBytesForCurrentThread();

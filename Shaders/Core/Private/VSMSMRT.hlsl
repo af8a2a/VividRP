@@ -1,4 +1,4 @@
-// Directional single-depth-field ray tracing. This is a bounded texel-cell
+// Directional layered-depth-field ray tracing. This is a bounded texel-cell
 // approximation, not geometry ray tracing or a copy of Unreal's private SMRT.
 // t is world distance along the central light axis. Clipmap segments keep the
 // original light-disk direction and world origin, including its receiver bias.
@@ -115,7 +115,8 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
             physicalOffset = physical - cell;
         }
         else physical = cell + physicalOffset;
-        uint rawDepth = LoadCombinedVSMDepth(physical);
+        uint2 frontDepths = LoadVSMDepthLayer(physical, 0);
+        uint rawDepth = max(frontDepths.x, frontDepths.y);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
         g_VSMDebugWork.y++;
 #endif
@@ -132,6 +133,27 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
         // through empty depth or recursively propagate across multiple cells.
         bool gap = rawDepth != 0 && surface > previousSurface + thickness
             && previousSurface > enter && previousSurface - thickness <= min(exitTime, rayLength);
+        if (!hit && !gap && surface > enter)
+        {
+            // Static and dynamic pools have independent ordering. Combining
+            // their layer ranks with max would lose a hidden moving surface.
+            uint2 depths = frontDepths;
+            for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
+            {
+                if (layer != 0)
+                {
+                    depths = LoadVSMDepthLayer(physical, layer);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+                    g_VSMDebugWork.y++;
+#endif
+                }
+                float2 surfaces = float2(depths.x == 0 ? -1 : (asfloat(depths.x) - origin.z) / depthPerWorld,
+                    depths.y == 0 ? -1 : (asfloat(depths.y) - origin.z) / depthPerWorld);
+                if (all(surfaces <= enter)) break;
+                hit = any((surfaces > enter) & (tail | (surfaces - thickness <= exitTime)));
+                if (hit) break;
+            }
+        }
         if (hit || gap) { visibility = 0; return true; }
         if (segmentEnd)
         {

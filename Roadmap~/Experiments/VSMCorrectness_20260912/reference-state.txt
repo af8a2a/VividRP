@@ -1,0 +1,1 @@
+camera=Camera position=(0.205128953, 5.076887, 4.14047146) rotation=(0.260245025, 0.0146322884, 0.000264453352, 0.96543175) size=1920x1080 instances=217 culling=ExtendedFrustum candidates=0 status=

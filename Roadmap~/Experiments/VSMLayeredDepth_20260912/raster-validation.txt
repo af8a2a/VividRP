@@ -1,0 +1,6 @@
+raster order=0 1024 overlapping fragments/pixel sorted distinct top8 pass
+raster order=1 1024 overlapping fragments/pixel sorted distinct top8 pass
+raster order=2 1024 overlapping fragments/pixel sorted distinct top8 pass
+independent static/dynamic hidden intersection pass
+cache dirty=0 all8 layers pass
+cache dirty=1 all8 layers pass

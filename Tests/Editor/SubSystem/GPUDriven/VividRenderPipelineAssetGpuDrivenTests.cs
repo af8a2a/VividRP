@@ -763,7 +763,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("BuildFailedException", volumeEditorSource);
             StringAssert.Contains("#pragma require randomwrite", casterSource);
             StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", casterSource);
-            StringAssert.Contains("RWTexture2D<uint> _VSMPrototypePhysicalPage : register(u0)", casterAbiSource);
+            StringAssert.Contains("RWTexture2DArray<uint> _VSMPrototypePhysicalPage : register(u0)", casterAbiSource);
             StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", casterAbiSource);
             StringAssert.Contains("StructuredBuffer<uint4> _VSMPrototypePageMetadata", casterAbiSource);
             StringAssert.Contains("kVividVSMPageDirty", casterAbiSource);
@@ -785,8 +785,8 @@ namespace VividRP.Editor.Tests
                     supportedUnityCasterSources[shaderIndex]);
             }
             StringAssert.Contains("AccessFlags.Read", resolvePassSource);
-            StringAssert.Contains("Texture2D<uint> _VSMPrototypeStaticPhysicalPage", resolveSource);
-            StringAssert.Contains("Texture2D<uint> _VSMPrototypeDynamicPhysicalPage", resolveSource);
+            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage", resolveSource);
+            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage", resolveSource);
             StringAssert.Contains("max(staticRawDepth, dynamicRawDepth)", resolveSource);
             StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", resolveSource);
             StringAssert.Contains("RWStructuredBuffer<uint4> _VSMPrototypePageMetadata", resolveSource);

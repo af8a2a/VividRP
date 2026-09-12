@@ -1,0 +1,36 @@
+#pragma kernel Reference
+#pragma use_dxc
+#pragma require inlineraytracing
+#include "UnityRayQuery.cginc"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+RaytracingAccelerationStructure _AccelerationStructure;
+Texture2D<float> _DepthTexture;
+Texture2D<float4> _GBuffer1;
+RWTexture2D<float4> _Output;
+float4x4 _InvViewProjectionMatrix;
+float4 _LightDirectionWS, _SunBasisX, _SunBasisY;
+float _TanSunAngularRadius;
+int _OutputWidth, _OutputHeight, _Batch;
+float Visibility(float3 origin, float3 dir) {
+ RayDesc r; r.Origin=origin; r.Direction=dir; r.TMin=0; r.TMax=1000;
+ UnityRayQuery<RAY_FLAG_FORCE_OPAQUE|RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES|RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
+ q.TraceRayInline(_AccelerationStructure, RAY_FLAG_FORCE_OPAQUE|RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES|RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 255, r);
+ while(q.Proceed()) {}
+ return q.CommittedStatus()==COMMITTED_TRIANGLE_HIT ? 0 : 1;
+}
+[numthreads(8,8,1)]
+void Reference(uint3 id:SV_DispatchThreadID) {
+ if(id.x>=_OutputWidth/4 || id.y>=_OutputHeight/4) return;
+ uint2 p=id.xy*4+2; float d=_DepthTexture.Load(int3(p,0));
+ float3 pos=ComputeWorldSpacePosition((p+.5)/float2(_OutputWidth,_OutputHeight),d,_InvViewProjectionMatrix);
+ float3 n=DecodeVividNormalOct(_GBuffer1.Load(int3(p,0)).xy);
+ float2 sum=0;
+ for(uint j=0;j<32;j++) {
+  uint k=_Batch*32+j; float u=(k+.5)/1024.0; float v=reversebits(k)*2.3283064365386963e-10;
+  float2 disk=sqrt(u)*float2(cos(v*6.28318530718),sin(v*6.28318530718))*_TanSunAngularRadius;
+  float3 dir=normalize(_LightDirectionWS.xyz+disk.x*_SunBasisX.xyz+disk.y*_SunBasisY.xyz);
+  sum+=float2(Visibility(pos+n*.001,dir),Visibility(pos+n*.01,dir));
+ }
+ _Output[id.xy]=float4(sum/32,Visibility(pos+n*.001,_LightDirectionWS.xyz),Visibility(pos+n*.01,_LightDirectionWS.xyz));
+}

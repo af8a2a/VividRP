@@ -11,6 +11,7 @@ namespace VividRP.Runtime.RenderPass.Core
         // Opt-in diagnostics run after resolve with this camera's live graph resources.
         // No subscriber means no texture resolution, dispatch, readback, or allocation.
         internal static event System.Action<ComputePassContext, Texture, Texture, Texture> EditorReceiverCapture;
+        internal static event System.Action<long> EditorResolveAllocationCapture;
 #endif
         private const int ThreadGroupSizeX = 8;
         private const int ThreadGroupSizeY = 8;
@@ -492,7 +493,14 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             else
             {
+#if UNITY_EDITOR
+                long allocatedBefore = System.GC.GetAllocatedBytesForCurrentThread();
+#endif
                 RecordFullScreenCSMResolve(cmd);
+#if UNITY_EDITOR
+                if (m_VirtualShadowMapPrototypeActive)
+                    EditorResolveAllocationCapture?.Invoke(System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
+#endif
             }
 
             RecordBendScreenSpaceContactShadow(cmd);

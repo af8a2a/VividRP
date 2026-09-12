@@ -4,7 +4,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapAddressing.hlsl"
 
 #if defined(VIVID_VSM_CASTER) || defined(VIVID_VSM_PAGE_CASTER)
-RWTexture2D<uint> _VSMPrototypePhysicalPage : register(u0);
+RWTexture2DArray<uint> _VSMPrototypePhysicalPage : register(u0);
 StructuredBuffer<uint> _VSMPrototypePageTable;
 StructuredBuffer<uint4> _VSMPrototypePageMetadata;
 int _VSMPrototypePageSize;
@@ -60,6 +60,20 @@ bool VividTryResolveVSMPhysicalTexel(
     return true;
 }
 
+// Atomic insertion preserves the nearest distinct depths regardless of draw
+// order. A displaced surface continues into the next layer; equal values must
+// stop here so repeated triangles cannot consume the hidden-surface budget.
+void VividInsertVSMDepth(uint2 texel, uint depth)
+{
+    for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT && depth != 0u; layer++)
+    {
+        uint previous;
+        InterlockedMax(_VSMPrototypePhysicalPage[uint3(texel, layer)], depth, previous);
+        if (previous == depth) break;
+        depth = min(previous, depth);
+    }
+}
+
 void VividWriteVSMDepth(float4 positionCS, uint cascadeIndex)
 {
     uint2 physicalTexel;
@@ -69,9 +83,7 @@ void VividWriteVSMDepth(float4 positionCS, uint cascadeIndex)
             physicalTexel))
         return;
 
-    InterlockedMax(
-        _VSMPrototypePhysicalPage[physicalTexel],
-        asuint(saturate(positionCS.z)));
+    VividInsertVSMDepth(physicalTexel, asuint(saturate(positionCS.z)));
 }
 
 void VividWriteVSMDepth(float4 positionCS)
@@ -96,7 +108,7 @@ void VividWriteVSMPageDepth(float4 positionCS, uint virtualPageIndex)
     uint rowSize = (uint)_VSMPrototypePhysicalPagesPerRow;
     uint2 texel = uint2(slot % rowSize, slot / rowSize) * (uint)_VSMPrototypePageSize
         + (uint2)positionCS.xy;
-    InterlockedMax(_VSMPrototypePhysicalPage[texel], asuint(saturate(positionCS.z)));
+    VividInsertVSMDepth(texel, asuint(saturate(positionCS.z)));
 }
 #else
 void VividWriteVSMDepth(float4 positionCS, uint cascadeIndex)

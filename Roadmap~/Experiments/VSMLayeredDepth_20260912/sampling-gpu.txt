@@ -1,0 +1,1 @@
+shipping sampler passed=32 (8 layers x static/dynamic x hidden hit/empty interval); shipping clean/dirty page clears pass

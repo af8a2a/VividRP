@@ -82,6 +82,36 @@ float2 VSMSMRTReceiverOffset(float2 phase, uint ray, uint count)
     return 2 * frac(samplePoint + phase) - 1;
 }
 
+// Diagnostic A/B only; zero uses the ordered search.
+int _VSMDepthSearchLinear;
+
+bool VSMSMRTHasDepthInInterval(Texture2DArray<uint> pool, int2 texel, uint frontDepth,
+    float originDepth, float depthPerWorld, float enter, float exitTime, float thickness)
+{
+    if (frontDepth == 0u) return false;
+    float surface = (asfloat(frontDepth) - originDepth) / depthPerWorld;
+    if (surface <= enter) return false;
+    if (surface - thickness <= exitTime) return true;
+    // Atomic insertion leaves a descending prefix of distinct reverse-Z depths,
+    // followed by zeros. Search each pool independently: their layer ranks do
+    // not correspond. Keep the original floating-point interval comparisons.
+    uint low = 1u, high = VIVID_VSM_DEPTH_LAYER_COUNT;
+    [loop]
+    while (low < high)
+    {
+        uint layer = (low + high) >> 1u;
+        uint depth = pool.Load(int4(texel, layer, 0));
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugWork.y++;
+#endif
+        surface = depth == 0u ? -1 : (asfloat(depth) - originDepth) / depthPerWorld;
+        if (surface <= enter) high = layer;
+        else if (surface - thickness <= exitTime) return true;
+        else low = layer + 1u;
+    }
+    return false;
+}
+
 bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorld,
     float startTime, float rayLength, bool parallelTail, float thickness, int budget, int index, out float visibility)
 {
@@ -138,23 +168,35 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
             && previousSurface > enter && previousSurface - thickness <= min(exitTime, rayLength);
         if (!hit && !gap && surface > enter)
         {
-            // Static and dynamic pools have independent ordering. Combining
-            // their layer ranks with max would lose a hidden moving surface.
-            uint2 depths = frontDepths;
-            for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
+            [branch]
+            if (_VSMDepthSearchLinear == 0)
             {
-                if (layer != 0)
+                hit = VSMSMRTHasDepthInInterval(_VSMPrototypeStaticPhysicalPage,
+                    physical, frontDepths.x, origin.z, depthPerWorld, enter, exitTime, thickness);
+                if (!hit)
+                    hit = VSMSMRTHasDepthInInterval(_VSMPrototypeDynamicPhysicalPage,
+                        physical, frontDepths.y, origin.z, depthPerWorld, enter, exitTime, thickness);
+            }
+            else
+            {
+                // Static and dynamic pools have independent ordering. Combining
+                // their layer ranks with max would lose a hidden moving surface.
+                uint2 depths = frontDepths;
+                for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
                 {
-                    depths = LoadVSMDepthLayer(physical, layer, pageFlags);
+                    if (layer != 0)
+                    {
+                        depths = LoadVSMDepthLayer(physical, layer, pageFlags);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
-                    g_VSMDebugWork.y++;
+                        g_VSMDebugWork.y++;
 #endif
+                    }
+                    float2 surfaces = float2(depths.x == 0 ? -1 : (asfloat(depths.x) - origin.z) / depthPerWorld,
+                        depths.y == 0 ? -1 : (asfloat(depths.y) - origin.z) / depthPerWorld);
+                    if (all(surfaces <= enter)) break;
+                    hit = any((surfaces > enter) & (tail | (surfaces - thickness <= exitTime)));
+                    if (hit) break;
                 }
-                float2 surfaces = float2(depths.x == 0 ? -1 : (asfloat(depths.x) - origin.z) / depthPerWorld,
-                    depths.y == 0 ? -1 : (asfloat(depths.y) - origin.z) / depthPerWorld);
-                if (all(surfaces <= enter)) break;
-                hit = any((surfaces > enter) & (tail | (surfaces - thickness <= exitTime)));
-                if (hit) break;
             }
         }
         if (hit || gap) { visibility = 0; return true; }

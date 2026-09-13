@@ -1,0 +1,95 @@
+{
+  "phase_grid": "256 radial x 512 angular midpoint phases, 19 analytic half-plane integrals",
+  "cases": [
+    {
+      "rays": 2,
+      "golden": {
+        "mean_halfplane_variance": 0.046741715220330084,
+        "max_expectation_error": 3.178838766548786e-05,
+        "central_halfplane_variance": 0.05859375,
+        "mean_radius_squared": 0.5
+      },
+      "uniform": {
+        "mean_halfplane_variance": 0.039693309441453925,
+        "max_expectation_error": 4.8634137105874053e-05,
+        "central_halfplane_variance": 0.0,
+        "mean_radius_squared": 0.5
+      }
+    },
+    {
+      "rays": 4,
+      "golden": {
+        "mean_halfplane_variance": 0.01575969767758292,
+        "max_expectation_error": 2.6098032629984225e-05,
+        "central_halfplane_variance": 0.029296875,
+        "mean_radius_squared": 0.5
+      },
+      "uniform": {
+        "mean_halfplane_variance": 0.013652749526571776,
+        "max_expectation_error": 4.1004742574624053e-05,
+        "central_halfplane_variance": 0.0,
+        "mean_radius_squared": 0.5
+      }
+    },
+    {
+      "rays": 5,
+      "golden": {
+        "mean_halfplane_variance": 0.009670508663464143,
+        "max_expectation_error": 6.428090195664815e-05,
+        "central_halfplane_variance": 0.009999999999999998,
+        "mean_radius_squared": 0.5
+      },
+      "uniform": {
+        "mean_halfplane_variance": 0.010514515675114173,
+        "max_expectation_error": 1.7281113310840812e-05,
+        "central_halfplane_variance": 0.009999999999999998,
+        "mean_radius_squared": 0.5
+      }
+    },
+    {
+      "rays": 6,
+      "golden": {
+        "mean_halfplane_variance": 0.0074211585904575056,
+        "max_expectation_error": 3.0486643476823616e-05,
+        "central_halfplane_variance": 0.009548611111111112,
+        "mean_radius_squared": 0.5
+      },
+      "uniform": {
+        "mean_halfplane_variance": 0.008599114704370631,
+        "max_expectation_error": 3.563477579415775e-05,
+        "central_halfplane_variance": 0.0,
+        "mean_radius_squared": 0.5
+      }
+    },
+    {
+      "rays": 7,
+      "golden": {
+        "mean_halfplane_variance": 0.00614099673415153,
+        "max_expectation_error": 2.42218086825563e-05,
+        "central_halfplane_variance": 0.007334183673469387,
+        "mean_radius_squared": 0.5
+      },
+      "uniform": {
+        "mean_halfplane_variance": 0.007629446146502555,
+        "max_expectation_error": 5.630463558392584e-06,
+        "central_halfplane_variance": 0.005102040816326529,
+        "mean_radius_squared": 0.5
+      }
+    },
+    {
+      "rays": 8,
+      "golden": {
+        "mean_halfplane_variance": 0.0044912017080940515,
+        "max_expectation_error": 4.3264170325296725e-05,
+        "central_halfplane_variance": 0.00341796875,
+        "mean_radius_squared": 0.5
+      },
+      "uniform": {
+        "mean_halfplane_variance": 0.006836359219481605,
+        "max_expectation_error": 2.3838604879311553e-05,
+        "central_halfplane_variance": 0.0,
+        "mean_radius_squared": 0.5
+      }
+    }
+  ]
+}

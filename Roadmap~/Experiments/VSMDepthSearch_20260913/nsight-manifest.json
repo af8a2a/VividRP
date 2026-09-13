@@ -1,0 +1,16 @@
+[
+  {
+    "run": "r2048",
+    "capture": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-depth-search\\nsight\\r2048\\Unity_2026_09_13_17_02_35.ngfx-gputrace",
+    "bytes": 69729214,
+    "sha256": "0f4fc71de16bd3bf45f93cde97076685ec24246f7c342ca843e777d7071b51d0",
+    "warm_seconds_before_capture": 73.937987
+  },
+  {
+    "run": "r4096",
+    "capture": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-depth-search\\nsight\\r4096\\Unity_2026_09_13_17_09_01.ngfx-gputrace",
+    "bytes": 78911198,
+    "sha256": "b75a3e2f39c93545ffb7fe41d9ac3146e3c43e9163adeb33542534b2b4a22e8b",
+    "warm_seconds_before_capture": 34.012998
+  }
+]

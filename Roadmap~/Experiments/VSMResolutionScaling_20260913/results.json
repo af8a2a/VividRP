@@ -1,0 +1,3445 @@
+{
+  "status": "complete",
+  "windows": [
+    {
+      "stage": 0,
+      "resolution": 2048,
+      "capacity": 256,
+      "table_entries": 2560,
+      "counters": {
+        "allocated": 256,
+        "requested": 266,
+        "new": 0,
+        "overflow": 10
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 26,
+          "requested": 36,
+          "requested_resident": 26,
+          "primary": 36,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 96,
+          "requested": 96,
+          "requested_resident": 96,
+          "primary": 96,
+          "parent": 24
+        },
+        {
+          "level": 3,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 32
+        },
+        {
+          "level": 4,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 29
+        },
+        {
+          "level": 5,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 6,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 7,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 0,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 0.224256,
+          "p95_ms": 0.22528,
+          "mean_ms": 0.223786,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.089344,
+          "p95_ms": 0.0900224,
+          "mean_ms": 0.096086,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.012544,
+          "p95_ms": 0.015616,
+          "mean_ms": 0.01281,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.063488,
+          "p95_ms": 0.0661248,
+          "mean_ms": 0.06376000000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.155904,
+          "p95_ms": 0.158976,
+          "mean_ms": 0.159038,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002304,
+          "mean_ms": 0.0018279999999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 6e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.506368,
+          "p95_ms": 0.5106303999999999,
+          "mean_ms": 0.512276,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.04864,
+          "p95_ms": 0.051456,
+          "mean_ms": 0.049964,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.059904,
+          "p95_ms": 0.06356479999999999,
+          "mean_ms": 0.06777999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 6.245376,
+          "p95_ms": 7.0580352,
+          "mean_ms": 6.281824,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 6.0253440000000005,
+          "p95_ms": 6.8067968,
+          "mean_ms": 6.0522279999999995,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.067328,
+          "p95_ms": 0.07370239999999999,
+          "mean_ms": 0.076672,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.009382399999999997,
+          "mean_ms": 0.008851999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 1,
+      "resolution": 4096,
+      "capacity": 256,
+      "table_entries": 10240,
+      "counters": {
+        "allocated": 256,
+        "requested": 641,
+        "new": 0,
+        "overflow": 385
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 0,
+          "requested": 110,
+          "requested_resident": 0,
+          "primary": 110,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 51,
+          "requested": 178,
+          "requested_resident": 51,
+          "primary": 178,
+          "parent": 51
+        },
+        {
+          "level": 3,
+          "resident": 73,
+          "requested": 221,
+          "requested_resident": 73,
+          "primary": 221,
+          "parent": 61
+        },
+        {
+          "level": 4,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 80
+        },
+        {
+          "level": 5,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 22
+        },
+        {
+          "level": 6,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 7,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 0.529408,
+          "p95_ms": 0.531968,
+          "mean_ms": 0.529344,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.0896,
+          "p95_ms": 0.0910464,
+          "mean_ms": 0.093334,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.011264,
+          "p95_ms": 0.014336,
+          "mean_ms": 0.011852,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.064,
+          "p95_ms": 0.067072,
+          "mean_ms": 0.068306,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.156416,
+          "p95_ms": 0.16016640000000001,
+          "mean_ms": 0.15983000000000003,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.0027263999999999977,
+          "mean_ms": 0.0020039999999999997,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.603392,
+          "p95_ms": 0.6071424,
+          "mean_ms": 0.607938,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.093952,
+          "p95_ms": 0.098048,
+          "mean_ms": 0.09377999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.060416,
+          "p95_ms": 0.06373119999999999,
+          "mean_ms": 0.060857999999999995,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 5.635968,
+          "p95_ms": 6.555327999999999,
+          "mean_ms": 5.725033999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 5.403136,
+          "p95_ms": 6.3318144,
+          "mean_ms": 5.494759999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.11276800000000001,
+          "p95_ms": 0.11818239999999999,
+          "mean_ms": 0.11655599999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.009292799999999995,
+          "mean_ms": 0.006748,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 2,
+      "resolution": 8192,
+      "capacity": 256,
+      "table_entries": 40960,
+      "counters": {
+        "allocated": 256,
+        "requested": 1431,
+        "new": 0,
+        "overflow": 1175
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 0,
+          "requested": 338,
+          "requested_resident": 0,
+          "primary": 338,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 0,
+          "requested": 389,
+          "requested_resident": 0,
+          "primary": 389,
+          "parent": 132
+        },
+        {
+          "level": 3,
+          "resident": 22,
+          "requested": 353,
+          "requested_resident": 22,
+          "primary": 353,
+          "parent": 138
+        },
+        {
+          "level": 4,
+          "resident": 139,
+          "requested": 221,
+          "requested_resident": 139,
+          "primary": 221,
+          "parent": 139
+        },
+        {
+          "level": 5,
+          "resident": 71,
+          "requested": 81,
+          "requested_resident": 71,
+          "primary": 81,
+          "parent": 71
+        },
+        {
+          "level": 6,
+          "resident": 22,
+          "requested": 31,
+          "requested_resident": 22,
+          "primary": 31,
+          "parent": 22
+        },
+        {
+          "level": 7,
+          "resident": 0,
+          "requested": 12,
+          "requested_resident": 0,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 0,
+          "requested": 4,
+          "requested_resident": 0,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 1.391616,
+          "p95_ms": 1.3940864000000002,
+          "mean_ms": 1.393554,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.0896,
+          "p95_ms": 0.090624,
+          "mean_ms": 0.09079200000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.011776,
+          "p95_ms": 0.015104,
+          "mean_ms": 0.012388,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.060416,
+          "p95_ms": 0.0613504,
+          "mean_ms": 0.06053,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.153472,
+          "p95_ms": 0.15751679999999998,
+          "mean_ms": 0.15734599999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.002048,
+          "p95_ms": 0.0032383999999999976,
+          "mean_ms": 0.0022140000000000003,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 8e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.773376,
+          "p95_ms": 0.9611263999999999,
+          "mean_ms": 0.79901,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.274304,
+          "p95_ms": 0.293696,
+          "mean_ms": 0.27911600000000003,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.060032,
+          "p95_ms": 0.06466559999999999,
+          "mean_ms": 0.061124,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 8e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 1.4114559999999998,
+          "p95_ms": 1.6834943999999998,
+          "mean_ms": 1.4559920000000002,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 1.197568,
+          "p95_ms": 1.4606719999999997,
+          "mean_ms": 1.234994,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.293504,
+          "p95_ms": 0.3150208,
+          "mean_ms": 0.304142,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.009382399999999997,
+          "mean_ms": 0.006887999999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 3,
+      "resolution": 16384,
+      "capacity": 256,
+      "table_entries": 163840,
+      "counters": {
+        "allocated": 256,
+        "requested": 2825,
+        "new": 0,
+        "overflow": 2569
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 0,
+          "requested": 714,
+          "requested_resident": 0,
+          "primary": 714,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 0,
+          "requested": 853,
+          "requested_resident": 0,
+          "primary": 853,
+          "parent": 307
+        },
+        {
+          "level": 3,
+          "resident": 0,
+          "requested": 556,
+          "requested_resident": 0,
+          "primary": 556,
+          "parent": 290
+        },
+        {
+          "level": 4,
+          "resident": 34,
+          "requested": 353,
+          "requested_resident": 34,
+          "primary": 353,
+          "parent": 219
+        },
+        {
+          "level": 5,
+          "resident": 125,
+          "requested": 221,
+          "requested_resident": 125,
+          "primary": 221,
+          "parent": 125
+        },
+        {
+          "level": 6,
+          "resident": 71,
+          "requested": 81,
+          "requested_resident": 71,
+          "primary": 81,
+          "parent": 71
+        },
+        {
+          "level": 7,
+          "resident": 22,
+          "requested": 31,
+          "requested_resident": 22,
+          "primary": 31,
+          "parent": 22
+        },
+        {
+          "level": 8,
+          "resident": 0,
+          "requested": 12,
+          "requested_resident": 0,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 3.386368,
+          "p95_ms": 3.3883264,
+          "mean_ms": 3.3879959999999993,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.0896,
+          "p95_ms": 0.090112,
+          "mean_ms": 0.08968999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.011904,
+          "p95_ms": 0.016038399999999998,
+          "mean_ms": 0.01262,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.060928,
+          "p95_ms": 0.061696,
+          "mean_ms": 0.06509199999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.153856,
+          "p95_ms": 0.15751679999999998,
+          "mean_ms": 0.159692,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.003328,
+          "p95_ms": 0.00384,
+          "mean_ms": 0.0032899999999999995,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.721664,
+          "p95_ms": 0.9173631999999999,
+          "mean_ms": 0.736044,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 1.040128,
+          "p95_ms": 1.0742144,
+          "mean_ms": 1.041648,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.060672,
+          "p95_ms": 0.0744064,
+          "mean_ms": 0.062504,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 1.816192,
+          "p95_ms": 2.1214592,
+          "mean_ms": 1.879208,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 1.600896,
+          "p95_ms": 1.8958592,
+          "mean_ms": 1.652658,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 1.0627840000000002,
+          "p95_ms": 1.1959296,
+          "mean_ms": 1.071454,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.009382399999999997,
+          "mean_ms": 0.006791999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 4,
+      "resolution": 8192,
+      "capacity": 256,
+      "table_entries": 40960,
+      "counters": {
+        "allocated": 256,
+        "requested": 1431,
+        "new": 0,
+        "overflow": 1175
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 0,
+          "requested": 338,
+          "requested_resident": 0,
+          "primary": 338,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 0,
+          "requested": 389,
+          "requested_resident": 0,
+          "primary": 389,
+          "parent": 132
+        },
+        {
+          "level": 3,
+          "resident": 22,
+          "requested": 353,
+          "requested_resident": 22,
+          "primary": 353,
+          "parent": 138
+        },
+        {
+          "level": 4,
+          "resident": 139,
+          "requested": 221,
+          "requested_resident": 139,
+          "primary": 221,
+          "parent": 139
+        },
+        {
+          "level": 5,
+          "resident": 71,
+          "requested": 81,
+          "requested_resident": 71,
+          "primary": 81,
+          "parent": 71
+        },
+        {
+          "level": 6,
+          "resident": 22,
+          "requested": 31,
+          "requested_resident": 22,
+          "primary": 31,
+          "parent": 22
+        },
+        {
+          "level": 7,
+          "resident": 0,
+          "requested": 12,
+          "requested_resident": 0,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 0,
+          "requested": 4,
+          "requested_resident": 0,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 1.513728,
+          "p95_ms": 1.5174784000000001,
+          "mean_ms": 1.511258,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.0896,
+          "p95_ms": 0.0902784,
+          "mean_ms": 0.093274,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.012288,
+          "p95_ms": 0.015616,
+          "mean_ms": 0.012724,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.060416,
+          "p95_ms": 0.061184,
+          "mean_ms": 0.061826,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.1536,
+          "p95_ms": 0.1563264,
+          "mean_ms": 0.156602,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.002048,
+          "p95_ms": 0.00256,
+          "mean_ms": 0.002052,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.733952,
+          "p95_ms": 0.9183872,
+          "mean_ms": 0.7490680000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.276992,
+          "p95_ms": 0.29319680000000004,
+          "mean_ms": 0.28255399999999997,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.06016,
+          "p95_ms": 0.063488,
+          "mean_ms": 0.061562000000000006,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 1.411712,
+          "p95_ms": 1.6536832,
+          "mean_ms": 1.446158,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 1.197568,
+          "p95_ms": 1.437248,
+          "mean_ms": 1.22465,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.295936,
+          "p95_ms": 0.314496,
+          "mean_ms": 0.307866,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.008870399999999997,
+          "mean_ms": 0.006584,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 5,
+      "resolution": 4096,
+      "capacity": 256,
+      "table_entries": 10240,
+      "counters": {
+        "allocated": 256,
+        "requested": 641,
+        "new": 0,
+        "overflow": 385
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 0,
+          "requested": 110,
+          "requested_resident": 0,
+          "primary": 110,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 51,
+          "requested": 178,
+          "requested_resident": 51,
+          "primary": 178,
+          "parent": 51
+        },
+        {
+          "level": 3,
+          "resident": 73,
+          "requested": 221,
+          "requested_resident": 73,
+          "primary": 221,
+          "parent": 61
+        },
+        {
+          "level": 4,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 80
+        },
+        {
+          "level": 5,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 22
+        },
+        {
+          "level": 6,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 7,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 0.532224,
+          "p95_ms": 0.537088,
+          "mean_ms": 0.532362,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.089856,
+          "p95_ms": 0.09088,
+          "mean_ms": 0.09282199999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.01152,
+          "p95_ms": 0.014592,
+          "mean_ms": 0.01208,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.063744,
+          "p95_ms": 0.064768,
+          "mean_ms": 0.06520000000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.156672,
+          "p95_ms": 0.1588864,
+          "mean_ms": 0.15816799999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002304,
+          "mean_ms": 0.0018239999999999997,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.604928,
+          "p95_ms": 0.6091776,
+          "mean_ms": 0.614428,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.094208,
+          "p95_ms": 0.099584,
+          "mean_ms": 0.094658,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.060672,
+          "p95_ms": 0.06391039999999999,
+          "mean_ms": 0.061456,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 5.347712,
+          "p95_ms": 5.9412352,
+          "mean_ms": 5.383788,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 5.054336,
+          "p95_ms": 5.7167872,
+          "mean_ms": 5.156976,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.112896,
+          "p95_ms": 0.11834879999999999,
+          "mean_ms": 0.11472600000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.008947199999999994,
+          "mean_ms": 0.006624,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 6,
+      "resolution": 2048,
+      "capacity": 256,
+      "table_entries": 2560,
+      "counters": {
+        "allocated": 256,
+        "requested": 266,
+        "new": 0,
+        "overflow": 10
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 26,
+          "requested": 36,
+          "requested_resident": 26,
+          "primary": 36,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 96,
+          "requested": 96,
+          "requested_resident": 96,
+          "primary": 96,
+          "parent": 24
+        },
+        {
+          "level": 3,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 32
+        },
+        {
+          "level": 4,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 29
+        },
+        {
+          "level": 5,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 6,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 7,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 0,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 0.225024,
+          "p95_ms": 0.2274944,
+          "mean_ms": 0.224644,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.090112,
+          "p95_ms": 0.40588799999999997,
+          "mean_ms": 0.13039800000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.01216,
+          "p95_ms": 0.015616,
+          "mean_ms": 0.012689999999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.064,
+          "p95_ms": 0.0666368,
+          "mean_ms": 0.067002,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.156672,
+          "p95_ms": 0.16016640000000001,
+          "mean_ms": 0.163886,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002304,
+          "mean_ms": 0.0017839999999999996,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 8e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.626944,
+          "p95_ms": 0.6446848000000001,
+          "mean_ms": 0.6375,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.048384,
+          "p95_ms": 0.0508544,
+          "mean_ms": 0.050814,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.06016,
+          "p95_ms": 0.0633984,
+          "mean_ms": 0.06145,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 6.284928,
+          "p95_ms": 7.148736,
+          "mean_ms": 6.34778,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 6.059392000000001,
+          "p95_ms": 6.9247743999999996,
+          "mean_ms": 6.109196000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.06720000000000001,
+          "p95_ms": 0.24851199999999996,
+          "mean_ms": 0.086076,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.009126399999999998,
+          "mean_ms": 0.008393999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 7,
+      "resolution": 2048,
+      "capacity": 1024,
+      "table_entries": 2560,
+      "counters": {
+        "allocated": 266,
+        "requested": 266,
+        "new": 0,
+        "overflow": 0
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 36,
+          "requested": 36,
+          "requested_resident": 36,
+          "primary": 36,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 96,
+          "requested": 96,
+          "requested_resident": 96,
+          "primary": 96,
+          "parent": 24
+        },
+        {
+          "level": 3,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 32
+        },
+        {
+          "level": 4,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 29
+        },
+        {
+          "level": 5,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 6,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 7,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 0,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 0.270592,
+          "p95_ms": 0.273408,
+          "mean_ms": 0.27067,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.18176,
+          "p95_ms": 0.5203327999999993,
+          "mean_ms": 0.22606000000000004,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.086912,
+          "p95_ms": 0.094976,
+          "mean_ms": 0.087082,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.064512,
+          "p95_ms": 0.0677504,
+          "mean_ms": 0.06872800000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.156928,
+          "p95_ms": 0.160256,
+          "mean_ms": 0.160802,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002304,
+          "mean_ms": 0.0018279999999999995,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.556544,
+          "p95_ms": 0.7430656,
+          "mean_ms": 0.571856,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.119552,
+          "p95_ms": 0.129088,
+          "mean_ms": 0.12004999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.055936,
+          "p95_ms": 0.09209599999999979,
+          "mean_ms": 0.059996,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 6.542336,
+          "p95_ms": 7.8101632,
+          "mean_ms": 6.629282,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 6.31936,
+          "p95_ms": 7.477542399999999,
+          "mean_ms": 6.38696,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.138496,
+          "p95_ms": 0.148992,
+          "mean_ms": 0.14165,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.008614399999999998,
+          "mean_ms": 0.006867999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 8,
+      "resolution": 4096,
+      "capacity": 1024,
+      "table_entries": 10240,
+      "counters": {
+        "allocated": 641,
+        "requested": 641,
+        "new": 0,
+        "overflow": 0
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 110,
+          "requested": 110,
+          "requested_resident": 110,
+          "primary": 110,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 178,
+          "requested": 178,
+          "requested_resident": 178,
+          "primary": 178,
+          "parent": 51
+        },
+        {
+          "level": 3,
+          "resident": 221,
+          "requested": 221,
+          "requested_resident": 221,
+          "primary": 221,
+          "parent": 61
+        },
+        {
+          "level": 4,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 80
+        },
+        {
+          "level": 5,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 22
+        },
+        {
+          "level": 6,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 7,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 0.569344,
+          "p95_ms": 0.578048,
+          "mean_ms": 0.571152,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.261632,
+          "p95_ms": 0.2624,
+          "mean_ms": 0.26478999999999997,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.08768000000000001,
+          "p95_ms": 0.0954752,
+          "mean_ms": 0.089406,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.06592,
+          "p95_ms": 0.066816,
+          "mean_ms": 0.06594799999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.156672,
+          "p95_ms": 0.1590528,
+          "mean_ms": 0.159406,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002304,
+          "mean_ms": 0.0018479999999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.662016,
+          "p95_ms": 0.6647424,
+          "mean_ms": 0.6677740000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.183168,
+          "p95_ms": 0.19216640000000001,
+          "mean_ms": 0.185058,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.07052800000000001,
+          "p95_ms": 0.1113472,
+          "mean_ms": 0.07556199999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 14.042624,
+          "p95_ms": 14.7511936,
+          "mean_ms": 14.09566,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 13.797888,
+          "p95_ms": 14.497126399999999,
+          "mean_ms": 13.863736,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.202112,
+          "p95_ms": 0.2121344,
+          "mean_ms": 0.210462,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.011174399999999998,
+          "mean_ms": 0.009486000000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 9,
+      "resolution": 8192,
+      "capacity": 1024,
+      "table_entries": 40960,
+      "counters": {
+        "allocated": 1024,
+        "requested": 1431,
+        "new": 0,
+        "overflow": 407
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 0,
+          "requested": 338,
+          "requested_resident": 0,
+          "primary": 338,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 320,
+          "requested": 389,
+          "requested_resident": 320,
+          "primary": 389,
+          "parent": 132
+        },
+        {
+          "level": 3,
+          "resident": 353,
+          "requested": 353,
+          "requested_resident": 353,
+          "primary": 353,
+          "parent": 138
+        },
+        {
+          "level": 4,
+          "resident": 221,
+          "requested": 221,
+          "requested_resident": 221,
+          "primary": 221,
+          "parent": 139
+        },
+        {
+          "level": 5,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 71
+        },
+        {
+          "level": 6,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 22
+        },
+        {
+          "level": 7,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 1.638144,
+          "p95_ms": 1.6406144,
+          "mean_ms": 1.63822,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.345344,
+          "p95_ms": 0.346112,
+          "mean_ms": 0.353618,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 6e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.0864,
+          "p95_ms": 0.0953984,
+          "mean_ms": 0.091014,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.066816,
+          "p95_ms": 0.067584,
+          "mean_ms": 0.06825,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.157184,
+          "p95_ms": 0.1590528,
+          "mean_ms": 0.160138,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.002048,
+          "p95_ms": 0.00256,
+          "mean_ms": 0.0020900000000000003,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 4e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.774656,
+          "p95_ms": 0.9784831999999999,
+          "mean_ms": 0.79823,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.38950399999999996,
+          "p95_ms": 0.4089984,
+          "mean_ms": 0.39037199999999994,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.08358399999999999,
+          "p95_ms": 0.11818239999999999,
+          "mean_ms": 0.093452,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 27.437824,
+          "p95_ms": 28.177497600000002,
+          "mean_ms": 27.465674,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 27.213056,
+          "p95_ms": 27.9522304,
+          "mean_ms": 27.234848,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.409216,
+          "p95_ms": 0.512883199999999,
+          "mean_ms": 0.420238,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.009472,
+          "mean_ms": 0.006953999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 10,
+      "resolution": 4096,
+      "capacity": 1024,
+      "table_entries": 10240,
+      "counters": {
+        "allocated": 641,
+        "requested": 641,
+        "new": 0,
+        "overflow": 0
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 110,
+          "requested": 110,
+          "requested_resident": 110,
+          "primary": 110,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 178,
+          "requested": 178,
+          "requested_resident": 178,
+          "primary": 178,
+          "parent": 51
+        },
+        {
+          "level": 3,
+          "resident": 221,
+          "requested": 221,
+          "requested_resident": 221,
+          "primary": 221,
+          "parent": 61
+        },
+        {
+          "level": 4,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 80
+        },
+        {
+          "level": 5,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 22
+        },
+        {
+          "level": 6,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 7,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 0.5952,
+          "p95_ms": 0.6038144,
+          "mean_ms": 0.596608,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.261632,
+          "p95_ms": 0.262912,
+          "mean_ms": 0.269546,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.087552,
+          "p95_ms": 0.0956544,
+          "mean_ms": 0.09101999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.066048,
+          "p95_ms": 0.066816,
+          "mean_ms": 0.068824,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.156672,
+          "p95_ms": 0.158464,
+          "mean_ms": 0.15953599999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002304,
+          "mean_ms": 0.0018399999999999996,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.604928,
+          "p95_ms": 0.7876992,
+          "mean_ms": 0.618388,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.18368,
+          "p95_ms": 0.1916544,
+          "mean_ms": 0.18296,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.069376,
+          "p95_ms": 0.108544,
+          "mean_ms": 0.0733,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 14.184704,
+          "p95_ms": 15.1077248,
+          "mean_ms": 14.233671999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 13.953664,
+          "p95_ms": 14.8840576,
+          "mean_ms": 14.000446,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.202752,
+          "p95_ms": 0.212224,
+          "mean_ms": 0.20878999999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.009356799999999985,
+          "mean_ms": 0.006939999999999998,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    },
+    {
+      "stage": 11,
+      "resolution": 2048,
+      "capacity": 1024,
+      "table_entries": 2560,
+      "counters": {
+        "allocated": 266,
+        "requested": 266,
+        "new": 0,
+        "overflow": 0
+      },
+      "levels": [
+        {
+          "level": 0,
+          "resident": 0,
+          "requested": 0,
+          "requested_resident": 0,
+          "primary": 0,
+          "parent": 0
+        },
+        {
+          "level": 1,
+          "resident": 36,
+          "requested": 36,
+          "requested_resident": 36,
+          "primary": 36,
+          "parent": 0
+        },
+        {
+          "level": 2,
+          "resident": 96,
+          "requested": 96,
+          "requested_resident": 96,
+          "primary": 96,
+          "parent": 24
+        },
+        {
+          "level": 3,
+          "resident": 81,
+          "requested": 81,
+          "requested_resident": 81,
+          "primary": 81,
+          "parent": 32
+        },
+        {
+          "level": 4,
+          "resident": 31,
+          "requested": 31,
+          "requested_resident": 31,
+          "primary": 31,
+          "parent": 29
+        },
+        {
+          "level": 5,
+          "resident": 12,
+          "requested": 12,
+          "requested_resident": 12,
+          "primary": 12,
+          "parent": 0
+        },
+        {
+          "level": 6,
+          "resident": 4,
+          "requested": 4,
+          "requested_resident": 4,
+          "primary": 4,
+          "parent": 0
+        },
+        {
+          "level": 7,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 8,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 2,
+          "parent": 0
+        },
+        {
+          "level": 9,
+          "resident": 2,
+          "requested": 2,
+          "requested_resident": 2,
+          "primary": 0,
+          "parent": 0
+        }
+      ],
+      "markers": {
+        "VSM.Allocate": {
+          "p50_ms": 0.27136,
+          "p95_ms": 0.273408,
+          "mean_ms": 0.27105999999999997,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.18176,
+          "p95_ms": 0.6126079999999994,
+          "mean_ms": 0.238752,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0001663999999999978,
+          "mean_ms": 1.4e-05,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.087168,
+          "p95_ms": 0.0956544,
+          "mean_ms": 0.08782799999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.064512,
+          "p95_ms": 0.06784,
+          "mean_ms": 0.07053999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.156928,
+          "p95_ms": 0.159744,
+          "mean_ms": 0.16165200000000002,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002304,
+          "mean_ms": 0.0017619999999999997,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.553856,
+          "p95_ms": 0.6691199999999988,
+          "mean_ms": 0.5646740000000001,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.118784,
+          "p95_ms": 0.1284224,
+          "mean_ms": 0.11873,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.05568,
+          "p95_ms": 0.1105024,
+          "mean_ms": 0.065664,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 2e-06,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.Resolve": {
+          "p50_ms": 6.490624,
+          "p95_ms": 7.657984,
+          "mean_ms": 6.575486,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 6.261248,
+          "p95_ms": 7.323519999999999,
+          "mean_ms": 6.3197920000000005,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.139008,
+          "p95_ms": 0.15258879999999997,
+          "mean_ms": 0.14682,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.008614399999999998,
+          "mean_ms": 0.006991999999999999,
+          "observations": 128,
+          "counts": [
+            1
+          ],
+          "zero_observations": 0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "mean_ms": 0.0,
+          "observations": 128,
+          "counts": [
+            0
+          ],
+          "zero_observations": 128
+        }
+      }
+    }
+  ],
+  "restoration": {
+    "serialized_settings_equal": true,
+    "effective_values_equal": true,
+    "differences": {},
+    "camera_equal": true,
+    "transform_equal": true,
+    "scenes_equal": true
+  }
+}

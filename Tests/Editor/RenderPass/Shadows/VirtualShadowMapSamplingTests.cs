@@ -352,6 +352,43 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SMRT_OrderedDepthIntervalsMatchLinearScanAcrossPoolsAndBoundaries()
+        {
+            using var f = new Fixture();
+            const int casesPerTexel = 128;
+            var inputs = new float4[256 * casesPerTexel];
+            var rays = new float4[inputs.Length];
+            for (int pixel = 0; pixel < 256; pixel++)
+            {
+                int staticCount = pixel % 17, dynamicCount = pixel / 17;
+                if (pixel == 255) staticCount = dynamicCount = 16;
+                for (int layer = 0; layer < 16; layer++)
+                {
+                    if (layer < staticCount) f.StaticData[layer * 256 + pixel] = math.asuint(.99f - .041f * layer);
+                    if (layer < dynamicCount) f.DynamicData[layer * 256 + pixel] = math.asuint(.973f - .043f * layer);
+                }
+                for (int c = 0; c < casesPerTexel; c++)
+                {
+                    int index = pixel * casesPerTexel + c;
+                    uint raw = ((c & 1) == 0 ? f.StaticData : f.DynamicData)[(c / 8) * 256 + pixel];
+                    float center = (math.asfloat(raw) - .07f) / .05f;
+                    float enter = Mathf.Max(0, center + (c % 4 - 2) * .00001f);
+                    inputs[index] = new float4(pixel % 16, pixel / 16, enter, enter + (c % 7) * .1f);
+                    rays[index] = new float4(.07f, .05f, (c % 5) * .01f, 0);
+                }
+            }
+            f.Upload();
+            var results = f.Run("InspectSMRTDepthIntervals", inputs, normals: rays);
+            int hits = 0;
+            for (int i = 0; i < results.Length; i++)
+            {
+                Assert.That(results[i].y, Is.EqualTo(results[i].x), "Ordered interval " + i);
+                if (results[i].x > 0) hits++;
+            }
+            Assert.That(hits, Is.GreaterThan(0).And.LessThan(results.Length));
+        }
+
+        [Test]
         public void SMRT_TraversesThinCellsWithoutBridgingEmptyDepthOrLockingCentralShadow()
         {
             using var f = new Fixture();

@@ -1,0 +1,142 @@
+[
+  {
+    "name": "r16384_p256_mode0.gz",
+    "bytes": 2935163,
+    "sha256": "30e87a7fc3c90407287d9b10ba0ab728efa42c74190fdc50926c67a5cd952d00"
+  },
+  {
+    "name": "r16384_p256_mode4.gz",
+    "bytes": 4578435,
+    "sha256": "b9caf4495cbd32fa92996a738c44e92bd171b833d8bccc03ad6379adbd038466"
+  },
+  {
+    "name": "r16384_p256_mode6.gz",
+    "bytes": 14853365,
+    "sha256": "5275c1889a5c85722f9e80dea4addaa386ec92afd80f97ce50f78499b43eb93b"
+  },
+  {
+    "name": "r16384_p256_mode7.gz",
+    "bytes": 518170,
+    "sha256": "98c2a9621fc4bc8cb3afc1c27f8b62a6eb691764b7e6536d64caefaf8809cc95"
+  },
+  {
+    "name": "r2048_p1024_mode0.gz",
+    "bytes": 3420466,
+    "sha256": "0c9bba20f8028672261bf2a8d5e0d43f4d5720b850e01b8d2af775be111d8710"
+  },
+  {
+    "name": "r2048_p1024_mode4.gz",
+    "bytes": 6237844,
+    "sha256": "a9eb9382574c3026e09463b1c95c0a2169a5b9dfc7711cdf4ef5bdf56898e878"
+  },
+  {
+    "name": "r2048_p1024_mode6.gz",
+    "bytes": 14803472,
+    "sha256": "1b8a748916026ced154062964ae17c2b5f52b5b7da1fef6840650bf16b39981f"
+  },
+  {
+    "name": "r2048_p1024_mode7.gz",
+    "bytes": 326015,
+    "sha256": "e7e35049ffe3eb3dee24da1ca1fb64e1ca96d20d20edf9d84ac9b468502ccc23"
+  },
+  {
+    "name": "r2048_p256_mode0.gz",
+    "bytes": 3413032,
+    "sha256": "92cd7e374ab6bd7f0b74abe77c4ad57dadd2420f77d07b735aed0b9cde6b048c"
+  },
+  {
+    "name": "r2048_p256_mode4.gz",
+    "bytes": 6187316,
+    "sha256": "5da7e499ec8cb79f978748db2e55b7c85d575e269c1d68593ef17524a58df6be"
+  },
+  {
+    "name": "r2048_p256_mode6.gz",
+    "bytes": 14803472,
+    "sha256": "1b8a748916026ced154062964ae17c2b5f52b5b7da1fef6840650bf16b39981f"
+  },
+  {
+    "name": "r2048_p256_mode7.gz",
+    "bytes": 328999,
+    "sha256": "7b58fa8c5937b1a0bfdde3683a7b2cb1cb82c96e0860dd56bed83eef8832e823"
+  },
+  {
+    "name": "r4096_p1024_mode0.gz",
+    "bytes": 3319395,
+    "sha256": "f63ffafd32130bc9ed2fa8407688e24784c1e108b780e77033f93c61158ce6ed"
+  },
+  {
+    "name": "r4096_p1024_mode4.gz",
+    "bytes": 6441279,
+    "sha256": "3135867e706d8e8afd067099097069473376e484696bed8a094dafc3cf767021"
+  },
+  {
+    "name": "r4096_p1024_mode6.gz",
+    "bytes": 14845192,
+    "sha256": "7bbe2e645304f4646fa98c8f6c24bb8ec635cb51f456c7df6dd3b8969716746e"
+  },
+  {
+    "name": "r4096_p1024_mode7.gz",
+    "bytes": 331871,
+    "sha256": "92f039595e731501b02c19781fa7249a79cc185af614950d38a4191402c71e36"
+  },
+  {
+    "name": "r4096_p256_mode0.gz",
+    "bytes": 3322778,
+    "sha256": "fd5b2e9bc405cd96c99396397a19ca0d4174682a75bc8096f51601d3486ecc31"
+  },
+  {
+    "name": "r4096_p256_mode4.gz",
+    "bytes": 5934304,
+    "sha256": "d290fcd379aff027e79797a47bbc25669ee28a89792b63a8ec22440fb1fc48a2"
+  },
+  {
+    "name": "r4096_p256_mode6.gz",
+    "bytes": 14845192,
+    "sha256": "7bbe2e645304f4646fa98c8f6c24bb8ec635cb51f456c7df6dd3b8969716746e"
+  },
+  {
+    "name": "r4096_p256_mode7.gz",
+    "bytes": 338308,
+    "sha256": "a06fb8d86290bca22523df73635d8961307ff86924716047baa75f7c9378e497"
+  },
+  {
+    "name": "r8192_p1024_mode0.gz",
+    "bytes": 3179236,
+    "sha256": "8e0d35a53e8d92681edffbed498c8e5759bc5e9c03f987c317da76174a01918d"
+  },
+  {
+    "name": "r8192_p1024_mode4.gz",
+    "bytes": 6293884,
+    "sha256": "2a0ba142670a90b7f874895d3b6d003e45bb5a707b8fdcb7fe1cd3ffd446c39d"
+  },
+  {
+    "name": "r8192_p1024_mode6.gz",
+    "bytes": 15006039,
+    "sha256": "3bd752d0c8d87102c7fcecf119319f8d0861016ec1fe2bd9e06768f6192169d2"
+  },
+  {
+    "name": "r8192_p1024_mode7.gz",
+    "bytes": 344171,
+    "sha256": "cb7bbeefb99b2534775c4ebcd88e36dffacd1c405a7c3b4a443b269917c0963f"
+  },
+  {
+    "name": "r8192_p256_mode0.gz",
+    "bytes": 3142072,
+    "sha256": "091a5d979b201256aa894f48a07f283e04508a71af99c1ed833a1dfeedc2f97d"
+  },
+  {
+    "name": "r8192_p256_mode4.gz",
+    "bytes": 3916112,
+    "sha256": "62b32e741b708aca5f362d20342f9a12852368b0a83e2f74c9e3928d54769072"
+  },
+  {
+    "name": "r8192_p256_mode6.gz",
+    "bytes": 15006039,
+    "sha256": "3bd752d0c8d87102c7fcecf119319f8d0861016ec1fe2bd9e06768f6192169d2"
+  },
+  {
+    "name": "r8192_p256_mode7.gz",
+    "bytes": 582168,
+    "sha256": "a24d59703fcdd010b6bdeb3f029005450bc690bbfd9fa19cd5fd922c17aea19b"
+  }
+]

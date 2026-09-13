@@ -177,7 +177,8 @@ static const uint kVSMMaxPagesPerMeshletRequest = 4u;
 // Thread-local instrumentation exists only in the opt-in diagnostic kernel.
 static int3 g_VSMDebugLevels;
 static float g_VSMDebugBlend;
-static uint3 g_VSMDebugWork; // attempted queries, completed combined-depth reads, attempted levels
+// Depth lookups count paired front/linear reads or individual ordered-search probes, not scalar pool loads.
+static uint3 g_VSMDebugWork; // attempted queries, completed depth lookups, attempted levels
 static uint g_VSMDebugMissing; // unmapped=1, dirty=2, inconsistent=4, outside=8
 static float4 g_VSMDebugQuality; // desired LOD, minimum covered, selected, footprint/target
 static uint4 g_VSMDebugSMRT; // rays, unoccluded parallel tails, failed footprints, final PCF fallback
@@ -2217,7 +2218,12 @@ void VSMShadowTemporalV(uint3 id : SV_DispatchThreadID)
                 }
             // React to moving casters even when receiver depth/normal are static.
             // Uniform newly lit/shadowed neighborhoods clamp history immediately.
-            float old = clamp(history.x, low, high);
+            // Relax noisy bounds only for small innovations. Larger changes
+            // retain the original clamp, and a uniform newly lit/shadowed
+            // neighborhood still discards stale history immediately.
+            float margin = min((high - low) * 0.5,
+                max(0, 0.05 - abs(history.x - current)));
+            float old = clamp(history.x, max(0, low - margin), min(1, high + margin));
             age = abs(history.x - current) > 0.2 ? 1 : min(history.y + 1, _VSMHistoryParameters.z);
             current = lerp(old, current, rcp(age));
         }

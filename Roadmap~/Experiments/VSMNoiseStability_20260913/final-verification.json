@@ -1,0 +1,19 @@
+{
+  "status": "pass",
+  "checks": {
+    "archive_restored_analysis_equal": true,
+    "shader_47_entries_pass": true,
+    "csharp_three_assemblies_pass": true,
+    "state_effective_values_and_resources_pass": true,
+    "source_hashes_match": true,
+    "readme_links_exist": true,
+    "motion_support_and_area_bounds": true,
+    "gpu_eight_history_cases_pass": true
+  },
+  "motion_max_absolute_error_area_increment": 0.001129150390625,
+  "raw_archive_sha256": "5000450cb3284940d2814b8f31a0b88f58318b84d5239535567b545c3e97230b",
+  "resolved_volume_override_flags_differ": [
+    "virtualShadowMapSMRTAdaptiveRays",
+    "virtualShadowMapSMRTTemporalDenoise"
+  ]
+}

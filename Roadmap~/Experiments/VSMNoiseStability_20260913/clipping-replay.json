@@ -1,0 +1,149 @@
+{
+  "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-noise-stability\\replay\\20260913_070813_986",
+  "cases": {
+    "camera_slide": {
+      "frames": 128,
+      "valid_pixels": 43200,
+      "penumbra_pixels": 13674,
+      "variants": {
+        "baseline4": {
+          "penumbra_mean_temporal_std": 0.10313601496882208,
+          "penumbra_rms_temporal_std": 0.1500694837483339,
+          "penumbra_mean_adjacent_delta": 0.010562358424067497,
+          "penumbra_mean_drift_abs": 0.0,
+          "all_valid_mean_drift_abs": 0.0,
+          "penumbra_mean_history_age": 3.8723113536834717,
+          "penumbra_age_one_fraction": 0.02386714750621618,
+          "max_abs_vs_baseline": 0.0
+        },
+        "clip4": {
+          "penumbra_mean_temporal_std": 0.10229593888464529,
+          "penumbra_rms_temporal_std": 0.14964016253557466,
+          "penumbra_mean_adjacent_delta": 0.00894293375313282,
+          "penumbra_mean_drift_abs": 0.0009109863894991577,
+          "all_valid_mean_drift_abs": 0.00031579830101691186,
+          "penumbra_mean_history_age": 3.872997999191284,
+          "penumbra_age_one_fraction": 0.023741452757057187,
+          "max_abs_vs_baseline": 0.149932861328125
+        },
+        "clip8": {
+          "penumbra_mean_temporal_std": 0.10199041636414723,
+          "penumbra_rms_temporal_std": 0.14946489409545552,
+          "penumbra_mean_adjacent_delta": 0.0072831083089113235,
+          "penumbra_mean_drift_abs": 0.0011856809724122286,
+          "all_valid_mean_drift_abs": 0.00040615638135932386,
+          "penumbra_mean_history_age": 7.478950500488281,
+          "penumbra_age_one_fraction": 0.023720313185607723,
+          "max_abs_vs_baseline": 0.17474365234375
+        },
+        "production": {
+          "penumbra_mean_temporal_std": 0.10313599623426353,
+          "penumbra_rms_temporal_std": 0.15006945093964918,
+          "penumbra_mean_adjacent_delta": 0.010562351904809475,
+          "penumbra_mean_drift_abs": 1.241436553556241e-08,
+          "all_valid_mean_drift_abs": 4.861091085217595e-08,
+          "penumbra_mean_history_age": 3.8723113536834717,
+          "penumbra_age_one_fraction": 0.02386714750621618,
+          "max_abs_vs_baseline": 0.00146484375
+        }
+      },
+      "baseline_production_different_words": 547
+    },
+    "static": {
+      "frames": 128,
+      "valid_pixels": 43200,
+      "penumbra_pixels": 12393,
+      "variants": {
+        "baseline4": {
+          "penumbra_mean_temporal_std": 0.012585346578562135,
+          "penumbra_rms_temporal_std": 0.017285860497888415,
+          "penumbra_mean_adjacent_delta": 0.00850190781056881,
+          "penumbra_mean_drift_abs": 0.0,
+          "all_valid_mean_drift_abs": 0.0,
+          "penumbra_mean_history_age": 3.9915685653686523,
+          "penumbra_age_one_fraction": 0.0017594357701928509,
+          "max_abs_vs_baseline": 0.0
+        },
+        "clip4": {
+          "penumbra_mean_temporal_std": 0.009793652508226787,
+          "penumbra_rms_temporal_std": 0.014408756981975196,
+          "penumbra_mean_adjacent_delta": 0.0065552364103496075,
+          "penumbra_mean_drift_abs": 0.0013729083584621549,
+          "all_valid_mean_drift_abs": 0.0004281099245417863,
+          "penumbra_mean_history_age": 3.9923746585845947,
+          "penumbra_age_one_fraction": 0.0016163358347454208,
+          "max_abs_vs_baseline": 0.14990234375
+        },
+        "clip8": {
+          "penumbra_mean_temporal_std": 0.007577111792664516,
+          "penumbra_rms_temporal_std": 0.013068518180045093,
+          "penumbra_mean_adjacent_delta": 0.004097416531294584,
+          "penumbra_mean_drift_abs": 0.0017041191458702087,
+          "all_valid_mean_drift_abs": 0.0005387660930864513,
+          "penumbra_mean_history_age": 7.97284460067749,
+          "penumbra_age_one_fraction": 0.0015917503832808843,
+          "max_abs_vs_baseline": 0.17431640625
+        },
+        "production": {
+          "penumbra_mean_temporal_std": 0.012585346578562135,
+          "penumbra_rms_temporal_std": 0.017285860497888415,
+          "penumbra_mean_adjacent_delta": 0.00850190781056881,
+          "penumbra_mean_drift_abs": 0.0,
+          "all_valid_mean_drift_abs": 0.0,
+          "penumbra_mean_history_age": 3.9915685653686523,
+          "penumbra_age_one_fraction": 0.0017594357701928509,
+          "max_abs_vs_baseline": 0.0
+        }
+      },
+      "baseline_production_different_words": 0
+    },
+    "sun_step": {
+      "frames": 128,
+      "valid_pixels": 43200,
+      "penumbra_pixels": 12578,
+      "variants": {
+        "baseline4": {
+          "penumbra_mean_temporal_std": 0.033523235048223105,
+          "penumbra_rms_temporal_std": 0.039963552944651405,
+          "penumbra_mean_adjacent_delta": 0.009457197040319443,
+          "penumbra_mean_drift_abs": 0.0,
+          "all_valid_mean_drift_abs": 0.0,
+          "penumbra_mean_history_age": 3.8976547718048096,
+          "penumbra_age_one_fraction": 0.01745669522181587,
+          "max_abs_vs_baseline": 0.0
+        },
+        "clip4": {
+          "penumbra_mean_temporal_std": 0.03210838296916254,
+          "penumbra_rms_temporal_std": 0.038818788773742646,
+          "penumbra_mean_adjacent_delta": 0.007562220096588135,
+          "penumbra_mean_drift_abs": 0.0012188955442979932,
+          "all_valid_mean_drift_abs": 0.0003865280013997108,
+          "penumbra_mean_history_age": 3.898531913757324,
+          "penumbra_age_one_fraction": 0.017294581809508665,
+          "max_abs_vs_baseline": 0.14990234375
+        },
+        "clip8": {
+          "penumbra_mean_temporal_std": 0.03147646221839152,
+          "penumbra_rms_temporal_std": 0.03848678948457522,
+          "penumbra_mean_adjacent_delta": 0.005328716244548559,
+          "penumbra_mean_drift_abs": 0.0015090093947947025,
+          "all_valid_mean_drift_abs": 0.00047996791545301676,
+          "penumbra_mean_history_age": 7.536045074462891,
+          "penumbra_age_one_fraction": 0.017274705835585942,
+          "max_abs_vs_baseline": 0.1748046875
+        },
+        "production": {
+          "penumbra_mean_temporal_std": 0.03352323925063969,
+          "penumbra_rms_temporal_std": 0.03996355294743058,
+          "penumbra_mean_adjacent_delta": 0.009457197040319443,
+          "penumbra_mean_drift_abs": 2.426266298982682e-09,
+          "all_valid_mean_drift_abs": 1.4998295227997005e-06,
+          "penumbra_mean_history_age": 3.8976547718048096,
+          "penumbra_age_one_fraction": 0.01745669522181587,
+          "max_abs_vs_baseline": 0.00146484375
+        }
+      },
+      "baseline_production_different_words": 16817
+    }
+  }
+}

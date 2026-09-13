@@ -1,0 +1,1 @@
+frame=8448 phase=0 width=1920 height=1080 fixedRays=4

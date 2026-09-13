@@ -1,0 +1,59 @@
+// Unity CLI eval_file body, copied to Temp .cs before execution. No imported code or asset edits.
+var root = "E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-nsight-20260913";
+int resolution = int.Parse(System.IO.File.ReadAllText(root + "/resolution.txt"));
+var run = root + "/" + (System.IO.File.Exists(root + "/run-label.txt")
+    ? System.IO.File.ReadAllText(root + "/run-label.txt").Trim() : "r" + resolution);
+System.IO.Directory.CreateDirectory(run);
+if (!UnityEditor.EditorApplication.isPlaying) throw new System.Exception("Play Mode required");
+var camera = UnityEngine.Camera.main;
+var additional = camera.GetComponent<VividRP.Runtime.VividAdditionalCameraData>();
+if (camera.pixelWidth != 1920 || camera.pixelHeight != 1080) throw new System.Exception("Expected 1920x1080");
+System.IO.File.WriteAllText(run + "/camera.json", UnityEditor.EditorJsonUtility.ToJson(camera));
+System.IO.File.WriteAllText(run + "/camera-transform.json", UnityEditor.EditorJsonUtility.ToJson(camera.transform));
+System.IO.File.WriteAllText(run + "/camera-additional.json", UnityEditor.EditorJsonUtility.ToJson(additional));
+System.IO.File.WriteAllText(run + "/light.json", UnityEditor.EditorJsonUtility.ToJson(UnityEngine.RenderSettings.sun.transform));
+var before = UnityEngine.Rendering.VolumeManager.instance.stack.GetComponent<VividRP.Runtime.CascadedShadowSettingsVolume>();
+System.IO.File.WriteAllText(run + "/settings-before.json", UnityEngine.JsonUtility.ToJson(before));
+var go = new UnityEngine.GameObject("Temporary Nsight VSM comparison") { hideFlags = UnityEngine.HideFlags.HideAndDontSave };
+int layer = 0; while (layer < 31 && (additional.volumeLayerMask.value & (1 << layer)) == 0) layer++; go.layer = layer;
+var volume = go.AddComponent<UnityEngine.Rendering.Volume>(); volume.isGlobal = true; volume.priority = float.MaxValue;
+var profile = UnityEngine.ScriptableObject.CreateInstance<UnityEngine.Rendering.VolumeProfile>(); profile.hideFlags = UnityEngine.HideFlags.HideAndDontSave;
+var settings = profile.Add<VividRP.Runtime.CascadedShadowSettingsVolume>(); settings.hideFlags = UnityEngine.HideFlags.HideAndDontSave;
+volume.sharedProfile = profile;
+settings.virtualShadowMapResolution.Override(resolution);
+settings.virtualShadowMapPhysicalPageBudget.Override(1024);
+settings.virtualShadowMapSMRTRayCount.Override(4);
+settings.virtualShadowMapSMRTAdaptiveRays.Override(false);
+UnityEngine.Application.runInBackground = true;
+additional.ResetPostProcessingHistory();
+var runtime = typeof(VividRP.Runtime.CascadedShadowSettingsVolume).Assembly.GetType("VividRP.Runtime.RenderPass.Core.VirtualShadowMapPrototypeRuntime");
+var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+int frames = 0, last = -1;
+System.Action<UnityEngine.Rendering.ScriptableRenderContext, UnityEngine.Camera> frame = null;
+UnityEditor.EditorApplication.CallbackFunction tick = null;
+frame = (context, observed) => {
+    if (observed != camera || last == UnityEngine.Time.renderedFrameCount) return;
+    last = UnityEngine.Time.renderedFrameCount; frames++;
+};
+bool ready = false;
+tick = () => {
+    if (!ready && frames >= 256) {
+        uint[] counters = new uint[4];
+        ((UnityEngine.GraphicsBuffer)runtime.GetProperty("AllocatorCounters", flags).GetValue(null)).GetData(counters);
+        var effective = UnityEngine.Rendering.VolumeManager.instance.stack.GetComponent<VividRP.Runtime.CascadedShadowSettingsVolume>();
+        System.IO.File.WriteAllText(run + "/settings-effective.json", UnityEngine.JsonUtility.ToJson(effective));
+        System.IO.File.WriteAllText(run + "/ready.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
+            frames, renderedFrame = last, resolution = runtime.GetProperty("VirtualResolution", flags).GetValue(null),
+            capacity = runtime.GetProperty("PhysicalPageCapacity", flags).GetValue(null), counters,
+            active = runtime.GetProperty("IsFrameActive", flags).GetValue(null),
+            angle = UnityEngine.RenderSettings.sun.GetComponent<VividRP.Runtime.VividAdditionalLightData>().angularDiameter,
+            utc = System.DateTime.UtcNow.ToString("O"), aa = additional.antialiasing.ToString()
+        }));
+        ready = true;
+    }
+    UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+    UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+};
+UnityEngine.Rendering.RenderPipelineManager.endCameraRendering += frame;
+UnityEditor.EditorApplication.update += tick;
+return new { resolution, capacity = 1024, rays = 4, adaptive = false };

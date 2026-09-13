@@ -1,0 +1,125 @@
+{
+  "frames": 192,
+  "pixels": 398131200,
+  "different": 0,
+  "max_error_bits": 0,
+  "min_shadowed_pixels": 1786008,
+  "stages": {
+    "0": {
+      "resolution": 2048,
+      "adaptive": false,
+      "scenario": "static",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "1": {
+      "resolution": 2048,
+      "adaptive": false,
+      "scenario": "camera_slide",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "2": {
+      "resolution": 2048,
+      "adaptive": false,
+      "scenario": "sun_rotate",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "3": {
+      "resolution": 2048,
+      "adaptive": true,
+      "scenario": "static",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "4": {
+      "resolution": 2048,
+      "adaptive": true,
+      "scenario": "camera_slide",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "5": {
+      "resolution": 2048,
+      "adaptive": true,
+      "scenario": "sun_rotate",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "6": {
+      "resolution": 4096,
+      "adaptive": false,
+      "scenario": "static",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "7": {
+      "resolution": 4096,
+      "adaptive": false,
+      "scenario": "camera_slide",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "8": {
+      "resolution": 4096,
+      "adaptive": false,
+      "scenario": "sun_rotate",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "9": {
+      "resolution": 4096,
+      "adaptive": true,
+      "scenario": "static",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "10": {
+      "resolution": 4096,
+      "adaptive": true,
+      "scenario": "camera_slide",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    },
+    "11": {
+      "resolution": 4096,
+      "adaptive": true,
+      "scenario": "sun_rotate",
+      "frames": 16,
+      "pixels": 33177600,
+      "different": 0,
+      "max_error_bits": 0
+    }
+  },
+  "gpu_fixture": {
+    "checkedCount": 131072,
+    "mismatches": 0,
+    "hits": 22581,
+    "misses": 108491,
+    "depthLayers": 16,
+    "prefixPairs": 289
+  }
+}

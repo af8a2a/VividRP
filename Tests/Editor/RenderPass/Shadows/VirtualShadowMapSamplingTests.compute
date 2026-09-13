@@ -17,6 +17,9 @@
 #pragma kernel InspectVSMStochasticSample
 #pragma kernel InspectVSMStochasticTexelOffset
 #pragma kernel UploadTestPools
+#pragma kernel InspectSMRTDepthIntervals
+#pragma kernel ResetSMRTComparison
+#pragma kernel CompareSMRTOutputs
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -34,6 +37,62 @@ StructuredBuffer<uint> _TestStaticData;
 StructuredBuffer<uint> _TestDynamicData;
 RWTexture2DArray<uint> _TestStaticPool;
 RWTexture2DArray<uint> _TestDynamicPool;
+
+// Same-input oracle for the ordered lookup, including independent pool ranks.
+[numthreads(64, 1, 1)]
+void InspectSMRTDepthIntervals(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x], ray = _SamplingNormals[id.x];
+    int2 texel = int2(input.xy);
+    bool referenceHit = false;
+    for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
+    {
+        uint2 depth = LoadVSMDepthLayer(texel, layer, 0u);
+        float2 surface = float2(depth.x == 0u ? -1 : (asfloat(depth.x) - ray.x) / ray.y,
+            depth.y == 0u ? -1 : (asfloat(depth.y) - ray.x) / ray.y);
+        if (all(surface <= input.z)) break;
+        if (any((surface > input.z) & (surface - ray.z <= input.w))) { referenceHit = true; break; }
+    }
+    uint2 front = LoadVSMDepthLayer(texel, 0u, 0u);
+    bool ordered = VSMSMRTHasDepthInInterval(_VSMPrototypeStaticPhysicalPage,
+        texel, front.x, ray.x, ray.y, input.z, input.w, ray.z);
+    if (!ordered) ordered = VSMSMRTHasDepthInInterval(_VSMPrototypeDynamicPhysicalPage,
+        texel, front.y, ray.x, ray.y, input.z, input.w, ray.z);
+    _SamplingResults[id.x] = float2(referenceHit, ordered);
+}
+
+Texture2D<float> _SMRTBefore, _SMRTAfter;
+RWStructuredBuffer<uint> _SMRTComparison;
+int2 _SMRTComparisonSize;
+groupshared uint g_SMRTDifferent, g_SMRTMax, g_SMRTShadowed;
+[numthreads(1, 1, 1)]
+void ResetSMRTComparison(uint3 id : SV_DispatchThreadID)
+{
+    for (uint i = 0; i < 4; i++) _SMRTComparison[i] = 0;
+}
+[numthreads(16, 16, 1)]
+void CompareSMRTOutputs(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    if (lane == 0u) { g_SMRTDifferent = 0; g_SMRTMax = 0; g_SMRTShadowed = 0; }
+    GroupMemoryBarrierWithGroupSync();
+    if (all(id.xy < (uint2)_SMRTComparisonSize))
+    {
+        float a = _SMRTBefore.Load(int3(id.xy, 0)), b = _SMRTAfter.Load(int3(id.xy, 0));
+        if (asuint(a) != asuint(b) || !isfinite(a) || !isfinite(b))
+        { InterlockedAdd(g_SMRTDifferent, 1); InterlockedMax(g_SMRTMax, asuint(abs(a - b))); }
+        if (a < 0.999) InterlockedAdd(g_SMRTShadowed, 1);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0u)
+    {
+        InterlockedAdd(_SMRTComparison[0], g_SMRTDifferent);
+        InterlockedMax(_SMRTComparison[1], g_SMRTMax);
+        InterlockedAdd(_SMRTComparison[2], min(16u, (uint)_SMRTComparisonSize.x - group.x * 16u)
+            * min(16u, (uint)_SMRTComparisonSize.y - group.y * 16u));
+        InterlockedAdd(_SMRTComparison[3], g_SMRTShadowed);
+    }
+}
 
 // input: pixel.xy, frame, mode (disk phase / receiver phase / disk / receiver).
 // normal.xy carries ray index and ray count.

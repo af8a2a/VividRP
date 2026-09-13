@@ -1,0 +1,9 @@
+case=0 age=1 maxError=0
+case=1 age=1 maxError=0
+case=2 age=4 maxError=0
+case=3 age=1 maxError=0
+case=4 age=1 maxError=0
+case=5 age=1 maxError=0
+case=6 age=1 maxError=0
+case=7 age=0 maxError=0
+passed=8

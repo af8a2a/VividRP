@@ -1,0 +1,4 @@
+{
+  "Shaders\\Core\\Private\\CSMShadowResolve.compute": "94a156e0f1b15da49911493424cf86bb5a785c3d92d4932425962d123ee2d320",
+  "Runtime\\RenderPass\\Core\\CSMShadowResolvePass.cs": "9245a10bed7f74056130c110d50490a35e0aa31db14f52ef81ecb9103bf9fb93"
+}

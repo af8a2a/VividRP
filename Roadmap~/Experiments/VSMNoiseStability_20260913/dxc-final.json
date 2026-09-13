@@ -1,0 +1,289 @@
+{
+  "status": "pass",
+  "passed": 47,
+  "total": 47,
+  "results": [
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowResolve",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMReceiverDebug",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMMarkReceiverPages",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeClearReceiverRequests",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeResetReceiverFeedback",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeAllocatePages",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMResetPhysicalOwners",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMRemapPages",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeMarkAllAllocatedPagesDirty",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeInvalidateStaticPages",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeClearPhysicalPages",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeFinalizeDirtyPages",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeReducePageOccupancy",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypePrepareMeshletPageRequests",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMPrototypeCullMeshletsToPages",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowClearTiles",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowClassifyTiles",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowResolveTiles",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowCopyFilterSource",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowBilateralFilterH",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowBilateralFilterV",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMShadowBilateralFilterH",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMShadowBilateralFilterV",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "VSMShadowTemporalV",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowBendCompositeLow",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowBendCompositeMedium",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowBendCompositeHigh",
+      "exit_code": 0
+    },
+    {
+      "source": "Shaders\\Core\\Private\\CSMShadowResolve.compute",
+      "sha256": "d0f2b97347c0dae397eb5284a7dbcd7f32c637e4393275c9de1c320ec038d0f6",
+      "entry": "CSMShadowBendCompositeVeryHigh",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectVSMHistory",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectSMRTSamples",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "TraceSMRTRays",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "TraceSMRTClipmaps",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "FilterSMRTFootprints",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "SampleTaps",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "ResolveReceivers",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "MarkFootprints",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "MarkCoalescedFootprints",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "FilterFootprints",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectBias",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectTransition",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectScreenNormal",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "ResolveScreenReceivers",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectReceiverDiagnostics",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectReceiverFootprint",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectVSMStochasticSample",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "InspectVSMStochasticTexelOffset",
+      "exit_code": 0
+    },
+    {
+      "source": "Tests\\Editor\\RenderPass\\Shadows\\VirtualShadowMapSamplingTests.compute",
+      "sha256": "fb78150f5600ebc877a57608f2be727e2704a5c40ab32d9d0528406945ad8d8f",
+      "entry": "UploadTestPools",
+      "exit_code": 0
+    }
+  ]
+}

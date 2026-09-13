@@ -1,0 +1,1 @@
+6000.7.0a6 NVIDIA GeForce RTX 5070 Ti Direct3D12 background=False

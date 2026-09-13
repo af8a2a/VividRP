@@ -1,0 +1,81 @@
+// Same-frame production Resolve replay; both paths see identical pages and history.
+var root="E:/VividRP_Reborn/Packages/VividRP/Roadmap~/Experiments/VSMDepthSearch_20260913/same-frame";
+System.IO.Directory.CreateDirectory(root);
+if(!UnityEditor.EditorApplication.isPlaying) throw new System.Exception("Play required");
+var camera=UnityEngine.Camera.main; var additional=camera.GetComponent<VividRP.Runtime.VividAdditionalCameraData>();
+var position=camera.transform.position; var rotation=camera.transform.rotation; var sun=UnityEngine.RenderSettings.sun; var lightRotation=sun.transform.rotation;
+bool background=UnityEngine.Application.runInBackground; UnityEngine.Application.runInBackground=true;
+var resolve=UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>("Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
+var compare=UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>("Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute");
+int kernel=resolve.FindKernel("CSMShadowResolve"), reset=compare.FindKernel("ResetSMRTComparison"), check=compare.FindKernel("CompareSMRTOutputs");
+compare.GetKernelThreadGroupSizes(check,out uint cx,out _,out _); if(cx!=16) throw new System.Exception("Invalid comparison kernel");
+var desc=new UnityEngine.RenderTextureDescriptor(camera.pixelWidth,camera.pixelHeight,UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat,0){enableRandomWrite=true};
+var before=new UnityEngine.RenderTexture(desc); before.Create(); var after=new UnityEngine.RenderTexture(desc); after.Create();
+var summary=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,4,4);
+var go=new UnityEngine.GameObject("Temporary VSM ordered-search comparison"){hideFlags=UnityEngine.HideFlags.HideAndDontSave};
+int layer=0;while(layer<31 && (additional.volumeLayerMask.value&(1<<layer))==0)layer++;go.layer=layer;
+var volume=go.AddComponent<UnityEngine.Rendering.Volume>();volume.isGlobal=true;volume.priority=float.MaxValue;
+var profile=UnityEngine.ScriptableObject.CreateInstance<UnityEngine.Rendering.VolumeProfile>();profile.hideFlags=UnityEngine.HideFlags.HideAndDontSave;
+var settings=profile.Add<VividRP.Runtime.CascadedShadowSettingsVolume>();settings.hideFlags=UnityEngine.HideFlags.HideAndDontSave;volume.sharedProfile=profile;
+settings.virtualShadowMapPhysicalPageBudget.Override(1024);settings.virtualShadowMapSMRTRayCount.Override(4);
+var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public;
+var instance=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public;
+var commandField=typeof(VividRP.Runtime.ComputePassContext).GetProperty("cmd").PropertyType.BaseType.GetField("m_WrappedCommandBuffer",instance);
+var frameField=typeof(VividRP.Runtime.VividCameraData).GetField("frameIndex",instance);
+var captureEvent=typeof(VividRP.Runtime.RenderPass.Core.CSMShadowResolvePass).GetEvent("EditorReceiverCapture",flags);
+int stage=0,warm=0,sample=0; bool disposed=false,pending=false,completed=false; string error=null;
+double started=UnityEditor.EditorApplication.timeSinceStartup;
+uint[] counters=new uint[4]; var records=new System.Collections.Generic.List<object>();
+System.Action<VividRP.Runtime.ComputePassContext,UnityEngine.Texture,UnityEngine.Texture,UnityEngine.Texture> capture=null;
+UnityEditor.EditorApplication.CallbackFunction tick=null;
+System.Action start=()=>{
+    warm=sample=0;started=UnityEditor.EditorApplication.timeSinceStartup;
+    camera.transform.SetPositionAndRotation(position,rotation);sun.transform.rotation=lightRotation;
+    settings.virtualShadowMapResolution.Override(stage<6?2048:4096);settings.virtualShadowMapSMRTAdaptiveRays.Override((stage/3)%2!=0);
+    additional.ResetPostProcessingHistory();
+    System.IO.File.WriteAllText(root+"/progress.txt","stage="+stage);
+};
+System.Action<string> finish=status=>{
+    if(disposed)return;disposed=true;UnityEditor.EditorApplication.update-=tick;captureEvent.GetRemoveMethod(true).Invoke(null,new object[]{capture});
+    resolve.SetInt("_VSMDepthSearchLinear",0);camera.transform.SetPositionAndRotation(position,rotation);sun.transform.rotation=lightRotation;
+    UnityEngine.Object.DestroyImmediate(go);UnityEngine.Object.DestroyImmediate(settings);UnityEngine.Object.DestroyImmediate(profile);
+    UnityEngine.Rendering.VolumeManager.instance.Update(camera.transform,additional.volumeLayerMask);UnityEngine.Application.runInBackground=background;
+    summary.Dispose();before.Release();after.Release();UnityEngine.Object.DestroyImmediate(before);UnityEngine.Object.DestroyImmediate(after);
+    System.IO.File.WriteAllText(root+"/results.json",Newtonsoft.Json.JsonConvert.SerializeObject(records));System.IO.File.WriteAllText(root+"/status.txt",status);
+};
+capture=(context,depth,normal,shadow)=>{
+    var c=context.Get<VividRP.Runtime.VividCameraData>();if(disposed||pending||completed||c.camera!=camera)return;
+    if(++warm<=64)return;
+    int capturedFrame=(int)frameField.GetValue(c);
+    var cmd=(UnityEngine.Rendering.CommandBuffer)commandField.GetValue(context.cmd);
+    cmd.SetComputeIntParam(resolve,"_VSMDepthSearchLinear",1);cmd.SetComputeTextureParam(resolve,kernel,"_DirectionalShadowTexture",before);
+    cmd.DispatchCompute(resolve,kernel,(before.width+7)/8,(before.height+7)/8,1);
+    cmd.SetComputeIntParam(resolve,"_VSMDepthSearchLinear",0);cmd.SetComputeTextureParam(resolve,kernel,"_DirectionalShadowTexture",after);
+    cmd.DispatchCompute(resolve,kernel,(after.width+7)/8,(after.height+7)/8,1);
+    cmd.SetComputeTextureParam(resolve,kernel,"_DirectionalShadowTexture",shadow);
+    cmd.SetComputeBufferParam(compare,reset,"_SMRTComparison",summary);cmd.DispatchCompute(compare,reset,1,1,1);
+    cmd.SetComputeBufferParam(compare,check,"_SMRTComparison",summary);cmd.SetComputeTextureParam(compare,check,"_SMRTBefore",before);cmd.SetComputeTextureParam(compare,check,"_SMRTAfter",after);
+    cmd.SetComputeIntParams(compare,"_SMRTComparisonSize",before.width,before.height);cmd.DispatchCompute(compare,check,(before.width+15)/16,(before.height+15)/16,1);
+    pending=true;
+    cmd.RequestAsyncReadback(summary,r=>{
+        if(r.hasError)error="GPU readback failed";
+        else {var data=r.GetData<uint>();for(int i=0;i<4;i++)counters[i]=data[i];
+            records.Add(new {stage,sample,frame=capturedFrame,resolution=stage<6?2048:4096,adaptive=(stage/3)%2!=0,scenario=new[]{"static","camera_slide","sun_rotate"}[stage%3],different=data[0],maxErrorBits=data[1],pixels=data[2],shadowed=data[3]});}
+        pending=false;completed=true;
+    });
+};
+tick=()=>{
+    if(disposed)return;
+    if(error!=null){finish("failed: "+error);return;}
+    if(completed){
+        completed=false;
+        if(counters[0]!=0 || counters[2]!=(uint)(before.width*before.height) || counters[3]==0){finish("failed: mismatched or empty comparison");return;}
+        if(++sample==16){if(++stage==12){finish("complete");return;}start();}
+        else if(stage%3==1)camera.transform.position=position+new UnityEngine.Vector3((sample-8)*.025f,0,0);
+        else if(stage%3==2)sun.transform.rotation=lightRotation*UnityEngine.Quaternion.Euler(0,(sample-8)*.15f,0);
+    }
+    if(UnityEditor.EditorApplication.timeSinceStartup-started>180 && !pending){finish("failed: timeout");return;}
+    UnityEditor.EditorApplication.QueuePlayerLoopUpdate();UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+};
+start();captureEvent.GetAddMethod(true).Invoke(null,new object[]{capture});UnityEditor.EditorApplication.update+=tick;
+return root;

@@ -1,0 +1,23 @@
+{
+  "r2048_warm_before_capture": true,
+  "r2048_camera_matches_baseline": true,
+  "r4096_warm_before_capture": true,
+  "r4096_camera_matches_baseline": true,
+  "r2048_recheck_warm_before_capture": true,
+  "r2048_recheck_camera_matches_baseline": true,
+  "r4096_recheck_warm_before_capture": true,
+  "r4096_recheck_camera_matches_baseline": true,
+  "r4096_only_resolution_differs": true,
+  "r4096_camera.json_matches": true,
+  "r4096_camera-additional.json_matches": true,
+  "r4096_light.json_matches": true,
+  "r2048_recheck_only_resolution_differs": true,
+  "r2048_recheck_camera.json_matches": true,
+  "r2048_recheck_camera-additional.json_matches": true,
+  "r2048_recheck_light.json_matches": true,
+  "r4096_recheck_only_resolution_differs": true,
+  "r4096_recheck_camera.json_matches": true,
+  "r4096_recheck_camera-additional.json_matches": true,
+  "r4096_recheck_light.json_matches": true,
+  "all_passed": true
+}

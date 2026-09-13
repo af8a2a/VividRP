@@ -1,0 +1,103 @@
+{
+  "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-noise-stability\\sampling\\20260913_070309_575",
+  "frames_per_variant": 256,
+  "phase_and_camera_match": true,
+  "regions": {
+    "penumbra": {
+      "pixels": 12398,
+      "variants": {
+        "golden": {
+          "mean_temporal_std": 0.012672351652995363,
+          "rms_temporal_std": 0.017345264585410785,
+          "mean_adjacent_delta": 0.008518449030816555,
+          "mean_drift_abs": 0.0,
+          "p95_drift_abs": 0.0,
+          "mean_visibility": 0.5390220284461975,
+          "mean_history_age": 3.9913837909698486
+        },
+        "receiver8": {
+          "mean_temporal_std": 0.012672879359836653,
+          "rms_temporal_std": 0.017356564832760324,
+          "mean_adjacent_delta": 0.008518103510141373,
+          "mean_drift_abs": 0.0006556441076099873,
+          "p95_drift_abs": 0.001935791689902544,
+          "mean_visibility": 0.5390217304229736,
+          "mean_history_age": 3.9914586544036865
+        },
+        "all8": {
+          "mean_temporal_std": 0.013094085191743505,
+          "rms_temporal_std": 0.0176595891404519,
+          "mean_adjacent_delta": 0.009017032571136951,
+          "mean_drift_abs": 0.0015881884610280395,
+          "p95_drift_abs": 0.004664037376642227,
+          "mean_visibility": 0.5390774011611938,
+          "mean_history_age": 3.9912848472595215
+        }
+      }
+    },
+    "floor_penumbra": {
+      "pixels": 3274,
+      "variants": {
+        "golden": {
+          "mean_temporal_std": 0.011331709948321899,
+          "rms_temporal_std": 0.01380838152703326,
+          "mean_adjacent_delta": 0.007341635879129171,
+          "mean_drift_abs": 0.0,
+          "p95_drift_abs": 0.0,
+          "mean_visibility": 0.5934106111526489,
+          "mean_history_age": 3.9978463649749756
+        },
+        "receiver8": {
+          "mean_temporal_std": 0.011325364310571311,
+          "rms_temporal_std": 0.013805058926755471,
+          "mean_adjacent_delta": 0.007333128713071346,
+          "mean_drift_abs": 0.0005511291674338281,
+          "p95_drift_abs": 0.001562213059514761,
+          "mean_visibility": 0.5934010744094849,
+          "mean_history_age": 3.9978654384613037
+        },
+        "all8": {
+          "mean_temporal_std": 0.011760001217672521,
+          "rms_temporal_std": 0.014165865722021553,
+          "mean_adjacent_delta": 0.00785503163933754,
+          "mean_drift_abs": 0.0015287501737475395,
+          "p95_drift_abs": 0.004088496323674917,
+          "mean_visibility": 0.5934836864471436,
+          "mean_history_age": 3.9979240894317627
+        }
+      }
+    },
+    "fully_shadowed": {
+      "pixels": 22355,
+      "variants": {
+        "golden": {
+          "mean_temporal_std": 8.366041102654926e-06,
+          "rms_temporal_std": 5.4530748930353316e-05,
+          "mean_adjacent_delta": 1.9768026504607406e-06,
+          "mean_drift_abs": 0.0,
+          "p95_drift_abs": 0.0,
+          "mean_visibility": 1.1096060461568413e-06,
+          "mean_history_age": 4.0
+        },
+        "receiver8": {
+          "mean_temporal_std": 1.246772568152231e-05,
+          "rms_temporal_std": 0.000309988750438875,
+          "mean_adjacent_delta": 2.6118002551811514e-06,
+          "mean_drift_abs": 8.6434539525726e-07,
+          "p95_drift_abs": 1.676450210652547e-06,
+          "mean_visibility": 1.4389855778063065e-06,
+          "mean_history_age": 3.999994993209839
+        },
+        "all8": {
+          "mean_temporal_std": 9.364766304788291e-06,
+          "rms_temporal_std": 6.7017312097708e-05,
+          "mean_adjacent_delta": 2.198552010668209e-06,
+          "mean_drift_abs": 7.490426696676877e-07,
+          "p95_drift_abs": 2.168075297959149e-06,
+          "mean_visibility": 1.2282284842513036e-06,
+          "mean_history_age": 4.0
+        }
+      }
+    }
+  }
+}

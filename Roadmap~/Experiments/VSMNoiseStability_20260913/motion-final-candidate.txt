@@ -1,0 +1,13 @@
+axis=0 speed=0.25 thin=False frames=48 maxPixelDifference=0.1352539 maxEquivalentLagPixels=0.596603393554688 atSpatialExtrema=0.02183533 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.596603393554688
+axis=0 speed=1 thin=False frames=48 maxPixelDifference=0.1352539 maxEquivalentLagPixels=0.596603393554688 atSpatialExtrema=0.02070618 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.596603393554688
+axis=0 speed=4 thin=False frames=48 maxPixelDifference=0.05029297 maxEquivalentLagPixels=0.0713043212890625 atSpatialExtrema=0 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.0713043212890625
+axis=0 speed=0.25 thin=True frames=48 maxPixelDifference=0.08544922 maxEquivalentLagPixels=0.0234031677246094 atSpatialExtrema=0.02183533 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.596202850341797
+axis=0 speed=1 thin=True frames=48 maxPixelDifference=0.08544922 maxEquivalentLagPixels=0.0784721374511719 atSpatialExtrema=0.02070618 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.621196746826172
+axis=0 speed=4 thin=True frames=48 maxPixelDifference=0.08520508 maxEquivalentLagPixels=0.170742034912109 atSpatialExtrema=0 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.312862396240234
+axis=1 speed=0.25 thin=False frames=48 maxPixelDifference=0.1347656 maxEquivalentLagPixels=0.29736328125 atSpatialExtrema=0 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.29736328125
+axis=1 speed=1 thin=False frames=48 maxPixelDifference=0.1411133 maxEquivalentLagPixels=0.29736328125 atSpatialExtrema=0 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.29736328125
+axis=1 speed=4 thin=False frames=48 maxPixelDifference=0.0703125 maxEquivalentLagPixels=0.0908203125 atSpatialExtrema=0 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.0908203125
+axis=1 speed=0.25 thin=True frames=48 maxPixelDifference=0.1140137 maxEquivalentLagPixels=0.358085632324219 atSpatialExtrema=0 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.458915710449219
+axis=1 speed=1 thin=True frames=48 maxPixelDifference=0.1395264 maxEquivalentLagPixels=0.444755554199219 atSpatialExtrema=0 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.564872741699219
+axis=1 speed=4 thin=True frames=48 maxPixelDifference=0.1425476 maxEquivalentLagPixels=0.319114685058594 atSpatialExtrema=0 outsideFivePixelSupport=0 maxAbsoluteErrorArea=0.319114685058594
+completed=12

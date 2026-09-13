@@ -1,0 +1,76 @@
+{
+  "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-noise-stability\\sampling\\20260913_071413_493",
+  "frames_per_variant": 256,
+  "phase_and_camera_match": true,
+  "regions": {
+    "penumbra": {
+      "pixels": 12398,
+      "variants": {
+        "baseline4": {
+          "mean_temporal_std": 0.012672351652995363,
+          "rms_temporal_std": 0.017345264585410785,
+          "mean_adjacent_delta": 0.008518449030816555,
+          "mean_drift_abs": 0.0,
+          "p95_drift_abs": 0.0,
+          "mean_visibility": 0.5390220284461975,
+          "mean_history_age": 3.9913837909698486
+        },
+        "clip4": {
+          "mean_temporal_std": 0.00986454285543476,
+          "rms_temporal_std": 0.01445696694154951,
+          "mean_adjacent_delta": 0.006565697491168976,
+          "mean_drift_abs": 0.00128668243996799,
+          "p95_drift_abs": 0.003940582275390625,
+          "mean_visibility": 0.5388621091842651,
+          "mean_history_age": 3.9923269748687744
+        }
+      }
+    },
+    "floor_penumbra": {
+      "pixels": 3274,
+      "variants": {
+        "baseline4": {
+          "mean_temporal_std": 0.011331709948321899,
+          "rms_temporal_std": 0.01380838152703326,
+          "mean_adjacent_delta": 0.007341635879129171,
+          "mean_drift_abs": 0.0,
+          "p95_drift_abs": 0.0,
+          "mean_visibility": 0.5934106111526489,
+          "mean_history_age": 3.9978463649749756
+        },
+        "clip4": {
+          "mean_temporal_std": 0.008566865798191787,
+          "rms_temporal_std": 0.010637118781728046,
+          "mean_adjacent_delta": 0.005537988618016243,
+          "mean_drift_abs": 0.0011040677782148123,
+          "p95_drift_abs": 0.0032209863420575857,
+          "mean_visibility": 0.5931446552276611,
+          "mean_history_age": 3.9981961250305176
+        }
+      }
+    },
+    "fully_shadowed": {
+      "pixels": 22355,
+      "variants": {
+        "baseline4": {
+          "mean_temporal_std": 8.366041102654926e-06,
+          "rms_temporal_std": 5.4530748930353316e-05,
+          "mean_adjacent_delta": 1.9768026504607406e-06,
+          "mean_drift_abs": 0.0,
+          "p95_drift_abs": 0.0,
+          "mean_visibility": 1.109608660954109e-06,
+          "mean_history_age": 4.0
+        },
+        "clip4": {
+          "mean_temporal_std": 8.320403504675048e-06,
+          "rms_temporal_std": 5.364637351346338e-05,
+          "mean_adjacent_delta": 1.9759793303819606e-06,
+          "mean_drift_abs": 2.3174184349272764e-08,
+          "p95_drift_abs": 0.0,
+          "mean_visibility": 1.1197134881513193e-06,
+          "mean_history_age": 4.0
+        }
+      }
+    }
+  }
+}

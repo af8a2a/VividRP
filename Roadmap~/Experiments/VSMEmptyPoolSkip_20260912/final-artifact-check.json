@@ -1,0 +1,17 @@
+{
+  "status": "pass",
+  "checks": {
+    "source_hashes_match": true,
+    "dxc_57_pass": true,
+    "csharp_three_pass": true,
+    "same_frame_288_pass": true,
+    "capacity_pass": true,
+    "archive_restore_pass": true,
+    "temporary_sources_and_metas_removed": true,
+    "dynamic_request_restored": true,
+    "readme_local_links_resolve": true,
+    "gpu_ten_cases_pass": true,
+    "current_thread_gc_zero": true
+  },
+  "scene_dirty_caveat": "Initial dirty flags not recorded; no scene saved or dirty flag cleared. See state-restoration.json."
+}

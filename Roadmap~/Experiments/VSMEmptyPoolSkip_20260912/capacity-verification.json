@@ -1,0 +1,22 @@
+{
+  "status": "pass",
+  "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-empty-skip\\cost\\20260912_125033_657",
+  "pools": {
+    "static": {
+      "valid_pages": 256,
+      "flagged_empty_pages": 0,
+      "actual_empty_pages": 0,
+      "false_empty_pages": 0,
+      "all_layers_checked_texels": 4194304,
+      "nonzero_depth_slots": 37370145
+    },
+    "dynamic": {
+      "valid_pages": 256,
+      "flagged_empty_pages": 256,
+      "actual_empty_pages": 256,
+      "false_empty_pages": 0,
+      "all_layers_checked_texels": 4194304,
+      "nonzero_depth_slots": 0
+    }
+  }
+}

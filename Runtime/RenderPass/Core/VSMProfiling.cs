@@ -8,6 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static readonly ProfilingSampler MarkReceivers = new("VSM.MarkReceiverPages");
         internal static readonly ProfilingSampler Allocate = new("VSM.Allocate");
         internal static readonly ProfilingSampler Clear = new("VSM.ClearPhysicalPages");
+        internal static readonly ProfilingSampler Occupancy = new("VSM.PageOccupancy");
         internal static readonly ProfilingSampler Finalize = new("VSM.FinalizePages");
         internal static readonly ProfilingSampler DynamicRaster = new("VSM.DynamicRaster");
         internal static readonly ProfilingSampler Layout = new("VSM.LayoutRemap");

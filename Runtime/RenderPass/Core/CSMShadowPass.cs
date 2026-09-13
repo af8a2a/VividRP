@@ -62,7 +62,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VSMPrototypePhysicalPageOwnersId = Shader.PropertyToID("_VSMPrototypePhysicalPageOwners");
         private static readonly int VSMPrototypeAllocatorCountersId = Shader.PropertyToID("_VSMPrototypeAllocatorCounters");
         private static readonly int VSMPrototypeStaticPhysicalPageRWId = Shader.PropertyToID("_VSMPrototypeStaticPhysicalPageRW");
+        private static readonly int VSMPrototypeStaticPhysicalPageId = Shader.PropertyToID("_VSMPrototypeStaticPhysicalPage");
         private static readonly int VSMPrototypeDynamicPhysicalPageRWId = Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPageRW");
+        private static readonly int VSMPrototypeDynamicPhysicalPageId = Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
         private static readonly int VSMPrototypePageSizeId = Shader.PropertyToID("_VSMPrototypePageSize");
         private static readonly int VSMPrototypeVirtualResolutionId = Shader.PropertyToID("_VSMPrototypeVirtualResolution");
         private static readonly int VSMPrototypePagesPerAxisId = Shader.PropertyToID("_VSMPrototypePagesPerAxis");
@@ -178,6 +180,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_VirtualShadowMapInvalidateStaticPagesKernel = -1;
         private int m_VirtualShadowMapClearPhysicalPagesKernel = -1;
         private int m_VirtualShadowMapFinalizeDirtyPagesKernel = -1;
+        private int m_VSMReducePageOccupancyKernel = -1;
         private int m_VirtualShadowMapPrepareMeshletPageRequestsKernel = -1;
         private int m_VirtualShadowMapCullMeshletsToPagesKernel = -1;
 
@@ -220,6 +223,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VirtualShadowMapClearPhysicalPagesKernel = FindKernelOrInvalid(
                 m_VirtualShadowMapPageManagementCompute,
                 VSMPrototypeClearPhysicalPagesKernelName);
+            m_VSMReducePageOccupancyKernel = FindKernelOrInvalid(
+                m_VirtualShadowMapPageManagementCompute, "VSMPrototypeReducePageOccupancy");
             m_VirtualShadowMapFinalizeDirtyPagesKernel = FindKernelOrInvalid(
                 m_VirtualShadowMapPageManagementCompute,
                 VSMPrototypeFinalizeDirtyPagesKernelName);
@@ -1521,22 +1526,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 nativeCmd.ClearRandomWriteTargets();
             }
 
-            using (new ProfilingScope(nativeCmd, VSMProfiling.Finalize))
-            {
-                nativeCmd.SetComputeBufferParam(
-                    m_VirtualShadowMapPageManagementCompute,
-                    m_VirtualShadowMapFinalizeDirtyPagesKernel,
-                    VSMPrototypePageMetadataId,
-                    pageMetadata);
-                SetVirtualShadowMapPageManagementParameters(nativeCmd);
-                nativeCmd.DispatchCompute(
-                    m_VirtualShadowMapPageManagementCompute,
-                    m_VirtualShadowMapFinalizeDirtyPagesKernel,
-                    CoreUtils.DivRoundUp(pageTableEntryCount, 64),
-                    1,
-                    1);
-            }
-
             bool canDrawDynamicMeshletCasters = false;
             GraphicsBuffer dynamicRequestsBuffer = null;
             GraphicsBuffer dynamicArgsBuffer = null;
@@ -1637,6 +1626,37 @@ namespace VividRP.Runtime.RenderPass.Core
                     nativeCmd.DisableKeyword(s_VirtualShadowMapCasterKeyword);
                 }
                 nativeCmd.SetGlobalInt(VSMUnityRasterEnabledId, 0);
+            }
+
+            using (new ProfilingScope(nativeCmd, VSMProfiling.Occupancy))
+            {
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute,
+                    m_VSMReducePageOccupancyKernel, VSMPrototypePageMetadataId, pageMetadata);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute,
+                    m_VSMReducePageOccupancyKernel, VSMPrototypePhysicalPageOwnersId, physicalPageOwners);
+                nativeCmd.SetComputeTextureParam(m_VirtualShadowMapPageManagementCompute,
+                    m_VSMReducePageOccupancyKernel, VSMPrototypeStaticPhysicalPageId, staticPhysicalPage);
+                nativeCmd.SetComputeTextureParam(m_VirtualShadowMapPageManagementCompute,
+                    m_VSMReducePageOccupancyKernel, VSMPrototypeDynamicPhysicalPageId, dynamicPhysicalPage);
+                SetVirtualShadowMapPageManagementParameters(nativeCmd);
+                nativeCmd.DispatchCompute(m_VirtualShadowMapPageManagementCompute,
+                    m_VSMReducePageOccupancyKernel, physicalPageCapacity, 1, 1);
+            }
+
+            using (new ProfilingScope(nativeCmd, VSMProfiling.Finalize))
+            {
+                nativeCmd.SetComputeBufferParam(
+                    m_VirtualShadowMapPageManagementCompute,
+                    m_VirtualShadowMapFinalizeDirtyPagesKernel,
+                    VSMPrototypePageMetadataId,
+                    pageMetadata);
+                SetVirtualShadowMapPageManagementParameters(nativeCmd);
+                nativeCmd.DispatchCompute(
+                    m_VirtualShadowMapPageManagementCompute,
+                    m_VirtualShadowMapFinalizeDirtyPagesKernel,
+                    CoreUtils.DivRoundUp(pageTableEntryCount, 64),
+                    1,
+                    1);
             }
 
             if (staticCacheHit)
@@ -1811,6 +1831,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_VirtualShadowMapInvalidateStaticPagesKernel >= 0
                 && m_VirtualShadowMapClearPhysicalPagesKernel >= 0
                 && m_VirtualShadowMapFinalizeDirtyPagesKernel >= 0
+                && m_VSMReducePageOccupancyKernel >= 0
                 && (!m_HasMeshletShadowCasters
                     || (m_VirtualShadowMapPrepareMeshletPageRequestsKernel >= 0
                         && m_VirtualShadowMapCullMeshletsToPagesKernel >= 0));
@@ -1878,6 +1899,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VirtualShadowMapInvalidateStaticPagesKernel = -1;
             m_VirtualShadowMapClearPhysicalPagesKernel = -1;
             m_VirtualShadowMapFinalizeDirtyPagesKernel = -1;
+            m_VSMReducePageOccupancyKernel = -1;
             m_VirtualShadowMapPrepareMeshletPageRequestsKernel = -1;
             m_VirtualShadowMapCullMeshletsToPagesKernel = -1;
             m_ShadowMatrices = default;

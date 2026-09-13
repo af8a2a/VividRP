@@ -1,0 +1,6 @@
+{
+  "Shaders/Core/Private/CSMShadowResolve.compute": "097d9d984926ef68651810f9b45b1466b8aea9fcb32515394d87c6cc9e812561",
+  "Shaders/Core/Private/VSMSMRT.hlsl": "4b29ecf1956ae72cb27cb5a4fd3d2a38c3a9370c286c112520e669976c9ced29",
+  "Runtime/RenderPass/Core/CSMShadowPass.cs": "6c4560577089f42a57af30eb8c368f3dd3f544ae5dd8870589f1c294c1f33313",
+  "Runtime/RenderPass/Core/VSMProfiling.cs": "78f2f4fe3efd50d07fcb7ed11dcecb6bc7e733e257c8d4aa84971ca5ee26ed33"
+}

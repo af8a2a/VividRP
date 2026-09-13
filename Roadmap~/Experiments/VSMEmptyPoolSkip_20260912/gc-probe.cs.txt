@@ -1,0 +1,20 @@
+var type=typeof(UnityEngine.Rendering.ProfilingSampler).Assembly; System.Type profiling=null;
+foreach(var assembly in System.AppDomain.CurrentDomain.GetAssemblies()) { profiling=assembly.GetType("VividRP.Runtime.RenderPass.Core.VSMProfiling"); if(profiling!=null)break; }
+var sampler=(UnityEngine.Rendering.ProfilingSampler)profiling.GetField("Occupancy",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static).GetValue(null);
+var runtime=profiling.Assembly.GetType("VividRP.Runtime.RenderPass.Core.VirtualShadowMapPrototypeRuntime");
+var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static;
+var metadata=(UnityEngine.GraphicsBuffer)runtime.GetProperty("PageMetadata",flags).GetValue(null);
+var owners=(UnityEngine.GraphicsBuffer)runtime.GetProperty("PhysicalPageOwners",flags).GetValue(null);
+var stat=(UnityEngine.Rendering.RTHandle)runtime.GetProperty("StaticPhysicalPage",flags).GetValue(null);
+var dyn=(UnityEngine.Rendering.RTHandle)runtime.GetProperty("DynamicPhysicalPage",flags).GetValue(null);
+int capacity=(int)runtime.GetProperty("PhysicalPageCapacity",flags).GetValue(null);
+var shader=UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>("Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");int kernel=shader.FindKernel("VSMPrototypeReducePageOccupancy");
+int m=UnityEngine.Shader.PropertyToID("_VSMPrototypePageMetadata"),o=UnityEngine.Shader.PropertyToID("_VSMPrototypePhysicalPageOwners"),a=UnityEngine.Shader.PropertyToID("_VSMPrototypeStaticPhysicalPage"),b=UnityEngine.Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
+var cmd=new UnityEngine.Rendering.CommandBuffer();
+System.Action record=()=> {using(new UnityEngine.Rendering.ProfilingScope(cmd,sampler)) {cmd.SetComputeBufferParam(shader,kernel,m,metadata);cmd.SetComputeBufferParam(shader,kernel,o,owners);cmd.SetComputeTextureParam(shader,kernel,a,stat);cmd.SetComputeTextureParam(shader,kernel,b,dyn);cmd.DispatchCompute(shader,kernel,capacity,1,1);} cmd.Clear();};
+try { for(int i=0;i<128;i++)record();
+long before=System.GC.GetAllocatedBytesForCurrentThread();for(int i=0;i<4096;i++)record();long bytes=System.GC.GetAllocatedBytesForCurrentThread()-before;
+if(bytes!=0)throw new System.Exception("Occupancy recording allocated "+bytes);
+string result="PASS: actual cached VSM.PageOccupancy sampler, two GraphicsBuffer bindings, two RTHandle bindings and DispatchCompute recording; warmed128 measured4096 currentThreadBytes="+bytes+". No GPU execution, Unity tests, or all-thread/whole-pipeline allocation claim.";
+System.IO.File.WriteAllText("Packages/VividRP/Roadmap~/Experiments/VSMEmptyPoolSkip_20260912/gc-result.txt",result);return result;
+} finally {cmd.Dispose();}

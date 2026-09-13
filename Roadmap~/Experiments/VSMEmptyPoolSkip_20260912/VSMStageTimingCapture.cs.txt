@@ -1,0 +1,107 @@
+// Temporary Editor harness helper. Restore as a .cs file only for capture, then
+// let Unity create its metadata. Does not subscribe events, change scene state,
+// enable global samplers, or perform GPU readbacks. Construct before warm-up,
+// Observe once per selected-camera callback, and export after the timing window.
+using System;
+using System.Globalization;
+using System.IO;
+using Unity.Profiling;
+using VividRP.Runtime.RenderPass.Core;
+
+namespace VividRP.Editor
+{
+    internal sealed class VSMStageTimingCapture : IDisposable
+    {
+        private static readonly string[] s_Markers =
+        {
+            "VSM.PageOccupancy", "VSM.LayoutRemap", "VSM.ResetFeedback", "VSM.MarkReceiverPages",
+            "VSM.Allocate", "VSM.InvalidateStatic", "VSM.ClearPhysicalPages",
+            "VSM.StaticCasterCull", "VSM.DynamicCasterCull", "VSM.PageCull",
+            "VSM.StaticRaster", "VSM.FinalizePages", "VSM.DynamicRaster",
+            "VSM.UnityCompatibilityRaster", "VSM.Resolve", "VSM.ResolveTrace",
+            "VSM.FilterHorizontal", "VSM.FilterVertical", "VSM.FilterTemporalVertical"
+        };
+
+        private readonly ProfilerRecorder[] m_Recorders;
+        private readonly long[] m_Nanoseconds, m_SampleCounts;
+        private readonly int[] m_ObservedFrames;
+        private readonly double[] m_ObservedTimes;
+        private readonly bool[] m_VSMActive;
+        internal int Count { get; private set; }
+        internal int Capacity => m_ObservedFrames.Length;
+
+        internal VSMStageTimingCapture(int capacity)
+        {
+            // Ensure the cached samplers exist before looking up their marker names.
+            _ = VSMProfiling.FilterTemporalVertical;
+            m_Recorders = new ProfilerRecorder[s_Markers.Length];
+            m_Nanoseconds = new long[capacity * s_Markers.Length];
+            m_SampleCounts = new long[m_Nanoseconds.Length];
+            m_ObservedFrames = new int[capacity];
+            m_ObservedTimes = new double[capacity];
+            m_VSMActive = new bool[capacity];
+            const ProfilerRecorderOptions options =
+                ProfilerRecorderOptions.WrapAroundWhenCapacityReached |
+                ProfilerRecorderOptions.SumAllSamplesInFrame |
+                ProfilerRecorderOptions.GpuRecorder;
+            for (int i = 0; i < s_Markers.Length; i++)
+            {
+                m_Recorders[i] = new ProfilerRecorder(ProfilerCategory.Render, s_Markers[i], 1, options);
+                m_Recorders[i].Start();
+            }
+        }
+
+        // GPU recorder values describe the last completed profiling frame. The
+        // observation's camera-frame ID is a timestamp, NOT a GPU-frame identity.
+        // Counts > 1 reveal multiple executions (PageCull may intentionally run
+        // once inside StaticCasterCull and once inside DynamicCasterCull).
+        internal void Observe(int cameraFrame, double observationTime, bool vsmActive)
+        {
+            if (Count == Capacity || (Count > 0 && m_ObservedFrames[Count - 1] == cameraFrame)) return;
+            m_ObservedFrames[Count] = cameraFrame;
+            m_ObservedTimes[Count] = observationTime;
+            m_VSMActive[Count] = vsmActive;
+            int offset = Count * s_Markers.Length;
+            for (int i = 0; i < m_Recorders.Length; i++)
+            {
+                if (!m_Recorders[i].Valid || m_Recorders[i].Count == 0) continue;
+                ProfilerRecorderSample sample = m_Recorders[i].GetSample(0);
+                m_Nanoseconds[offset + i] = sample.Value;
+                m_SampleCounts[offset + i] = sample.Count;
+            }
+            Count++;
+        }
+
+        // Reuse after another warm-up; keep the native recorders running.
+        internal void Reset()
+        {
+            Count = 0;
+            Array.Clear(m_Nanoseconds, 0, m_Nanoseconds.Length);
+            Array.Clear(m_SampleCounts, 0, m_SampleCounts.Length);
+        }
+
+        // Cold path: call only after sampling, without active image/readback work.
+        internal void WriteCsv(string path)
+        {
+            using var writer = new StreamWriter(path, false);
+            writer.WriteLine("observation,camera_frame_observed,editor_time_observed,vsm_active_observed,marker,gpu_ns,gpu_sample_count");
+            for (int row = 0; row < Count; row++)
+            for (int marker = 0; marker < s_Markers.Length; marker++)
+            {
+                int offset = row * s_Markers.Length + marker;
+                writer.Write(row); writer.Write(',');
+                writer.Write(m_ObservedFrames[row]); writer.Write(',');
+                writer.Write(m_ObservedTimes[row].ToString("R", CultureInfo.InvariantCulture)); writer.Write(',');
+                writer.Write(m_VSMActive[row] ? 1 : 0); writer.Write(',');
+                writer.Write(s_Markers[marker]); writer.Write(',');
+                writer.Write(m_Nanoseconds[offset]); writer.Write(',');
+                writer.WriteLine(m_SampleCounts[offset]);
+            }
+        }
+
+        public void Dispose()
+        {
+            for (int i = 0; i < m_Recorders.Length; i++) m_Recorders[i].Dispose();
+        }
+    }
+}

@@ -1,0 +1,106 @@
+{
+  "baseline": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-empty-skip\\baseline\\dynamic\\20260912_123501_994",
+  "candidate": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-empty-skip\\skip\\dynamic\\20260912_123704_061",
+  "cases": {
+    "camera_slide_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 20,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 51,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 0.0166015625,
+      "history_max_abs": 2.0,
+      "metadata_mismatches": [],
+      "strict_equal": false
+    },
+    "camera_turn_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 12,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 16,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 1.52587890625e-05,
+      "history_max_abs": 1.0,
+      "metadata_mismatches": [],
+      "strict_equal": false
+    },
+    "deform_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 0,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 0,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 0.0,
+      "history_max_abs": 0.0,
+      "metadata_mismatches": [],
+      "strict_equal": true
+    },
+    "receiver_lift_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 0,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 0,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 0.0,
+      "history_max_abs": 0.0,
+      "metadata_mismatches": [],
+      "strict_equal": true
+    },
+    "receiver_slide_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 0,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 0,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 0.0,
+      "history_max_abs": 0.0,
+      "metadata_mismatches": [],
+      "strict_equal": true
+    },
+    "static_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 0,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 16257,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 0.00048828125,
+      "history_max_abs": 0.0,
+      "metadata_mismatches": [],
+      "strict_equal": false
+    },
+    "sun_rotate_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 0,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 0,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 0.0,
+      "history_max_abs": 0.0,
+      "metadata_mismatches": [],
+      "strict_equal": true
+    },
+    "sun_step_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 0,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 0,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 0.0,
+      "history_max_abs": 0.0,
+      "metadata_mismatches": [],
+      "strict_equal": true
+    },
+    "thin_sweep_adaptive": {
+      "frames": 32,
+      "world_different_float_words": 0,
+      "reference_different_float_words": 0,
+      "signal_different_float_words": 0,
+      "pages_different_uint_words": 0,
+      "visibility_max_abs": 0.0,
+      "history_max_abs": 0.0,
+      "metadata_mismatches": [],
+      "strict_equal": true
+    }
+  },
+  "status": "differences"
+}

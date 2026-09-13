@@ -1,0 +1,63 @@
+{
+  "status": "pass",
+  "source": "E:\\VividRP_Reborn\\Packages\\VividRP\\Temp~\\vsm-empty-skip\\skip\\dynamic\\20260912_124420_290",
+  "scope": "Two unfiltered full-screen production Resolve dispatches in the same frame, same input buffers, page mapping, phase and previous history; R32 scratch outputs. Candidate and baseline differ only in empty-depth-load override. No history outputs are written by either replay.",
+  "cases": {
+    "camera_slide_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1806239
+    },
+    "camera_turn_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1800095
+    },
+    "deform_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1783498
+    },
+    "receiver_lift_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1801003
+    },
+    "receiver_slide_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1806245
+    },
+    "static_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1806128
+    },
+    "sun_rotate_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1806239
+    },
+    "sun_step_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1806128
+    },
+    "thin_sweep_adaptive": {
+      "frames": 32,
+      "checked_pixels": 66355200,
+      "different_pixels": 0,
+      "min_shadowed_pixels": 1806149
+    }
+  },
+  "total_frames": 288,
+  "total_checked_pixels": 597196800
+}

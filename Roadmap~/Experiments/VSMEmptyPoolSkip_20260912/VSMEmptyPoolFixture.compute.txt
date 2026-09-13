@@ -1,0 +1,37 @@
+#pragma kernel VSMPrototypeReducePageOccupancy
+#pragma kernel VSMPrototypeFinalizeDirtyPages
+#pragma kernel VSMPrototypeClearPhysicalPages
+#pragma kernel VSMPrototypeMarkAllAllocatedPagesDirty
+#pragma kernel VSMResetPhysicalOwners
+#pragma kernel VSMRemapPages
+#pragma kernel FillFixture
+#pragma kernel AuditFixture
+#pragma use_dxc
+#pragma require Native16Bit
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"
+int _FixtureCase;
+RWStructuredBuffer<uint> _Audit;
+[numthreads(8,8,1)]
+void FillFixture(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = id.x / 8u + (id.y / 8u) * 2u;
+    bool s = _FixtureCase == 1 ? slot == 0u : _FixtureCase == 2 ? slot == 0u || slot == 2u : false;
+    bool d = _FixtureCase == 2 ? slot == 1u || slot == 2u : _FixtureCase == 3 ? slot == 3u : false;
+    uint depth = asuint(0.95 - id.z * 0.04);
+    _VSMPrototypeStaticPhysicalPageRW[id] = s ? depth : 0u;
+    _VSMPrototypeDynamicPhysicalPageRW[id] = d ? depth : 0u;
+}
+[numthreads(8,8,1)]
+void AuditFixture(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = id.x / 8u + (id.y / 8u) * 2u;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    if (owner == 0u) return;
+    uint flags = _VSMPrototypePageMetadata[owner - 1u].x;
+    uint2 raw = uint2(_VSMPrototypeStaticPhysicalPage.Load(int4(id,0)), _VSMPrototypeDynamicPhysicalPage.Load(int4(id,0)));
+    uint2 masked = LoadVSMDepthLayer(int2(id.xy),id.z,flags);
+    if (any(raw != masked)) InterlockedAdd(_Audit[0],1u);
+    InterlockedAdd(_Audit[1],1u);
+    if ((flags & kVSMPageStaticEmpty) != 0u) InterlockedAdd(_Audit[2],1u);
+    if ((flags & kVSMPageDynamicEmpty) != 0u) InterlockedAdd(_Audit[3],1u);
+}

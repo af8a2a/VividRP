@@ -100,6 +100,7 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
     float enter = startTime;
     float previousSurface = -1;
     int2 pageLow = 0, pageHigh = 0, physicalOffset = 0;
+    uint pageFlags = 0u;
     [loop]
     for (int sampleIndex = 0; sampleIndex < budget; sampleIndex++)
     {
@@ -111,13 +112,13 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
         // cells reuse the validated physical page, including empty depth cells.
         if (any(cell < pageLow) || any(cell >= pageHigh))
         {
-            if (!TryResolveVSMPhysicalTexel(cell, index, physical)) return false;
+            if (!TryResolveVSMPhysicalTexel(cell, index, physical, pageFlags)) return false;
             pageLow = (cell / _VSMPrototypePageSize) * _VSMPrototypePageSize;
             pageHigh = pageLow + _VSMPrototypePageSize;
             physicalOffset = physical - cell;
         }
         else physical = cell + physicalOffset;
-        uint2 frontDepths = LoadVSMDepthLayer(physical, 0);
+        uint2 frontDepths = LoadVSMDepthLayer(physical, 0, pageFlags);
         uint rawDepth = max(frontDepths.x, frontDepths.y);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
         g_VSMDebugWork.y++;
@@ -144,7 +145,7 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
             {
                 if (layer != 0)
                 {
-                    depths = LoadVSMDepthLayer(physical, layer);
+                    depths = LoadVSMDepthLayer(physical, layer, pageFlags);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
                     g_VSMDebugWork.y++;
 #endif

@@ -1,0 +1,832 @@
+{
+  "status": "complete",
+  "restored": true,
+  "stages": [
+    {
+      "stage": 0,
+      "resolution": 4096,
+      "scenario": 1,
+      "force": true,
+      "warmFrames": 32,
+      "sampleFrames": 64,
+      "allocated": 649,
+      "genericRedrawn": 649,
+      "dynamicDirty": 649,
+      "dynamicNonempty": 55,
+      "unknown": 0,
+      "pressure": [
+        0,
+        60,
+        649,
+        0,
+        649,
+        649,
+        0,
+        1065353216,
+        0,
+        0,
+        0,
+        649
+      ],
+      "counters": [
+        649,
+        649,
+        0,
+        0
+      ],
+      "args": [
+        384,
+        0,
+        0,
+        0,
+        384,
+        0,
+        0,
+        0,
+        384,
+        12,
+        0,
+        0,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        0,
+        384,
+        0,
+        0,
+        0,
+        384,
+        418,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36
+      ],
+      "gpu": {
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.74368,
+          "p95_ms": 0.895001599999999,
+          "minimum_ms": 0.738048,
+          "maximum_ms": 1.4336,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 30
+        },
+        "VSM.AllocationPrepare": {
+          "p50_ms": 0.009472,
+          "p95_ms": 0.009728,
+          "minimum_ms": 0.009216,
+          "maximum_ms": 0.011776,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 5
+        },
+        "VSM.AllocationCommit": {
+          "p50_ms": 0.605568,
+          "p95_ms": 0.6112256,
+          "minimum_ms": 0.60416,
+          "maximum_ms": 0.613632,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 16
+        },
+        "VSM.Allocate": {
+          "p50_ms": 0.623232,
+          "p95_ms": 1.0986496,
+          "minimum_ms": 0.613888,
+          "maximum_ms": 1.43488,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 43
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.261888,
+          "p95_ms": 0.265216,
+          "minimum_ms": 0.260608,
+          "maximum_ms": 0.43392,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 16
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.072704,
+          "p95_ms": 0.075264,
+          "minimum_ms": 0.0704,
+          "maximum_ms": 0.077056,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 22
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002048,
+          "minimum_ms": 0.001536,
+          "maximum_ms": 0.002048,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 3
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.02304,
+          "p95_ms": 0.03576319999999994,
+          "minimum_ms": 0.02176,
+          "maximum_ms": 0.10752,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 21
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.000256,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.000256,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 59,
+          "unique_values": 2
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.0,
+          "samples": 64,
+          "sample_counts": [
+            0
+          ],
+          "zero_samples": 64,
+          "unique_values": 1
+        },
+        "VSM.InvalidateDynamic": {
+          "p50_ms": 0.001536,
+          "p95_ms": 0.00256,
+          "minimum_ms": 0.00128,
+          "maximum_ms": 0.003072,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 7
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.209664,
+          "p95_ms": 0.3787648,
+          "minimum_ms": 0.200192,
+          "maximum_ms": 0.594432,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 43
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.120064,
+          "p95_ms": 0.125696,
+          "minimum_ms": 0.111616,
+          "maximum_ms": 0.392448,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 36
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.295424,
+          "p95_ms": 0.3055872,
+          "minimum_ms": 0.274176,
+          "maximum_ms": 0.365824,
+          "samples": 64,
+          "sample_counts": [
+            2
+          ],
+          "zero_samples": 0,
+          "unique_values": 52
+        },
+        "VSM.StaticRasterClear": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0019967999999999883,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.008704,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 44,
+          "unique_values": 6
+        },
+        "VSM.StaticRasterDraw": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.008921599999999998,
+          "minimum_ms": 0.003072,
+          "maximum_ms": 0.009216,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 13
+        },
+        "VSM.DynamicRasterClear": {
+          "p50_ms": 0.000256,
+          "p95_ms": 0.004236799999999995,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.076544,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 21,
+          "unique_values": 16
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50_ms": 0.022528,
+          "p95_ms": 0.025011199999999997,
+          "minimum_ms": 0.021504,
+          "maximum_ms": 0.03712,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 13
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007424,
+          "p95_ms": 0.011865599999999983,
+          "minimum_ms": 0.003328,
+          "maximum_ms": 0.01792,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 15
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.0,
+          "samples": 64,
+          "sample_counts": [
+            0
+          ],
+          "zero_samples": 64,
+          "unique_values": 1
+        },
+        "VSM.Resolve": {
+          "p50_ms": 6.172416,
+          "p95_ms": 7.035212799999999,
+          "minimum_ms": 5.257728,
+          "maximum_ms": 7.628288,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 63
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 5.908992,
+          "p95_ms": 6.5764736,
+          "minimum_ms": 5.036032,
+          "maximum_ms": 7.40224,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 63
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.065536,
+          "p95_ms": 0.0682752,
+          "minimum_ms": 0.064256,
+          "maximum_ms": 0.449792,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 19
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.0,
+          "samples": 64,
+          "sample_counts": [
+            0
+          ],
+          "zero_samples": 64,
+          "unique_values": 1
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.159744,
+          "p95_ms": 0.4193536,
+          "minimum_ms": 0.156416,
+          "maximum_ms": 1.118976,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 30
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.000256,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 63,
+          "unique_values": 2
+        }
+      }
+    },
+    {
+      "stage": 1,
+      "resolution": 4096,
+      "scenario": 1,
+      "force": false,
+      "warmFrames": 32,
+      "sampleFrames": 64,
+      "allocated": 649,
+      "genericRedrawn": 0,
+      "dynamicDirty": 0,
+      "dynamicNonempty": 55,
+      "unknown": 0,
+      "pressure": [
+        0,
+        60,
+        649,
+        0,
+        649,
+        649,
+        0,
+        1065353216,
+        0,
+        0,
+        0,
+        649
+      ],
+      "counters": [
+        649,
+        649,
+        0,
+        0
+      ],
+      "args": [
+        384,
+        0,
+        0,
+        0,
+        384,
+        0,
+        0,
+        0,
+        384,
+        0,
+        0,
+        0,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        0,
+        384,
+        0,
+        0,
+        0,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36,
+        384,
+        0,
+        0,
+        36
+      ],
+      "gpu": {
+        "VSM.MarkReceiverPages": {
+          "p50_ms": 0.74368,
+          "p95_ms": 0.7456896,
+          "minimum_ms": 0.740864,
+          "maximum_ms": 0.921856,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 23
+        },
+        "VSM.AllocationPrepare": {
+          "p50_ms": 0.009728,
+          "p95_ms": 0.009728,
+          "minimum_ms": 0.009216,
+          "maximum_ms": 0.009728,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 3
+        },
+        "VSM.AllocationCommit": {
+          "p50_ms": 0.606464,
+          "p95_ms": 0.607744,
+          "minimum_ms": 0.604416,
+          "maximum_ms": 0.61312,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 16
+        },
+        "VSM.Allocate": {
+          "p50_ms": 0.869632,
+          "p95_ms": 1.2025343999999998,
+          "minimum_ms": 0.614912,
+          "maximum_ms": 1.325568,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 51
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50_ms": 0.119296,
+          "p95_ms": 0.1218176,
+          "minimum_ms": 0.118528,
+          "maximum_ms": 0.283648,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 16
+        },
+        "VSM.PageOccupancy": {
+          "p50_ms": 0.00256,
+          "p95_ms": 0.00256,
+          "minimum_ms": 0.002304,
+          "maximum_ms": 0.002816,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 3
+        },
+        "VSM.FinalizePages": {
+          "p50_ms": 0.001792,
+          "p95_ms": 0.002048,
+          "minimum_ms": 0.001536,
+          "maximum_ms": 0.00256,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 4
+        },
+        "VSM.DynamicRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.007936,
+          "minimum_ms": 0.003328,
+          "maximum_ms": 0.01024,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 12
+        },
+        "VSM.LayoutRemap": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.0,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 64,
+          "unique_values": 1
+        },
+        "VSM.InvalidateStatic": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.0,
+          "samples": 64,
+          "sample_counts": [
+            0
+          ],
+          "zero_samples": 64,
+          "unique_values": 1
+        },
+        "VSM.InvalidateDynamic": {
+          "p50_ms": 0.000256,
+          "p95_ms": 0.000512,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.000512,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 23,
+          "unique_values": 3
+        },
+        "VSM.StaticCasterCull": {
+          "p50_ms": 0.208768,
+          "p95_ms": 0.2190464,
+          "minimum_ms": 0.19968,
+          "maximum_ms": 0.577024,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 45
+        },
+        "VSM.DynamicCasterCull": {
+          "p50_ms": 0.1216,
+          "p95_ms": 0.1271552,
+          "minimum_ms": 0.113408,
+          "maximum_ms": 0.267776,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 39
+        },
+        "VSM.PageCull": {
+          "p50_ms": 0.297344,
+          "p95_ms": 0.3089152,
+          "minimum_ms": 0.278528,
+          "maximum_ms": 0.66944,
+          "samples": 64,
+          "sample_counts": [
+            2
+          ],
+          "zero_samples": 0,
+          "unique_values": 48
+        },
+        "VSM.StaticRasterClear": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.000256,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.000256,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 50,
+          "unique_values": 2
+        },
+        "VSM.StaticRasterDraw": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.007936,
+          "minimum_ms": 0.003072,
+          "maximum_ms": 0.011264,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 13
+        },
+        "VSM.DynamicRasterClear": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.000256,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.000512,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 44,
+          "unique_values": 3
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50_ms": 0.006912,
+          "p95_ms": 0.007424,
+          "minimum_ms": 0.003072,
+          "maximum_ms": 0.009984,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 11
+        },
+        "VSM.StaticRaster": {
+          "p50_ms": 0.007168,
+          "p95_ms": 0.008192,
+          "minimum_ms": 0.003328,
+          "maximum_ms": 0.01152,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 14
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.0,
+          "samples": 64,
+          "sample_counts": [
+            0
+          ],
+          "zero_samples": 64,
+          "unique_values": 1
+        },
+        "VSM.Resolve": {
+          "p50_ms": 6.259968000000001,
+          "p95_ms": 6.728447999999999,
+          "minimum_ms": 5.58592,
+          "maximum_ms": 7.152128,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 62
+        },
+        "VSM.ResolveTrace": {
+          "p50_ms": 6.0129280000000005,
+          "p95_ms": 6.373823999999999,
+          "minimum_ms": 5.348864,
+          "maximum_ms": 6.514688,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 64
+        },
+        "VSM.FilterHorizontal": {
+          "p50_ms": 0.066304,
+          "p95_ms": 0.240704,
+          "minimum_ms": 0.064512,
+          "maximum_ms": 0.563712,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 23
+        },
+        "VSM.FilterVertical": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.0,
+          "samples": 64,
+          "sample_counts": [
+            0
+          ],
+          "zero_samples": 64,
+          "unique_values": 1
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50_ms": 0.159744,
+          "p95_ms": 0.163584,
+          "minimum_ms": 0.157696,
+          "maximum_ms": 0.477952,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 0,
+          "unique_values": 23
+        },
+        "VSM.ResetFeedback": {
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "minimum_ms": 0.0,
+          "maximum_ms": 0.000256,
+          "samples": 64,
+          "sample_counts": [
+            1
+          ],
+          "zero_samples": 63,
+          "unique_values": 2
+        }
+      }
+    }
+  ]
+}

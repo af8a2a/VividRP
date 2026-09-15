@@ -1,0 +1,3192 @@
+{
+  "commit": "352f0d4a1706e4e513bba9880b115ae8911466e9",
+  "source_hashes_match_implementation": true,
+  "timing_windows": 24,
+  "warmup_camera_callbacks": 1536,
+  "sampled_camera_callbacks": 2304,
+  "comparisons": [
+    {
+      "resolution": 4096,
+      "scenario": 0,
+      "allocated": 641,
+      "primary": [
+        641,
+        641
+      ],
+      "pressure_bias": 0.0,
+      "forced_dynamic_dirty": [
+        641,
+        641
+      ],
+      "reuse_dynamic_dirty": [
+        0,
+        0
+      ],
+      "forced_instances": [
+        0,
+        0
+      ],
+      "reuse_instances": [
+        0,
+        0
+      ],
+      "forced_vertex_slots": [
+        0,
+        0
+      ],
+      "reuse_vertex_slots": [
+        0,
+        0
+      ],
+      "metrics": {
+        "VSM.MarkReceiverPages": {
+          "forced_window_p50_ms": [
+            0.573824,
+            0.57472
+          ],
+          "reuse_window_p50_ms": [
+            0.574208,
+            0.574208
+          ],
+          "forced_p95_ms": [
+            0.576768,
+            0.5776640000000001
+          ],
+          "reuse_p95_ms": [
+            0.577856,
+            0.577088
+          ],
+          "change_percent": 0.011144544745333995
+        },
+        "VSM.AllocationPrepare": {
+          "forced_window_p50_ms": [
+            0.009472,
+            0.009472
+          ],
+          "reuse_window_p50_ms": [
+            0.009728,
+            0.009472
+          ],
+          "forced_p95_ms": [
+            0.009728,
+            0.009728
+          ],
+          "reuse_p95_ms": [
+            0.009792,
+            0.009728
+          ],
+          "change_percent": -1.3513513513513598
+        },
+        "VSM.AllocationCommit": {
+          "forced_window_p50_ms": [
+            0.594944,
+            0.5952
+          ],
+          "reuse_window_p50_ms": [
+            0.5952,
+            0.594944
+          ],
+          "forced_p95_ms": [
+            0.600832,
+            0.600832
+          ],
+          "reuse_p95_ms": [
+            0.600896,
+            0.600832
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.Allocate": {
+          "forced_window_p50_ms": [
+            0.7869440000000001,
+            0.773504
+          ],
+          "reuse_window_p50_ms": [
+            0.779264,
+            0.780672
+          ],
+          "forced_p95_ms": [
+            1.0063360000000001,
+            1.014208
+          ],
+          "reuse_p95_ms": [
+            1.102272,
+            1.0831359999999999
+          ],
+          "change_percent": 0.03281109014847683
+        },
+        "VSM.ClearPhysicalPages": {
+          "forced_window_p50_ms": [
+            0.26112,
+            0.261632
+          ],
+          "reuse_window_p50_ms": [
+            0.120064,
+            0.119936
+          ],
+          "forced_p95_ms": [
+            0.263488,
+            0.304192
+          ],
+          "reuse_p95_ms": [
+            0.12192,
+            0.121664
+          ],
+          "change_percent": 54.08912830558277
+        },
+        "VSM.PageOccupancy": {
+          "forced_window_p50_ms": [
+            0.073856,
+            0.074752
+          ],
+          "reuse_window_p50_ms": [
+            0.00256,
+            0.00256
+          ],
+          "forced_p95_ms": [
+            0.0768,
+            0.077312
+          ],
+          "reuse_p95_ms": [
+            0.002624,
+            0.002816
+          ],
+          "change_percent": 96.55469422911284
+        },
+        "VSM.FinalizePages": {
+          "forced_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "reuse_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "forced_p95_ms": [
+            0.002048,
+            0.002048
+          ],
+          "reuse_p95_ms": [
+            0.002048,
+            0.002048
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRaster": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.LayoutRemap": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateStatic": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateDynamic": {
+          "forced_window_p50_ms": [
+            0.001536,
+            0.001536
+          ],
+          "reuse_window_p50_ms": [
+            0.000256,
+            0.000256
+          ],
+          "forced_p95_ms": [
+            0.00256,
+            0.00256
+          ],
+          "reuse_p95_ms": [
+            0.000512,
+            0.000512
+          ],
+          "change_percent": 83.33333333333334
+        },
+        "VSM.StaticCasterCull": {
+          "forced_window_p50_ms": [
+            0.20595200000000002,
+            0.205696
+          ],
+          "reuse_window_p50_ms": [
+            0.205824,
+            0.205568
+          ],
+          "forced_p95_ms": [
+            0.21529600000000002,
+            0.374144
+          ],
+          "reuse_p95_ms": [
+            0.453504,
+            0.216
+          ],
+          "change_percent": 0.062189054726380366
+        },
+        "VSM.DynamicCasterCull": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.PageCull": {
+          "forced_window_p50_ms": [
+            0.186752,
+            0.186368
+          ],
+          "reuse_window_p50_ms": [
+            0.186752,
+            0.186368
+          ],
+          "forced_p95_ms": [
+            0.194304,
+            0.19596799999999998
+          ],
+          "reuse_p95_ms": [
+            0.194368,
+            0.193024
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.StaticRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "reuse_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "change_percent": null
+        },
+        "VSM.StaticRasterDraw": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.009536,
+            0.009472
+          ],
+          "reuse_p95_ms": [
+            0.010048,
+            0.010048
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.DynamicRasterDraw": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.StaticRaster": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007424,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.009792,
+            0.010112
+          ],
+          "reuse_p95_ms": [
+            0.010943999999999999,
+            0.010304
+          ],
+          "change_percent": -1.7857142857143016
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.Resolve": {
+          "forced_window_p50_ms": [
+            6.023424,
+            6.002816
+          ],
+          "reuse_window_p50_ms": [
+            6.0111360000000005,
+            6.026752
+          ],
+          "forced_p95_ms": [
+            6.522112,
+            6.4737279999999995
+          ],
+          "reuse_p95_ms": [
+            6.568704,
+            6.631488
+          ],
+          "change_percent": -0.09685487733488429
+        },
+        "VSM.ResolveTrace": {
+          "forced_window_p50_ms": [
+            5.757440000000001,
+            5.764736
+          ],
+          "reuse_window_p50_ms": [
+            5.737728000000001,
+            5.782528
+          ],
+          "forced_p95_ms": [
+            6.206656,
+            6.162240000000001
+          ],
+          "reuse_p95_ms": [
+            6.284544,
+            6.401728
+          ],
+          "change_percent": 0.01666351911306929
+        },
+        "VSM.FilterHorizontal": {
+          "forced_window_p50_ms": [
+            0.06592,
+            0.066048
+          ],
+          "reuse_window_p50_ms": [
+            0.066048,
+            0.066048
+          ],
+          "forced_p95_ms": [
+            0.06790399999999999,
+            0.06784
+          ],
+          "reuse_p95_ms": [
+            0.06790399999999999,
+            0.068352
+          ],
+          "change_percent": -0.09699321047524911
+        },
+        "VSM.FilterVertical": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.FilterTemporalVertical": {
+          "forced_window_p50_ms": [
+            0.160256,
+            0.160512
+          ],
+          "reuse_window_p50_ms": [
+            0.160384,
+            0.160512
+          ],
+          "forced_p95_ms": [
+            0.163136,
+            0.32064000000000004
+          ],
+          "reuse_p95_ms": [
+            0.16416,
+            0.166976
+          ],
+          "change_percent": -0.03990422984834208
+        },
+        "VSM.ResetFeedback": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        }
+      }
+    },
+    {
+      "resolution": 4096,
+      "scenario": 1,
+      "allocated": 666,
+      "primary": [
+        649,
+        649
+      ],
+      "pressure_bias": 0.0,
+      "forced_dynamic_dirty": [
+        666,
+        666
+      ],
+      "reuse_dynamic_dirty": [
+        0,
+        0
+      ],
+      "forced_instances": [
+        454,
+        454
+      ],
+      "reuse_instances": [
+        0,
+        0
+      ],
+      "forced_vertex_slots": [
+        174336,
+        174336
+      ],
+      "reuse_vertex_slots": [
+        0,
+        0
+      ],
+      "metrics": {
+        "VSM.MarkReceiverPages": {
+          "forced_window_p50_ms": [
+            0.558336,
+            0.558976
+          ],
+          "reuse_window_p50_ms": [
+            0.558336,
+            0.558336
+          ],
+          "forced_p95_ms": [
+            0.562496,
+            0.576832
+          ],
+          "reuse_p95_ms": [
+            0.561472,
+            0.56192
+          ],
+          "change_percent": 0.057280329934694674
+        },
+        "VSM.AllocationPrepare": {
+          "forced_window_p50_ms": [
+            0.009472,
+            0.009728
+          ],
+          "reuse_window_p50_ms": [
+            0.009728,
+            0.009728
+          ],
+          "forced_p95_ms": [
+            0.009728,
+            0.009728
+          ],
+          "reuse_p95_ms": [
+            0.009728,
+            0.009792
+          ],
+          "change_percent": -1.3333333333333197
+        },
+        "VSM.AllocationCommit": {
+          "forced_window_p50_ms": [
+            0.601088,
+            0.601344
+          ],
+          "reuse_window_p50_ms": [
+            0.601344,
+            0.601344
+          ],
+          "forced_p95_ms": [
+            0.60704,
+            0.607232
+          ],
+          "reuse_p95_ms": [
+            0.60704,
+            0.607232
+          ],
+          "change_percent": -0.02129018522460946
+        },
+        "VSM.Allocate": {
+          "forced_window_p50_ms": [
+            0.7927040000000001,
+            0.780288
+          ],
+          "reuse_window_p50_ms": [
+            0.7951360000000001,
+            0.792192
+          ],
+          "forced_p95_ms": [
+            1.086976,
+            1.09184
+          ],
+          "reuse_p95_ms": [
+            1.0764799999999999,
+            1.06464
+          ],
+          "change_percent": -0.9113841647001353
+        },
+        "VSM.ClearPhysicalPages": {
+          "forced_window_p50_ms": [
+            0.26713600000000004,
+            0.267264
+          ],
+          "reuse_window_p50_ms": [
+            0.119936,
+            0.120064
+          ],
+          "forced_p95_ms": [
+            0.46905600000000003,
+            0.442304
+          ],
+          "reuse_p95_ms": [
+            0.12140799999999999,
+            0.12224
+          ],
+          "change_percent": 55.08982035928144
+        },
+        "VSM.PageOccupancy": {
+          "forced_window_p50_ms": [
+            0.0736,
+            0.073728
+          ],
+          "reuse_window_p50_ms": [
+            0.00256,
+            0.00256
+          ],
+          "forced_p95_ms": [
+            0.077312,
+            0.076928
+          ],
+          "reuse_p95_ms": [
+            0.002816,
+            0.00256
+          ],
+          "change_percent": 96.52476107732406
+        },
+        "VSM.FinalizePages": {
+          "forced_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "reuse_window_p50_ms": [
+            0.0016640000000000001,
+            0.0016640000000000001
+          ],
+          "forced_p95_ms": [
+            0.002048,
+            0.002112
+          ],
+          "reuse_p95_ms": [
+            0.002048,
+            0.002048
+          ],
+          "change_percent": 7.14285714285714
+        },
+        "VSM.DynamicRaster": {
+          "forced_window_p50_ms": [
+            0.026112,
+            0.026112
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.028735999999999998,
+            0.029312
+          ],
+          "reuse_p95_ms": [
+            0.008832,
+            0.008768
+          ],
+          "change_percent": 72.54901960784314
+        },
+        "VSM.LayoutRemap": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateStatic": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateDynamic": {
+          "forced_window_p50_ms": [
+            0.0016640000000000001,
+            0.001536
+          ],
+          "reuse_window_p50_ms": [
+            0.000256,
+            0.000256
+          ],
+          "forced_p95_ms": [
+            0.00256,
+            0.00256
+          ],
+          "reuse_p95_ms": [
+            0.000512,
+            0.000512
+          ],
+          "change_percent": 84.00000000000001
+        },
+        "VSM.StaticCasterCull": {
+          "forced_window_p50_ms": [
+            0.209024,
+            0.209536
+          ],
+          "reuse_window_p50_ms": [
+            0.208256,
+            0.20928000000000002
+          ],
+          "forced_p95_ms": [
+            0.36665600000000004,
+            0.272768
+          ],
+          "reuse_p95_ms": [
+            0.218944,
+            0.21888
+          ],
+          "change_percent": 0.24464831804280607
+        },
+        "VSM.DynamicCasterCull": {
+          "forced_window_p50_ms": [
+            0.11904,
+            0.117504
+          ],
+          "reuse_window_p50_ms": [
+            0.11968000000000001,
+            0.119552
+          ],
+          "forced_p95_ms": [
+            0.125184,
+            0.125952
+          ],
+          "reuse_p95_ms": [
+            0.125504,
+            0.125696
+          ],
+          "change_percent": -1.1363636363636243
+        },
+        "VSM.PageCull": {
+          "forced_window_p50_ms": [
+            0.293504,
+            0.292352
+          ],
+          "reuse_window_p50_ms": [
+            0.293376,
+            0.29580799999999996
+          ],
+          "forced_p95_ms": [
+            0.30342399999999997,
+            0.306624
+          ],
+          "reuse_p95_ms": [
+            0.30656,
+            0.305664
+          ],
+          "change_percent": -0.5680576797028714
+        },
+        "VSM.StaticRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "reuse_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "change_percent": null
+        },
+        "VSM.StaticRasterDraw": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.0096,
+            0.009984
+          ],
+          "reuse_p95_ms": [
+            0.008576,
+            0.007936
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRasterClear": {
+          "forced_window_p50_ms": [
+            0.0006399999999999999,
+            0.000512
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.003712,
+            0.003072
+          ],
+          "reuse_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "change_percent": 100.0
+        },
+        "VSM.DynamicRasterDraw": {
+          "forced_window_p50_ms": [
+            0.025088,
+            0.025088
+          ],
+          "reuse_window_p50_ms": [
+            0.006912,
+            0.006912
+          ],
+          "forced_p95_ms": [
+            0.026496,
+            0.027264
+          ],
+          "reuse_p95_ms": [
+            0.008,
+            0.008448
+          ],
+          "change_percent": 72.44897959183673
+        },
+        "VSM.StaticRaster": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007296,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.009856,
+            0.010304
+          ],
+          "reuse_p95_ms": [
+            0.00864,
+            0.008192
+          ],
+          "change_percent": -0.8928571428571619
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.Resolve": {
+          "forced_window_p50_ms": [
+            6.116352,
+            6.071680000000001
+          ],
+          "reuse_window_p50_ms": [
+            6.139904,
+            6.079104
+          ],
+          "forced_p95_ms": [
+            6.546688,
+            6.630208
+          ],
+          "reuse_p95_ms": [
+            6.472896,
+            6.62144
+          ],
+          "change_percent": -0.2541509572669298
+        },
+        "VSM.ResolveTrace": {
+          "forced_window_p50_ms": [
+            5.828608,
+            5.810048
+          ],
+          "reuse_window_p50_ms": [
+            5.860735999999999,
+            5.8300160000000005
+          ],
+          "forced_p95_ms": [
+            6.244032,
+            6.2672
+          ],
+          "reuse_p95_ms": [
+            6.207936,
+            6.317632
+          ],
+          "change_percent": -0.44761182047134973
+        },
+        "VSM.FilterHorizontal": {
+          "forced_window_p50_ms": [
+            0.066048,
+            0.06592
+          ],
+          "reuse_window_p50_ms": [
+            0.06592,
+            0.066048
+          ],
+          "forced_p95_ms": [
+            0.227072,
+            0.06771200000000001
+          ],
+          "reuse_p95_ms": [
+            0.06790399999999999,
+            0.067648
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.FilterVertical": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.FilterTemporalVertical": {
+          "forced_window_p50_ms": [
+            0.160768,
+            0.161024
+          ],
+          "reuse_window_p50_ms": [
+            0.160768,
+            0.160512
+          ],
+          "forced_p95_ms": [
+            0.34112,
+            0.413312
+          ],
+          "reuse_p95_ms": [
+            0.206528,
+            0.20275200000000002
+          ],
+          "change_percent": 0.15910898965789677
+        },
+        "VSM.ResetFeedback": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        }
+      }
+    },
+    {
+      "resolution": 4096,
+      "scenario": 2,
+      "allocated": 680,
+      "primary": [
+        640,
+        640
+      ],
+      "pressure_bias": 0.0,
+      "forced_dynamic_dirty": [
+        680,
+        680
+      ],
+      "reuse_dynamic_dirty": [
+        51,
+        51
+      ],
+      "forced_instances": [
+        902,
+        902
+      ],
+      "reuse_instances": [
+        89,
+        89
+      ],
+      "forced_vertex_slots": [
+        346368,
+        346368
+      ],
+      "reuse_vertex_slots": [
+        34176,
+        34176
+      ],
+      "metrics": {
+        "VSM.MarkReceiverPages": {
+          "forced_window_p50_ms": [
+            0.55808,
+            0.5584640000000001
+          ],
+          "reuse_window_p50_ms": [
+            0.55808,
+            0.55808
+          ],
+          "forced_p95_ms": [
+            0.561728,
+            0.7416320000000001
+          ],
+          "reuse_p95_ms": [
+            0.581504,
+            0.561152
+          ],
+          "change_percent": 0.03439183767054432
+        },
+        "VSM.AllocationPrepare": {
+          "forced_window_p50_ms": [
+            0.009728,
+            0.009728
+          ],
+          "reuse_window_p50_ms": [
+            0.009728,
+            0.009600000000000001
+          ],
+          "forced_p95_ms": [
+            0.009728,
+            0.009728
+          ],
+          "reuse_p95_ms": [
+            0.009792,
+            0.009728
+          ],
+          "change_percent": 0.6578947368421018
+        },
+        "VSM.AllocationCommit": {
+          "forced_window_p50_ms": [
+            0.6016,
+            0.601856
+          ],
+          "reuse_window_p50_ms": [
+            0.6016,
+            0.600832
+          ],
+          "forced_p95_ms": [
+            0.60704,
+            0.607232
+          ],
+          "reuse_p95_ms": [
+            0.606592,
+            0.607552
+          ],
+          "change_percent": 0.0850882790895624
+        },
+        "VSM.Allocate": {
+          "forced_window_p50_ms": [
+            0.7993600000000001,
+            0.854912
+          ],
+          "reuse_window_p50_ms": [
+            0.7800320000000001,
+            0.797056
+          ],
+          "forced_p95_ms": [
+            1.051648,
+            1.152384
+          ],
+          "reuse_p95_ms": [
+            1.055936,
+            1.105024
+          ],
+          "change_percent": 4.665738161559895
+        },
+        "VSM.ClearPhysicalPages": {
+          "forced_window_p50_ms": [
+            0.269824,
+            0.270336
+          ],
+          "reuse_window_p50_ms": [
+            0.12991999999999998,
+            0.13017600000000001
+          ],
+          "forced_p95_ms": [
+            0.43756799999999996,
+            0.27296000000000004
+          ],
+          "reuse_p95_ms": [
+            0.33440000000000003,
+            0.13472
+          ],
+          "change_percent": 51.84834123222748
+        },
+        "VSM.PageOccupancy": {
+          "forced_window_p50_ms": [
+            0.075008,
+            0.075264
+          ],
+          "reuse_window_p50_ms": [
+            0.053248,
+            0.053248
+          ],
+          "forced_p95_ms": [
+            0.07744000000000001,
+            0.077568
+          ],
+          "reuse_p95_ms": [
+            0.054272,
+            0.054784
+          ],
+          "change_percent": 29.13117546848383
+        },
+        "VSM.FinalizePages": {
+          "forced_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "reuse_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "forced_p95_ms": [
+            0.002048,
+            0.002048
+          ],
+          "reuse_p95_ms": [
+            0.002048,
+            0.002048
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRaster": {
+          "forced_window_p50_ms": [
+            0.03072,
+            0.03072
+          ],
+          "reuse_window_p50_ms": [
+            0.022784,
+            0.023296
+          ],
+          "forced_p95_ms": [
+            0.046016,
+            0.054784
+          ],
+          "reuse_p95_ms": [
+            0.029312,
+            0.034368
+          ],
+          "change_percent": 25.00000000000001
+        },
+        "VSM.LayoutRemap": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateStatic": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateDynamic": {
+          "forced_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "reuse_window_p50_ms": [
+            0.009216,
+            0.009472
+          ],
+          "forced_p95_ms": [
+            0.00256,
+            0.002816
+          ],
+          "reuse_p95_ms": [
+            0.012288,
+            0.012608
+          ],
+          "change_percent": -421.42857142857144
+        },
+        "VSM.StaticCasterCull": {
+          "forced_window_p50_ms": [
+            0.20864,
+            0.207872
+          ],
+          "reuse_window_p50_ms": [
+            0.209152,
+            0.209152
+          ],
+          "forced_p95_ms": [
+            0.3632,
+            0.270848
+          ],
+          "reuse_p95_ms": [
+            0.3728,
+            0.39251199999999997
+          ],
+          "change_percent": -0.4302397049784856
+        },
+        "VSM.DynamicCasterCull": {
+          "forced_window_p50_ms": [
+            0.11776,
+            0.11904
+          ],
+          "reuse_window_p50_ms": [
+            0.117248,
+            0.117504
+          ],
+          "forced_p95_ms": [
+            0.166656,
+            0.124544
+          ],
+          "reuse_p95_ms": [
+            0.122432,
+            0.123008
+          ],
+          "change_percent": 0.8648648648648671
+        },
+        "VSM.PageCull": {
+          "forced_window_p50_ms": [
+            0.290944,
+            0.291456
+          ],
+          "reuse_window_p50_ms": [
+            0.292736,
+            0.291968
+          ],
+          "forced_p95_ms": [
+            0.303488,
+            0.303872
+          ],
+          "reuse_p95_ms": [
+            0.303808,
+            0.305216
+          ],
+          "change_percent": -0.39560439560439864
+        },
+        "VSM.StaticRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "reuse_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "change_percent": null
+        },
+        "VSM.StaticRasterDraw": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.008704,
+            0.009344
+          ],
+          "reuse_p95_ms": [
+            0.00832,
+            0.009536
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRasterClear": {
+          "forced_window_p50_ms": [
+            0.0006399999999999999,
+            0.0006399999999999999
+          ],
+          "reuse_window_p50_ms": [
+            0.000256,
+            0.000768
+          ],
+          "forced_p95_ms": [
+            0.016704,
+            0.018496
+          ],
+          "reuse_p95_ms": [
+            0.004544,
+            0.004864
+          ],
+          "change_percent": 19.999999999999996
+        },
+        "VSM.DynamicRasterDraw": {
+          "forced_window_p50_ms": [
+            0.029952,
+            0.029824
+          ],
+          "reuse_window_p50_ms": [
+            0.022272,
+            0.022016
+          ],
+          "forced_p95_ms": [
+            0.032576,
+            0.033344
+          ],
+          "reuse_p95_ms": [
+            0.025856,
+            0.025984
+          ],
+          "change_percent": 25.91006423982869
+        },
+        "VSM.StaticRaster": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007424
+          ],
+          "forced_p95_ms": [
+            0.01056,
+            0.010304
+          ],
+          "reuse_p95_ms": [
+            0.00864,
+            0.009792
+          ],
+          "change_percent": -1.7857142857143016
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.Resolve": {
+          "forced_window_p50_ms": [
+            6.0759039999999995,
+            6.255744
+          ],
+          "reuse_window_p50_ms": [
+            6.0768,
+            6.14784
+          ],
+          "forced_p95_ms": [
+            6.60672,
+            6.8583680000000005
+          ],
+          "reuse_p95_ms": [
+            6.6008320000000005,
+            6.419584
+          ],
+          "change_percent": 0.8677510094352248
+        },
+        "VSM.ResolveTrace": {
+          "forced_window_p50_ms": [
+            5.826304,
+            5.947648
+          ],
+          "reuse_window_p50_ms": [
+            5.838976000000001,
+            5.850496
+          ],
+          "forced_p95_ms": [
+            6.188607999999999,
+            6.5182080000000004
+          ],
+          "reuse_p95_ms": [
+            6.262208,
+            6.15616
+          ],
+          "change_percent": 0.7175160897547439
+        },
+        "VSM.FilterHorizontal": {
+          "forced_window_p50_ms": [
+            0.065792,
+            0.066176
+          ],
+          "reuse_window_p50_ms": [
+            0.066048,
+            0.066048
+          ],
+          "forced_p95_ms": [
+            0.067584,
+            0.06790399999999999
+          ],
+          "reuse_p95_ms": [
+            0.06784,
+            0.067584
+          ],
+          "change_percent": -0.09699321047524911
+        },
+        "VSM.FilterVertical": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.FilterTemporalVertical": {
+          "forced_window_p50_ms": [
+            0.16089599999999998,
+            0.160768
+          ],
+          "reuse_window_p50_ms": [
+            0.160256,
+            0.16064
+          ],
+          "forced_p95_ms": [
+            0.430336,
+            0.46553599999999995
+          ],
+          "reuse_p95_ms": [
+            0.352512,
+            0.16595200000000002
+          ],
+          "change_percent": 0.23875845602863155
+        },
+        "VSM.ResetFeedback": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        }
+      }
+    },
+    {
+      "resolution": 8192,
+      "scenario": 0,
+      "allocated": 1024,
+      "primary": [
+        966,
+        966
+      ],
+      "pressure_bias": 1.7419002056121826,
+      "forced_dynamic_dirty": [
+        1024,
+        1024
+      ],
+      "reuse_dynamic_dirty": [
+        0,
+        0
+      ],
+      "forced_instances": [
+        0,
+        0
+      ],
+      "reuse_instances": [
+        0,
+        0
+      ],
+      "forced_vertex_slots": [
+        0,
+        0
+      ],
+      "reuse_vertex_slots": [
+        0,
+        0
+      ],
+      "metrics": {
+        "VSM.MarkReceiverPages": {
+          "forced_window_p50_ms": [
+            0.9056,
+            0.907008
+          ],
+          "reuse_window_p50_ms": [
+            0.906752,
+            0.90624
+          ],
+          "forced_p95_ms": [
+            1.087104,
+            1.096512
+          ],
+          "reuse_p95_ms": [
+            1.201152,
+            1.2254079999999998
+          ],
+          "change_percent": -0.021184944566066122
+        },
+        "VSM.AllocationPrepare": {
+          "forced_window_p50_ms": [
+            0.01024,
+            0.01024
+          ],
+          "reuse_window_p50_ms": [
+            0.01024,
+            0.01024
+          ],
+          "forced_p95_ms": [
+            0.011264,
+            0.010496
+          ],
+          "reuse_p95_ms": [
+            0.014656,
+            0.010496
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.AllocationCommit": {
+          "forced_window_p50_ms": [
+            1.18144,
+            1.18144
+          ],
+          "reuse_window_p50_ms": [
+            1.18144,
+            1.18144
+          ],
+          "forced_p95_ms": [
+            1.184384,
+            1.182464
+          ],
+          "reuse_p95_ms": [
+            1.182464,
+            1.182528
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.Allocate": {
+          "forced_window_p50_ms": [
+            1.381376,
+            1.405952
+          ],
+          "reuse_window_p50_ms": [
+            1.378432,
+            1.403904
+          ],
+          "forced_p95_ms": [
+            1.685376,
+            1.78336
+          ],
+          "reuse_p95_ms": [
+            1.676352,
+            1.6699519999999999
+          ],
+          "change_percent": 0.1790962527553286
+        },
+        "VSM.ClearPhysicalPages": {
+          "forced_window_p50_ms": [
+            0.344192,
+            0.34432
+          ],
+          "reuse_window_p50_ms": [
+            0.11904,
+            0.11904
+          ],
+          "forced_p95_ms": [
+            0.51456,
+            0.52416
+          ],
+          "reuse_p95_ms": [
+            0.12268799999999999,
+            0.12256
+          ],
+          "change_percent": 65.42108198549916
+        },
+        "VSM.PageOccupancy": {
+          "forced_window_p50_ms": [
+            0.093696,
+            0.096256
+          ],
+          "reuse_window_p50_ms": [
+            0.00256,
+            0.00256
+          ],
+          "forced_p95_ms": [
+            0.097344,
+            0.09856
+          ],
+          "reuse_p95_ms": [
+            0.002816,
+            0.002816
+          ],
+          "change_percent": 97.30458221024259
+        },
+        "VSM.FinalizePages": {
+          "forced_window_p50_ms": [
+            0.002048,
+            0.002048
+          ],
+          "reuse_window_p50_ms": [
+            0.002048,
+            0.002048
+          ],
+          "forced_p95_ms": [
+            0.00256,
+            0.002624
+          ],
+          "reuse_p95_ms": [
+            0.00256,
+            0.00256
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRaster": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.LayoutRemap": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateStatic": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateDynamic": {
+          "forced_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "reuse_window_p50_ms": [
+            0.000256,
+            0.000256
+          ],
+          "forced_p95_ms": [
+            0.003072,
+            0.003136
+          ],
+          "reuse_p95_ms": [
+            0.000512,
+            0.00031999999999999997
+          ],
+          "change_percent": 85.71428571428572
+        },
+        "VSM.StaticCasterCull": {
+          "forced_window_p50_ms": [
+            0.43136,
+            0.431488
+          ],
+          "reuse_window_p50_ms": [
+            0.42879999999999996,
+            0.428928
+          ],
+          "forced_p95_ms": [
+            0.698304,
+            0.699776
+          ],
+          "reuse_p95_ms": [
+            0.691136,
+            0.678016
+          ],
+          "change_percent": 0.5933837709538814
+        },
+        "VSM.DynamicCasterCull": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.PageCull": {
+          "forced_window_p50_ms": [
+            0.407808,
+            0.40934400000000004
+          ],
+          "reuse_window_p50_ms": [
+            0.407552,
+            0.40844800000000003
+          ],
+          "forced_p95_ms": [
+            0.42464,
+            0.429952
+          ],
+          "reuse_p95_ms": [
+            0.42764800000000003,
+            0.430784
+          ],
+          "change_percent": 0.14097744360902498
+        },
+        "VSM.StaticRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "reuse_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "change_percent": null
+        },
+        "VSM.StaticRasterDraw": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.009792,
+            0.011072
+          ],
+          "reuse_p95_ms": [
+            0.009023999999999999,
+            0.009023999999999999
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.DynamicRasterDraw": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.StaticRaster": {
+          "forced_window_p50_ms": [
+            0.007424,
+            0.007424
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007424
+          ],
+          "forced_p95_ms": [
+            0.010048,
+            0.011328
+          ],
+          "reuse_p95_ms": [
+            0.009536,
+            0.009984
+          ],
+          "change_percent": 1.724137931034475
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.Resolve": {
+          "forced_window_p50_ms": [
+            7.825792,
+            7.822976000000001
+          ],
+          "reuse_window_p50_ms": [
+            7.934464,
+            7.9240960000000005
+          ],
+          "forced_p95_ms": [
+            8.272192,
+            8.251584000000001
+          ],
+          "reuse_p95_ms": [
+            8.527616,
+            8.415808
+          ],
+          "change_percent": -1.340629498756707
+        },
+        "VSM.ResolveTrace": {
+          "forced_window_p50_ms": [
+            7.590656,
+            7.584768
+          ],
+          "reuse_window_p50_ms": [
+            7.673344,
+            7.631743999999999
+          ],
+          "forced_p95_ms": [
+            8.03168,
+            8.025535999999999
+          ],
+          "reuse_p95_ms": [
+            8.244288000000001,
+            8.18336
+          ],
+          "change_percent": -0.8544341166349056
+        },
+        "VSM.FilterHorizontal": {
+          "forced_window_p50_ms": [
+            0.065792,
+            0.065792
+          ],
+          "reuse_window_p50_ms": [
+            0.065792,
+            0.065792
+          ],
+          "forced_p95_ms": [
+            0.06784,
+            0.067584
+          ],
+          "reuse_p95_ms": [
+            0.067648,
+            0.06784
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.FilterVertical": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.FilterTemporalVertical": {
+          "forced_window_p50_ms": [
+            0.16,
+            0.159744
+          ],
+          "reuse_window_p50_ms": [
+            0.16,
+            0.160128
+          ],
+          "forced_p95_ms": [
+            0.329472,
+            0.162688
+          ],
+          "reuse_p95_ms": [
+            0.163008,
+            0.348288
+          ],
+          "change_percent": -0.12009607686147561
+        },
+        "VSM.ResetFeedback": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        }
+      }
+    },
+    {
+      "resolution": 8192,
+      "scenario": 1,
+      "allocated": 1024,
+      "primary": [
+        943,
+        943
+      ],
+      "pressure_bias": 1.7419002056121826,
+      "forced_dynamic_dirty": [
+        1024,
+        1024
+      ],
+      "reuse_dynamic_dirty": [
+        0,
+        0
+      ],
+      "forced_instances": [
+        605,
+        605
+      ],
+      "reuse_instances": [
+        0,
+        0
+      ],
+      "forced_vertex_slots": [
+        232320,
+        232320
+      ],
+      "reuse_vertex_slots": [
+        0,
+        0
+      ],
+      "metrics": {
+        "VSM.MarkReceiverPages": {
+          "forced_window_p50_ms": [
+            0.89344,
+            0.894208
+          ],
+          "reuse_window_p50_ms": [
+            0.893696,
+            0.894464
+          ],
+          "forced_p95_ms": [
+            1.08608,
+            1.238272
+          ],
+          "reuse_p95_ms": [
+            1.167936,
+            1.089536
+          ],
+          "change_percent": -0.02864098524990588
+        },
+        "VSM.AllocationPrepare": {
+          "forced_window_p50_ms": [
+            0.01024,
+            0.01024
+          ],
+          "reuse_window_p50_ms": [
+            0.01024,
+            0.01024
+          ],
+          "forced_p95_ms": [
+            0.010496,
+            0.010816
+          ],
+          "reuse_p95_ms": [
+            0.010496,
+            0.010496
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.AllocationCommit": {
+          "forced_window_p50_ms": [
+            1.164288,
+            1.164544
+          ],
+          "reuse_window_p50_ms": [
+            1.164288,
+            1.164544
+          ],
+          "forced_p95_ms": [
+            1.165312,
+            1.165696
+          ],
+          "reuse_p95_ms": [
+            1.165888,
+            1.165312
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.Allocate": {
+          "forced_window_p50_ms": [
+            1.419392,
+            1.360384
+          ],
+          "reuse_window_p50_ms": [
+            1.4252799999999999,
+            1.42592
+          ],
+          "forced_p95_ms": [
+            1.674048,
+            1.688448
+          ],
+          "reuse_p95_ms": [
+            1.654784,
+            1.672768
+          ],
+          "change_percent": -2.5694156651471234
+        },
+        "VSM.ClearPhysicalPages": {
+          "forced_window_p50_ms": [
+            0.344064,
+            0.344064
+          ],
+          "reuse_window_p50_ms": [
+            0.11904,
+            0.11904
+          ],
+          "forced_p95_ms": [
+            0.518528,
+            0.546368
+          ],
+          "reuse_p95_ms": [
+            0.123328,
+            0.122624
+          ],
+          "change_percent": 65.40178571428571
+        },
+        "VSM.PageOccupancy": {
+          "forced_window_p50_ms": [
+            0.094976,
+            0.093184
+          ],
+          "reuse_window_p50_ms": [
+            0.00256,
+            0.00256
+          ],
+          "forced_p95_ms": [
+            0.096576,
+            0.096064
+          ],
+          "reuse_p95_ms": [
+            0.002816,
+            0.002816
+          ],
+          "change_percent": 97.27891156462584
+        },
+        "VSM.FinalizePages": {
+          "forced_window_p50_ms": [
+            0.002048,
+            0.002048
+          ],
+          "reuse_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "forced_p95_ms": [
+            0.00256,
+            0.002624
+          ],
+          "reuse_p95_ms": [
+            0.002816,
+            0.00256
+          ],
+          "change_percent": 12.5
+        },
+        "VSM.DynamicRaster": {
+          "forced_window_p50_ms": [
+            0.019712,
+            0.019712
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.02112,
+            0.022784
+          ],
+          "reuse_p95_ms": [
+            0.009791999999999999,
+            0.01184
+          ],
+          "change_percent": 63.63636363636363
+        },
+        "VSM.LayoutRemap": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateStatic": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateDynamic": {
+          "forced_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "reuse_window_p50_ms": [
+            0.000256,
+            0.000256
+          ],
+          "forced_p95_ms": [
+            0.0028799999999999997,
+            0.003328
+          ],
+          "reuse_p95_ms": [
+            0.00031999999999999997,
+            0.000512
+          ],
+          "change_percent": 85.71428571428572
+        },
+        "VSM.StaticCasterCull": {
+          "forced_window_p50_ms": [
+            0.42854400000000004,
+            0.427264
+          ],
+          "reuse_window_p50_ms": [
+            0.428544,
+            0.425728
+          ],
+          "forced_p95_ms": [
+            0.698496,
+            0.70272
+          ],
+          "reuse_p95_ms": [
+            0.666688,
+            0.595456
+          ],
+          "change_percent": 0.17947950942268642
+        },
+        "VSM.DynamicCasterCull": {
+          "forced_window_p50_ms": [
+            0.14592,
+            0.14400000000000002
+          ],
+          "reuse_window_p50_ms": [
+            0.143232,
+            0.14336
+          ],
+          "forced_p95_ms": [
+            0.16288000000000002,
+            0.15744
+          ],
+          "reuse_p95_ms": [
+            0.381824,
+            0.309632
+          ],
+          "change_percent": 1.1479028697571891
+        },
+        "VSM.PageCull": {
+          "forced_window_p50_ms": [
+            0.5390079999999999,
+            0.53632
+          ],
+          "reuse_window_p50_ms": [
+            0.5358080000000001,
+            0.5312
+          ],
+          "forced_p95_ms": [
+            0.5593600000000001,
+            0.569152
+          ],
+          "reuse_p95_ms": [
+            0.604352,
+            0.5523199999999999
+          ],
+          "change_percent": 0.7737174145934889
+        },
+        "VSM.StaticRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "reuse_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "change_percent": null
+        },
+        "VSM.StaticRasterDraw": {
+          "forced_window_p50_ms": [
+            0.007039999999999999,
+            0.006912
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.00896,
+            0.010496
+          ],
+          "reuse_p95_ms": [
+            0.00896,
+            0.009023999999999999
+          ],
+          "change_percent": -2.752293577981657
+        },
+        "VSM.DynamicRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "reuse_p95_ms": [
+            0.00031999999999999997,
+            0.000448
+          ],
+          "change_percent": null
+        },
+        "VSM.DynamicRasterDraw": {
+          "forced_window_p50_ms": [
+            0.019456,
+            0.019456
+          ],
+          "reuse_window_p50_ms": [
+            0.006912,
+            0.006912
+          ],
+          "forced_p95_ms": [
+            0.0208,
+            0.022784
+          ],
+          "reuse_p95_ms": [
+            0.008512,
+            0.009856
+          ],
+          "change_percent": 64.47368421052632
+        },
+        "VSM.StaticRaster": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007296,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.009472,
+            0.010752000000000001
+          ],
+          "reuse_p95_ms": [
+            0.009728,
+            0.010496
+          ],
+          "change_percent": -0.8928571428571619
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.Resolve": {
+          "forced_window_p50_ms": [
+            8.104704,
+            8.161152
+          ],
+          "reuse_window_p50_ms": [
+            8.074752,
+            8.068224
+          ],
+          "forced_p95_ms": [
+            8.480896,
+            8.797376
+          ],
+          "reuse_p95_ms": [
+            8.535487999999999,
+            8.535616
+          ],
+          "change_percent": 0.7554474845959502
+        },
+        "VSM.ResolveTrace": {
+          "forced_window_p50_ms": [
+            7.875968,
+            7.91552
+          ],
+          "reuse_window_p50_ms": [
+            7.809792,
+            7.778048
+          ],
+          "forced_p95_ms": [
+            8.194047999999999,
+            8.518847999999998
+          ],
+          "reuse_p95_ms": [
+            8.28832,
+            8.28736
+          ],
+          "change_percent": 1.2896061473117726
+        },
+        "VSM.FilterHorizontal": {
+          "forced_window_p50_ms": [
+            0.065792,
+            0.065792
+          ],
+          "reuse_window_p50_ms": [
+            0.065792,
+            0.065792
+          ],
+          "forced_p95_ms": [
+            0.06739200000000001,
+            0.067584
+          ],
+          "reuse_p95_ms": [
+            0.06784,
+            0.067072
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.FilterVertical": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.FilterTemporalVertical": {
+          "forced_window_p50_ms": [
+            0.159744,
+            0.16
+          ],
+          "reuse_window_p50_ms": [
+            0.16,
+            0.16
+          ],
+          "forced_p95_ms": [
+            0.334208,
+            0.17216
+          ],
+          "reuse_p95_ms": [
+            0.20588800000000002,
+            0.206336
+          ],
+          "change_percent": -0.08006405124099114
+        },
+        "VSM.ResetFeedback": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        }
+      }
+    },
+    {
+      "resolution": 8192,
+      "scenario": 2,
+      "allocated": 1024,
+      "primary": [
+        956,
+        956
+      ],
+      "pressure_bias": 1.7419002056121826,
+      "forced_dynamic_dirty": [
+        1024,
+        1024
+      ],
+      "reuse_dynamic_dirty": [
+        34,
+        34
+      ],
+      "forced_instances": [
+        1245,
+        1245
+      ],
+      "reuse_instances": [
+        43,
+        43
+      ],
+      "forced_vertex_slots": [
+        478080,
+        478080
+      ],
+      "reuse_vertex_slots": [
+        16512,
+        16512
+      ],
+      "metrics": {
+        "VSM.MarkReceiverPages": {
+          "forced_window_p50_ms": [
+            0.8953599999999999,
+            0.895104
+          ],
+          "reuse_window_p50_ms": [
+            0.895616,
+            0.8963840000000001
+          ],
+          "forced_p95_ms": [
+            1.097728,
+            0.901632
+          ],
+          "reuse_p95_ms": [
+            1.112256,
+            1.2783360000000001
+          ],
+          "change_percent": -0.08578781812982328
+        },
+        "VSM.AllocationPrepare": {
+          "forced_window_p50_ms": [
+            0.01024,
+            0.01024
+          ],
+          "reuse_window_p50_ms": [
+            0.01024,
+            0.01024
+          ],
+          "forced_p95_ms": [
+            0.010496,
+            0.010496
+          ],
+          "reuse_p95_ms": [
+            0.010496,
+            0.010496
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.AllocationCommit": {
+          "forced_window_p50_ms": [
+            1.1690239999999998,
+            1.168896
+          ],
+          "reuse_window_p50_ms": [
+            1.169152,
+            1.16864
+          ],
+          "forced_p95_ms": [
+            1.177408,
+            1.177216
+          ],
+          "reuse_p95_ms": [
+            1.1776,
+            1.177856
+          ],
+          "change_percent": 0.005474952094153274
+        },
+        "VSM.Allocate": {
+          "forced_window_p50_ms": [
+            1.3611520000000001,
+            1.42208
+          ],
+          "reuse_window_p50_ms": [
+            1.186432,
+            1.3603839999999998
+          ],
+          "forced_p95_ms": [
+            1.679424,
+            1.731584
+          ],
+          "reuse_p95_ms": [
+            1.697088,
+            1.6843519999999998
+          ],
+          "change_percent": 8.494297277409867
+        },
+        "VSM.ClearPhysicalPages": {
+          "forced_window_p50_ms": [
+            0.344064,
+            0.34432
+          ],
+          "reuse_window_p50_ms": [
+            0.124416,
+            0.124416
+          ],
+          "forced_p95_ms": [
+            0.345408,
+            0.520448
+          ],
+          "reuse_p95_ms": [
+            0.128256,
+            0.128256
+          ],
+          "change_percent": 63.85273335812569
+        },
+        "VSM.PageOccupancy": {
+          "forced_window_p50_ms": [
+            0.09472,
+            0.094464
+          ],
+          "reuse_window_p50_ms": [
+            0.06912,
+            0.066944
+          ],
+          "forced_p95_ms": [
+            0.097024,
+            0.096256
+          ],
+          "reuse_p95_ms": [
+            0.071424,
+            0.069632
+          ],
+          "change_percent": 28.07848443843031
+        },
+        "VSM.FinalizePages": {
+          "forced_window_p50_ms": [
+            0.002048,
+            0.002048
+          ],
+          "reuse_window_p50_ms": [
+            0.002048,
+            0.002048
+          ],
+          "forced_p95_ms": [
+            0.002816,
+            0.00256
+          ],
+          "reuse_p95_ms": [
+            0.002816,
+            0.00256
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRaster": {
+          "forced_window_p50_ms": [
+            0.03456,
+            0.03456
+          ],
+          "reuse_window_p50_ms": [
+            0.016384,
+            0.016256
+          ],
+          "forced_p95_ms": [
+            0.038208,
+            0.035072
+          ],
+          "reuse_p95_ms": [
+            0.026752,
+            0.026944
+          ],
+          "change_percent": 52.77777777777777
+        },
+        "VSM.LayoutRemap": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateStatic": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.InvalidateDynamic": {
+          "forced_window_p50_ms": [
+            0.001792,
+            0.001792
+          ],
+          "reuse_window_p50_ms": [
+            0.033024,
+            0.033024
+          ],
+          "forced_p95_ms": [
+            0.0028799999999999997,
+            0.003072
+          ],
+          "reuse_p95_ms": [
+            0.051840000000000004,
+            0.054016
+          ],
+          "change_percent": -1742.8571428571427
+        },
+        "VSM.StaticCasterCull": {
+          "forced_window_p50_ms": [
+            0.43302399999999996,
+            0.429568
+          ],
+          "reuse_window_p50_ms": [
+            0.429824,
+            0.43008
+          ],
+          "forced_p95_ms": [
+            0.69504,
+            0.6745599999999999
+          ],
+          "reuse_p95_ms": [
+            0.605248,
+            0.615744
+          ],
+          "change_percent": 0.31161893456003176
+        },
+        "VSM.DynamicCasterCull": {
+          "forced_window_p50_ms": [
+            0.144128,
+            0.144128
+          ],
+          "reuse_window_p50_ms": [
+            0.142336,
+            0.14374399999999998
+          ],
+          "forced_p95_ms": [
+            0.154304,
+            0.151424
+          ],
+          "reuse_p95_ms": [
+            0.289792,
+            0.316032
+          ],
+          "change_percent": 0.7548845470692789
+        },
+        "VSM.PageCull": {
+          "forced_window_p50_ms": [
+            0.5400320000000001,
+            0.537472
+          ],
+          "reuse_window_p50_ms": [
+            0.5365759999999999,
+            0.537472
+          ],
+          "forced_p95_ms": [
+            0.5622400000000001,
+            0.5545599999999999
+          ],
+          "reuse_p95_ms": [
+            0.556864,
+            0.562176
+          ],
+          "change_percent": 0.32074126870992314
+        },
+        "VSM.StaticRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "reuse_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "change_percent": null
+        },
+        "VSM.StaticRasterDraw": {
+          "forced_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "reuse_window_p50_ms": [
+            0.007168,
+            0.007168
+          ],
+          "forced_p95_ms": [
+            0.010048,
+            0.009792
+          ],
+          "reuse_p95_ms": [
+            0.010048,
+            0.010816
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.DynamicRasterClear": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.000256,
+            0.000256
+          ],
+          "reuse_p95_ms": [
+            0.000384,
+            0.004992
+          ],
+          "change_percent": null
+        },
+        "VSM.DynamicRasterDraw": {
+          "forced_window_p50_ms": [
+            0.034304,
+            0.03456
+          ],
+          "reuse_window_p50_ms": [
+            0.016128,
+            0.016
+          ],
+          "forced_p95_ms": [
+            0.037888,
+            0.034816
+          ],
+          "reuse_p95_ms": [
+            0.020864,
+            0.019584
+          ],
+          "change_percent": 53.3457249070632
+        },
+        "VSM.StaticRaster": {
+          "forced_window_p50_ms": [
+            0.007424,
+            0.007424
+          ],
+          "reuse_window_p50_ms": [
+            0.007424,
+            0.007424
+          ],
+          "forced_p95_ms": [
+            0.010496,
+            0.010048
+          ],
+          "reuse_p95_ms": [
+            0.010496,
+            0.011328
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.UnityCompatibilityRaster": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.Resolve": {
+          "forced_window_p50_ms": [
+            7.923712,
+            7.9834879999999995
+          ],
+          "reuse_window_p50_ms": [
+            7.7117439999999995,
+            8.007424
+          ],
+          "forced_p95_ms": [
+            8.795392,
+            8.4896
+          ],
+          "reuse_p95_ms": [
+            8.478784,
+            8.462592
+          ],
+          "change_percent": 1.1820559243612916
+        },
+        "VSM.ResolveTrace": {
+          "forced_window_p50_ms": [
+            7.68576,
+            7.751168
+          ],
+          "reuse_window_p50_ms": [
+            7.475072,
+            7.750912
+          ],
+          "forced_p95_ms": [
+            8.357568,
+            8.216256
+          ],
+          "reuse_p95_ms": [
+            8.208511999999999,
+            8.23456
+          ],
+          "change_percent": 1.3664894984287024
+        },
+        "VSM.FilterHorizontal": {
+          "forced_window_p50_ms": [
+            0.065536,
+            0.065792
+          ],
+          "reuse_window_p50_ms": [
+            0.065536,
+            0.065792
+          ],
+          "forced_p95_ms": [
+            0.067584,
+            0.067328
+          ],
+          "reuse_p95_ms": [
+            0.06784,
+            0.067584
+          ],
+          "change_percent": 0.0
+        },
+        "VSM.FilterVertical": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        },
+        "VSM.FilterTemporalVertical": {
+          "forced_window_p50_ms": [
+            0.159488,
+            0.159744
+          ],
+          "reuse_window_p50_ms": [
+            0.159232,
+            0.159744
+          ],
+          "forced_p95_ms": [
+            0.16384,
+            0.162624
+          ],
+          "reuse_p95_ms": [
+            0.162688,
+            0.16192
+          ],
+          "change_percent": 0.080192461908557
+        },
+        "VSM.ResetFeedback": {
+          "forced_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_window_p50_ms": [
+            0.0,
+            0.0
+          ],
+          "forced_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "reuse_p95_ms": [
+            0.0,
+            0.0
+          ],
+          "change_percent": null
+        }
+      }
+    }
+  ],
+  "depth_cases": 8,
+  "depth_values_checked_both_pools": 3546808320,
+  "scene_restored": true
+}

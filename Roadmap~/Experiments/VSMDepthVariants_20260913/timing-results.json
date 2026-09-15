@@ -1,0 +1,4802 @@
+{
+  "specialized-0a": {
+    "windows": [
+      {
+        "file": "00_r2048_p1024_l0_m0.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.068607999999999,
+            "min": 4.013568,
+            "max": 5.25952
+          },
+          "VSM.Resolve": {
+            "median": 4.288,
+            "min": 4.231424,
+            "max": 5.483264
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.18048,
+            "min": 0.1792,
+            "max": 0.6784
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.06528,
+            "min": 0.063232,
+            "max": 0.536576
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007424,
+            "min": 0.003072,
+            "max": 0.011264
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.087808,
+            "min": 0.078848,
+            "max": 0.3968
+          },
+          "VSM.Allocate": {
+            "median": 0.277248,
+            "min": 0.272384,
+            "max": 0.291328
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.500736,
+            "min": 0.49664,
+            "max": 1.147648
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "01_r4096_p1024_l0_m0.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.99264,
+            "min": 4.867584,
+            "max": 6.236416
+          },
+          "VSM.Resolve": {
+            "median": 5.215872,
+            "min": 5.089024,
+            "max": 6.46016
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.262144,
+            "min": 0.260352,
+            "max": 0.694528
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.068608,
+            "min": 0.063232,
+            "max": 0.38144
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003072,
+            "max": 0.304896
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.087808,
+            "min": 0.07808,
+            "max": 0.251392
+          },
+          "VSM.Allocate": {
+            "median": 0.577536,
+            "min": 0.565248,
+            "max": 0.604416
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.585984,
+            "min": 0.58112,
+            "max": 1.178624
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "02_r4096_p1024_l0_m0.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.951936,
+            "min": 4.875264,
+            "max": 6.583296
+          },
+          "VSM.Resolve": {
+            "median": 5.173248,
+            "min": 5.09568,
+            "max": 6.812672
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.261888,
+            "min": 0.25984,
+            "max": 0.555776
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.070784,
+            "min": 0.061696,
+            "max": 0.22784
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007424,
+            "min": 0.003072,
+            "max": 0.03456
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.08832000000000001,
+            "min": 0.077312,
+            "max": 0.249856
+          },
+          "VSM.Allocate": {
+            "median": 0.577152,
+            "min": 0.564736,
+            "max": 0.606976
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.585216,
+            "min": 0.580096,
+            "max": 1.158912
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "03_r2048_p1024_l0_m0.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 3.90848,
+            "min": 3.869696,
+            "max": 5.020928
+          },
+          "VSM.Resolve": {
+            "median": 4.127104,
+            "min": 4.087808,
+            "max": 5.34272
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.18048,
+            "min": 0.179456,
+            "max": 0.644096
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.061952,
+            "min": 0.060416,
+            "max": 0.429568
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003072,
+            "max": 0.012288
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.088064,
+            "min": 0.077824,
+            "max": 0.434176
+          },
+          "VSM.Allocate": {
+            "median": 0.270336,
+            "min": 0.267008,
+            "max": 0.513792
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.580352,
+            "min": 0.578048,
+            "max": 1.208064
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      }
+    ],
+    "groups": {
+      "r2048_p1024_l0_m0": {
+        "VSM.ResolveTrace": [
+          4.068607999999999,
+          3.90848
+        ],
+        "VSM.Resolve": [
+          4.288,
+          4.127104
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.18048,
+          0.18048
+        ],
+        "VSM.PageOccupancy": [
+          0.06528,
+          0.061952
+        ],
+        "VSM.StaticRaster": [
+          0.007424,
+          0.00768
+        ],
+        "VSM.DynamicRaster": [
+          0.087808,
+          0.088064
+        ],
+        "VSM.Allocate": [
+          0.277248,
+          0.270336
+        ],
+        "VSM.MarkReceiverPages": [
+          0.500736,
+          0.580352
+        ]
+      },
+      "r4096_p1024_l0_m0": {
+        "VSM.ResolveTrace": [
+          4.99264,
+          4.951936
+        ],
+        "VSM.Resolve": [
+          5.215872,
+          5.173248
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.262144,
+          0.261888
+        ],
+        "VSM.PageOccupancy": [
+          0.068608,
+          0.070784
+        ],
+        "VSM.StaticRaster": [
+          0.00768,
+          0.007424
+        ],
+        "VSM.DynamicRaster": [
+          0.087808,
+          0.08832000000000001
+        ],
+        "VSM.Allocate": [
+          0.577536,
+          0.577152
+        ],
+        "VSM.MarkReceiverPages": [
+          0.585984,
+          0.585216
+        ]
+      }
+    },
+    "restoration": {
+      "settings": true,
+      "camera": true,
+      "camera-transform": true,
+      "scenes": true
+    }
+  },
+  "specialized-1": {
+    "windows": [
+      {
+        "file": "00_r2048_p1024_l0_m1.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.521984,
+            "min": 3.904256,
+            "max": 5.331456
+          },
+          "VSM.Resolve": {
+            "median": 4.826496000000001,
+            "min": 4.122368,
+            "max": 5.58208
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.35648,
+            "min": 0.178688,
+            "max": 0.797952
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.046848,
+            "min": 0.045824,
+            "max": 0.082944
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003328,
+            "max": 0.041216
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.08704,
+            "min": 0.078336,
+            "max": 0.29184
+          },
+          "VSM.Allocate": {
+            "median": 0.269824,
+            "min": 0.265728,
+            "max": 0.273664
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.566528,
+            "min": 0.563712,
+            "max": 0.785664
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "01_r4096_p1024_l0_m1.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.82144,
+            "min": 4.975872,
+            "max": 6.918656
+          },
+          "VSM.Resolve": {
+            "median": 6.064512,
+            "min": 5.196288,
+            "max": 7.145728
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.261376,
+            "min": 0.259328,
+            "max": 0.703232
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.061056,
+            "min": 0.054784,
+            "max": 0.388096
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003072,
+            "max": 0.032768
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.086528,
+            "min": 0.079616,
+            "max": 0.679168
+          },
+          "VSM.Allocate": {
+            "median": 0.632192,
+            "min": 0.622336,
+            "max": 0.67328
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.648704,
+            "min": 0.644608,
+            "max": 1.01504
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "02_r4096_p1024_l0_m1.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.759232000000001,
+            "min": 4.964352,
+            "max": 6.422528
+          },
+          "VSM.Resolve": {
+            "median": 5.993984,
+            "min": 5.18528,
+            "max": 6.756608
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.261632,
+            "min": 0.25984,
+            "max": 0.591104
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.060032,
+            "min": 0.051968,
+            "max": 0.265728
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003072,
+            "max": 0.011264
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.086912,
+            "min": 0.078592,
+            "max": 0.905984
+          },
+          "VSM.Allocate": {
+            "median": 0.634624,
+            "min": 0.619264,
+            "max": 0.670208
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.649472,
+            "min": 0.644608,
+            "max": 0.859392
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "03_r2048_p1024_l0_m1.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.513152,
+            "min": 3.904,
+            "max": 5.365248
+          },
+          "VSM.Resolve": {
+            "median": 4.799232,
+            "min": 4.1216,
+            "max": 5.590272
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.360064,
+            "min": 0.179456,
+            "max": 0.861696
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.046848,
+            "min": 0.045568,
+            "max": 0.394496
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003072,
+            "max": 0.295424
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.086784,
+            "min": 0.079872,
+            "max": 0.403968
+          },
+          "VSM.Allocate": {
+            "median": 0.29568,
+            "min": 0.29184,
+            "max": 0.298496
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.566784,
+            "min": 0.563968,
+            "max": 0.779264
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      }
+    ],
+    "groups": {
+      "r2048_p1024_l0_m1": {
+        "VSM.ResolveTrace": [
+          4.521984,
+          4.513152
+        ],
+        "VSM.Resolve": [
+          4.826496000000001,
+          4.799232
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.35648,
+          0.360064
+        ],
+        "VSM.PageOccupancy": [
+          0.046848,
+          0.046848
+        ],
+        "VSM.StaticRaster": [
+          0.00768,
+          0.00768
+        ],
+        "VSM.DynamicRaster": [
+          0.08704,
+          0.086784
+        ],
+        "VSM.Allocate": [
+          0.269824,
+          0.29568
+        ],
+        "VSM.MarkReceiverPages": [
+          0.566528,
+          0.566784
+        ]
+      },
+      "r4096_p1024_l0_m1": {
+        "VSM.ResolveTrace": [
+          5.82144,
+          5.759232000000001
+        ],
+        "VSM.Resolve": [
+          6.064512,
+          5.993984
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.261376,
+          0.261632
+        ],
+        "VSM.PageOccupancy": [
+          0.061056,
+          0.060032
+        ],
+        "VSM.StaticRaster": [
+          0.00768,
+          0.00768
+        ],
+        "VSM.DynamicRaster": [
+          0.086528,
+          0.086912
+        ],
+        "VSM.Allocate": [
+          0.632192,
+          0.634624
+        ],
+        "VSM.MarkReceiverPages": [
+          0.648704,
+          0.649472
+        ]
+      }
+    },
+    "restoration": {
+      "settings": true,
+      "camera": true,
+      "camera-transform": true,
+      "scenes": true
+    }
+  },
+  "specialized-2": {
+    "windows": [
+      {
+        "file": "00_r2048_p1024_l0_m2.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.2882560000000005,
+            "min": 3.938816,
+            "max": 5.074944
+          },
+          "VSM.Resolve": {
+            "median": 4.541183999999999,
+            "min": 4.156928,
+            "max": 5.30176
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.179968,
+            "min": 0.178688,
+            "max": 0.72064
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.06144,
+            "min": 0.06016,
+            "max": 0.099584
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003072,
+            "max": 0.105472
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.086016,
+            "min": 0.078592,
+            "max": 0.395776
+          },
+          "VSM.Allocate": {
+            "median": 0.2688,
+            "min": 0.265472,
+            "max": 0.272896
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.521472,
+            "min": 0.517376,
+            "max": 0.727296
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "01_r4096_p1024_l0_m2.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.727488,
+            "min": 4.93312,
+            "max": 6.313984
+          },
+          "VSM.Resolve": {
+            "median": 5.951616,
+            "min": 5.15328,
+            "max": 6.581248
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.26112,
+            "min": 0.259584,
+            "max": 0.573696
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.071936,
+            "min": 0.064,
+            "max": 0.37632
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007424,
+            "min": 0.003072,
+            "max": 0.018432
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.086656,
+            "min": 0.078336,
+            "max": 0.1088
+          },
+          "VSM.Allocate": {
+            "median": 0.597888,
+            "min": 0.587264,
+            "max": 0.611584
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.557312,
+            "min": 0.553216,
+            "max": 0.780288
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "02_r4096_p1024_l0_m2.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.717376,
+            "min": 4.917248,
+            "max": 8.83328
+          },
+          "VSM.Resolve": {
+            "median": 5.976191999999999,
+            "min": 5.136896,
+            "max": 9.060352
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.26112,
+            "min": 0.259328,
+            "max": 0.584192
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.071296,
+            "min": 0.063744,
+            "max": 0.44032
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003072,
+            "max": 0.029696
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.086144,
+            "min": 0.078848,
+            "max": 0.315392
+          },
+          "VSM.Allocate": {
+            "median": 0.598272,
+            "min": 0.587264,
+            "max": 0.622848
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.557568,
+            "min": 0.553728,
+            "max": 1.189632
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "03_r2048_p1024_l0_m2.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.862336,
+            "min": 4.225536,
+            "max": 5.918464
+          },
+          "VSM.Resolve": {
+            "median": 5.1362559999999995,
+            "min": 4.48128,
+            "max": 6.145024
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.372096,
+            "min": 0.178688,
+            "max": 0.868352
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.062208,
+            "min": 0.06016,
+            "max": 0.100352
+          },
+          "VSM.StaticRaster": {
+            "median": 0.00768,
+            "min": 0.003072,
+            "max": 0.10368
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.087168,
+            "min": 0.07936,
+            "max": 0.109056
+          },
+          "VSM.Allocate": {
+            "median": 0.288256,
+            "min": 0.284416,
+            "max": 0.30592
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.49024,
+            "min": 0.487424,
+            "max": 0.796672
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      }
+    ],
+    "groups": {
+      "r2048_p1024_l0_m2": {
+        "VSM.ResolveTrace": [
+          4.2882560000000005,
+          4.862336
+        ],
+        "VSM.Resolve": [
+          4.541183999999999,
+          5.1362559999999995
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.179968,
+          0.372096
+        ],
+        "VSM.PageOccupancy": [
+          0.06144,
+          0.062208
+        ],
+        "VSM.StaticRaster": [
+          0.00768,
+          0.00768
+        ],
+        "VSM.DynamicRaster": [
+          0.086016,
+          0.087168
+        ],
+        "VSM.Allocate": [
+          0.2688,
+          0.288256
+        ],
+        "VSM.MarkReceiverPages": [
+          0.521472,
+          0.49024
+        ]
+      },
+      "r4096_p1024_l0_m2": {
+        "VSM.ResolveTrace": [
+          5.727488,
+          5.717376
+        ],
+        "VSM.Resolve": [
+          5.951616,
+          5.976191999999999
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.26112,
+          0.26112
+        ],
+        "VSM.PageOccupancy": [
+          0.071936,
+          0.071296
+        ],
+        "VSM.StaticRaster": [
+          0.007424,
+          0.00768
+        ],
+        "VSM.DynamicRaster": [
+          0.086656,
+          0.086144
+        ],
+        "VSM.Allocate": [
+          0.597888,
+          0.598272
+        ],
+        "VSM.MarkReceiverPages": [
+          0.557312,
+          0.557568
+        ]
+      }
+    },
+    "restoration": {
+      "settings": true,
+      "camera": true,
+      "camera-transform": true,
+      "scenes": true
+    }
+  },
+  "timing": {
+    "windows": [
+      {
+        "file": "00_r2048_p1024_l0_m0.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.095168,
+            "min": 4.545536,
+            "max": 6.491904
+          },
+          "VSM.Resolve": {
+            "median": 5.320448,
+            "min": 4.763904,
+            "max": 6.721024
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.182016,
+            "min": 0.178432,
+            "max": 0.606208
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.0576,
+            "min": 0.054784,
+            "max": 0.116224
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.01664
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.090112,
+            "min": 0.081408,
+            "max": 0.409344
+          },
+          "VSM.Allocate": {
+            "median": 0.278528,
+            "min": 0.27392,
+            "max": 0.292608
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.533504,
+            "min": 0.52736,
+            "max": 1.184
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "01_r2048_p1024_l0_m1.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.480576,
+            "min": 4.624384,
+            "max": 6.258432
+          },
+          "VSM.Resolve": {
+            "median": 5.739264,
+            "min": 4.983808,
+            "max": 6.717952
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.374784,
+            "min": 0.179968,
+            "max": 1.213696
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.0512,
+            "min": 0.04992,
+            "max": 0.086272
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.610816
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089728,
+            "min": 0.080384,
+            "max": 0.437504
+          },
+          "VSM.Allocate": {
+            "median": 0.278784,
+            "min": 0.2752,
+            "max": 0.281344
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.533504,
+            "min": 0.529152,
+            "max": 0.837376
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "02_r2048_p1024_l0_m2.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.389056,
+            "min": 4.934656,
+            "max": 6.512384
+          },
+          "VSM.Resolve": {
+            "median": 5.619071999999999,
+            "min": 5.16224,
+            "max": 6.743808
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.35584,
+            "min": 0.180736,
+            "max": 0.84224
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.056704000000000004,
+            "min": 0.05504,
+            "max": 0.112384
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.041216
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089216,
+            "min": 0.077312,
+            "max": 0.465664
+          },
+          "VSM.Allocate": {
+            "median": 0.27904,
+            "min": 0.275968,
+            "max": 0.280832
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.533504,
+            "min": 0.528384,
+            "max": 0.745984
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "03_r2048_p1024_l0_m3.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 3,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.413119999999999,
+            "min": 4.6336,
+            "max": 6.12736
+          },
+          "VSM.Resolve": {
+            "median": 5.644416,
+            "min": 5.01888,
+            "max": 6.478848
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.18291200000000002,
+            "min": 0.180224,
+            "max": 0.836352
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.051712,
+            "min": 0.049664,
+            "max": 0.088064
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.041472
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089856,
+            "min": 0.080896,
+            "max": 0.457216
+          },
+          "VSM.Allocate": {
+            "median": 0.27904,
+            "min": 0.274176,
+            "max": 0.282624
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.534528,
+            "min": 0.529152,
+            "max": 0.753408
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "04_r2048_p1024_l1_m0.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.8868480000000005,
+            "min": 5.053952,
+            "max": 6.592512
+          },
+          "VSM.Resolve": {
+            "median": 6.12096,
+            "min": 5.275904,
+            "max": 6.818048
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.937728,
+            "min": 0.731904,
+            "max": 1.27872
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.10636799999999999,
+            "min": 0.103936,
+            "max": 0.44928
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.021248
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.0896,
+            "min": 0.07936,
+            "max": 0.277248
+          },
+          "VSM.Allocate": {
+            "median": 0.27904,
+            "min": 0.273664,
+            "max": 0.287232
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.534016,
+            "min": 0.528128,
+            "max": 0.755968
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "05_r2048_p1024_l1_m1.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.82144,
+            "min": 5.041152,
+            "max": 6.843904
+          },
+          "VSM.Resolve": {
+            "median": 6.06976,
+            "min": 5.265408,
+            "max": 7.246848
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.98688,
+            "min": 0.73216,
+            "max": 1.279488
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.074752,
+            "min": 0.072192,
+            "max": 0.145152
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.205312
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089472,
+            "min": 0.080128,
+            "max": 0.094976
+          },
+          "VSM.Allocate": {
+            "median": 0.278528,
+            "min": 0.27392,
+            "max": 0.281088
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.533248,
+            "min": 0.528896,
+            "max": 0.851456
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "06_r2048_p1024_l1_m2.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.88608,
+            "min": 5.32864,
+            "max": 6.805248
+          },
+          "VSM.Resolve": {
+            "median": 6.159488,
+            "min": 5.55648,
+            "max": 7.032064
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.932096,
+            "min": 0.73216,
+            "max": 1.458432
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.106496,
+            "min": 0.103424,
+            "max": 0.28288
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.282624
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.0896,
+            "min": 0.079104,
+            "max": 0.54144
+          },
+          "VSM.Allocate": {
+            "median": 0.278784,
+            "min": 0.27392,
+            "max": 0.29184
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.534272,
+            "min": 0.529408,
+            "max": 1.10592
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "07_r2048_p1024_l1_m3.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 3,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.840384,
+            "min": 5.038336,
+            "max": 6.483712
+          },
+          "VSM.Resolve": {
+            "median": 6.100096000000001,
+            "min": 5.260544,
+            "max": 6.714368
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.0054400000000001,
+            "min": 0.732416,
+            "max": 1.286144
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.074752,
+            "min": 0.073216,
+            "max": 0.238848
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.324608
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089216,
+            "min": 0.076544,
+            "max": 0.476928
+          },
+          "VSM.Allocate": {
+            "median": 0.278784,
+            "min": 0.2752,
+            "max": 0.284672
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.534016,
+            "min": 0.526592,
+            "max": 0.782848
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "08_r4096_p1024_l0_m0.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 7.040128,
+            "min": 5.748736,
+            "max": 9.868544
+          },
+          "VSM.Resolve": {
+            "median": 7.2677119999999995,
+            "min": 5.970176,
+            "max": 10.0928
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.263936,
+            "min": 0.26112,
+            "max": 0.757504
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.073984,
+            "min": 0.065536,
+            "max": 0.317696
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.035328
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.086784,
+            "min": 0.077056,
+            "max": 0.093952
+          },
+          "VSM.Allocate": {
+            "median": 0.609152,
+            "min": 0.598272,
+            "max": 0.631296
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.604672,
+            "min": 0.60032,
+            "max": 1.173248
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "09_r4096_p1024_l0_m1.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.231552000000001,
+            "min": 5.767168,
+            "max": 8.74624
+          },
+          "VSM.Resolve": {
+            "median": 6.464512,
+            "min": 5.9904,
+            "max": 8.97152
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.264192,
+            "min": 0.260352,
+            "max": 0.777216
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.066688,
+            "min": 0.055552,
+            "max": 0.56064
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007296,
+            "min": 0.003072,
+            "max": 0.03328
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.08832,
+            "min": 0.079616,
+            "max": 0.466432
+          },
+          "VSM.Allocate": {
+            "median": 0.612224,
+            "min": 0.599296,
+            "max": 0.639744
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.605184,
+            "min": 0.601088,
+            "max": 0.872192
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "10_r4096_p1024_l0_m2.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.722048,
+            "min": 5.73952,
+            "max": 7.995392
+          },
+          "VSM.Resolve": {
+            "median": 6.967936,
+            "min": 5.960704,
+            "max": 8.221952
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.263936,
+            "min": 0.260864,
+            "max": 0.748288
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.07424,
+            "min": 0.065536,
+            "max": 0.344576
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.011776
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.08704,
+            "min": 0.079104,
+            "max": 0.412928
+          },
+          "VSM.Allocate": {
+            "median": 0.61056,
+            "min": 0.593664,
+            "max": 0.654592
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.60544,
+            "min": 0.600832,
+            "max": 2.323456
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "11_r4096_p1024_l0_m3.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 3,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.673536,
+            "min": 5.776128,
+            "max": 15.025408
+          },
+          "VSM.Resolve": {
+            "median": 7.006976,
+            "min": 5.997568,
+            "max": 15.252992
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.263936,
+            "min": 0.260864,
+            "max": 0.73088
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.066816,
+            "min": 0.058112,
+            "max": 0.45056
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007424,
+            "min": 0.003072,
+            "max": 0.026112
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.088832,
+            "min": 0.08064,
+            "max": 0.270336
+          },
+          "VSM.Allocate": {
+            "median": 0.608256,
+            "min": 0.594176,
+            "max": 0.644608
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.605184,
+            "min": 0.601856,
+            "max": 1.183488
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "12_r4096_p1024_l1_m0.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 24.369664,
+            "min": 20.780288,
+            "max": 43.359744
+          },
+          "VSM.Resolve": {
+            "median": 24.598399999999998,
+            "min": 21.002752,
+            "max": 43.588096
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.600768,
+            "min": 1.593344,
+            "max": 6.314496
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.201728,
+            "min": 0.194816,
+            "max": 0.474368
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.916736
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.088832,
+            "min": 0.079104,
+            "max": 2.24128
+          },
+          "VSM.Allocate": {
+            "median": 0.6053120000000001,
+            "min": 0.508928,
+            "max": 0.651008
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.603904,
+            "min": 0.60032,
+            "max": 2.812672
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "13_r4096_p1024_l1_m1.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 24.092416,
+            "min": 21.28512,
+            "max": 44.894208
+          },
+          "VSM.Resolve": {
+            "median": 24.621824,
+            "min": 21.51296,
+            "max": 45.12256
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.600768,
+            "min": 1.594112,
+            "max": 7.840768
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.082432,
+            "min": 0.08064,
+            "max": 0.151552
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 2.145024
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.087168,
+            "min": 0.077312,
+            "max": 2.219264
+          },
+          "VSM.Allocate": {
+            "median": 0.603904,
+            "min": 0.514048,
+            "max": 0.651776
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.60416,
+            "min": 0.600064,
+            "max": 5.22496
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "14_r4096_p1024_l1_m2.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 24.511232,
+            "min": 23.10656,
+            "max": 27.433728
+          },
+          "VSM.Resolve": {
+            "median": 24.803584,
+            "min": 23.332608,
+            "max": 28.581888
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.600768,
+            "min": 1.598464,
+            "max": 3.405056
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.201728,
+            "min": 0.194816,
+            "max": 0.61184
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.177152
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089856,
+            "min": 0.076288,
+            "max": 0.277504
+          },
+          "VSM.Allocate": {
+            "median": 0.605952,
+            "min": 0.596224,
+            "max": 0.655616
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.60416,
+            "min": 0.599296,
+            "max": 1.122304
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "15_r4096_p1024_l1_m3.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 3,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 22.137728,
+            "min": 20.967168,
+            "max": 35.466496
+          },
+          "VSM.Resolve": {
+            "median": 22.443392000000003,
+            "min": 21.193984,
+            "max": 35.69536
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.600768,
+            "min": 1.593856,
+            "max": 2.621696
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.08204800000000001,
+            "min": 0.080384,
+            "max": 0.544
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003328,
+            "max": 0.351744
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.0896,
+            "min": 0.08064,
+            "max": 0.464384
+          },
+          "VSM.Allocate": {
+            "median": 0.60416,
+            "min": 0.514048,
+            "max": 0.653312
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.603904,
+            "min": 0.601344,
+            "max": 1.380352
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "16_r4096_p1024_l1_m3.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 3,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 22.187392000000003,
+            "min": 19.313152,
+            "max": 26.653184
+          },
+          "VSM.Resolve": {
+            "median": 22.511872,
+            "min": 19.535616,
+            "max": 27.772416
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.601024,
+            "min": 1.597952,
+            "max": 2.694656
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.081664,
+            "min": 0.08064,
+            "max": 0.156416
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.010752
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.0896,
+            "min": 0.076288,
+            "max": 0.464896
+          },
+          "VSM.Allocate": {
+            "median": 0.6086400000000001,
+            "min": 0.595712,
+            "max": 0.651776
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.603904,
+            "min": 0.598528,
+            "max": 2.743552
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "17_r4096_p1024_l1_m2.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 24.267648,
+            "min": 22.31552,
+            "max": 27.084032
+          },
+          "VSM.Resolve": {
+            "median": 24.58176,
+            "min": 22.811136,
+            "max": 27.312384
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.601024,
+            "min": 1.599488,
+            "max": 2.657024
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.20096,
+            "min": 0.195328,
+            "max": 0.298496
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.030464
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089472,
+            "min": 0.079616,
+            "max": 0.097024
+          },
+          "VSM.Allocate": {
+            "median": 0.604672,
+            "min": 0.597248,
+            "max": 0.653568
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.603904,
+            "min": 0.601344,
+            "max": 0.997632
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "18_r4096_p1024_l1_m1.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 22.23424,
+            "min": 21.4272,
+            "max": 28.267776
+          },
+          "VSM.Resolve": {
+            "median": 22.557184,
+            "min": 21.654784,
+            "max": 28.49664
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.600768,
+            "min": 1.599488,
+            "max": 2.122496
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.081792,
+            "min": 0.08064,
+            "max": 0.15744
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.02176
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089856,
+            "min": 0.076288,
+            "max": 1.46816
+          },
+          "VSM.Allocate": {
+            "median": 0.606848,
+            "min": 0.594944,
+            "max": 0.6528
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.60416,
+            "min": 0.599808,
+            "max": 1.763584
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "19_r4096_p1024_l1_m0.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 23.90272,
+            "min": 22.113024,
+            "max": 28.34432
+          },
+          "VSM.Resolve": {
+            "median": 24.234624,
+            "min": 22.337792,
+            "max": 28.629504
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.600768,
+            "min": 1.592832,
+            "max": 2.320896
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.20096,
+            "min": 0.196864,
+            "max": 0.770816
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.011008
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089472,
+            "min": 0.080384,
+            "max": 0.43392
+          },
+          "VSM.Allocate": {
+            "median": 0.605696,
+            "min": 0.596736,
+            "max": 0.654336
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.60416,
+            "min": 0.59648,
+            "max": 0.97664
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "20_r4096_p1024_l0_m3.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 3,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 7.1745280000000005,
+            "min": 5.8752,
+            "max": 8.349696
+          },
+          "VSM.Resolve": {
+            "median": 7.452032,
+            "min": 6.739456,
+            "max": 8.639488
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.26752,
+            "min": 0.26112,
+            "max": 0.888064
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.06643199999999999,
+            "min": 0.060928,
+            "max": 0.267264
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.378368
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.090624,
+            "min": 0.080384,
+            "max": 0.417792
+          },
+          "VSM.Allocate": {
+            "median": 0.617088,
+            "min": 0.601344,
+            "max": 0.66816
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.645504,
+            "min": 0.602368,
+            "max": 1.05344
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "21_r4096_p1024_l0_m2.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 7.117184,
+            "min": 6.58688,
+            "max": 8.955392
+          },
+          "VSM.Resolve": {
+            "median": 7.469696,
+            "min": 6.81344,
+            "max": 9.609984
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.265344,
+            "min": 0.260608,
+            "max": 0.64768
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.075904,
+            "min": 0.063488,
+            "max": 0.579584
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007424,
+            "min": 0.003072,
+            "max": 0.091648
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.090624,
+            "min": 0.000256,
+            "max": 0.44544
+          },
+          "VSM.Allocate": {
+            "median": 0.615552,
+            "min": 0.595456,
+            "max": 0.690944
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.608256,
+            "min": 0.601856,
+            "max": 1.084672
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "22_r4096_p1024_l0_m1.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 7.228544,
+            "min": 6.324224,
+            "max": 8.599808
+          },
+          "VSM.Resolve": {
+            "median": 7.5262720000000005,
+            "min": 6.600448,
+            "max": 8.828416
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.269056,
+            "min": 0.26112,
+            "max": 0.840704
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.067328,
+            "min": 0.056832,
+            "max": 0.414208
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.029696
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.090624,
+            "min": 0.080896,
+            "max": 0.61056
+          },
+          "VSM.Allocate": {
+            "median": 0.618496,
+            "min": 0.598784,
+            "max": 0.666624
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.647424,
+            "min": 0.602368,
+            "max": 1.192704
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 3,
+            "6": 23,
+            "7": 6,
+            "8": 23,
+            "9": 49,
+            "10": 21,
+            "11": 43,
+            "12": 26,
+            "13": 41,
+            "14": 43,
+            "15": 38,
+            "16": 304
+          },
+          "dynamic": {
+            "0": 641
+          }
+        }
+      },
+      {
+        "file": "23_r4096_p1024_l0_m0.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 7.027839999999999,
+            "min": 5.905408,
+            "max": 7.918848
+          },
+          "VSM.Resolve": {
+            "median": 7.4001920000000005,
+            "min": 6.130688,
+            "max": 8.358912
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.269184,
+            "min": 0.26112,
+            "max": 0.756992
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.076032,
+            "min": 0.066816,
+            "max": 0.445696
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.045568
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.090752,
+            "min": 0.081408,
+            "max": 0.524544
+          },
+          "VSM.Allocate": {
+            "median": 0.618496,
+            "min": 0.601344,
+            "max": 0.669952
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.6478079999999999,
+            "min": 0.60288,
+            "max": 1.08416
+          }
+        },
+        "counters": [
+          641,
+          641,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "24_r2048_p1024_l1_m3.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 3,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.07872,
+            "min": 5.028096,
+            "max": 7.168512
+          },
+          "VSM.Resolve": {
+            "median": 6.3557120000000005,
+            "min": 5.250816,
+            "max": 7.399936
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.801408,
+            "min": 0.731904,
+            "max": 1.671936
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.07552,
+            "min": 0.073216,
+            "max": 0.24832
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.02048
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089856,
+            "min": 0.076288,
+            "max": 0.579328
+          },
+          "VSM.Allocate": {
+            "median": 0.27264,
+            "min": 0.265728,
+            "max": 0.279552
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.593152,
+            "min": 0.588288,
+            "max": 1.144576
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "25_r2048_p1024_l1_m2.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.174016,
+            "min": 5.032448,
+            "max": 6.989568
+          },
+          "VSM.Resolve": {
+            "median": 5.4036480000000005,
+            "min": 5.253632,
+            "max": 7.21792
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.800768,
+            "min": 0.73216,
+            "max": 1.232896
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.108288,
+            "min": 0.10496,
+            "max": 0.455936
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007424,
+            "min": 0.003072,
+            "max": 0.029184
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.0896,
+            "min": 0.080384,
+            "max": 0.765952
+          },
+          "VSM.Allocate": {
+            "median": 0.274176,
+            "min": 0.26624,
+            "max": 0.276736
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.633216,
+            "min": 0.588288,
+            "max": 0.856064
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "26_r2048_p1024_l1_m1.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.132928,
+            "min": 5.033472,
+            "max": 6.75968
+          },
+          "VSM.Resolve": {
+            "median": 5.361408,
+            "min": 5.256192,
+            "max": 6.990848
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.801024,
+            "min": 0.734464,
+            "max": 1.238016
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.076288,
+            "min": 0.073728,
+            "max": 0.397312
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003328,
+            "max": 0.027648
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089728,
+            "min": 0.08064,
+            "max": 0.41344
+          },
+          "VSM.Allocate": {
+            "median": 0.274432,
+            "min": 0.266496,
+            "max": 0.27648
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.634112,
+            "min": 0.588288,
+            "max": 0.849408
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "27_r2048_p1024_l1_m0.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.171200000000001,
+            "min": 5.035008,
+            "max": 6.019584
+          },
+          "VSM.Resolve": {
+            "median": 5.397632,
+            "min": 5.256192,
+            "max": 6.478592
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.801024,
+            "min": 0.732416,
+            "max": 1.147904
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.108032,
+            "min": 0.103424,
+            "max": 0.430592
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.01152
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.08768000000000001,
+            "min": 0.08064,
+            "max": 0.431104
+          },
+          "VSM.Allocate": {
+            "median": 0.27392,
+            "min": 0.265216,
+            "max": 0.281088
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.632576,
+            "min": 0.588288,
+            "max": 0.849408
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "28_r2048_p1024_l0_m3.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 3,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.695552,
+            "min": 4.592128,
+            "max": 6.560256
+          },
+          "VSM.Resolve": {
+            "median": 4.91904,
+            "min": 4.811264,
+            "max": 6.79296
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.190976,
+            "min": 0.182528,
+            "max": 1.016064
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.059136,
+            "min": 0.056832,
+            "max": 0.258816
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.027904
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.08832,
+            "min": 0.080384,
+            "max": 0.098048
+          },
+          "VSM.Allocate": {
+            "median": 0.274304,
+            "min": 0.266752,
+            "max": 0.276736
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.6336,
+            "min": 0.5888,
+            "max": 0.836352
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "29_r2048_p1024_l0_m2.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.700544,
+            "min": 4.5696,
+            "max": 5.557504
+          },
+          "VSM.Resolve": {
+            "median": 4.924032,
+            "min": 4.789504,
+            "max": 5.787392
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.190464,
+            "min": 0.180224,
+            "max": 0.58368
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.064512,
+            "min": 0.061696,
+            "max": 0.349184
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.040704
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.091264,
+            "min": 0.082176,
+            "max": 0.09728
+          },
+          "VSM.Allocate": {
+            "median": 0.274176,
+            "min": 0.267776,
+            "max": 0.27648
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.633344,
+            "min": 0.588544,
+            "max": 0.817152
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      },
+      {
+        "file": "30_r2048_p1024_l0_m1.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.696704,
+            "min": 4.587264,
+            "max": 5.535744
+          },
+          "VSM.Resolve": {
+            "median": 4.920704000000001,
+            "min": 4.806912,
+            "max": 5.875712
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.190464,
+            "min": 0.179968,
+            "max": 0.625152
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.05888,
+            "min": 0.05632,
+            "max": 0.086784
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007424,
+            "min": 0.003072,
+            "max": 0.013312
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.089216,
+            "min": 0.082432,
+            "max": 0.385024
+          },
+          "VSM.Allocate": {
+            "median": 0.274176,
+            "min": 0.266496,
+            "max": 0.276736
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.6337280000000001,
+            "min": 0.588544,
+            "max": 0.861952
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 9,
+            "7": 1,
+            "8": 9,
+            "9": 15,
+            "10": 1,
+            "11": 14,
+            "12": 6,
+            "13": 17,
+            "14": 19,
+            "15": 15,
+            "16": 138
+          },
+          "dynamic": {
+            "0": 266
+          }
+        }
+      },
+      {
+        "file": "31_r2048_p1024_l0_m0.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.700927999999999,
+            "min": 4.578816,
+            "max": 5.576448
+          },
+          "VSM.Resolve": {
+            "median": 4.924928,
+            "min": 4.79872,
+            "max": 5.808128
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.19072,
+            "min": 0.180224,
+            "max": 0.681728
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.064768,
+            "min": 0.062208,
+            "max": 0.416512
+          },
+          "VSM.StaticRaster": {
+            "median": 0.007168,
+            "min": 0.003072,
+            "max": 0.013568
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.08998400000000001,
+            "min": 0.08192,
+            "max": 0.40832
+          },
+          "VSM.Allocate": {
+            "median": 0.274432,
+            "min": 0.26752,
+            "max": 0.27648
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.632832,
+            "min": 0.589568,
+            "max": 0.856576
+          }
+        },
+        "counters": [
+          266,
+          266,
+          0,
+          0
+        ]
+      }
+    ],
+    "groups": {
+      "r2048_p1024_l0_m0": {
+        "VSM.ResolveTrace": [
+          5.095168,
+          4.700927999999999
+        ],
+        "VSM.Resolve": [
+          5.320448,
+          4.924928
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.182016,
+          0.19072
+        ],
+        "VSM.PageOccupancy": [
+          0.0576,
+          0.064768
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.090112,
+          0.08998400000000001
+        ],
+        "VSM.Allocate": [
+          0.278528,
+          0.274432
+        ],
+        "VSM.MarkReceiverPages": [
+          0.533504,
+          0.632832
+        ]
+      },
+      "r2048_p1024_l0_m1": {
+        "VSM.ResolveTrace": [
+          5.480576,
+          4.696704
+        ],
+        "VSM.Resolve": [
+          5.739264,
+          4.920704000000001
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.374784,
+          0.190464
+        ],
+        "VSM.PageOccupancy": [
+          0.0512,
+          0.05888
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007424
+        ],
+        "VSM.DynamicRaster": [
+          0.089728,
+          0.089216
+        ],
+        "VSM.Allocate": [
+          0.278784,
+          0.274176
+        ],
+        "VSM.MarkReceiverPages": [
+          0.533504,
+          0.6337280000000001
+        ]
+      },
+      "r2048_p1024_l0_m2": {
+        "VSM.ResolveTrace": [
+          5.389056,
+          4.700544
+        ],
+        "VSM.Resolve": [
+          5.619071999999999,
+          4.924032
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.35584,
+          0.190464
+        ],
+        "VSM.PageOccupancy": [
+          0.056704000000000004,
+          0.064512
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.089216,
+          0.091264
+        ],
+        "VSM.Allocate": [
+          0.27904,
+          0.274176
+        ],
+        "VSM.MarkReceiverPages": [
+          0.533504,
+          0.633344
+        ]
+      },
+      "r2048_p1024_l0_m3": {
+        "VSM.ResolveTrace": [
+          5.413119999999999,
+          4.695552
+        ],
+        "VSM.Resolve": [
+          5.644416,
+          4.91904
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.18291200000000002,
+          0.190976
+        ],
+        "VSM.PageOccupancy": [
+          0.051712,
+          0.059136
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.089856,
+          0.08832
+        ],
+        "VSM.Allocate": [
+          0.27904,
+          0.274304
+        ],
+        "VSM.MarkReceiverPages": [
+          0.534528,
+          0.6336
+        ]
+      },
+      "r2048_p1024_l1_m0": {
+        "VSM.ResolveTrace": [
+          5.8868480000000005,
+          5.171200000000001
+        ],
+        "VSM.Resolve": [
+          6.12096,
+          5.397632
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.937728,
+          0.801024
+        ],
+        "VSM.PageOccupancy": [
+          0.10636799999999999,
+          0.108032
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.0896,
+          0.08768000000000001
+        ],
+        "VSM.Allocate": [
+          0.27904,
+          0.27392
+        ],
+        "VSM.MarkReceiverPages": [
+          0.534016,
+          0.632576
+        ]
+      },
+      "r2048_p1024_l1_m1": {
+        "VSM.ResolveTrace": [
+          5.82144,
+          5.132928
+        ],
+        "VSM.Resolve": [
+          6.06976,
+          5.361408
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.98688,
+          0.801024
+        ],
+        "VSM.PageOccupancy": [
+          0.074752,
+          0.076288
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.089472,
+          0.089728
+        ],
+        "VSM.Allocate": [
+          0.278528,
+          0.274432
+        ],
+        "VSM.MarkReceiverPages": [
+          0.533248,
+          0.634112
+        ]
+      },
+      "r2048_p1024_l1_m2": {
+        "VSM.ResolveTrace": [
+          5.88608,
+          5.174016
+        ],
+        "VSM.Resolve": [
+          6.159488,
+          5.4036480000000005
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.932096,
+          0.800768
+        ],
+        "VSM.PageOccupancy": [
+          0.106496,
+          0.108288
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007424
+        ],
+        "VSM.DynamicRaster": [
+          0.0896,
+          0.0896
+        ],
+        "VSM.Allocate": [
+          0.278784,
+          0.274176
+        ],
+        "VSM.MarkReceiverPages": [
+          0.534272,
+          0.633216
+        ]
+      },
+      "r2048_p1024_l1_m3": {
+        "VSM.ResolveTrace": [
+          5.840384,
+          6.07872
+        ],
+        "VSM.Resolve": [
+          6.100096000000001,
+          6.3557120000000005
+        ],
+        "VSM.ClearPhysicalPages": [
+          1.0054400000000001,
+          0.801408
+        ],
+        "VSM.PageOccupancy": [
+          0.074752,
+          0.07552
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.089216,
+          0.089856
+        ],
+        "VSM.Allocate": [
+          0.278784,
+          0.27264
+        ],
+        "VSM.MarkReceiverPages": [
+          0.534016,
+          0.593152
+        ]
+      },
+      "r4096_p1024_l0_m0": {
+        "VSM.ResolveTrace": [
+          7.040128,
+          7.027839999999999
+        ],
+        "VSM.Resolve": [
+          7.2677119999999995,
+          7.4001920000000005
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.263936,
+          0.269184
+        ],
+        "VSM.PageOccupancy": [
+          0.073984,
+          0.076032
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.086784,
+          0.090752
+        ],
+        "VSM.Allocate": [
+          0.609152,
+          0.618496
+        ],
+        "VSM.MarkReceiverPages": [
+          0.604672,
+          0.6478079999999999
+        ]
+      },
+      "r4096_p1024_l0_m1": {
+        "VSM.ResolveTrace": [
+          6.231552000000001,
+          7.228544
+        ],
+        "VSM.Resolve": [
+          6.464512,
+          7.5262720000000005
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.264192,
+          0.269056
+        ],
+        "VSM.PageOccupancy": [
+          0.066688,
+          0.067328
+        ],
+        "VSM.StaticRaster": [
+          0.007296,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.08832,
+          0.090624
+        ],
+        "VSM.Allocate": [
+          0.612224,
+          0.618496
+        ],
+        "VSM.MarkReceiverPages": [
+          0.605184,
+          0.647424
+        ]
+      },
+      "r4096_p1024_l0_m2": {
+        "VSM.ResolveTrace": [
+          6.722048,
+          7.117184
+        ],
+        "VSM.Resolve": [
+          6.967936,
+          7.469696
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.263936,
+          0.265344
+        ],
+        "VSM.PageOccupancy": [
+          0.07424,
+          0.075904
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007424
+        ],
+        "VSM.DynamicRaster": [
+          0.08704,
+          0.090624
+        ],
+        "VSM.Allocate": [
+          0.61056,
+          0.615552
+        ],
+        "VSM.MarkReceiverPages": [
+          0.60544,
+          0.608256
+        ]
+      },
+      "r4096_p1024_l0_m3": {
+        "VSM.ResolveTrace": [
+          6.673536,
+          7.1745280000000005
+        ],
+        "VSM.Resolve": [
+          7.006976,
+          7.452032
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.263936,
+          0.26752
+        ],
+        "VSM.PageOccupancy": [
+          0.066816,
+          0.06643199999999999
+        ],
+        "VSM.StaticRaster": [
+          0.007424,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.088832,
+          0.090624
+        ],
+        "VSM.Allocate": [
+          0.608256,
+          0.617088
+        ],
+        "VSM.MarkReceiverPages": [
+          0.605184,
+          0.645504
+        ]
+      },
+      "r4096_p1024_l1_m0": {
+        "VSM.ResolveTrace": [
+          24.369664,
+          23.90272
+        ],
+        "VSM.Resolve": [
+          24.598399999999998,
+          24.234624
+        ],
+        "VSM.ClearPhysicalPages": [
+          1.600768,
+          1.600768
+        ],
+        "VSM.PageOccupancy": [
+          0.201728,
+          0.20096
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.088832,
+          0.089472
+        ],
+        "VSM.Allocate": [
+          0.6053120000000001,
+          0.605696
+        ],
+        "VSM.MarkReceiverPages": [
+          0.603904,
+          0.60416
+        ]
+      },
+      "r4096_p1024_l1_m1": {
+        "VSM.ResolveTrace": [
+          24.092416,
+          22.23424
+        ],
+        "VSM.Resolve": [
+          24.621824,
+          22.557184
+        ],
+        "VSM.ClearPhysicalPages": [
+          1.600768,
+          1.600768
+        ],
+        "VSM.PageOccupancy": [
+          0.082432,
+          0.081792
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.087168,
+          0.089856
+        ],
+        "VSM.Allocate": [
+          0.603904,
+          0.606848
+        ],
+        "VSM.MarkReceiverPages": [
+          0.60416,
+          0.60416
+        ]
+      },
+      "r4096_p1024_l1_m2": {
+        "VSM.ResolveTrace": [
+          24.511232,
+          24.267648
+        ],
+        "VSM.Resolve": [
+          24.803584,
+          24.58176
+        ],
+        "VSM.ClearPhysicalPages": [
+          1.600768,
+          1.601024
+        ],
+        "VSM.PageOccupancy": [
+          0.201728,
+          0.20096
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.089856,
+          0.089472
+        ],
+        "VSM.Allocate": [
+          0.605952,
+          0.604672
+        ],
+        "VSM.MarkReceiverPages": [
+          0.60416,
+          0.603904
+        ]
+      },
+      "r4096_p1024_l1_m3": {
+        "VSM.ResolveTrace": [
+          22.137728,
+          22.187392000000003
+        ],
+        "VSM.Resolve": [
+          22.443392000000003,
+          22.511872
+        ],
+        "VSM.ClearPhysicalPages": [
+          1.600768,
+          1.601024
+        ],
+        "VSM.PageOccupancy": [
+          0.08204800000000001,
+          0.081664
+        ],
+        "VSM.StaticRaster": [
+          0.007168,
+          0.007168
+        ],
+        "VSM.DynamicRaster": [
+          0.0896,
+          0.0896
+        ],
+        "VSM.Allocate": [
+          0.60416,
+          0.6086400000000001
+        ],
+        "VSM.MarkReceiverPages": [
+          0.603904,
+          0.603904
+        ]
+      }
+    },
+    "restoration": {
+      "settings": true,
+      "camera": true,
+      "camera-transform": true,
+      "scenes": true
+    }
+  },
+  "timing-moving-light": {
+    "windows": [
+      {
+        "file": "00_r2048_p1024_l0_m0.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.5664,
+            "min": 4.545536,
+            "max": 5.073408
+          },
+          "VSM.Resolve": {
+            "median": 4.69824,
+            "min": 4.678144,
+            "max": 5.211136
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.268032,
+            "min": 0.266496,
+            "max": 0.606464
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.056448,
+            "min": 0.05376,
+            "max": 0.12544
+          },
+          "VSM.StaticRaster": {
+            "median": 7.98976,
+            "min": 7.873792,
+            "max": 8.703488
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.084864,
+            "min": 0.010496,
+            "max": 0.231168
+          },
+          "VSM.Allocate": {
+            "median": 2.110464,
+            "min": 2.088448,
+            "max": 2.160128
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.634368,
+            "min": 0.6272,
+            "max": 1.261056
+          }
+        },
+        "counters": [
+          267,
+          267,
+          267,
+          0
+        ]
+      },
+      {
+        "file": "01_r2048_p1024_l0_m1.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.564992,
+            "min": 4.499456,
+            "max": 4.62592
+          },
+          "VSM.Resolve": {
+            "median": 4.697216,
+            "min": 4.630784,
+            "max": 4.758528
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.268672,
+            "min": 0.266496,
+            "max": 0.605952
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.135168,
+            "min": 0.127744,
+            "max": 0.183552
+          },
+          "VSM.StaticRaster": {
+            "median": 8.003968,
+            "min": 7.873024,
+            "max": 8.544512
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.083328,
+            "min": 0.010752,
+            "max": 0.207872
+          },
+          "VSM.Allocate": {
+            "median": 2.112768,
+            "min": 2.088704,
+            "max": 2.161408
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.635136,
+            "min": 0.627456,
+            "max": 1.229568
+          }
+        },
+        "counters": [
+          267,
+          267,
+          267,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 10,
+            "7": 1,
+            "8": 8,
+            "9": 16,
+            "10": 3,
+            "11": 12,
+            "12": 6,
+            "13": 20,
+            "14": 13,
+            "15": 22,
+            "16": 134
+          },
+          "dynamic": {
+            "0": 267
+          }
+        }
+      },
+      {
+        "file": "02_r2048_p1024_l0_m2.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.578048,
+            "min": 4.540416,
+            "max": 5.328128
+          },
+          "VSM.Resolve": {
+            "median": 4.7092480000000005,
+            "min": 4.673536,
+            "max": 5.466368
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.2688,
+            "min": 0.266496,
+            "max": 0.594176
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.055808,
+            "min": 0.05376,
+            "max": 0.117504
+          },
+          "VSM.StaticRaster": {
+            "median": 8.024576,
+            "min": 7.890432,
+            "max": 8.597504
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.082176,
+            "min": 0.009984,
+            "max": 0.096256
+          },
+          "VSM.Allocate": {
+            "median": 2.112896,
+            "min": 2.088448,
+            "max": 2.15936
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.634624,
+            "min": 0.628224,
+            "max": 1.336064
+          }
+        },
+        "counters": [
+          267,
+          267,
+          267,
+          0
+        ]
+      },
+      {
+        "file": "03_r2048_p1024_l1_m0.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.018496,
+            "min": 4.989184,
+            "max": 5.15712
+          },
+          "VSM.Resolve": {
+            "median": 5.152,
+            "min": 5.125376,
+            "max": 5.291264
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.396608,
+            "min": 1.386496,
+            "max": 2.03264
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.119552,
+            "min": 0.099072,
+            "max": 0.284928
+          },
+          "VSM.StaticRaster": {
+            "median": 9.844096,
+            "min": 9.663232,
+            "max": 10.443776
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.042368,
+            "min": 0.009984,
+            "max": 0.093952
+          },
+          "VSM.Allocate": {
+            "median": 2.10816,
+            "min": 2.088448,
+            "max": 2.169856
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.633856,
+            "min": 0.62848,
+            "max": 1.302784
+          }
+        },
+        "counters": [
+          267,
+          267,
+          267,
+          0
+        ]
+      },
+      {
+        "file": "04_r4096_p1024_l0_m0.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.711424,
+            "min": 5.675264,
+            "max": 8.859392
+          },
+          "VSM.Resolve": {
+            "median": 6.862592,
+            "min": 5.808896,
+            "max": 8.999168
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.4736,
+            "min": 0.470784,
+            "max": 0.477952
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.073472,
+            "min": 0.064,
+            "max": 0.123136
+          },
+          "VSM.StaticRaster": {
+            "median": 27.631487999999997,
+            "min": 27.293184,
+            "max": 29.414656
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.027392,
+            "min": 0.010496,
+            "max": 0.753664
+          },
+          "VSM.Allocate": {
+            "median": 11.29664,
+            "min": 11.15904,
+            "max": 11.475968
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.613888,
+            "min": 0.609536,
+            "max": 1.224448
+          }
+        },
+        "counters": [
+          644,
+          644,
+          644,
+          0
+        ]
+      },
+      {
+        "file": "05_r4096_p1024_l0_m1.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.780544000000001,
+            "min": 5.705728,
+            "max": 8.97024
+          },
+          "VSM.Resolve": {
+            "median": 6.921216,
+            "min": 5.838848,
+            "max": 9.110016
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.47372800000000004,
+            "min": 0.47104,
+            "max": 0.498176
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.180608,
+            "min": 0.164608,
+            "max": 0.423424
+          },
+          "VSM.StaticRaster": {
+            "median": 27.588352,
+            "min": 27.2256,
+            "max": 29.251328
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.028416,
+            "min": 0.009472,
+            "max": 0.840704
+          },
+          "VSM.Allocate": {
+            "median": 11.32352,
+            "min": 11.154688,
+            "max": 11.452672
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.614912,
+            "min": 0.609792,
+            "max": 1.348352
+          }
+        },
+        "counters": [
+          644,
+          644,
+          644,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 22,
+            "5": 2,
+            "6": 23,
+            "7": 6,
+            "8": 22,
+            "9": 53,
+            "10": 27,
+            "11": 43,
+            "12": 22,
+            "13": 41,
+            "14": 38,
+            "15": 45,
+            "16": 300
+          },
+          "dynamic": {
+            "0": 644
+          }
+        }
+      },
+      {
+        "file": "06_r4096_p1024_l0_m2.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.4346879999999995,
+            "min": 5.676288,
+            "max": 8.412416
+          },
+          "VSM.Resolve": {
+            "median": 6.586368,
+            "min": 5.809152,
+            "max": 8.552192
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.474112,
+            "min": 0.470784,
+            "max": 0.493312
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.07334399999999999,
+            "min": 0.065024,
+            "max": 0.29056
+          },
+          "VSM.StaticRaster": {
+            "median": 27.569536,
+            "min": 27.208448,
+            "max": 28.565504
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.027903999999999998,
+            "min": 0.01024,
+            "max": 0.093696
+          },
+          "VSM.Allocate": {
+            "median": 11.313792,
+            "min": 11.157504,
+            "max": 11.474688
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.614144,
+            "min": 0.609536,
+            "max": 1.156352
+          }
+        },
+        "counters": [
+          644,
+          644,
+          644,
+          0
+        ]
+      },
+      {
+        "file": "07_r4096_p1024_l1_m0.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 21.797248,
+            "min": 20.316672,
+            "max": 23.79648
+          },
+          "VSM.Resolve": {
+            "median": 21.937792,
+            "min": 20.456704,
+            "max": 24.109824
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 3.196288,
+            "min": 3.176448,
+            "max": 3.363584
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.20134400000000002,
+            "min": 0.188672,
+            "max": 0.28928
+          },
+          "VSM.StaticRaster": {
+            "median": 34.777727999999996,
+            "min": 33.939456,
+            "max": 36.198144
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.01664,
+            "min": 0.009472,
+            "max": 0.310272
+          },
+          "VSM.Allocate": {
+            "median": 11.2576,
+            "min": 11.154432,
+            "max": 11.356416
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.613632,
+            "min": 0.609792,
+            "max": 1.205504
+          }
+        },
+        "counters": [
+          644,
+          644,
+          644,
+          0
+        ]
+      },
+      {
+        "file": "08_r4096_p1024_l1_m0.csv",
+        "resolution": 4096,
+        "layout": 1,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 20.58624,
+            "min": 19.477504,
+            "max": 22.224384
+          },
+          "VSM.Resolve": {
+            "median": 20.724864,
+            "min": 19.614208,
+            "max": 22.424576
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 3.1978239999999998,
+            "min": 3.177728,
+            "max": 3.523584
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.200192,
+            "min": 0.19328,
+            "max": 0.284416
+          },
+          "VSM.StaticRaster": {
+            "median": 34.404224,
+            "min": 33.7344,
+            "max": 36.878592
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.02688,
+            "min": 0.009728,
+            "max": 0.177664
+          },
+          "VSM.Allocate": {
+            "median": 11.257728,
+            "min": 11.153152,
+            "max": 11.358976
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.61312,
+            "min": 0.608512,
+            "max": 1.21728
+          }
+        },
+        "counters": [
+          644,
+          644,
+          644,
+          0
+        ]
+      },
+      {
+        "file": "09_r4096_p1024_l0_m2.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.70784,
+            "min": 5.693696,
+            "max": 8.782592
+          },
+          "VSM.Resolve": {
+            "median": 6.871296,
+            "min": 5.828864,
+            "max": 8.921856
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.473472,
+            "min": 0.470784,
+            "max": 0.492288
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.07270399999999999,
+            "min": 0.065024,
+            "max": 0.118016
+          },
+          "VSM.StaticRaster": {
+            "median": 27.587328,
+            "min": 27.108096,
+            "max": 28.78592
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.026368,
+            "min": 0.01024,
+            "max": 0.627456
+          },
+          "VSM.Allocate": {
+            "median": 11.301376,
+            "min": 11.15648,
+            "max": 11.440384
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.614656,
+            "min": 0.60928,
+            "max": 1.295616
+          }
+        },
+        "counters": [
+          644,
+          644,
+          644,
+          0
+        ]
+      },
+      {
+        "file": "10_r4096_p1024_l0_m1.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.790144,
+            "min": 5.727488,
+            "max": 9.081856
+          },
+          "VSM.Resolve": {
+            "median": 7.0261759999999995,
+            "min": 5.862144,
+            "max": 9.379584
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.4736,
+            "min": 0.470528,
+            "max": 0.49024
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.1792,
+            "min": 0.164864,
+            "max": 0.211456
+          },
+          "VSM.StaticRaster": {
+            "median": 27.564416,
+            "min": 27.21792,
+            "max": 28.48256
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.026112,
+            "min": 0.009216,
+            "max": 0.24832
+          },
+          "VSM.Allocate": {
+            "median": 11.294848,
+            "min": 11.15776,
+            "max": 11.443968
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.6142719999999999,
+            "min": 0.609792,
+            "max": 1.233408
+          }
+        },
+        "counters": [
+          644,
+          644,
+          644,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 22,
+            "5": 2,
+            "6": 23,
+            "7": 6,
+            "8": 22,
+            "9": 53,
+            "10": 27,
+            "11": 43,
+            "12": 22,
+            "13": 41,
+            "14": 38,
+            "15": 45,
+            "16": 300
+          },
+          "dynamic": {
+            "0": 644
+          }
+        }
+      },
+      {
+        "file": "11_r4096_p1024_l0_m0.csv",
+        "resolution": 4096,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 6.747648,
+            "min": 5.72288,
+            "max": 8.96896
+          },
+          "VSM.Resolve": {
+            "median": 6.899584,
+            "min": 6.130688,
+            "max": 9.108992
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.4736,
+            "min": 0.47104,
+            "max": 0.478208
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.07424,
+            "min": 0.064512,
+            "max": 0.12672
+          },
+          "VSM.StaticRaster": {
+            "median": 27.550208,
+            "min": 27.205888,
+            "max": 28.994816
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.027520000000000003,
+            "min": 0.009984,
+            "max": 0.493312
+          },
+          "VSM.Allocate": {
+            "median": 11.297792000000001,
+            "min": 11.158016,
+            "max": 11.446272
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.613632,
+            "min": 0.609024,
+            "max": 1.215744
+          }
+        },
+        "counters": [
+          644,
+          644,
+          644,
+          0
+        ]
+      },
+      {
+        "file": "12_r2048_p1024_l1_m0.csv",
+        "resolution": 2048,
+        "layout": 1,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 5.008896,
+            "min": 4.96128,
+            "max": 5.218816
+          },
+          "VSM.Resolve": {
+            "median": 5.142656000000001,
+            "min": 5.095936,
+            "max": 5.35552
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 1.391232,
+            "min": 1.383424,
+            "max": 1.984512
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.118528,
+            "min": 0.112128,
+            "max": 0.28544
+          },
+          "VSM.StaticRaster": {
+            "median": 9.812224,
+            "min": 9.6128,
+            "max": 10.446848
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.083968,
+            "min": 0.009984,
+            "max": 0.09472
+          },
+          "VSM.Allocate": {
+            "median": 2.106112,
+            "min": 2.081792,
+            "max": 2.15424
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.614144,
+            "min": 0.60544,
+            "max": 1.168896
+          }
+        },
+        "counters": [
+          267,
+          267,
+          267,
+          0
+        ]
+      },
+      {
+        "file": "13_r2048_p1024_l0_m2.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 2,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.55872,
+            "min": 4.530944,
+            "max": 5.131264
+          },
+          "VSM.Resolve": {
+            "median": 4.690303999999999,
+            "min": 4.66432,
+            "max": 5.266944
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.268288,
+            "min": 0.266496,
+            "max": 0.573696
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.055552,
+            "min": 0.05376,
+            "max": 0.122368
+          },
+          "VSM.StaticRaster": {
+            "median": 7.989504,
+            "min": 7.854848,
+            "max": 8.799232
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.084992,
+            "min": 0.014592,
+            "max": 0.25216
+          },
+          "VSM.Allocate": {
+            "median": 2.106368,
+            "min": 2.088192,
+            "max": 2.157056
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.613248,
+            "min": 0.605952,
+            "max": 1.317888
+          }
+        },
+        "counters": [
+          267,
+          267,
+          267,
+          0
+        ]
+      },
+      {
+        "file": "14_r2048_p1024_l0_m1.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 1,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.559104,
+            "min": 4.524288,
+            "max": 6.278144
+          },
+          "VSM.Resolve": {
+            "median": 4.692096,
+            "min": 4.654592,
+            "max": 6.418432
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.268032,
+            "min": 0.26624,
+            "max": 0.3008
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.133376,
+            "min": 0.124416,
+            "max": 0.179968
+          },
+          "VSM.StaticRaster": {
+            "median": 8.010496,
+            "min": 7.85792,
+            "max": 8.970496
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.086272,
+            "min": 0.0128,
+            "max": 0.40064
+          },
+          "VSM.Allocate": {
+            "median": 2.104704,
+            "min": 2.085376,
+            "max": 2.145536
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.613376,
+            "min": 0.60544,
+            "max": 1.168896
+          }
+        },
+        "counters": [
+          267,
+          267,
+          267,
+          0
+        ],
+        "page_layer_counts": {
+          "static": {
+            "4": 21,
+            "5": 1,
+            "6": 10,
+            "7": 1,
+            "8": 8,
+            "9": 16,
+            "10": 3,
+            "11": 12,
+            "12": 6,
+            "13": 20,
+            "14": 13,
+            "15": 22,
+            "16": 134
+          },
+          "dynamic": {
+            "0": 267
+          }
+        }
+      },
+      {
+        "file": "15_r2048_p1024_l0_m0.csv",
+        "resolution": 2048,
+        "layout": 0,
+        "mode": 0,
+        "timings_ms": {
+          "VSM.ResolveTrace": {
+            "median": 4.560512,
+            "min": 4.524032,
+            "max": 5.852672
+          },
+          "VSM.Resolve": {
+            "median": 4.692608,
+            "min": 4.655872,
+            "max": 6.139904
+          },
+          "VSM.ClearPhysicalPages": {
+            "median": 0.267776,
+            "min": 0.265472,
+            "max": 0.410112
+          },
+          "VSM.PageOccupancy": {
+            "median": 0.056192000000000006,
+            "min": 0.05376,
+            "max": 0.26496
+          },
+          "VSM.StaticRaster": {
+            "median": 7.967744,
+            "min": 7.849216,
+            "max": 9.126144
+          },
+          "VSM.DynamicRaster": {
+            "median": 0.085632,
+            "min": 0.012288,
+            "max": 0.304384
+          },
+          "VSM.Allocate": {
+            "median": 2.10432,
+            "min": 2.08384,
+            "max": 2.334208
+          },
+          "VSM.MarkReceiverPages": {
+            "median": 0.613376,
+            "min": 0.605696,
+            "max": 1.113088
+          }
+        },
+        "counters": [
+          267,
+          267,
+          267,
+          0
+        ]
+      }
+    ],
+    "groups": {
+      "r2048_p1024_l0_m0": {
+        "VSM.ResolveTrace": [
+          4.5664,
+          4.560512
+        ],
+        "VSM.Resolve": [
+          4.69824,
+          4.692608
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.268032,
+          0.267776
+        ],
+        "VSM.PageOccupancy": [
+          0.056448,
+          0.056192000000000006
+        ],
+        "VSM.StaticRaster": [
+          7.98976,
+          7.967744
+        ],
+        "VSM.DynamicRaster": [
+          0.084864,
+          0.085632
+        ],
+        "VSM.Allocate": [
+          2.110464,
+          2.10432
+        ],
+        "VSM.MarkReceiverPages": [
+          0.634368,
+          0.613376
+        ]
+      },
+      "r2048_p1024_l0_m1": {
+        "VSM.ResolveTrace": [
+          4.564992,
+          4.559104
+        ],
+        "VSM.Resolve": [
+          4.697216,
+          4.692096
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.268672,
+          0.268032
+        ],
+        "VSM.PageOccupancy": [
+          0.135168,
+          0.133376
+        ],
+        "VSM.StaticRaster": [
+          8.003968,
+          8.010496
+        ],
+        "VSM.DynamicRaster": [
+          0.083328,
+          0.086272
+        ],
+        "VSM.Allocate": [
+          2.112768,
+          2.104704
+        ],
+        "VSM.MarkReceiverPages": [
+          0.635136,
+          0.613376
+        ]
+      },
+      "r2048_p1024_l0_m2": {
+        "VSM.ResolveTrace": [
+          4.578048,
+          4.55872
+        ],
+        "VSM.Resolve": [
+          4.7092480000000005,
+          4.690303999999999
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.2688,
+          0.268288
+        ],
+        "VSM.PageOccupancy": [
+          0.055808,
+          0.055552
+        ],
+        "VSM.StaticRaster": [
+          8.024576,
+          7.989504
+        ],
+        "VSM.DynamicRaster": [
+          0.082176,
+          0.084992
+        ],
+        "VSM.Allocate": [
+          2.112896,
+          2.106368
+        ],
+        "VSM.MarkReceiverPages": [
+          0.634624,
+          0.613248
+        ]
+      },
+      "r2048_p1024_l1_m0": {
+        "VSM.ResolveTrace": [
+          5.018496,
+          5.008896
+        ],
+        "VSM.Resolve": [
+          5.152,
+          5.142656000000001
+        ],
+        "VSM.ClearPhysicalPages": [
+          1.396608,
+          1.391232
+        ],
+        "VSM.PageOccupancy": [
+          0.119552,
+          0.118528
+        ],
+        "VSM.StaticRaster": [
+          9.844096,
+          9.812224
+        ],
+        "VSM.DynamicRaster": [
+          0.042368,
+          0.083968
+        ],
+        "VSM.Allocate": [
+          2.10816,
+          2.106112
+        ],
+        "VSM.MarkReceiverPages": [
+          0.633856,
+          0.614144
+        ]
+      },
+      "r4096_p1024_l0_m0": {
+        "VSM.ResolveTrace": [
+          6.711424,
+          6.747648
+        ],
+        "VSM.Resolve": [
+          6.862592,
+          6.899584
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.4736,
+          0.4736
+        ],
+        "VSM.PageOccupancy": [
+          0.073472,
+          0.07424
+        ],
+        "VSM.StaticRaster": [
+          27.631487999999997,
+          27.550208
+        ],
+        "VSM.DynamicRaster": [
+          0.027392,
+          0.027520000000000003
+        ],
+        "VSM.Allocate": [
+          11.29664,
+          11.297792000000001
+        ],
+        "VSM.MarkReceiverPages": [
+          0.613888,
+          0.613632
+        ]
+      },
+      "r4096_p1024_l0_m1": {
+        "VSM.ResolveTrace": [
+          6.780544000000001,
+          6.790144
+        ],
+        "VSM.Resolve": [
+          6.921216,
+          7.0261759999999995
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.47372800000000004,
+          0.4736
+        ],
+        "VSM.PageOccupancy": [
+          0.180608,
+          0.1792
+        ],
+        "VSM.StaticRaster": [
+          27.588352,
+          27.564416
+        ],
+        "VSM.DynamicRaster": [
+          0.028416,
+          0.026112
+        ],
+        "VSM.Allocate": [
+          11.32352,
+          11.294848
+        ],
+        "VSM.MarkReceiverPages": [
+          0.614912,
+          0.6142719999999999
+        ]
+      },
+      "r4096_p1024_l0_m2": {
+        "VSM.ResolveTrace": [
+          6.4346879999999995,
+          6.70784
+        ],
+        "VSM.Resolve": [
+          6.586368,
+          6.871296
+        ],
+        "VSM.ClearPhysicalPages": [
+          0.474112,
+          0.473472
+        ],
+        "VSM.PageOccupancy": [
+          0.07334399999999999,
+          0.07270399999999999
+        ],
+        "VSM.StaticRaster": [
+          27.569536,
+          27.587328
+        ],
+        "VSM.DynamicRaster": [
+          0.027903999999999998,
+          0.026368
+        ],
+        "VSM.Allocate": [
+          11.313792,
+          11.301376
+        ],
+        "VSM.MarkReceiverPages": [
+          0.614144,
+          0.614656
+        ]
+      },
+      "r4096_p1024_l1_m0": {
+        "VSM.ResolveTrace": [
+          21.797248,
+          20.58624
+        ],
+        "VSM.Resolve": [
+          21.937792,
+          20.724864
+        ],
+        "VSM.ClearPhysicalPages": [
+          3.196288,
+          3.1978239999999998
+        ],
+        "VSM.PageOccupancy": [
+          0.20134400000000002,
+          0.200192
+        ],
+        "VSM.StaticRaster": [
+          34.777727999999996,
+          34.404224
+        ],
+        "VSM.DynamicRaster": [
+          0.01664,
+          0.02688
+        ],
+        "VSM.Allocate": [
+          11.2576,
+          11.257728
+        ],
+        "VSM.MarkReceiverPages": [
+          0.613632,
+          0.61312
+        ]
+      }
+    },
+    "restoration": {
+      "settings": true,
+      "camera": true,
+      "camera-transform": true,
+      "scenes": true
+    }
+  }
+}

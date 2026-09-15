@@ -1,0 +1,76 @@
+// Compare actual native raster output, independent of the sampling oracle.
+var root="E:/VividRP_Reborn/Packages/VividRP/Roadmap~/Experiments/VSMDepthVariants_20260913/native-layout";
+System.IO.Directory.CreateDirectory(root);
+if(!UnityEditor.EditorApplication.isPlaying)throw new System.Exception("Play required");
+var camera=UnityEngine.Camera.main;var additional=camera.GetComponent<VividRP.Runtime.VividAdditionalCameraData>();
+var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public;
+var runtime=typeof(VividRP.Runtime.CascadedShadowSettingsVolume).Assembly.GetType("VividRP.Runtime.RenderPass.Core.VirtualShadowMapPrototypeRuntime");
+var resolve=UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>("Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
+var shader=UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>("Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute");
+int kernel=shader.FindKernel("CompareNativeDepthLayout"),reset=shader.FindKernel("ResetSMRTComparison");
+shader.GetKernelThreadGroupSizes(kernel,out uint kx,out _,out _);if(kx!=8)throw new System.Exception("Invalid native comparison kernel");
+float timeScale=UnityEngine.Time.timeScale;UnityEngine.Time.timeScale=0;
+bool background=UnityEngine.Application.runInBackground;UnityEngine.Application.runInBackground=true;
+var cube=UnityEngine.GameObject.CreatePrimitive(UnityEngine.PrimitiveType.Cube);cube.name="Temporary native VSM caster";cube.hideFlags=UnityEngine.HideFlags.HideAndDontSave;
+cube.transform.position=camera.ViewportToWorldPoint(new UnityEngine.Vector3(.5f,.5f,6));cube.transform.localScale=UnityEngine.Vector3.one;
+foreach(var renderer in UnityEngine.Object.FindObjectsByType<UnityEngine.MeshRenderer>(UnityEngine.FindObjectsSortMode.None))
+    if(renderer.gameObject!=cube && renderer.sharedMaterial!=null && renderer.sharedMaterial.shader.name.Contains("Vivid")){cube.GetComponent<UnityEngine.MeshRenderer>().sharedMaterial=renderer.sharedMaterial;break;}
+var go=new UnityEngine.GameObject("Temporary native layout volume"){hideFlags=UnityEngine.HideFlags.HideAndDontSave};
+int layer=0;while(layer<31&&(additional.volumeLayerMask.value&(1<<layer))==0)layer++;go.layer=layer;
+var volume=go.AddComponent<UnityEngine.Rendering.Volume>();volume.isGlobal=true;volume.priority=float.MaxValue;
+var profile=UnityEngine.ScriptableObject.CreateInstance<UnityEngine.Rendering.VolumeProfile>();profile.hideFlags=UnityEngine.HideFlags.HideAndDontSave;
+var settings=profile.Add<VividRP.Runtime.CascadedShadowSettingsVolume>();volume.sharedProfile=profile;
+settings.virtualShadowMapPhysicalPageBudget.Override(1024);settings.virtualShadowMapSMRTRayCount.Override(4);settings.virtualShadowMapSMRTAdaptiveRays.Override(false);
+var summary=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,4,4);
+UnityEngine.RenderTexture referenceStatic=null,referenceDynamic=null;
+var ownerBefore=new uint[1024];var ownerAfter=new uint[1024];var counts=new uint[4];
+var records=new System.Collections.Generic.List<object>();int stage=0,warm=0,last=-1;bool disposed=false;
+double started=UnityEditor.EditorApplication.timeSinceStartup;
+System.Action<UnityEngine.Rendering.ScriptableRenderContext,UnityEngine.Camera> frame=null;
+UnityEditor.EditorApplication.CallbackFunction tick=null;
+System.Action start=()=>{
+    settings.virtualShadowMapResolution.Override(stage<3?2048:4096);
+    int layout=stage%3==2?1:0;resolve.SetInt("_VSMDepthLayoutInterleaved",layout);resolve.SetInt("_VSMDepthExperiment",0);
+    UnityEngine.Shader.SetGlobalInt("_VSMDepthLayoutInterleaved",layout);runtime.GetMethod("InvalidateCache",flags).Invoke(null,null);
+    warm=0;started=UnityEditor.EditorApplication.timeSinceStartup;
+    System.IO.File.WriteAllText(root+"/progress.txt","stage="+stage);
+};
+System.Action<string> finish=status=>{
+    if(disposed)return;disposed=true;UnityEditor.EditorApplication.update-=tick;UnityEngine.Rendering.RenderPipelineManager.endCameraRendering-=frame;
+    resolve.SetInt("_VSMDepthLayoutInterleaved",0);resolve.SetInt("_VSMDepthExperiment",0);UnityEngine.Shader.SetGlobalInt("_VSMDepthLayoutInterleaved",0);
+    runtime.GetMethod("InvalidateCache",flags).Invoke(null,null);UnityEngine.Time.timeScale=timeScale;UnityEngine.Application.runInBackground=background;
+    foreach(var t in new[]{referenceStatic,referenceDynamic})if(t!=null){t.Release();UnityEngine.Object.DestroyImmediate(t);}
+    summary.Dispose();UnityEngine.Object.DestroyImmediate(cube);UnityEngine.Object.DestroyImmediate(go);UnityEngine.Object.DestroyImmediate(settings);UnityEngine.Object.DestroyImmediate(profile);
+    UnityEngine.Rendering.VolumeManager.instance.Update(camera.transform,additional.volumeLayerMask);
+    System.IO.File.WriteAllText(root+"/results.json",Newtonsoft.Json.JsonConvert.SerializeObject(records));System.IO.File.WriteAllText(root+"/status.txt",status);
+};
+frame=(context,observed)=>{if(observed==camera&&last!=UnityEngine.Time.renderedFrameCount){last=UnityEngine.Time.renderedFrameCount;warm++;}};
+tick=()=>{
+    if(disposed)return;
+    try{
+        if(warm>=64){
+            var stat=((UnityEngine.Rendering.RTHandle)runtime.GetProperty("StaticPhysicalPage",flags).GetValue(null)).rt;
+            var dyn=((UnityEngine.Rendering.RTHandle)runtime.GetProperty("DynamicPhysicalPage",flags).GetValue(null)).rt;
+            var owners=(UnityEngine.GraphicsBuffer)runtime.GetProperty("PhysicalPageOwners",flags).GetValue(null);
+            if(stage%3==0){
+                if(referenceStatic==null){referenceStatic=new UnityEngine.RenderTexture(stat.descriptor);referenceDynamic=new UnityEngine.RenderTexture(dyn.descriptor);if(!referenceStatic.Create()||!referenceDynamic.Create())throw new System.Exception("Reference allocation failed");}
+                UnityEngine.Graphics.CopyTexture(stat,referenceStatic);UnityEngine.Graphics.CopyTexture(dyn,referenceDynamic);owners.GetData(ownerBefore);
+            }else{
+                owners.GetData(ownerAfter);int ownerDifferences=0;for(int i=0;i<1024;i++)if(ownerBefore[i]!=ownerAfter[i])ownerDifferences++;
+                var cmd=new UnityEngine.Rendering.CommandBuffer();
+                cmd.SetComputeBufferParam(shader,reset,"_SMRTComparison",summary);cmd.DispatchCompute(shader,reset,1,1,1);
+                cmd.SetComputeIntParam(shader,"_VSMDepthLayoutInterleaved",stage%3==2?1:0);cmd.SetComputeIntParam(shader,"_VSMPrototypePageSize",128);cmd.SetComputeIntParam(shader,"_VSMPrototypePhysicalPagesPerRow",stat.width/128);
+                cmd.SetComputeBufferParam(shader,kernel,"_VSMPrototypePhysicalPageOwners",owners);cmd.SetComputeBufferParam(shader,kernel,"_SMRTComparison",summary);
+                cmd.SetComputeTextureParam(shader,kernel,"_VSMPrototypeStaticPhysicalPage",stat);cmd.SetComputeTextureParam(shader,kernel,"_VSMPrototypeDynamicPhysicalPage",dyn);
+                cmd.SetComputeTextureParam(shader,kernel,"_TestStaticPool",referenceStatic);cmd.SetComputeTextureParam(shader,kernel,"_TestDynamicPool",referenceDynamic);
+                cmd.DispatchCompute(shader,kernel,16,16,1024);UnityEngine.Graphics.ExecuteCommandBuffer(cmd);cmd.Dispose();summary.GetData(counts);
+                records.Add(new{stage,resolution=stage<3?2048:4096,layout=stage%3==2?1:0,ownerDifferences,staticDifferences=counts[0],dynamicDifferences=counts[1],examinedDepthsPerPool=counts[2],dynamicNonzero=counts[3]});
+            }
+            if(++stage==6){finish("complete");return;}start();
+        }
+        if(UnityEditor.EditorApplication.timeSinceStartup-started>180){finish("failed: timeout");return;}
+        UnityEditor.EditorApplication.QueuePlayerLoopUpdate();UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+    }catch(System.Exception ex){finish("failed: "+ex);}
+};
+start();UnityEngine.Rendering.RenderPipelineManager.endCameraRendering+=frame;UnityEditor.EditorApplication.update+=tick;
+return root;

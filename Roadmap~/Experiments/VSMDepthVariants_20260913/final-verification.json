@@ -1,0 +1,18 @@
+{
+  "baseline_commit": "70f4eb9b",
+  "production_source_restored_byte_exact": {
+    "Shaders/Core/Private/CSMShadowResolve.compute": true,
+    "Shaders/Core/Private/VSMSMRT.hlsl": true,
+    "Shaders/Core/Public/Shadow/VividVirtualShadowMapAddressing.hlsl": true,
+    "Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl": true,
+    "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute": true
+  },
+  "all_restored": true,
+  "completed_windows": 60,
+  "observations_per_window": 128,
+  "warmup_frames_per_window": 64,
+  "closing_control_executed": false,
+  "closing_control_reason": "Editor exited normally before the closing baseline could be started",
+  "native_validation_post_cleanup_device_hung": true,
+  "unity_test_framework_run": false
+}

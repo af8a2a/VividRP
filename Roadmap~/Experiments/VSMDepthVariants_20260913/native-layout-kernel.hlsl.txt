@@ -1,0 +1,31 @@
+// Added to the existing GPU test shader for native raster layout verification.
+groupshared uint3 g_NativeDifferences;
+[numthreads(8, 8, 1)]
+void CompareNativeDepthLayout(uint3 id : SV_DispatchThreadID, uint lane : SV_GroupIndex)
+{
+    if (_VSMPrototypePhysicalPageOwners[id.z] == 0u) return;
+    if (lane == 0u) g_NativeDifferences = 0u;
+    GroupMemoryBarrierWithGroupSync();
+    uint2 p = uint2(id.z % (uint)_VSMPrototypePhysicalPagesPerRow,
+        id.z / (uint)_VSMPrototypePhysicalPagesPerRow) * (uint)_VSMPrototypePageSize + id.xy;
+    uint3 different = 0u;
+    for (uint layer = 0; layer < 16u; layer++)
+    {
+        uint x = _VSMPrototypeStaticPhysicalPage.Load(VividVSMDepthLoadAddress(p, layer));
+        uint y = _VSMPrototypeDynamicPhysicalPage.Load(VividVSMDepthLoadAddress(p, layer));
+        different.x += x != _TestStaticPool[uint3(p, layer)] ? 1u : 0u;
+        different.y += y != _TestDynamicPool[uint3(p, layer)] ? 1u : 0u;
+        different.z += y != 0u ? 1u : 0u;
+    }
+    InterlockedAdd(g_NativeDifferences.x, different.x);
+    InterlockedAdd(g_NativeDifferences.y, different.y);
+    InterlockedAdd(g_NativeDifferences.z, different.z);
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0u)
+    {
+        InterlockedAdd(_SMRTComparison[0], g_NativeDifferences.x);
+        InterlockedAdd(_SMRTComparison[1], g_NativeDifferences.y);
+        InterlockedAdd(_SMRTComparison[2], 64u * 16u);
+        InterlockedAdd(_SMRTComparison[3], g_NativeDifferences.z);
+    }
+}

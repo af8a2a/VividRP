@@ -1,0 +1,44 @@
+if(VividRP.Editor.VividDiagnostics.IsRunning)throw new System.Exception("Another diagnostic is active");
+var root="E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-pressure/live-v5";System.IO.Directory.CreateDirectory(root);
+var camera=UnityEngine.Camera.main;var extra=camera.GetComponent<VividRP.Runtime.VividAdditionalCameraData>();
+var light=UnityEngine.RenderSettings.sun;var rotation=light.transform.rotation;var position=camera.transform.position;var cameraRotation=camera.transform.rotation;
+bool playing=UnityEditor.EditorApplication.isPlaying,background=UnityEngine.Application.runInBackground;
+var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public;
+var runtime=typeof(VividRP.Runtime.CascadedShadowSettingsVolume).Assembly.GetType("VividRP.Runtime.RenderPass.Core.VirtualShadowMapPrototypeRuntime");
+var stateProperty=runtime.GetProperty("PagePressure",flags);var counterProperty=runtime.GetProperty("AllocatorCounters",flags);var ownerProperty=runtime.GetProperty("PhysicalPageOwners",flags);
+var go=new UnityEngine.GameObject("Temporary VSM budget sweep"){hideFlags=UnityEngine.HideFlags.HideAndDontSave};
+int layer=0;while(layer<31&&(extra.volumeLayerMask.value&(1<<layer))==0)layer++;go.layer=layer;
+var volume=go.AddComponent<UnityEngine.Rendering.Volume>();volume.isGlobal=true;volume.priority=float.MaxValue;
+var profile=UnityEngine.ScriptableObject.CreateInstance<UnityEngine.Rendering.VolumeProfile>();profile.hideFlags=UnityEngine.HideFlags.HideAndDontSave;
+var settings=profile.Add<VividRP.Runtime.CascadedShadowSettingsVolume>();volume.sharedProfile=profile;
+settings.virtualShadowMapResolution.Override(8192);settings.virtualShadowMapScreenDensity.Override(true);settings.virtualShadowMapPagePressure.Override(true);
+settings.virtualShadowMapSMRTAdaptiveRays.Override(false);settings.virtualShadowMapSMRTRayCount.Override(4);
+int[] budgets={128,256,512,1024,128,256,512,1024,512,256,128};
+var stateData=new Unity.Mathematics.uint4[3];var counts=new uint[4];var owners=new uint[1024];var levelCounts=new int[16];
+var rows=new System.Collections.Generic.List<object>();var stages=new System.Collections.Generic.List<object>();
+int stage=0,frame=0;bool disposed=false;double began=UnityEditor.EditorApplication.timeSinceStartup;
+System.Func<string> snapshot=()=>Newtonsoft.Json.JsonConvert.SerializeObject(new{playing=UnityEditor.EditorApplication.isPlaying,background=UnityEngine.Application.runInBackground,cameraTransform=UnityEditor.EditorJsonUtility.ToJson(camera.transform),sun=UnityEditor.EditorJsonUtility.ToJson(light.transform),settings=UnityEngine.JsonUtility.ToJson(UnityEngine.Rendering.VolumeManager.instance.stack.GetComponent<VividRP.Runtime.CascadedShadowSettingsVolume>()),scene0Dirty=UnityEngine.SceneManagement.SceneManager.GetSceneAt(0).isDirty,scene1Dirty=UnityEngine.SceneManagement.SceneManager.GetSceneAt(1).isDirty});
+System.IO.File.WriteAllText(root+"/before.json",snapshot());UnityEngine.Application.runInBackground=true;
+UnityEditor.AssemblyReloadEvents.AssemblyReloadCallback reload=null;
+UnityEditor.EditorApplication.CallbackFunction tick=null;System.Action<UnityEngine.Rendering.ScriptableRenderContext,UnityEngine.Camera> rendered=null;
+System.Action<string> finish=null;
+System.Action begin=()=>{settings.virtualShadowMapPhysicalPageBudget.Override(budgets[stage]);settings.virtualShadowMapPagePressure.Override(stage>=4);extra.ResetPostProcessingHistory();frame=0;began=UnityEditor.EditorApplication.timeSinceStartup;System.IO.File.WriteAllText(root+"/progress.txt",stage+" budget="+budgets[stage]);};
+finish=status=>{if(disposed)return;disposed=true;UnityEditor.AssemblyReloadEvents.beforeAssemblyReload-=reload;UnityEditor.EditorApplication.update-=tick;UnityEngine.Rendering.RenderPipelineManager.endCameraRendering-=rendered;light.transform.rotation=rotation;UnityEngine.Object.DestroyImmediate(go);UnityEngine.Object.DestroyImmediate(settings);UnityEngine.Object.DestroyImmediate(profile);UnityEngine.Application.runInBackground=background;UnityEngine.Rendering.VolumeManager.instance.Update(camera.transform,extra.volumeLayerMask);runtime.GetMethod("InvalidateCache",flags).Invoke(null,null);extra.ResetPostProcessingHistory();System.IO.File.WriteAllText(root+"/after.json",snapshot());System.IO.File.WriteAllText(root+"/frames.json",Newtonsoft.Json.JsonConvert.SerializeObject(rows));System.IO.File.WriteAllText(root+"/stages.json",Newtonsoft.Json.JsonConvert.SerializeObject(stages));System.IO.File.WriteAllText(root+"/status.txt",status);};
+rendered=(context,observed)=>{
+ if(disposed||observed!=camera||frame>=(stage<4?24:480))return;
+ var state=(UnityEngine.GraphicsBuffer)stateProperty.GetValue(null);var counter=(UnityEngine.GraphicsBuffer)counterProperty.GetValue(null);if(state==null||counter==null)return;
+ state.GetData(stateData);counter.GetData(counts);
+ rows.Add(new{stage,frame,adaptive=stage>=4,budget=budgets[stage],bias=Unity.Mathematics.math.asfloat(stateData[0].x),recovery=stateData[0].y,floor=Unity.Mathematics.math.asfloat(stateData[2].x),probeDemand=stateData[2].z,essential=stateData[0].z,essentialMiss=stateData[0].w,primary=stateData[1].x,primaryResident=stateData[1].y,requested=counts[1],overflow=counts[3]});
+ if(++frame%30==0)System.IO.File.WriteAllText(root+"/progress.txt",stage+" budget="+budgets[stage]+" frame="+frame+" bias="+Unity.Mathematics.math.asfloat(stateData[0].x));
+};
+tick=()=>{if(disposed)return;try{
+ if(UnityEditor.EditorApplication.isCompiling||UnityEditor.EditorApplication.isPlaying!=playing||camera.transform.position!=position||camera.transform.rotation!=cameraRotation){finish("cancelled: editor/camera changed");return;}
+ if(System.IO.File.Exists(root+"/cancel")){finish("cancelled");return;}
+ if(UnityEditor.EditorApplication.timeSinceStartup-began>120){finish("failed: incomplete camera callbacks");return;}
+ if(frame>=(stage<4?24:480)){var b=(UnityEngine.GraphicsBuffer)ownerProperty.GetValue(null);System.Array.Clear(owners,0,owners.Length);b.GetData(owners,0,0,b.count);System.Array.Clear(levelCounts,0,levelCounts.Length);for(int i=0;i<b.count;i++)if(owners[i]!=0)levelCounts[(owners[i]-1)/(64*64)]++;stages.Add(new{stage,adaptive=stage>=4,budget=budgets[stage],levels=(int[])levelCounts.Clone()});if(++stage==budgets.Length){finish("complete");return;}begin();}
+ light.transform.rotation=rotation*UnityEngine.Quaternion.Euler(0,(frame%2==0?1:-1)*.0001f,0);
+ UnityEditor.EditorApplication.QueuePlayerLoopUpdate();UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+ }catch(System.Exception e){finish("failed: "+e);}};
+reload=()=>finish("cancelled: assembly reload");UnityEditor.AssemblyReloadEvents.beforeAssemblyReload+=reload;
+begin();UnityEngine.Rendering.RenderPipelineManager.endCameraRendering+=rendered;UnityEditor.EditorApplication.update+=tick;
+return root;

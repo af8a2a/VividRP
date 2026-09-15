@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "command": "command eval",
+  "data": {
+    "command": "eval",
+    "parameters": {
+      "code": "return new { diagnosticRunning = VividRP.Editor.VividDiagnostics.IsRunning, playing = UnityEditor.EditorApplication.isPlaying, background = UnityEngine.Application.runInBackground, temporaryObjects = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(System.Linq.Enumerable.Where(UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>(), g => g.name.StartsWith(\"Temporary VSM\")), g => g.name)) };"
+    },
+    "result": {
+      "output": null,
+      "diagnostics": [],
+      "success": true,
+      "result": {
+        "diagnosticRunning": false,
+        "playing": false,
+        "background": false,
+        "temporaryObjects": []
+      }
+    },
+    "target": {
+      "host": "127.0.0.1",
+      "port": 7800,
+      "projectPath": "E:\\VividRP_Reborn"
+    },
+    "success": true
+  },
+  "errors": [],
+  "warnings": []
+}

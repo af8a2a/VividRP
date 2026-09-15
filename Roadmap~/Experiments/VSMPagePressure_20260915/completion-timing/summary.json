@@ -1,0 +1,32 @@
+[
+  {
+    "stage": 0,
+    "scenario": "cold",
+    "samples": 16,
+    "oldMedianMs": 30.34985,
+    "newMedianMs": 3.201,
+    "oldRangeMs": [
+      30.1868,
+      30.6221
+    ],
+    "newRangeMs": [
+      2.8876,
+      3.3972
+    ]
+  },
+  {
+    "stage": 1,
+    "scenario": "recycle",
+    "samples": 16,
+    "oldMedianMs": 267.85105,
+    "newMedianMs": 3.6936,
+    "oldRangeMs": [
+      259.2109,
+      275.5387
+    ],
+    "newRangeMs": [
+      3.2335,
+      4.2574
+    ]
+  }
+]

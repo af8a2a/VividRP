@@ -1,0 +1,20 @@
+[
+  {
+    "stage": 0,
+    "resolution": 8192,
+    "recycle": false,
+    "oldN": 64,
+    "newN": 64,
+    "oldP50": 28.292864,
+    "newP50": 2.5615360000000003
+  },
+  {
+    "stage": 1,
+    "resolution": 8192,
+    "recycle": true,
+    "oldN": 64,
+    "newN": 64,
+    "oldP50": 256.867968,
+    "newP50": 2.766336
+  }
+]

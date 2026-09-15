@@ -1,0 +1,64 @@
+if(VividRP.Editor.VividDiagnostics.IsRunning)throw new System.Exception("Diagnostic already running");
+var root="E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-pressure";
+var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic;
+var create=typeof(UnityEditor.ShaderUtil).GetMethod("CreateComputeShaderAsset",flags,null,new[]{typeof(string)},null);
+var baseline=(UnityEngine.ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(root+"/baseline.compute.txt")});
+var candidate=UnityEngine.Object.Instantiate(UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>("Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+var results=new System.Collections.Generic.List<object>();
+try{
+ int oldKernel=baseline.FindKernel("VSMPrototypeAllocatePages"),kernel=candidate.FindKernel("VSMPrototypeAllocatePages"),prepare=candidate.FindKernel("VSMPrototypePrepareAllocation");
+ int seed=0;foreach(int levelCount in new[]{1,2,4,16})foreach(int budget in new[]{1,2,7,31,64,65,127,256,1024})foreach(int pattern in new[]{0,1,2}){
+  int perLevel=pattern==0?16:256,pageCount=levelCount*perLevel,capacity=System.Math.Min(pageCount,budget);
+  var rng=new System.Random(901+seed++);uint frame=pattern==0?0u:pattern==1?1u:1000u;
+  var pages=new uint[pageCount];var metadata=new Unity.Mathematics.uint4[pageCount];var owners=new uint[capacity];
+  var order=new int[pageCount];for(int i=0;i<pageCount;i++)order[i]=i;
+  for(int i=pageCount-1;i>0;i--){int j=rng.Next(i+1);int v=order[i];order[i]=order[j];order[j]=v;}
+  int occupied=pattern==0?0:pattern==1?capacity/2:capacity;
+  var roles=new uint[]{0u,256u,512u,1024u,2048u,768u,1536u,2560u};
+  for(int slot=0;slot<occupied;slot++){
+   int page=order[slot];pages[page]=(uint)slot+1;owners[slot]=(uint)page+1;
+   metadata[page]=new Unity.Mathematics.uint4(2u|8u|16u|32u|4096u|8192u|16384u,(uint)slot+1,frame==0?0:(uint)rng.Next((int)frame),123u);
+  }
+  for(int page=0;page<pageCount;page++){
+   var m=metadata[page];if(rng.Next(4)!=0){m.x|=1u|roles[rng.Next(roles.Length)];m.z=rng.Next(5)==0?frame+1:frame;}metadata[page]=m;
+  }
+  using(var tableA=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,pageCount,4))
+  using(var tableB=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,pageCount,4))
+  using(var metaA=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,pageCount,16))
+  using(var metaB=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,pageCount,16))
+  using(var ownersA=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,capacity,4))
+  using(var ownersB=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,capacity,4))
+  using(var countsA=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,4,4))
+  using(var countsB=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,4,4))
+  using(var requests=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,(pageCount+31)/32+4,4))
+  using(var pressure=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,3,16)){
+   tableA.SetData(pages);tableB.SetData(pages);metaA.SetData(metadata);metaB.SetData(metadata);ownersA.SetData(owners);ownersB.SetData(owners);
+   pressure.SetData(new Unity.Mathematics.uint4[3]);var guard=new uint[requests.count];for(int i=guard.Length-4;i<guard.Length;i++)guard[i]=0xaabbccdd;requests.SetData(guard);
+   for(int i=0;i<2;i++){
+    var shader=i==0?baseline:candidate;int k=i==0?oldKernel:kernel;
+    shader.SetInt("_VSMPrototypePageTableEntryCount",pageCount);shader.SetInt("_VSMProjectionCount",levelCount);
+    shader.SetInt("_VSMPrototypePhysicalPageCapacity",capacity);shader.SetInt("_VSMPrototypeFeedbackFrameIndex",(int)frame);
+    shader.SetBuffer(k,"_VSMPrototypeWritablePageTable",i==0?tableA:tableB);shader.SetBuffer(k,"_VSMPrototypePageMetadata",i==0?metaA:metaB);
+    shader.SetBuffer(k,"_VSMPrototypePhysicalPageOwners",i==0?ownersA:ownersB);shader.SetBuffer(k,"_VSMPrototypeAllocatorCounters",i==0?countsA:countsB);
+    if(i==1){shader.SetBuffer(prepare,"_VSMPrototypePageMetadata",metaB);shader.SetBuffer(prepare,"_VSMAllocationRequests",requests);shader.Dispatch(prepare,((pageCount+31)/32+63)/64,1,1);shader.SetBuffer(k,"_VSMAllocationRequests",requests);shader.SetBuffer(k,"_VSMPagePressureRW",pressure);}
+    shader.Dispatch(k,1,1,1);
+   }
+   var pa=new uint[pageCount];var pb=new uint[pageCount];var ma=new Unity.Mathematics.uint4[pageCount];var mb=new Unity.Mathematics.uint4[pageCount];var oa=new uint[capacity];var ob=new uint[capacity];var ca=new uint[4];var cb=new uint[4];
+   tableA.GetData(pa);tableB.GetData(pb);metaA.GetData(ma);metaB.GetData(mb);ownersA.GetData(oa);ownersB.GetData(ob);countsA.GetData(ca);countsB.GetData(cb);requests.GetData(guard);
+   for(int i=0;i<pageCount;i++)if(pa[i]!=pb[i]||!ma[i].Equals(mb[i]))throw new System.Exception("Page mismatch seed="+seed+" page="+i+" old="+ma[i]+" new="+mb[i]);
+   for(int i=0;i<capacity;i++)if(oa[i]!=ob[i])throw new System.Exception("Owner mismatch");
+   for(int i=0;i<4;i++)if(ca[i]!=cb[i]||guard[guard.Length-4+i]!=0xaabbccdd)throw new System.Exception("Counter/guard mismatch");
+   var state=new Unity.Mathematics.uint4[3];pressure.GetData(state);uint demand=0,misses=0,primary=0,resident=0;
+   for(int page=0;page<pageCount;page++){
+    var m=metadata[page];bool current=(m.x&1u)!=0&&m.z==frame;if(!current)continue;
+    if((m.x&(256u|512u|1024u|2048u))!=0){demand++;if(pb[page]==0)misses++;}
+    if((m.x&512u)!=0){primary++;if(pb[page]!=0)resident++;}
+   }
+   if(state[0].z!=demand||state[0].w!=misses||state[1].x!=primary||state[1].y!=resident)throw new System.Exception("Pressure accounting mismatch");
+   results.Add(new{levelCount,capacity,pattern,pageCount,frame,counters=cb,essential=demand,misses,primary,resident});
+  }
+ }
+ var oldMessages=UnityEditor.ShaderUtil.GetComputeShaderMessages(baseline);var newMessages=UnityEditor.ShaderUtil.GetComputeShaderMessages(candidate);
+ if(oldMessages.Length>0||newMessages.Length>0)throw new System.Exception("Compute compiler reported messages");
+ System.IO.File.WriteAllText(root+"/allocator-equivalence.json",Newtonsoft.Json.JsonConvert.SerializeObject(results));return new{cases=results.Count,differences=0};
+}finally{UnityEngine.Object.DestroyImmediate(baseline);UnityEngine.Object.DestroyImmediate(candidate);}

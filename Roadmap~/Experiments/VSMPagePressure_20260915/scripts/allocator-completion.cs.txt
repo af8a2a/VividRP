@@ -1,0 +1,35 @@
+var root="E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-pressure/allocator-completion";System.IO.Directory.CreateDirectory(root);
+var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic;
+var baseline=(UnityEngine.ComputeShader)typeof(UnityEditor.ShaderUtil).GetMethod("CreateComputeShaderAsset",flags,null,new[]{typeof(string)},null).Invoke(null,new object[]{System.IO.File.ReadAllText("E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-pressure/baseline.compute.txt")});
+var candidate=(UnityEngine.ComputeShader)typeof(UnityEditor.ShaderUtil).GetMethod("CreateComputeShaderAsset",flags,null,new[]{typeof(string)},null).Invoke(null,new object[]{System.IO.File.ReadAllText("E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-pressure/candidate.compute.txt")});
+int oldKernel=baseline.FindKernel("VSMPrototypeAllocatePages"),kernel=candidate.FindKernel("VSMPrototypeAllocatePages"),prepare=candidate.FindKernel("VSMPrototypePrepareAllocation");
+
+UnityEngine.GraphicsBuffer table=null,meta=null,owners=null,counts=null,requests=null,pressure=null;
+uint[] pageData=null,ownerData=null;Unity.Mathematics.uint4[] metaData=null;var zeroPressure=new Unity.Mathematics.uint4[3];var zeros=new uint[4];
+int[] resolutions={8192,8192};int[] levelCounts={10,10};var records=new System.Collections.Generic.List<object>();
+System.Action cleanup=()=>{table?.Dispose();meta?.Dispose();owners?.Dispose();counts?.Dispose();requests?.Dispose();pressure?.Dispose();};
+try{for(int stage=0;stage<2;stage++){
+ cleanup();int perLevel=resolutions[stage]/128;perLevel*=perLevel;int pageCount=perLevel*levelCounts[stage];
+ pageData=new uint[pageCount];metaData=new Unity.Mathematics.uint4[pageCount];ownerData=new uint[1024];
+ if(stage>=1)for(int slot=0;slot<1024;slot++){int p=(slot*31)%pageCount;pageData[p]=(uint)slot+1;ownerData[slot]=(uint)p+1;metaData[p]=new Unity.Mathematics.uint4(58u,(uint)slot+1,(uint)(slot%100),0);}
+ for(int n=0;n<2048;n++){int p=(int)(((long)n*pageCount)/2048);var m=metaData[p];m.x|=1u|512u;m.z=101;metaData[p]=m;}
+ table=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,pageCount,4);meta=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,pageCount,16);owners=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,1024,4);counts=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,4,4);requests=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,(pageCount+31)/32,4);pressure=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,3,16);
+ for(int i=0;i<2;i++){var shader=i==0?baseline:candidate;int k=i==0?oldKernel:kernel;shader.SetInt("_VSMPrototypePageTableEntryCount",pageCount);shader.SetInt("_VSMProjectionCount",levelCounts[stage]);shader.SetInt("_VSMPrototypePhysicalPageCapacity",1024);shader.SetInt("_VSMPrototypeFeedbackFrameIndex",101);shader.SetBuffer(k,"_VSMPrototypeWritablePageTable",table);shader.SetBuffer(k,"_VSMPrototypePageMetadata",meta);shader.SetBuffer(k,"_VSMPrototypePhysicalPageOwners",owners);shader.SetBuffer(k,"_VSMPrototypeAllocatorCounters",counts);}
+ candidate.SetBuffer(prepare,"_VSMPrototypePageMetadata",meta);candidate.SetBuffer(prepare,"_VSMAllocationRequests",requests);candidate.SetBuffer(kernel,"_VSMAllocationRequests",requests);candidate.SetBuffer(kernel,"_VSMPagePressureRW",pressure);
+
+ for(int iteration=0;iteration<24;iteration++){
+  var stats=new uint[2][];var ms=new double[2];
+  for(int order=0;order<2;order++){
+   int i=(iteration+order)%2;
+   table.SetData(pageData);meta.SetData(metaData);owners.SetData(ownerData);counts.SetData(zeros);pressure.SetData(zeroPressure);
+   stats[i]=new uint[4];long start=System.Diagnostics.Stopwatch.GetTimestamp();
+   if(i==0)baseline.Dispatch(oldKernel,1,1,1);else{candidate.Dispatch(prepare,(requests.count+63)/64,1,1);candidate.Dispatch(kernel,1,1,1);}
+   counts.GetData(stats[i]);ms[i]=(System.Diagnostics.Stopwatch.GetTimestamp()-start)*1000.0/System.Diagnostics.Stopwatch.Frequency;
+  }
+  for(int i=0;i<4;i++)if(stats[0][i]!=stats[1][i])throw new System.Exception("Counter mismatch during timing");
+  if(stats[0][0]!=1024||stats[0][1]!=2048)throw new System.Exception("Incomplete GPU work");
+  if(iteration>=8)records.Add(new{stage,recycle=stage>=1,iteration,oldMs=ms[0],newMs=ms[1],counters=stats[0]});
+ }
+}
+System.IO.File.WriteAllText(root+"/results.json",Newtonsoft.Json.JsonConvert.SerializeObject(records));return new{samples=records.Count,verified=true};
+}finally{cleanup();UnityEngine.Object.DestroyImmediate(baseline);UnityEngine.Object.DestroyImmediate(candidate);}

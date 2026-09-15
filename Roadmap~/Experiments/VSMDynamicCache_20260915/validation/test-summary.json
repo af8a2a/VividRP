@@ -1,0 +1,1080 @@
+{
+  "runs": [
+    {
+      "file": "tests.xml",
+      "total": 118,
+      "passed": 118,
+      "failed": 0,
+      "skipped": 0,
+      "test_body_seconds": 2.7011734
+    },
+    {
+      "file": "tests-final.xml",
+      "total": 260,
+      "passed": 238,
+      "failed": 22,
+      "skipped": 0,
+      "test_body_seconds": 11.0095192
+    },
+    {
+      "file": "tests-sampling-repaired.xml",
+      "total": 141,
+      "passed": 134,
+      "failed": 7,
+      "skipped": 0,
+      "test_body_seconds": 1.4748718
+    },
+    {
+      "file": "tests-sampling-final.xml",
+      "total": 141,
+      "passed": 141,
+      "failed": 0,
+      "skipped": 0,
+      "test_body_seconds": 1.152341
+    }
+  ],
+  "final_unique_cases": 260,
+  "final_passed": 260,
+  "latest_cases": {
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.CascadedShadowSettingsVolume_ExposesScreenSpaceShadowDenoiseToggle": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.CascadedShadowSettingsVolume_VirtualShadowMapPrototypeDefaultsOff": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.DynamicCache_InvalidatesChangedConfigurationAndLeavingUntrackedCasters": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.DynamicCache_WarmUploadsAndKeyChecksAllocateZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.DynamicPageLifecycle_PreservesAllHiddenLayersOutsideEachDirtyPool": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.GetCascadeBorderRatios_ConvertsInterCascadeRangesToSquaredDistanceFade": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.PageBudgetResize_PreservesPressureButLayoutChangeResetsIt": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapBuildValidation_RejectsInactivePotentialCaster": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapBuildValidation_RequiresSceneVolumeOverride": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeAllocator_AllocatesRequestedPagesDeterministically": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeAllocator_RecyclesUnrequestedPagesAcrossFrames": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_CopiesCullingStateAndIgnoresDispatchOffsets": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_FullyInvalidatesChangedCullingInputs": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(0)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(1)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(2)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(3)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(4)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(5)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(6)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(7)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(8)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteState": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_ReusesMatchingStableState": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCacheKey_AcceptsEmptyStaticPool": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeDynamicRefresh_DoesNotInvalidateStaticCache": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_IsConsumedOnlyByItsCameraAndCurrentFrame": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_ReleaseClearsOwnerAndFrame": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection(0)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection(10)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_WarmOwnershipChecksAllocateZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFrameState_TracksReadinessActivationAndFallback": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.7509f,0.7511f,0.1f,0.2f,8)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.1f,0.2f,0.7509f,0.7511f,4096)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.7499f,0.7501f,0.7499f,0.7501f,52224)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.25f,0.25f,0.1f,0.2f,2)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(1.0f,1.0f,0.1f,0.2f,8)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(-0.1f,0.0001f,0.1f,0.2f,1)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.2499f,0.24999f,0.1f,0.2f,1)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.2509f,0.2511f,0.1f,0.2f,2)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.5009f,0.5011f,0.1f,0.2f,4)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPageBuffers_GrowOnceAndThenAllocateZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,0,256)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,1,256)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,2,256)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,256)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(1,0,256)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,1)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,63)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,64)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,65)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,0,4096)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(1,2,1024)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPageShader_CompilesPageClippedVariants": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePageTable_StartsUnmapped": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(False,True,True,True,False)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,False,False,True,False)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,True,False,True,True)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,False,True,False,True)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,True,True,False,False)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_StableSelectionAllocatesZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeResources_AllocateFourCascadePhysicalPool": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeResources_StableEnsureAllocatesZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeStableFrameTransitions_AllocateZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeStableStaticCacheCheck_AllocatesZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeStaticCache_LocalizesContentButFullyInvalidatesConfiguration": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,True,True,True)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Vulkan,True,True,True,True)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D11,True,True,True,False)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,False,True,True,False)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,False,True,False)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,True,False,False)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(\"VividRP/Material/StandardLit\")": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(\"VividRP/Material/StandardLayeredLit\")": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(\"VividRP/Experimental/Material/StandardLit\")": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(\"VividRP/Material/Unlit\")": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(\"VividRP/Terrain/TerrainLit\")": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(\"Hidden/VividRP/TerrainLit_Basemap\")": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_RejectsUnmarkedShadowCaster": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_ReportsExactRendererMaterialSlot": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_StableReadinessAllocatesZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMClipmapLayoutAndResourceReuse_AllocateZeroAfterWarmup": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMProjectionABI_AndAllocatorAreNotLimitedToFourCSMCascades": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMQuality_DefaultsToHardReferenceAndClampsTransitionWidth": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(True,128)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(False,128)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(True,2048)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(False,2048)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned(0,2048,2048)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned(4097,512,4224)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned(16384,512,16384)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned(99,512,128)": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_CoarseDemandDisplacesRequestedDetailWithoutLosingOverflowAccounting": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_CoarseOversubscriptionRemainsBoundedAndReportsEveryMiss": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_ColdPoolFillsIntermediateCoverageBeforeFineDetail": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_ColdPoolPrioritizesRolesAboveClipmapLevel(0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_ColdPoolPrioritizesRolesAboveClipmapLevel(7)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_IntermediateCoverageRecoversFromFineSaturationAndStaysResident": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_PrimaryReclaimsFallbackBeforeTransitionAndRemainsStable": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_RequestBitsetPreservesOrderAcrossWordsAndMaximumLayout(64)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_RequestBitsetPreservesOrderAcrossWordsAndMaximumLayout(8192)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_RequestBitsetPreservesOrderAcrossWordsAndMaximumLayout(262144)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Allocator_StaleRoleBitsDoNotProtectAResident": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Bias_OnlyUncorrectedGrazingSlopeAddsComparisonBias(3.0f,0.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Bias_OnlyUncorrectedGrazingSlopeAddsComparisonBias(4.0f,0.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Bias_OnlyUncorrectedGrazingSlopeAddsComparisonBias(4.5f,1.25f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Bias_OnlyUncorrectedGrazingSlopeAddsComparisonBias(6.0f,4.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Bias_OnlyUncorrectedGrazingSlopeAddsComparisonBias(1000.0f,4.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Bias_ScalesWithTexelsAndDepthRangeAndBoundsGrazingSlopes(0.01f,1.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Bias_ScalesWithTexelsAndDepthRangeAndBoundsGrazingSlopes(0.1f,1.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Bias_ScalesWithTexelsAndDepthRangeAndBoundsGrazingSlopes(0.01f,0.5f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.CurrentFrame_CoalescedRequestsPreservePerPageRolesAndAge(0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.CurrentFrame_CoalescedRequestsPreservePerPageRolesAndAge(1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.CurrentFrame_CoalescedRequestsPreservePerPageRolesAndAge(2)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.CurrentReceiverMarking_ColdStartAllocatesSameFrameAndClearsDepartedDemand(False,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.CurrentReceiverMarking_ColdStartAllocatesSameFrameAndClearsDepartedDemand(True,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.CurrentReceiverMarking_ColdStartAllocatesSameFrameAndClearsDepartedDemand(True,True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_CoverageTransitionDoesNotChangePreferredLevel(0.2f,0.5f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_CoverageTransitionDoesNotChangePreferredLevel(0.05f,0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_CoverageTransitionDoesNotChangePreferredLevel(0,0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_DisablingRestoresLegacyChoiceAndUnavailableQualityView": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_FeedbackAndSamplingStartAtSameLevelAndKeepCoarseCoverage(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_FeedbackAndSamplingStartAtSameLevelAndKeepCoarseCoverage(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_PcfCoverageGuardAndNormalOffsetConstrainFineRequests": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_PerspectiveDistanceFovAndGeometricSlopeAffectDemand": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_RespondsToOutputResolutionZoomAndVirtualTexelDensity": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_TransitionsAtLodBoundaryWithoutBlendingFallbackTwice(-1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_TransitionsAtLodBoundaryWithoutBlendingFallbackTwice(0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_TransitionsAtLodBoundaryWithoutBlendingFallbackTwice(0.05f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.DensityPolicy_UsesAvailableFineCoverageWithoutResizingTheProjection": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.EmptyFine_IsValidButDirtyFineMustFallBack(False,1.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.EmptyFine_IsValidButDirtyFineMustFallBack(True,0.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Feedback_SharedPageRetainsPrimaryAndTransitionDemand": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.FeedbackReset_DropsOldPriorityWithoutDiscardingCompletedDepth": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Footprint_ClipsAtMapBoundaryInsteadOfWrappingRequests": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.HardSampling_RemainsPointSampledWhenStochasticOptionIsSelected": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.MissingAll_UsesLitTerminalAndRequestsWholeChainEvenDuringBootstrap(0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.MissingAll_UsesLitTerminalAndRequestsWholeChainEvenDuringBootstrap(1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.MissingFine_ReprojectsWorldPositionDepthAndLevelBias(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.MissingFine_ReprojectsWorldPositionDepthAndLevelBias(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_AreaFilteringDoesNotRenormalizeAroundMissingPagesAcrossPhases(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_AreaFilteringDoesNotRenormalizeAroundMissingPagesAcrossPhases(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_AreaWeightsPreserveConstantsAndRejectNyquistAcrossSubTexelPhases(0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_AreaWeightsPreserveConstantsAndRejectNyquistAcrossSubTexelPhases(1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_AreaWeightsPreserveConstantsAndRejectNyquistAcrossSubTexelPhases(2)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_AreaWeightsPreserveConstantsAndRejectNyquistAcrossSubTexelPhases(3)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_AreaWeightsPreserveConstantsAndRejectNyquistAcrossSubTexelPhases(4)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_IncompleteTransitionFootprintDoesNotBrightenThePrimary": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_IsContinuousAcrossTheVirtualPageBoundary": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_MissingNeighborDegradesTheWholeKernel(False,0.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_MissingNeighborDegradesTheWholeKernel(True,1.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_NormalizesAreaWeightsAcrossShuffledPages(3.5f,0.1875f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.PCF_NormalizesAreaWeightsAcrossShuffledPages(3.25f,0.109375f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDebugKernel_WritesRawDataAndSkyWithoutFeedback(0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDebugKernel_WritesRawDataAndSkyWithoutFeedback(1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDebugKernel_WritesRawDataAndSkyWithoutFeedback(2)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDebugKernel_WritesRawDataAndSkyWithoutFeedback(3)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDebugKernel_WritesRawDataAndSkyWithoutFeedback(4)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDebugKernel_WritesRawDataAndSkyWithoutFeedback(5)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDebugKernel_WritesRawDataAndSkyWithoutFeedback(6)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDiagnostics_DistinguishEmptyResidentAndAllMissing": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDiagnostics_MatchResolveAndDoNotWriteFeedback(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDiagnostics_MatchResolveAndDoNotWriteFeedback(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverDiagnostics_ReportFallbackDirtyAndTransitionWork": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverFootprint_ScalesWithVirtualTexels": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_IncompleteEdgeStencilDoesNotForceADifferentFace(-1,0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_IncompleteEdgeStencilDoesNotForceADifferentFace(1,0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_IncompleteEdgeStencilDoesNotForceADifferentFace(0,-1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_IncompleteEdgeStencilDoesNotForceADifferentFace(0,1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_RejectsCloserDepthAcrossAPlaneBoundary(-1,0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_RejectsCloserDepthAcrossAPlaneBoundary(1,0)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_RejectsCloserDepthAcrossAPlaneBoundary(0,-1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_RejectsCloserDepthAcrossAPlaneBoundary(0,1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_UsesDepthPlaneAtScreenEdgesAndRejectsDiscontinuousNeighbors(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_UsesDepthPlaneAtScreenEdgesAndRejectsDiscontinuousNeighbors(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_UsesFallbackWhenNoDepthPlaneCanBeReconstructed(1)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_UsesFallbackWhenNoDepthPlaneCanBeReconstructed(3)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_UsesFirstNeighborsWhenSecondNeighborsAreUnavailable(2)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverNormal_UsesFirstNeighborsWhenSecondNeighborsAreUnavailable(3)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverRoles_FollowIntendedBlendIndependentlyOfResidency(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.ReceiverRoles_FollowIntendedBlendIndependentlyOfResidency(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_AcrossSubTexelPhasesSeparatesCoplanarReceiversAndBlockers(0,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_AcrossSubTexelPhasesSeparatesCoplanarReceiversAndBlockers(1,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_AcrossSubTexelPhasesSeparatesCoplanarReceiversAndBlockers(2,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_AcrossSubTexelPhasesSeparatesCoplanarReceiversAndBlockers(0,True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_AcrossSubTexelPhasesSeparatesCoplanarReceiversAndBlockers(1,True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_AcrossSubTexelPhasesSeparatesCoplanarReceiversAndBlockers(2,True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(False,0.0078125f,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(True,0.0078125f,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(True,0.0078125f,True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(False,0.015625f,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(True,0.015625f,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(True,0.015625f,True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(False,0.03125f,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(True,0.03125f,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_DefaultBiasKeepsCoplanarReceiverLitAndNearbyBlockerShadowed(True,0.03125f,True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_NormalMappedSlopeIsLitButASeparateOccluderStillShadows(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_NormalMappedSlopeIsLitButASeparateOccluderStillShadows(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_PlaneBoundaryNormalPreservesNearbyOccluder(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_PlaneBoundaryNormalPreservesNearbyOccluder(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_ReceiverPlaneCorrectionRemovesCoplanarTapSelfShadow(False,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_ReceiverPlaneCorrectionRemovesCoplanarTapSelfShadow(True,False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Sampling_ReceiverPlaneCorrectionRemovesCoplanarTapSelfShadow(True,True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_BND1PhasesAdvanceAcross256FramesAndKeepRayStrataAndReceiverSupport": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_BoundedGapFillDoesNotExtendAcrossEmptyDepth": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_ContinuationDoesNotRestartBehindItsSegmentAndRequestsPrimaryDependencies": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_ContinuationPreservesWorldRayAcrossScrolledAndRescaledClipmaps": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_DenseForegroundStackDoesNotDiscardTheArchOccluder": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_FootprintValidityDoesNotDependOnRandomPhase": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_HiddenSurfacesRemainIndependentAcrossEveryLayerAndCasterPool(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_HiddenSurfacesRemainIndependentAcrossEveryLayerAndCasterPool(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_MissingFineSupportRetriesParentThenCompletePCFWithoutLosingOcclusion": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_OrderedDepthIntervalsMatchLinearScanAcrossPoolsAndBoundaries": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_PageReuseRejectsInvalidNextPage(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_PageReuseRejectsInvalidNextPage(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_PageReuseTraversesShuffledPhysicalPagesInBothDirections": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_ParallelTailPreservesFarOccludersAndExhaustionIsUnavailable": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_ResolveEntryUsesSoftOutputWithoutPCFOverwritingItsOutParameter": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_SlopedUnoccludedReceiverStaysLitWithOriginIntegrationAndOddRayCounts": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.SMRT_TraversesThinCellsWithoutBridgingEmptyDepthOrLockingCentralShadow": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.StochasticFilter_IncompletePotentialFootprintUsesTheSameFallbackAcrossFrames(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.StochasticFilter_IncompletePotentialFootprintUsesTheSameFallbackAcrossFrames(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.StochasticFilter_NineComparisonMeanConvergesToAnalyticUnitDiskCoverage": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.StochasticSamples_CoverNineEqualAreaStrataAndVaryDeterministicallyByFrameAndPixel": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.StochasticSamples_RoundingCannotEscapeTheOneTexelFeedbackHalo": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Taps_CrossAllEdgesAndCornersWithoutPhysicalAtlasAdjacency(3)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Taps_CrossAllEdgesAndCornersWithoutPhysicalAtlasAdjacency(4)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Taps_RejectOutOfMapAndDirtyPagesButAcceptCompletedEmptyPages": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Transition_BlendsOnlyAvailableSamples(False,0.0f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Transition_BlendsOnlyAvailableSamples(True,0.5f)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Transition_HasNoStepWhenTheSelectedLevelChanges(False)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Transition_HasNoStepWhenTheSelectedLevelChanges(True)": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VirtualShadowMapSamplingTests.Transition_UsesSmoothEndpointsAndCanBeDisabled": {
+      "result": "Passed",
+      "report": "tests-sampling-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.ActiveCullRecords_AreDenseAndRemainAddressableAfterSwapBack": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.AlphaShadowInvalidations_LocalizeOncePerCasterAndPreserveOtherChanges": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.DirtyPages_ScaleWithTouchedRecordPages": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.DynamicShadowInvalidations_ClassifyPoolsAndConservativelyHandleOverflowAndSkinning": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.DynamicShadowInvalidations_TrackMotionVisibilityResourcesAndRemoval": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.DynamicShadowInvalidations_WarmStableAndMovingPathsAllocateZeroBytes": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.FullResync_MarksEveryPopulatedTableForWholeTableUpload": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.GeneratedHLSL_ContainsAllPrimitiveSceneTables": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.GenerationWrap_SkipsZero": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.GPUDataLayouts_HaveExpectedStrides": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.LegacyPayloadChanges_DoNotChangeLogicalHandles": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.MalformedResourceKeys_AreInvalid": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.MissingMaterialKeys_DoNotMergeAcrossOwnersOrSections": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.RebuildLegacyBridge_MapsAllResourceDomainsAndPreservesLogicalHandlesOnReorder": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.Register_ThreeSectionsCreatesOnePrimitiveAndOneTransform": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.RemoveAndRegister_ReusesPrimitiveSlotWithNewGeneration": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.SameSectionCountUpdate_KeepsRangeAndStableSharedHandles": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.SceneToken_RejectsHandleFromAnotherScene": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.SharedResources_AreReleasedOnlyAfterLastPrimitiveIsRemoved": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowInvalidations_LocalizeResourceChangesAndFallbackForUnknownChanges": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowInvalidations_PreserveNewChangesAndFallbackOnOverflow": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowInvalidations_ReuseJournalWithoutManagedAllocation": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowInvalidations_TrackOldNewAndRemovedBounds": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowRevision_IgnoresDynamicMotionAndTracksStaticContent": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.TransformUpdate_DirtiesOnlyTransformTablesAndPreviousCatchesUpOnce": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.TryGetWorldBounds_FiltersShadowCastersByStatePassAndCameraLayer": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    },
+    "VividRP.Editor.Tests.VividPrimitiveSceneTests.Upload_EmptySceneCreatesPlaceholdersAndBuffersGrowWithoutShrinking": {
+      "result": "Passed",
+      "report": "tests-final.xml"
+    }
+  }
+}

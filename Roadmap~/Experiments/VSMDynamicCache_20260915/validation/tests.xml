@@ -1,0 +1,768 @@
+<?xml version='1.0' encoding='utf-8'?>
+<test-run id="2" testcasecount="118" result="Passed" total="118" passed="118" failed="0" inconclusive="0" skipped="0" asserts="0" engine-version="3.5.0.0" clr-version="4.0.30319.42000" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:18Z" duration="2.7011734">
+  <test-suite type="TestSuite" id="1000" name="VividRP_Reborn" fullname="VividRP_Reborn" runstate="Runnable" testcasecount="3830" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:18Z" duration="2.701173" total="118" passed="118" failed="0" inconclusive="0" skipped="0" asserts="0">
+    <properties>
+      <property name="platform" value="EditMode" />
+    </properties>
+    <test-suite type="Assembly" id="5415" name="VividRP.Editor.Tests.dll" fullname="E:/VividRP_Reborn/Library/ScriptAssemblies/VividRP.Editor.Tests.dll" runstate="Runnable" testcasecount="2930" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:18Z" duration="2.623014" total="118" passed="118" failed="0" inconclusive="0" skipped="0" asserts="0">
+      <properties>
+        <property name="_PID" value="2064" />
+        <property name="_APPDOMAIN" value="Unity Child Domain" />
+        <property name="platform" value="EditMode" />
+        <property name="EditorOnly" value="True" />
+      </properties>
+      <test-suite type="TestSuite" id="5416" name="VividRP" fullname="VividRP" runstate="Runnable" testcasecount="2930" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:18Z" duration="2.588587" total="118" passed="118" failed="0" inconclusive="0" skipped="0" asserts="0">
+        <properties />
+        <test-suite type="TestSuite" id="5418" name="Editor" fullname="VividRP.Editor" runstate="Runnable" testcasecount="2921" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:18Z" duration="2.550026" total="118" passed="118" failed="0" inconclusive="0" skipped="0" asserts="0">
+          <properties />
+          <test-suite type="TestSuite" id="5419" name="Tests" fullname="VividRP.Editor.Tests" runstate="Runnable" testcasecount="2921" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:18Z" duration="2.516493" total="118" passed="118" failed="0" inconclusive="0" skipped="0" asserts="0">
+            <properties />
+            <test-suite type="TestFixture" id="3817" name="CascadedShadowSettingsVolumeTests" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="91" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:17Z" duration="2.289861" total="91" passed="91" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="3819" name="CascadedShadowSettingsVolume_ExposesScreenSpaceShadowDenoiseToggle" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.CascadedShadowSettingsVolume_ExposesScreenSpaceShadowDenoiseToggle" methodname="CascadedShadowSettingsVolume_ExposesScreenSpaceShadowDenoiseToggle" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1704665284" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:15Z" duration="0.012006" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3820" name="CascadedShadowSettingsVolume_VirtualShadowMapPrototypeDefaultsOff" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.CascadedShadowSettingsVolume_VirtualShadowMapPrototypeDefaultsOff" methodname="CascadedShadowSettingsVolume_VirtualShadowMapPrototypeDefaultsOff" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1875787467" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:15Z" duration="0.000321" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3902" name="DynamicCache_InvalidatesChangedConfigurationAndLeavingUntrackedCasters" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.DynamicCache_InvalidatesChangedConfigurationAndLeavingUntrackedCasters" methodname="DynamicCache_InvalidatesChangedConfigurationAndLeavingUntrackedCasters" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1702701895" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:15Z" duration="0.010035" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3874" name="DynamicPageLifecycle_PreservesAllHiddenLayersOutsideEachDirtyPool" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.DynamicPageLifecycle_PreservesAllHiddenLayersOutsideEachDirtyPool" methodname="DynamicPageLifecycle_PreservesAllHiddenLayersOutsideEachDirtyPool" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="91458943" result="Passed" start-time="2026-09-15 15:22:15Z" end-time="2026-09-15 15:22:16Z" duration="0.508558" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3818" name="GetCascadeBorderRatios_ConvertsInterCascadeRangesToSquaredDistanceFade" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.GetCascadeBorderRatios_ConvertsInterCascadeRangesToSquaredDistanceFade" methodname="GetCascadeBorderRatios_ConvertsInterCascadeRangesToSquaredDistanceFade" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="713015621" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001493" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3861" name="PageBudgetResize_PreservesPressureButLayoutChangeResetsIt" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.PageBudgetResize_PreservesPressureButLayoutChangeResetsIt" methodname="PageBudgetResize_PreservesPressureButLayoutChangeResetsIt" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="411421314" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.017479" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3845" name="VirtualShadowMapBuildValidation_RejectsInactivePotentialCaster" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapBuildValidation_RejectsInactivePotentialCaster" methodname="VirtualShadowMapBuildValidation_RejectsInactivePotentialCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="2098335457" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.007826" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3846" name="VirtualShadowMapBuildValidation_RequiresSceneVolumeOverride" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapBuildValidation_RequiresSceneVolumeOverride" methodname="VirtualShadowMapBuildValidation_RequiresSceneVolumeOverride" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1971659714" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001378" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3862" name="VirtualShadowMapPrototypeAllocator_AllocatesRequestedPagesDeterministically" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeAllocator_AllocatesRequestedPagesDeterministically" methodname="VirtualShadowMapPrototypeAllocator_AllocatesRequestedPagesDeterministically" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1756211091" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.005076" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3863" name="VirtualShadowMapPrototypeAllocator_RecyclesUnrequestedPagesAcrossFrames" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeAllocator_RecyclesUnrequestedPagesAcrossFrames" methodname="VirtualShadowMapPrototypeAllocator_RecyclesUnrequestedPagesAcrossFrames" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1214226612" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.014465" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3905" name="VirtualShadowMapPrototypeCache_CopiesCullingStateAndIgnoresDispatchOffsets" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_CopiesCullingStateAndIgnoresDispatchOffsets" methodname="VirtualShadowMapPrototypeCache_CopiesCullingStateAndIgnoresDispatchOffsets" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1523449233" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001901" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3904" name="VirtualShadowMapPrototypeCache_FullyInvalidatesChangedCullingInputs" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_FullyInvalidatesChangedCullingInputs" methodname="VirtualShadowMapPrototypeCache_FullyInvalidatesChangedCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1478116848" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001169" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-suite type="ParameterizedMethod" id="3915" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="9" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.009342" total="9" passed="9" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3906" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(0)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(0)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="2040808449" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000462" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3907" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(1)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(1)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="2062147011" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000083" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3908" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(2)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(2)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="197681552" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000070" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3909" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(3)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(3)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1077800032" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000044" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3910" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(4)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(4)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1752994015" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000062" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3911" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(5)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(5)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="594183119" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000063" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3912" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(6)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(6)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1524320670" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000060" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3913" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(7)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(7)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="525869205" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000064" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3914" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(8)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs(8)" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteCullingInputs" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1346006177" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000061" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+              <test-case id="3916" name="VirtualShadowMapPrototypeCache_RejectsNonFiniteState" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_RejectsNonFiniteState" methodname="VirtualShadowMapPrototypeCache_RejectsNonFiniteState" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1301211167" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000246" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3899" name="VirtualShadowMapPrototypeCache_ReusesMatchingStableState" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCache_ReusesMatchingStableState" methodname="VirtualShadowMapPrototypeCache_ReusesMatchingStableState" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="287431046" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000295" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3917" name="VirtualShadowMapPrototypeCacheKey_AcceptsEmptyStaticPool" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeCacheKey_AcceptsEmptyStaticPool" methodname="VirtualShadowMapPrototypeCacheKey_AcceptsEmptyStaticPool" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="2128017487" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000129" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3901" name="VirtualShadowMapPrototypeDynamicRefresh_DoesNotInvalidateStaticCache" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeDynamicRefresh_DoesNotInvalidateStaticCache" methodname="VirtualShadowMapPrototypeDynamicRefresh_DoesNotInvalidateStaticCache" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="413371122" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000187" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3876" name="VirtualShadowMapPrototypeFeedback_IsConsumedOnlyByItsCameraAndCurrentFrame" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_IsConsumedOnlyByItsCameraAndCurrentFrame" methodname="VirtualShadowMapPrototypeFeedback_IsConsumedOnlyByItsCameraAndCurrentFrame" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="91115827" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000321" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3877" name="VirtualShadowMapPrototypeFeedback_ReleaseClearsOwnerAndFrame" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_ReleaseClearsOwnerAndFrame" methodname="VirtualShadowMapPrototypeFeedback_ReleaseClearsOwnerAndFrame" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1752401081" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.000121" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-suite type="ParameterizedMethod" id="3881" name="VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="2" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.115334" total="2" passed="2" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3879" name="VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection(0)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection(0)" methodname="VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1494094162" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.110422" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3880" name="VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection(10)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection(10)" methodname="VirtualShadowMapPrototypeFeedback_ResetRemovesOtherCameraDemandAndEvictionProtection" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1363623443" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.002573" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+              <test-case id="3878" name="VirtualShadowMapPrototypeFeedback_WarmOwnershipChecksAllocateZeroBytes" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFeedback_WarmOwnershipChecksAllocateZeroBytes" methodname="VirtualShadowMapPrototypeFeedback_WarmOwnershipChecksAllocateZeroBytes" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="172461850" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001086" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3875" name="VirtualShadowMapPrototypeFrameState_TracksReadinessActivationAndFallback" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeFrameState_TracksReadinessActivationAndFallback" methodname="VirtualShadowMapPrototypeFrameState_TracksReadinessActivationAndFallback" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="608363995" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001041" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-suite type="ParameterizedMethod" id="3873" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="9" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.394992" total="9" passed="9" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3864" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.7509f,0.7511f,0.1f,0.2f,8)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.7509f,0.7511f,0.1f,0.2f,8)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="926803598" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.377808" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3865" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.1f,0.2f,0.7509f,0.7511f,4096)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.1f,0.2f,0.7509f,0.7511f,4096)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="2111874736" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.002479" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3866" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.7499f,0.7501f,0.7499f,0.7501f,52224)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.7499f,0.7501f,0.7499f,0.7501f,52224)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="593277818" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001745" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3867" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.25f,0.25f,0.1f,0.2f,2)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.25f,0.25f,0.1f,0.2f,2)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="669208943" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001737" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3868" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(1.0f,1.0f,0.1f,0.2f,8)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(1.0f,1.0f,0.1f,0.2f,8)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1830873919" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001784" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3869" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(-0.1f,0.0001f,0.1f,0.2f,1)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(-0.1f,0.0001f,0.1f,0.2f,1)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1495138737" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001833" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3870" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.2499f,0.24999f,0.1f,0.2f,1)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.2499f,0.24999f,0.1f,0.2f,1)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1055113707" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.002032" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3871" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.2509f,0.2511f,0.1f,0.2f,2)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.2509f,0.2511f,0.1f,0.2f,2)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1843759425" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001797" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3872" name="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.5009f,0.5011f,0.1f,0.2f,4)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries(0.5009f,0.5011f,0.1f,0.2f,4)" methodname="VirtualShadowMapPrototypeInvalidation_MatchesRasterPageBoundaries" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="783632437" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001631" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+              <test-case id="3898" name="VirtualShadowMapPrototypeMeshletPageBuffers_GrowOnceAndThenAllocateZeroBytes" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPageBuffers_GrowOnceAndThenAllocateZeroBytes" methodname="VirtualShadowMapPrototypeMeshletPageBuffers_GrowOnceAndThenAllocateZeroBytes" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="424567939" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:16Z" duration="0.001032" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-suite type="ParameterizedMethod" id="3897" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="11" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:17Z" duration="0.452514" total="11" passed="11" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3886" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,0,256)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,0,256)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="203455723" result="Passed" start-time="2026-09-15 15:22:16Z" end-time="2026-09-15 15:22:17Z" duration="0.339309" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3887" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,1,256)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,1,256)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1551776583" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.006020" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3888" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,2,256)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,2,256)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1575572860" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.021444" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3889" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,256)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,256)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="981793063" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.009324" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3890" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(1,0,256)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(1,0,256)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1845182075" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.006317" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3891" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,1)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,1)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="775193016" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.006129" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3892" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,63)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,63)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1536342244" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.020997" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3893" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,64)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,64)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1919069201" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.007521" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3894" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,65)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,3,65)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="459276366" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.006573" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3895" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,0,4096)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(0,0,4096)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="988135992" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.009225" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3896" name="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(1,2,1024)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages(1,2,1024)" methodname="VirtualShadowMapPrototypeMeshletPages_ClipLargeRequestsToRelevantPages" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1809396397" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.017267" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+              <test-case id="3885" name="VirtualShadowMapPrototypeMeshletPageShader_CompilesPageClippedVariants" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeMeshletPageShader_CompilesPageClippedVariants" methodname="VirtualShadowMapPrototypeMeshletPageShader_CompilesPageClippedVariants" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1303793228" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.002073" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3860" name="VirtualShadowMapPrototypePageTable_StartsUnmapped" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePageTable_StartsUnmapped" methodname="VirtualShadowMapPrototypePageTable_StartsUnmapped" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1172883442" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.002023" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-suite type="ParameterizedMethod" id="3834" name="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="5" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.002831" total="5" passed="5" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3829" name="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(False,True,True,True,False)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(False,True,True,True,False)" methodname="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="2065392129" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001495" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3830" name="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,False,False,True,False)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,False,False,True,False)" methodname="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="334274127" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000052" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3831" name="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,True,False,True,True)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,True,False,True,True)" methodname="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1196210659" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000042" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3832" name="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,False,True,False,True)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,False,True,False,True)" methodname="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1828765195" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000040" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3833" name="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,True,True,False,False)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend(True,True,True,False,False)" methodname="VirtualShadowMapPrototypePreparation_AcceptsEitherCasterBackend" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="950161225" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000040" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+              <test-case id="3835" name="VirtualShadowMapPrototypePreparation_StableSelectionAllocatesZeroBytes" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypePreparation_StableSelectionAllocatesZeroBytes" methodname="VirtualShadowMapPrototypePreparation_StableSelectionAllocatesZeroBytes" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1457173855" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000183" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3883" name="VirtualShadowMapPrototypeResources_AllocateFourCascadePhysicalPool" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeResources_AllocateFourCascadePhysicalPool" methodname="VirtualShadowMapPrototypeResources_AllocateFourCascadePhysicalPool" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1056838947" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.004317" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3884" name="VirtualShadowMapPrototypeResources_StableEnsureAllocatesZeroBytes" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeResources_StableEnsureAllocatesZeroBytes" methodname="VirtualShadowMapPrototypeResources_StableEnsureAllocatesZeroBytes" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="55212636" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.004003" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3882" name="VirtualShadowMapPrototypeStableFrameTransitions_AllocateZeroBytes" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeStableFrameTransitions_AllocateZeroBytes" methodname="VirtualShadowMapPrototypeStableFrameTransitions_AllocateZeroBytes" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="870495664" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000256" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3900" name="VirtualShadowMapPrototypeStableStaticCacheCheck_AllocatesZeroBytes" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeStableStaticCacheCheck_AllocatesZeroBytes" methodname="VirtualShadowMapPrototypeStableStaticCacheCheck_AllocatesZeroBytes" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="124282274" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.023151" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3903" name="VirtualShadowMapPrototypeStaticCache_LocalizesContentButFullyInvalidatesConfiguration" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeStaticCache_LocalizesContentButFullyInvalidatesConfiguration" methodname="VirtualShadowMapPrototypeStaticCache_LocalizesContentButFullyInvalidatesConfiguration" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1080102036" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000940" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-suite type="ParameterizedMethod" id="3828" name="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="6" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.002231" total="6" passed="6" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3822" name="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,True,True,True)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,True,True,True)" methodname="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="931766260" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000359" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3823" name="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Vulkan,True,True,True,True)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Vulkan,True,True,True,True)" methodname="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1120008894" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000059" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3824" name="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D11,True,True,True,False)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D11,True,True,True,False)" methodname="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1689076863" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000048" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3825" name="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,False,True,True,False)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,False,True,True,False)" methodname="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="45383303" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000047" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3826" name="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,False,True,False)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,False,True,False)" methodname="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1126122234" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000046" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3827" name="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,True,False,False)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities(Direct3D12,True,True,False,False)" methodname="VirtualShadowMapPrototypeSupport_RequiresTargetPlatformCapabilities" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1842163000" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000045" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+              <test-suite type="ParameterizedMethod" id="3842" name="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="6" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.006967" total="6" passed="6" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3836" name="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Material/StandardLit&quot;)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Material/StandardLit&quot;)" methodname="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="327024998" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001737" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3837" name="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Material/StandardLayeredLit&quot;)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Material/StandardLayeredLit&quot;)" methodname="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="686625027" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001142" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3838" name="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Experimental/Material/StandardLit&quot;)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Experimental/Material/StandardLit&quot;)" methodname="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1855172491" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000211" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3839" name="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Material/Unlit&quot;)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Material/Unlit&quot;)" methodname="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1953088815" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000944" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3840" name="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Terrain/TerrainLit&quot;)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;VividRP/Terrain/TerrainLit&quot;)" methodname="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="617587944" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001827" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3841" name="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;Hidden/VividRP/TerrainLit_Basemap&quot;)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster(&quot;Hidden/VividRP/TerrainLit_Basemap&quot;)" methodname="VirtualShadowMapUnityCasterCompatibility_AcceptsMarkedShadowCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="864837650" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000111" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+              <test-case id="3843" name="VirtualShadowMapUnityCasterCompatibility_RejectsUnmarkedShadowCaster" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_RejectsUnmarkedShadowCaster" methodname="VirtualShadowMapUnityCasterCompatibility_RejectsUnmarkedShadowCaster" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1156506039" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000379" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3844" name="VirtualShadowMapUnityCasterCompatibility_ReportsExactRendererMaterialSlot" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_ReportsExactRendererMaterialSlot" methodname="VirtualShadowMapUnityCasterCompatibility_ReportsExactRendererMaterialSlot" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="304620586" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000464" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3847" name="VirtualShadowMapUnityCasterCompatibility_StableReadinessAllocatesZeroBytes" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VirtualShadowMapUnityCasterCompatibility_StableReadinessAllocatesZeroBytes" methodname="VirtualShadowMapUnityCasterCompatibility_StableReadinessAllocatesZeroBytes" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="53057778" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.003915" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3859" name="VSMClipmapLayoutAndResourceReuse_AllocateZeroAfterWarmup" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMClipmapLayoutAndResourceReuse_AllocateZeroAfterWarmup" methodname="VSMClipmapLayoutAndResourceReuse_AllocateZeroAfterWarmup" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="448472810" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.031785" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3853" name="VSMProjectionABI_AndAllocatorAreNotLimitedToFourCSMCascades" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMProjectionABI_AndAllocatorAreNotLimitedToFourCSMCascades" methodname="VSMProjectionABI_AndAllocatorAreNotLimitedToFourCSMCascades" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="369077395" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000455" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="3821" name="VSMQuality_DefaultsToHardReferenceAndClampsTransitionWidth" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMQuality_DefaultsToHardReferenceAndClampsTransitionWidth" methodname="VSMQuality_DefaultsToHardReferenceAndClampsTransitionWidth" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="899695263" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000388" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-suite type="ParameterizedMethod" id="3858" name="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="4" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.620238" total="4" passed="4" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3854" name="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(True,128)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(True,128)" methodname="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1148725228" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.342610" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3855" name="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(False,128)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(False,128)" methodname="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1464824888" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.274464" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3856" name="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(True,2048)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(True,2048)" methodname="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1873773862" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000720" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3857" name="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(False,2048)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMRasterProjection_PreservesVirtualPixelCentersAndDepth(False,2048)" methodname="VSMRasterProjection_PreservesVirtualPixelCentersAndDepth" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1814766790" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000645" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+              <test-suite type="ParameterizedMethod" id="3852" name="VSMResolution_IsIndependentAndPageAligned" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" testcasecount="4" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001419" total="4" passed="4" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-case id="3848" name="VSMResolution_IsIndependentAndPageAligned(0,2048,2048)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned(0,2048,2048)" methodname="VSMResolution_IsIndependentAndPageAligned" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="866576727" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000263" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3849" name="VSMResolution_IsIndependentAndPageAligned(4097,512,4224)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned(4097,512,4224)" methodname="VSMResolution_IsIndependentAndPageAligned" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="604226849" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000051" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3850" name="VSMResolution_IsIndependentAndPageAligned(16384,512,16384)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned(16384,512,16384)" methodname="VSMResolution_IsIndependentAndPageAligned" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1065504666" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000036" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+                <test-case id="3851" name="VSMResolution_IsIndependentAndPageAligned(99,512,128)" fullname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests.VSMResolution_IsIndependentAndPageAligned(99,512,128)" methodname="VSMResolution_IsIndependentAndPageAligned" classname="VividRP.Editor.Tests.CascadedShadowSettingsVolumeTests" runstate="Runnable" seed="1978209158" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000033" asserts="0">
+                  <properties>
+                    <property name="retryIteration" value="0" />
+                    <property name="repeatIteration" value="0" />
+                  </properties>
+                </test-case>
+              </test-suite>
+            </test-suite>
+            <test-suite type="TestFixture" id="4892" name="VividPrimitiveSceneTests" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" testcasecount="27" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:18Z" duration="0.111109" total="27" passed="27" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="4898" name="ActiveCullRecords_AreDenseAndRemainAddressableAfterSwapBack" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.ActiveCullRecords_AreDenseAndRemainAddressableAfterSwapBack" methodname="ActiveCullRecords_AreDenseAndRemainAddressableAfterSwapBack" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1997186997" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.014613" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4907" name="DirtyPages_ScaleWithTouchedRecordPages" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.DirtyPages_ScaleWithTouchedRecordPages" methodname="DirtyPages_ScaleWithTouchedRecordPages" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="103358923" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.015788" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4910" name="DynamicShadowInvalidations_ClassifyPoolsAndConservativelyHandleOverflowAndSkinning" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.DynamicShadowInvalidations_ClassifyPoolsAndConservativelyHandleOverflowAndSkinning" methodname="DynamicShadowInvalidations_ClassifyPoolsAndConservativelyHandleOverflowAndSkinning" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="519482668" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.002190" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4909" name="DynamicShadowInvalidations_TrackMotionVisibilityResourcesAndRemoval" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.DynamicShadowInvalidations_TrackMotionVisibilityResourcesAndRemoval" methodname="DynamicShadowInvalidations_TrackMotionVisibilityResourcesAndRemoval" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1076629318" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001533" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4911" name="DynamicShadowInvalidations_WarmStableAndMovingPathsAllocateZeroBytes" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.DynamicShadowInvalidations_WarmStableAndMovingPathsAllocateZeroBytes" methodname="DynamicShadowInvalidations_WarmStableAndMovingPathsAllocateZeroBytes" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1916590330" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001308" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4919" name="FullResync_MarksEveryPopulatedTableForWholeTableUpload" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.FullResync_MarksEveryPopulatedTableForWholeTableUpload" methodname="FullResync_MarksEveryPopulatedTableForWholeTableUpload" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="725150710" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.015837" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4894" name="GeneratedHLSL_ContainsAllPrimitiveSceneTables" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.GeneratedHLSL_ContainsAllPrimitiveSceneTables" methodname="GeneratedHLSL_ContainsAllPrimitiveSceneTables" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="2085341685" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.002014" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4895" name="GenerationWrap_SkipsZero" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.GenerationWrap_SkipsZero" methodname="GenerationWrap_SkipsZero" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="171460169" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000240" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4893" name="GPUDataLayouts_HaveExpectedStrides" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.GPUDataLayouts_HaveExpectedStrides" methodname="GPUDataLayouts_HaveExpectedStrides" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="582699774" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000290" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4903" name="LegacyPayloadChanges_DoNotChangeLogicalHandles" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.LegacyPayloadChanges_DoNotChangeLogicalHandles" methodname="LegacyPayloadChanges_DoNotChangeLogicalHandles" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1039405000" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.014670" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4906" name="MalformedResourceKeys_AreInvalid" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.MalformedResourceKeys_AreInvalid" methodname="MalformedResourceKeys_AreInvalid" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="500751644" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000277" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4905" name="MissingMaterialKeys_DoNotMergeAcrossOwnersOrSections" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.MissingMaterialKeys_DoNotMergeAcrossOwnersOrSections" methodname="MissingMaterialKeys_DoNotMergeAcrossOwnersOrSections" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="5987602" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000602" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4904" name="RebuildLegacyBridge_MapsAllResourceDomainsAndPreservesLogicalHandlesOnReorder" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.RebuildLegacyBridge_MapsAllResourceDomainsAndPreservesLogicalHandlesOnReorder" methodname="RebuildLegacyBridge_MapsAllResourceDomainsAndPreservesLogicalHandlesOnReorder" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="632435595" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.021143" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4900" name="Register_ThreeSectionsCreatesOnePrimitiveAndOneTransform" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.Register_ThreeSectionsCreatesOnePrimitiveAndOneTransform" methodname="Register_ThreeSectionsCreatesOnePrimitiveAndOneTransform" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1789851417" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000915" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4897" name="RemoveAndRegister_ReusesPrimitiveSlotWithNewGeneration" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.RemoveAndRegister_ReusesPrimitiveSlotWithNewGeneration" methodname="RemoveAndRegister_ReusesPrimitiveSlotWithNewGeneration" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1807883571" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000537" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4902" name="SameSectionCountUpdate_KeepsRangeAndStableSharedHandles" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.SameSectionCountUpdate_KeepsRangeAndStableSharedHandles" methodname="SameSectionCountUpdate_KeepsRangeAndStableSharedHandles" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1655299622" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001298" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4896" name="SceneToken_RejectsHandleFromAnotherScene" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.SceneToken_RejectsHandleFromAnotherScene" methodname="SceneToken_RejectsHandleFromAnotherScene" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="191133522" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000425" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4901" name="SharedResources_AreReleasedOnlyAfterLastPrimitiveIsRemoved" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.SharedResources_AreReleasedOnlyAfterLastPrimitiveIsRemoved" methodname="SharedResources_AreReleasedOnlyAfterLastPrimitiveIsRemoved" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1371613696" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001653" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4916" name="StaticAlphaShadowInvalidations_LocalizeOncePerCasterAndPreserveOtherChanges" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticAlphaShadowInvalidations_LocalizeOncePerCasterAndPreserveOtherChanges" methodname="StaticAlphaShadowInvalidations_LocalizeOncePerCasterAndPreserveOtherChanges" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="735087735" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001613" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4914" name="StaticShadowInvalidations_LocalizeResourceChangesAndFallbackForUnknownChanges" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowInvalidations_LocalizeResourceChangesAndFallbackForUnknownChanges" methodname="StaticShadowInvalidations_LocalizeResourceChangesAndFallbackForUnknownChanges" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1893586319" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000555" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4915" name="StaticShadowInvalidations_PreserveNewChangesAndFallbackOnOverflow" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowInvalidations_PreserveNewChangesAndFallbackOnOverflow" methodname="StaticShadowInvalidations_PreserveNewChangesAndFallbackOnOverflow" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1353727156" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000479" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4917" name="StaticShadowInvalidations_ReuseJournalWithoutManagedAllocation" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowInvalidations_ReuseJournalWithoutManagedAllocation" methodname="StaticShadowInvalidations_ReuseJournalWithoutManagedAllocation" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1807346077" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000326" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4913" name="StaticShadowInvalidations_TrackOldNewAndRemovedBounds" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowInvalidations_TrackOldNewAndRemovedBounds" methodname="StaticShadowInvalidations_TrackOldNewAndRemovedBounds" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1451358499" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000851" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4912" name="StaticShadowRevision_IgnoresDynamicMotionAndTracksStaticContent" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.StaticShadowRevision_IgnoresDynamicMotionAndTracksStaticContent" methodname="StaticShadowRevision_IgnoresDynamicMotionAndTracksStaticContent" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1447658062" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.000533" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4908" name="TransformUpdate_DirtiesOnlyTransformTablesAndPreviousCatchesUpOnce" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.TransformUpdate_DirtiesOnlyTransformTablesAndPreviousCatchesUpOnce" methodname="TransformUpdate_DirtiesOnlyTransformTablesAndPreviousCatchesUpOnce" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1173931628" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.002800" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4899" name="TryGetWorldBounds_FiltersShadowCastersByStatePassAndCameraLayer" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.TryGetWorldBounds_FiltersShadowCastersByStatePassAndCameraLayer" methodname="TryGetWorldBounds_FiltersShadowCastersByStatePassAndCameraLayer" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="822626200" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:17Z" duration="0.001520" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="4918" name="Upload_EmptySceneCreatesPlaceholdersAndBuffersGrowWithoutShrinking" fullname="VividRP.Editor.Tests.VividPrimitiveSceneTests.Upload_EmptySceneCreatesPlaceholdersAndBuffersGrowWithoutShrinking" methodname="Upload_EmptySceneCreatesPlaceholdersAndBuffersGrowWithoutShrinking" classname="VividRP.Editor.Tests.VividPrimitiveSceneTests" runstate="Runnable" seed="1868278384" result="Passed" start-time="2026-09-15 15:22:17Z" end-time="2026-09-15 15:22:18Z" duration="0.003019" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output>Saving results to: C:/Users/11252/AppData/LocalLow/DefaultCompany/VividRP_Reborn\TestResults.xml
+</output>
+              </test-case>
+            </test-suite>
+          </test-suite>
+        </test-suite>
+      </test-suite>
+    </test-suite>
+  </test-suite>
+</test-run>

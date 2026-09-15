@@ -1,0 +1,65 @@
+{
+  "baseline": "689aab661581b578ffabb53b8e5fe91c7a5c9cab",
+  "files": [
+    {
+      "path": "Runtime/RenderPass/Core/CSMShadowPass.cs",
+      "before_sha256": "d76764d4b7fb63817033e2d31380aea958b46eb1f85a9638e651abdc0af99fd9",
+      "final_sha256": "144265ae6dcc502a1badf4dce570402b9bdadeafc7b87aa4c368c9c6d54b7413"
+    },
+    {
+      "path": "Runtime/RenderPass/Core/VSMProfiling.cs",
+      "before_sha256": "c60a1f64d53ab81fc411e6e9ab98781087809f66ba23119e31403d378bcf3b58",
+      "final_sha256": "f00fde230137261f82bb779f7cf674ff4deda54f3fa34deb9ca1db8aa41e9e3f"
+    },
+    {
+      "path": "Runtime/SubSystem/GPUDriven/VividGPUDrivenSceneDataBuilder.cs",
+      "before_sha256": "ab1a5448f681dc52c39849a3bc27c884fad7aacd71f1e5d668d726579b6b5c1b",
+      "final_sha256": "3f39918e14da34f478659ae5a7e383caa1549ff4f8ad09a0c97c11290c0455f2"
+    },
+    {
+      "path": "Runtime/SubSystem/GPUDriven/VividGPUDrivenSystem.cs",
+      "before_sha256": "391e64f034bed9bae17f34657a751378b815ddb627c98778993744a873af763c",
+      "final_sha256": "d39fd57bcef5a27738e3f5191c85f94974a404ad9ae2212185204bece3562512"
+    },
+    {
+      "path": "Runtime/SubSystem/PrimitiveScene/VividPrimitiveScene.cs",
+      "before_sha256": "688a5e960b90d4b6ba4525fd80a63a1419ccb33abda84d2d781938c4737f9789",
+      "final_sha256": "ef8294b7685b9be7342b2c876346ab649237045632540b78e9a38d90a387d1a5"
+    },
+    {
+      "path": "Runtime/SubSystem/PrimitiveScene/VividPrimitiveSceneAdapter.cs",
+      "before_sha256": "308d121385810229a27088930c47bbeb607b02d62dba944a9de5add6a5bce3c7",
+      "final_sha256": "79c63290a4a809775163fc415096a1a209dfbe5b9d0e97de6e1fee6a8b0522db"
+    },
+    {
+      "path": "Shaders/Core/Private/CSMShadowResolve.compute",
+      "before_sha256": "e9a2947dd2bba402f9fd13a25df7e25385dcc4c64f04517259d96f7d0253c50b",
+      "final_sha256": "2ed23cf6c07e1d4ae64690b01821f328f790b9367695f4ca7d71f61496747e48"
+    },
+    {
+      "path": "Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl",
+      "before_sha256": "560270fadf09436c2f6bac0994af488d7fe8ccd3d493975addf6c7e8a1d9b5c4",
+      "final_sha256": "2916fc53a7abe2e68cb7220e09d7b4119e855043ce6b0f4091ee7f8c4df9d10d"
+    },
+    {
+      "path": "Tests/Editor/RenderPass/Shadows/CascadedShadowSettingsVolumeTests.cs",
+      "before_sha256": "0bf94b7702a0db96985c4c404e80dac01795425bdb6b1f11a3f4634b7623050c",
+      "final_sha256": "eaaa54a52b15239b552e1ffed2e92cb9e01bb6763b1ae4a8d0b66a03450df7a7"
+    },
+    {
+      "path": "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.cs",
+      "before_sha256": "ecd5e49b663f9ec99aa41acc433ed81787f8b7a1056bec250b387e6367b60c40",
+      "final_sha256": "4f953d39f147a6d16279f8341a7cb56d9a34b36b1f6320225f13d968a5c150c2"
+    },
+    {
+      "path": "Tests/Editor/SubSystem/GPUDriven/VividRenderPipelineAssetGpuDrivenTests.cs",
+      "before_sha256": "452f992544c2251224d2cb940ac05006e1b26569f8df535f9fc616ae1a3f7dba",
+      "final_sha256": "41ee0a29278c99828aae69a86fc695daf90ae5224bce22a739964760dbcd2811"
+    },
+    {
+      "path": "Tests/Editor/SubSystem/PrimitiveScene/VividPrimitiveSceneTests.cs",
+      "before_sha256": "da07694ce9bce2672d593b4052de36b887861047336dad02481dab8cb56b1c00",
+      "final_sha256": "50ed225a4869768f4d58fe4826a295281af71097c939243c78f03b81aae6a476"
+    }
+  ]
+}

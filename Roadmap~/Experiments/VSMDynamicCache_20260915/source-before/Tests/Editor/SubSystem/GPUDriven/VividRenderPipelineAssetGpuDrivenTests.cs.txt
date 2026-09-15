@@ -1,0 +1,1311 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using NUnit.Framework;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
+using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
+using Object = UnityEngine.Object;
+
+namespace VividRP.Editor.Tests
+{
+    public class VividRenderPipelineAssetGpuDrivenTests
+    {
+        [Test]
+        public void Asset_DefaultsToGpuDrivenDisabled()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+
+            try
+            {
+                Assert.That(asset.ColorGradingSpace, Is.EqualTo(ColorGradingSpace.sRGB));
+                Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.Unreal));
+                Assert.That(asset.EnableGPUDriven, Is.False);
+                Assert.That(asset.EnableGPUDrivenOcclusionCulling, Is.True);
+                Assert.That(asset.EnableTerrainRuntimeVirtualTexture, Is.False);
+                Assert.That(asset.DecalTechnique, Is.EqualTo(VividDecalTechnique.ClusteredBindless));
+                Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
+                Assert.That(
+                    asset.GPUDrivenVirtualTexturePhysicalPoolQuality,
+                    Is.EqualTo(GPUDrivenVirtualTexturePhysicalPoolQuality.Medium));
+                Assert.That(asset.VirtualTextureMaxResidencyAllocationsPerFrame, Is.EqualTo(64));
+                Assert.That(asset.VirtualTextureMaxPrefetchAllocationsPerFrame, Is.Zero);
+                Assert.That(asset.VirtualTextureMaxPageUploadsPerFrame, Is.EqualTo(64));
+                Assert.That(asset.VirtualTextureMaxUploadBytesPerFrameMiB, Is.Zero);
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void SerializedObject_UpdatesGpuDrivenProperty()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+
+            try
+            {
+                var serializedObject = new SerializedObject(asset);
+                var colorGradingSpaceProperty = serializedObject.FindProperty("m_ColorGradingSpace");
+                var implementationProperty = serializedObject.FindProperty("m_AutoExposureImplementation");
+                var property = serializedObject.FindProperty("m_EnableGPUDriven");
+                var occlusionProperty = serializedObject.FindProperty("m_EnableGPUDrivenOcclusionCulling");
+                var terrainRVTProperty = serializedObject.FindProperty("m_EnableTerrainRuntimeVirtualTexture");
+                var decalTechniqueProperty = serializedObject.FindProperty("m_DecalTechnique");
+                var textureBackendProperty = serializedObject.FindProperty("m_GPUDrivenTextureBackend");
+                var virtualTexturePhysicalPoolQualityProperty = serializedObject.FindProperty(
+                    "m_GPUDrivenVirtualTexturePhysicalPoolQuality");
+                var maxResidencyProperty = serializedObject.FindProperty(
+                    "m_VirtualTextureMaxResidencyAllocationsPerFrame");
+                var maxPrefetchProperty = serializedObject.FindProperty(
+                    "m_VirtualTextureMaxPrefetchAllocationsPerFrame");
+                var maxPageUploadsProperty = serializedObject.FindProperty(
+                    "m_VirtualTextureMaxPageUploadsPerFrame");
+                var maxUploadMiBProperty = serializedObject.FindProperty(
+                    "m_VirtualTextureMaxUploadBytesPerFrameMiB");
+
+                Assert.That(colorGradingSpaceProperty, Is.Not.Null);
+                Assert.That(implementationProperty, Is.Not.Null);
+                Assert.That(property, Is.Not.Null);
+                Assert.That(occlusionProperty, Is.Not.Null);
+                Assert.That(terrainRVTProperty, Is.Not.Null);
+                Assert.That(decalTechniqueProperty, Is.Not.Null);
+                Assert.That(textureBackendProperty, Is.Not.Null);
+                Assert.That(virtualTexturePhysicalPoolQualityProperty, Is.Not.Null);
+                Assert.That(maxResidencyProperty, Is.Not.Null);
+                Assert.That(maxPrefetchProperty, Is.Not.Null);
+                Assert.That(maxPageUploadsProperty, Is.Not.Null);
+                Assert.That(maxUploadMiBProperty, Is.Not.Null);
+
+                colorGradingSpaceProperty.enumValueIndex = (int)ColorGradingSpace.AcesCg;
+                implementationProperty.enumValueIndex = (int)AutoExposureImplementationPath.HDRP;
+                property.boolValue = true;
+                occlusionProperty.boolValue = false;
+                terrainRVTProperty.boolValue = true;
+                decalTechniqueProperty.enumValueIndex = (int)VividDecalTechnique.TerrainRuntimeVirtualTexture;
+                textureBackendProperty.enumValueIndex = (int) GPUDrivenTextureBackendMode.Bindless;
+                virtualTexturePhysicalPoolQualityProperty.enumValueIndex =
+                    (int)GPUDrivenVirtualTexturePhysicalPoolQuality.High;
+                maxResidencyProperty.intValue = 41;
+                maxPrefetchProperty.intValue = 7;
+                maxPageUploadsProperty.intValue = 13;
+                maxUploadMiBProperty.intValue = 23;
+                serializedObject.ApplyModifiedPropertiesWithoutUndo();
+
+                Assert.That(asset.ColorGradingSpace, Is.EqualTo(ColorGradingSpace.AcesCg));
+                Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.HDRP));
+                Assert.That(asset.EnableGPUDriven, Is.True);
+                Assert.That(asset.EnableGPUDrivenOcclusionCulling, Is.False);
+                Assert.That(asset.EnableTerrainRuntimeVirtualTexture, Is.True);
+                Assert.That(
+                    asset.DecalTechnique,
+                    Is.EqualTo(VividDecalTechnique.TerrainRuntimeVirtualTexture));
+                Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
+                Assert.That(
+                    asset.GPUDrivenVirtualTexturePhysicalPoolQuality,
+                    Is.EqualTo(GPUDrivenVirtualTexturePhysicalPoolQuality.High));
+                Assert.That(asset.VirtualTextureMaxResidencyAllocationsPerFrame, Is.EqualTo(41));
+                Assert.That(asset.VirtualTextureMaxPrefetchAllocationsPerFrame, Is.EqualTo(7));
+                Assert.That(asset.VirtualTextureMaxPageUploadsPerFrame, Is.EqualTo(13));
+                Assert.That(asset.VirtualTextureMaxUploadBytesPerFrameMiB, Is.EqualTo(23));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void Asset_DoesNotExposeLegacyGpuDrivenDebugOverlayToggle()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+
+            try
+            {
+                var serializedObject = new SerializedObject(asset);
+
+                Assert.That(serializedObject.FindProperty("m_EnableGPUDrivenDebugOverlay"), Is.Null);
+                Assert.That(typeof(VividRenderPipelineAsset).GetProperty("EnableGPUDrivenDebugOverlay"), Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void Asset_DefaultShader_IsStandardLit()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+
+            try
+            {
+                Assert.That(asset.defaultShader, Is.Not.Null);
+                Assert.That(asset.defaultShader.name, Is.EqualTo("VividRP/Material/StandardLit"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void Asset_DefaultMaterial_UsesPrecreatedStandardLitMaterial()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+
+            try
+            {
+                Material expectedMaterial = Resources.Load<Material>("DefaultMaterial");
+                Material material = asset.defaultMaterial;
+
+                Assert.That(expectedMaterial, Is.Not.Null);
+                Assert.That(material, Is.Not.Null);
+                Assert.That(material, Is.SameAs(expectedMaterial));
+                Assert.That(material.name, Is.EqualTo("DefaultMaterial"));
+                Assert.That(material.shader, Is.Not.Null);
+                Assert.That(material.shader.name, Is.EqualTo("VividRP/Material/StandardLit"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+    }
+
+    public class VividGPUDrivenSystemLifecycleTests
+    {
+        [SetUp]
+        public void SetUp()
+        {
+            VividGPUDrivenSystem.Deinitialize();
+            FrameContextSystem.Clear();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            VividGPUDrivenSystem.Deinitialize();
+            FrameContextSystem.Clear();
+        }
+
+        [Test]
+        public void ResolveConfiguredTextureBackendMode_DefaultsToVirtualTextureIndependentlyOfFeatureState()
+        {
+            Assert.That(
+                VividGPUDrivenSystem.ResolveConfiguredTextureBackendMode(null),
+                Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
+
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                Assert.That(asset.EnableGPUDriven, Is.False);
+                Assert.That(
+                    VividGPUDrivenSystem.ResolveConfiguredTextureBackendMode(asset),
+                    Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
+
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.Bindless;
+                Assert.That(
+                    VividGPUDrivenSystem.ResolveConfiguredTextureBackendMode(asset),
+                    Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void TerrainRuntimeVirtualTextureDecals_ValidateRequiredPipelineDependenciesInOrder()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                Assert.That(
+                    asset.TryValidateTerrainRuntimeVirtualTextureDecals(out string gpuReason),
+                    Is.False);
+                Assert.That(gpuReason, Does.Contain("GPUDriven"));
+
+                asset.EnableGPUDriven = true;
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.Bindless;
+                Assert.That(
+                    asset.TryValidateTerrainRuntimeVirtualTextureDecals(out string backendReason),
+                    Is.False);
+                Assert.That(backendReason, Does.Contain("Virtual Texture"));
+
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.VirtualTexture;
+                Assert.That(
+                    asset.TryValidateTerrainRuntimeVirtualTextureDecals(out string terrainReason),
+                    Is.False);
+                Assert.That(terrainReason, Does.Contain("Terrain Runtime Virtual Texture"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void ResolveConfiguredVirtualTextureDescriptorProfile_UsesMediumByDefaultAndAssetQuality()
+        {
+            GPUDrivenVirtualTextureDescriptorProfile defaultProfile =
+                VividGPUDrivenSystem.ResolveConfiguredVirtualTextureDescriptorProfile(null);
+            Assert.That(defaultProfile.CachePageCount, Is.EqualTo(512));
+
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                asset.GPUDrivenVirtualTexturePhysicalPoolQuality =
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.High;
+
+                GPUDrivenVirtualTextureDescriptorProfile highProfile =
+                    VividGPUDrivenSystem.ResolveConfiguredVirtualTextureDescriptorProfile(asset);
+
+                Assert.That(highProfile.CachePageCount, Is.EqualTo(1024));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void RequiresTextureBackendRecreation_TracksBackendModeOnly()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        asset),
+                    Is.False);
+
+                asset.GPUDrivenVirtualTexturePhysicalPoolQuality =
+                    GPUDrivenVirtualTexturePhysicalPoolQuality.High;
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        asset),
+                    Is.False,
+                    "Physical-pool quality takes effect on the next backend initialization.");
+
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.Bindless;
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        asset),
+                    Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void RequiresTextureBackendRecreation_TracksTerrainRVTOptInForVirtualTextureBackend()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        terrainRuntimeVirtualTextureRequested: false,
+                        asset),
+                    Is.False);
+
+                asset.EnableTerrainRuntimeVirtualTexture = true;
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        terrainRuntimeVirtualTextureRequested: false,
+                        asset),
+                    Is.True);
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.VirtualTexture,
+                        terrainRuntimeVirtualTextureRequested: true,
+                        asset),
+                    Is.False);
+
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.Bindless;
+                Assert.That(
+                    VividGPUDrivenSystem.RequiresTextureBackendRecreation(
+                        GPUDrivenTextureBackendMode.Bindless,
+                        terrainRuntimeVirtualTextureRequested: false,
+                        asset),
+                    Is.False,
+                    "Bindless ignores the experimental Terrain RVT toggle.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void Deinitialize_DisposesCurrentSingletonInstance()
+        {
+            var system = VividGPUDrivenSystem.instance;
+
+            Assert.That(system, Is.Not.Null);
+            Assert.That(VividGPUDrivenSystem.HasInstance, Is.True);
+
+            VividGPUDrivenSystem.Deinitialize();
+
+            Assert.That(VividGPUDrivenSystem.HasInstance, Is.False);
+        }
+
+        [Test]
+        public void Instance_RecreatesSingleton_AfterDeinitialize()
+        {
+            var first = VividGPUDrivenSystem.instance;
+
+            VividGPUDrivenSystem.Deinitialize();
+
+            var second = VividGPUDrivenSystem.instance;
+
+            Assert.That(second, Is.Not.Null);
+            Assert.That(second, Is.Not.SameAs(first));
+            Assert.That(VividGPUDrivenSystem.HasInstance, Is.True);
+        }
+
+        [Test]
+        public void ShouldPrepareFrame_ReturnsTrue_ForRepeatedEditorFrameIndex()
+        {
+            Assert.That(VividGPUDrivenSystem.ShouldPrepareFrame(12, 12, isPlaying: false), Is.True);
+        }
+
+        [Test]
+        public void ShouldPrepareFrame_ReturnsFalse_ForRepeatedPlayModeFrameIndex()
+        {
+            Assert.That(VividGPUDrivenSystem.ShouldPrepareFrame(12, 12, isPlaying: true), Is.False);
+        }
+
+        [Test]
+        public void RenderCamera_SchedulesCpuCullAfterBeginCameraCallbacksAndBeforeUnityCull()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPipeline",
+                "VividRenderPipeline.cs");
+            string renderCamera = SliceSource(
+                source,
+                "private void RenderCamera(",
+                "private void DispatchBeginCameraRendering(");
+
+            int beginCamera = renderCamera.IndexOf("DispatchBeginCameraRendering(context, camera)");
+            int gpuDrivenCull = renderCamera.IndexOf(
+                "VividGPUDrivenSystem.ScheduleCullForCamera(camera, frameIndex)");
+            int decalCull = renderCamera.IndexOf("DecalSystem.ScheduleCullForCamera(camera)");
+            int unityCull = renderCamera.IndexOf("context.Cull(ref cullingParameters)");
+            int prepareFrame = renderCamera.IndexOf("PassRecorder.PrepareFrame(graphAsset, cmdBuffer)");
+
+            Assert.That(beginCamera, Is.GreaterThanOrEqualTo(0));
+            Assert.That(gpuDrivenCull, Is.GreaterThan(beginCamera));
+            Assert.That(decalCull, Is.GreaterThan(gpuDrivenCull));
+            Assert.That(unityCull, Is.GreaterThan(decalCull));
+            Assert.That(prepareFrame, Is.GreaterThan(unityCull));
+        }
+
+        [Test]
+        public void PrepareFrame_InvalidatesDrawSetReadersBeforePrimitiveSceneSynchronization()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string prepareFrame = SliceSource(
+                source,
+                "public void PrepareFrame(bool reportStats = true)",
+                "public void Cull(");
+
+            int invalidateBuilds = prepareFrame.IndexOf(
+                "m_PrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int invalidateShadowBuilds = prepareFrame.IndexOf(
+                "m_ShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int invalidateStaticShadowBuilds = prepareFrame.IndexOf(
+                "m_StaticShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int invalidateDynamicShadowBuilds = prepareFrame.IndexOf(
+                "m_DynamicShadowPrimitiveDrawSetSystem.CompleteAndInvalidateAllBuilds()");
+            int synchronizeScene = prepareFrame.IndexOf("m_PrimitiveSceneAdapter.Synchronize(");
+
+            Assert.That(invalidateBuilds, Is.GreaterThanOrEqualTo(0));
+            Assert.That(invalidateShadowBuilds, Is.GreaterThan(invalidateBuilds));
+            Assert.That(invalidateStaticShadowBuilds, Is.GreaterThan(invalidateShadowBuilds));
+            Assert.That(invalidateDynamicShadowBuilds, Is.GreaterThan(invalidateStaticShadowBuilds));
+            Assert.That(synchronizeScene, Is.GreaterThan(invalidateBuilds));
+            Assert.That(synchronizeScene, Is.GreaterThan(invalidateShadowBuilds));
+            Assert.That(synchronizeScene, Is.GreaterThan(invalidateDynamicShadowBuilds));
+        }
+
+        [Test]
+        public void ShadowDrawSetScheduling_UsesUnifiedCascadeMatricesAndShadowSemantics()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string schedule = SliceSource(
+                source,
+                "private VividPrimitiveDrawSet ScheduleShadowDrawSet(",
+                "internal VividPrimitiveDrawSet CompleteShadowDrawSet(");
+
+            StringAssert.Contains("PassRecorder.HasCascadedShadowCasterPass", schedule);
+            StringAssert.Contains("shadowData.isCSMActive", schedule);
+            StringAssert.Contains("shadowData.viewMatrices", schedule);
+            StringAssert.Contains("shadowData.projMatrices", schedule);
+            StringAssert.Contains("VividInstancePassMask.Shadows", schedule);
+            StringAssert.Contains("cullAgainstNearPlane: false", schedule);
+            StringAssert.Contains("drawSetSystem.Schedule(", schedule);
+            StringAssert.Contains("requiredPrimitiveFlags", schedule);
+            StringAssert.Contains("excludedPrimitiveFlags", schedule);
+            StringAssert.DoesNotContain("CompleteScheduledBuild", schedule);
+        }
+
+        [Test]
+        public void GPUDrivenPreRender_SchedulesShadowDrawSetBeforePublishingFrameData()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string updateCore = SliceSource(
+                source,
+                "private static void UpdateCore(",
+                "private static void PrepareFrameIfNeeded(");
+
+            int schedule = updateCore.IndexOf("gpuDrivenSystem.ScheduleShadowDrawSet(");
+            int mainViewCull = updateCore.IndexOf("gpuDrivenSystem.CullMainView(");
+            int publishFrameData = updateCore.IndexOf("PassRecorder.SetGPUDrivenFrameData(");
+
+            Assert.That(schedule, Is.GreaterThanOrEqualTo(0));
+            Assert.That(mainViewCull, Is.GreaterThan(schedule));
+            Assert.That(publishFrameData, Is.GreaterThan(mainViewCull));
+            StringAssert.DoesNotContain("CompleteShadowDrawSet", updateCore);
+        }
+
+        [Test]
+        public void CSMShadowRecord_UsesBranchSpecificDrawSetsForShadowGpuCull()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string prepareMeshletDraws = SliceSource(
+                source,
+                "private bool TryPrepareMeshletShadowDraws(",
+                "private bool TryPrepareMeshletShadowPoolDraws(");
+            string conventionalDraw = SliceSource(
+                source,
+                "private void DrawConventionalShadowMap(",
+                "private bool DrawVirtualShadowMapPrototypePages(");
+            string virtualDraw = SliceSource(
+                source,
+                "private bool DrawVirtualShadowMapPrototypePages(",
+                "private void BindVirtualShadowMapPageManagementBuffers(");
+
+            int complete = prepareMeshletDraws.IndexOf("system.CompleteShadowDrawSet(");
+
+            Assert.That(complete, Is.GreaterThanOrEqualTo(0));
+            StringAssert.Contains("m_PrimitiveShadowDrawSet", prepareMeshletDraws);
+            StringAssert.DoesNotContain("system.CullShadowCascades(", prepareMeshletDraws);
+            StringAssert.Contains("meshletContext.AggregateDrawSet", conventionalDraw);
+            StringAssert.DoesNotContain("meshletContext.StaticDrawSet", conventionalDraw);
+            StringAssert.DoesNotContain("meshletContext.DynamicDrawSet", conventionalDraw);
+            StringAssert.Contains("meshletContext.StaticDrawSet", virtualDraw);
+            StringAssert.Contains("meshletContext.DynamicDrawSet", virtualDraw);
+            StringAssert.DoesNotContain("meshletContext.AggregateDrawSet", virtualDraw);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_CachesTheSubmittedCullingSnapshot()
+        {
+            string source = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string prepare = SliceSource(source, "public override void Prepare(", "public override void Record(");
+            string prepareMeshlets = SliceSource(source,
+                "private void PrepareMeshletRendering(", "private bool TryValidateMeshletVirtualShadowMapReadiness(");
+            string prepareVsm = SliceSource(source,
+                "private void PrepareVirtualShadowMapPrototype(", "private void PrepareMeshletRendering(");
+            string recordMeshlets = SliceSource(source,
+                "private bool TryPrepareMeshletShadowDraws(", "private static bool HasMeshletShadowShaderResources(");
+
+            int prepareMeshletIndex = prepare.IndexOf("PrepareMeshletRendering(");
+            Assert.That(prepareMeshletIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(prepare.IndexOf("PrepareVirtualShadowMapPrototype("), Is.GreaterThan(prepareMeshletIndex));
+            StringAssert.Contains("BuildLODSelectionContext(out m_ShadowLODSelectionContext)", prepareMeshlets);
+            StringAssert.Contains("BuildShadowCullingContext(", prepareMeshlets);
+            StringAssert.Contains("cameraData.camera.cullingMask", prepareVsm);
+            StringAssert.Contains("Projections.Generation", prepareVsm);
+            StringAssert.Contains("PrepareClipmaps(clipmaps)", prepareVsm);
+            StringAssert.DoesNotContain("m_ShadowLODSelectionContext", prepareVsm);
+            StringAssert.Contains("m_ClipmapCullingContexts", recordMeshlets);
+            StringAssert.Contains("m_ClipmapLODContext", recordMeshlets);
+            StringAssert.Contains("m_ShadowLODSelectionContext", recordMeshlets);
+            StringAssert.Contains("m_ShadowCullingContexts", recordMeshlets);
+            StringAssert.DoesNotContain("BuildLODSelectionContext", recordMeshlets);
+            StringAssert.DoesNotContain("BuildShadowCullingContext(", recordMeshlets);
+        }
+
+        [Test]
+        public void CSMShadowPass_DrawsUnityAndMeshletCastersWithOneMatrixArrayAndPerCascadeSlices()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string shaderVariables = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Public",
+                "ShaderVariablesGlobal.hlsl");
+            string record = SliceSource(
+                source,
+                "public override void Record(",
+                "private void PrepareVirtualShadowMapPrototype(");
+            string conventionalDraw = SliceSource(
+                source,
+                "private void DrawConventionalShadowMap(",
+                "private bool DrawVirtualShadowMapPrototypePages(");
+            string drawMeshletShadowCascade = SliceSource(
+                source,
+                "private void DrawMeshletShadowCascade(",
+                "private void DrawConventionalShadowMap(");
+            string buildCullingContext = SliceSource(
+                source,
+                "private void BuildShadowCullingContext(",
+                "private static void ConfigureMaterial(");
+
+            StringAssert.Contains("m_ShadowAtlas.desc.Dimension = TextureDimension.Tex2DArray", source);
+            StringAssert.Contains("m_ShadowAtlas.desc.Slices = VividShadowData.MaxCascadeCount", source);
+            StringAssert.Contains("ConstantBuffer.PushGlobal(", record);
+            StringAssert.Contains("ShadowMatricesConstantBufferId", record);
+            StringAssert.Contains("CBUFFER_START(ShaderVariablesShadowMatrices)", shaderVariables);
+            StringAssert.Contains("float4x4 _VividShadowVP[4]", shaderVariables);
+            StringAssert.DoesNotContain("SetGlobalMatrixArray", record);
+            StringAssert.Contains("depthSlice: cascadeIndex", conventionalDraw);
+            StringAssert.DoesNotContain("RenderBufferLoadAction.DontCare", conventionalDraw);
+            StringAssert.Contains(
+                "SetGlobalInt(ShadowCascadeIndexId, cascadeIndex)",
+                conventionalDraw);
+            StringAssert.DoesNotContain("SetViewProjectionMatrices", record);
+            StringAssert.DoesNotContain("SetViewport", record);
+            StringAssert.DoesNotContain("EnableScissorRect", record);
+            StringAssert.Contains("m_ShadowData.viewMatrices", buildCullingContext);
+            StringAssert.Contains("m_ShadowData.projMatrices", buildCullingContext);
+            StringAssert.Contains(
+                "nativeCmd.DrawRendererList(rendererList)",
+                conventionalDraw);
+            StringAssert.Contains("DrawMeshletShadowCascade(", conventionalDraw);
+            StringAssert.Contains(
+                "GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(",
+                drawMeshletShadowCascade);
+        }
+
+        [Test]
+        public void CSMShadowPass_SetsPerDrawStateWithoutReuploadingShadowMatrices()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string prepare = SliceSource(
+                source,
+                "private bool TryPrepareMeshletShadowDraws(",
+                "private bool TryPrepareMeshletShadowPoolDraws(");
+            string draw = SliceSource(
+                source,
+                "private void DrawMeshletShadowCascade(",
+                "private void DrawConventionalShadowMap(");
+
+            StringAssert.Contains(
+                "m_DrawProperties.SetInteger(ShadowCascadeIndexId, cascadeIndex)",
+                draw);
+            StringAssert.DoesNotContain("ShadowMatricesConstantBufferId", draw);
+            StringAssert.DoesNotContain("SetGlobalMatrixArray", draw);
+            StringAssert.Contains("BindSpaceProperties", draw);
+            StringAssert.Contains("VirtualTextureSpaceBinding", prepare);
+        }
+
+        [Test]
+        public void CSMShadowPass_UsesPerCascadeSplitDataWithoutBatchShadowCulling()
+        {
+            string csmSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string recorderSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderGraph",
+                "PassRecorder.Execution.cs");
+            string shadowDataSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderGraph",
+                "FrameContext",
+                "VividShadowData.cs");
+
+            StringAssert.Contains("settings.splitData = shadowData.splitData[i]", csmSource);
+            StringAssert.Contains("settings.splitIndex = -1", csmSource);
+            StringAssert.DoesNotContain("CullShadowCasters", recorderSource);
+            StringAssert.DoesNotContain("CullShadowCasters", shadowDataSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_UsesSparseRequestedPagesAndHardShadowResolve()
+        {
+            string passSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string resolvePassSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowResolvePass.cs");
+            string casterSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferShadowCasterPass.shader");
+            string casterAbiSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Public",
+                "Shadow",
+                "VividVirtualShadowMapCaster.hlsl");
+            string standardCasterSource = ReadRuntimeSource(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "VividShaderPassShadowCaster.hlsl");
+            string unlitPassSource = ReadRuntimeSource(
+                "Shaders",
+                "Material",
+                "Unlit",
+                "UnlitPass.hlsl");
+            string terrainPassSource = ReadRuntimeSource(
+                "Shaders",
+                "Material",
+                "TerrainLit",
+                "TerrainLitPass.hlsl");
+            string[] supportedUnityCasterSources =
+            {
+                ReadRuntimeSource("Shaders", "Material", "StandardLit", "StandardLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "StandardLayeredLit", "StandardLayeredLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "Experimental", "StandardLit", "ExperimentalStandardLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "Unlit", "Unlit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "TerrainLit", "TerrainLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "TerrainLit", "TerrainLit_Basemap.shader"),
+            };
+            string resolveSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "CSMShadowResolve.compute");
+            string volumeEditorSource = ReadRuntimeSource(
+                "Editor",
+                "VolumeEditor",
+                "CascadedShadowSettingsVolumeEditor.cs");
+
+            StringAssert.Contains("GraphicsFormat.R32_UInt", passSource);
+            StringAssert.Contains("GraphicsFormatUsage.Render", passSource);
+            StringAssert.Contains("GraphicsFormatUsage.LoadStore", passSource);
+            StringAssert.DoesNotContain(
+                "GraphicsFormatUsage.Sample | GraphicsFormatUsage.LoadStore",
+                passSource);
+            StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, staticPhysicalPage)", passSource);
+            StringAssert.Contains("nativeCmd.SetRandomWriteTarget(0, dynamicPhysicalPage)", passSource);
+            StringAssert.DoesNotContain("nativeCmd.SetBufferData(", passSource);
+            StringAssert.Contains("BuildUnmappedPageTable(", passSource);
+            StringAssert.Contains("DefaultPhysicalPageCount = 256", passSource);
+            StringAssert.Contains("MaxPhysicalPageCount = 1024", passSource);
+            StringAssert.Contains("VSMPrototypeAllocatePages", passSource);
+            StringAssert.Contains("VSMPrototypeClearPhysicalPages", passSource);
+            StringAssert.Contains("TextureDimension.Tex2DArray", passSource);
+            StringAssert.Contains("AccessFlags.Write", passSource);
+            StringAssert.Contains("m_VirtualShadowMapPrototypeMaterials", passSource);
+            StringAssert.Contains(
+                "DrawMeshletVirtualShadowMapPages(",
+                passSource);
+            StringAssert.DoesNotContain(
+                "SetVirtualShadowMapPrototypeKeyword(",
+                passSource);
+            StringAssert.Contains("Projections.GetRasterMatrix(", passSource);
+            StringAssert.Contains("nativeCmd.DrawRendererList(rendererList)", passSource);
+            StringAssert.Contains("nativeCmd.EnableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
+            StringAssert.Contains("nativeCmd.DisableKeyword(s_VirtualShadowMapCasterKeyword)", passSource);
+            StringAssert.Contains("m_HasUnityShadowCasters", passSource);
+            StringAssert.Contains("m_HasMeshletShadowCasters", passSource);
+            StringAssert.Contains("TryValidateMeshletVirtualShadowMapReadiness(", passSource);
+            StringAssert.Contains("VirtualShadowMapPrototypeFallbackReason", passSource);
+            StringAssert.Contains("VirtualShadowMapUnityCasterCompatibility.IsReady()", passSource);
+            StringAssert.Contains("ObjectTracker<Renderer>", passSource);
+            StringAssert.Contains("ObjectTracker<Terrain>", passSource);
+            StringAssert.Contains("ObjectTracker<Material>", passSource);
+            StringAssert.Contains("ObjectTracker<Shader>", passSource);
+            StringAssert.Contains("IProcessSceneWithReport", volumeEditorSource);
+            StringAssert.Contains("BuildFailedException", volumeEditorSource);
+            StringAssert.Contains("#pragma require randomwrite", casterSource);
+            StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", casterSource);
+            StringAssert.Contains("RWTexture2DArray<uint> _VSMPrototypePhysicalPage : register(u0)", casterAbiSource);
+            StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", casterAbiSource);
+            StringAssert.Contains("StructuredBuffer<uint4> _VSMPrototypePageMetadata", casterAbiSource);
+            StringAssert.Contains("kVividVSMPageDirty", casterAbiSource);
+            StringAssert.Contains("encodedPhysicalPage - 1u", casterAbiSource);
+            StringAssert.Contains("InterlockedMax(", casterAbiSource);
+            StringAssert.Contains("VividWriteVSMDepth(packedInput.positionCS)", standardCasterSource);
+            StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", unlitPassSource);
+            StringAssert.Contains("VividWriteVSMDepth(input.positionCS)", terrainPassSource);
+            for (int shaderIndex = 0; shaderIndex < supportedUnityCasterSources.Length; shaderIndex++)
+            {
+                StringAssert.Contains(
+                    "#pragma multi_compile_fragment _ VIVID_VSM_CASTER",
+                    supportedUnityCasterSources[shaderIndex]);
+                StringAssert.Contains(
+                    "#pragma require randomwrite : VIVID_VSM_CASTER",
+                    supportedUnityCasterSources[shaderIndex]);
+                StringAssert.Contains(
+                    "\"VividVSMCaster\" = \"2\"",
+                    supportedUnityCasterSources[shaderIndex]);
+            }
+            StringAssert.Contains("AccessFlags.Read", resolvePassSource);
+            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage", resolveSource);
+            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage", resolveSource);
+            StringAssert.Contains("max(staticRawDepth, dynamicRawDepth)", resolveSource);
+            StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", resolveSource);
+            StringAssert.Contains("RWStructuredBuffer<uint4> _VSMPrototypePageMetadata", resolveSource);
+            StringAssert.Contains("void MarkVSMReceiverPage(", resolveSource);
+            StringAssert.Contains("void VSMPrototypeAllocatePages(", resolveSource);
+            StringAssert.Contains("void VSMPrototypeClearPhysicalPages(", resolveSource);
+            StringAssert.Contains("overflowPageCount", resolveSource);
+            StringAssert.Contains("TryResolveVSMPhysicalTexel(", resolveSource);
+            StringAssert.Contains("return SampleCSMShadowMap(shadowUV, receiverDepth, cascadeIndex)", resolveSource);
+            StringAssert.Contains("asfloat(", resolveSource);
+            StringAssert.Contains("UseVirtualShadowMapPrototype(cascadeIndex)", resolveSource);
+            StringAssert.Contains("EnsurePhysicalPageForBinding()", resolvePassSource);
+            StringAssert.Contains("AccessFlags.ReadWrite", resolvePassSource);
+            StringAssert.Contains("MarkReceiverResolveProduced(", resolvePassSource);
+            StringAssert.Contains("staticVirtualShadowMapPage", resolvePassSource);
+            StringAssert.Contains("dynamicVirtualShadowMapPage", resolvePassSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_MarksCurrentReceiversBeforeAllocation()
+        {
+            string pass = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string resolve = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowResolvePass.cs");
+            string shader = ReadRuntimeSource("Shaders", "Core", "Private", "CSMShadowResolve.compute");
+            string record = SliceSource(pass, "public override void Record(", "private bool RecordReceiverPageRequests(");
+            Assert.That(record.IndexOf("RecordReceiverPageRequests(nativeCmd)"),
+                Is.LessThan(record.IndexOf("DrawVirtualShadowMapPrototypePages(")));
+            StringAssert.DoesNotContain("m_FrameIndex - 1", pass);
+            StringAssert.DoesNotContain("MarkReceiverFeedbackProduced(", resolve);
+            StringAssert.Contains("MarkReceiverResolveProduced(", resolve);
+            StringAssert.Contains("#pragma kernel VSMMarkReceiverPages VIVID_VSM_MARK_RECEIVERS", shader);
+            string clear = SliceSource(shader, "void VSMPrototypeClearReceiverRequests(", "void VSMPrototypeResetReceiverFeedback(");
+            StringAssert.Contains(".x &= ~kVSMPageRequestMask", clear);
+            StringAssert.DoesNotContain(".z =", clear);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_CachesStaticPoolAndRefreshesDynamicPool()
+        {
+            string passSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string resolvePassSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowResolvePass.cs");
+            string gpuDrivenSystemSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string drawSetJobSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "PrimitiveScene",
+                "VividPrimitiveDrawSetJobs.cs");
+
+            StringAssert.Contains("VirtualShadowMapPrototypeCacheKey", passSource);
+            StringAssert.Contains("gpuDrivenSystem.PrimitiveScene.StaticShadowRevision", passSource);
+            StringAssert.Contains("gpuDrivenSystem.TextureBindingRevision", passSource);
+            StringAssert.Contains("RequiresStaticCacheRefresh(", passSource);
+            StringAssert.Contains("TryUseCachedStaticPages(", passSource);
+            StringAssert.Contains("CommitStaticCache(", passSource);
+            StringAssert.Contains("MarkDynamicPoolRefreshed()", passSource);
+            StringAssert.Contains("m_StaticPrimitiveShadowDrawSet", passSource);
+            StringAssert.Contains("m_DynamicPrimitiveShadowDrawSet", passSource);
+            StringAssert.Contains("VividPrimitiveFlags.Static", gpuDrivenSystemSource);
+            StringAssert.Contains("RequiredPrimitiveFlags", drawSetJobSource);
+            StringAssert.Contains("ExcludedPrimitiveFlags", drawSetJobSource);
+            StringAssert.Contains("AccessFlags.ReadWrite", passSource);
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFramePrepared", resolvePassSource);
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.IsFrameActive", resolvePassSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_SkipsConventionalCsmOnlyAfterSuccessfulRecord()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string record = SliceSource(
+                source,
+                "public override void Record(",
+                "private void PrepareVirtualShadowMapPrototype(");
+            string virtualDraw = SliceSource(
+                source,
+                "private bool DrawVirtualShadowMapPrototypePages(",
+                "private void BindVirtualShadowMapPageManagementBuffers(");
+
+            int virtualAttempt = record.IndexOf("DrawVirtualShadowMapPrototypePages(");
+            int fallbackBranch = record.IndexOf("if (!vsmCompleted)");
+            int conventionalDraw = record.IndexOf("DrawConventionalShadowMap(");
+
+            Assert.That(virtualAttempt, Is.GreaterThanOrEqualTo(0));
+            Assert.That(fallbackBranch, Is.GreaterThan(virtualAttempt));
+            Assert.That(conventionalDraw, Is.GreaterThan(fallbackBranch));
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.MarkFallback(", record);
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.MarkActive()", virtualDraw);
+            StringAssert.Contains("VirtualShadowMapPrototypeFrameState", source);
+            StringAssert.Contains("LastFallbackReason", source);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_MeshletPathBuildsBoundedPageRequests()
+        {
+            string passSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string cullSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "CSMShadowResolve.compute");
+            string casterSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "VisibilityBufferShadowCasterPass.shader");
+
+            StringAssert.Contains(
+                "EnsureMeshletPageRequestCapacity(",
+                passSource);
+            StringAssert.Contains(
+                "MaxPageRequestsPerMeshlet = 4",
+                passSource);
+            StringAssert.Contains(
+                "VSMPrototypePrepareMeshletPageRequests",
+                cullSource);
+            StringAssert.Contains(
+                "VSMPrototypeCullMeshletsToPages",
+                cullSource);
+            StringAssert.Contains(
+                "coveredPageCount > kVSMMaxPagesPerMeshletRequest",
+                cullSource);
+            StringAssert.DoesNotContain("kVSMInvalidVirtualPage", cullSource);
+            StringAssert.Contains("_VSMPrototypeMeshletRasterPages", cullSource);
+            StringAssert.Contains("requestMode < 2", passSource);
+            StringAssert.Contains("GetIndirectInstanceID(input.instanceID)", casterSource);
+            StringAssert.DoesNotContain("virtualPageIndex == 0xffffffffu", casterSource);
+            StringAssert.Contains(
+                "VIVID_VSM_PAGE_CASTER",
+                casterSource);
+            StringAssert.Contains(
+                "SV_ClipDistance0",
+                casterSource);
+            StringAssert.Contains(
+                "SV_RenderTargetArrayIndex",
+                casterSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_StaticChangesInvalidateOnlyProjectedPages()
+        {
+            string passSource = ReadRuntimeSource(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "CSMShadowPass.cs");
+            string sceneSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "PrimitiveScene",
+                "VividPrimitiveScene.cs");
+            string sceneBuilderSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSceneDataBuilder.cs");
+            string sceneAdapterSource = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "PrimitiveScene",
+                "VividPrimitiveSceneAdapter.cs");
+            string cullSource = ReadRuntimeSource(
+                "Shaders",
+                "Core",
+                "Private",
+                "CSMShadowResolve.compute");
+
+            StringAssert.Contains("PendingStaticShadowInvalidationBounds", sceneSource);
+            StringAssert.Contains("previousData.WorldBoundsMin", sceneSource);
+            StringAssert.Contains("removedData.WorldBoundsMin", sceneSource);
+            StringAssert.Contains("InvalidateAllStaticShadows()", sceneSource);
+            StringAssert.Contains("primitiveScene.InvalidateAllStaticShadows()", sceneAdapterSource);
+            StringAssert.Contains("m_ChangedMaterialProxyIds", sceneBuilderSource);
+            StringAssert.Contains(
+                "InvalidateChangedStaticShadowCasters(",
+                sceneBuilderSource);
+            StringAssert.Contains("UploadStaticInvalidationBounds(", passSource);
+            StringAssert.Contains("UpdateVirtualTextureShadowInvalidations(m_VirtualTextureFrameData)", passSource);
+            Assert.That(passSource.IndexOf("UpdateVirtualTextureShadowInvalidations(m_VirtualTextureFrameData)", System.StringComparison.Ordinal),
+                Is.LessThan(passSource.IndexOf("new VirtualShadowMapPrototypeCacheKey(", System.StringComparison.Ordinal)));
+            StringAssert.Contains("RequiresFullStaticCacheRefresh(", passSource);
+            StringAssert.Contains("VSMPrototypeInvalidateStaticPages", cullSource);
+            StringAssert.Contains("_VSMPrototypeStaticInvalidationBounds", cullSource);
+            StringAssert.Contains("InterlockedOr(", cullSource);
+            StringAssert.Contains("kVSMPageDirty", cullSource);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototype_AddressingIsSharedAcrossAllPageConsumers()
+        {
+            string computeSource = ReadRuntimeSource(
+                "Shaders", "Core", "Private", "CSMShadowResolve.compute");
+            string casterSource = ReadRuntimeSource(
+                "Shaders", "Core", "Public", "Shadow", "VividVirtualShadowMapCaster.hlsl");
+
+            StringAssert.Contains("VividVirtualShadowMapAddressing.hlsl", computeSource);
+            StringAssert.Contains("VividVirtualShadowMapAddressing.hlsl", casterSource);
+            StringAssert.Contains("VividVSMUVToVirtualTexel(", SliceSource(
+                computeSource, "bool GetVSMPageRange(", "void VSMPrototypeCullMeshletsToPages("));
+            StringAssert.Contains("VividVSMUVToVirtualTexel(", SliceSource(
+                computeSource, "void VSMPrototypeInvalidateStaticPages(", "void VSMPrototypeClearPhysicalPages("));
+            StringAssert.Contains("VividVSMTryOffsetVirtualTexel(", SliceSource(
+                computeSource, "void MarkVSMReceiverPage(", "bool TryResolveVSMPhysicalTexel("));
+            string resolveSource = SliceSource(
+                computeSource, "bool TryResolveVSMPhysicalTexel(", "uint LoadCombinedVSMDepth(");
+            StringAssert.Contains("VividVSMTryOffsetVirtualTexel(", resolveSource);
+            StringAssert.DoesNotContain("ShadowUVToTexelCoord(", resolveSource);
+            StringAssert.DoesNotContain("* (virtualResolution - 1u)", computeSource);
+            StringAssert.Contains("VividVSMRasterPositionToVirtualTexel(", casterSource);
+        }
+
+        [Test]
+        public void VSMProjectionConsumers_DoNotReadFixedCSMProjectionArrays()
+        {
+            string compute = ReadRuntimeSource("Shaders", "Core", "Private", "CSMShadowResolve.compute");
+            string management = SliceSource(compute, "void VSMPrototypePrepareMeshletPageRequests(",
+                "void VSMPrototypeFinalizeDirtyPages(");
+            string sampling = SliceSource(compute, "bool TryEvaluateVSMProjection(", "void CSMShadowResolve(");
+            foreach (string consumer in new[] { management, sampling })
+            {
+                StringAssert.Contains("_VSMProjections", consumer);
+                StringAssert.Contains("_VSMProjectionCount", consumer);
+                StringAssert.DoesNotContain("_CSMViewProjMatrices", consumer);
+                StringAssert.DoesNotContain("_CSMCascadeCount", consumer);
+            }
+            StringAssert.Contains("MarkVSMReceiverPage(coord.xy, index)", sampling);
+            string raster = ReadRuntimeSource("Shaders", "Core", "Private", "GPUDriven",
+                "VisibilityBufferShadowCasterPass.shader");
+            StringAssert.DoesNotContain("_VividShadowVP", raster);
+            StringAssert.Contains("_VSMProjections[cascadeIndex].worldToClip", raster);
+            StringAssert.Contains("VividVSMToRasterClip(", raster);
+            StringAssert.Contains("VividWriteVSMPageDepth(input.positionCS, input.virtualPageIndex)", raster);
+        }
+
+        [Test]
+        public void VSMQuality_KeepsCasterDepthUnbiasedAndBindsReceiverControls()
+        {
+            string pass = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string record = SliceSource(pass, "public override void Record(", "private void RecordVirtualShadowMapLayout(");
+            int virtualDraw = record.IndexOf("vsmCompleted = DrawVirtualShadowMapPrototypePages(");
+            int zeroBias = record.IndexOf("SetGlobalDepthBias(0.0f, 0.0f)");
+            int csmBias = record.IndexOf("SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias)");
+            Assert.That(zeroBias, Is.GreaterThanOrEqualTo(0));
+            Assert.That(virtualDraw, Is.GreaterThan(zeroBias));
+            Assert.That(csmBias, Is.GreaterThan(virtualDraw));
+            Assert.That(record.IndexOf("DrawConventionalShadowMap("), Is.GreaterThan(csmBias));
+            string prepare = SliceSource(pass, "private void PrepareVirtualShadowMapPrototype(", "private void PrepareMeshletRendering(");
+            StringAssert.DoesNotContain("m_SlopeScaleDepthBias", prepare);
+            string resolve = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowResolvePass.cs");
+            StringAssert.Contains("csmSettings.virtualShadowMapPCF.value", resolve);
+            StringAssert.Contains("shadowData.depthBias, shadowData.slopeScaleDepthBias", resolve);
+            StringAssert.Contains("SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters)", resolve);
+            string compute = ReadRuntimeSource("Shaders", "Core", "Private", "CSMShadowResolve.compute");
+            StringAssert.Contains("vsmNormal = ReconstructVSMReceiverNormal(pixelCoord, deviceDepth, positionWS, vsmNormal)", compute);
+            string filter = SliceSource(compute, "bool TryFilterVSMProjection(", "float VSMTransitionWeight(");
+            StringAssert.Contains("coord.z + bias.z - dot(bias.xy, centerOffset)", filter);
+        }
+
+        [Test]
+        public void VirtualShadowMapPrototypeShaders_ImportWithoutErrors()
+        {
+            const string computeAssetPath =
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute";
+            const string casterShaderName =
+                "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass";
+
+            ComputeShader resolveCompute =
+                AssetDatabase.LoadAssetAtPath<ComputeShader>(computeAssetPath);
+            Assert.That(resolveCompute, Is.Not.Null, computeAssetPath);
+            Assert.That(resolveCompute.HasKernel("CSMShadowResolve"), Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMPrototypeAllocatePages"), Is.True);
+            Assert.That(
+                resolveCompute.HasKernel("VSMPrototypeMarkAllAllocatedPagesDirty"),
+                Is.True);
+            Assert.That(
+                resolveCompute.HasKernel("VSMPrototypeInvalidateStaticPages"),
+                Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMPrototypeClearPhysicalPages"), Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMPrototypeFinalizeDirtyPages"), Is.True);
+            Assert.That(
+                resolveCompute.HasKernel("VSMPrototypePrepareMeshletPageRequests"),
+                Is.True);
+            Assert.That(
+                resolveCompute.HasKernel("VSMPrototypeCullMeshletsToPages"),
+                Is.True);
+
+            ShaderMessage[] computeErrors = ShaderUtil
+                .GetComputeShaderMessages(resolveCompute)
+                .Where(message => message.severity.ToString() == "Error")
+                .ToArray();
+            Assert.That(
+                computeErrors,
+                Is.Empty,
+                string.Join(
+                    "\n",
+                    computeErrors.Select(message =>
+                        $"{message.file}:{message.line}: {message.message}")));
+
+            Shader casterShader = Shader.Find(casterShaderName);
+            Assert.That(casterShader, Is.Not.Null, casterShaderName);
+            var casterMaterial = new Material(casterShader);
+            try
+            {
+                casterMaterial.EnableKeyword("VIVID_VSM_CASTER");
+                ShaderUtil.CompilePass(casterMaterial, 0);
+                ShaderMessage[] casterErrors = ShaderUtil
+                    .GetShaderMessages(casterShader)
+                    .Where(message => message.severity.ToString() == "Error")
+                    .ToArray();
+                Assert.That(
+                    casterErrors,
+                    Is.Empty,
+                    string.Join(
+                        "\n",
+                        casterErrors.Select(message =>
+                            $"{message.file}:{message.line}: {message.message}")));
+            }
+            finally
+            {
+                Object.DestroyImmediate(casterMaterial);
+            }
+
+            string[] unityCasterShaderNames =
+            {
+                "VividRP/Material/StandardLit",
+                "VividRP/Material/StandardLayeredLit",
+                "VividRP/Experimental/Material/StandardLit",
+                "VividRP/Material/Unlit",
+                "VividRP/Terrain/TerrainLit",
+                "Hidden/VividRP/TerrainLit_Basemap",
+            };
+            bool casterKeywordWasEnabled = Shader.IsKeywordEnabled("VIVID_VSM_CASTER");
+            Shader.EnableKeyword("VIVID_VSM_CASTER");
+            try
+            {
+                for (int shaderIndex = 0; shaderIndex < unityCasterShaderNames.Length; shaderIndex++)
+                {
+                    AssertShaderPassCompilesWithoutErrors(
+                        unityCasterShaderNames[shaderIndex],
+                        "ShadowCaster");
+                }
+            }
+            finally
+            {
+                if (!casterKeywordWasEnabled)
+                    Shader.DisableKeyword("VIVID_VSM_CASTER");
+            }
+        }
+
+        private static void AssertShaderPassCompilesWithoutErrors(
+            string shaderName,
+            string passName)
+        {
+            Shader shader = Shader.Find(shaderName);
+            Assert.That(shader, Is.Not.Null, shaderName);
+            var material = new Material(shader);
+            try
+            {
+                int passIndex = material.FindPass(passName);
+                Assert.That(passIndex, Is.GreaterThanOrEqualTo(0), shaderName);
+                Assert.That(
+                    shader.FindPassTagValue(
+                        passIndex,
+                        new ShaderTagId("VividVSMCaster")),
+                    Is.EqualTo(new ShaderTagId("2")),
+                    shaderName);
+                ShaderUtil.CompilePass(material, passIndex);
+                ShaderMessage[] errors = ShaderUtil
+                    .GetShaderMessages(shader)
+                    .Where(message => message.severity.ToString() == "Error")
+                    .ToArray();
+                Assert.That(
+                    errors,
+                    Is.Empty,
+                    string.Join(
+                        "\n",
+                        errors.Select(message =>
+                            $"{message.file}:{message.line}: {message.message}")));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void ScheduledDrawSetToken_RequiresExactPendingCameraFrameAndRevisionMatch()
+        {
+            string source = ReadRuntimeSource(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs");
+            string consumeToken = SliceSource(
+                source,
+                "private bool TryConsumeScheduledMainViewDrawSet(",
+                "private void ClearScheduledMainViewDrawSet()");
+
+            StringAssert.Contains(
+                "m_ScheduledMainViewRenderingCameraId.Equals(renderingCamera.GetEntityId())",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewCullingCameraId.Equals(cullingCamera.GetEntityId())",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewFrameIndex == resolvedFrameIndex",
+                consumeToken);
+            StringAssert.Contains(
+                "m_ScheduledMainViewSceneRevision == PrimitiveScene.SceneRevision",
+                consumeToken);
+            StringAssert.Contains("drawSet.MatchesPendingBuild(", consumeToken);
+            Assert.That(
+                consumeToken.IndexOf("ClearScheduledMainViewDrawSet();"),
+                Is.GreaterThan(consumeToken.IndexOf("bool matches =")),
+                "The pending token must be cleared after every consumption attempt.");
+        }
+
+        [Test]
+        public void ScheduleCullForCamera_SkipsPreviewWithoutChangingGpuDrivenSystemLifetime()
+        {
+            var preview = new PreviewRenderUtility();
+            bool hadInstance = VividGPUDrivenSystem.HasInstance;
+            try
+            {
+                Assert.That(preview.camera.cameraType, Is.EqualTo(CameraType.Preview));
+                Assert.That(
+                    VividGPUDrivenSystem.ScheduleCullForCamera(preview.camera, frameIndex: 3),
+                    Is.False);
+                Assert.That(VividGPUDrivenSystem.HasInstance, Is.EqualTo(hadInstance));
+            }
+            finally
+            {
+                preview.Cleanup();
+            }
+        }
+
+        [Test]
+        public void FrameContextClear_KeepsGPUDrivenPreRenderCallbackRegistered_InEditor()
+        {
+            VividGPUDrivenSystem.Initialize();
+
+            FrameContextSystem.Clear();
+
+            Assert.That(
+                HasFrameContextSubscriber(
+                    "SubsystemPreRender",
+                    typeof(VividSubsystem<VividGPUDrivenSystem>),
+                    "DispatchUpdate"),
+                Is.True);
+        }
+
+        [Test]
+        public void FrameContextClear_DoesNotRegisterLegacyGpuDrivenDebugOverlayCallback_InEditor()
+        {
+            VividGPUDrivenSystem.Initialize();
+
+            FrameContextSystem.Clear();
+
+            Assert.That(
+                HasFrameContextSubscriber("SubsystemPostRender", typeof(VividGPUDrivenSystem), "RenderDebugOverlay"),
+                Is.False);
+        }
+
+        private static bool HasFrameContextSubscriber(string eventName, Type declaringType, string methodName)
+        {
+            FieldInfo eventField = typeof(FrameContextSystem).GetField(
+                eventName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.That(eventField, Is.Not.Null);
+
+            var multicastDelegate = eventField.GetValue(null) as MulticastDelegate;
+            return multicastDelegate != null
+                && multicastDelegate.GetInvocationList().Any(
+                    callback => callback.Method.DeclaringType == declaringType
+                        && callback.Method.Name == methodName);
+        }
+
+        private static string ReadRuntimeSource(params string[] relativeSegments)
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VividRenderPipelineAsset).Assembly);
+            Assert.That(package, Is.Not.Null);
+
+            string path = package.resolvedPath;
+            for (int index = 0; index < relativeSegments.Length; index++)
+                path = Path.Combine(path, relativeSegments[index]);
+
+            Assert.That(File.Exists(path), Is.True, path);
+            return File.ReadAllText(path);
+        }
+
+        private static string SliceSource(string source, string startMarker, string endMarker)
+        {
+            int start = source.IndexOf(startMarker, StringComparison.Ordinal);
+            Assert.That(start, Is.GreaterThanOrEqualTo(0), startMarker);
+            int end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+            Assert.That(end, Is.GreaterThan(start), endMarker);
+            return source.Substring(start, end - start);
+        }
+    }
+}

@@ -1,0 +1,134 @@
+{
+  "total": 32,
+  "passed": 32,
+  "results": [
+    {
+      "variant": "vs_page0_alpha0_vt0_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page0_alpha0_vt0_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page0_alpha0_vt0_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page0_alpha0_vt0_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page0_alpha0_vt1_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page0_alpha0_vt1_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page0_alpha0_vt1_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page0_alpha0_vt1_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page0_alpha1_vt0_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page0_alpha1_vt0_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page0_alpha1_vt0_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page0_alpha1_vt0_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page0_alpha1_vt1_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page0_alpha1_vt1_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page0_alpha1_vt1_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page0_alpha1_vt1_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page1_alpha0_vt0_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page1_alpha0_vt0_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page1_alpha0_vt0_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page1_alpha0_vt0_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page1_alpha0_vt1_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page1_alpha0_vt1_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page1_alpha0_vt1_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page1_alpha0_vt1_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page1_alpha1_vt0_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page1_alpha1_vt0_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page1_alpha1_vt0_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page1_alpha1_vt0_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page1_alpha1_vt1_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page1_alpha1_vt1_caster0",
+      "exit_code": 0
+    },
+    {
+      "variant": "vs_page1_alpha1_vt1_caster1",
+      "exit_code": 0
+    },
+    {
+      "variant": "ps_page1_alpha1_vt1_caster1",
+      "exit_code": 0
+    }
+  ]
+}

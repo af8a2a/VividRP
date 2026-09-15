@@ -1,0 +1,92 @@
+// Temporary eval_file body. No scene assets saved. One diagnostic at a time.
+if (VividRP.Editor.VividDiagnostics.IsRunning || (bool)typeof(VividRP.Editor.VividDiagnostics).Assembly.GetType("VividRP.Editor.VSMQualityReproduction").GetProperty("IsRunning",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).GetValue(null))
+    throw new System.Exception("Another diagnostic is active");
+var root="E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-rebuild/final-recheck";
+System.IO.Directory.CreateDirectory(root);
+var camera=UnityEngine.Camera.main;
+if(camera==null || UnityEngine.RenderSettings.sun==null)throw new System.Exception("Camera and sun required");
+bool playing=UnityEditor.EditorApplication.isPlaying;
+var extra=camera.GetComponent<VividRP.Runtime.VividAdditionalCameraData>();
+var light=UnityEngine.RenderSettings.sun;var rotation=light.transform.rotation;
+var cameraPosition=camera.transform.position;var cameraRotation=camera.transform.rotation;
+var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public;
+var runtime=typeof(VividRP.Runtime.CascadedShadowSettingsVolume).Assembly.GetType("VividRP.Runtime.RenderPass.Core.VirtualShadowMapPrototypeRuntime");
+var invalidate=runtime.GetMethod("InvalidateCache",flags);
+var fields=runtime.Assembly.GetType("VividRP.Runtime.RenderPass.Core.VSMProfiling").GetFields(flags);
+var samplers=new UnityEngine.Rendering.ProfilingSampler[fields.Length];var oldRecording=new bool[fields.Length];
+var recorders=new Unity.Profiling.ProfilerRecorder[fields.Length];
+for(int i=0;i<fields.Length;i++){
+ samplers[i]=(UnityEngine.Rendering.ProfilingSampler)fields[i].GetValue(null);oldRecording[i]=UnityEngine.Profiling.Recorder.Get(samplers[i].name).enabled;
+ samplers[i].enableRecording=true;recorders[i]=new Unity.Profiling.ProfilerRecorder(Unity.Profiling.ProfilerCategory.Render,samplers[i].name,1,
+ Unity.Profiling.ProfilerRecorderOptions.WrapAroundWhenCapacityReached|Unity.Profiling.ProfilerRecorderOptions.SumAllSamplesInFrame|Unity.Profiling.ProfilerRecorderOptions.GpuRecorder);recorders[i].Start();
+}
+var go=new UnityEngine.GameObject("Temporary VSM final timing"){hideFlags=UnityEngine.HideFlags.HideAndDontSave};
+int layer=0;while(layer<31&&(extra.volumeLayerMask.value&(1<<layer))==0)layer++;go.layer=layer;
+var volume=go.AddComponent<UnityEngine.Rendering.Volume>();volume.isGlobal=true;volume.priority=float.MaxValue;
+var profile=UnityEngine.ScriptableObject.CreateInstance<UnityEngine.Rendering.VolumeProfile>();profile.hideFlags=UnityEngine.HideFlags.HideAndDontSave;
+var settings=profile.Add<VividRP.Runtime.CascadedShadowSettingsVolume>();volume.sharedProfile=profile;
+bool background=UnityEngine.Application.runInBackground;UnityEngine.Application.runInBackground=true;
+System.Func<string> state=()=>Newtonsoft.Json.JsonConvert.SerializeObject(new{
+ playing=UnityEditor.EditorApplication.isPlaying,background=UnityEngine.Application.runInBackground,
+ camera=UnityEditor.EditorJsonUtility.ToJson(camera),cameraTransform=UnityEditor.EditorJsonUtility.ToJson(camera.transform),
+ sun=UnityEditor.EditorJsonUtility.ToJson(light.transform),settings=UnityEngine.JsonUtility.ToJson(UnityEngine.Rendering.VolumeManager.instance.stack.GetComponent<VividRP.Runtime.CascadedShadowSettingsVolume>()),
+ scene0Dirty=UnityEngine.SceneManagement.SceneManager.GetSceneAt(0).isDirty,scene1Dirty=UnityEngine.SceneManagement.SceneManager.GetSceneAt(1).isDirty});
+System.IO.File.WriteAllText(root+"/before.json",state());
+int[] modes={0,0,0};
+int[] resolutions={4096,4096,4096};
+int[] grouped={1,1,1};
+var compute=UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>("Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
+const int warmFrames=96,sampleFrames=128;
+var values=new long[sampleFrames*fields.Length];var counts=new long[values.Length];
+int stage=0,warm=0,sample=0,observation=0;bool disposed=false;
+double began=UnityEditor.EditorApplication.timeSinceStartup;
+UnityEditor.EditorApplication.CallbackFunction tick=null;
+System.Action<UnityEngine.Rendering.ScriptableRenderContext,UnityEngine.Camera> frame=null;
+System.Action<string> finish=null;
+System.Action begin=()=>{
+ 
+ settings.virtualShadowMapResolution.Override(resolutions[stage]);settings.virtualShadowMapPhysicalPageBudget.Override(1024);
+ settings.virtualShadowMapSMRTRayCount.Override(4);settings.virtualShadowMapSMRTAdaptiveRays.Override(false);
+ invalidate.Invoke(null,null);extra.ResetPostProcessingHistory();warm=sample=0;began=UnityEditor.EditorApplication.timeSinceStartup;
+ System.Array.Clear(values,0,values.Length);System.Array.Clear(counts,0,counts.Length);
+ System.IO.File.WriteAllText(root+"/progress.txt",stage+" resolution="+(resolutions[stage])+" mode="+modes[stage]+" grouped="+grouped[stage]);
+};
+finish=status=>{
+ if(disposed)return;disposed=true;
+ UnityEditor.EditorApplication.update-=tick;UnityEngine.Rendering.RenderPipelineManager.endCameraRendering-=frame;
+ light.transform.rotation=rotation;invalidate.Invoke(null,null);extra.ResetPostProcessingHistory();
+ for(int i=0;i<recorders.Length;i++){recorders[i].Dispose();samplers[i].enableRecording=oldRecording[i];}
+ UnityEngine.Object.DestroyImmediate(go);UnityEngine.Object.DestroyImmediate(settings);UnityEngine.Object.DestroyImmediate(profile);
+ UnityEngine.Application.runInBackground=background;UnityEngine.Rendering.VolumeManager.instance.Update(camera.transform,extra.volumeLayerMask);
+ System.IO.File.WriteAllText(root+"/after.json",state());System.IO.File.WriteAllText(root+"/status.txt",status);
+ UnityEditor.EditorApplication.QueuePlayerLoopUpdate();UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+};
+frame=(context,observed)=>{
+ if(disposed||observed!=camera||sample>=sampleFrames)return;observation++;
+ if(++warm<=warmFrames)return;
+ for(int i=0;i<recorders.Length;i++){if(!recorders[i].Valid||recorders[i].Count==0)continue;var v=recorders[i].GetSample(0);values[sample*fields.Length+i]=v.Value;counts[sample*fields.Length+i]=v.Count;}sample++;
+};
+tick=()=>{
+ if(disposed)return;
+ try{
+  if(UnityEditor.EditorApplication.isCompiling||UnityEditor.EditorApplication.isPlaying!=playing){finish("cancelled: editor state changed");return;}
+  if(System.IO.File.Exists(root+"/cancel")){finish("cancelled");return;}
+  if(camera.transform.position!=cameraPosition||camera.transform.rotation!=cameraRotation){finish("cancelled: camera changed");return;}
+  if(UnityEditor.EditorApplication.timeSinceStartup-began>240){finish("failed: timeout");return;}
+  if(sample>=sampleFrames){
+   string prefix=root+"/"+stage.ToString("D2")+"_r"+(resolutions[stage])+"_m"+modes[stage];
+   var csv=new System.Text.StringBuilder("observation,marker,gpu_ns,gpu_sample_count\n");
+   for(int n=0;n<sampleFrames;n++)for(int i=0;i<fields.Length;i++)csv.Append(n).Append(',').Append(samplers[i].name).Append(',').Append(values[n*fields.Length+i]).Append(',').Append(counts[n*fields.Length+i]).AppendLine();
+   System.IO.File.WriteAllText(prefix+".csv",csv.ToString());
+   var counters=new uint[4];((UnityEngine.GraphicsBuffer)runtime.GetProperty("AllocatorCounters",flags).GetValue(null)).GetData(counters);
+   var rasterBuffer=(UnityEngine.GraphicsBuffer)runtime.GetProperty("MeshletRasterPages",flags).GetValue(null);var rasterPages=new uint[rasterBuffer.count];rasterBuffer.GetData(rasterPages);System.IO.File.WriteAllText(prefix+"-pages.json",Newtonsoft.Json.JsonConvert.SerializeObject(rasterPages));
+   var argsBuffer=(UnityEngine.GraphicsBuffer)runtime.GetProperty("MeshletPageIndirectArgs",flags).GetValue(null);var args=new uint[argsBuffer.count];argsBuffer.GetData(args);System.IO.File.WriteAllText(prefix+"-args.json",Newtonsoft.Json.JsonConvert.SerializeObject(args));
+   System.IO.File.WriteAllText(prefix+".json",Newtonsoft.Json.JsonConvert.SerializeObject(new{stage,mode=modes[stage],resolution=resolutions[stage],grouped=grouped[stage],moving=stage==1,counters,observations=observation,state=state()}));
+   if(++stage==modes.Length){finish("complete");return;}begin();
+  }
+  light.transform.rotation=stage==1?rotation*UnityEngine.Quaternion.Euler(0,(warm%16-8)*.025f,0):rotation;
+  UnityEditor.EditorApplication.QueuePlayerLoopUpdate();UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+ }catch(System.Exception ex){finish("failed: "+ex);}
+};
+begin();UnityEngine.Rendering.RenderPipelineManager.endCameraRendering+=frame;UnityEditor.EditorApplication.update+=tick;
+return root;

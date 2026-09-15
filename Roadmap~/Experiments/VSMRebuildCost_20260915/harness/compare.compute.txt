@@ -1,0 +1,22 @@
+#pragma kernel ComparePools
+Texture2DArray<uint> _Static, _Dynamic, _ReferenceStatic, _ReferenceDynamic;
+StructuredBuffer<uint> _Owners;
+RWStructuredBuffer<uint> _Counts;
+int _PagesPerRow;
+groupshared uint4 totals;
+[numthreads(8,8,1)]
+void ComparePools(uint3 id:SV_DispatchThreadID,uint lane:SV_GroupIndex)
+{
+    bool active = _Owners[id.z] != 0u;
+    if(lane==0u)totals=0u;
+    GroupMemoryBarrierWithGroupSync();
+    uint2 p=uint2(id.z%(uint)_PagesPerRow,id.z/(uint)_PagesPerRow)*128u+id.xy;
+    uint4 v=0u;
+    for(uint layer=0;active && layer<16;layer++){
+        uint a=_Static.Load(int4(p,layer,0)),b=_Dynamic.Load(int4(p,layer,0));
+        v+=uint4(a!=_ReferenceStatic.Load(int4(p,layer,0)),b!=_ReferenceDynamic.Load(int4(p,layer,0)),1u,b!=0u);
+    }
+    InterlockedAdd(totals.x,v.x);InterlockedAdd(totals.y,v.y);InterlockedAdd(totals.z,v.z);InterlockedAdd(totals.w,v.w);
+    GroupMemoryBarrierWithGroupSync();
+    if(lane==0u){InterlockedAdd(_Counts[0],totals.x);InterlockedAdd(_Counts[1],totals.y);InterlockedAdd(_Counts[2],totals.z);InterlockedAdd(_Counts[3],totals.w);}
+}

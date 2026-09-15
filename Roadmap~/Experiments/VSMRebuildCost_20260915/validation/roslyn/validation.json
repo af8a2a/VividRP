@@ -1,0 +1,14 @@
+[
+  {
+    "assembly": "VividRP.Runtime",
+    "exit_code": 0
+  },
+  {
+    "assembly": "VividRP.Editor",
+    "exit_code": 0
+  },
+  {
+    "assembly": "VividRP.Editor.Tests",
+    "exit_code": 0
+  }
+]

@@ -1,0 +1,41 @@
+var shader=UnityEngine.Object.Instantiate(UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.ComputeShader>("Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+int kernel=shader.FindKernel("VSMPrototypePrepareMeshletPageRequests");
+int lists=(int)VividRP.Runtime.GPUDriven.VividRendererListID.Count;
+var rows=new System.Collections.Generic.List<object>();
+try{
+ foreach(int levels in new[]{1,4,16})foreach(int capacity in new[]{1,63,64,65,256,1024,4096})foreach(int caster in new[]{0,1})foreach(int pattern in new[]{0,1,2,3}){
+  int pageCount=levels*64;var tableData=new uint[pageCount];var metaData=new Unity.Mathematics.uint4[pageCount];var ownerData=new uint[capacity];var expected=new bool[pageCount];var perLevel=new int[16];
+  for(int page=0;page<pageCount;page++){
+   int physical=(page*73+19)%pageCount;bool allocated=physical<capacity&&(pattern==3||page%7!=0);bool dirty=pattern==3||(pattern==1&&page==9)||(pattern==2&&page%11==9);
+   if(allocated){tableData[page]=(uint)physical+1u;ownerData[physical]=(uint)page+1u;metaData[page].x=dirty?6u:10u;}
+   expected[page]=allocated&&(caster!=0||dirty);if(expected[page])perLevel[page/64]++;
+  }
+  using(var table=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,pageCount,4))
+  using(var meta=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,pageCount,16))
+  using(var owners=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,capacity,4))
+  using(var pages=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Structured,capacity+33+4,4))
+  using(var sourceArgs=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Raw,levels*lists*4,4))
+  using(var args=new UnityEngine.GraphicsBuffer(UnityEngine.GraphicsBuffer.Target.Raw|UnityEngine.GraphicsBuffer.Target.IndirectArguments,lists*8,4)){
+   table.SetData(tableData);meta.SetData(metaData);owners.SetData(ownerData);sourceArgs.SetData(new uint[levels*lists*4]);
+   var output=new uint[capacity+33+4];for(int i=0;i<output.Length;i++)output[i]=0xeeeeeeeeu;pages.SetData(output);
+   shader.SetInt("_VSMProjectionCount",levels);shader.SetInt("_VSMPrototypePagesPerAxis",8);shader.SetInt("_VSMPrototypePageTableEntryCount",pageCount);shader.SetInt("_VSMPrototypePhysicalPageCapacity",capacity);shader.SetInt("_VSMPrototypeCasterLayer",caster);
+   shader.SetBuffer(kernel,"_VSMPrototypePageTable",table);shader.SetBuffer(kernel,"_VSMPrototypePageMetadata",meta);shader.SetBuffer(kernel,"_VSMPrototypePhysicalPageOwners",owners);shader.SetBuffer(kernel,"_VSMPrototypeMeshletRasterPages",pages);shader.SetBuffer(kernel,"_VSMPrototypeSourceMeshletIndirectArgs",sourceArgs);shader.SetBuffer(kernel,"_VSMPrototypeMeshletPageIndirectArgs",args);
+   shader.Dispatch(kernel,1,1,1);pages.GetData(output);int offset=33,max=0;var seen=new bool[pageCount];
+   for(int level=0;level<16;level++){
+    if(output[1+level]!=perLevel[level]||output[17+level]!=offset)throw new System.Exception("Header mismatch");
+    for(int i=0;i<perLevel[level];i++){uint page=output[offset+i];if(page>=pageCount||page/64!=level||!expected[page]||seen[page])throw new System.Exception("Page mapping mismatch");seen[page]=true;}
+    offset+=perLevel[level];max=System.Math.Max(max,perLevel[level]);
+   }
+   if(output[0]!=max)throw new System.Exception("Stride mismatch");for(int i=0;i<pageCount;i++)if(expected[i]!=seen[i])throw new System.Exception("Missing page");
+   for(int i=capacity+33;i<output.Length;i++)if(output[i]!=0xeeeeeeeeu)throw new System.Exception("Guard overwritten");
+   rows.Add(new{levels,capacity,caster,pattern,pages=offset-33,stride=max});
+  }
+ }
+ var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public;
+ var runtime=typeof(VividRP.Runtime.CascadedShadowSettingsVolume).Assembly.GetType("VividRP.Runtime.RenderPass.Core.VirtualShadowMapPrototypeRuntime");
+ var method=runtime.GetMethod("EnsureMeshletPageRequestCapacity",flags);var call=(System.Func<int,bool>)System.Delegate.CreateDelegate(typeof(System.Func<int,bool>),method);
+ int current=((UnityEngine.GraphicsBuffer)runtime.GetProperty("MeshletPageRequests",flags).GetValue(null)).count/4;
+ for(int i=0;i<32;i++)call(current);long before=System.GC.GetAllocatedBytesForCurrentThread();int ready=0;for(int i=0;i<256;i++)if(call(current))ready++;long bytes=System.GC.GetAllocatedBytesForCurrentThread()-before;
+ if(bytes!=0||ready!=256)throw new System.Exception("Stable allocation regression");
+ System.IO.File.WriteAllText("E:/VividRP_Reborn/Packages/VividRP/Temp~/vsm-rebuild/group-fixture.json",Newtonsoft.Json.JsonConvert.SerializeObject(new{cases=rows.Count,rows,stableAllocatedBytes=bytes,stableCalls=ready}));return new{cases=rows.Count,bytes};
+}finally{UnityEngine.Object.DestroyImmediate(shader);}

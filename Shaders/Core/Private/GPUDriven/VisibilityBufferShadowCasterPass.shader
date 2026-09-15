@@ -168,11 +168,14 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                     const uint requestEnd = instanceID - localInstance;
                     pageRequest = _VSMPrototypeMeshletPageRequests[
                         requestEnd - 1u - localInstance / pageCount];
-                    virtualPageIndex = _VSMPrototypeMeshletRasterPages[
-                        1u + localInstance % pageCount];
                     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
                     const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
                     cascadeIndex = pageRequest.w / pagesPerCascade;
+                    uint pageOrdinal = localInstance % pageCount;
+                    if (pageOrdinal >= _VSMPrototypeMeshletRasterPages[1u + cascadeIndex])
+                        return output;
+                    uint pageOffset = _VSMPrototypeMeshletRasterPages[1u + VIVID_VSM_RASTER_MAX_LEVELS + cascadeIndex];
+                    virtualPageIndex = _VSMPrototypeMeshletRasterPages[pageOffset + pageOrdinal];
                     const uint pageInCascade = virtualPageIndex % pagesPerCascade;
                     const uint minPage = pageRequest.z % pagesPerCascade;
                     const uint maxPage = pageRequest.w % pagesPerCascade;

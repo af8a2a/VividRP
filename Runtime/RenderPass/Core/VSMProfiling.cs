@@ -16,6 +16,10 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static readonly ProfilingSampler StaticCull = new("VSM.StaticCasterCull");
         internal static readonly ProfilingSampler DynamicCull = new("VSM.DynamicCasterCull");
         internal static readonly ProfilingSampler PageCull = new("VSM.PageCull");
+        internal static readonly ProfilingSampler StaticRasterClear = new("VSM.StaticRasterClear");
+        internal static readonly ProfilingSampler StaticRasterDraw = new("VSM.StaticRasterDraw");
+        internal static readonly ProfilingSampler DynamicRasterClear = new("VSM.DynamicRasterClear");
+        internal static readonly ProfilingSampler DynamicRasterDraw = new("VSM.DynamicRasterDraw");
         internal static readonly ProfilingSampler StaticRaster = new("VSM.StaticRaster");
         internal static readonly ProfilingSampler UnityRaster = new("VSM.UnityCompatibilityRaster");
         internal static readonly ProfilingSampler Resolve = new("VSM.Resolve");

@@ -1,0 +1,4582 @@
+{
+  "timing": [
+    {
+      "stage": 0,
+      "mode": 0,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 160,
+      "window": "00_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.727808,
+          "n": 96,
+          "p95": 1.168128
+        },
+        "VSM.Allocate": {
+          "p50": 11.263743999999999,
+          "n": 96,
+          "p95": 11.34464
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.471936,
+          "n": 96,
+          "p95": 0.47744
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.069632,
+          "n": 96,
+          "p95": 0.092928
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.062976,
+          "n": 96,
+          "p95": 0.09344
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.18009599999999998,
+          "n": 96,
+          "p95": 0.186624
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.16,
+          "n": 96,
+          "p95": 0.166656
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 28.315648000000003,
+          "n": 96,
+          "p95": 29.273088
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.062848,
+          "n": 96,
+          "p95": 0.09344
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 28.315904000000003,
+          "n": 96,
+          "p95": 29.273344
+        },
+        "VSM.Resolve": {
+          "p50": 5.3788160000000005,
+          "n": 96,
+          "p95": 6.151424
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.239168,
+          "n": 96,
+          "p95": 6.01344
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.064256,
+          "n": 96,
+          "p95": 0.066816
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.072448
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 1,
+      "mode": 1,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 320,
+      "window": "01_r4096_m1",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.921728,
+          "n": 96,
+          "p95": 1.237504
+        },
+        "VSM.Allocate": {
+          "p50": 11.282688,
+          "n": 96,
+          "p95": 11.372544
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.472192,
+          "n": 96,
+          "p95": 0.476672
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.06873599999999999,
+          "n": 96,
+          "p95": 0.091136
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.065024,
+          "n": 96,
+          "p95": 0.094464
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.00256,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.179456,
+          "n": 96,
+          "p95": 0.185856
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.15961599999999998,
+          "n": 96,
+          "p95": 0.166144
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 25.06048,
+          "n": 96,
+          "p95": 26.337024
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.06489600000000001,
+          "n": 96,
+          "p95": 0.094464
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 25.060864000000002,
+          "n": 96,
+          "p95": 26.33728
+        },
+        "VSM.Resolve": {
+          "p50": 3.4170879999999997,
+          "n": 96,
+          "p95": 4.068864
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.284096,
+          "n": 96,
+          "p95": 3.726592
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.061184,
+          "n": 96,
+          "p95": 0.067328
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.070912,
+          "n": 96,
+          "p95": 0.072192
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 2,
+      "mode": 2,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 480,
+      "window": "02_r4096_m2",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.728064,
+          "n": 96,
+          "p95": 1.117952
+        },
+        "VSM.Allocate": {
+          "p50": 11.288192,
+          "n": 96,
+          "p95": 11.397632
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.47232,
+          "n": 96,
+          "p95": 0.47744
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.06528,
+          "n": 96,
+          "p95": 0.105728
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.06528,
+          "n": 96,
+          "p95": 0.093184
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.179712,
+          "n": 96,
+          "p95": 0.186368
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.15987200000000001,
+          "n": 96,
+          "p95": 0.166144
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 24.593664,
+          "n": 96,
+          "p95": 26.691328
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.06528,
+          "n": 96,
+          "p95": 0.092928
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 24.593792,
+          "n": 96,
+          "p95": 26.691584
+        },
+        "VSM.Resolve": {
+          "p50": 5.829248,
+          "n": 96,
+          "p95": 7.192832
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.695872,
+          "n": 96,
+          "p95": 6.730496
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.061952,
+          "n": 96,
+          "p95": 0.065536
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.072448
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 3,
+      "mode": 3,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 640,
+      "window": "03_r4096_m3",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.729088,
+          "n": 96,
+          "p95": 1.260032
+        },
+        "VSM.Allocate": {
+          "p50": 11.288192,
+          "n": 96,
+          "p95": 11.388416
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.472064,
+          "n": 96,
+          "p95": 0.504064
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.071552,
+          "n": 96,
+          "p95": 0.07936
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.024448,
+          "n": 96,
+          "p95": 0.095488
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.003072
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.179072,
+          "n": 96,
+          "p95": 0.186368
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.15936,
+          "n": 96,
+          "p95": 0.1664
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 28.304512000000003,
+          "n": 96,
+          "p95": 29.464832
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.024448,
+          "n": 96,
+          "p95": 0.095488
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 28.30464,
+          "n": 96,
+          "p95": 29.465088
+        },
+        "VSM.Resolve": {
+          "p50": 5.861504,
+          "n": 96,
+          "p95": 8.038144
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.712384,
+          "n": 96,
+          "p95": 7.899392
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.065152,
+          "n": 96,
+          "p95": 0.06784
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.07168,
+          "n": 96,
+          "p95": 0.074752
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 4,
+      "mode": 4,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 800,
+      "window": "04_r4096_m4",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.7297279999999999,
+          "n": 96,
+          "p95": 1.1712
+        },
+        "VSM.Allocate": {
+          "p50": 11.291648,
+          "n": 96,
+          "p95": 11.386624
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.472576,
+          "n": 96,
+          "p95": 0.47744
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.07168,
+          "n": 96,
+          "p95": 0.078592
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.01408,
+          "n": 96,
+          "p95": 0.093952
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.17856,
+          "n": 96,
+          "p95": 0.185856
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.15872,
+          "n": 96,
+          "p95": 0.166144
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 27.801856,
+          "n": 96,
+          "p95": 28.737536
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.01408,
+          "n": 96,
+          "p95": 0.093952
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 27.802112,
+          "n": 96,
+          "p95": 28.737792
+        },
+        "VSM.Resolve": {
+          "p50": 5.382272,
+          "n": 96,
+          "p95": 6.231808
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.239168,
+          "n": 96,
+          "p95": 6.092544
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.064512,
+          "n": 96,
+          "p95": 0.067584
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071296,
+          "n": 96,
+          "p95": 0.072704
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 5,
+      "mode": 4,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 960,
+      "window": "05_r4096_m4",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.729088,
+          "n": 96,
+          "p95": 1.233664
+        },
+        "VSM.Allocate": {
+          "p50": 11.291904,
+          "n": 96,
+          "p95": 11.373312
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.47232,
+          "n": 96,
+          "p95": 0.504576
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.07232,
+          "n": 96,
+          "p95": 0.105984
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.013696,
+          "n": 96,
+          "p95": 0.095744
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.179712,
+          "n": 96,
+          "p95": 0.186112
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.16,
+          "n": 96,
+          "p95": 0.165632
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 27.919104,
+          "n": 96,
+          "p95": 28.703232
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.013568,
+          "n": 96,
+          "p95": 0.095744
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 27.919232,
+          "n": 96,
+          "p95": 28.703488
+        },
+        "VSM.Resolve": {
+          "p50": 5.399552,
+          "n": 96,
+          "p95": 6.382336
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.259648,
+          "n": 96,
+          "p95": 6.192896
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.064512,
+          "n": 96,
+          "p95": 0.06784
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071424,
+          "n": 96,
+          "p95": 0.07296
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 6,
+      "mode": 3,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 1120,
+      "window": "06_r4096_m3",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.729088,
+          "n": 96,
+          "p95": 1.242368
+        },
+        "VSM.Allocate": {
+          "p50": 11.2896,
+          "n": 96,
+          "p95": 11.359744
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.472064,
+          "n": 96,
+          "p95": 0.47616
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.073216,
+          "n": 96,
+          "p95": 0.094464
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.027903999999999998,
+          "n": 96,
+          "p95": 0.094976
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.00256,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.178816,
+          "n": 96,
+          "p95": 0.1856
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.15910400000000002,
+          "n": 96,
+          "p95": 0.165888
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 28.391424,
+          "n": 96,
+          "p95": 28.764672
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.027903999999999998,
+          "n": 96,
+          "p95": 0.094976
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 28.39168,
+          "n": 96,
+          "p95": 28.764672
+        },
+        "VSM.Resolve": {
+          "p50": 5.879296,
+          "n": 96,
+          "p95": 6.447104
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.6957439999999995,
+          "n": 96,
+          "p95": 6.306816
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.065792,
+          "n": 96,
+          "p95": 0.068096
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071936,
+          "n": 96,
+          "p95": 0.07296
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 7,
+      "mode": 2,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 1280,
+      "window": "07_r4096_m2",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.72832,
+          "n": 96,
+          "p95": 1.086976
+        },
+        "VSM.Allocate": {
+          "p50": 11.296512,
+          "n": 96,
+          "p95": 11.406592
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.47424,
+          "n": 96,
+          "p95": 0.477696
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.068992,
+          "n": 96,
+          "p95": 0.10624
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.083712,
+          "n": 96,
+          "p95": 0.095232
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.18048,
+          "n": 96,
+          "p95": 0.185856
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.00128
+        },
+        "VSM.PageCull": {
+          "p50": 0.16064,
+          "n": 96,
+          "p95": 0.165888
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 24.94912,
+          "n": 96,
+          "p95": 25.822976
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.083712,
+          "n": 96,
+          "p95": 0.094976
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 24.949248,
+          "n": 96,
+          "p95": 25.828608
+        },
+        "VSM.Resolve": {
+          "p50": 6.440192,
+          "n": 96,
+          "p95": 7.371264
+        },
+        "VSM.ResolveTrace": {
+          "p50": 6.209792,
+          "n": 96,
+          "p95": 7.044864
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.062976,
+          "n": 96,
+          "p95": 0.068096
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.07168,
+          "n": 96,
+          "p95": 0.07296
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 8,
+      "mode": 1,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 1440,
+      "window": "08_r4096_m1",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.728448,
+          "n": 96,
+          "p95": 1.32608
+        },
+        "VSM.Allocate": {
+          "p50": 11.286656,
+          "n": 96,
+          "p95": 11.362304
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.471808,
+          "n": 96,
+          "p95": 0.476416
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.06912,
+          "n": 96,
+          "p95": 0.080128
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.06412799999999999,
+          "n": 96,
+          "p95": 0.090112
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.180992,
+          "n": 96,
+          "p95": 0.188928
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.16064,
+          "n": 96,
+          "p95": 0.167168
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 24.822912000000002,
+          "n": 96,
+          "p95": 26.257152
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.06412799999999999,
+          "n": 96,
+          "p95": 0.090112
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 24.822912000000002,
+          "n": 96,
+          "p95": 26.257408
+        },
+        "VSM.Resolve": {
+          "p50": 3.36192,
+          "n": 96,
+          "p95": 4.06144
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.220224,
+          "n": 96,
+          "p95": 3.865088
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.06144,
+          "n": 96,
+          "p95": 0.209664
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.075264
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 9,
+      "mode": 0,
+      "resolution": 4096,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 1600,
+      "window": "09_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.729344,
+          "n": 96,
+          "p95": 1.238784
+        },
+        "VSM.Allocate": {
+          "p50": 11.262592000000001,
+          "n": 96,
+          "p95": 11.367168
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.472064,
+          "n": 96,
+          "p95": 0.476416
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.070272,
+          "n": 96,
+          "p95": 0.077312
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.031872,
+          "n": 96,
+          "p95": 0.095744
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.00256,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.18009599999999998,
+          "n": 96,
+          "p95": 0.186112
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.160512,
+          "n": 96,
+          "p95": 0.1664
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 28.424191999999998,
+          "n": 96,
+          "p95": 29.928704
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.031872,
+          "n": 96,
+          "p95": 0.095744
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 28.42432,
+          "n": 96,
+          "p95": 29.92896
+        },
+        "VSM.Resolve": {
+          "p50": 5.429632,
+          "n": 96,
+          "p95": 6.349824
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.292288,
+          "n": 96,
+          "p95": 6.19776
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.064512,
+          "n": 96,
+          "p95": 0.067584
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071424,
+          "n": 96,
+          "p95": 0.072448
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 10,
+      "mode": 0,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 1760,
+      "window": "10_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.57088,
+          "n": 96,
+          "p95": 1.111808
+        },
+        "VSM.Allocate": {
+          "p50": 2.12736,
+          "n": 96,
+          "p95": 2.157312
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268032,
+          "n": 96,
+          "p95": 0.427776
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.054784,
+          "n": 96,
+          "p95": 0.060672
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.08063999999999999,
+          "n": 96,
+          "p95": 0.093184
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.126336,
+          "n": 96,
+          "p95": 0.134656
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.107264,
+          "n": 96,
+          "p95": 0.114176
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 8.411007999999999,
+          "n": 96,
+          "p95": 9.026816
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.080512,
+          "n": 96,
+          "p95": 0.092928
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 8.411264,
+          "n": 96,
+          "p95": 9.027072
+        },
+        "VSM.Resolve": {
+          "p50": 4.602368,
+          "n": 96,
+          "p95": 5.765632
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.417152,
+          "n": 96,
+          "p95": 5.466368
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.063104,
+          "n": 96,
+          "p95": 0.068096
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.072192,
+          "n": 96,
+          "p95": 0.073472
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 11,
+      "mode": 1,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 1920,
+      "window": "11_r2048_m1",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.56896,
+          "n": 96,
+          "p95": 0.936448
+        },
+        "VSM.Allocate": {
+          "p50": 2.120064,
+          "n": 96,
+          "p95": 2.155776
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268416,
+          "n": 96,
+          "p95": 0.270848
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.053248,
+          "n": 96,
+          "p95": 0.065536
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.070016,
+          "n": 96,
+          "p95": 0.090112
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.126208,
+          "n": 96,
+          "p95": 0.13696
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.107264,
+          "n": 96,
+          "p95": 0.114944
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 7.433088,
+          "n": 96,
+          "p95": 7.786496
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.069888,
+          "n": 96,
+          "p95": 0.090112
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 7.433216,
+          "n": 96,
+          "p95": 7.786752
+        },
+        "VSM.Resolve": {
+          "p50": 3.036288,
+          "n": 96,
+          "p95": 3.373568
+        },
+        "VSM.ResolveTrace": {
+          "p50": 2.8780799999999997,
+          "n": 96,
+          "p95": 3.096064
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.061696,
+          "n": 96,
+          "p95": 0.065024
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071424,
+          "n": 96,
+          "p95": 0.289792
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 12,
+      "mode": 2,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 2080,
+      "window": "12_r2048_m2",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.568832,
+          "n": 96,
+          "p95": 0.88576
+        },
+        "VSM.Allocate": {
+          "p50": 2.117248,
+          "n": 96,
+          "p95": 2.154496
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.267776,
+          "n": 96,
+          "p95": 0.27008
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.0512,
+          "n": 96,
+          "p95": 0.059136
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.078336,
+          "n": 96,
+          "p95": 0.088576
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.125952,
+          "n": 96,
+          "p95": 0.135936
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.106624,
+          "n": 96,
+          "p95": 0.113152
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 7.28384,
+          "n": 96,
+          "p95": 7.58528
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.078336,
+          "n": 96,
+          "p95": 0.088576
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 7.284224,
+          "n": 96,
+          "p95": 7.585536
+        },
+        "VSM.Resolve": {
+          "p50": 4.8672,
+          "n": 96,
+          "p95": 5.636864
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.731776,
+          "n": 96,
+          "p95": 5.4592
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.061696,
+          "n": 96,
+          "p95": 0.064768
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071424,
+          "n": 96,
+          "p95": 0.07296
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 13,
+      "mode": 3,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 2240,
+      "window": "13_r2048_m3",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.568576,
+          "n": 96,
+          "p95": 0.891904
+        },
+        "VSM.Allocate": {
+          "p50": 2.118016,
+          "n": 96,
+          "p95": 2.147328
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.267776,
+          "n": 96,
+          "p95": 0.269824
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.05504,
+          "n": 96,
+          "p95": 0.062208
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.083328,
+          "n": 96,
+          "p95": 0.094208
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.126208,
+          "n": 96,
+          "p95": 0.132096
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.10700799999999999,
+          "n": 96,
+          "p95": 0.112896
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 8.146688000000001,
+          "n": 96,
+          "p95": 8.431104
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.083328,
+          "n": 96,
+          "p95": 0.094208
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 8.146816000000001,
+          "n": 96,
+          "p95": 8.43136
+        },
+        "VSM.Resolve": {
+          "p50": 4.02816,
+          "n": 96,
+          "p95": 4.51584
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.89248,
+          "n": 96,
+          "p95": 4.38016
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.062208,
+          "n": 96,
+          "p95": 0.062976
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.072448
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 14,
+      "mode": 4,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 2400,
+      "window": "14_r2048_m4",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.567808,
+          "n": 96,
+          "p95": 0.88192
+        },
+        "VSM.Allocate": {
+          "p50": 2.124288,
+          "n": 96,
+          "p95": 2.151936
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268032,
+          "n": 96,
+          "p95": 0.27008
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.055296,
+          "n": 96,
+          "p95": 0.062976
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.083328,
+          "n": 96,
+          "p95": 0.09344
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.125824,
+          "n": 96,
+          "p95": 0.132352
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.10688,
+          "n": 96,
+          "p95": 0.113152
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 7.997696,
+          "n": 96,
+          "p95": 8.372224
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.082816,
+          "n": 96,
+          "p95": 0.09344
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 7.997952000000001,
+          "n": 96,
+          "p95": 8.37248
+        },
+        "VSM.Resolve": {
+          "p50": 4.040576,
+          "n": 96,
+          "p95": 4.743168
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.904,
+          "n": 96,
+          "p95": 4.603392
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.062208,
+          "n": 96,
+          "p95": 0.064512
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.072448
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 15,
+      "mode": 4,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 2560,
+      "window": "15_r2048_m4",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.568832,
+          "n": 96,
+          "p95": 1.002752
+        },
+        "VSM.Allocate": {
+          "p50": 2.1255680000000003,
+          "n": 96,
+          "p95": 2.157056
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268288,
+          "n": 96,
+          "p95": 0.270592
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.055296,
+          "n": 96,
+          "p95": 0.06144
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.081792,
+          "n": 96,
+          "p95": 0.093184
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.12531199999999998,
+          "n": 96,
+          "p95": 0.134144
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.10624,
+          "n": 96,
+          "p95": 0.114944
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 8.072576000000002,
+          "n": 96,
+          "p95": 8.419072
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.08140800000000001,
+          "n": 96,
+          "p95": 0.093184
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 8.072832,
+          "n": 96,
+          "p95": 8.419072
+        },
+        "VSM.Resolve": {
+          "p50": 4.047616,
+          "n": 96,
+          "p95": 5.40672
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.9109119999999997,
+          "n": 96,
+          "p95": 5.084928
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.062464,
+          "n": 96,
+          "p95": 0.068352
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071424,
+          "n": 96,
+          "p95": 0.072704
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 16,
+      "mode": 3,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 2720,
+      "window": "16_r2048_m3",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.83904,
+          "n": 96,
+          "p95": 1.19296
+        },
+        "VSM.Allocate": {
+          "p50": 2.127744,
+          "n": 96,
+          "p95": 2.158592
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268288,
+          "n": 96,
+          "p95": 0.43264
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.056448,
+          "n": 96,
+          "p95": 0.061184
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.085632,
+          "n": 96,
+          "p95": 0.093952
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.127488,
+          "n": 96,
+          "p95": 0.286464
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.108032,
+          "n": 96,
+          "p95": 0.11264
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 8.524416,
+          "n": 96,
+          "p95": 8.777984
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.085632,
+          "n": 96,
+          "p95": 0.093952
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 8.528768,
+          "n": 96,
+          "p95": 8.777984
+        },
+        "VSM.Resolve": {
+          "p50": 4.842624000000001,
+          "n": 96,
+          "p95": 5.47456
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.68224,
+          "n": 96,
+          "p95": 5.331968
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.063744,
+          "n": 96,
+          "p95": 0.068608
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.072192,
+          "n": 96,
+          "p95": 0.073472
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 17,
+      "mode": 2,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 2880,
+      "window": "17_r2048_m2",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.568704,
+          "n": 96,
+          "p95": 0.926208
+        },
+        "VSM.Allocate": {
+          "p50": 2.1272320000000002,
+          "n": 96,
+          "p95": 2.161408
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268032,
+          "n": 96,
+          "p95": 0.270336
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.051968,
+          "n": 96,
+          "p95": 0.055808
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.08064,
+          "n": 96,
+          "p95": 0.090368
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.12659199999999998,
+          "n": 96,
+          "p95": 0.134656
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.10752,
+          "n": 96,
+          "p95": 0.114432
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 7.42528,
+          "n": 96,
+          "p95": 7.756544
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.08064,
+          "n": 96,
+          "p95": 0.090368
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 7.432320000000001,
+          "n": 96,
+          "p95": 7.7568
+        },
+        "VSM.Resolve": {
+          "p50": 5.226623999999999,
+          "n": 96,
+          "p95": 6.070272
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.074176,
+          "n": 96,
+          "p95": 5.930496
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.062208,
+          "n": 96,
+          "p95": 0.067584
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.072192,
+          "n": 96,
+          "p95": 0.075776
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 18,
+      "mode": 1,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 3040,
+      "window": "18_r2048_m1",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.568704,
+          "n": 96,
+          "p95": 1.091584
+        },
+        "VSM.Allocate": {
+          "p50": 2.1213439999999997,
+          "n": 96,
+          "p95": 2.156032
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268032,
+          "n": 96,
+          "p95": 0.270336
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.05376,
+          "n": 96,
+          "p95": 0.106752
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002048
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.069888,
+          "n": 96,
+          "p95": 0.088832
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.12672,
+          "n": 96,
+          "p95": 0.134656
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.107648,
+          "n": 96,
+          "p95": 0.114176
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 7.312896,
+          "n": 96,
+          "p95": 7.664384
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.069888,
+          "n": 96,
+          "p95": 0.088832
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 7.3131520000000005,
+          "n": 96,
+          "p95": 7.66464
+        },
+        "VSM.Resolve": {
+          "p50": 2.8005120000000003,
+          "n": 96,
+          "p95": 3.351808
+        },
+        "VSM.ResolveTrace": {
+          "p50": 2.6656,
+          "n": 96,
+          "p95": 3.173376
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.06144,
+          "n": 96,
+          "p95": 0.06656
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.227328
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 19,
+      "mode": 0,
+      "resolution": 2048,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 3200,
+      "window": "19_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.5693440000000001,
+          "n": 96,
+          "p95": 1.020672
+        },
+        "VSM.Allocate": {
+          "p50": 2.127104,
+          "n": 96,
+          "p95": 2.160896
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268288,
+          "n": 96,
+          "p95": 0.270848
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.055296,
+          "n": 96,
+          "p95": 0.10752
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.083328,
+          "n": 96,
+          "p95": 0.092416
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.126336,
+          "n": 96,
+          "p95": 0.133632
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.107008,
+          "n": 96,
+          "p95": 0.114176
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 8.350335999999999,
+          "n": 96,
+          "p95": 8.780032
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.0832,
+          "n": 96,
+          "p95": 0.092416
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 8.350463999999999,
+          "n": 96,
+          "p95": 8.780288
+        },
+        "VSM.Resolve": {
+          "p50": 4.2544640000000005,
+          "n": 96,
+          "p95": 5.036544
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.118399999999999,
+          "n": 96,
+          "p95": 4.891392
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.062464,
+          "n": 96,
+          "p95": 0.067584
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071424,
+          "n": 96,
+          "p95": 0.073216
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    }
+  ],
+  "group-timing": [
+    {
+      "stage": 0,
+      "mode": 0,
+      "resolution": 4096,
+      "grouped": 0,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 160,
+      "window": "00_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.6554880000000001,
+          "n": 96,
+          "p95": 1.271552
+        },
+        "VSM.Allocate": {
+          "p50": 11.286784,
+          "n": 96,
+          "p95": 11.40352
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.47296,
+          "n": 96,
+          "p95": 0.478464
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.068864,
+          "n": 96,
+          "p95": 0.086784
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.013312,
+          "n": 96,
+          "p95": 0.096256
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.177408,
+          "n": 96,
+          "p95": 0.18816
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.157696,
+          "n": 96,
+          "p95": 0.168704
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 28.27136,
+          "n": 96,
+          "p95": 29.523456
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.013312,
+          "n": 96,
+          "p95": 0.096256
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 28.271487999999998,
+          "n": 96,
+          "p95": 29.523712
+        },
+        "VSM.Resolve": {
+          "p50": 5.039872,
+          "n": 96,
+          "p95": 6.597888
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.905728,
+          "n": 96,
+          "p95": 6.2848
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.064,
+          "n": 96,
+          "p95": 0.067584
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.070912,
+          "n": 96,
+          "p95": 0.072704
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 1,
+      "mode": 6,
+      "resolution": 4096,
+      "grouped": 0,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 320,
+      "window": "01_r4096_m6",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.653952,
+          "n": 96,
+          "p95": 1.182976
+        },
+        "VSM.Allocate": {
+          "p50": 11.218304,
+          "n": 96,
+          "p95": 11.2832
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.470272,
+          "n": 96,
+          "p95": 0.472832
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.069248,
+          "n": 96,
+          "p95": 0.1088
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.089216,
+          "n": 96,
+          "p95": 0.097792
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.00256,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.178944,
+          "n": 96,
+          "p95": 0.1856
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.159488,
+          "n": 96,
+          "p95": 0.164864
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 23.061376,
+          "n": 96,
+          "p95": 23.472128
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.089216,
+          "n": 96,
+          "p95": 0.097792
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 23.061632,
+          "n": 96,
+          "p95": 23.472384
+        },
+        "VSM.Resolve": {
+          "p50": 3.5412480000000004,
+          "n": 96,
+          "p95": 3.876096
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.3688320000000003,
+          "n": 96,
+          "p95": 3.670016
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.061184,
+          "n": 96,
+          "p95": 0.216832
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.072192
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 2,
+      "mode": 7,
+      "resolution": 4096,
+      "grouped": 0,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 480,
+      "window": "02_r4096_m7",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.9248,
+          "n": 96,
+          "p95": 1.176832
+        },
+        "VSM.Allocate": {
+          "p50": 11.245951999999999,
+          "n": 96,
+          "p95": 11.284992
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.470528,
+          "n": 96,
+          "p95": 0.471808
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.065152,
+          "n": 96,
+          "p95": 0.074496
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.0896,
+          "n": 96,
+          "p95": 0.096512
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.00256,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.178944,
+          "n": 96,
+          "p95": 0.186368
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.159744,
+          "n": 96,
+          "p95": 0.166912
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 23.171072,
+          "n": 96,
+          "p95": 24.001024
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.0896,
+          "n": 96,
+          "p95": 0.096256
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 23.171328,
+          "n": 96,
+          "p95": 24.00128
+        },
+        "VSM.Resolve": {
+          "p50": 4.451456,
+          "n": 96,
+          "p95": 5.027328
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.294271999999999,
+          "n": 96,
+          "p95": 4.888064
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.06144,
+          "n": 96,
+          "p95": 0.066816
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071424,
+          "n": 96,
+          "p95": 0.072192
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 3,
+      "mode": 8,
+      "resolution": 4096,
+      "grouped": 0,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 640,
+      "window": "03_r4096_m8",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.656128,
+          "n": 96,
+          "p95": 1.08032
+        },
+        "VSM.Allocate": {
+          "p50": 11.294976,
+          "n": 96,
+          "p95": 11.410176
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.475776,
+          "n": 96,
+          "p95": 0.525568
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.06912,
+          "n": 96,
+          "p95": 0.113664
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.014208,
+          "n": 96,
+          "p95": 0.094976
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.179712,
+          "n": 96,
+          "p95": 0.185088
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.16,
+          "n": 96,
+          "p95": 0.165632
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 28.022528,
+          "n": 96,
+          "p95": 28.651776
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.01408,
+          "n": 96,
+          "p95": 0.09472
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 28.022784,
+          "n": 96,
+          "p95": 28.652032
+        },
+        "VSM.Resolve": {
+          "p50": 5.192576,
+          "n": 96,
+          "p95": 6.132224
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.057408000000001,
+          "n": 96,
+          "p95": 5.891584
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.063744,
+          "n": 96,
+          "p95": 0.065536
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.070912,
+          "n": 96,
+          "p95": 0.072448
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 4,
+      "mode": 0,
+      "resolution": 4096,
+      "grouped": 1,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 800,
+      "window": "04_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.654592,
+          "n": 96,
+          "p95": 1.053696
+        },
+        "VSM.Allocate": {
+          "p50": 11.25888,
+          "n": 96,
+          "p95": 11.352576
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.472576,
+          "n": 96,
+          "p95": 0.476416
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.073216,
+          "n": 96,
+          "p95": 0.081408
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002176,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.012672,
+          "n": 96,
+          "p95": 0.028416
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.17830400000000002,
+          "n": 96,
+          "p95": 0.184576
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.158848,
+          "n": 96,
+          "p95": 0.165376
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 13.850368,
+          "n": 96,
+          "p95": 14.559488
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.012672,
+          "n": 96,
+          "p95": 0.028416
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 13.850496,
+          "n": 96,
+          "p95": 14.559744
+        },
+        "VSM.Resolve": {
+          "p50": 5.033984,
+          "n": 96,
+          "p95": 5.777152
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.900352,
+          "n": 96,
+          "p95": 5.639168
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.063744,
+          "n": 96,
+          "p95": 0.06528
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.070656,
+          "n": 96,
+          "p95": 0.071936
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 5,
+      "mode": 0,
+      "resolution": 4096,
+      "grouped": 1,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 960,
+      "window": "05_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.832384,
+          "n": 96,
+          "p95": 1.068032
+        },
+        "VSM.Allocate": {
+          "p50": 11.258112,
+          "n": 96,
+          "p95": 11.355904
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.472832,
+          "n": 96,
+          "p95": 0.476416
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.076288,
+          "n": 96,
+          "p95": 0.087552
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.0128,
+          "n": 96,
+          "p95": 0.029696
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.177664,
+          "n": 96,
+          "p95": 0.1856
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.158464,
+          "n": 96,
+          "p95": 0.165888
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 14.50752,
+          "n": 96,
+          "p95": 15.02208
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.0128,
+          "n": 96,
+          "p95": 0.029696
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 14.507776,
+          "n": 96,
+          "p95": 15.02208
+        },
+        "VSM.Resolve": {
+          "p50": 5.764608,
+          "n": 96,
+          "p95": 6.121984
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.58976,
+          "n": 96,
+          "p95": 5.958144
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.064768,
+          "n": 96,
+          "p95": 0.067072
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.07168,
+          "n": 96,
+          "p95": 0.072704
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 6,
+      "mode": 0,
+      "resolution": 4096,
+      "grouped": 0,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 1120,
+      "window": "06_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.655616,
+          "n": 96,
+          "p95": 1.084672
+        },
+        "VSM.Allocate": {
+          "p50": 11.2896,
+          "n": 96,
+          "p95": 11.441152
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.4736,
+          "n": 96,
+          "p95": 0.478208
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.073472,
+          "n": 96,
+          "p95": 0.108544
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.012544,
+          "n": 96,
+          "p95": 0.095488
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.178432,
+          "n": 96,
+          "p95": 0.185088
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.158976,
+          "n": 96,
+          "p95": 0.165376
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 28.377344,
+          "n": 96,
+          "p95": 29.487104
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.012544,
+          "n": 96,
+          "p95": 0.095488
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 28.3776,
+          "n": 96,
+          "p95": 29.48736
+        },
+        "VSM.Resolve": {
+          "p50": 5.046528,
+          "n": 96,
+          "p95": 6.053376
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.910336,
+          "n": 96,
+          "p95": 5.913856
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.064,
+          "n": 96,
+          "p95": 0.065792
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.070784,
+          "n": 96,
+          "p95": 0.072448
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 7,
+      "mode": 0,
+      "resolution": 4096,
+      "grouped": 0,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 1280,
+      "window": "07_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.6554880000000001,
+          "n": 96,
+          "p95": 0.983296
+        },
+        "VSM.Allocate": {
+          "p50": 11.318528,
+          "n": 96,
+          "p95": 11.43808
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.475008,
+          "n": 96,
+          "p95": 0.478208
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.072576,
+          "n": 96,
+          "p95": 0.080896
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002176,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.01728,
+          "n": 96,
+          "p95": 0.093952
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.179072,
+          "n": 96,
+          "p95": 0.185856
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.159744,
+          "n": 96,
+          "p95": 0.166144
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 28.147199999999998,
+          "n": 96,
+          "p95": 28.670976
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.01728,
+          "n": 96,
+          "p95": 0.093696
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 28.147456,
+          "n": 96,
+          "p95": 28.671232
+        },
+        "VSM.Resolve": {
+          "p50": 5.034624,
+          "n": 96,
+          "p95": 5.367808
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.900224,
+          "n": 96,
+          "p95": 5.232128
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.063744,
+          "n": 96,
+          "p95": 0.064768
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.070656,
+          "n": 96,
+          "p95": 0.07168
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 8,
+      "mode": 0,
+      "resolution": 2048,
+      "grouped": 0,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 1440,
+      "window": "08_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.560256,
+          "n": 96,
+          "p95": 0.889088
+        },
+        "VSM.Allocate": {
+          "p50": 2.11648,
+          "n": 96,
+          "p95": 2.143488
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268032,
+          "n": 96,
+          "p95": 0.270336
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.057344,
+          "n": 96,
+          "p95": 0.107008
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.0864,
+          "n": 96,
+          "p95": 0.094976
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.130816,
+          "n": 96,
+          "p95": 0.137216
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.111872,
+          "n": 96,
+          "p95": 0.117504
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 8.186752,
+          "n": 96,
+          "p95": 8.53632
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.0864,
+          "n": 96,
+          "p95": 0.094976
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 8.187007999999999,
+          "n": 96,
+          "p95": 8.536576
+        },
+        "VSM.Resolve": {
+          "p50": 4.0403199999999995,
+          "n": 96,
+          "p95": 4.559616
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.906944,
+          "n": 96,
+          "p95": 4.423936
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.061952,
+          "n": 96,
+          "p95": 0.06272
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071296,
+          "n": 96,
+          "p95": 0.072704
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 9,
+      "mode": 0,
+      "resolution": 2048,
+      "grouped": 1,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 1600,
+      "window": "09_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.561664,
+          "n": 96,
+          "p95": 0.886016
+        },
+        "VSM.Allocate": {
+          "p50": 2.120064,
+          "n": 96,
+          "p95": 2.139136
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268416,
+          "n": 96,
+          "p95": 0.271104
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.057088,
+          "n": 96,
+          "p95": 0.062464
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.011776,
+          "n": 96,
+          "p95": 0.0128
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.130432,
+          "n": 96,
+          "p95": 0.137472
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.11136,
+          "n": 96,
+          "p95": 0.11776
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 4.384,
+          "n": 96,
+          "p95": 4.729344
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.011776,
+          "n": 96,
+          "p95": 0.0128
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 4.3841280000000005,
+          "n": 96,
+          "p95": 4.7296
+        },
+        "VSM.Resolve": {
+          "p50": 4.029568,
+          "n": 96,
+          "p95": 4.4672
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.896448,
+          "n": 96,
+          "p95": 4.327936
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.061696,
+          "n": 96,
+          "p95": 0.062976
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.072448
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    },
+    {
+      "stage": 10,
+      "mode": 0,
+      "resolution": 2048,
+      "grouped": 1,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 1760,
+      "window": "10_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.56192,
+          "n": 96,
+          "p95": 1.065984
+        },
+        "VSM.Allocate": {
+          "p50": 2.121216,
+          "n": 96,
+          "p95": 2.145536
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.2688,
+          "n": 96,
+          "p95": 0.447232
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.057856,
+          "n": 96,
+          "p95": 0.063232
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.011776,
+          "n": 96,
+          "p95": 0.0128
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.13119999999999998,
+          "n": 96,
+          "p95": 0.13824
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.112,
+          "n": 96,
+          "p95": 0.118528
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 4.523648,
+          "n": 96,
+          "p95": 5.096448
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.011776,
+          "n": 96,
+          "p95": 0.0128
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 4.523776,
+          "n": 96,
+          "p95": 5.096704
+        },
+        "VSM.Resolve": {
+          "p50": 4.051072,
+          "n": 96,
+          "p95": 5.392384
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.915648,
+          "n": 96,
+          "p95": 5.100032
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.062208,
+          "n": 96,
+          "p95": 0.067328
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.07168,
+          "n": 96,
+          "p95": 0.073216
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 11,
+      "mode": 0,
+      "resolution": 2048,
+      "grouped": 0,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 1920,
+      "window": "11_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.559872,
+          "n": 96,
+          "p95": 0.881408
+        },
+        "VSM.Allocate": {
+          "p50": 2.119168,
+          "n": 96,
+          "p95": 2.142976
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.268032,
+          "n": 96,
+          "p95": 0.270848
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.056192000000000006,
+          "n": 96,
+          "p95": 0.059904
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002304
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.08576,
+          "n": 96,
+          "p95": 0.093952
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.13017600000000001,
+          "n": 96,
+          "p95": 0.136704
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.111488,
+          "n": 96,
+          "p95": 0.118016
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 8.196096,
+          "n": 96,
+          "p95": 8.539392
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.08576,
+          "n": 96,
+          "p95": 0.093952
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 8.196352000000001,
+          "n": 96,
+          "p95": 8.539648
+        },
+        "VSM.Resolve": {
+          "p50": 4.042496,
+          "n": 96,
+          "p95": 4.548096
+        },
+        "VSM.ResolveTrace": {
+          "p50": 3.90464,
+          "n": 96,
+          "p95": 4.41088
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.061952,
+          "n": 96,
+          "p95": 0.063232
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.071168,
+          "n": 96,
+          "p95": 0.072704
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002048
+        }
+      }
+    }
+  ],
+  "final-timing": [
+    {
+      "stage": 0,
+      "mode": 0,
+      "resolution": 4096,
+      "grouped": 1,
+      "moving": true,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 160,
+      "window": "00_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.937216,
+          "n": 96,
+          "p95": 1.217536
+        },
+        "VSM.Allocate": {
+          "p50": 11.259904,
+          "n": 96,
+          "p95": 11.326976
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.471808,
+          "n": 96,
+          "p95": 0.473088
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.075904,
+          "n": 96,
+          "p95": 0.09856
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.013056,
+          "n": 96,
+          "p95": 0.014336
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002816,
+          "n": 96,
+          "p95": 0.003072
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.183296,
+          "n": 96,
+          "p95": 0.187392
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.163456,
+          "n": 96,
+          "p95": 0.167424
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 14.665984,
+          "n": 96,
+          "p95": 15.131136
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.013056,
+          "n": 96,
+          "p95": 0.01408
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 14.66624,
+          "n": 96,
+          "p95": 15.131392
+        },
+        "VSM.Resolve": {
+          "p50": 6.017152,
+          "n": 96,
+          "p95": 6.560512
+        },
+        "VSM.ResolveTrace": {
+          "p50": 5.861888,
+          "n": 96,
+          "p95": 6.395392
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.066816,
+          "n": 96,
+          "p95": 0.068096
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.072192,
+          "n": 96,
+          "p95": 0.07296
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        }
+      }
+    },
+    {
+      "stage": 1,
+      "mode": 0,
+      "resolution": 2048,
+      "grouped": 1,
+      "moving": true,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 320,
+      "window": "01_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.71424,
+          "n": 96,
+          "p95": 1.120768
+        },
+        "VSM.Allocate": {
+          "p50": 2.1151999999999997,
+          "n": 96,
+          "p95": 2.138624
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.26713600000000004,
+          "n": 96,
+          "p95": 0.269568
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.064,
+          "n": 96,
+          "p95": 0.069888
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.012544,
+          "n": 96,
+          "p95": 0.013824
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.131072,
+          "n": 96,
+          "p95": 0.139008
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.11136,
+          "n": 96,
+          "p95": 0.117504
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 4.686591999999999,
+          "n": 96,
+          "p95": 5.063168
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.012544,
+          "n": 96,
+          "p95": 0.013824
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 4.686719999999999,
+          "n": 96,
+          "p95": 5.063424
+        },
+        "VSM.Resolve": {
+          "p50": 4.946432,
+          "n": 96,
+          "p95": 5.3632
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.767232,
+          "n": 96,
+          "p95": 5.105408
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.065792,
+          "n": 96,
+          "p95": 0.06784
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.072448,
+          "n": 96,
+          "p95": 0.07424
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002304
+        }
+      }
+    },
+    {
+      "stage": 2,
+      "mode": 0,
+      "resolution": 2048,
+      "grouped": 1,
+      "moving": true,
+      "counters": [
+        267,
+        267,
+        267,
+        0
+      ],
+      "observations": 480,
+      "window": "02_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.722816,
+          "n": 96,
+          "p95": 1.108224
+        },
+        "VSM.Allocate": {
+          "p50": 2.109952,
+          "n": 96,
+          "p95": 2.139392
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.267008,
+          "n": 96,
+          "p95": 0.423936
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.064512,
+          "n": 96,
+          "p95": 0.069376
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002048,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.012288,
+          "n": 96,
+          "p95": 0.015872
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.130048,
+          "n": 96,
+          "p95": 0.13568
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.PageCull": {
+          "p50": 0.110848,
+          "n": 96,
+          "p95": 0.114944
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 4.7127040000000004,
+          "n": 96,
+          "p95": 5.103616
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.012288,
+          "n": 96,
+          "p95": 0.015872
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 4.712960000000001,
+          "n": 96,
+          "p95": 5.103872
+        },
+        "VSM.Resolve": {
+          "p50": 4.9916160000000005,
+          "n": 96,
+          "p95": 5.521664
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.791551999999999,
+          "n": 96,
+          "p95": 5.380864
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.065536,
+          "n": 96,
+          "p95": 0.068096
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.072192,
+          "n": 96,
+          "p95": 0.073472
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        }
+      }
+    },
+    {
+      "stage": 3,
+      "mode": 0,
+      "resolution": 4096,
+      "grouped": 1,
+      "moving": true,
+      "counters": [
+        644,
+        644,
+        644,
+        0
+      ],
+      "observations": 640,
+      "window": "03_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.840064,
+          "n": 96,
+          "p95": 1.13152
+        },
+        "VSM.Allocate": {
+          "p50": 11.259776,
+          "n": 96,
+          "p95": 11.32288
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.472064,
+          "n": 96,
+          "p95": 0.498944
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.074752,
+          "n": 96,
+          "p95": 0.082688
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.002816
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.013056,
+          "n": 96,
+          "p95": 0.01408
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.InvalidateStatic": {
+          "p50": 0.002816,
+          "n": 96,
+          "p95": 0.003072
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.177664,
+          "n": 96,
+          "p95": 0.182016
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.157696,
+          "n": 96,
+          "p95": 0.162048
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 15.083136,
+          "n": 96,
+          "p95": 15.730944
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.013056,
+          "n": 96,
+          "p95": 0.01408
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 15.083264,
+          "n": 96,
+          "p95": 15.7312
+        },
+        "VSM.Resolve": {
+          "p50": 6.50112,
+          "n": 96,
+          "p95": 7.422976
+        },
+        "VSM.ResolveTrace": {
+          "p50": 6.279936,
+          "n": 96,
+          "p95": 7.25248
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.067072,
+          "n": 96,
+          "p95": 0.068096
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.072192,
+          "n": 96,
+          "p95": 0.073728
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.002304,
+          "n": 96,
+          "p95": 0.00256
+        }
+      }
+    },
+    {
+      "stage": 4,
+      "mode": 0,
+      "resolution": 4096,
+      "grouped": 1,
+      "moving": false,
+      "counters": [
+        641,
+        641,
+        0,
+        0
+      ],
+      "observations": 800,
+      "window": "04_r4096_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.629248,
+          "n": 96,
+          "p95": 0.772096
+        },
+        "VSM.Allocate": {
+          "p50": 0.5693440000000001,
+          "n": 96,
+          "p95": 0.57856
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 19.964544,
+          "n": 96,
+          "p95": 36.896512
+        },
+        "VSM.PageOccupancy": {
+          "p50": 2.879744,
+          "n": 96,
+          "p95": 4.701184
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.002816,
+          "n": 96,
+          "p95": 0.003328
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.088832,
+          "n": 96,
+          "p95": 0.093184
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.215424,
+          "n": 96,
+          "p95": 0.5888
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.190464,
+          "n": 96,
+          "p95": 0.19968
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 0.00768,
+          "n": 96,
+          "p95": 0.009984
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.088832,
+          "n": 96,
+          "p95": 0.093184
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 0.007936,
+          "n": 96,
+          "p95": 0.011008
+        },
+        "VSM.Resolve": {
+          "p50": 59.543808,
+          "n": 96,
+          "p95": 115.874304
+        },
+        "VSM.ResolveTrace": {
+          "p50": 59.283328,
+          "n": 96,
+          "p95": 115.646464
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.06720000000000001,
+          "n": 96,
+          "p95": 0.068352
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.157952,
+          "n": 96,
+          "p95": 0.353536
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        }
+      }
+    },
+    {
+      "stage": 5,
+      "mode": 0,
+      "resolution": 2048,
+      "grouped": 1,
+      "moving": false,
+      "counters": [
+        266,
+        266,
+        0,
+        0
+      ],
+      "observations": 960,
+      "window": "05_r2048_m0",
+      "markers": {
+        "VSM.MarkReceiverPages": {
+          "p50": 0.537088,
+          "n": 96,
+          "p95": 0.556288
+        },
+        "VSM.Allocate": {
+          "p50": 0.287488,
+          "n": 96,
+          "p95": 0.290048
+        },
+        "VSM.ClearPhysicalPages": {
+          "p50": 0.47808,
+          "n": 96,
+          "p95": 0.90624
+        },
+        "VSM.PageOccupancy": {
+          "p50": 0.062976,
+          "n": 96,
+          "p95": 0.0896
+        },
+        "VSM.FinalizePages": {
+          "p50": 0.001792,
+          "n": 96,
+          "p95": 0.00256
+        },
+        "VSM.DynamicRaster": {
+          "p50": 0.0896,
+          "n": 96,
+          "p95": 0.093952
+        },
+        "VSM.LayoutRemap": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticCasterCull": {
+          "p50": 0.145664,
+          "n": 96,
+          "p95": 0.154368
+        },
+        "VSM.DynamicCasterCull": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.PageCull": {
+          "p50": 0.123136,
+          "n": 96,
+          "p95": 0.128256
+        },
+        "VSM.StaticRasterClear": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.000256
+        },
+        "VSM.StaticRasterDraw": {
+          "p50": 0.00768,
+          "n": 96,
+          "p95": 0.011776
+        },
+        "VSM.DynamicRasterClear": {
+          "p50": 0.0896,
+          "n": 96,
+          "p95": 0.093696
+        },
+        "VSM.DynamicRasterDraw": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        },
+        "VSM.StaticRaster": {
+          "p50": 0.007936,
+          "n": 96,
+          "p95": 0.012288
+        },
+        "VSM.Resolve": {
+          "p50": 5.160192,
+          "n": 96,
+          "p95": 5.691648
+        },
+        "VSM.ResolveTrace": {
+          "p50": 4.837248000000001,
+          "n": 96,
+          "p95": 5.46176
+        },
+        "VSM.FilterHorizontal": {
+          "p50": 0.066304,
+          "n": 96,
+          "p95": 0.068096
+        },
+        "VSM.FilterTemporalVertical": {
+          "p50": 0.158592,
+          "n": 96,
+          "p95": 0.446208
+        },
+        "VSM.ResetFeedback": {
+          "p50": 0.0,
+          "n": 96,
+          "p95": 0.0
+        }
+      }
+    }
+  ]
+}

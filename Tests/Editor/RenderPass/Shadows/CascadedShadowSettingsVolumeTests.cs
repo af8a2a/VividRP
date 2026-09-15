@@ -1236,7 +1236,8 @@ namespace VividRP.Editor.Tests
             using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, requestCapacity + 4, 16);
             using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
                 listCount * 8, 4);
-            using var rasterPages = new GraphicsBuffer(GraphicsBuffer.Target.Structured, physicalCapacity + 1, 4);
+            const int headerSize = VirtualShadowMapPrototypeRuntime.RasterPageHeaderSize;
+            using var rasterPages = new GraphicsBuffer(GraphicsBuffer.Target.Structured, physicalCapacity + headerSize, 4);
             using var instances = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, Marshal.SizeOf<VividInstanceData>());
             using var meshlets = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, Marshal.SizeOf<VividMeshlet>());
             var requestData = new uint4[requestCapacity + 4];
@@ -1275,17 +1276,30 @@ namespace VividRP.Editor.Tests
             shader.Dispatch(prepare, 1, 1, 1);
             shader.Dispatch(cull, 1, 4, listCount);
             var argsData = new VividIndirectDrawArgs[listCount * 2];
-            var rasterPageData = new uint[physicalCapacity + 1];
+            var rasterPageData = new uint[physicalCapacity + headerSize];
             requests.GetData(requestData); args.GetData(argsData); rasterPages.GetData(rasterPageData);
-            Assert.That(rasterPageData[0], Is.EqualTo(relevantCount));
             var seenPages = new bool[pageCount];
-            for (int i = 0; i < relevantCount; i++)
+            int expectedOffset = headerSize;
+            int maxLevelCount = 0;
+            for (int level = 0; level < VirtualShadowMapClipmapLayout.MaxLevels; level++)
             {
-                uint page = rasterPageData[i + 1];
-                Assert.That(page, Is.LessThan(pageCount));
-                Assert.That(relevant[page] && !seenPages[page], Is.True);
-                seenPages[page] = true;
+                int expectedCount = 0;
+                for (int page = level * 64; page < (level + 1) * 64 && page < pageCount; page++)
+                    if (relevant[page]) expectedCount++;
+                Assert.That(rasterPageData[1 + level], Is.EqualTo(expectedCount));
+                Assert.That(rasterPageData[1 + VirtualShadowMapClipmapLayout.MaxLevels + level], Is.EqualTo(expectedOffset));
+                for (int i = 0; i < expectedCount; i++)
+                {
+                    uint page = rasterPageData[expectedOffset + i];
+                    Assert.That(page / 64u, Is.EqualTo(level));
+                    Assert.That(relevant[page] && !seenPages[page], Is.True);
+                    seenPages[page] = true;
+                }
+                maxLevelCount = Mathf.Max(maxLevelCount, expectedCount);
+                expectedOffset += expectedCount;
             }
+            Assert.That(expectedOffset, Is.EqualTo(headerSize + relevantCount));
+            Assert.That(rasterPageData[0], Is.EqualTo(maxLevelCount));
             var actual = new int[listCount * 3 * pageCount];
             for (int command = 0; command < argsData.Length; command++)
             {
@@ -1298,7 +1312,14 @@ namespace VividRP.Editor.Tests
                         : draw.StartInstance + local;
                     Assert.That(address, Is.LessThan(requestCapacity));
                     uint4 request = requestData[address];
-                    uint page = large ? rasterPageData[1u + local % rasterPageData[0]] : request.z;
+                    uint page = request.z;
+                    if (large)
+                    {
+                        uint level = request.w / 64u;
+                        uint ordinal = local % rasterPageData[0];
+                        if (ordinal >= rasterPageData[1u + level]) continue;
+                        page = rasterPageData[rasterPageData[1u + VirtualShadowMapClipmapLayout.MaxLevels + level] + ordinal];
+                    }
                     if (large && (page / 64 != request.w / 64
                         || page % 8 < request.z % 8 || page % 8 > request.w % 8
                         || page % 64 / 8 < request.z % 64 / 8 || page % 64 / 8 > request.w % 64 / 8))
@@ -1350,7 +1371,8 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer rasterPagesBuffer = VirtualShadowMapPrototypeRuntime.MeshletRasterPages;
                 Assert.That(argsBuffer.count, Is.EqualTo((int)VividRendererListID.Count * 8));
                 Assert.That(rasterPagesBuffer.count, Is.EqualTo(
-                    VirtualShadowMapPrototypeRuntime.MaxPhysicalPageCount + 1));
+                    VirtualShadowMapPrototypeRuntime.MaxPhysicalPageCount
+                    + VirtualShadowMapPrototypeRuntime.RasterPageHeaderSize));
 
                 for (int iteration = 0; iteration < warmupCount; iteration++)
                 {

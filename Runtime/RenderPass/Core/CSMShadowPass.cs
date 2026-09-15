@@ -1509,21 +1509,27 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 using var rasterScope = new ProfilingScope(nativeCmd, VSMProfiling.StaticRaster);
                 nativeCmd.SetGlobalInt(VSMPrototypeCasterLayerId, 0);
-                CoreUtils.SetRenderTarget(
-                    nativeCmd,
-                    rasterDepth,
-                    ClearFlag.Depth,
-                    Color.black,
-                    depthSlice: -1);
-                nativeCmd.SetRandomWriteTarget(0, staticPhysicalPage);
-                DrawMeshletVirtualShadowMapPages(
-                    nativeCmd,
-                    meshletContext.System,
-                    staticPageRequestsBuffer,
-                    staticPageArgsBuffer,
-                    meshletContext.VirtualTextureReady,
-                    meshletContext.VirtualTextureBinding);
-                nativeCmd.ClearRandomWriteTargets();
+                using (new ProfilingScope(nativeCmd, VSMProfiling.StaticRasterClear))
+                {
+                    CoreUtils.SetRenderTarget(
+                        nativeCmd,
+                        rasterDepth,
+                        ClearFlag.Depth,
+                        Color.black,
+                        depthSlice: -1);
+                }
+                using (new ProfilingScope(nativeCmd, VSMProfiling.StaticRasterDraw))
+                {
+                    nativeCmd.SetRandomWriteTarget(0, staticPhysicalPage);
+                    DrawMeshletVirtualShadowMapPages(
+                        nativeCmd,
+                        meshletContext.System,
+                        staticPageRequestsBuffer,
+                        staticPageArgsBuffer,
+                        meshletContext.VirtualTextureReady,
+                        meshletContext.VirtualTextureBinding);
+                    nativeCmd.ClearRandomWriteTargets();
+                }
             }
 
             bool canDrawDynamicMeshletCasters = false;
@@ -1570,24 +1576,30 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(nativeCmd, VSMProfiling.DynamicRaster))
             {
                 nativeCmd.SetGlobalInt(VSMPrototypeCasterLayerId, 1);
-                CoreUtils.SetRenderTarget(
-                    nativeCmd,
-                    rasterDepth,
-                    ClearFlag.Depth,
-                    Color.black,
-                    depthSlice: -1);
-                nativeCmd.SetRandomWriteTarget(0, dynamicPhysicalPage);
-                if (canDrawDynamicMeshletCasters)
+                using (new ProfilingScope(nativeCmd, VSMProfiling.DynamicRasterClear))
                 {
-                    DrawMeshletVirtualShadowMapPages(
+                    CoreUtils.SetRenderTarget(
                         nativeCmd,
-                        meshletContext.System,
-                        dynamicPageRequestsBuffer,
-                        dynamicPageArgsBuffer,
-                        meshletContext.VirtualTextureReady,
-                        meshletContext.VirtualTextureBinding);
+                        rasterDepth,
+                        ClearFlag.Depth,
+                        Color.black,
+                        depthSlice: -1);
                 }
-                nativeCmd.ClearRandomWriteTargets();
+                using (new ProfilingScope(nativeCmd, VSMProfiling.DynamicRasterDraw))
+                {
+                    nativeCmd.SetRandomWriteTarget(0, dynamicPhysicalPage);
+                    if (canDrawDynamicMeshletCasters)
+                    {
+                        DrawMeshletVirtualShadowMapPages(
+                            nativeCmd,
+                            meshletContext.System,
+                            dynamicPageRequestsBuffer,
+                            dynamicPageArgsBuffer,
+                            meshletContext.VirtualTextureReady,
+                            meshletContext.VirtualTextureBinding);
+                    }
+                    nativeCmd.ClearRandomWriteTargets();
+                }
             }
             if (m_HasUnityShadowCasters)
             {
@@ -2682,6 +2694,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int DefaultPhysicalPageCount = 256;
         internal const int MaxPhysicalPageCount = 1024;
         internal const int MaxPageRequestsPerMeshlet = 4;
+        internal const int RasterPageHeaderSize = 1 + 2 * VirtualShadowMapClipmapLayout.MaxLevels;
         private const int MeshletPageRequestStride = sizeof(uint) * 4;
         private const int StaticInvalidationBoundsStride = sizeof(float) * 8;
 
@@ -2935,7 +2948,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 s_MeshletRasterPages?.Dispose();
                 s_MeshletRasterPages = new GraphicsBuffer(
                     GraphicsBuffer.Target.Structured,
-                    MaxPhysicalPageCount + 1,
+                    MaxPhysicalPageCount + RasterPageHeaderSize,
                     sizeof(uint))
                 {
                     name = "VSMPrototypeMeshletRasterPages",

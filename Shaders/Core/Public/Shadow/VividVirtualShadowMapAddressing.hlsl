@@ -3,6 +3,8 @@
 
 // Independent nearest surfaces; never fill the empty space between layers.
 #define VIVID_VSM_DEPTH_LAYER_COUNT 16
+#define VIVID_VSM_RASTER_MAX_LEVELS 16
+#define VIVID_VSM_RASTER_PAGE_HEADER_SIZE (1 + 2 * VIVID_VSM_RASTER_MAX_LEVELS)
 
 // Callers provide a positive resolution. SV_Position is in non-negative
 // raster coordinates; truncation selects its pixel, including pixel centers.

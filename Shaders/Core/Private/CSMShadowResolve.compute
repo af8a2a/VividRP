@@ -236,31 +236,60 @@ void AppendVSMPageMeshletRequest(
             cascadeIndex);
 }
 
+// Large records retain one fixed instance stride so their record address is
+// arithmetic. Use the largest per-clipmap page count, not the sum across all
+// clipmaps; each record only visits its own level's list and skips padding.
 groupshared uint g_VSMRasterPageCount;
+groupshared uint g_VSMRasterLevelCounts[VIVID_VSM_RASTER_MAX_LEVELS];
+groupshared uint g_VSMRasterLevelOffsets[VIVID_VSM_RASTER_MAX_LEVELS];
 
 [numthreads(64, 1, 1)]
-void VSMPrototypePrepareMeshletPageRequests(
-    uint groupIndex : SV_GroupIndex)
+void VSMPrototypePrepareMeshletPageRequests(uint groupIndex : SV_GroupIndex)
 {
     if (groupIndex == 0u) g_VSMRasterPageCount = 0u;
+    if (groupIndex < VIVID_VSM_RASTER_MAX_LEVELS) g_VSMRasterLevelCounts[groupIndex] = 0u;
     GroupMemoryBarrierWithGroupSync();
-    // The list is an unordered set: each physical owner contributes at most
-    // once. Parallelize the budget scan without changing caster relevance.
-    for (uint physicalPage = groupIndex;
-         physicalPage < (uint)_VSMPrototypePhysicalPageCapacity;
-         physicalPage += 64u)
+    uint pagesPerLevel = (uint)(_VSMPrototypePagesPerAxis * _VSMPrototypePagesPerAxis);
+    for (uint slot = groupIndex; slot < (uint)_VSMPrototypePhysicalPageCapacity; slot += 64u)
     {
-        const uint owner = _VSMPrototypePhysicalPageOwners[physicalPage];
+        uint owner = _VSMPrototypePhysicalPageOwners[slot];
         if (owner != 0u && IsVSMCasterPageRelevant(owner - 1u))
         {
-            uint rasterPageIndex;
-            InterlockedAdd(g_VSMRasterPageCount, 1u, rasterPageIndex);
-            _VSMPrototypeMeshletRasterPages[1u + rasterPageIndex] = owner - 1u;
+            uint level = (owner - 1u) / pagesPerLevel;
+            InterlockedAdd(g_VSMRasterLevelCounts[level], 1u);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (groupIndex == 0u)
+    {
+        uint offset = VIVID_VSM_RASTER_PAGE_HEADER_SIZE;
+        for (uint level = 0u; level < VIVID_VSM_RASTER_MAX_LEVELS; level++)
+        {
+            uint count = g_VSMRasterLevelCounts[level];
+            g_VSMRasterPageCount = max(g_VSMRasterPageCount, count);
+            g_VSMRasterLevelOffsets[level] = offset;
+            _VSMPrototypeMeshletRasterPages[1u + level] = count;
+            _VSMPrototypeMeshletRasterPages[1u + VIVID_VSM_RASTER_MAX_LEVELS + level] = offset;
+            offset += count;
+            g_VSMRasterLevelCounts[level] = 0u;
+        }
+        _VSMPrototypeMeshletRasterPages[0] = g_VSMRasterPageCount;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    for (uint slot = groupIndex; slot < (uint)_VSMPrototypePhysicalPageCapacity; slot += 64u)
+    {
+        uint owner = _VSMPrototypePhysicalPageOwners[slot];
+        if (owner != 0u && IsVSMCasterPageRelevant(owner - 1u))
+        {
+            uint level = (owner - 1u) / pagesPerLevel;
+            uint index;
+            InterlockedAdd(g_VSMRasterLevelCounts[level], 1u, index);
+            index += g_VSMRasterLevelOffsets[level];
+            _VSMPrototypeMeshletRasterPages[index] = owner - 1u;
         }
     }
     GroupMemoryBarrierWithGroupSync();
     if (groupIndex != 0u) return;
-    _VSMPrototypeMeshletRasterPages[0] = g_VSMRasterPageCount;
 
     uint outputStartInstance = 0u;
     for (uint rendererListIndex = 0u;

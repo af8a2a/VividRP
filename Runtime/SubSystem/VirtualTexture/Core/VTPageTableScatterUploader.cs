@@ -49,6 +49,7 @@ namespace VividRP.Runtime
         private readonly List<DispatchSlice> m_DispatchSlices = new();
 
         private VTPageTableScatterUpdate[] m_Updates = Array.Empty<VTPageTableScatterUpdate>();
+        private BufferHandle[] m_DestinationHandles = Array.Empty<BufferHandle>();
         private ComputeShader m_Shader;
         private int m_Kernel = -1;
         private bool m_HasActiveBatch;
@@ -182,6 +183,7 @@ namespace VividRP.Runtime
             m_UploadChunks.Clear();
             m_DispatchSlices.Clear();
             m_Updates = Array.Empty<VTPageTableScatterUpdate>();
+            m_DestinationHandles = Array.Empty<BufferHandle>();
             m_Shader = null;
             m_Kernel = -1;
             m_ScatterBatchCount = 0;
@@ -313,7 +315,8 @@ namespace VividRP.Runtime
             IComputeRenderGraphBuilder builder,
             int maxChunkEntryCount)
         {
-            var destinationHandles = new BufferHandle[m_PendingSlices.Count];
+            if (m_DestinationHandles.Length < m_PendingSlices.Count)
+                Array.Resize(ref m_DestinationHandles, Mathf.NextPowerOfTwo(m_PendingSlices.Count));
             for (int sliceIndex = 0; sliceIndex < m_PendingSlices.Count; sliceIndex++)
             {
                 PendingSlice slice = m_PendingSlices[sliceIndex];
@@ -321,13 +324,12 @@ namespace VividRP.Runtime
                 if (!destinationHandle.IsValid())
                     throw new InvalidOperationException("Could not import a VT page-table buffer into RenderGraph.");
 
-                destinationHandles[sliceIndex] = destinationHandle;
+                m_DestinationHandles[sliceIndex] = destinationHandle;
                 builder.UseBuffer(destinationHandle, AccessFlags.Write);
             }
 
             int totalUpdateCount = GetPackedUpdateCount();
             int chunkStart = 0;
-            int chunkIndex = 0;
             while (chunkStart < totalUpdateCount)
             {
                 int chunkCount = Math.Min(maxChunkEntryCount, totalUpdateCount - chunkStart);
@@ -335,7 +337,7 @@ namespace VividRP.Runtime
                     chunkCount,
                     VTPageTableScatterUpdate.Stride)
                 {
-                    name = $"VividVT_PageTableScatterUpload_{chunkIndex}",
+                    name = "VividVT_PageTableScatterUpload",
                     target = GraphicsBuffer.Target.Structured,
                 });
                 m_UploadChunks.Add(new UploadChunk(uploadBuffer, chunkStart, chunkCount));
@@ -353,13 +355,12 @@ namespace VividRP.Runtime
 
                     AddDispatchSlices(
                         uploadBuffer,
-                        destinationHandles[sliceIndex],
+                        m_DestinationHandles[sliceIndex],
                         intersectionStart - chunkStart,
                         intersectionEnd - intersectionStart);
                 }
 
                 chunkStart = chunkEnd;
-                chunkIndex += 1;
             }
         }
 

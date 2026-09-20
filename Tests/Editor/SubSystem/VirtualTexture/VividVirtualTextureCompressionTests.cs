@@ -861,6 +861,95 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GatherTasks_FirstCollectionOnFreshProducerDoesNotAllocate()
+        {
+            using var manager = new VTStreamChunkManager();
+            var pending = new System.Threading.Tasks.TaskCompletionSource<byte[]>();
+            var entry = new VTStreamChunkManager.ChunkEntry { State = VTStreamChunkState.Decoding };
+            var lease = new VTChunkLease(manager, entry);
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+            var producerType = typeof(VividVirtualTextureAssetProducer);
+            var keyType = producerType.GetNestedType("TileKey", System.Reflection.BindingFlags.NonPublic);
+            object key = Activator.CreateInstance(keyType);
+            var streamType = producerType.GetNestedType("StreamTileTask", System.Reflection.BindingFlags.NonPublic);
+            var stream = (IVTPageProducerTask)Activator.CreateInstance(streamType, flags, null,
+                new object[] { pending.Task, null, false }, null);
+            var chunkType = producerType.GetNestedType("ChunkTileRequest", System.Reflection.BindingFlags.NonPublic);
+            var chunk = (IVTPageProducerTask)Activator.CreateInstance(chunkType, true);
+            chunkType.GetField("m_Lease", flags).SetValue(chunk, lease);
+
+            VividVirtualTextureAssetProducer CreateProducer()
+            {
+                var producer = (VividVirtualTextureAssetProducer)System.Runtime.Serialization.FormatterServices
+                    .GetUninitializedObject(producerType);
+                foreach (string name in new[] { "m_StreamTasks", "m_ChunkRequests" })
+                {
+                    var field = producerType.GetField(name, flags);
+                    var dictionary = (System.Collections.IDictionary)Activator.CreateInstance(field.FieldType);
+                    dictionary.Add(key, name == "m_StreamTasks" ? stream : chunk);
+                    field.SetValue(producer, dictionary);
+                }
+                return producer;
+            }
+
+            var tasks = new List<IVTPageProducerTask>(3) { stream };
+            CreateProducer().GatherTasks(tasks);
+            tasks.RemoveRange(1, tasks.Count - 1);
+            var freshProducer = CreateProducer();
+            bool correct = true;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                freshProducer.GatherTasks(tasks);
+                correct &= tasks.Count == 3 && ReferenceEquals(tasks[0], stream)
+                    && ReferenceEquals(tasks[1], stream) && ReferenceEquals(tasks[2], chunk);
+                tasks.RemoveRange(1, tasks.Count - 1);
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(correct, Is.True);
+            Assert.That(allocated, Is.Zero);
+            pending.SetResult(Array.Empty<byte>());
+            entry.State = VTStreamChunkState.Ready;
+            freshProducer.GatherTasks(tasks);
+            Assert.That(tasks.Count, Is.EqualTo(1));
+        }
+
+        [TestCase(64)]
+        [TestCase(256)]
+        public void DecodeQueue_FirstConfiguredBurstDoesNotAllocate(int capacity)
+        {
+            using var manager = new VTStreamChunkManager();
+            manager.Configure(VividVirtualTextureIOBackendMode.AsyncReadManager, capacity, 1, 1);
+            var queue = (Action<VTStreamChunkManager.ChunkEntry, byte[]>)typeof(VTStreamChunkManager)
+                .GetMethod("QueueDecode", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .CreateDelegate(typeof(Action<VTStreamChunkManager.ChunkEntry, byte[]>), manager);
+            var entries = new VTStreamChunkManager.ChunkEntry[capacity];
+            for (int index = 0; index < capacity; index++)
+                entries[index] = new VTStreamChunkManager.ChunkEntry { ReferenceCount = 1 };
+            byte[] data = new byte[16];
+            var queued = (List<VTStreamChunkManager.ChunkEntry>)typeof(VTStreamChunkManager)
+                .GetField("m_PendingDecodeEntries", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .GetValue(manager);
+            queue(entries[0], data);
+            queued.Clear();
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                for (int index = 0; index < capacity; index++)
+                    queue(entries[index], data);
+                queued.Clear();
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            for (int index = 0; index < capacity; index++)
+            {
+                Assert.That(entries[index].State, Is.EqualTo(VTStreamChunkState.Decoding));
+                Assert.That(entries[index].StoredData, Is.SameAs(data));
+            }
+        }
+
+        [Test]
         public void DecodeWorker_ReusesWorkSlotWithoutAllocatingOrFlowingContext()
         {
             var ambient = new AsyncLocal<object> { Value = new object() };
@@ -898,6 +987,50 @@ namespace VividRP.Editor.Tests
             Assert.That(correct && contextWasClear, Is.True);
             Assert.That(allocated, Is.Zero);
             Assert.That(workerBytes - workerBefore, Is.Zero);
+        }
+
+        [Test]
+        public void PumpDecodeQueue_FirstParallelBurstDoesNotAllocate()
+        {
+            using var release = new ManualResetEventSlim(true);
+            using var manager = new VTStreamChunkManager(state =>
+            {
+                release.Wait();
+                return new VTStreamChunkManager.DecodeResult(((VTStreamChunkManager.ChunkEntry)state).StoredData, null);
+            });
+            manager.Configure(VividVirtualTextureIOBackendMode.AsyncReadManager, 64, 8, 1);
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var queue = (Action<VTStreamChunkManager.ChunkEntry, byte[]>)typeof(VTStreamChunkManager)
+                .GetMethod("QueueDecode", flags).CreateDelegate(typeof(Action<VTStreamChunkManager.ChunkEntry, byte[]>), manager);
+            var pump = (Action)typeof(VTStreamChunkManager).GetMethod("PumpDecodeQueue", flags).CreateDelegate(typeof(Action), manager);
+            var poll = (Action)typeof(VTStreamChunkManager).GetMethod("PollDecodeTasks", flags).CreateDelegate(typeof(Action), manager);
+            byte[] data = new byte[16];
+            var warm = new VTStreamChunkManager.ChunkEntry { ReferenceCount = 1 };
+            queue(warm, data);
+            pump();
+            Assert.That(WaitForDecodeWorker(warm.DecodeWorker), Is.True);
+            poll();
+            var entries = new VTStreamChunkManager.ChunkEntry[8];
+            for (int index = 0; index < entries.Length; index++)
+            {
+                entries[index] = new VTStreamChunkManager.ChunkEntry { ReferenceCount = 1 };
+                queue(entries[index], data);
+            }
+            release.Reset();
+            try
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                pump();
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(manager.ActiveDecodeCount, Is.EqualTo(8));
+                Assert.That(manager.PendingDecodeCount, Is.Zero);
+            }
+            finally
+            {
+                release.Set();
+            }
         }
 
         [Test]
@@ -987,6 +1120,50 @@ namespace VividRP.Editor.Tests
             Assert.That(acquired, Is.True);
             Assert.That(allocated, Is.Zero);
             Assert.That(manager.PendingChunkCount, Is.Zero);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ChunkManager_SharedChunkLeaseBurst_UsesPreparedOrConfiguredCapacity(bool prepareAsset)
+        {
+            using var manager = new VTStreamChunkManager();
+            const int count = 256;
+            if (prepareAsset)
+            {
+                manager.PrepareAsset("shared-lease.stream", 1, 1);
+                manager.PrepareAsset("shared-lease.stream", 1, 1, count);
+                manager.PrepareAsset("shared-lease.stream", 1, 1, count);
+            }
+            else
+            {
+                manager.Configure(VividVirtualTextureIOBackendMode.AsyncReadManager,
+                    count, 1, 1);
+            }
+            var location = CreateRawLocation(0, 0);
+            var leases = new VTChunkLease[count];
+            var first = manager.Acquire("shared-lease.stream", 1, location, false);
+            var second = manager.Acquire("shared-lease.stream", 1, location, false);
+            first.Dispose();
+            second.Dispose();
+            bool correct = true;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                for (int index = 0; index < count; index++)
+                {
+                    leases[index] = manager.Acquire("shared-lease.stream", 1, location, false);
+                    correct &= leases[index] != null;
+                }
+                for (int index = 0; index < count - 1; index++)
+                    leases[index]?.Dispose();
+                correct &= manager.PendingChunkCount == 1;
+                leases[count - 1]?.Dispose();
+                correct &= manager.PendingChunkCount == 0;
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(correct, Is.True);
+            Assert.That(allocated, Is.Zero);
+            Assert.That(new HashSet<VTChunkLease>(leases).Count, Is.EqualTo(count));
         }
 
         [Test]

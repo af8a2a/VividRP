@@ -54,7 +54,7 @@ namespace VividRP.Runtime
         private readonly Vector4[] m_LayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
         private readonly IVTPageProducer m_PageProducer;
         private readonly List<VTPendingUploadCandidate> m_LocalUploadCandidates = new();
-        private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
+        private readonly List<IVTPageProducerTask> m_ProducerTasks;
         private readonly List<PendingUploadSortEntry> m_PendingUploadSortEntries = new();
         private readonly List<VTRequest> m_SortedPendingRequests = new();
         private readonly List<VTRequest> m_EligiblePendingRequests = new();
@@ -133,6 +133,7 @@ namespace VividRP.Runtime
             ProducerName = producer.Name;
             m_MipOffsets = VirtualTextureSpaceUtility.BuildMipOffsets(desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount);
             TotalPageCount = desc.PageTableEntryCount;
+            m_ProducerTasks = new List<IVTPageProducerTask>(TotalPageCount);
             m_ShaderParams = new VirtualTextureSpaceShaderParams(spaceId, desc, TotalPageCount);
             BuildLayerFallbacks(desc, m_LayerFallbacks);
             PhysicalPool = physicalPool ?? throw new ArgumentNullException(nameof(physicalPool));

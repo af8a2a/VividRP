@@ -318,15 +318,17 @@ namespace VividRP.Runtime
         private static readonly Comparison<ChunkEntry> s_QueuedEntryComparison = new QueuedEntryComparer().Compare;
 
         private readonly Dictionary<ChunkKey, ChunkEntry> m_Entries = new(64);
-        private readonly Dictionary<(string Path, uint Version), int> m_PreparedAssets = new();
+        private readonly Dictionary<(string Path, uint Version), (int Chunks, int Leases)> m_PreparedAssets = new();
         private int m_PreparedChunkCount;
+        private int m_PreparedLeaseCount;
         private int m_EntryCapacity = 64;
+        private int m_LeaseCapacity = 64;
         private readonly List<ChunkEntry> m_QueuedEntries = new(64);
-        private readonly List<ChunkEntry> m_PendingDecodeEntries = new();
-        private readonly List<ChunkEntry> m_DecodingEntries = new();
-        private readonly List<ActiveBatch> m_ActiveBatches = new();
+        private readonly List<ChunkEntry> m_PendingDecodeEntries = new(64);
+        private readonly List<ChunkEntry> m_DecodingEntries = new(64);
+        private readonly List<ActiveBatch> m_ActiveBatches = new(64);
         private readonly List<ActiveBatch> m_RetainedReadBatches = new(64);
-        private readonly Stack<ActiveBatch> m_ActiveBatchPool = new();
+        private readonly Stack<ActiveBatch> m_ActiveBatchPool = new(64);
         private readonly List<ChunkEntry> m_SubmissionEntries = new();
         private readonly List<VTIOReadCommand> m_SubmissionCommands = new(64);
         private VTChunkLease m_FreeLease;
@@ -350,6 +352,13 @@ namespace VividRP.Runtime
         private int m_LastCacheAllocationFailureCount;
         private bool m_BackendNeedsReplacement;
         private bool m_Disposed;
+
+        static VTStreamChunkManager()
+        {
+            // Mono lazily allocates generic sorting helpers even with cached comparisons.
+            Array.Sort(new ChunkEntry[2], s_QueuedEntryComparison);
+            Array.Sort(new ActiveBatch[2], s_ActiveBatchComparison);
+        }
 
         internal VTStreamChunkManager(Func<object, DecodeResult> decodeWork = null)
         {
@@ -399,7 +408,7 @@ namespace VividRP.Runtime
                 decodeConcurrency,
                 decodedCacheBudgetMiB);
             foreach (var asset in previous.m_PreparedAssets)
-                replacement.PrepareAsset(asset.Key.Path, asset.Key.Version, asset.Value);
+                replacement.PrepareAsset(asset.Key.Path, asset.Key.Version, asset.Value.Chunks, asset.Value.Leases);
             s_Shared = replacement;
         }
 
@@ -426,7 +435,14 @@ namespace VividRP.Runtime
             int decodedCacheBudgetMiB)
         {
             m_MaxInFlightChunkCount = Mathf.Max(1, maxInFlightChunkCount);
+            if (m_PendingDecodeEntries.Capacity < m_MaxInFlightChunkCount)
+                m_PendingDecodeEntries.Capacity = m_MaxInFlightChunkCount;
+            if (m_ActiveBatches.Capacity < m_MaxInFlightChunkCount)
+                m_ActiveBatches.Capacity = m_MaxInFlightChunkCount;
+            if (m_RetainedReadBatches.Capacity < m_MaxInFlightChunkCount)
+                m_RetainedReadBatches.Capacity = m_MaxInFlightChunkCount;
             EnsureEntryCapacity();
+            EnsureLeaseCapacity();
             int clampedDecodeConcurrency = Mathf.Clamp(decodeConcurrency, 1, 64);
             m_DecodeConcurrency = clampedDecodeConcurrency;
             EnsureDecodeWorkers();
@@ -444,15 +460,31 @@ namespace VividRP.Runtime
 
         // Ready chunks retain their entries after leaving the in-flight budget. Reserve
         // those entries when registering assets, plus room for outstanding read batches.
-        internal void PrepareAsset(string path, uint contentVersion, int chunkCount)
+        internal void PrepareAsset(string path, uint contentVersion, int chunkCount, int tileCount = 0)
         {
             var key = (path, contentVersion);
-            if (m_PreparedAssets.ContainsKey(key))
+            m_PreparedAssets.TryGetValue(key, out var previous);
+            int chunks = Math.Max(previous.Chunks, chunkCount);
+            // Each tile can retain a lease even when several tiles share one chunk.
+            int leases = Math.Max(previous.Leases, Math.Max(chunkCount, tileCount));
+            if (chunks == previous.Chunks && leases == previous.Leases)
                 return;
 
-            m_PreparedAssets.Add(key, chunkCount);
-            m_PreparedChunkCount += chunkCount;
+            m_PreparedAssets[key] = (chunks, leases);
+            m_PreparedChunkCount += chunks - previous.Chunks;
+            m_PreparedLeaseCount += leases - previous.Leases;
             EnsureEntryCapacity();
+            EnsureLeaseCapacity();
+        }
+
+        private void EnsureLeaseCapacity()
+        {
+            int capacity = m_PreparedLeaseCount + m_MaxInFlightChunkCount;
+            while (m_LeaseCapacity < capacity)
+            {
+                m_FreeLease = new VTChunkLease { NextFree = m_FreeLease };
+                m_LeaseCapacity++;
+            }
         }
 
         private void EnsureEntryCapacity()
@@ -1120,7 +1152,10 @@ namespace VividRP.Runtime
         {
             VTChunkLease lease = m_FreeLease;
             if (lease == null)
+            {
                 lease = new VTChunkLease();
+                m_LeaseCapacity++;
+            }
             else
             {
                 m_FreeLease = lease.NextFree;

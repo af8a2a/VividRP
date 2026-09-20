@@ -402,7 +402,7 @@ namespace VividRP.Runtime
             if (!m_HasPermanentFailure && UsesSharedChunkManager)
             {
                 VTStreamChunkManager.Shared.PrepareAsset(
-                    m_ResolvedStreamDataPath, m_BuiltData.ContentVersion, m_BuiltData.ChunkCount);
+                    m_ResolvedStreamDataPath, m_BuiltData.ContentVersion, m_BuiltData.ChunkCount, m_BuiltData.TileCount);
                 int requestCapacity = Math.Min(m_BuiltData.TileCount,
                     VTVirtualTextureStreamRequestGate.DefaultMaxPendingReadCount);
                 m_ChunkRequests.EnsureCapacity(requestCapacity);
@@ -630,14 +630,16 @@ namespace VividRP.Runtime
             if (tasks == null)
                 return;
 
-            foreach (StreamTileTask task in m_StreamTasks.Values)
+            foreach (var pair in m_StreamTasks)
             {
+                StreamTileTask task = pair.Value;
                 if (!task.IsCompleted)
                     tasks.Add(task);
             }
 
-            foreach (ChunkTileRequest request in m_ChunkRequests.Values)
+            foreach (var pair in m_ChunkRequests)
             {
+                ChunkTileRequest request = pair.Value;
                 if (!request.IsCompleted)
                     tasks.Add(request);
             }

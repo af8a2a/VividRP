@@ -1,1 +1,0 @@
-20260909_124608_074 discarded: experiment incorrectly synchronized _CSMFrameIndex, affecting page snapshot validation. Replaced with SMRT-only _VSMBNDSamplingFrame. Valid run is 20260909_125317_274, independently checks resident/replayed shadow.

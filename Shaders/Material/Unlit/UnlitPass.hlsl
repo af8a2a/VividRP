@@ -3,7 +3,7 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapCaster.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
 #if defined(VIVIDRP_UNLIT_MOTION_VECTOR_PASS)

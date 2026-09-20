@@ -1,5 +1,0 @@
-axis=0 speed=1 frames=24 maxPixelDifference=0.1352539 maxEquivalentLagPixels=0.596603393554688 beyondFilterSupport=0
-axis=0 speed=4 frames=24 maxPixelDifference=0.05029297 maxEquivalentLagPixels=0.0713043212890625 beyondFilterSupport=0
-axis=1 speed=1 frames=24 maxPixelDifference=0.1411133 maxEquivalentLagPixels=0.29736328125 beyondFilterSupport=0
-axis=1 speed=4 frames=24 maxPixelDifference=0.0703125 maxEquivalentLagPixels=0.0908203125 beyondFilterSupport=0
-passed=4

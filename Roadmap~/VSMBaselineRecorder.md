@@ -16,7 +16,7 @@ pixels, LOD bias and denoise. Other CSM settings are copied from the selected
 camera's effective Volume stack at startup; light bias and camera transforms
 are not changed. Enter a source commit in **Revision** for reproducibility.
 
-New presets use **Manual** recorder repaint after the controlled [repaint experiment](VSMPhase0Findings.md).
+New presets use **Manual** recorder repaint after the controlled [repaint experiment](../Temp~/VSM/Roadmap~/VSMPhase0Findings.md).
 Existing serialized settings can be replaced with **Load baseline preset (manual repaint)**.
 Sampling continues independently of GUI repaint; **Refresh progress** requests
 an explicit repaint. Manual suppresses periodic recorder repaints during sampling,
@@ -43,12 +43,12 @@ Profiler, or change Player Settings.
 
 ## Matched 4K repaint A/B capture
 
-The existing [controlled experiment](VSMPhase0Findings.md) found about 0.25-second
+The existing [controlled experiment](../Temp~/VSM/Roadmap~/VSMPhase0Findings.md) found about 0.25-second
 recurrence of sub-1 ms GPU values with FourHz and none in three Manual windows.
 That experiment used **1920×1080 Game output**. It is evidence of recorder repaint
 influence, not a new 3840×2160 capture or attribution of individual GPU results.
 
-A subsequent [3840×2160 ABBA capture](Experiments/RepaintIsolation_20260906/findings.md)
+A subsequent [3840×2160 ABBA capture](../Temp~/VSM/Roadmap~/Experiments/RepaintIsolation_20260906/findings.md)
 replicated the result: both Manual windows had zero recorder repaints and zero
 sub-1 ms readings across 1,373 valid GPU samples; FourHz restored the periodic low
 tail. All four cases passed coverage and matched recorded scene/camera/settings.
@@ -90,7 +90,7 @@ The report preserves raw data and documents the temporary graph and attribution 
 
 Compare the full exported distributions; do not delete low GPU readings, clamp
 them to 1 ms or recompute a filtered headline median. Run
-`python Roadmap~/Experiments/analyze_timing_source.py <run-directory>` on each
+`python Temp~/VSM/Roadmap~/Experiments/analyze_timing_source.py <run-directory>` on each
 folder to produce `timing-source-audit.json` while retaining all raw CSV files.
 The audit includes observation/valid counts, low counts and within-segment low
 recurrence intervals, observed repaint counts, and whole-frame/Allocate/Resolve

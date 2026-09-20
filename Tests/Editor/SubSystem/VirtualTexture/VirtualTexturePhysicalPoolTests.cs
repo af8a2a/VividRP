@@ -790,6 +790,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FlushRegion_NoMatchingBindings_DoesNotAllocate()
+        {
+            using var pool = CreatePhysicalPoolForTesting(pageCount: 4);
+            var region = new RectInt(0, 0, 1, 1);
+            pool.FlushRegion(1, 0, region);
+            int flushed = 0;
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+                flushed += pool.FlushRegion(1, 0, region);
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(flushed, Is.Zero);
+            Assert.That(allocated, Is.Zero);
+        }
+
+        [Test]
+        public void Touch_FirstUseAndRepeatedTouches_DoNotAllocate()
+        {
+            using var pool = CreatePhysicalPoolForTesting(pageCount: 4);
+            var lru = (LinkedList<int>)typeof(VTPhysicalPool).GetField(
+                "m_LruPhysicalPages", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .GetValue(pool);
+            pool.Touch(0, VirtualTextureViewId.Invalid, 0, false);
+
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int frame = 1; frame <= 256; frame++)
+            {
+                for (int page = 0; page < 4; page++)
+                    pool.Touch(page, VirtualTextureViewId.Invalid, frame, false);
+                // Freeing a page detaches its node; the next touch must reuse it.
+                lru.RemoveFirst();
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(allocated, Is.Zero);
+            Assert.That(lru, Is.EqualTo(new[] { 1, 2, 3 }));
+        }
+
+        [Test]
         public void Touch_DeduplicatesLruMutationWithinTheSameFrame()
         {
             Assert.That(VTPhysicalPool.FeedbackEvictionProtectionFrames, Is.GreaterThanOrEqualTo(16));

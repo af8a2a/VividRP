@@ -16,6 +16,11 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.Reset();
             m_DebugDisplaySettingsUI = new DebugDisplaySettingsUI();
             m_DebugDisplaySettingsUI.RegisterDebug(VividRenderingDebugDisplaySettings.Instance);
+            // CoreRP creates widgets lazily when a debug window opens. Batch tests
+            // must initialize them explicitly without opening a desktop window.
+            typeof(DebugDisplaySettingsUI).GetMethod("InitializeDebugUI",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .Invoke(m_DebugDisplaySettingsUI, null);
         }
 
         [TearDown]
@@ -24,6 +29,26 @@ namespace VividRP.Editor.Tests
             m_DebugDisplaySettingsUI?.UnregisterDebug();
             m_DebugDisplaySettingsUI = null;
             VividRenderingDebugDisplaySettings.Data.Reset();
+        }
+
+        [Test]
+        public void VSMReceiverMode_DebuggerFieldSerializesAndResets()
+        {
+            var data = VividRenderingDebugDisplaySettings.Data;
+            var field = DebugManager.instance.GetItem(
+                "Rendering -> VividRP Debug -> Virtual Shadow Map -> Receiver Mode") as DebugUI.EnumField;
+            Assert.That(field, Is.Not.Null);
+            field.SetValue((int)VSMReceiverDebugMode.Availability);
+            Assert.That(data.vsmReceiverDebugMode, Is.EqualTo(VSMReceiverDebugMode.Availability));
+            Assert.That(data.AreAnySettingsActive, Is.True);
+            var restored = UnityEngine.JsonUtility.FromJson<VividRenderingDebugSettingsData>(
+                UnityEngine.JsonUtility.ToJson(data));
+            Assert.That(restored.vsmReceiverDebugMode, Is.EqualTo(VSMReceiverDebugMode.Availability));
+            data.Reset();
+            Assert.That(field.GetValue(), Is.EqualTo((int)VSMReceiverDebugMode.TexelFootprint));
+            Assert.That(data.AreAnySettingsActive, Is.False);
+            data.vsmReceiverDebugMode = (VSMReceiverDebugMode)999;
+            Assert.That(data.vsmReceiverDebugMode, Is.EqualTo(VSMReceiverDebugMode.TexelFootprint));
         }
 
         [Test]
@@ -60,6 +85,7 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Visibility Buffer"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Shadow Map -> Receiver Mode"), Is.Not.Null);
             Assert.That(
                 DebugManager.instance.GetItem(
                     "Rendering -> VividRP Debug -> Visibility Buffer -> Mode"),

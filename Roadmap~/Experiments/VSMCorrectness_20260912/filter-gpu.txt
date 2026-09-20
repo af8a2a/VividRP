@@ -1,5 +1,0 @@
-case=0 maxError=0 meanSum=309.375
-case=1 maxError=0.00048828125 meanSum=212.34423828125
-case=2 maxError=0 meanSum=425
-case=3 maxError=0 meanSum=425
-passed=4

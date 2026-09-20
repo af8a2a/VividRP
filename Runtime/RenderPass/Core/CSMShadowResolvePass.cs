@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -11,6 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
         // Opt-in diagnostics run after resolve with this camera's live graph resources.
         // No subscriber means no texture resolution, dispatch, readback, or allocation.
         internal static event System.Action<ComputePassContext, Texture, Texture, Texture> EditorReceiverCapture;
+        internal static event System.Action<CSMShadowResolvePass, ComputePassContext, int, int> EditorSMRTCostCapture;
 #endif
         private const int ThreadGroupSizeX = 8;
         private const int ThreadGroupSizeY = 8;
@@ -207,6 +209,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_PreviousViewProjection, m_PreviousView, m_CurrentView;
         private Vector4 m_VSMHistoryLayout, m_VSMHistoryFilterSettings;
         private int m_VSMTemporalKernel = -1;
+        private int m_VSMAdaptiveKernel = -1;
 
         private ComputeShader m_ResolveCompute;
         private int m_Kernel = -1;
@@ -323,6 +326,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMBilateralFilterHKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterH");
             m_VSMBilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterV");
             m_VSMTemporalKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowTemporalV");
+            m_VSMAdaptiveKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptive");
 
             for (var i = 0; i < s_BendCompositeKernelNames.Length; i++)
                 m_BendCompositeKernels[i] = FindKernelOrInvalid(m_ResolveCompute, s_BendCompositeKernelNames[i]);
@@ -502,6 +506,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_VirtualShadowMapPrototypePageTable.IsValid())
             {
                 m_VirtualShadowMapPrototypeActive = true;
+                m_EnableAdaptiveRays = VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(
+                    csmSettings, m_VSMSMRTParameters) && m_VSMAdaptiveKernel >= 0;
                 m_EnableTiledResolve = false;
                 m_EnableBilateralDenoise &= m_VSMSMRTParameters.x > 0f
                     && m_VSMBilateralFilterHKernel >= 0 && m_VSMBilateralFilterVKernel >= 0;
@@ -525,7 +531,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 settings.maxShadowDistance.value);
             m_VSMHistoryFilterSettings = new Vector4(m_NormalBias, settings.virtualShadowMapTransition.value,
                 settings.virtualShadowMapViewCoverage.value ? 1 : 0, 0);
-            m_EnableAdaptiveRays = settings.virtualShadowMapSMRTAdaptiveRays.value;
             ConfigureHistoryDescriptor(m_VSMHistoryCurrent.desc, cameraData.actualWidth, cameraData.actualHeight);
             ConfigureHistoryDescriptor(m_VSMDepthCurrent.desc, cameraData.actualWidth, cameraData.actualHeight);
             bool signalValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, cameraData.camera,
@@ -609,7 +614,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             else
             {
-                RecordFullScreenCSMResolve(cmd);
+                RecordFullScreenCSMResolve(context);
             }
 
             RecordBendScreenSpaceContactShadow(cmd);
@@ -626,6 +631,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_ShadowHistoryStates.Dispose();
             m_VSMTemporalKernel = -1;
+            m_VSMAdaptiveKernel = -1;
             m_ResolveCompute = null;
             m_Kernel = -1;
             m_ClearTilesKernel = -1;
@@ -665,21 +671,27 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CascadeBorders = Vector4.zero;
         }
 
-        private void RecordFullScreenCSMResolve(ComputeCommandBuffer cmd)
+        private void RecordFullScreenCSMResolve(ComputePassContext context)
         {
+            var cmd = context.cmd;
             using var resolveScope = new ProfilingScope(cmd,
                 m_VirtualShadowMapPrototypeActive ? VSMProfiling.Resolve : null);
             using (new ProfilingScope(cmd,
                 m_VirtualShadowMapPrototypeActive ? VSMProfiling.ResolveTrace : null))
             {
-                BindCommonTextures(cmd, m_Kernel);
-                BindVSMHistory(cmd, m_Kernel);
+                int kernel = m_EnableAdaptiveRays ? m_VSMAdaptiveKernel : m_Kernel;
+                BindCommonTextures(cmd, kernel);
+                BindVSMHistory(cmd, kernel);
                 BindShadowParameters(cmd);
 
-                cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
+                cmd.DispatchCompute(m_ResolveCompute, kernel,
                     m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
             }
 
+#if UNITY_EDITOR
+            if (m_VirtualShadowMapPrototypeActive && VirtualShadowMapPrototypeRuntime.IsFrameActive)
+                EditorSMRTCostCapture?.Invoke(this, context, m_DirectionalShadowTexture.desc.Width, m_DirectionalShadowTexture.desc.Height);
+#endif
             // VSM resolves the full screen and does not produce the PCSS tile list.
             // Both filter passes write every pixel, so no copy/clear dispatch is needed.
             if (m_VirtualShadowMapPrototypeActive && m_EnableBilateralDenoise
@@ -705,6 +717,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
             }
         }
+
+#if UNITY_EDITOR
+        internal void RecordSMRTCost(ComputePassContext context, GraphicsBuffer output)
+        {
+            // Called only by an explicit Editor diagnostic. Reuse this pass's
+            // exact receiver inputs, blue noise and parameters before filtering.
+            var cmd = context.cmd;
+            int kernel = m_ResolveCompute.FindKernel("VSMReceiverCost");
+            BindCommonTextures(cmd, kernel);
+            cmd.SetComputeBufferParam(m_ResolveCompute, kernel, "_VSMSMRTCostOutput", output);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, "_VSMSMRTCostReference", m_DirectionalShadowTexture.innerHandle);
+            cmd.DispatchCompute(m_ResolveCompute, kernel, m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+        }
+#endif
 
         private void RecordTiledScreenSpaceResolve(ComputeCommandBuffer cmd)
         {
@@ -861,7 +887,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeVectorParam(m_ResolveCompute, VSMHistoryParametersId,
                 new Vector4(m_EnableVSMTemporal && m_HasVSMHistory ? 1 : 0,
-                    m_EnableVSMTemporal && m_EnableAdaptiveRays ? 1 : 0, 4, 0));
+                    m_EnableAdaptiveRays ? 1 : 0, 4, 0));
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMPreviousViewProjectionId, m_PreviousViewProjection);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMPreviousViewId, m_PreviousView);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMCurrentViewId, m_CurrentView);

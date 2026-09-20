@@ -1,7 +1,0 @@
-fileFormatVersion: 2
-guid: 715e117352eb5b0409f4f8c4a07d605d
-ComputeShaderImporter:
-  externalObjects: {}
-  userData: 
-  assetBundleName: 
-  assetBundleVariant: 

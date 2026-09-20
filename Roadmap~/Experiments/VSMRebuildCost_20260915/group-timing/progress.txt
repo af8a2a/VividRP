@@ -1,1 +1,0 @@
-11 resolution=2048 mode=0 grouped=0

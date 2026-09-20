@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using System;
 using System.IO;
 using System.Linq;
@@ -498,32 +499,18 @@ namespace VividRP.Editor.Tests
         [Test]
         public void CSMShadowRecord_UsesBranchSpecificDrawSetsForShadowGpuCull()
         {
-            string source = ReadRuntimeSource(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "CSMShadowPass.cs");
-            string prepareMeshletDraws = SliceSource(
-                source,
-                "private bool TryPrepareMeshletShadowDraws(",
-                "private bool TryPrepareMeshletShadowPoolDraws(");
-            string conventionalDraw = SliceSource(
-                source,
-                "private void DrawConventionalShadowMap(",
-                "private bool DrawVirtualShadowMapPrototypePages(");
-            string virtualDraw = SliceSource(
-                source,
-                "private bool DrawVirtualShadowMapPrototypePages(",
-                "private void BindVirtualShadowMapPageManagementBuffers(");
-
-            int complete = prepareMeshletDraws.IndexOf("system.CompleteShadowDrawSet(");
-
-            Assert.That(complete, Is.GreaterThanOrEqualTo(0));
-            StringAssert.Contains("m_PrimitiveShadowDrawSet", prepareMeshletDraws);
-            StringAssert.DoesNotContain("system.CullShadowCascades(", prepareMeshletDraws);
-            StringAssert.Contains("meshletContext.AggregateDrawSet", conventionalDraw);
-            StringAssert.DoesNotContain("meshletContext.StaticDrawSet", conventionalDraw);
-            StringAssert.DoesNotContain("meshletContext.DynamicDrawSet", conventionalDraw);
+            string common = ReadRuntimeSource("Runtime", "RenderPass", "Core", "ShadowCasterPass.cs");
+            string conventional = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string virtualPass = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
+            string prepare = SliceSource(common, "bool TryPrepareMeshletShadowDraws(", "bool TryPrepareMeshletShadowPoolDraws(");
+            string draw = SliceSource(conventional, "private void DrawConventionalShadowMap(", "private void BuildShadowCullingContext(");
+            string virtualDraw = SliceSource(virtualPass, "private bool DrawVirtualShadowMapPrototypePages(", "private void BindVirtualShadowMapPageManagementBuffers(");
+            StringAssert.Contains("system.CompleteShadowDrawSet(", prepare);
+            StringAssert.Contains("m_PrimitiveShadowDrawSet", prepare);
+            StringAssert.DoesNotContain("system.CullShadowCascades(", prepare);
+            StringAssert.Contains("meshletContext.AggregateDrawSet", draw);
+            StringAssert.DoesNotContain("meshletContext.StaticDrawSet", draw);
+            StringAssert.DoesNotContain("meshletContext.DynamicDrawSet", draw);
             StringAssert.Contains("meshletContext.StaticDrawSet", virtualDraw);
             StringAssert.Contains("meshletContext.DynamicDrawSet", virtualDraw);
             StringAssert.DoesNotContain("meshletContext.AggregateDrawSet", virtualDraw);
@@ -532,28 +519,23 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VirtualShadowMapPrototype_CachesTheSubmittedCullingSnapshot()
         {
-            string source = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string source = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
+            string common = ReadRuntimeSource("Runtime", "RenderPass", "Core", "ShadowCasterPass.cs");
+            string conventional = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
             string prepare = SliceSource(source, "public override void Prepare(", "public override void Record(");
-            string prepareMeshlets = SliceSource(source,
-                "private void PrepareMeshletRendering(", "private bool TryValidateMeshletVirtualShadowMapReadiness(");
-            string prepareVsm = SliceSource(source,
-                "private void PrepareVirtualShadowMapPrototype(", "private void PrepareMeshletRendering(");
-            string recordMeshlets = SliceSource(source,
-                "private bool TryPrepareMeshletShadowDraws(", "private static bool HasMeshletShadowShaderResources(");
-
-            int prepareMeshletIndex = prepare.IndexOf("PrepareMeshletRendering(");
-            Assert.That(prepareMeshletIndex, Is.GreaterThanOrEqualTo(0));
-            Assert.That(prepare.IndexOf("PrepareVirtualShadowMapPrototype("), Is.GreaterThan(prepareMeshletIndex));
-            StringAssert.Contains("BuildLODSelectionContext(out m_ShadowLODSelectionContext)", prepareMeshlets);
-            StringAssert.Contains("BuildShadowCullingContext(", prepareMeshlets);
+            string prepareVsm = SliceSource(source, "private void PrepareVirtualShadowMapPrototype(", "internal static bool ShouldPrepareVirtualShadowMapPrototype(");
+            string recordMeshlets = SliceSource(common, "bool TryPrepareMeshletShadowDraws(", "static bool HasMeshletShadowShaderResources(");
+            Assert.That(prepare.IndexOf("base.Prepare(frameData)"), Is.LessThan(prepare.IndexOf("PrepareVirtualShadowMapPrototype(")));
+            StringAssert.Contains("BuildLODSelectionContext(out m_ShadowLODSelectionContext)", common);
+            StringAssert.Contains("BuildShadowCullingContext(", conventional);
             StringAssert.Contains("cameraData.camera.cullingMask", prepareVsm);
             StringAssert.Contains("Projections.Generation", prepareVsm);
             StringAssert.Contains("PrepareClipmaps(clipmaps)", prepareVsm);
             StringAssert.DoesNotContain("m_ShadowLODSelectionContext", prepareVsm);
-            StringAssert.Contains("m_ClipmapCullingContexts", recordMeshlets);
-            StringAssert.Contains("m_ClipmapLODContext", recordMeshlets);
-            StringAssert.Contains("m_ShadowLODSelectionContext", recordMeshlets);
-            StringAssert.Contains("m_ShadowCullingContexts", recordMeshlets);
+            StringAssert.Contains("m_ClipmapCullingContexts", source);
+            StringAssert.Contains("m_ClipmapLODContext", source);
+            StringAssert.Contains("m_ShadowLODSelectionContext", conventional);
+            StringAssert.Contains("m_ShadowCullingContexts", conventional);
             StringAssert.DoesNotContain("BuildLODSelectionContext", recordMeshlets);
             StringAssert.DoesNotContain("BuildShadowCullingContext(", recordMeshlets);
         }
@@ -574,11 +556,11 @@ namespace VividRP.Editor.Tests
             string record = SliceSource(
                 source,
                 "public override void Record(",
-                "private void PrepareVirtualShadowMapPrototype(");
+                "private void DrawMeshletShadowCascade(");
             string conventionalDraw = SliceSource(
                 source,
                 "private void DrawConventionalShadowMap(",
-                "private bool DrawVirtualShadowMapPrototypePages(");
+                "private void BuildShadowCullingContext(");
             string drawMeshletShadowCascade = SliceSource(
                 source,
                 "private void DrawMeshletShadowCascade(",
@@ -586,7 +568,7 @@ namespace VividRP.Editor.Tests
             string buildCullingContext = SliceSource(
                 source,
                 "private void BuildShadowCullingContext(",
-                "private static void ConfigureMaterial(");
+                "private static Matrix4x4 BuildShadowViewProjectionMatrix(");
 
             StringAssert.Contains("m_ShadowAtlas.desc.Dimension = TextureDimension.Tex2DArray", source);
             StringAssert.Contains("m_ShadowAtlas.desc.Slices = VividShadowData.MaxCascadeCount", source);
@@ -623,9 +605,9 @@ namespace VividRP.Editor.Tests
                 "Core",
                 "CSMShadowPass.cs");
             string prepare = SliceSource(
-                source,
-                "private bool TryPrepareMeshletShadowDraws(",
-                "private bool TryPrepareMeshletShadowPoolDraws(");
+                ReadRuntimeSource("Runtime", "RenderPass", "Core", "ShadowCasterPass.cs"),
+                "bool TryPrepareMeshletShadowDraws(",
+                "bool TryPrepareMeshletShadowPoolDraws(");
             string draw = SliceSource(
                 source,
                 "private void DrawMeshletShadowCascade(",
@@ -667,11 +649,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VirtualShadowMapPrototype_UsesSparseRequestedPagesAndHardShadowResolve()
         {
-            string passSource = ReadRuntimeSource(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "CSMShadowPass.cs");
+            string passSource = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
             string resolvePassSource = ReadRuntimeSource(
                 "Runtime",
                 "RenderPass",
@@ -684,11 +662,7 @@ namespace VividRP.Editor.Tests
                 "GPUDriven",
                 "VisibilityBufferShadowCasterPass.shader");
             string casterAbiSource = ReadRuntimeSource(
-                "Shaders",
-                "Core",
-                "Public",
-                "Shadow",
-                "VividVirtualShadowMapCaster.hlsl");
+                "Shaders", "VirtualShadowMap", "Public", "VividVirtualShadowMapCaster.hlsl");
             string standardCasterSource = ReadRuntimeSource(
                 "Shaders",
                 "Material",
@@ -736,7 +710,9 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("DefaultPhysicalPageCount = 256", passSource);
             StringAssert.Contains("MaxPhysicalPageCount = 1024", passSource);
             StringAssert.Contains("VSMPrototypeAllocatePages", passSource);
-            StringAssert.Contains("VSMPrototypeClearPhysicalPages", passSource);
+            StringAssert.Contains("VSMClearPhysicalPagesIndirect", passSource);
+            StringAssert.Contains("VSMReducePageOccupancyIndirect", passSource);
+            StringAssert.Contains("VSMBuildPageWorkLists", passSource);
             StringAssert.Contains("TextureDimension.Tex2DArray", passSource);
             StringAssert.Contains("AccessFlags.Write", passSource);
             StringAssert.Contains("m_VirtualShadowMapPrototypeMaterials", passSource);
@@ -793,7 +769,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("void MarkVSMReceiverPage(", resolveSource);
             StringAssert.Contains("void VSMPrototypeAllocatePages(", resolveSource);
             StringAssert.Contains("void VSMPrototypeClearPhysicalPages(", resolveSource);
-            StringAssert.Contains("overflowPageCount", resolveSource);
+            StringAssert.Contains("metadata.w |= kVSMPageDebugOverflow", resolveSource);
             StringAssert.Contains("TryResolveVSMPhysicalTexel(", resolveSource);
             StringAssert.Contains("return SampleCSMShadowMap(shadowUV, receiverDepth, cascadeIndex)", resolveSource);
             StringAssert.Contains("asfloat(", resolveSource);
@@ -808,7 +784,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VirtualShadowMapPrototype_MarksCurrentReceiversBeforeAllocation()
         {
-            string pass = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string pass = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
             string resolve = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowResolvePass.cs");
             string shader = ReadRuntimeSource("Shaders", "Core", "Private", "CSMShadowResolve.compute");
             string record = SliceSource(pass, "public override void Record(", "private bool RecordReceiverPageRequests(");
@@ -826,11 +802,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VirtualShadowMapPrototype_CachesStaticPoolAndRefreshesDynamicPool()
         {
-            string passSource = ReadRuntimeSource(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "CSMShadowPass.cs");
+            string passSource = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
             string resolvePassSource = ReadRuntimeSource(
                 "Runtime",
                 "RenderPass",
@@ -867,41 +839,23 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VirtualShadowMapPrototype_SkipsConventionalCsmOnlyAfterSuccessfulRecord()
         {
-            string source = ReadRuntimeSource(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "CSMShadowPass.cs");
-            string record = SliceSource(
-                source,
-                "public override void Record(",
-                "private void PrepareVirtualShadowMapPrototype(");
-            string virtualDraw = SliceSource(
-                source,
-                "private bool DrawVirtualShadowMapPrototypePages(",
-                "private void BindVirtualShadowMapPageManagementBuffers(");
-
-            int virtualAttempt = record.IndexOf("DrawVirtualShadowMapPrototypePages(");
-            int fallbackBranch = record.IndexOf("if (!vsmCompleted)");
-            int conventionalDraw = record.IndexOf("DrawConventionalShadowMap(");
-
-            Assert.That(virtualAttempt, Is.GreaterThanOrEqualTo(0));
-            Assert.That(fallbackBranch, Is.GreaterThan(virtualAttempt));
-            Assert.That(conventionalDraw, Is.GreaterThan(fallbackBranch));
+            string virtualPass = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
+            string conventional = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string record = SliceSource(virtualPass, "public override void Record(", "private bool RecordReceiverPageRequests(");
+            string fallback = SliceSource(conventional, "public override void Record(", "private void DrawMeshletShadowCascade(");
+            StringAssert.Contains("m_ShadowData.virtualShadowMapRendered = RecordReceiverPageRequests(nativeCmd)", record);
+            StringAssert.Contains("&& DrawVirtualShadowMapPrototypePages(", record);
             StringAssert.Contains("VirtualShadowMapPrototypeRuntime.MarkFallback(", record);
-            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.MarkActive()", virtualDraw);
-            StringAssert.Contains("VirtualShadowMapPrototypeFrameState", source);
-            StringAssert.Contains("LastFallbackReason", source);
+            StringAssert.Contains("VirtualShadowMapPrototypeRuntime.MarkActive()", virtualPass);
+            Assert.That(fallback.IndexOf("m_ShadowData.virtualShadowMapRendered"), Is.LessThan(fallback.IndexOf("DrawConventionalShadowMap(")));
+            StringAssert.DoesNotContain("VirtualShadowMapPrototypeRuntime", conventional);
+            StringAssert.DoesNotContain("DrawConventionalShadowMap", virtualPass);
         }
 
         [Test]
         public void VirtualShadowMapPrototype_MeshletPathBuildsBoundedPageRequests()
         {
-            string passSource = ReadRuntimeSource(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "CSMShadowPass.cs");
+            string passSource = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
             string cullSource = ReadRuntimeSource(
                 "Shaders",
                 "Core",
@@ -948,11 +902,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VirtualShadowMapPrototype_StaticChangesInvalidateOnlyProjectedPages()
         {
-            string passSource = ReadRuntimeSource(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "CSMShadowPass.cs");
+            string passSource = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
             string sceneSource = ReadRuntimeSource(
                 "Runtime",
                 "SubSystem",
@@ -1000,14 +950,14 @@ namespace VividRP.Editor.Tests
             string computeSource = ReadRuntimeSource(
                 "Shaders", "Core", "Private", "CSMShadowResolve.compute");
             string casterSource = ReadRuntimeSource(
-                "Shaders", "Core", "Public", "Shadow", "VividVirtualShadowMapCaster.hlsl");
+                "Shaders", "VirtualShadowMap", "Public", "VividVirtualShadowMapCaster.hlsl");
 
             StringAssert.Contains("VividVirtualShadowMapAddressing.hlsl", computeSource);
             StringAssert.Contains("VividVirtualShadowMapAddressing.hlsl", casterSource);
             StringAssert.Contains("VividVSMUVToVirtualTexel(", SliceSource(
                 computeSource, "bool GetVSMPageRange(", "void VSMPrototypeCullMeshletsToPages("));
             StringAssert.Contains("VividVSMUVToVirtualTexel(", SliceSource(
-                computeSource, "void VSMPrototypeInvalidateStaticPages(", "void VSMPrototypeClearPhysicalPages("));
+                computeSource, "void InvalidateVSMPageBounds(", "void VSMPrototypeClearPhysicalPages("));
             StringAssert.Contains("VividVSMTryOffsetVirtualTexel(", SliceSource(
                 computeSource, "void MarkVSMReceiverPage(", "bool TryResolveVSMPhysicalTexel("));
             string resolveSource = SliceSource(
@@ -1044,16 +994,14 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VSMQuality_KeepsCasterDepthUnbiasedAndBindsReceiverControls()
         {
-            string pass = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
-            string record = SliceSource(pass, "public override void Record(", "private void RecordVirtualShadowMapLayout(");
-            int virtualDraw = record.IndexOf("vsmCompleted = DrawVirtualShadowMapPrototypePages(");
-            int zeroBias = record.IndexOf("SetGlobalDepthBias(0.0f, 0.0f)");
-            int csmBias = record.IndexOf("SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias)");
-            Assert.That(zeroBias, Is.GreaterThanOrEqualTo(0));
-            Assert.That(virtualDraw, Is.GreaterThan(zeroBias));
-            Assert.That(csmBias, Is.GreaterThan(virtualDraw));
-            Assert.That(record.IndexOf("DrawConventionalShadowMap("), Is.GreaterThan(csmBias));
-            string prepare = SliceSource(pass, "private void PrepareVirtualShadowMapPrototype(", "private void PrepareMeshletRendering(");
+            string pass = ReadRuntimeSource("Runtime", "SubSystem", "VirtualShadowMap", "RenderPass", "VSMShadowPass.cs");
+            string conventional = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowPass.cs");
+            string record = SliceSource(pass, "public override void Record(", "private bool RecordReceiverPageRequests(");
+            Assert.That(record.IndexOf("SetGlobalDepthBias(0.0f, 0.0f)"), Is.GreaterThanOrEqualTo(0));
+            Assert.That(record.IndexOf("DrawVirtualShadowMapPrototypePages("), Is.GreaterThan(record.IndexOf("SetGlobalDepthBias(0.0f, 0.0f)")));
+            StringAssert.DoesNotContain("SetGlobalDepthBias(1.0f", pass);
+            StringAssert.Contains("SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias)", conventional);
+            string prepare = SliceSource(pass, "private void PrepareVirtualShadowMapPrototype(", "internal static bool ShouldPrepareVirtualShadowMapPrototype(");
             StringAssert.DoesNotContain("m_SlopeScaleDepthBias", prepare);
             string resolve = ReadRuntimeSource("Runtime", "RenderPass", "Core", "CSMShadowResolvePass.cs");
             StringAssert.Contains("csmSettings.virtualShadowMapPCF.value", resolve);
@@ -1085,6 +1033,9 @@ namespace VividRP.Editor.Tests
                 resolveCompute.HasKernel("VSMPrototypeInvalidateStaticPages"),
                 Is.True);
             Assert.That(resolveCompute.HasKernel("VSMPrototypeClearPhysicalPages"), Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMBuildPageWorkLists"), Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMClearPhysicalPagesIndirect"), Is.True);
+            Assert.That(resolveCompute.HasKernel("VSMReducePageOccupancyIndirect"), Is.True);
             Assert.That(resolveCompute.HasKernel("VSMPrototypeFinalizeDirtyPages"), Is.True);
             Assert.That(
                 resolveCompute.HasKernel("VSMPrototypePrepareMeshletPageRequests"),
@@ -1296,7 +1247,11 @@ namespace VividRP.Editor.Tests
                 path = Path.Combine(path, relativeSegments[index]);
 
             Assert.That(File.Exists(path), Is.True, path);
-            return File.ReadAllText(path);
+            string source = File.ReadAllText(path);
+            // VSM implementations are included by the shared CSM/VSM entry point.
+            return System.Text.RegularExpressions.Regex.Replace(source,
+                @"#include ""Packages/com\.vivid\.render-pipelines/(Shaders/VirtualShadowMap/Private/[^""]+)""",
+                match => File.ReadAllText(Path.Combine(package.resolvedPath, match.Groups[1].Value)));
         }
 
         private static string SliceSource(string source, string startMarker, string endMarker)

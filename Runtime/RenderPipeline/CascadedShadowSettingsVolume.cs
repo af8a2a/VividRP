@@ -24,6 +24,8 @@ namespace VividRP.Runtime
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]
         public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, 1024);
+        [Tooltip("Maximum physical pages rebuilt per camera render, coarse levels first. Each selected page completes all 16 depth layers in both dirty pools. Deferred fine pages use complete coarser coverage. 0 rebuilds all dirty pages; this bounds page count, not GPU milliseconds.")]
+        public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(64, 0, 1024);
         [Tooltip("Base-2 exponent of the finest directional clipmap radius in world units. Coarser levels double in size until Max Distance is covered.")]
         public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
         [Tooltip("Shift intermediate clipmaps toward the non-jittered camera frustum while preserving page alignment and nested coverage. The nearest and farthest levels remain camera-centred.")]
@@ -46,9 +48,9 @@ namespace VividRP.Runtime
         public BoolParameter virtualShadowMapSMRTJointSampling = new(false);
         [Tooltip("Accumulate a short, depth/normal-validated shadow history with current-frame clamping. Requires Screen Space Denoise and SMRT; independent of camera anti-aliasing.")]
         public BoolParameter virtualShadowMapSMRTTemporalDenoise = new(true);
-        [Tooltip("Use two rays in stable fully lit/shadowed regions, with periodic full-budget refresh. Penumbrae and invalid history use the configured ray count. Requires SMRT temporal denoising.")]
+        [Tooltip("Use current-frame wave votes to stop after one ray in uniformly lit regions or at least two rays in uniformly shadowed regions. Mixed or unavailable waves keep the full budget. Independent of temporal denoising; may change penumbra noise.")]
         public BoolParameter virtualShadowMapSMRTAdaptiveRays = new(true);
-        [Tooltip("Maximum shadow rays per pixel. Adaptive rays retain this budget in penumbrae and on invalid history.")]
+        [Tooltip("Maximum rays per shadow estimate. Adaptive Rays can stop uniformly lit/shadowed waves early; disabling it uses the full count.")]
         public ClampedIntParameter virtualShadowMapSMRTRayCount = new(4, 4, 8);
         [Tooltip("Depth-cell budget per intermediate clipmap segment. Longer rays continue through coarser levels along the same direction. The coarsest map visits enough cells to finish the configured world length, so total reads can exceed this value. More samples retain fine detail farther from the receiver.")]
         public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 4, 8);

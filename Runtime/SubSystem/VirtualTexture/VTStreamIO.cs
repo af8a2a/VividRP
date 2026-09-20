@@ -51,16 +51,29 @@ namespace VividRP.Runtime
         void Cancel();
     }
 
+    // The returned view is valid only until the batch is disposed.
+    internal interface IVTNativeIOBatch : IVTIOBatch
+    {
+        bool TryGetNativeResult(int commandIndex, out NativeArray<byte> data);
+    }
+
     internal sealed unsafe class VTAsyncReadManagerBackend : IVTIOBackend
     {
         private readonly Dictionary<string, SharedFile> m_Files = new(StringComparer.OrdinalIgnoreCase);
-        private readonly Stack<int[]> m_BatchIntBufferPool = new();
+        private Batch m_FreeBatch;
         private bool m_Disposed;
 
         private sealed class SharedFile
         {
             internal FileHandle Handle;
             internal int ReferenceCount;
+        }
+
+        internal VTAsyncReadManagerBackend()
+        {
+            // At most one batch per in-flight chunk under the default streaming budget.
+            for (int index = 0; index < VTVirtualTextureStreamRequestGate.DefaultMaxPendingReadCount; index++)
+                ReturnBatch(new Batch(this));
         }
 
         public string Name => nameof(VividVirtualTextureIOBackendMode.AsyncReadManager);
@@ -73,13 +86,23 @@ namespace VividRP.Runtime
                 throw new ObjectDisposedException(nameof(VTAsyncReadManagerBackend));
 
             SharedFile file = AcquireFile(path);
+            Batch batch = m_FreeBatch;
+            if (batch != null)
+            {
+                m_FreeBatch = batch.NextFree;
+                batch.NextFree = null;
+            }
+            else
+                batch = new Batch(this);
             try
             {
-                return new Batch(this, path, file, commands);
+                batch.Initialize(path, file, commands);
+                return batch;
             }
             catch
             {
                 ReleaseFile(path, file);
+                ReturnBatch(batch);
                 throw;
             }
         }
@@ -92,21 +115,17 @@ namespace VividRP.Runtime
             foreach (SharedFile file in m_Files.Values)
                 CloseFile(file);
             m_Files.Clear();
-            m_BatchIntBufferPool.Clear();
+            m_FreeBatch = null;
             m_Disposed = true;
         }
 
-        private int[] RentBatchIntBuffer()
+        private void ReturnBatch(Batch batch)
         {
-            return m_BatchIntBufferPool.Count > 0
-                ? m_BatchIntBufferPool.Pop()
-                : new int[64];
-        }
-
-        private void ReturnBatchIntBuffer(int[] buffer)
-        {
-            if (!m_Disposed && buffer != null && buffer.Length >= 64)
-                m_BatchIntBufferPool.Push(buffer);
+            if (!m_Disposed)
+            {
+                batch.NextFree = m_FreeBatch;
+                m_FreeBatch = batch;
+            }
         }
 
         private SharedFile AcquireFile(string path)
@@ -150,21 +169,26 @@ namespace VividRP.Runtime
                 file.Handle.Close(default).Complete();
         }
 
-        private sealed unsafe class Batch : IVTIOBatch
+        private sealed unsafe class Batch : IVTNativeIOBatch
         {
-            private readonly int[] m_BufferOffsets;
-            private readonly int[] m_ByteSizes;
+            internal Batch NextFree;
+            private readonly int[] m_BufferOffsets = new int[64];
+            private readonly int[] m_ByteSizes = new int[64];
             private readonly VTAsyncReadManagerBackend m_Owner;
-            private readonly string m_Path;
+            private string m_Path;
             private SharedFile m_File;
             private NativeArray<byte> m_Buffer;
             private NativeArray<ReadCommand> m_ReadCommands;
             private ReadHandle m_ReadHandle;
             private bool m_HasReadHandle;
-            private bool m_Disposed;
+            private bool m_Disposed = true;
 
-            internal Batch(
-                VTAsyncReadManagerBackend owner,
+            internal Batch(VTAsyncReadManagerBackend owner)
+            {
+                m_Owner = owner;
+            }
+
+            internal void Initialize(
                 string path,
                 SharedFile file,
                 IReadOnlyList<VTIOReadCommand> commands)
@@ -174,13 +198,13 @@ namespace VividRP.Runtime
                 if (commands == null || commands.Count == 0 || commands.Count > 64)
                     throw new ArgumentOutOfRangeException(nameof(commands));
 
-                m_Owner = owner;
                 m_Path = path;
                 m_File = file;
 
                 Count = commands.Count;
-                m_BufferOffsets = owner.RentBatchIntBuffer();
-                m_ByteSizes = owner.RentBatchIntBuffer();
+                m_Disposed = false;
+                m_HasReadHandle = false;
+                m_ReadHandle = default;
                 try
                 {
                     int totalByteSize = 0;
@@ -217,13 +241,16 @@ namespace VividRP.Runtime
                         m_ReadCommands.Dispose();
                     if (m_Buffer.IsCreated)
                         m_Buffer.Dispose();
-                    owner.ReturnBatchIntBuffer(m_BufferOffsets);
-                    owner.ReturnBatchIntBuffer(m_ByteSizes);
+                    m_Buffer = default;
+                    m_ReadCommands = default;
+                    m_File = null;
+                    m_Path = null;
+                    m_Disposed = true;
                     throw;
                 }
             }
 
-            public int Count { get; }
+            public int Count { get; private set; }
 
             public bool IsCompleted
             {
@@ -258,20 +285,28 @@ namespace VividRP.Runtime
             public bool TryGetResult(int commandIndex, out byte[] data)
             {
                 data = null;
+                if (!TryGetNativeResult(commandIndex, out NativeArray<byte> nativeData))
+                    return false;
+
+                data = nativeData.ToArray();
+                return true;
+            }
+
+            public bool TryGetNativeResult(int commandIndex, out NativeArray<byte> data)
+            {
+                data = default;
                 EnsureSubmitted();
                 if (m_Disposed
                     || commandIndex < 0
                     || commandIndex >= Count
+                    || !m_HasReadHandle
                     || m_ReadHandle.Status != ReadStatus.Complete
                     || m_ReadHandle.GetBytesRead((uint)commandIndex) != m_ByteSizes[commandIndex])
                 {
                     return false;
                 }
 
-                int byteSize = m_ByteSizes[commandIndex];
-                data = new byte[byteSize];
-                if (byteSize > 0)
-                    NativeArray<byte>.Copy(m_Buffer, m_BufferOffsets[commandIndex], data, 0, byteSize);
+                data = m_Buffer.GetSubArray(m_BufferOffsets[commandIndex], m_ByteSizes[commandIndex]);
                 return true;
             }
 
@@ -299,10 +334,14 @@ namespace VividRP.Runtime
                 if (m_Buffer.IsCreated)
                     m_Buffer.Dispose();
                 m_Owner.ReleaseFile(m_Path, m_File);
-                m_Owner.ReturnBatchIntBuffer(m_BufferOffsets);
-                m_Owner.ReturnBatchIntBuffer(m_ByteSizes);
+                m_Buffer = default;
+                m_ReadCommands = default;
+                m_ReadHandle = default;
+                m_HasReadHandle = false;
+                m_Path = null;
                 m_File = null;
                 m_Disposed = true;
+                m_Owner.ReturnBatch(this);
             }
 
             private void EnsureSubmitted()

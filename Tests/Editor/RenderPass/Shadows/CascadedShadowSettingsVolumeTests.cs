@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -147,7 +148,7 @@ namespace VividRP.Editor.Tests
             bool expected)
         {
             Assert.That(
-                CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
+                VSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
                     prototypeEnabled,
                     hasUnityShadowCasters,
                     hasMeshletShadowCasters,
@@ -161,7 +162,7 @@ namespace VividRP.Editor.Tests
             const int iterationCount = 4096;
             for (int iteration = 0; iteration < iterationCount; iteration++)
             {
-                CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
+                VSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
                     prototypeEnabled: true,
                     hasUnityShadowCasters: true,
                     hasMeshletShadowCasters: false,
@@ -172,7 +173,7 @@ namespace VividRP.Editor.Tests
             long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
             for (int iteration = 0; iteration < iterationCount; iteration++)
             {
-                if (CSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
+                if (VSMShadowPass.ShouldPrepareVirtualShadowMapPrototype(
                         prototypeEnabled: true,
                         hasUnityShadowCasters: true,
                         hasMeshletShadowCasters: false,
@@ -224,6 +225,50 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(material);
             }
+        }
+
+        [TestCase("VividRP/Material/StandardLit", true)]
+        [TestCase("VividRP/Material/StandardLayeredLit", true)]
+        [TestCase("VividRP/Experimental/Material/StandardLit", true)]
+        [TestCase("VividRP/Material/Unlit", true)]
+        [TestCase("Hidden/VividRP/Tests/PerObjectBuffer", false)]
+        public void UnityDynamicCache_RequiresRigidRendererAndBoundsContract(string shaderName, bool expected)
+        {
+            var go = new GameObject("Bounded Unity shadow caster");
+            var material = new Material(Shader.Find(shaderName));
+            try
+            {
+                var renderer = go.AddComponent<MeshRenderer>();
+                renderer.sharedMaterial = material;
+                Assert.That(VirtualShadowMapUnityCasterCompatibility.HasConservativeBounds(renderer), Is.EqualTo(expected));
+                Object.DestroyImmediate(renderer);
+                var skinned = go.AddComponent<SkinnedMeshRenderer>();
+                skinned.sharedMaterial = material;
+                Assert.That(VirtualShadowMapUnityCasterCompatibility.HasConservativeBounds(skinned), Is.False);
+            }
+            finally { Object.DestroyImmediate(go); Object.DestroyImmediate(material); }
+        }
+
+        [Test]
+        public void UnityDynamicCache_BoundsContractCheckAllocatesZeroBytesAfterWarmup()
+        {
+            var go = new GameObject("Bounded Unity shadow caster");
+            var material = new Material(Shader.Find("VividRP/Material/StandardLit"));
+            try
+            {
+                var renderer = go.AddComponent<MeshRenderer>();
+                renderer.sharedMaterial = material;
+                for (int i = 0; i < 32; i++)
+                    VirtualShadowMapUnityCasterCompatibility.HasConservativeBounds(renderer);
+                int bounded = 0;
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++)
+                    if (VirtualShadowMapUnityCasterCompatibility.HasConservativeBounds(renderer)) bounded++;
+                long bytes = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(bounded, Is.EqualTo(256));
+                Assert.That(bytes, Is.Zero);
+            }
+            finally { Object.DestroyImmediate(go); Object.DestroyImmediate(material); }
         }
 
         [Test]
@@ -607,6 +652,84 @@ namespace VividRP.Editor.Tests
             Assert.That(metadataData[7].LastRequestedFrame, Is.EqualTo(7u));
         }
 
+        [TestCase(16, 7)]
+        [TestCase(128, 65)]
+        [TestCase(4096, 1024)]
+        public void VirtualShadowMapPrototypeAllocator_ProtectsCoarseRequestsAcrossCommitBatches(
+            int pagesPerLevel, int capacity)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            ComputeShader source = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
+            Assert.That(source, Is.Not.Null);
+            ComputeShader shader = Object.Instantiate(source);
+            try
+            {
+                int pageCount = pagesPerLevel * 2;
+                const uint requestedPrimary = 1u | 512u;
+                const uint allocated = 2u;
+                var pageData = new uint[pageCount];
+                var metaData = new TestPageMetadata[pageCount];
+                var ownerData = new uint[capacity];
+                var counterData = new uint[4];
+                // All slots belong to requested fine pages. Coarse requests of
+                // the same role must evict them before processing the fine level.
+                for (int slot = 0; slot < capacity; slot++)
+                {
+                    pageData[slot] = (uint)slot + 1u;
+                    ownerData[slot] = (uint)slot + 1u;
+                    metaData[slot].Flags = requestedPrimary | allocated;
+                    metaData[slot].EncodedPhysicalPage = (uint)slot + 1u;
+                    metaData[slot].LastRequestedFrame = 7u;
+                }
+                for (int page = pagesPerLevel; page < pageCount; page++)
+                {
+                    metaData[page].Flags = requestedPrimary;
+                    metaData[page].LastRequestedFrame = 7u;
+                }
+                using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, sizeof(uint));
+                using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, Marshal.SizeOf<TestPageMetadata>());
+                using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, sizeof(uint));
+                using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, sizeof(uint));
+                table.SetData(pageData);
+                metadata.SetData(metaData);
+                owners.SetData(ownerData);
+                int kernel = shader.FindKernel("VSMPrototypeAllocatePages");
+                shader.SetInt("_VSMPrototypePageTableEntryCount", pageCount);
+                shader.SetInt("_VSMProjectionCount", 2);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
+                shader.SetInt("_VSMPrototypeFeedbackFrameIndex", 7);
+                shader.SetBuffer(kernel, "_VSMPrototypeWritablePageTable", table);
+                shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", counters);
+                DispatchVSMAllocation(shader, kernel, pageCount, metadata);
+                table.GetData(pageData);
+                metadata.GetData(metaData);
+                owners.GetData(ownerData);
+                counters.GetData(counterData);
+                Assert.That(counterData, Is.EqualTo(new uint[]
+                {
+                    (uint)capacity, (uint)(capacity + pagesPerLevel), (uint)capacity, (uint)pagesPerLevel
+                }));
+                for (int page = 0; page < pageCount; page++)
+                {
+                    uint expected = page >= pagesPerLevel && page < pagesPerLevel + capacity
+                        ? (uint)(page - pagesPerLevel + 1) : 0u;
+                    Assert.That(pageData[page], Is.EqualTo(expected), $"Page {page}");
+                    Assert.That(metaData[page].EncodedPhysicalPage, Is.EqualTo(expected));
+                    Assert.That(metaData[page].Flags & requestedPrimary, Is.Zero);
+                    Assert.That(metaData[page].Flags & allocated, Is.EqualTo(expected == 0u ? 0u : allocated));
+                }
+                for (int slot = 0; slot < capacity; slot++)
+                    Assert.That(ownerData[slot], Is.EqualTo((uint)(pagesPerLevel + slot + 1)));
+            }
+            finally
+            {
+                Object.DestroyImmediate(shader);
+            }
+        }
+
         [Test]
         public void VirtualShadowMapPrototypeAllocator_RecyclesUnrequestedPagesAcrossFrames()
         {
@@ -833,8 +956,204 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(1, 1)]
+        [TestCase(65, 7)]
+        [TestCase(1024, 64)]
+        [TestCase(65, 7, true)]
+        [TestCase(65, 7, false, true)]
+        public void PageUpdateBudget_PrioritizesCoarsePagesAndConverges(int capacity, int budget, bool remap = false, bool unlimitedAfterFirst = false)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2, 16);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
+            using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            try
+            {
+                const uint dirty = 4u | (1u << 15), deferred = 1u << 17, known = (1u << 14) | (1u << 16);
+                var data = new uint4[capacity * 2]; var owner = new uint[capacity];
+                for (int slot = 0; slot < capacity; slot++)
+                {
+                    int page = slot / 2 + (slot % 2) * capacity;
+                    owner[slot] = (uint)page + 1;
+                    data[page] = new uint4(2u | dirty | known, (uint)slot + 1, 0, 1);
+                }
+                owners.SetData(owner);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", capacity * 2);
+                shader.SetInt("_VSMProjectionCount", 2);
+                shader.SetInt("_VSMPrototypePageSize", 128);
+                shader.SetInt("_VSMPageUpdateBudget", budget);
+                shader.SetInt("_VSMPageOccupancySkipDisabled", 0);
+                int build = shader.FindKernel("VSMBuildPageWorkLists");
+                shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(build, "_VSMPageWorkListRW", work);
+                shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
+                int finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
+                shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
+                var dispatch = new uint[6]; var entries = new uint[capacity * 2];
+                var expected = new System.Collections.Generic.List<int>(capacity);
+                int completed = 0;
+                for (int frame = 0; frame <= (capacity + budget - 1) / budget + 1; frame++)
+                {
+                    expected.Clear();
+                    if (remap && frame == 1)
+                    {
+                        // A deferred physical slot changes virtual owner before
+                        // the next work list. No queued old identity may survive.
+                        int oldPage = (int)owner[0] - 1, newPage = capacity * 2 - 1;
+                        data[newPage] = data[oldPage]; data[oldPage] = default;
+                        owner[0] = (uint)newPage + 1; owners.SetData(owner);
+                    }
+                    int currentBudget = unlimitedAfterFirst && frame > 0 ? 0 : budget;
+                    int limit = currentBudget == 0 ? capacity : currentBudget;
+                    shader.SetInt("_VSMPageUpdateBudget", currentBudget);
+                    for (int slot = 0; slot < capacity; slot++)
+                    {
+                        int page = (int)owner[slot] - 1;
+                        data[page].z = (uint)frame;
+                        // One initially unrequested dirty page must wait, even
+                        // when there is spare budget, then resume on new demand.
+                        data[page].w = frame == 0 && slot == 0 ? 0u : 1u;
+                        if ((data[page].x & dirty) != 0 && data[page].w != 0) expected.Add(slot);
+                    }
+                    expected.Sort((a, b) => {
+                        int level = ((owner[b] - 1) / (uint)capacity).CompareTo((owner[a] - 1) / (uint)capacity);
+                        return level != 0 ? level : ((a + frame) % capacity).CompareTo((b + frame) % capacity);
+                    });
+                    if (expected.Count > limit) expected.RemoveRange(limit, expected.Count - limit);
+                    metadata.SetData(data);
+                    shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
+                    shader.Dispatch(build, 1, 1, 1);
+                    args.GetData(dispatch); work.GetData(entries); metadata.GetData(data);
+                    Assert.That(dispatch[2], Is.EqualTo(expected.Count));
+                    Assert.That(dispatch[3], Is.EqualTo(expected.Count));
+                    var clearSlots = new System.Collections.Generic.HashSet<int>();
+                    var occupancySlots = new System.Collections.Generic.HashSet<int>();
+                    for (int i = 0; i < expected.Count; i++)
+                    {
+                        Assert.That(clearSlots.Add((int)entries[i]), Is.True);
+                        Assert.That(occupancySlots.Add((int)entries[capacity + i]), Is.True);
+                    }
+                    CollectionAssert.AreEquivalent(expected, clearSlots);
+                    CollectionAssert.AreEquivalent(expected, occupancySlots);
+                    // No drawing is needed for this metadata test: the selected
+                    // pages represent completed empty geometry before finalize.
+                    shader.Dispatch(finalize, (capacity * 2 + 63) / 64, 1, 1);
+                    metadata.GetData(data);
+                    foreach (int slot in expected)
+                    {
+                        Assert.That(data[owner[slot] - 1].x & (dirty | deferred | 8u), Is.EqualTo(8u));
+                        completed++;
+                    }
+                    for (int slot = 0; slot < capacity; slot++)
+                    {
+                        uint flags = data[owner[slot] - 1].x;
+                        if ((flags & dirty) != 0) Assert.That(flags & (dirty | deferred), Is.EqualTo(dirty | deferred));
+                    }
+                }
+                Assert.That(completed, Is.EqualTo(capacity));
+                Assert.That(dispatch[2] + dispatch[3], Is.Zero);
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [Test]
-        public void DynamicPageLifecycle_PreservesAllHiddenLayersOutsideEachDirtyPool()
+        public void PageUpdateBudget_DefaultAndStableReadsPreserveZeroManagedAllocation()
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            try
+            {
+                Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.EqualTo(64));
+                settings.virtualShadowMapPageUpdateBudget.value = -1;
+                Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.Zero);
+                settings.virtualShadowMapPageUpdateBudget.value = 2048;
+                Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.EqualTo(1024));
+                int sum = 0;
+                for (int i = 0; i < 1024; i++) sum += settings.virtualShadowMapPageUpdateBudget.value;
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 1024; i++) sum += settings.virtualShadowMapPageUpdateBudget.value;
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(sum, Is.EqualTo(2 * 1024 * 1024));
+            }
+            finally { Object.DestroyImmediate(settings); }
+        }
+
+        [TestCase(1)]
+        [TestCase(63)]
+        [TestCase(64)]
+        [TestCase(65)]
+        [TestCase(1024)]
+        public void PageWorkLists_IncludeDirtyAndUnknownPagesAndOverwriteZeroWork(int capacity)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 16);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
+            using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2 + 1, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 7, 4);
+            try
+            {
+                int build = shader.FindKernel("VSMBuildPageWorkLists");
+                shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(build, "_VSMPageWorkListRW", work);
+                shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
+                shader.SetInt("_VSMPrototypePageSize", 128);
+                const uint known = (1u << 14) | (1u << 16);
+                var data = new uint4[capacity]; var owner = new uint[capacity];
+                var entries = new uint[capacity * 2 + 1]; var dispatch = new uint[7];
+                entries[capacity * 2] = dispatch[6] = 0x12345678;
+                work.SetData(entries); args.SetData(dispatch);
+                // Reassign each physical slot to a different virtual owner; last
+                // iteration removes all owners after a full list was produced.
+                for (int pattern = 0; pattern < 4; pattern++)
+                {
+                    var clear = new System.Collections.Generic.HashSet<uint>();
+                    var reduce = new System.Collections.Generic.HashSet<uint>();
+                    for (int slot = 0; slot < capacity; slot++)
+                    {
+                        int page = capacity - 1 - slot;
+                        uint flags = known | 10u;
+                        if (pattern < 2)
+                        {
+                            if (slot % 5 == 0) flags |= 4u;
+                            if (slot % 5 == 1) flags |= 1u << 15;
+                            if (slot % 5 == 2) flags &= ~(1u << 14);
+                            if (slot % 5 == 3) flags &= ~(1u << 16);
+                        }
+                        data[page] = new uint4(flags, (uint)slot + 1, 1, 8);
+                        owner[slot] = pattern == 3 || (pattern == 0 && slot % 7 == 0) ? 0u : (uint)page + 1;
+                        if (owner[slot] == 0) continue;
+                        bool dirty = (flags & (4u | (1u << 15))) != 0;
+                        if (dirty) clear.Add((uint)slot);
+                        if (dirty || (flags & known) != known || pattern == 2) reduce.Add((uint)slot);
+                    }
+                    metadata.SetData(data); owners.SetData(owner);
+                    shader.SetInt("_VSMPageOccupancySkipDisabled", pattern == 2 ? 1 : 0);
+                    shader.Dispatch(build, 1, 1, 1);
+                    args.GetData(dispatch); work.GetData(entries);
+                    Assert.That(dispatch, Is.EqualTo(new uint[] { 16, 16, (uint)clear.Count, (uint)reduce.Count, 1, 1, 0x12345678 }));
+                    for (int i = 0; i < dispatch[2]; i++) Assert.That(clear.Remove(entries[i]), Is.True);
+                    for (int i = 0; i < dispatch[3]; i++) Assert.That(reduce.Remove(entries[capacity + i]), Is.True);
+                    Assert.That(clear.Count + reduce.Count, Is.Zero);
+                    Assert.That(entries[capacity * 2], Is.EqualTo(0x12345678u));
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        [TestCase(true, true)]
+        public void DynamicPageLifecycle_PreservesAllHiddenLayersOutsideEachDirtyPool(bool indirect, bool deferred)
         {
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -852,6 +1171,8 @@ namespace VividRP.Editor.Tests
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 16);
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
             using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4096, 4);
+            using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 32, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
             try
             {
                 Assert.That(staticPool.Create() && dynamicPool.Create(), Is.True);
@@ -871,12 +1192,26 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_VSMPrototypePageTableEntryCount", 16);
                 shader.SetInt("_VSMPrototypePageSize", 4);
                 shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 4);
-                int clear = shader.FindKernel("VSMPrototypeClearPhysicalPages");
+                shader.SetInt("_VSMPageOccupancySkipDisabled", 0);
+                int build = shader.FindKernel("VSMBuildPageWorkLists");
+                shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(build, "_VSMPageWorkListRW", work);
+                shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
+                shader.Dispatch(build, 1, 1, 1);
+                var dispatch = new uint[6]; args.GetData(dispatch);
+                Assert.That(dispatch, Is.EqualTo(new uint[] { 1, 1, 3, 4, 1, 1 }));
+                // A stale work-list entry must not clear, scan or publish a page
+                // that was deferred. Verify both direct and indirect kernels.
+                if (deferred) { meta[3].x |= 1u << 17; metadata.SetData(meta); }
+                int clear = shader.FindKernel(indirect ? "VSMClearPhysicalPagesIndirect" : "VSMPrototypeClearPhysicalPages");
+                if (indirect) shader.SetBuffer(clear, "_VSMPageWorkList", work);
                 shader.SetBuffer(clear, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(clear, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetTexture(clear, "_VSMPrototypeStaticPhysicalPageRW", staticPool);
                 shader.SetTexture(clear, "_VSMPrototypeDynamicPhysicalPageRW", dynamicPool);
-                shader.Dispatch(clear, 1, 1, 16);
+                if (indirect) shader.DispatchIndirect(clear, args, VirtualShadowMapPrototypeRuntime.ClearWorkArgsOffset);
+                else shader.Dispatch(clear, 1, 1, 16);
                 var readStatic = AsyncGPUReadback.Request(staticPool);
                 var readDynamic = AsyncGPUReadback.Request(dynamicPool);
                 readStatic.WaitForCompletion(); readDynamic.WaitForCompletion();
@@ -890,31 +1225,64 @@ namespace VividRP.Editor.Tests
                     {
                         int slot = pixel / 16 / 4 * 4 + pixel % 16 / 4;
                         uint depth = data[layer * 256 + pixel];
-                        Assert.That(actualStatic[pixel], Is.EqualTo(slot < 4 && (dirty[slot] & 4u) != 0 ? 0u : depth));
-                        Assert.That(actualDynamic[pixel], Is.EqualTo(slot < 4 && (dirty[slot] & dynamicDirty) != 0 ? 0u : depth));
+                        bool updated = slot < 4 && !(deferred && slot == 3);
+                        Assert.That(actualStatic[pixel], Is.EqualTo(updated && (dirty[slot] & 4u) != 0 ? 0u : depth));
+                        Assert.That(actualDynamic[pixel], Is.EqualTo(updated && (dirty[slot] & dynamicDirty) != 0 ? 0u : depth));
                     }
                 }
-                int occupancy = shader.FindKernel("VSMPrototypeReducePageOccupancy");
+                int occupancy = shader.FindKernel(indirect ? "VSMReducePageOccupancyIndirect" : "VSMPrototypeReducePageOccupancy");
+                if (indirect) shader.SetBuffer(occupancy, "_VSMPageWorkList", work);
                 shader.SetBuffer(occupancy, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(occupancy, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetTexture(occupancy, "_VSMPrototypeStaticPhysicalPage", staticPool);
                 shader.SetTexture(occupancy, "_VSMPrototypeDynamicPhysicalPage", dynamicPool);
                 shader.SetInt("_VSMPageOccupancySkipDisabled", 0);
-                shader.Dispatch(occupancy, 16, 1, 1);
+                if (indirect) shader.DispatchIndirect(occupancy, args, VirtualShadowMapPrototypeRuntime.OccupancyWorkArgsOffset);
+                else shader.Dispatch(occupancy, 16, 1, 1);
                 int finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
                 shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
                 shader.Dispatch(finalize, 1, 1, 1);
                 metadata.GetData(meta);
                 for (int i = 0; i < 4; i++)
                 {
+                    if (deferred && i == 3)
+                    {
+                        Assert.That(meta[i].x, Is.EqualTo(10u | dirty[i] | (1u << 17)));
+                        continue;
+                    }
                     Assert.That(meta[i].x & (4u | dynamicDirty), Is.Zero);
                     Assert.That(meta[i].x & ((1u << 14) | (1u << 16)), Is.EqualTo((1u << 14) | (1u << 16)));
                     Assert.That((meta[i].x & (1u << 12)) != 0, Is.EqualTo((dirty[i] & 4u) != 0));
                     Assert.That((meta[i].x & (1u << 13)) != 0, Is.EqualTo((dirty[i] & dynamicDirty) != 0));
                     Assert.That((meta[i].w & dynamicDirty) != 0, Is.EqualTo((dirty[i] & dynamicDirty) != 0));
+                    Assert.That((meta[i].w & 4u) != 0, Is.EqualTo((dirty[i] & 4u) != 0),
+                        "Dynamic-only redraw must not appear as static invalidation in debug snapshots.");
                 }
+                if (deferred) return;
                 var preserved = (uint4[])meta.Clone();
-                shader.Dispatch(occupancy, 16, 1, 1);
+                shader.Dispatch(build, 1, 1, 1);
+                args.GetData(dispatch);
+                Assert.That(dispatch, Is.EqualTo(new uint[] { 1, 1, 0, 0, 1, 1 }));
+                if (indirect) shader.DispatchIndirect(occupancy, args, VirtualShadowMapPrototypeRuntime.OccupancyWorkArgsOffset);
+                else shader.Dispatch(occupancy, 16, 1, 1);
+                metadata.GetData(meta);
+                Assert.That(meta, Is.EqualTo(preserved));
+                // Disabling cached occupancy must visit clean pages as well;
+                // re-enabling must rescan their now-unknown pools.
+                shader.SetInt("_VSMPageOccupancySkipDisabled", 1);
+                shader.Dispatch(build, 1, 1, 1);
+                args.GetData(dispatch);
+                Assert.That(dispatch[3], Is.EqualTo(4u));
+                if (indirect) shader.DispatchIndirect(occupancy, args, VirtualShadowMapPrototypeRuntime.OccupancyWorkArgsOffset);
+                else shader.Dispatch(occupancy, 16, 1, 1);
+                metadata.GetData(meta);
+                for (int i = 0; i < 4; i++) Assert.That(meta[i].x & ((1u << 14) | (1u << 16)), Is.Zero);
+                shader.SetInt("_VSMPageOccupancySkipDisabled", 0);
+                shader.Dispatch(build, 1, 1, 1);
+                args.GetData(dispatch);
+                Assert.That(dispatch[3], Is.EqualTo(4u));
+                if (indirect) shader.DispatchIndirect(occupancy, args, VirtualShadowMapPrototypeRuntime.OccupancyWorkArgsOffset);
+                else shader.Dispatch(occupancy, 16, 1, 1);
                 metadata.GetData(meta);
                 Assert.That(meta, Is.EqualTo(preserved));
                 int invalidateAll = shader.FindKernel("VSMPrototypeMarkDynamicPagesDirty");
@@ -1655,6 +2023,97 @@ namespace VividRP.Editor.Tests
             {
                 VirtualShadowMapPrototypeRuntime.InvalidateCache();
             }
+        }
+
+        [Test]
+        public void ShadowCasterPreparation_InactivePathAllocatesZeroBytesAfterWarmup()
+        {
+            using var frame = new ContextContainer();
+            frame.GetOrCreate<VividShadowData>();
+            var pass = new CSMShadowPass();
+            try
+            {
+                for (int i = 0; i < 32; i++) pass.Prepare(frame);
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++) pass.Prepare(frame);
+                long bytes = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(bytes, Is.Zero);
+            }
+            finally { pass.Dispose(); }
+        }
+
+        [Test]
+        public void UnityDynamicCache_InvalidatesCommittedOldAndCurrentCoverageIncludingRemoval()
+        {
+            var oldBounds = new Bounds(Vector3.zero, Vector3.one * 2);
+            var movedBounds = new Bounds(Vector3.right * 10, Vector3.one * 2);
+            var laterBounds = new Bounds(Vector3.right * 20, Vector3.one * 2);
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+                var first = VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, true, oldBounds);
+                Assert.That(first.Length, Is.EqualTo(1));
+                VirtualShadowMapPrototypeRuntime.CommitDynamicUnityBounds(true, oldBounds);
+                var stationary = VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, true, oldBounds);
+                Assert.That(stationary.Length, Is.EqualTo(1), "Unjournaled material/mesh changes must still redraw inside current coverage.");
+                var moved = VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, true, movedBounds);
+                Assert.That(moved.Length, Is.EqualTo(2));
+                Assert.That(moved[0].BoundsMin.xyz, Is.EqualTo((float3)oldBounds.min));
+                Assert.That(moved[1].BoundsMax.xyz, Is.EqualTo((float3)movedBounds.max));
+                // Preparing a frame is not a commit: an aborted pass must retain old shadows' coverage.
+                var later = VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, true, laterBounds);
+                Assert.That(later[0].BoundsMin.xyz, Is.EqualTo((float3)oldBounds.min));
+                VirtualShadowMapPrototypeRuntime.CommitDynamicUnityBounds(true, laterBounds);
+                var removed = VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, false, default);
+                Assert.That(removed.Length, Is.EqualTo(1));
+                Assert.That(removed[0].BoundsMax.xyz, Is.EqualTo((float3)laterBounds.max));
+                VirtualShadowMapPrototypeRuntime.CommitDynamicUnityBounds(false, default);
+                Assert.That(VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, false, default).Length, Is.Zero);
+            }
+            finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); }
+        }
+
+        [Test]
+        public void UnityDynamicCache_MergesMeshletJournalAndResetsCoverageWithCache()
+        {
+            using var journal = new Unity.Collections.NativeArray<VividStaticShadowInvalidationBounds>(
+                new[] { new VividStaticShadowInvalidationBounds { BoundsMin = new float4(-3), BoundsMax = new float4(3) } },
+                Unity.Collections.Allocator.Temp);
+            var bounds = new Bounds(Vector3.one * 10, Vector3.one);
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+                var merged = VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(journal, true, bounds);
+                Assert.That(merged.Length, Is.EqualTo(2));
+                Assert.That(merged[0].BoundsMin, Is.EqualTo(journal[0].BoundsMin));
+                VirtualShadowMapPrototypeRuntime.CommitDynamicUnityBounds(true, bounds);
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+                Assert.That(VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, false, default).Length, Is.Zero);
+            }
+            finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); }
+        }
+
+        [Test]
+        public void UnityDynamicCache_WarmMergeAndUploadAllocateZeroBytes()
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var bounds = new Bounds(Vector3.zero, Vector3.one);
+            var moved = new Bounds(Vector3.one * 3, Vector3.one);
+            try
+            {
+                VirtualShadowMapPrototypeRuntime.InvalidateCache();
+                VirtualShadowMapPrototypeRuntime.CommitDynamicUnityBounds(true, bounds);
+                for (int i = 0; i < 32; i++)
+                    VirtualShadowMapPrototypeRuntime.UploadDynamicInvalidationBounds(
+                        VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, true, moved));
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++)
+                    VirtualShadowMapPrototypeRuntime.UploadDynamicInvalidationBounds(
+                        VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(default, true, moved));
+                long bytes = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(bytes, Is.Zero);
+            }
+            finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); }
         }
 
         [Test]

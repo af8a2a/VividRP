@@ -916,19 +916,19 @@ evaluating higher-quality soft shadows or declaring the P4 production baseline.
 ### P5-A — Quality and Performance Baseline
 
 Implemented instrumentation and a fixed measurement protocol on 2026-09-05.
-See [VSMQualityBaseline.md](VSMQualityBaseline.md) and the six-configuration
-[measurement sheet](VSMQualityBaseline.csv). Only the existing 2K Hard capture's
+See [VSMQualityBaseline.md](../Temp~/VSM/Roadmap~/VSMQualityBaseline.md) and the six-configuration
+[measurement sheet](../Temp~/VSM/Roadmap~/VSMQualityBaseline.csv). Only the existing 2K Hard capture's
 quality row is populated. A separate static Play Mode 2K–8K Hard–PCF performance
 sweep completed on 2026-09-05; all required scopes were captured. Its camera
 differs from the quality capture, and timing-source/repeatability checks remain
-open. See the [complete-run audit](Baselines/20260905_113329_d0e8beb7/README.md)
+open. See the [complete-run audit](../Temp~/VSM/Roadmap~/Baselines/20260905_113329_d0e8beb7/README.md)
 and [performance/quality optimization plan](VSMOptimizationPlan.md).
 Phase 0 update 2026-09-06: three rotating repaint rounds identify recorder repaint
 as a source of low whole-frame GPU observations. Two current-Game-camera diagonal
 captures complete with 601 poses and 31 capture groups each; 93/93 ROI files match
-between runs, including a six-pixel fallback at step 460. See [Phase 0 findings](VSMPhase0Findings.md).
+between runs, including a six-pixel fallback at step 460. See [Phase 0 findings](../Temp~/VSM/Roadmap~/VSMPhase0Findings.md).
 Game GPU-frame attribution and the original wall's full quality matrix are still pending.
-Follow-up: [four matched density trajectories](VSMDensityFindings.md) complete
+Follow-up: [four matched density trajectories](../Temp~/VSM/Roadmap~/VSMDensityFindings.md) complete
 with 69 ROI groups each and 41 consecutive recovery frames. Density targets
 1/2/4 px all fail the current 256-page budget gate. The off configuration's
 transient unmapped fallback is isolated to steps 460–461 within that dense

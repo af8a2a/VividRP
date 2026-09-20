@@ -1,7 +1,0 @@
-Native ROI top-left x=700 y=170 width=420 height=410; binary rows flipY.
-shadow RHalf, source/output RGBAHalf. Debug0/3/5/6/7 RGBAFloat entire 480x270 grid sampled at native pixel 4*id+2, rows flipY.
-debug0 preferred/sampled/transition/blend; debug3 footprintXY/worldTexelSize/valid; debug5 missing/replay/source/error; debug6 desiredLOD/minimumCovered/preferred/ratio; debug7 worldXYZ/valid.
-counters uint32 allocated/requested/new/overflow every frame; static24 translate64 yaw96 per variant, warm128 and aligned first jitter each stage.
-Calibration: central 20% view visible receiver depth median along camera forward, fixed for entire experiment. Bounded follow-up: shift level3 only, all other levels unchanged. Contain original level2 and stay inside level4, each with one-child-page guard; quarter-page hysteresis. Only bounded stages3..5 captured; baseline from initial run.
-Translate: steps0..47 sin(pi*step/47)*(1.5,0,1.5) world meters then16rest. Yaw:0..63 sin(2*pi*step/63)*12deg worldY then32rest.
-Raw capture all static frames, dynamic every4th plus last; metadata/counters every frame. Native TSR16 history and original sharpening preserved; fixed exposure12.252064.

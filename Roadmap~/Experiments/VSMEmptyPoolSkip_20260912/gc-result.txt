@@ -1,1 +1,0 @@
-PASS: actual cached VSM.PageOccupancy sampler, two GraphicsBuffer bindings, two RTHandle bindings and DispatchCompute recording; warmed128 measured4096 currentThreadBytes=0. No GPU execution, Unity tests, or all-thread/whole-pipeline allocation claim.

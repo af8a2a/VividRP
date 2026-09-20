@@ -569,6 +569,119 @@ namespace VividRP.Editor.Tests
             Assert.That(pendingRequests[0].PageCoord, Is.EqualTo(fineCoord));
         }
 
+        [TestCase(typeof(VTUploadScheduler), "QueuedUpload", "s_QueuedUploadComparison")]
+        [TestCase(typeof(VTPageTableSpace), "PendingUploadSortEntry", "s_PendingUploadComparison")]
+        [TestCase(typeof(VirtualTextureSystem), "ResidencyPriorityCandidate", "s_ResidencyPriorityCandidateComparison")]
+        [TestCase(typeof(VirtualTextureSystem), "PrefetchPriorityCandidate", "s_PrefetchPriorityCandidateComparison")]
+        public void UploadSort_DoesNotAllocate(System.Type schedulerType, string entryTypeName, string comparisonField)
+        {
+            var uploadType = schedulerType.GetNestedType(entryTypeName, System.Reflection.BindingFlags.NonPublic);
+            var listType = typeof(List<>).MakeGenericType(uploadType);
+            var uploads = (System.Collections.IList)System.Activator.CreateInstance(listType);
+            for (int index = 0; index < 32; index++)
+                uploads.Add(System.Activator.CreateInstance(uploadType));
+            object comparison = schedulerType.GetField(comparisonField,
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).GetValue(null);
+            var sort = System.Linq.Expressions.Expression.Lambda<System.Action>(
+                System.Linq.Expressions.Expression.Call(
+                    System.Linq.Expressions.Expression.Constant(uploads, listType),
+                    listType.GetMethod("Sort", new[] { comparison.GetType() }),
+                    System.Linq.Expressions.Expression.Constant(comparison))).Compile();
+            sort();
+
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+                sort();
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+        }
+
+        [Test]
+        public void PendingUploadCandidateSort_DoesNotAllocate()
+        {
+            var comparison = (System.Comparison<VTPendingUploadCandidate>)typeof(VirtualTextureSystem)
+                .GetField("s_PendingUploadCandidateComparison",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).GetValue(null);
+            var candidates = new List<VTPendingUploadCandidate>(32);
+            for (int index = 0; index < 32; index++)
+                candidates.Add(new VTPendingUploadCandidate(null, default, false, 31 - index));
+            candidates.Sort(comparison);
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+                candidates.Sort(comparison);
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+        }
+
+        [Test]
+        public void UploadPoolLayout_CacheMatchesOriginalKeysAcrossLayoutChanges()
+        {
+            using var scheduler = new VTUploadScheduler();
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var keyType = typeof(VTUploadScheduler).GetNestedType(
+                "UploadPoolKey", System.Reflection.BindingFlags.NonPublic);
+            var constructor = keyType.GetConstructors(flags)[0];
+            var getKey = typeof(VTUploadScheduler).GetMethod("GetUploadPoolKey", flags);
+            var descriptors = new List<VirtualTextureSpaceDesc>();
+            // Each change affects either layout compatibility or only unrelated space settings.
+            for (int variant = 0; variant < 8; variant++)
+            {
+                var layers = new[]
+                {
+                    new VTLayerDesc(VTLayerSemantic.BaseColor, GraphicsFormat.R8G8B8A8_UNorm,
+                        variant == 1, new Color32(0, 0, 0, 255)),
+                    new VTLayerDesc(variant == 2 ? VTLayerSemantic.Mask : VTLayerSemantic.Normal,
+                        variant == 3 ? GraphicsFormat.R8G8B8A8_SRGB : GraphicsFormat.R8G8B8A8_UNorm,
+                        false, new Color32((byte)variant, 0, 0, 255), variant == 4 ? 1 : 0),
+                };
+                if (variant == 5)
+                    System.Array.Reverse(layers);
+                var stack = new VTStackDesc(variant == 6 ? 8 : 4, 0, variant == 7 ? 8 : 4,
+                    layers, 2, 16);
+                descriptors.Add(new VirtualTextureSpaceDesc("Layout" + variant, 4, 4, 3, stack));
+            }
+
+            var cached = new object[descriptors.Count];
+            var expected = new object[descriptors.Count];
+            for (int index = 0; index < descriptors.Count; index++)
+            {
+                object[] args = { descriptors[index] };
+                expected[index] = constructor.Invoke(args);
+                cached[index] = getKey.Invoke(scheduler, args);
+                Assert.That(cached[index], Is.EqualTo(expected[index]));
+            }
+            for (int left = 0; left < descriptors.Count; left++)
+                for (int right = 0; right < descriptors.Count; right++)
+                    Assert.That(cached[left].Equals(cached[right]),
+                        Is.EqualTo(expected[left].Equals(expected[right])));
+
+            var keys = (System.Collections.ICollection)typeof(VTUploadScheduler)
+                .GetField("m_PoolKeys", flags).GetValue(scheduler);
+            Assert.That(keys.Count, Is.EqualTo(7));
+        }
+
+        [Test]
+        public void UploadPoolLayout_StableReservations_DoNotAllocate()
+        {
+            using var scheduler = new VTUploadScheduler();
+            VirtualTextureSpaceDesc desc = CreateDesc("CachedUploadLayout");
+            Assert.That(scheduler.TryReserveUpload(desc.SpaceName, desc), Is.True);
+            scheduler.ReleaseUploadReservation(desc);
+
+            bool reserved = true;
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                reserved &= scheduler.TryReserveUpload(desc.SpaceName, desc);
+                scheduler.ReleaseUploadReservation(desc);
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(reserved, Is.True);
+            Assert.That(allocated, Is.Zero);
+        }
+
         [Test]
         public void Uploads_RespectFrameMemoryBudget_AndKeepPageTablePending()
         {

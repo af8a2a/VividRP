@@ -1,5 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 
 namespace VividRP.Runtime
 {
@@ -17,7 +19,7 @@ namespace VividRP.Runtime
     internal static class VTStreamCodecRegistry
     {
         private static readonly IVTStreamCodec s_None = new VTNoneStreamCodec();
-        private static readonly IVTStreamCodec s_Zstd = new VTZstdStreamCodec();
+        private static readonly VTZstdStreamCodec s_Zstd = new VTZstdStreamCodec();
 
         internal static IVTStreamCodec Get(VividVirtualTextureStreamCompression compression)
         {
@@ -27,6 +29,30 @@ namespace VividRP.Runtime
                 VividVirtualTextureStreamCompression.Zstd => s_Zstd,
                 _ => null,
             };
+        }
+
+        internal static bool TryDecodeNative(
+            VividVirtualTextureStreamCompression compression,
+            NativeArray<byte> storedData,
+            int decodedByteSize,
+            out byte[] decodedData,
+            out string error)
+        {
+            if (compression == VividVirtualTextureStreamCompression.Zstd)
+                return s_Zstd.TryDecodeNative(storedData, decodedByteSize, out decodedData, out error);
+
+            decodedData = null;
+            if (compression != VividVirtualTextureStreamCompression.None
+                || !storedData.IsCreated || storedData.Length != decodedByteSize)
+            {
+                error = "Raw VT chunk stored and decoded sizes differ.";
+                return false;
+            }
+
+            // Raw chunks still need an owned buffer for the decoded cache.
+            decodedData = storedData.ToArray();
+            error = null;
+            return true;
         }
     }
 
@@ -135,7 +161,28 @@ namespace VividRP.Runtime
             return true;
         }
 
-        public bool TryDecode(byte[] storedData, int decodedByteSize, out byte[] decodedData, out string error)
+        public unsafe bool TryDecode(byte[] storedData, int decodedByteSize, out byte[] decodedData, out string error)
+        {
+            fixed (byte* source = storedData)
+                return TryDecode(source, storedData?.Length ?? -1, decodedByteSize, out decodedData, out error);
+        }
+
+        internal unsafe bool TryDecodeNative(
+            NativeArray<byte> storedData,
+            int decodedByteSize,
+            out byte[] decodedData,
+            out string error)
+        {
+            return TryDecode(
+                storedData.IsCreated ? (byte*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(storedData) : null,
+                storedData.IsCreated ? storedData.Length : -1,
+                decodedByteSize,
+                out decodedData,
+                out error);
+        }
+
+        private unsafe bool TryDecode(
+            byte* source, int storedByteSize, int decodedByteSize, out byte[] decodedData, out string error)
         {
             decodedData = null;
             if (!m_IsAvailable)
@@ -144,7 +191,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            if (storedData == null || decodedByteSize < 0)
+            if (storedByteSize < 0 || decodedByteSize < 0)
             {
                 error = "Invalid Zstd VT chunk input.";
                 return false;
@@ -154,8 +201,8 @@ namespace VividRP.Runtime
             UIntPtr result = VividVT_ZstdDecompress(
                 destination,
                 (UIntPtr)(uint)destination.Length,
-                storedData,
-                (UIntPtr)(uint)storedData.Length);
+                source,
+                (UIntPtr)(uint)storedByteSize);
             if (VividVT_ZstdIsError(result) != 0)
             {
                 error = Marshal.PtrToStringAnsi(VividVT_ZstdGetErrorName(result)) ?? "Zstd decompression failed.";
@@ -188,10 +235,10 @@ namespace VividRP.Runtime
             int compressionLevel);
 
         [DllImport(NativeLibrary, CallingConvention = CallingConvention.Cdecl)]
-        private static extern UIntPtr VividVT_ZstdDecompress(
+        private static extern unsafe UIntPtr VividVT_ZstdDecompress(
             [Out] byte[] destination,
             UIntPtr destinationCapacity,
-            byte[] source,
+            byte* source,
             UIntPtr sourceSize);
 
         [DllImport(NativeLibrary, CallingConvention = CallingConvention.Cdecl)]

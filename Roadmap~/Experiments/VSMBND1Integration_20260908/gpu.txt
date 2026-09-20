@@ -1,1 +1,0 @@
-GPU=Direct3D12 checks=74940 error=none

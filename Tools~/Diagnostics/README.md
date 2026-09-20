@@ -72,7 +72,7 @@ profile 使用当前场景设置，不施加固定射线/页预算 preset。做 
 
 ## 实验专用配方
 
-[16层容量、成本与动态基线](../../Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/README.md) 中的 RTAS 几何参考、36个插入夹具、动态 meshlet 序列和256/1024射线配对属于实验配方，保留原始来源及分析脚本，本轮不复制成另一套常驻实现。
+[16层容量、成本与动态基线](../../Temp~/VSM/Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/README.md) 中的 RTAS 几何参考、36个插入夹具、动态 meshlet 序列和256/1024射线配对属于实验配方，保留原始来源及分析脚本，本轮不复制成另一套常驻实现。
 
 新的普通场景成本检查用 `profile`；页表、阴影和池检查用 `capture`。需要独立几何正确性时，再按原报告导入相应配方，先检查法线有效、参考命中、同相位配对与状态恢复。不要把新的原始缓冲文件直接传给要求旧实验特定 schema 的分析器。
 

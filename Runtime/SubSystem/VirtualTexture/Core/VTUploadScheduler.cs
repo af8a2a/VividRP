@@ -198,6 +198,28 @@ namespace VividRP.Runtime
                 return PhysicalPoolDesc.GetGroupStorageFormat(physicalGroup);
             }
 
+            internal bool Matches(in VirtualTextureSpaceDesc desc)
+            {
+                IReadOnlyList<VTLayerDesc> layers = desc.StackDesc.Layers;
+                if (PhysicalPageSize != desc.PhysicalPageSize || LayerCount != layers.Count)
+                    return false;
+
+                // Match exactly the fields encoded by BuildLayerGroupKey. Upload pools
+                // intentionally ignore space identity, cache size and fallback colors.
+                for (int layerIndex = 0; layerIndex < layers.Count; layerIndex++)
+                {
+                    VTPhysicalPoolLayerDesc cached = PhysicalPoolDesc.Layers[layerIndex];
+                    VTLayerDesc layer = layers[layerIndex];
+                    if (cached.Semantic != layer.Semantic
+                        || cached.PhysicalGroup != layer.PhysicalGroup
+                        || cached.GraphicsFormat != layer.GraphicsFormat
+                        || cached.SRGB != layer.SRGB)
+                        return false;
+                }
+
+                return true;
+            }
+
             public bool Equals(UploadPoolKey other)
             {
                 return PhysicalPageSize == other.PhysicalPageSize
@@ -244,38 +266,6 @@ namespace VividRP.Runtime
             internal long EnqueueSequence { get; }
         }
 
-        private sealed class GraphicsFenceHandle : IVTUploadFenceHandle
-        {
-            private readonly GraphicsFence m_Fence;
-
-            internal GraphicsFenceHandle(GraphicsFence fence)
-            {
-                m_Fence = fence;
-            }
-
-            public bool IsPassed => m_Fence.passed;
-        }
-
-        private sealed class GraphicsFenceFactory : IVTUploadFenceFactory
-        {
-            internal static readonly GraphicsFenceFactory Instance = new();
-
-            private GraphicsFenceFactory()
-            {
-            }
-
-            public IVTUploadFenceHandle Create(CommandBuffer cmd)
-            {
-                if (cmd == null)
-                    throw new ArgumentNullException(nameof(cmd));
-
-                GraphicsFence fence = cmd.CreateGraphicsFence(
-                    GraphicsFenceType.AsyncQueueSynchronisation,
-                    SynchronisationStageFlags.AllGPUOperations);
-                return new GraphicsFenceHandle(fence);
-            }
-        }
-
         private sealed class UploadBatch : IDisposable
         {
             private readonly string m_SpaceName;
@@ -291,6 +281,8 @@ namespace VividRP.Runtime
 
             private int m_RequestCount;
             private IVTUploadFenceHandle m_Fence;
+            private GraphicsFence m_GraphicsFence;
+            private bool m_HasGraphicsFence;
             private Texture2DArray m_CpuStagingTexture;
             private RenderTexture m_GpuStagingTexture;
 
@@ -422,7 +414,7 @@ namespace VividRP.Runtime
                 return stagingTexture;
             }
 
-            internal bool InFlight => m_Fence != null;
+            internal bool InFlight => m_HasGraphicsFence || m_Fence != null;
 
             internal int RequestCount => m_RequestCount;
 
@@ -520,19 +512,30 @@ namespace VividRP.Runtime
                 m_RequestCount = Mathf.Clamp(requestCount, 0, Capacity);
             }
 
-            internal void Submit(IVTUploadFenceHandle fence)
+            internal void Submit(CommandBuffer cmd, IVTUploadFenceFactory fenceFactory)
             {
-                m_Fence = fence ?? throw new ArgumentNullException(nameof(fence));
+                if (fenceFactory != null)
+                {
+                    m_Fence = fenceFactory.Create(cmd) ?? throw new InvalidOperationException("Upload fence factory returned null.");
+                    return;
+                }
+
+                m_GraphicsFence = cmd.CreateGraphicsFence(
+                    GraphicsFenceType.AsyncQueueSynchronisation,
+                    SynchronisationStageFlags.AllGPUOperations);
+                m_HasGraphicsFence = true;
             }
 
             internal bool IsPassed()
             {
-                return m_Fence != null && m_Fence.IsPassed;
+                return m_HasGraphicsFence ? m_GraphicsFence.passed : m_Fence != null && m_Fence.IsPassed;
             }
 
             internal void Reset()
             {
                 m_Fence = null;
+                m_GraphicsFence = default;
+                m_HasGraphicsFence = false;
                 Array.Clear(m_PhysicalPools, 0, m_PhysicalPools.Length);
                 Array.Clear(m_UsesGpuStaging, 0, m_UsesGpuStaging.Length);
                 Array.Clear(m_UsesEncodedStaging, 0, m_UsesEncodedStaging.Length);
@@ -1028,7 +1031,7 @@ namespace VividRP.Runtime
                 }
 
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeSubmitMarker.Auto())
-                    batch.Submit(fenceFactory.Create(cmd));
+                    batch.Submit(cmd, fenceFactory);
                 return true;
             }
 
@@ -1071,9 +1074,12 @@ namespace VividRP.Runtime
             }
         }
 
-        private static IVTUploadFenceFactory s_FenceFactory = GraphicsFenceFactory.Instance;
+        private static IVTUploadFenceFactory s_FenceFactory;
+
+        private static readonly Comparison<QueuedUpload> s_QueuedUploadComparison = QueuedUploadComparer.Instance.Compare;
 
         private readonly Dictionary<UploadPoolKey, UploadPool> m_Pools = new();
+        private readonly List<UploadPoolKey> m_PoolKeys = new();
         private readonly Dictionary<UploadPoolKey, int> m_QueuedCountsByKey = new();
         private readonly List<QueuedUpload> m_QueuedUploads = new();
         private Color32[] m_ScratchPixels = Array.Empty<Color32>();
@@ -1152,12 +1158,12 @@ namespace VividRP.Runtime
 
         internal static void SetFenceFactoryForTesting(IVTUploadFenceFactory fenceFactory)
         {
-            s_FenceFactory = fenceFactory ?? GraphicsFenceFactory.Instance;
+            s_FenceFactory = fenceFactory;
         }
 
         internal static void ResetFenceFactory()
         {
-            s_FenceFactory = GraphicsFenceFactory.Instance;
+            s_FenceFactory = null;
         }
 
         internal void BeginFrame()
@@ -1189,7 +1195,7 @@ namespace VividRP.Runtime
 
         internal int GetAvailableBatchCapacity(string spaceName, in VirtualTextureSpaceDesc desc)
         {
-            UploadPoolKey key = new(desc);
+            UploadPoolKey key = GetUploadPoolKey(desc);
             UploadPool pool = GetOrCreatePool(spaceName, key, desc.MaxUploadsPerFrame);
             m_QueuedCountsByKey.TryGetValue(key, out int queuedCount);
             return Mathf.Max(0, pool.AvailableBatchCapacity - queuedCount);
@@ -1326,7 +1332,7 @@ namespace VividRP.Runtime
             if (GetAvailableBatchCapacity(spaceName, desc) <= 0)
                 return false;
 
-            UploadPoolKey key = new(desc);
+            UploadPoolKey key = GetUploadPoolKey(desc);
             m_QueuedCountsByKey.TryGetValue(key, out int queuedCount);
             m_QueuedCountsByKey[key] = queuedCount + 1;
             m_ReservedUploadCountThisFrame += 1;
@@ -1336,7 +1342,7 @@ namespace VividRP.Runtime
 
         internal void ReleaseUploadReservation(in VirtualTextureSpaceDesc desc)
         {
-            ReleaseUploadReservation(new UploadPoolKey(desc));
+            ReleaseUploadReservation(GetUploadPoolKey(desc));
         }
 
         private void ReleaseUploadReservation(in UploadPoolKey key)
@@ -1361,7 +1367,7 @@ namespace VividRP.Runtime
             in VTPageUploadPayload payload,
             in VTRequestPriorityKey priorityKey)
         {
-            UploadPoolKey key = new(desc);
+            UploadPoolKey key = GetUploadPoolKey(desc);
             GetOrCreatePool(spaceName, key, desc.MaxUploadsPerFrame);
             m_QueuedUploads.Add(new QueuedUpload(
                 key,
@@ -1390,7 +1396,7 @@ namespace VividRP.Runtime
             }
             bool scheduledAny = false;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeSortMarker.Auto())
-                m_QueuedUploads.Sort(QueuedUploadComparer.Instance);
+                m_QueuedUploads.Sort(s_QueuedUploadComparison);
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeScheduleMarker.Auto())
             {
                 int startIndex = 0;
@@ -1440,6 +1446,7 @@ namespace VividRP.Runtime
                 pool.Dispose();
 
             m_Pools.Clear();
+            m_PoolKeys.Clear();
             m_QueuedCountsByKey.Clear();
         }
 
@@ -1490,9 +1497,23 @@ namespace VividRP.Runtime
             m_QueuedCountsByKey.Clear();
         }
 
-        private static int ComputeUploadByteSize(in VirtualTextureSpaceDesc desc)
+        private UploadPoolKey GetUploadPoolKey(in VirtualTextureSpaceDesc desc)
         {
-            return ComputeUploadByteSize(new UploadPoolKey(desc));
+            for (int keyIndex = 0; keyIndex < m_PoolKeys.Count; keyIndex++)
+            {
+                UploadPoolKey key = m_PoolKeys[keyIndex];
+                if (key.Matches(desc))
+                    return key;
+            }
+
+            var newKey = new UploadPoolKey(desc);
+            m_PoolKeys.Add(newKey);
+            return newKey;
+        }
+
+        private int ComputeUploadByteSize(in VirtualTextureSpaceDesc desc)
+        {
+            return ComputeUploadByteSize(GetUploadPoolKey(desc));
         }
 
         private static int ComputeUploadByteSize(in UploadPoolKey key)
@@ -1540,7 +1561,7 @@ namespace VividRP.Runtime
                 if (sizeCompare != 0)
                     return sizeCompare;
 
-                int formatCompare = left.Key.GraphicsFormat.CompareTo(right.Key.GraphicsFormat);
+                int formatCompare = ((int)left.Key.GraphicsFormat).CompareTo((int)right.Key.GraphicsFormat);
                 if (formatCompare != 0)
                     return formatCompare;
 

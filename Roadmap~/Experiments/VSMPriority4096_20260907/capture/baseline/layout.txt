@@ -1,1 +1,0 @@
-4096/256 pages; original layout, density target1, transition.2, fixed exposure12.252064, existing AA. Empty pool each stage; >=128 warmup, jitter aligned. Static32; yaw128 (96sin +/-12deg then32rest). Readback capture is not a GPU performance measurement.

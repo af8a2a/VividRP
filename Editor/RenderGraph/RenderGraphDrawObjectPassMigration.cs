@@ -91,14 +91,28 @@ namespace VividRP.Editor.RenderGraph
         internal static bool MigrateShadowReceiverInputs(RenderGraphEditorGraph graph)
         {
             bool changed = false;
-            foreach (var resolve in graph.GetNodes().OfType<RenderPassNodeData>())
+            foreach (var resolve in graph.GetNodes().OfType<RenderPassNodeData>().ToArray())
             {
                 if (resolve.GetPassType() != typeof(CSMShadowResolvePass)) continue;
                 var atlas = resolve.GetInputPortByName("m_CSMShadowAtlas")?.FirstConnectedPort;
                 if (!(atlas?.GetNode() is RenderPassNodeData shadow)
                     || shadow.GetPassType() != typeof(CSMShadowPass)) continue;
-                changed |= ConnectReceiverInput(graph, resolve, shadow, "m_DepthTexture");
-                changed |= ConnectReceiverInput(graph, resolve, shadow, "m_GBuffer1");
+                var prerequisite = shadow.GetInputPortByName("m_VSMPageTable");
+                if (prerequisite == null) continue;
+                var virtualShadow = prerequisite.FirstConnectedPort?.GetNode() as RenderPassNodeData;
+                if (virtualShadow == null && !prerequisite.IsConnected)
+                {
+                    var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(VSMShadowPass));
+                    if (nodeType == null) continue;
+                    virtualShadow = (RenderPassNodeData)System.Activator.CreateInstance(nodeType);
+                    virtualShadow.Position = shadow.Position + new Vector2(-300, 0);
+                    graph.AddNode(virtualShadow);
+                    changed = true;
+                    changed |= graph.Connect(virtualShadow.GetOutputPortByName("m_PageTable_Out"), prerequisite);
+                }
+                if (virtualShadow?.GetPassType() != typeof(VSMShadowPass)) continue;
+                changed |= ConnectReceiverInput(graph, resolve, virtualShadow, "m_DepthTexture");
+                changed |= ConnectReceiverInput(graph, resolve, virtualShadow, "m_GBuffer1");
             }
             return changed;
         }

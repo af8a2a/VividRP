@@ -200,7 +200,7 @@ namespace VividRP.Runtime
             in VTRequestPriorityKey left,
             in VTRequestPriorityKey right)
         {
-            int tierCompare = right.IOTier.CompareTo(left.IOTier);
+            int tierCompare = ((byte)right.IOTier).CompareTo((byte)left.IOTier);
             return tierCompare != 0 ? tierCompare : Compare(left, right);
         }
 

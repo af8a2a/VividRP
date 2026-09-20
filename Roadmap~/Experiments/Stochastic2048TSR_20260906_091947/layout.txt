@@ -1,6 +1,0 @@
-ROI top-left x=700 y=170 width=420 height=410; binary rows require flipY.
-shadow/accept: RHalf; source/output/unsharp/history/motion: RGBAHalf; debug0/debug5: RGBAFloat. All gzip.
-history.xy=sampleCount/depth; accept=1 accepted,0 rejected; motion.xy=UV motion.
-debug0=preferred/sampled/transition/blend; debug5=missing/shadow/source/error.
-counters=uint32 allocated/requested/newlyAllocated/overflow. Native TSR; diagnostic overhead excluded from perf.
-stochastic9_static last eight frames reference: RGBAFloat mode5, channelG=1024-comparison disk reference.

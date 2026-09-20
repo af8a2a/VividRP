@@ -1959,6 +1959,7 @@ namespace VividRP.Runtime
             for (int slotIndex = 0; slotIndex < m_Bindings.Length; slotIndex++)
             {
                 m_LastLruTouchFrames[slotIndex] = int.MinValue;
+                m_LruNodes[slotIndex] = new LinkedListNode<int>(slotIndex);
                 m_NextPhysicalPageWithSameIdentity[slotIndex] = -1;
                 m_Bindings[slotIndex] = new List<PhysicalPageBinding>(1);
             }
@@ -2638,14 +2639,6 @@ namespace VividRP.Runtime
             m_LastLruTouchFrames[physicalPageId] = frameIndex;
 
             LinkedListNode<int> node = m_LruNodes[physicalPageId];
-            if (node == null)
-            {
-                node = new LinkedListNode<int>(physicalPageId);
-                m_LruNodes[physicalPageId] = node;
-                m_LruPhysicalPages.AddLast(node);
-                return;
-            }
-
             if (node.List != null && node != m_LruPhysicalPages.Last)
             {
                 m_LruPhysicalPages.Remove(node);
@@ -2692,7 +2685,7 @@ namespace VividRP.Runtime
 
                 flushedCount += FlushBindings(
                     slotIndex,
-                    binding => binding.SpaceId == spaceId);
+                    spaceId, null);
             }
 
             return flushedCount;
@@ -2708,7 +2701,7 @@ namespace VividRP.Runtime
             {
                 flushedCount += FlushBindings(
                     slotIndex,
-                    binding => ReferenceEquals(binding.Owner, owner));
+                    owner.SpaceId, owner);
             }
 
             return flushedCount;
@@ -2955,9 +2948,10 @@ namespace VividRP.Runtime
 
         private int FlushBindings(
             int physicalPageId,
-            Predicate<PhysicalPageBinding> predicate)
+            int spaceId,
+            IVTPhysicalPoolOwner owner)
         {
-            if (predicate == null || physicalPageId < 0 || physicalPageId >= m_Bindings.Length)
+            if (physicalPageId < 0 || physicalPageId >= m_Bindings.Length)
                 return 0;
 
             List<PhysicalPageBinding> bindings = m_Bindings[physicalPageId];
@@ -2969,7 +2963,7 @@ namespace VividRP.Runtime
             for (int bindingIndex = bindings.Count - 1; bindingIndex >= 0; bindingIndex--)
             {
                 PhysicalPageBinding binding = bindings[bindingIndex];
-                if (!predicate(binding))
+                if (owner != null ? !ReferenceEquals(binding.Owner, owner) : binding.SpaceId != spaceId)
                     continue;
 
                 binding.Owner?.OnPhysicalPageInvalidated(binding.VirtualPageIndex, generation);

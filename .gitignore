@@ -6,3 +6,8 @@ nvngx_dlssg.dll
 nvngx_dlssnr.dll
 UnityDLSS.dll
 UnityDLSS.dll.meta
+Shaders/VirtualShadowMap/ReferenceVSM
+ReferenceVSM.meta
+
+# Local implementation reports, profiling captures and temporary artifacts.
+/Temp~/

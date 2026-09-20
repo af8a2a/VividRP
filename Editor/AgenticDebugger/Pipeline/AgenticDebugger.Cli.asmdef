@@ -1,0 +1,9 @@
+{
+    "name": "AgenticDebugger.Cli",
+    "references": ["AgenticDebugger", "Unity.Pipeline"],
+    "includePlatforms": ["Editor"],
+    "defineConstraints": ["AGENTIC_DEBUGGER_UNITY_PIPELINE"],
+    "versionDefines": [
+        { "name": "com.unity.pipeline", "expression": "0.7.0-exp.1", "define": "AGENTIC_DEBUGGER_UNITY_PIPELINE" }
+    ]
+}

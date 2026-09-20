@@ -45,6 +45,8 @@ namespace VividRP.Runtime
 
     internal sealed class VTPageTableSpace : IDisposable, IVTUploadRequestCommitter
     {
+        private static readonly Comparison<PendingUploadSortEntry> s_PendingUploadComparison = PendingUploadRequestComparer.Instance.Compare;
+
         private readonly int[] m_MipOffsets;
         private readonly VTResidencyManager m_ResidencyManager;
         private readonly VTPageTableUpdater m_PageTableUpdater;
@@ -1346,7 +1348,7 @@ namespace VividRP.Runtime
             }
 
             if (m_PendingUploadSortEntries.Count > 1)
-                m_PendingUploadSortEntries.Sort(PendingUploadRequestComparer.Instance);
+                m_PendingUploadSortEntries.Sort(s_PendingUploadComparison);
 
             for (int entryIndex = 0; entryIndex < m_PendingUploadSortEntries.Count; entryIndex++)
                 m_SortedPendingRequests.Add(m_PendingUploadSortEntries[entryIndex].Request);

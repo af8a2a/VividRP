@@ -1,9 +1,0 @@
-{
-  "Runtime/RenderPass/Core/VirtualShadowMapClipmapLayout.cs": "c9e078f56374860b8e77ca584cfc2ba015e294852f2677d71a8e86702b44e9e7",
-  "Runtime/RenderPass/Core/CSMShadowPass.cs": "ac568f2293322c02dac290cae30c7d7f1988963dfd4ca4b8fdf2d04d36a22903",
-  "Runtime/RenderPass/Core/VirtualShadowMapReceiverQuality.cs": "e1a47d55e730b3660c69e4d3c6ca015f2b9737196033eb17b2141f6711cd4acf",
-  "Runtime/RenderGraph/FrameContext/VividShadowData.cs": "11c4b0fc470d76fdc9e55d2a3560a9b9661b1887358c88056b74d7397dc42f18",
-  "Runtime/RenderPipeline/CascadedShadowSettingsVolume.cs": "de8a75d931340255c3f637125fbde1e0162b1d16e03836262703c064681a4faa",
-  "Editor/VolumeEditor/CascadedShadowSettingsVolumeEditor.cs": "ba116d84a23cfbd315747b0bf0b96aac403857f43b3ad34b958132381552929a",
-  "Shaders/Core/Private/VSMReceiverQuality.hlsl": "4f73f63a518c8eb28ef205c23f3fe57d4c1582e610ec060a29cb9bcb9ca762cf"
-}

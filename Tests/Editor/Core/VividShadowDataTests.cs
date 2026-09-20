@@ -12,12 +12,14 @@ namespace VividRP.Editor.Tests
             var shadowData = new VividShadowData
             {
                 isCSMActive = true,
+                virtualShadowMapRendered = true,
                 cascadeCount = VividShadowData.MaxCascadeCount,
                 maxShadowDistance = 150.0f,
                 cascadeResolution = 2048,
                 normalBias = 1.0f,
                 mainLightVisibleIndex = 3,
                 hasUnityShadowCasters = true,
+                unityShadowCasterBounds = new Bounds(Vector3.one, Vector3.one),
                 slopeScaleDepthBias = 2.0f,
                 shadowCasterState = Vector4.one,
             };
@@ -36,6 +38,8 @@ namespace VividRP.Editor.Tests
             shadowData.Update(default, null, null);
 
             Assert.That(shadowData.isCSMActive, Is.False);
+            Assert.That(shadowData.virtualShadowMapRendered, Is.False);
+            Assert.That(shadowData.unityShadowCasterBounds, Is.EqualTo(default(Bounds)));
             Assert.That(shadowData.cascadeCount, Is.Zero);
             Assert.That(shadowData.maxShadowDistance, Is.Zero);
             Assert.That(shadowData.cascadeResolution, Is.Zero);

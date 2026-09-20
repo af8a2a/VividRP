@@ -1,4 +1,0 @@
-{
-  "Shaders/Core/Private/VSMSMRT.hlsl": "4edb8721d63d62a09e4d6733dae121580f029e4b0940dd481958e00eb7ad2e65",
-  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.cs": "766cb3a86eec8b002ee816226eda9205a1a44510c7805f7cd6ea5f4479e4560f"
-}

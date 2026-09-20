@@ -1,1 +1,0 @@
-Production BND joint sampling: native/joint/native-return; real camera frame, 4096 4x8, production pool256, no public textures or frame override. Warm64; short replay proof only, not a quality or GPU timing measurement.

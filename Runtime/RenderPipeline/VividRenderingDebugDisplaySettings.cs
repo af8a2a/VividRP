@@ -86,6 +86,7 @@ namespace VividRP.Runtime
         internal const ReGIRDebugVisualizationMode DefaultReGIRDebugMode = ReGIRDebugVisualizationMode.None;
         internal const float DefaultReGIRDebugOpacity = 0.45f;
         internal const float DefaultVisibilityBufferWireframeThickness = 10f;
+        internal const VSMReceiverDebugMode DefaultVSMReceiverDebugMode = VSMReceiverDebugMode.TexelFootprint;
         internal const float DefaultVirtualTextureVisualizationWorldPageSize = 1f;
         internal const float DefaultVirtualTextureAdaptiveMipBiasOverride = -1f;
         internal const int DefaultVirtualTextureFeedbackOverflowCountOverride = -1;
@@ -195,6 +196,9 @@ namespace VividRP.Runtime
         [SerializeField]
         private float m_VisibilityBufferWireframeThickness =
             DefaultVisibilityBufferWireframeThickness;
+
+        [SerializeField]
+        private VSMReceiverDebugMode m_VSMReceiverDebugMode = DefaultVSMReceiverDebugMode;
 
         [SerializeField]
         private bool m_ForceMeshletCullingFromMainCamera;
@@ -450,6 +454,12 @@ namespace VividRP.Runtime
             set => m_VisibilityBufferWireframeThickness = Mathf.Max(0.1f, value);
         }
 
+        internal VSMReceiverDebugMode vsmReceiverDebugMode
+        {
+            get => VSMReceiverDebugPass.NormalizeMode(m_VSMReceiverDebugMode);
+            set => m_VSMReceiverDebugMode = VSMReceiverDebugPass.NormalizeMode(value);
+        }
+
         internal bool forceMeshletCullingFromMainCamera
         {
             get => m_ForceMeshletCullingFromMainCamera;
@@ -618,6 +628,7 @@ namespace VividRP.Runtime
                 visibilityBufferWireframeThickness,
                 DefaultVisibilityBufferWireframeThickness)
             || m_ForceMeshletCullingFromMainCamera
+            || vsmReceiverDebugMode != DefaultVSMReceiverDebugMode
             || reflectionProbeAtlasDebugMode != ReflectionProbeAtlasDebugMode.None
             || m_ReflectionProbeAtlasArraySlice != 0
             || m_ReflectionProbeAtlasMipLevel != 0
@@ -674,6 +685,7 @@ namespace VividRP.Runtime
             m_VisibilityBufferWireframeThickness =
                 DefaultVisibilityBufferWireframeThickness;
             m_ForceMeshletCullingFromMainCamera = false;
+            m_VSMReceiverDebugMode = DefaultVSMReceiverDebugMode;
             m_ReflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugMode.None;
             m_ReflectionProbeAtlasArraySlice = 0;
             m_ReflectionProbeAtlasMipLevel = 0;
@@ -821,6 +833,13 @@ namespace VividRP.Runtime
             public const string OverlayName = "Overlay";
             public const string MaterialName = "Material";
             public const string VisibilityBufferName = "Visibility Buffer";
+            public const string VirtualShadowMapName = "Virtual Shadow Map";
+
+            public static readonly NameAndTooltip VSMReceiverMode = new()
+            {
+                name = "Receiver Mode",
+                tooltip = "VSM receiver visualization shown by the connected VSMReceiverDebugPass output. Levels are zero-based. Cache State and Virtual Page inspect the preferred page. Magenta means unavailable; black is sky except in Shadow Mask."
+            };
             public const string ReflectionProbeAtlasName = "Reflection Probe Atlas";
             public const string SliderName = "Slider";
             public const string VirtualTextureName = "Virtual Texture";
@@ -1150,6 +1169,7 @@ namespace VividRP.Runtime
                 root.children.Add(CreateOverlayFoldout(data));
                 root.children.Add(CreateMaterialFoldout(data));
                 root.children.Add(CreateVisibilityBufferFoldout(data));
+                root.children.Add(CreateVirtualShadowMapFoldout(data));
                 root.children.Add(CreateReflectionProbeAtlasFoldout(data));
                 root.children.Add(CreateSliderFoldout(data));
                 root.children.Add(CreateVirtualTextureFoldout(data));
@@ -1399,6 +1419,20 @@ namespace VividRP.Runtime
                     min = () => -16f,
                     max = () => 16f,
                 });
+                return foldout;
+            }
+
+            private static DebugUI.Foldout CreateVirtualShadowMapFoldout(VividRenderingDebugSettingsData data)
+            {
+                var foldout = new DebugUI.Foldout
+                {
+                    displayName = Strings.VirtualShadowMapName,
+                    opened = true,
+                };
+                foldout.children.Add(CreateEnumField(
+                    Strings.VSMReceiverMode,
+                    () => data.vsmReceiverDebugMode,
+                    value => data.vsmReceiverDebugMode = value));
                 return foldout;
             }
 

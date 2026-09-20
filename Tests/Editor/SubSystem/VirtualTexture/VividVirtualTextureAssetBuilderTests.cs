@@ -505,10 +505,28 @@ namespace VividRP.Editor.Tests
                     Assert.That(producer.RequestPageData(desc, staleRequest), Is.EqualTo(VTPageRequestStatus.Pending));
                     Assert.That(producer.PendingStreamTaskCountForTesting, Is.EqualTo(2));
 
+                    var liveRequests = new[] { liveRequest, staleRequest, liveRequest };
+                    // First non-empty retirement must not initialize a scratch set or Keys wrapper.
+                    long before = System.GC.GetAllocatedBytesForCurrentThread();
+                    producer.RetireRequests(liveRequests);
+                    long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                    Assert.That(allocated, Is.Zero);
+                    Assert.That(producer.PendingStreamTaskCountForTesting, Is.EqualTo(2));
+
+                    producer.RetireRequests(liveRequests);
+                    before = System.GC.GetAllocatedBytesForCurrentThread();
+                    for (int iteration = 0; iteration < 256; iteration++)
+                        producer.RetireRequests(liveRequests);
+                    allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                    Assert.That(allocated, Is.Zero);
+
                     producer.RetireRequests(new[] { liveRequest });
 
                     Assert.That(producer.PendingStreamTaskCountForTesting, Is.EqualTo(1));
                     Assert.That(pendingTasks[1].Task.IsCanceled, Is.True);
+                    producer.RetireRequests(null);
+                    Assert.That(producer.PendingStreamTaskCountForTesting, Is.Zero);
+                    Assert.That(pendingTasks[0].Task.IsCanceled, Is.True);
                 }
                 finally
                 {

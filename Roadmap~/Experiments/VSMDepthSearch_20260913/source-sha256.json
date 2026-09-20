@@ -1,6 +1,0 @@
-{
-  "Shaders/Core/Private/VSMSMRT.hlsl": "1f174cb4da0417b2a52fa72a5a6862d41649927af1baf0daad1e0643abf4aef3",
-  "Shaders/Core/Private/CSMShadowResolve.compute": "bf1f827a2f4cdf7fb1478bd07bcecc6c1a226891d9eed5ca03277f389df15293",
-  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.cs": "288925942f7b14b698f443f66ffea2c31e1ed1062525e533036d378ae3522093",
-  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute": "d93a1fd6185245606e9480b88c2600bc2cafc02ca8a9358b5715d1bec3422966"
-}

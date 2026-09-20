@@ -1,9 +1,0 @@
-{
-  "isCompilationSuccessful": true,
-  "isExecutionSuccessful": true,
-  "executionId": 1,
-  "compilationLogs": "",
-  "executionLogs": "[Log] playing=[False]; paused=[False]; camera=[Perf-Camera]; output=[1920]x[1080]; pose=[(0.02, 7.66, -2.43)]/[(359.23, 3.03, 0.45)]; current pipeline=[New Vivid Render Pipeline Asset 1]; quality pipeline=[New Vivid Render Pipeline Asset 1]; background=[False]; profiler=[False]; timeScale=[1]\n[Log] temporary capture objects=[0]",
-  "localFixedCode": "using UnityEngine;\r\nusing UnityEditor;\r\nusing UnityEngine.Rendering;\r\n\r\nnamespace Unity.AI.Assistant.Agent.Dynamic.Extension.Editor\r\n{\r\n    internal class CommandScript : IRunCommand\r\n    {\r\n        public void Execute(ExecutionResult result)\r\n        {\r\n            result.Log(\"playing={0}; paused={1}; camera={2}; output={3}x{4}; pose={5}/{6}; current pipeline={7}; quality pipeline={8}; background={9}; profiler={10}; timeScale={11}\", EditorApplication.isPlaying, EditorApplication.isPaused, Camera.main.name, Camera.main.pixelWidth, Camera.main.pixelHeight, Camera.main.transform.position, Camera.main.transform.eulerAngles, GraphicsSettings.currentRenderPipeline.name, QualitySettings.renderPipeline.name, Application.runInBackground, UnityEngine.Profiling.Profiler.enabled, Time.timeScale);\r\n            int temp = 0;\r\n            foreach (var o in Resources.FindObjectsOfTypeAll<ScriptableObject>())\r\n                if (o.name == \"VSM_Repaint_Capture_Pipeline_Temporary\" || o.name == \"VSM_Repaint_Capture_Graph_Temporary\")\r\n                    temp++;\r\n            result.Log(\"temporary capture objects={0}\", temp);\r\n        }\r\n    }\r\n}",
-  "result": "Command executed successfully."
-}

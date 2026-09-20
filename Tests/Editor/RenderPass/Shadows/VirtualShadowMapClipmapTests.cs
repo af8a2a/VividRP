@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEditor;
@@ -297,16 +298,26 @@ namespace VividRP.Editor.Tests
                 Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage.rt.volumeDepth, Is.EqualTo(VirtualShadowMapPrototypeRuntime.DepthLayerCount));
                 Assert.That(VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage.rt.volumeDepth, Is.EqualTo(VirtualShadowMapPrototypeRuntime.DepthLayerCount));
                 var pool = VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
+                var workList = VirtualShadowMapPrototypeRuntime.PageWorkList;
+                var workArgs = VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs;
+                Assert.That(workList.count, Is.EqualTo(budget * 2));
+                Assert.That(workArgs.count, Is.EqualTo(6));
+                Assert.That(workArgs.target, Is.EqualTo(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments));
                 for (int i = 0; i < 32; i++) VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget);
                 long before = System.GC.GetAllocatedBytesForCurrentThread();
                 for (int i = 0; i < 256; i++) VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget);
                 long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
                 Assert.That(allocated, Is.Zero);
                 Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage, Is.SameAs(pool));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList, Is.SameAs(workList));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, Is.SameAs(workArgs));
                 VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(256));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList.count, Is.EqualTo(512));
             }
             finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); }
+            Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList, Is.Null);
+            Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, Is.Null);
         }
 
         private static VirtualShadowMapPrototypeCacheKey Key(ulong generation = 1, int mask = -1,

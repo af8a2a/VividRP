@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -26,6 +27,13 @@ namespace VividRP.Editor.Tests
         [TestCase(VSMDebugVisualizationMode.Unmapped)]
         [TestCase(VSMDebugVisualizationMode.Evicted)]
         [TestCase(VSMDebugVisualizationMode.Overflow)]
+        [TestCase(VSMDebugVisualizationMode.Deferred)]
+        [TestCase(VSMDebugVisualizationMode.RequestRole)]
+        [TestCase(VSMDebugVisualizationMode.PhysicalPage)]
+        [TestCase(VSMDebugVisualizationMode.PageAge)]
+        [TestCase(VSMDebugVisualizationMode.StaticCache)]
+        [TestCase(VSMDebugVisualizationMode.DynamicCache)]
+        [TestCase(VSMDebugVisualizationMode.PageOccupancy)]
         public void PageModes_SerializeAndNormalize(VSMDebugVisualizationMode mode)
         {
             var pass = new VSMDebugPass();
@@ -75,12 +83,21 @@ namespace VividRP.Editor.Tests
                 var properties = new MaterialPropertyBlock();
                 VirtualShadowMapPrototypeRuntime.MarkActive();
                 VirtualShadowMapPrototypeRuntime.MarkPageDebugSnapshot(42ul, 10);
-                for (int i = 0; i < 32; i++) VSMDebugPass.BindPageStateResources(properties);
+                var pass = new VSMDebugPass();
+                int layerId = Shader.PropertyToID("_VSMDebugDepthLayer");
+                for (int i = 0; i < 32; i++)
+                {
+                    VSMDebugPass.BindPageStateResources(properties);
+                    pass.DepthLayer = i;
+                    properties.SetInt(layerId, pass.DepthLayer);
+                }
                 long before = GC.GetAllocatedBytesForCurrentThread();
                 int hits = 0;
                 for (int i = 0; i < 256; i++)
                 {
                     VSMDebugPass.BindPageStateResources(properties);
+                    pass.DepthLayer = i;
+                    properties.SetInt(layerId, pass.DepthLayer);
                     if (VSMDebugPass.IsPageStateMode(VSMDebugVisualizationMode.PageStates)
                         && VirtualShadowMapPrototypeRuntime.HasPageDebugSnapshot(42ul, 10)) hits++;
                 }
@@ -89,6 +106,68 @@ namespace VividRP.Editor.Tests
                 Assert.That(allocated, Is.Zero);
             }
             finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); }
+        }
+
+        [Test]
+        public void DepthLayer_IsExposedAsGraphEnumAndClamped()
+        {
+            var pass = new VSMDebugPass();
+            RenderGraphPassEnumParameterUtility.ApplyEnumParameters(pass, typeof(VSMDebugPass),
+                new List<RenderGraphPassEnumParameter> { new() { FieldName = "m_DepthLayer", Value = 15 } });
+            Assert.That(pass.DepthLayer, Is.EqualTo(15));
+            pass.DepthLayer = 50;
+            Assert.That(pass.DepthLayer, Is.EqualTo(15));
+            pass.DepthLayer = -1;
+            Assert.That(pass.DepthLayer, Is.Zero);
+        }
+
+        // In a completed dynamic-only redraw the static page must remain cached.
+        // Deferred data must not be mistaken for valid occupancy or cached depth.
+        [TestCase(15, 10u, 32768u, 0.1f, 0.8f, 0.2f)]
+        [TestCase(16, 10u, 32768u, 1f, 0.1f, 0.1f)]
+        [TestCase(15, 163842u, 32768u, 0.1f, 0.8f, 0.2f)]
+        [TestCase(16, 163842u, 32768u, 1f, 0.6f, 0f)]
+        [TestCase(11, 163842u, 32768u, 1f, 0.6f, 0f)]
+        [TestCase(17, 163842u, 32768u, 1f, 0.6f, 0f)]
+        [TestCase(17, 94210u, 0u, 0f, 0f, 0f)]
+        public void PageShader_DistinguishesDynamicRedrawAndDeferredData(
+            int mode, uint live, uint snapshot, float r, float g, float b)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var material = new Material(Shader.Find(VSMDebugPass.VSMDebugShaderName));
+            var target = new RenderTexture(64, 64, 0, RenderTextureFormat.ARGBFloat);
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            table.SetData(new uint[] { 1 });
+            metadata.SetData(new[] { new uint4(live, 1, 10, snapshot) });
+            counters.SetData(new uint[4]);
+            try
+            {
+                target.Create();
+                ShaderUtil.CompilePass(material, 1, true);
+                var properties = new MaterialPropertyBlock();
+                properties.SetBuffer("_VSMPrototypePageTable", table);
+                properties.SetBuffer("_VSMPrototypePageMetadata", metadata);
+                properties.SetBuffer("_VSMPrototypeAllocatorCounters", counters);
+                properties.SetInt("_VSMDebugVisualizationMode", mode);
+                properties.SetVector("_VSMDebugPageLayout", new Vector4(1, 1, 1, 0));
+                properties.SetVector("_VSMDebugOutputSize", new Vector4(64, 64, 0, 0));
+                using var command = new CommandBuffer();
+                command.SetRenderTarget(target);
+                command.DrawProcedural(Matrix4x4.identity, material, 1, MeshTopology.Triangles, 3, 1, properties);
+                Graphics.ExecuteCommandBuffer(command);
+                var readback = AsyncGPUReadback.Request(target);
+                readback.WaitForCompletion();
+                Assert.That(readback.hasError, Is.False);
+                AssertColor(readback.GetData<Color>()[40 * 64 + 40], new Color(r, g, b, 1));
+            }
+            finally
+            {
+                target.Release();
+                UnityEngine.Object.DestroyImmediate(target);
+                UnityEngine.Object.DestroyImmediate(material);
+            }
         }
 
         [TestCase(3)]
@@ -394,18 +473,14 @@ namespace VividRP.Editor.Tests
             Assert.That(package, Is.Not.Null);
             string path = Path.Combine(
                 package.resolvedPath,
-                "Shaders",
-                "Core",
-                "Private",
-                "Debug",
-                "VSMDebug.shader");
+                "Shaders", "VirtualShadowMap", "Debug", "VSMDebug.shader");
 
             Assert.That(File.Exists(path), Is.True, path);
             string source = File.ReadAllText(path);
 
             StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage", source);
             StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage", source);
-            StringAssert.Contains("max(staticRawDepth, dynamicRawDepth)", source);
+            StringAssert.Contains("_VSMDebugDepthLayer", source);
             StringAssert.Contains("asfloat(rawDepth)", source);
             StringAssert.Contains("VIVID_VSM_DEBUG_OCCUPANCY", source);
         }
@@ -452,7 +527,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(result.Passes, Has.Count.EqualTo(2));
                 Assert.That(
                     result.Passes[0].EnumParameters.Select(parameter => parameter.FieldName),
-                    Is.EquivalentTo(new[] { "m_VisualizationMode", "m_PoolMode" }));
+                    Is.EquivalentTo(new[] { "m_VisualizationMode", "m_PoolMode", "m_DepthLayer" }));
                 Assert.That(
                     result.Passes[0].FloatParameters.Select(parameter => parameter.FieldName),
                     Is.EquivalentTo(new[] { "m_Exposure" }));

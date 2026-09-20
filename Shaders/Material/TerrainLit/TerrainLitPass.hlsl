@@ -4,7 +4,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapCaster.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/MetaPass.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitSampling.hlsl"
 #if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)

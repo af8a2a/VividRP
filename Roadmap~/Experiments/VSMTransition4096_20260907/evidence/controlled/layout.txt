@@ -1,7 +1,0 @@
-CONTROLLED: ReleaseResources at each stage boundary, empty page pool, then >=128 warmup frames and aligned first jitter. No release during measured frames.
-4096/256pages. Four variants: camera-centered .2/.05, bounded-level3 .2/.05. Density LOD width stays .2. Final repeat020_static is camera-centered .2 A/A control.
-Per variant static32, yaw128 (0..95 sin(2*pi*s/95)*12deg worldY, then32rest). No translation in this controlled confirmation; earlier exploratory capture contains translation.
-Native ROI top-left x680 y170 width560 height650; shadow RHalf, source/output RGBAHalf, binary rows flipY.
-Debug0/3/4/5/6/7/8 RGBAFloat 480x270 native grid (4*id+2), rows flipY. Debug8 coverageBlend/lodBlend/coverageWidth/edgeClearance.
-Counters every frame uint32 allocated/requested/new/overflow. Captured-frame page table uint32, metadata uint4 per virtual page; compare valid mapped sets, not frame timestamp fields.
-Current PCF/TSR preserved, fixed EV10012.252064. Readback and cold reset overhead excluded from performance conclusions.

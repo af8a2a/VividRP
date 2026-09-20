@@ -1,9 +1,0 @@
-Packages/com.vivid.render-pipelines/Shaders/Core/Private/Debug/VSMDebug.shader pass
-Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/VisibilityBufferShadowCasterPass.shader pass
-Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLit.shader pass
-Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLit.shader pass
-Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLit.shader pass
-Packages/com.vivid.render-pipelines/Shaders/Material/Unlit/Unlit.shader pass
-Packages/com.vivid.render-pipelines/Shaders/Particles/BillboardUnlit.shader pass
-Packages/com.vivid.render-pipelines/Shaders/Particles/ParticleUnlit.shader pass
-compute pass; shader count=8

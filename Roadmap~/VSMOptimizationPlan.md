@@ -1,12 +1,12 @@
 # VSM 性能与质量优化方案
 
-更新：2026-09-06。依据完整六档单轮基线 **20260905_113329_d0e8beb7**、当前 allocator/receiver 代码及已有 P5 质量诊断。Phase 0 的重绘实验与当前 Game 相机慢速斜移复现已完成，见[实测结果](VSMPhase0Findings.md)；新增[四组密度/逐帧恢复对照](VSMDensityFindings.md)确认 1/2/4 px 均未通过 256 页预算。后续算法优化与完整质量验收仍待实施。
+更新：2026-09-06。依据完整六档单轮基线 **20260905_113329_d0e8beb7**、当前 allocator/receiver 代码及已有 P5 质量诊断。Phase 0 的重绘实验与当前 Game 相机慢速斜移复现已完成，见[实测结果](../Temp~/VSM/Roadmap~/VSMPhase0Findings.md)；新增[四组密度/逐帧恢复对照](../Temp~/VSM/Roadmap~/VSMDensityFindings.md)确认 1/2/4 px 均未通过 256 页预算。后续算法优化与完整质量验收仍待实施。
 
 **决策：Allocate 是首个性能优化对象；过渡质量按密度、覆盖、驻留三类原因诊断。以 4K 固定 256 页作为首个算法对照，以 8K 固定 256 页作为超预算压力对照。** 计时来源检查和质量复现先行，随后分别提交可验证的小改动。
 
 ## 1. 完整基线支持什么结论
 
-[完整复核](Baselines/20260905_113329_d0e8beb7/README.md)已核对 22 个文件、7,815 条观测和 108 行指标；各档超过 10 秒且 ≥300 条。必需 GPU 阶段覆盖率 100%，场景/相机/光源/参数快照一致，采集编辑器启动参数没有 D3D12 debug。
+[完整复核](../Temp~/VSM/Roadmap~/Baselines/20260905_113329_d0e8beb7/README.md)已核对 22 个文件、7,815 条观测和 108 行指标；各档超过 10 秒且 ≥300 条。必需 GPU 阶段覆盖率 100%，场景/相机/光源/参数快照一致，采集编辑器启动参数没有 D3D12 debug。
 
 时间单位 ms，均为未过滤原始观测的 median；GPU 全帧数值仅作当前口径参考。
 
@@ -45,7 +45,7 @@
 
 ### 2.2 先把质量问题分型
 
-使用 [VSMReceiverDebugPass 协议](VSMQualityBaseline.md)，接在选定相机完成的 Resolve 后；质量诊断与性能计量分开。
+使用 [VSMReceiverDebugPass 协议](../Temp~/VSM/Roadmap~/VSMQualityBaseline.md)，接在选定相机完成的 Resolve 后；质量诊断与性能计量分开。
 
 保留三个输入锚点：
 
@@ -100,7 +100,7 @@ A2/A3 后重新分析；只有 eviction 仍显著占时，才继续做空槽/候
 
 固定 4K/256 页、FirstLevel=1、Transition=0.2、bias=1/1/2.5，先只切换 Screen Density off/on；on 使用 target=1 px、LOD bias=0，Hard/PCF 分别对照。这是试验候选，未认证为默认档位。
 
-PCF 同轨迹对照已完成：off 的 69 个采样点均无溢出；on 的 target=1/2/4 px 分别有 69/69、69/69、65/69 个点溢出。1 px 改善大量局部足迹，却增加持续回退；4 px 足迹变大的配对像素占 22.893%，变小占 20.270%。因此当前 256 页预算下三者均不进入默认候选。下一步拆分按层需求、覆盖限制与预算拒绝，保留 coarse 保护语义后再评估请求策略或单独的容量实验。Hard 对照、完整画面质量与独立性能仍未认证，见[完整结果](VSMDensityFindings.md)。
+PCF 同轨迹对照已完成：off 的 69 个采样点均无溢出；on 的 target=1/2/4 px 分别有 69/69、69/69、65/69 个点溢出。1 px 改善大量局部足迹，却增加持续回退；4 px 足迹变大的配对像素占 22.893%，变小占 20.270%。因此当前 256 页预算下三者均不进入默认候选。下一步拆分按层需求、覆盖限制与预算拒绝，保留 coarse 保护语义后再评估请求策略或单独的容量实验。Hard 对照、完整画面质量与独立性能仍未认证，见[完整结果](../Temp~/VSM/Roadmap~/VSMDensityFindings.md)。
 
 旧墙面 level 2 的 5.09 px footprint 若能使用覆盖完整的 level 0，按层尺度可降至约 1.27 px；这是局部几何推算，仍可能受 coverage、最细层或驻留限制，不是严格 1 px 保证。先定位限制再调整资源分辨率、FirstLevel 或需求目标，不用 light bias 掩盖牙齿。
 
@@ -155,8 +155,8 @@ TryEvaluateVSMProjection 即使不再比较深度，也继续投影并请求完�
 
 ## 7. 记录与当前状态
 
-- [最新原始报告及审计](Baselines/20260905_113329_d0e8beb7/README.md)：本文数值来源，保留全部原始样本。
-- [旧方案存档](Baselines/20260905_103520_f847acad/optimization-plan-history.md)：保留上一轮不完整数据下的推导。
-- [P5-A 质量协议](VSMQualityBaseline.md)、[P5-B 选择语义](VSMReceiverQuality.md)：性能相机与旧质量 ROI 不混用。
+- [最新原始报告及审计](../Temp~/VSM/Roadmap~/Baselines/20260905_113329_d0e8beb7/README.md)：本文数值来源，保留全部原始样本。
+- [旧方案存档](../Temp~/VSM/Roadmap~/Baselines/20260905_103520_f847acad/optimization-plan-history.md)：保留上一轮不完整数据下的推导。
+- [P5-A 质量协议](../Temp~/VSM/Roadmap~/VSMQualityBaseline.md)、[P5-B 选择语义](VSMReceiverQuality.md)：性能相机与旧质量 ROI 不混用。
 - 已完成：完整六档单轮性能采集与统计审计。
 - 待完成：计时来源隔离、三轮重复性、P5-B 场景质量矩阵，以及本文提出的优化实施与验收。

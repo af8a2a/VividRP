@@ -1,1 +1,0 @@
-meshes=217 triangles=264754 instances=217 opaque triangle reference; alpha silhouettes excluded from metrics

@@ -1,8 +1,0 @@
-{
-  "scope": "Editor.log since last Begin MonoManager ReloadAssembly",
-  "log": "E:/VividRP_Reborn/Logs/Editor.log",
-  "markerFound": true,
-  "relevantErrors": [],
-  "patterns": "error CS\\d+|Shader error|incompatible keyword|keyword space.*mismatch",
-  "note": "Only C#/shader/keyword failures audited; unrelated licensing/AI service diagnostics excluded."
-}

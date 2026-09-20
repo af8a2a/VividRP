@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using System;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -279,6 +280,37 @@ namespace VividRP.Editor.Tests
                 for (int i = 0; i < 256; i++) RecordSMRT(cmd, settings, shader);
                 long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
                 Assert.That(bytes, Is.Zero);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [Test]
+        public void SMRT_AdaptiveBindingRequiresActiveRaysAndAllocatesNoManagedMemory()
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            try
+            {
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(null, Vector4.one), Is.False);
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(settings,
+                    VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, .5f)), Is.False);
+                settings.virtualShadowMapSMRT.value = true;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(settings,
+                    VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, 0)), Is.False);
+                Vector4 parameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, .5f);
+                settings.virtualShadowMapSMRTAdaptiveRays.value = false;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(settings, parameters), Is.False);
+                settings.virtualShadowMapSMRTAdaptiveRays.value = true;
+                settings.virtualShadowMapSMRTTemporalDenoise.value = false;
+                settings.screenSpaceShadowDenoise.value = false;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(settings, parameters), Is.True);
+                for (int i = 0; i < 32; i++) VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(settings, parameters);
+                int enabled = 0;
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++)
+                    if (VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(settings, parameters)) enabled++;
+                long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(bytes, Is.Zero);
+                Assert.That(enabled, Is.EqualTo(256));
             }
             finally { UnityEngine.Object.DestroyImmediate(settings); }
         }

@@ -117,6 +117,9 @@ namespace VividRP.Runtime
         private static readonly List<VTPageTableSpace> s_TransitionSchedulingSpaces = new();
         private static readonly Comparison<VTPageTableSpace>
             s_AddressSpaceIdComparison = CompareAddressSpacesById;
+        private static readonly Comparison<ResidencyPriorityCandidate> s_ResidencyPriorityCandidateComparison = ResidencyPriorityCandidateComparer.Instance.Compare;
+        private static readonly Comparison<PrefetchPriorityCandidate> s_PrefetchPriorityCandidateComparison = PrefetchPriorityCandidateComparer.Instance.Compare;
+        private static readonly Comparison<VTPendingUploadCandidate> s_PendingUploadCandidateComparison = PendingUploadCandidateComparer.Instance.Compare;
         private static readonly List<VirtualTextureFeedbackBatch> s_InjectedReadbacks = new();
         private static readonly Dictionary<FeedbackMotionKey, FeedbackMotionState> s_FeedbackMotionStates = new();
         private static readonly Dictionary<int, Vector2Int> s_PrefetchBiasBySpace = new();
@@ -1095,7 +1098,7 @@ namespace VividRP.Runtime
                             addressSpace.ProducerPriority));
                     }
                     if (s_ResidencyPriorityCandidates.Count > 1)
-                        s_ResidencyPriorityCandidates.Sort(ResidencyPriorityCandidateComparer.Instance);
+                        s_ResidencyPriorityCandidates.Sort(s_ResidencyPriorityCandidateComparison);
                     s_LastResidencyCandidateCount = s_ResidencyPriorityCandidates.Count;
 
                     s_RemainingResidencyBudgetBySpace.Clear();
@@ -1275,7 +1278,7 @@ namespace VividRP.Runtime
             {
                 s_LastPrefetchCandidateProcessCount = 0;
                 if (s_PrefetchPriorityCandidates.Count > 1)
-                    s_PrefetchPriorityCandidates.Sort(PrefetchPriorityCandidateComparer.Instance);
+                    s_PrefetchPriorityCandidates.Sort(s_PrefetchPriorityCandidateComparison);
                 int remainingGlobalPrefetchRequestBudget = Mathf.Max(
                     0,
                     s_MaxPrefetchAllocationsPerFrame - s_AllocatedPrefetchRequestCount);
@@ -3452,7 +3455,7 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingSortCandidatesMarker.Auto())
             {
                 if (s_PendingUploadCandidates.Count > 1)
-                    s_PendingUploadCandidates.Sort(PendingUploadCandidateComparer.Instance);
+                    s_PendingUploadCandidates.Sort(s_PendingUploadCandidateComparison);
             }
 
             int skippedUploadCount = 0;

@@ -1,1 +1,0 @@
-warmup=64 measured=256 bytes=0 width=2048 height=2048 layers=8

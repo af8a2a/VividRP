@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -102,7 +103,7 @@ namespace VividRP.Editor
                     WriteSnapshot(folder, "snapshot.json", FindCamera(request.cameraId, false));
                     return JsonUtility.ToJson(new Result { kind = "snapshot", state = "complete", outputDirectory = folder });
                 }
-                if (request.action != "profile" && request.action != "capture") throw new ArgumentException("Unknown action.");
+                if (request.action != "profile" && request.action != "capture" && request.action != "smrt-cost") throw new ArgumentException("Unknown action.");
                 if (s_Active != null || VSMQualityReproduction.IsRunning) throw new InvalidOperationException("Another diagnostic is active.");
                 foreach (var window in Resources.FindObjectsOfTypeAll<VSMBaselineRecorderWindow>())
                     if (window.IsRecording) throw new InvalidOperationException("Baseline Recorder is active.");
@@ -126,7 +127,7 @@ namespace VividRP.Editor
                 throw new ArgumentException("Invalid warm-up/frame count or timeout (1–3600 seconds).");
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                 throw new InvalidOperationException("Wait for compilation/import to finish.");
-            if (request.action == "capture" && !SystemInfo.supportsAsyncGPUReadback)
+            if ((request.action == "capture" || request.action == "smrt-cost") && !SystemInfo.supportsAsyncGPUReadback)
                 throw new NotSupportedException("Async GPU readback is unavailable.");
         }
 
@@ -198,6 +199,8 @@ namespace VividRP.Editor
         private static void ProfileMenu() => Debug.Log(Execute("{\"action\":\"profile\"}"));
         [MenuItem("Tools/VividRP/Diagnostics/Capture VSM Buffers")]
         private static void CaptureMenu() => Debug.Log(Execute("{\"action\":\"capture\"}"));
+        [MenuItem("Tools/VividRP/Diagnostics/Capture SMRT Cost")]
+        private static void SMRTCostMenu() => Debug.Log(Execute("{\"action\":\"smrt-cost\"}"));
         [MenuItem("Tools/VividRP/Diagnostics/Cancel Current Diagnostic")]
         private static void CancelMenu() { if (s_Active != null) s_Active.Stop("cancelled"); }
 
@@ -208,6 +211,9 @@ namespace VividRP.Editor
             private readonly Camera m_Camera;
             private readonly Action<ScriptableRenderContext, Camera> m_EndCamera;
             private readonly Action<ComputePassContext, Texture, Texture, Texture> m_Resolve;
+            private readonly Action<CSMShadowResolvePass, ComputePassContext, int, int> m_SMRTCost;
+            private readonly Action<AsyncGPUReadbackRequest> m_SMRTCostReadback;
+            private static readonly ProfilingSampler s_SMRTCostReplay = new("VSM.SMRTCostReplay");
             private readonly EditorApplication.CallbackFunction m_Update;
             private readonly AssemblyReloadEvents.AssemblyReloadCallback m_Reload;
             private readonly Action m_Quit;
@@ -217,6 +223,8 @@ namespace VividRP.Editor
             private RenderStageCapture m_Timing;
             private ComputeShader m_Copy;
             private RenderTexture m_DepthCopy;
+            private GraphicsBuffer m_CostBuffer;
+            private int m_CostWidth, m_CostHeight;
             private int m_CopyKernel;
             private bool m_Stopped, m_Queued;
             private int m_LastFrame = -1, m_CameraObservations;
@@ -226,6 +234,7 @@ namespace VividRP.Editor
                 m_Request = request; m_Camera = camera; m_Started = EditorApplication.timeSinceStartup;
                 Result = new Result { jobId = Guid.NewGuid().ToString("N"), kind = request.action, state = "warming", outputDirectory = folder };
                 m_EndCamera = EndCamera; m_Resolve = Resolve; m_Update = Update;
+                m_SMRTCost = CaptureSMRTCost; m_SMRTCostReadback = SaveSMRTCost;
                 m_Reload = OnReload; m_Quit = OnQuit; m_PlayMode = OnPlayMode;
             }
 
@@ -239,6 +248,8 @@ namespace VividRP.Editor
                     m_Timing = new RenderStageCapture(m_Request.markers ?? RenderStageCapture.VsmMarkers, m_Request.frames);
                     RenderPipelineManager.endCameraRendering += m_EndCamera;
                 }
+                else if (m_Request.action == "smrt-cost")
+                    CSMShadowResolvePass.EditorSMRTCostCapture += m_SMRTCost;
                 else
                 {
                     var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VividDiagnostics).Assembly);
@@ -323,6 +334,41 @@ namespace VividRP.Editor
                 m_Manifest.channels.Add(channel); Result.pendingReadbacks++;
             }
 
+            private void CaptureSMRTCost(CSMShadowResolvePass pass, ComputePassContext context, int width, int height)
+            {
+                if (m_Stopped || m_Queued) return;
+                var camera = context.Get<VividCameraData>();
+                if (camera.camera != m_Camera || !Ready(camera.frameIndex)) return;
+                m_Queued = true;
+                try
+                {
+                    m_CostWidth = width; m_CostHeight = height;
+                    m_CostBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
+                        checked(width * height * (SMRTCostCapture.CounterCount / 4)), sizeof(uint) * 4)
+                        { name = "VSMSMRTCostCapture" };
+                    WriteSnapshot(Result.outputDirectory, "frame.json", m_Camera);
+                    var cmd = context.cmd.m_WrappedCommandBuffer;
+                    using (new ProfilingScope(cmd, s_SMRTCostReplay)) pass.RecordSMRTCost(context, m_CostBuffer);
+                    cmd.RequestAsyncReadback(m_CostBuffer, m_SMRTCostReadback);
+                    Result.pendingReadbacks++; Result.observations = 1; Result.state = "readback";
+                }
+                catch (Exception exception) { Result.error = exception.Message; }
+            }
+
+            private void SaveSMRTCost(AsyncGPUReadbackRequest readback)
+            {
+                try
+                {
+                    if (m_Stopped) return;
+                    if (readback.hasError) throw new InvalidOperationException("SMRT cost readback failed.");
+                    var report = SMRTCostCapture.Summarize(readback.GetData<uint>(), m_CostWidth, m_CostHeight);
+                    File.WriteAllText(Path.Combine(Result.outputDirectory, "smrt-cost.json"), JsonUtility.ToJson(report, true));
+                    if (report.shadowDifferencesOverTolerance != 0) Result.error = "SMRT replay differs from raw production shadow by more than 1e-6.";
+                }
+                catch (Exception exception) { Result.error = exception.Message; }
+                finally { Result.pendingReadbacks--; }
+            }
+
             private void BufferReadback(CommandBuffer cmd, GraphicsBuffer buffer, string name)
             {
                 if (buffer == null) throw new InvalidOperationException("Missing buffer: " + name);
@@ -375,6 +421,7 @@ namespace VividRP.Editor
                 m_Stopped = true;
                 RenderPipelineManager.endCameraRendering -= m_EndCamera;
                 CSMShadowResolvePass.EditorReceiverCapture -= m_Resolve;
+                CSMShadowResolvePass.EditorSMRTCostCapture -= m_SMRTCost;
                 EditorApplication.update -= m_Update;
                 AssemblyReloadEvents.beforeAssemblyReload -= m_Reload;
                 EditorApplication.quitting -= m_Quit;
@@ -391,8 +438,9 @@ namespace VividRP.Editor
                 {
                     // The staging texture must outlive native readback. Normal completion
                     // already has zero pending requests; only early teardown needs a drain.
-                    if (m_DepthCopy != null && Result.pendingReadbacks > 0) AsyncGPUReadback.WaitAllRequests();
+                    if ((m_DepthCopy != null || m_CostBuffer != null) && Result.pendingReadbacks > 0) AsyncGPUReadback.WaitAllRequests();
                     if (m_DepthCopy != null) UnityEngine.Object.DestroyImmediate(m_DepthCopy);
+                    m_CostBuffer?.Dispose();
                     m_Timing?.Dispose(); s_Active = null;
                     // Persist terminal state across domain reload.
                     try { WriteResult(); }

@@ -21,6 +21,8 @@
 #pragma kernel InspectSMRTDepthIntervals
 #pragma kernel ResetSMRTComparison
 #pragma kernel CompareSMRTOutputs
+#pragma kernel FilterSMRTAdaptive VIVID_VSM_RECEIVER_DEBUG VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_ADAPTIVE_RAYS
+#pragma kernel InspectSMRTWavePolicy
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -33,6 +35,7 @@ StructuredBuffer<float4> _SamplingNormals;
 RWStructuredBuffer<float2> _SamplingResults;
 int _SamplingCount;
 int2 _SamplingPixel;
+float2 _SamplingAdaptive; // wave adaptation enabled, use production uniform binding
 
 StructuredBuffer<uint> _TestStaticData;
 StructuredBuffer<uint> _TestDynamicData;
@@ -106,7 +109,7 @@ void InspectSMRTSamples(uint3 id : SV_DispatchThreadID)
     float2 phase = VSMSMRTPhase(uint2(input.xy), (uint)input.z, (mode & 1u) * 2u);
     uint2 ray = uint2(_SamplingNormals[id.x].xy);
     _SamplingResults[id.x] = mode < 2u ? phase : mode == 2u
-        ? VSMSMRTDiskSample(phase, ray.x, ray.y) : VSMSMRTReceiverOffset(phase, ray.x, ray.y);
+        ? VSMSMRTDiskSample(phase, ray.x) : VSMSMRTReceiverOffset(phase, ray.x);
 }
 
 [numthreads(8, 8, 1)]
@@ -278,6 +281,47 @@ void TraceSMRTClipmaps(uint3 id : SV_DispatchThreadID)
     _SamplingResults[id.x] = float2(valid ? 1 : 0, visibility);
 }
 
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+[numthreads(64, 1, 1)]
+void FilterSMRTAdaptive(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    if (_SamplingNormals[id.x].w < 0) { _SamplingResults[id.x] = float2(-2, 0); return; }
+    g_VSMDebugSMRT = 0;
+    float visibility;
+    bool valid;
+    if (_SamplingAdaptive.y > 0)
+        valid = TryFilterVSMSMRT(input.xyz, _SamplingNormals[id.x], (int)input.w,
+            uint2(id.x, _SamplingPixel.y), visibility);
+    else
+        valid = TryFilterVSMSMRT(input.xyz, _SamplingNormals[id.x], (int)input.w,
+            uint2(id.x, _SamplingPixel.y), _SamplingAdaptive.x > 0, visibility);
+    _SamplingResults[id.x] = float2(valid ? visibility : -1, g_VSMDebugSMRT.x);
+}
+#endif
+
+// Synthetic visibility streams exercise the production wave vote, including
+// lanes which become unavailable after an earlier mixed vote.
+[numthreads(64, 1, 1)]
+void InspectSMRTWavePolicy(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x]; // visibility bitmask, invalid ray, active, reserved
+    if (input.z < 0) { _SamplingResults[id.x] = float2(-2, 0); return; }
+    bool complete = true;
+    float sum = 0;
+    int maximum = clamp((int)_VSMSMRTParameters.x, 4, 8);
+    for (int ray = 0; ray < maximum; ray++)
+    {
+        bool valid = ray != (int)input.y;
+        sum += (((uint)input.x >> ray) & 1u) != 0u ? 1 : 0;
+        bool finish = VSMWaveCanFinish(ray, sum, valid, complete);
+        if (!valid) { _SamplingResults[id.x] = float2(-1, ray + 1); return; }
+        if (finish) { _SamplingResults[id.x] = float2(sum / (ray + 1), ray + 1); return; }
+    }
+    _SamplingResults[id.x] = float2(sum / maximum, maximum);
+}
 // Exact role/age union under divergent and partially active waves.
 [numthreads(64, 1, 1)]
 void MarkCoalescedFootprints(uint3 id : SV_DispatchThreadID)
@@ -287,7 +331,7 @@ void MarkCoalescedFootprints(uint3 id : SV_DispatchThreadID)
     MarkVSMReceiverPage(input.xy, (int)input.z, (uint)input.w, (int)_SamplingNormals[id.x].x);
 }
 
-// Reprojection and adaptive policy run through the shipping helpers.
+// History now serves denoising only; the second result is the configured cap.
 [numthreads(64, 1, 1)]
 void InspectVSMHistory(uint3 id : SV_DispatchThreadID)
 {
@@ -297,7 +341,7 @@ void InspectVSMHistory(uint3 id : SV_DispatchThreadID)
     uint2 pixel = uint2(_SamplingPixel);
     float2 history;
     bool valid = LoadVSMHistory(pixel, world, normal, history);
-    _SamplingResults[id.x] = float2(valid ? history.x : -1, VSMAdaptiveRayCount(pixel, world, normal));
+    _SamplingResults[id.x] = float2(valid ? history.x : -1, clamp((int)_VSMSMRTParameters.x, 4, 8));
 }
 
 [numthreads(64, 1, 1)]

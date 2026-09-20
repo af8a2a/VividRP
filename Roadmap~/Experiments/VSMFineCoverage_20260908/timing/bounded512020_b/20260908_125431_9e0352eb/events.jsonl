@@ -1,4 +1,0 @@
-{"utc":"2026-09-08T12:54:31.8882415Z","action":"case_started","reason":"","caseIndex":0,"attempt":0,"observations":0,"measuredSeconds":0.0}
-{"utc":"2026-09-08T12:54:36.8637098Z","action":"segment_started","reason":"","caseIndex":0,"attempt":0,"observations":0,"measuredSeconds":0.0}
-{"utc":"2026-09-08T12:54:41.9466282Z","action":"case_finished","reason":"completed_with_warnings","caseIndex":0,"attempt":0,"observations":843,"measuredSeconds":5.00024119897958}
-{"utc":"2026-09-08T12:54:41.9476306Z","action":"session_finished","reason":"completed","caseIndex":1,"attempt":0,"observations":843,"measuredSeconds":5.00024119897958}

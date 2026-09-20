@@ -1,7 +1,0 @@
-rays=2 frames=256 fourDimensions=permutations radialStrata=complete origins=insideSupport
-rays=4 frames=256 fourDimensions=permutations radialStrata=complete origins=insideSupport
-rays=5 frames=256 fourDimensions=permutations radialStrata=complete origins=insideSupport
-rays=6 frames=256 fourDimensions=permutations radialStrata=complete origins=insideSupport
-rays=7 frames=256 fourDimensions=permutations radialStrata=complete origins=insideSupport
-rays=8 frames=256 fourDimensions=permutations radialStrata=complete origins=insideSupport
-passed=6

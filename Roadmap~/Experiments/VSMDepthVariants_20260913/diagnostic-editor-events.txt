@@ -1,8 +1,0 @@
-d3d12: Device failed error (887a0006).
-d3d12: GfxDevice was not out of Local memory
-d3d12: GfxDevice was not out of Non-Local memory
-d3d12: Device failed error (887a0006).
-d3d12: GfxDevice was not out of Local memory
-d3d12: GfxDevice was not out of Non-Local memory
-A crash has been intercepted by the crash handler. For call stack and other details, see the latest crash report generated in:
-Follow-up Editor later exited normally before the optional closing control.

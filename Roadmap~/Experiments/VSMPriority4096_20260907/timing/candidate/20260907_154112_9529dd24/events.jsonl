@@ -1,3 +1,0 @@
-{"utc":"2026-09-07T15:41:12.3821599Z","action":"case_started","reason":"","caseIndex":0,"attempt":0,"observations":0,"measuredSeconds":0.0}
-{"utc":"2026-09-07T15:41:17.1082331Z","action":"segment_started","reason":"","caseIndex":0,"attempt":0,"observations":0,"measuredSeconds":0.0}
-{"utc":"2026-09-07T15:41:22.1938418Z","action":"case_finished","reason":"completed_with_warnings","caseIndex":0,"attempt":0,"observations":805,"measuredSeconds":5.001960700113379}

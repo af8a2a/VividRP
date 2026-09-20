@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using System;
 using NUnit.Framework;
 using UnityEngine.Rendering;
@@ -10,6 +11,38 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VSMReceiverDebugPassTests
     {
+        private VSMReceiverDebugMode m_PreviousMode;
+
+        [SetUp]
+        public void SaveDebuggerMode()
+        {
+            m_PreviousMode = VividRenderingDebugDisplaySettings.Data.vsmReceiverDebugMode;
+            VividRenderingDebugDisplaySettings.Data.vsmReceiverDebugMode = VSMReceiverDebugMode.TexelFootprint;
+        }
+
+        [TearDown]
+        public void RestoreDebuggerMode()
+        {
+            VividRenderingDebugDisplaySettings.Data.vsmReceiverDebugMode = m_PreviousMode;
+        }
+
+        [Test]
+        public void ReceiverMode_ComesFromDebuggerAndIgnoresLegacyGraphParameter()
+        {
+            var pass = new VSMReceiverDebugPass();
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.vsmReceiverDebugMode = VSMReceiverDebugMode.CacheState;
+                RenderGraphPassEnumParameterUtility.ApplyEnumParameters(pass, typeof(VSMReceiverDebugPass),
+                    new[] { new RenderGraphPassEnumParameter { FieldName = "m_VisualizationMode", Value = 5 } });
+                Assert.That(pass.VisualizationMode, Is.EqualTo(VSMReceiverDebugMode.CacheState));
+                CollectionAssert.IsEmpty(RenderGraphPassEnumParameterUtility.EnumerateSerializableEnumFields(typeof(VSMReceiverDebugPass)));
+                pass.VisualizationMode = VSMReceiverDebugMode.ShadowMask;
+                Assert.That(VividRenderingDebugDisplaySettings.Data.vsmReceiverDebugMode, Is.EqualTo(VSMReceiverDebugMode.ShadowMask));
+            }
+            finally { pass.Dispose(); }
+        }
+
         [Test]
         public void GeneratedRegistry_ExposesReceiverDebugNode()
         {
@@ -85,6 +118,7 @@ namespace VividRP.Editor.Tests
         {
             pass.ConfigureOutputSize(1920, 1080);
             pass.VisualizationMode = VSMReceiverDebugMode.SamplingWork;
+            _ = pass.VisualizationMode;
             VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(42, 10);
             command.Clear();
             using var scope = new ProfilingScope(command, VSMProfiling.Resolve);

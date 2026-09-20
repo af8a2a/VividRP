@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using System;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -331,7 +332,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SMRT_BND1PhasesAdvanceAcross256FramesAndKeepRayStrataAndReceiverSupport()
+        public void SMRT_BND1PhasesAdvanceAcross256FramesAndKeepProgressiveSupport()
         {
             using var f = new Fixture();
             var inputs = new float4[256 * 4];
@@ -357,9 +358,8 @@ namespace VividRP.Editor.Tests
                         Assert.That(visited[dim, bin], Is.False, "Temporal sequence must not use the static 1SPP mask");
                         visited[dim, bin] = true;
                     }
-                    int ray = frame % count;
                     float radiusSquared = math.lengthsq(samples[i + 2]);
-                    Assert.That(radiusSquared, Is.InRange((float)ray / count - 1e-6f, (float)(ray + 1) / count + 1e-6f));
+                    Assert.That(radiusSquared, Is.InRange(0f, 1.000001f));
                     Assert.That(samples[i + 3].x, Is.InRange(-1f, 1f));
                     Assert.That(samples[i + 3].y, Is.InRange(-1f, 1f));
                 }
@@ -688,6 +688,133 @@ namespace VividRP.Editor.Tests
                     foreach (float2 sample in output) Assert.That(sample, Is.EqualTo(new float2(1, 1)));
                 }
             }
+        }
+
+        [TestCase(4)]
+        [TestCase(5)]
+        [TestCase(6)]
+        [TestCase(7)]
+        [TestCase(8)]
+        public void SMRT_WaveUniformRegionsStopAtOneOrTwoRaysWithoutHistory(int maximum)
+        {
+            using var f = new Fixture();
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(maximum, 8, 1, .02f));
+            f.Shader.SetVector("_VSMHistoryParameters", Vector4.zero);
+            var inputs = new float4[77]; // Full and partial waves.
+            for (int i = 0; i < inputs.Length; i++) inputs[i] = new float4(.5f, .5f, .2f, 0);
+            for (int shadowed = 0; shadowed <= 1; shadowed++)
+            {
+                for (int page = 0; page < 12; page++) f.Map(page, 11 - page, shadowed == 1 ? .8f : 0);
+                f.Upload();
+                float expected = 1 - shadowed;
+                f.Shader.SetVector("_SamplingAdaptive", new Vector4(1, 0, 0, 0));
+                foreach (float2 sample in f.Run("FilterSMRTAdaptive", inputs))
+                    Assert.That(sample, Is.EqualTo(new float2(expected, shadowed == 1 ? 2 : 1)));
+                f.Shader.SetVector("_SamplingAdaptive", Vector4.zero);
+                foreach (float2 sample in f.Run("FilterSMRTAdaptive", inputs))
+                    Assert.That(sample, Is.EqualTo(new float2(expected, maximum)));
+            }
+        }
+
+        [TestCase(4)]
+        [TestCase(5)]
+        [TestCase(6)]
+        [TestCase(7)]
+        [TestCase(8)]
+        public void SMRT_WaveMixedReceiversMatchFullBudgetAndMissingLanesPreventExit(int maximum)
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
+            for (int y = 0; y < 8; y++) for (int x = 4; x < 8; x++) SetSMRTDepth(f, x, y, .8f);
+            f.Upload();
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(maximum, 8, 1, .02f));
+            var inputs = new float4[77];
+            // Every wave starts mixed, independently of the noise phase.
+            for (int i = 0; i < inputs.Length; i++)
+                inputs[i] = new float4((i % 2 == 0 ? 3.5f : 4.5f) / 8, .5f, .2f, 0);
+            f.Shader.SetVector("_SamplingAdaptive", Vector4.zero);
+            float2[] reference = f.Run("FilterSMRTAdaptive", inputs);
+            f.Shader.SetVector("_SamplingAdaptive", new Vector4(1, 0, 0, 0));
+            CollectionAssert.AreEqual(reference, f.Run("FilterSMRTAdaptive", inputs));
+            foreach (float2 sample in reference) Assert.That(sample.y, Is.EqualTo(maximum));
+            // Missing lanes must vote before leaving their fully lit neighbours.
+            for (int i = 0; i < inputs.Length; i++)
+                inputs[i] = new float4(i % 2 == 0 ? .25f : .5f, .5f, .2f, 0);
+            f.TableData[1] = 0; f.Upload();
+            float2[] missing = f.Run("FilterSMRTAdaptive", inputs);
+            for (int i = 0; i < inputs.Length; i++)
+                Assert.That(missing[i], Is.EqualTo(i % 2 == 0 ? new float2(1, maximum) : new float2(-1, 0)));
+        }
+
+        [TestCase(4)]
+        [TestCase(8)]
+        public void SMRT_ProductionAdaptiveSettingControlsExitIndependentlyOfHistory(int maximum)
+        {
+            using var f = new Fixture();
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(maximum, 8, 1, .02f));
+            f.Shader.SetVector("_SamplingAdaptive", new Vector4(0, 1, 0, 0));
+            var inputs = new float4[77];
+            for (int i = 0; i < inputs.Length; i++) inputs[i] = new float4(.5f, .5f, .2f, 0);
+            for (int shadowed = 0; shadowed <= 1; shadowed++)
+            {
+                for (int page = 0; page < 12; page++) f.Map(page, 11 - page, shadowed == 1 ? .8f : 0);
+                f.Upload();
+                for (int adaptive = 0; adaptive <= 1; adaptive++)
+                for (int history = 0; history <= 1; history++)
+                {
+                    f.Shader.SetVector("_VSMHistoryParameters", new Vector4(history, adaptive, 4, 0));
+                    foreach (float2 sample in f.Run("FilterSMRTAdaptive", inputs))
+                        Assert.That(sample, Is.EqualTo(new float2(1 - shadowed,
+                            adaptive == 0 ? maximum : shadowed == 1 ? 2 : 1)));
+                }
+            }
+        }
+
+        [TestCase(4)]
+        [TestCase(8)]
+        public void SMRT_WavePolicyLatchesUnavailableLanesAndDoesNotExitOnLaterAllMiss(int maximum)
+        {
+            using var f = new Fixture();
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(maximum, 8, 1, .02f));
+            var inputs = new float4[77];
+            // Odd lanes miss first, fail on the second ray, then leave. The
+            // remaining all-hit lanes must not incorrectly declare umbra.
+            for (int i = 0; i < inputs.Length; i++) inputs[i] = new float4(i % 2, i % 2 == 0 ? -1 : 1, 0, 0);
+            float2[] result = f.Run("InspectSMRTWavePolicy", inputs);
+            for (int i = 0; i < inputs.Length; i++)
+                Assert.That(result[i], Is.EqualTo(i % 2 == 0 ? new float2(0, maximum) : new float2(-1, 2)));
+            for (int i = 0; i < inputs.Length; i++) inputs[i] = new float4(254 + i % 2, -1, 0, 0);
+            result = f.Run("InspectSMRTWavePolicy", inputs);
+            for (int i = 0; i < inputs.Length; i++)
+                Assert.That(result[i], Is.EqualTo(new float2(i % 2 == 0 ? (float)(maximum - 1) / maximum : 1, maximum)));
+        }
+
+        [Test]
+        public void SMRT_ProgressiveFirstRayCoversWholeDiskAndPowerOfTwoPrefixesStratify()
+        {
+            using var f = new Fixture();
+            var inputs = new float4[256 * 8]; var rays = new float4[inputs.Length];
+            for (int frame = 0; frame < 256; frame++) for (int ray = 0; ray < 8; ray++)
+            {
+                int i = frame * 8 + ray;
+                inputs[i] = new float4(19, 37, frame, 2); rays[i] = new float4(ray, 8, 0, 0);
+            }
+            float2[] samples = f.Run("InspectSMRTSamples", inputs, normals: rays);
+            var firstRayBins = new int[8];
+            for (int frame = 0; frame < 256; frame++)
+            {
+                firstRayBins[Mathf.Min(7, Mathf.FloorToInt(math.lengthsq(samples[frame * 8]) * 8 + 1e-5f))]++;
+                foreach (int count in new[] { 2, 4, 8 })
+                {
+                    var bins = new bool[count];
+                    for (int ray = 0; ray < count; ray++)
+                    {
+                        int bin = Mathf.Min(count - 1, Mathf.FloorToInt(math.lengthsq(samples[frame * 8 + ray]) * count + 1e-5f));
+                        Assert.That(bins[bin], Is.False); bins[bin] = true;
+                    }
+                }
+            }
+            foreach (int count in firstRayBins) Assert.That(count, Is.EqualTo(32));
         }
 
         [SetUp]
@@ -1457,12 +1584,14 @@ namespace VividRP.Editor.Tests
 
         [TestCase(false)]
         [TestCase(true)]
-        public void StochasticFilter_IncompletePotentialFootprintUsesTheSameFallbackAcrossFrames(bool dirty)
+        [TestCase(true, true)]
+        public void StochasticFilter_IncompletePotentialFootprintUsesTheSameFallbackAcrossFrames(bool dirty, bool deferred = false)
         {
             using var f = new Fixture();
             f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 1));
             for (int page = 0; page < 3; page++) f.Map(page, 8 + page, 0.8f);
             if (dirty) { f.Map(3, 11, 0.8f); f.MetadataData[3].x |= 4; }
+            if (deferred) f.MetadataData[3].x |= (1u << 15) | (1u << 17);
             for (int page = 4; page < 8; page++) f.Map(page, page - 4);
             f.Upload();
             // Only a small disk corner can reach fine page 3. Residency must

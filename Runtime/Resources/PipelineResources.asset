@@ -63,8 +63,6 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: b974f021133ecde479d75a3763b559b1, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
-  - ResourceName: Shaders/Core/Private/Debug/VSMDebug
-    ResourceObject: {fileID: 4800000, guid: e6505fc15aea3bd42bf6101f5fe0e874, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/VisibilityBufferDebug
     ResourceObject: {fileID: 4800000, guid: 8fc0c26bc17f0c34199116c378c2318e, type: 3}
   - ResourceName: Shaders/Core/Private/DepthOfField
@@ -257,6 +255,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: ae38dd41aa46f9f47b50c0ad31eb25d7, type: 3}
   - ResourceName: Shaders/Material/MaterialClassification
     ResourceObject: {fileID: 7200000, guid: 10706a155531873498d61668200a903d, type: 3}
+  - ResourceName: Shaders/VirtualShadowMap/Debug/VSMDebug
+    ResourceObject: {fileID: 4800000, guid: e6505fc15aea3bd42bf6101f5fe0e874, type: 3}
   - ResourceName: Texture/BlueNoise/RankingTile1SPP.png
     ResourceObject: {fileID: 2800000, guid: 3014c3f0ebe00d743a49e8b7913dad74, type: 3}
   - ResourceName: Texture/BlueNoise/RankingTile256SPP.png

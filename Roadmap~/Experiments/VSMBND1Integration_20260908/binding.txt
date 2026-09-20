@@ -1,1 +1,0 @@
-stable CommandBuffer binding: 0 bytes / 10000 calls; 100 warm-up calls

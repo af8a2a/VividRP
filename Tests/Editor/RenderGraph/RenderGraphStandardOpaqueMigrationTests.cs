@@ -89,14 +89,16 @@ namespace VividRP.Editor.Tests
             Assert.That(graph.Connect(depthOutput, resolve.GetInputPortByName("m_DepthTexture")), Is.True);
             Assert.That(graph.Connect(normalOutput, resolve.GetInputPortByName("m_GBuffer1")), Is.True);
             Assert.That(RenderGraphDrawObjectPassMigration.MigrateShadowReceiverInputs(graph), Is.True);
-            Assert.That(shadow.GetInputPortByName("m_DepthTexture").FirstConnectedPort, Is.SameAs(depthOutput));
-            Assert.That(shadow.GetInputPortByName("m_GBuffer1").FirstConnectedPort, Is.SameAs(normalOutput));
+            var virtualShadow = (RenderPassNodeData)shadow.GetInputPortByName("m_VSMPageTable").FirstConnectedPort.GetNode();
+            Assert.That(virtualShadow.GetPassType(), Is.EqualTo(typeof(VSMShadowPass)));
+            Assert.That(virtualShadow.GetInputPortByName("m_DepthTexture").FirstConnectedPort, Is.SameAs(depthOutput));
+            Assert.That(virtualShadow.GetInputPortByName("m_GBuffer1").FirstConnectedPort, Is.SameAs(normalOutput));
             Assert.That(RenderGraphDrawObjectPassMigration.MigrateShadowReceiverInputs(graph), Is.False);
             var explicitDepth = normal.GetOutputPortByName("m_GBufferDepth_Out");
-            graph.Disconnect(depthOutput, shadow.GetInputPortByName("m_DepthTexture"));
-            graph.Connect(explicitDepth, shadow.GetInputPortByName("m_DepthTexture"));
+            graph.Disconnect(depthOutput, virtualShadow.GetInputPortByName("m_DepthTexture"));
+            graph.Connect(explicitDepth, virtualShadow.GetInputPortByName("m_DepthTexture"));
             Assert.That(RenderGraphDrawObjectPassMigration.MigrateShadowReceiverInputs(graph), Is.False);
-            Assert.That(shadow.GetInputPortByName("m_DepthTexture").FirstConnectedPort, Is.SameAs(explicitDepth));
+            Assert.That(virtualShadow.GetInputPortByName("m_DepthTexture").FirstConnectedPort, Is.SameAs(explicitDepth));
         }
 
         [Test]

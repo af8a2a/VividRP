@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using NUnit.Framework;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using VividRP.Editor;
@@ -256,6 +257,73 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RequestPriorityKey_CompareForIO_DoesNotAllocate()
+        {
+            var keys = new[]
+            {
+                VTRequestPriorityKey.FromRequest(new VTRequest(1, default, 0, 1, 0, 0), false, 0),
+                VTRequestPriorityKey.FromLegacyIOPriority(false),
+                VTRequestPriorityKey.FromLegacyIOPriority(true),
+                VTRequestPriorityKey.FromRequest(new VTRequest(1, default, 0, 1, 1, 0), true, 0),
+            };
+            int total = 0;
+            for (int left = 0; left < keys.Length; left++)
+                for (int right = 0; right < keys.Length; right++)
+                    total += VTRequestPriorityUtility.CompareForIO(keys[left], keys[right]);
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+                for (int left = 0; left < keys.Length; left++)
+                    for (int right = 0; right < keys.Length; right++)
+                        total += VTRequestPriorityUtility.CompareForIO(keys[left], keys[right]);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(allocated, Is.Zero);
+            Assert.That(total, Is.Zero);
+        }
+
+        [Test]
+        public void AsyncReadBatch_NativeResults_DoNotAllocateAndPreserveCommandRanges()
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
+            File.WriteAllBytes(path, new byte[] { 2, 3, 5, 7, 11, 13 });
+            try
+            {
+                using var backend = new VTAsyncReadManagerBackend();
+                using var batch = (IVTNativeIOBatch)backend.CreateBatch(path, new[]
+                {
+                    new VTIOReadCommand(1, 2, false),
+                    new VTIOReadCommand(4, 2, false),
+                });
+                DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!batch.IsCompleted && DateTime.UtcNow < deadline)
+                    Thread.Sleep(1);
+                Assert.That(batch.IsCompleted && !batch.Failed, Is.True, batch.Error);
+                Assert.That(batch.TryGetNativeResult(-1, out _), Is.False);
+                Assert.That(batch.TryGetNativeResult(2, out _), Is.False);
+                Assert.That(batch.TryGetNativeResult(0, out NativeArray<byte> first), Is.True);
+                Assert.That(batch.TryGetNativeResult(1, out NativeArray<byte> second), Is.True);
+                Assert.That(first.ToArray(), Is.EqualTo(new byte[] { 3, 5 }));
+                Assert.That(second.ToArray(), Is.EqualTo(new byte[] { 11, 13 }));
+
+                bool succeeded = true;
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 256; iteration++)
+                {
+                    succeeded &= batch.TryGetNativeResult(0, out _);
+                    succeeded &= batch.TryGetNativeResult(1, out _);
+                }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(succeeded, Is.True);
+                Assert.That(allocated, Is.Zero);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void RequestPriorityKey_PreservesViewProducerMipAndIOTierOrdering()
         {
             var backgroundRequest = new VTRequest(
@@ -378,6 +446,17 @@ namespace VividRP.Editor.Tests
 
                 manager.PollProgress();
                 Assert.That(backend.PollOrder, Is.EqualTo(new long[] { 0, 64 }));
+
+                // Reuse the recording buffer so only the production polling path is measured.
+                backend.PollOrder.Clear();
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 256; iteration++)
+                {
+                    manager.PollProgress();
+                    backend.PollOrder.Clear();
+                }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
             }
             finally
             {
@@ -690,6 +769,347 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AsyncReadBatch_ReusesWrapperAndResetsCommandRanges()
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
+            File.WriteAllBytes(path, new byte[] { 2, 3, 5, 7, 11, 13 });
+            try
+            {
+                using var backend = new VTAsyncReadManagerBackend();
+                var commands = new[] { new VTIOReadCommand(0, 2, false) };
+                IVTIOBatch first = backend.CreateBatch(path, commands);
+                first.Dispose();
+                first.Dispose();
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 64; iteration++)
+                    backend.CreateBatch(path, commands).Dispose();
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+
+                commands[0] = new VTIOReadCommand(3, 3, false);
+                using IVTIOBatch reused = backend.CreateBatch(path, commands);
+                Assert.That(reused, Is.SameAs(first));
+                using IVTIOBatch other = backend.CreateBatch(path, commands);
+                Assert.That(other, Is.Not.SameAs(reused));
+                DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!reused.IsCompleted && DateTime.UtcNow < deadline)
+                    Thread.Sleep(1);
+                Assert.That(reused.Failed, Is.False, reused.Error);
+                Assert.That(((IVTNativeIOBatch)reused).TryGetNativeResult(0, out var result), Is.True);
+                Assert.That(result.ToArray(), Is.EqualTo(new byte[] { 7, 11, 13 }));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void ChunkManager_DefaultBurstAndQueuedCancellation_ReuseEntriesAndLeasesWithoutAllocation()
+        {
+            using var manager = new VTStreamChunkManager();
+            var leases = new VTChunkLease[64];
+            var locations = new VividVirtualTextureTilePayloadLocation[64];
+            for (int index = 0; index < locations.Length; index++)
+                locations[index] = CreateRawLocation(index, index * 64);
+            // Warm the code without filling the default pool with an earlier burst.
+            VTChunkLease warmFirst = manager.Acquire("pooled.stream", 1, locations[0], false);
+            VTChunkLease warmSecond = manager.Acquire("pooled.stream", 1, locations[1], false);
+            warmFirst.Dispose();
+            warmSecond.Dispose();
+            bool acquired = true;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (uint version = 2; version < 18; version++)
+            {
+                for (int index = 0; index < leases.Length; index++)
+                {
+                    leases[index] = manager.Acquire("pooled.stream", version, locations[index], false);
+                    acquired &= leases[index] != null;
+                }
+                for (int index = 0; index < leases.Length; index++)
+                    leases[index]?.Dispose();
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(acquired, Is.True);
+            Assert.That(allocated, Is.Zero);
+            Assert.That(manager.PendingChunkCount, Is.Zero);
+        }
+
+        [Test]
+        public void ChunkManager_RetiredEntryWaitsForBatchBeforeReuseAndClearsPreviousState()
+        {
+            using var manager = new VTStreamChunkManager();
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var entryField = typeof(VTChunkLease).GetField("m_Entry", flags);
+            var recycle = (Action<VTStreamChunkManager.ChunkEntry>)typeof(VTStreamChunkManager)
+                .GetMethod("TryRecycleEntry", flags).CreateDelegate(typeof(Action<VTStreamChunkManager.ChunkEntry>), manager);
+            var location = CreateRawLocation(0, 0);
+            VTChunkLease first = manager.Acquire("retired.stream", 1, location, false);
+            var entry = (VTStreamChunkManager.ChunkEntry)entryField.GetValue(first);
+            entry.BatchReferenceCount = 1;
+            entry.RetryCount = 2;
+            entry.Error = "previous attempt";
+            entry.DecodedData = new byte[16];
+            first.Dispose();
+            using VTChunkLease other = manager.Acquire("retired.stream", 2, location, false);
+            Assert.That(entryField.GetValue(other), Is.Not.SameAs(entry));
+            Assert.That(entry.Retired, Is.True);
+            entry.BatchReferenceCount = 0;
+            recycle(entry);
+            using VTChunkLease reused = manager.Acquire("retired.stream", 3, location, true);
+            Assert.That(entryField.GetValue(reused), Is.SameAs(entry));
+            Assert.That(entry.RetryCount, Is.Zero);
+            Assert.That(entry.Error, Is.Null);
+            Assert.That(entry.DecodedData, Is.Null);
+            Assert.That(entry.Retired, Is.False);
+            Assert.That(entry.Key.ContentVersion, Is.EqualTo(3));
+            Assert.That(entry.PriorityKey.UsesHighIOPriority, Is.True);
+        }
+
+        [Test]
+        public void ChunkManager_IntrusiveLru_RemovesMiddleHeadTailAndSingleton()
+        {
+            using var manager = new VTStreamChunkManager();
+            var remove = (Action<VTStreamChunkManager.ChunkEntry>)typeof(VTStreamChunkManager)
+                .GetMethod("RemoveFromLru", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .CreateDelegate(typeof(Action<VTStreamChunkManager.ChunkEntry>), manager);
+            var first = new VTStreamChunkManager.ChunkEntry { State = VTStreamChunkState.Ready, ReferenceCount = 1 };
+            var middle = new VTStreamChunkManager.ChunkEntry { State = VTStreamChunkState.Ready, ReferenceCount = 1 };
+            var last = new VTStreamChunkManager.ChunkEntry { State = VTStreamChunkState.Ready, ReferenceCount = 1 };
+            manager.Release(first);
+            manager.Release(middle);
+            manager.Release(last);
+            remove(middle);
+            Assert.That(first.LruNext, Is.SameAs(last));
+            Assert.That(last.LruPrevious, Is.SameAs(first));
+            middle.ReferenceCount = 1;
+            manager.Release(middle);
+            Assert.That(last.LruNext, Is.SameAs(middle));
+            remove(first);
+            remove(middle);
+            Assert.That(last.LruPrevious, Is.Null);
+            Assert.That(last.LruNext, Is.Null);
+            remove(last);
+            remove(last);
+            first.ReferenceCount = 1;
+            manager.Release(first);
+            Assert.That(first.LruPrevious, Is.Null);
+            Assert.That(first.LruNext, Is.Null);
+        }
+
+        [Test]
+        public void ChunkManager_ReadyLeaseReacquisition_ReusesLruNodeWithoutAllocating()
+        {
+            using var manager = new VTStreamChunkManager();
+            manager.SetIOBackendForTesting(new CompletedIOBackend());
+            var location = CreateRawLocation(0, 0);
+            VTChunkLease lease = manager.Acquire("lru-reuse.stream", 1, location, false);
+            manager.SubmitPendingReads();
+            WaitForLease(manager, lease);
+            Assert.That(lease.State, Is.EqualTo(VTStreamChunkState.Ready), lease.Error);
+            lease.Dispose();
+
+            bool allReady = true;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                lease = manager.Acquire("lru-reuse.stream", 1, location, false);
+                allReady &= lease != null && lease.State == VTStreamChunkState.Ready;
+                lease?.Dispose();
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allReady, Is.True);
+            Assert.That(allocated, Is.Zero);
+        }
+
+        private delegate IVTPageProducerTask RentChunkRequestDelegate(
+            VTChunkLease lease, in VividVirtualTextureTilePayloadLocation location);
+        private delegate void InitializeEncodedUploadDelegate(
+            in VividVirtualTextureTilePayload payload, IReadOnlyList<VTLayerDesc> layers, int pageSize);
+
+        [Test]
+        public void AssetProducer_FirstDefaultRequestBurst_UsesPreallocatedObjectsAndDictionary()
+        {
+            var source = CreateTexture(16, 16, false);
+            var asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            var builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string path = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
+            VividVirtualTextureAssetProducer.ResetStreamReadHandlersForTesting();
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = source, PageSize = 2, BorderSize = 0, MipCount = 1, StreamDataPath = path,
+                });
+                using var producer = new VividVirtualTextureAssetProducer(asset);
+                using var manager = new VTStreamChunkManager();
+                const System.Reflection.BindingFlags flags =
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var rent = (RentChunkRequestDelegate)typeof(VividVirtualTextureAssetProducer)
+                    .GetMethod("RentChunkRequest", flags).CreateDelegate(typeof(RentChunkRequestDelegate), producer);
+                int capacity = Math.Min(builtData.TileCount, VTVirtualTextureStreamRequestGate.DefaultMaxPendingReadCount);
+                Assert.That(capacity, Is.EqualTo(64));
+                var dictionary = typeof(VividVirtualTextureAssetProducer).GetField("m_ChunkRequests", flags).GetValue(producer);
+                Assert.That((int)dictionary.GetType().GetMethod("EnsureCapacity").Invoke(dictionary, new object[] { 0 }),
+                    Is.GreaterThanOrEqualTo(capacity));
+                var leases = new VTChunkLease[capacity];
+                var requests = new IVTPageProducerTask[capacity];
+                for (int index = 0; index < capacity; index++)
+                    leases[index] = new VTChunkLease(manager,
+                        new VTStreamChunkManager.ChunkEntry { ReferenceCount = 1, State = VTStreamChunkState.Reading });
+                var location = CreateRawLocation(0, 0);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < capacity; index++)
+                    requests[index] = rent(leases[index], location);
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                for (int index = 0; index < capacity; index++)
+                    ((IDisposable)requests[index]).Dispose();
+            }
+            finally
+            {
+                Object.DestroyImmediate(source);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+                File.Delete(path);
+            }
+        }
+
+        [TestCase(GraphicsFormat.R8G8B8A8_UNorm, 64)]
+        [TestCase(GraphicsFormat.RGBA_BC7_UNorm, 16)]
+        public void ChunkRequest_EncodedUploadAndPoolReturn_DoNotAllocateAndKeepLayerOffsets(
+            GraphicsFormat format, int layerByteSize)
+        {
+            // This fixture exercises request ownership without asset importing or disk I/O.
+            var producer = (VividVirtualTextureAssetProducer)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(VividVirtualTextureAssetProducer));
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var rent = (RentChunkRequestDelegate)typeof(VividVirtualTextureAssetProducer)
+                .GetMethod("RentChunkRequest", flags).CreateDelegate(typeof(RentChunkRequestDelegate), producer);
+            using var manager = new VTStreamChunkManager();
+            var entry = new VTStreamChunkManager.ChunkEntry { State = VTStreamChunkState.Ready, ReferenceCount = 1 };
+            var lease = new VTChunkLease(manager, entry);
+            var location = CreateRawLocation(0, 0);
+            var task = rent(lease, location);
+            var finalizer = (IVTEncodedPageFinalizer)task;
+            var initialize = (InitializeEncodedUploadDelegate)task.GetType().GetMethod("InitializeUpload", flags)
+                .CreateDelegate(typeof(InitializeEncodedUploadDelegate), task);
+            var layers = new[]
+            {
+                new VTLayerDesc(VTLayerSemantic.BaseColor, format, false, default),
+                new VTLayerDesc(VTLayerSemantic.Normal, format, false, default),
+            };
+            var bytes = new byte[4 + 2 * layerByteSize];
+            for (int index = 0; index < bytes.Length; index++)
+                bytes[index] = (byte)index;
+            var payload = new VividVirtualTextureTilePayload(bytes, 4, 2 * layerByteSize);
+            var texture = new Texture2DArray(4, 4, 2, format, TextureCreationFlags.None);
+            try
+            {
+                initialize(payload, layers, 4);
+                finalizer.FinalizeEncodedUploadLayer(texture, 0, 0);
+                finalizer.FinalizeEncodedUploadLayer(texture, 1, 1);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 256; iteration++)
+                {
+                    finalizer.FinalizeEncodedUploadLayer(texture, 0, 0);
+                    finalizer.FinalizeEncodedUploadLayer(texture, 1, 1);
+                }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                for (int layer = 0; layer < 2; layer++)
+                {
+                    var actual = texture.GetPixelData<byte>(0, layer);
+                    for (int index = 0; index < layerByteSize; index++)
+                        Assert.That(actual[index], Is.EqualTo(bytes[4 + layer * layerByteSize + index]));
+                }
+
+                var truncated = new VividVirtualTextureTilePayload(bytes, 4, 2 * layerByteSize - 1);
+                initialize(truncated, layers, 4);
+                Assert.Throws<InvalidOperationException>(() => finalizer.FinalizeEncodedUploadLayer(texture, 1, 1));
+
+                // Detach the lease to measure first pool return independently of lease-pool growth.
+                var detached = (VTChunkLease)task.GetType().GetMethod("DetachLease", flags).Invoke(task, null);
+                before = GC.GetAllocatedBytesForCurrentThread();
+                finalizer.Dispose();
+                allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                finalizer.Dispose(); // Must not insert the same object twice.
+                var reused = rent(detached, location);
+                Assert.That(reused, Is.SameAs(task));
+                var otherLease = new VTChunkLease(manager,
+                    new VTStreamChunkManager.ChunkEntry { State = VTStreamChunkState.Ready, ReferenceCount = 1 });
+                var other = rent(otherLease, location);
+                Assert.That(other, Is.Not.SameAs(task));
+                ((IDisposable)other).Dispose();
+                ((IDisposable)reused).Dispose();
+            }
+            finally
+            {
+                finalizer.Dispose();
+                Object.DestroyImmediate(texture);
+            }
+        }
+
+        [Test]
+        public void ChunkManager_KeepsNativeBatchAliveWhileDecodeIsRunningAndPendingLeaseIsReleased()
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
+            var bytes = new byte[128];
+            bytes[0] = 37;
+            File.WriteAllBytes(path, bytes);
+            using var started = new ManualResetEventSlim();
+            using var resume = new ManualResetEventSlim();
+            var manager = new VTStreamChunkManager(state =>
+            {
+                var entry = (VTStreamChunkManager.ChunkEntry)state;
+                started.Set();
+                if (!resume.Wait(TimeSpan.FromSeconds(5)))
+                    return new VTStreamChunkManager.DecodeResult(null, "Timed out waiting for decode resume.");
+                return new VTStreamChunkManager.DecodeResult(entry.NativeStoredData.ToArray(), null);
+            });
+            VTChunkLease first = null;
+            VTChunkLease pending = null;
+            try
+            {
+                manager.Configure(VividVirtualTextureIOBackendMode.AsyncReadManager, 4, 1, 1);
+                var firstLocation = CreateRawLocation(0, 0);
+                first = manager.Acquire(path, 1, firstLocation, false);
+                pending = manager.Acquire(path, 1, CreateRawLocation(1, 64), false);
+                manager.SubmitPendingReads();
+                DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!started.IsSet && DateTime.UtcNow < deadline)
+                {
+                    manager.PollProgress();
+                    Thread.Sleep(1);
+                }
+                Assert.That(started.IsSet, Is.True);
+                Assert.That(manager.PendingDecodeCount, Is.EqualTo(1));
+                pending.Dispose();
+                pending = null;
+                Assert.That(manager.PendingDecodeCount, Is.Zero);
+                // Replacing the backend must wait for the retained batch's worker.
+                manager.Configure(VividVirtualTextureIOBackendMode.Auto, 4, 1, 1);
+                manager.PollProgress();
+                resume.Set();
+                WaitForLease(manager, first);
+                Assert.That(first.State, Is.EqualTo(VTStreamChunkState.Ready), first.Error);
+                Assert.That(first.TryGetTilePayload(firstLocation, out var payload), Is.True);
+                Assert.That(payload.Data[0], Is.EqualTo(37));
+            }
+            finally
+            {
+                resume.Set();
+                pending?.Dispose();
+                first?.Dispose();
+                manager.Dispose();
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void ChunkManager_SharesAsyncReadLeaseAndEvictsUnreferencedReadyData()
         {
             string streamPath = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
@@ -806,6 +1226,16 @@ namespace VividRP.Editor.Tests
                     Is.True,
                     $"level {level}: {decodeError}");
                 Assert.That(roundTrip, Is.EqualTo(decoded));
+                using var native = new NativeArray<byte>(stored.Length + 8, Allocator.Persistent);
+                NativeArray<byte>.Copy(stored, 0, native, 4, stored.Length);
+                Assert.That(
+                    codec.TryDecodeNative(native.GetSubArray(4, stored.Length), decoded.Length,
+                        out byte[] nativeRoundTrip, out string nativeError),
+                    Is.True, nativeError);
+                Assert.That(nativeRoundTrip, Is.EqualTo(decoded));
+                Assert.That(
+                    codec.TryDecodeNative(native.GetSubArray(4, stored.Length), decoded.Length + 1,
+                        out _, out _), Is.False);
             }
         }
 

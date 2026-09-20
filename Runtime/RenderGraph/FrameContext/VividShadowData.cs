@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
@@ -14,6 +15,7 @@ namespace VividRP.Runtime
         private const float MinCascadeRadius = 0.001f;
 
         public bool isCSMActive;
+        internal bool virtualShadowMapRendered;
         internal readonly VirtualShadowMapClipmapLayout clipmaps = new();
         public int cascadeCount;
         public float maxShadowDistance;
@@ -22,6 +24,7 @@ namespace VividRP.Runtime
 
         internal int mainLightVisibleIndex = -1;
         internal bool hasUnityShadowCasters;
+        internal Bounds unityShadowCasterBounds;
         internal bool hasPrimitiveShadowCasters;
         internal float depthBias;
         internal float slopeScaleDepthBias;
@@ -42,12 +45,14 @@ namespace VividRP.Runtime
         {
             clipmaps.Reset();
             isCSMActive = false;
+            virtualShadowMapRendered = false;
             cascadeCount = 0;
             maxShadowDistance = 0f;
             cascadeResolution = 0;
             normalBias = 0f;
             mainLightVisibleIndex = -1;
             hasUnityShadowCasters = false;
+            unityShadowCasterBounds = default;
             hasPrimitiveShadowCasters = false;
             depthBias = 0f;
             slopeScaleDepthBias = 0f;
@@ -101,7 +106,6 @@ namespace VividRP.Runtime
             depthBias = Mathf.Max(0.0f, additionalLightData.depthBias);
             slopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
             shadowCasterState = BuildShadowCasterState(lightData.mainVisibleLight);
-            Bounds unityShadowCasterBounds = default;
             hasUnityShadowCasters = mainLightVisibleIndex >= 0
                 && mainLightVisibleIndex < cullingResults.visibleLights.Length
                 && cullingResults.GetShadowCasterBounds(
@@ -600,7 +604,7 @@ namespace VividRP.Runtime
                 && float.IsFinite(value.z);
         }
 
-        private static bool IsBoundsUsable(Bounds bounds)
+        internal static bool IsBoundsUsable(Bounds bounds)
         {
             Vector3 size = bounds.size;
             return IsFinite(bounds.min)

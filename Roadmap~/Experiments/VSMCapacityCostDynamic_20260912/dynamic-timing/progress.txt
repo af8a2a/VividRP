@@ -1,1 +1,0 @@
-static_adaptive_reverse warmup

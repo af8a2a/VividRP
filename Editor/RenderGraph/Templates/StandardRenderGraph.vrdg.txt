@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 12501, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: StandardRenderGraph
+  m_Name: __VividVSMShadowPassMigration
   m_EditorClassIdentifier: UnityEditor.dll::Unity.GraphToolkit.Editor.Implementation.GraphObjectImp
   m_GraphModel:
     rid: 8515051663678505028
@@ -59,7 +59,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 2506.35, y: -333.34668}
         m_Title: CSMShadowAtlas (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -69,11 +69,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -128,13 +128,13 @@ MonoBehaviour:
           Hash: 26e3daf364f1d2f9484d4aa05e538060
         m_Version: 2
         m_Name: CSMShadowAtlas (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569128883355716
         m_Modifiers: 1
@@ -331,7 +331,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: -17, y: 652.18506}
         m_Title: HZB (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -341,11 +341,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -368,13 +368,13 @@ MonoBehaviour:
           Hash: 41ea73073e0a7205ec4dfc13c59f9730
         m_Version: 2
         m_Name: HZB (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569313814675542
         m_Modifiers: 1
@@ -446,8 +446,8 @@ MonoBehaviour:
           Hash: 2a19114abcaa08d275342f8fbb74b111
         m_Version: 2
         m_Position: {x: 2179.4072, y: 1206.8358}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -465,11 +465,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -521,7 +521,7 @@ MonoBehaviour:
     - rid: 5491569314989342781
       type: {class: HZBGeneratePass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 5491569314989342783
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -597,8 +597,8 @@ MonoBehaviour:
           Hash: 1933a22b6c045fb47a446bc36a39417d
         m_Version: 2
         m_Position: {x: 21.080536, y: 1004.7551}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -614,11 +614,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -689,7 +689,7 @@ MonoBehaviour:
     - rid: 5491569450071621759
       type: {class: LightGridPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 5491569450071621775
       type: {class: VariableNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -702,7 +702,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 706.0167, y: -560.041}
         m_Title: DirectionalLights (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -712,11 +712,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -771,13 +771,13 @@ MonoBehaviour:
           Hash: 65ecaff0a15eb42c4f62b8f235a222d8
         m_Version: 2
         m_Name: DirectionalLights (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569450071621778
         m_Modifiers: 1
@@ -803,7 +803,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 648.26666, y: -486.44104}
         m_Title: PunctualLights (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -813,11 +813,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -872,13 +872,13 @@ MonoBehaviour:
           Hash: beb51de6b266b54afda9bbf6f8cc5efb
         m_Version: 2
         m_Name: PunctualLights (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569450071621782
         m_Modifiers: 1
@@ -904,7 +904,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 683.4667, y: -447.341}
         m_Title: AreaLights (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -914,11 +914,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -973,13 +973,13 @@ MonoBehaviour:
           Hash: 8c1c9dce371f33b7480c7dbc2819f030
         m_Version: 2
         m_Name: AreaLights (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569450071621786
         m_Modifiers: 1
@@ -1005,7 +1005,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 643.56665, y: -396.89102}
         m_Title: LayeredOffset (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -1015,11 +1015,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -1074,13 +1074,13 @@ MonoBehaviour:
           Hash: 043814a5daa2e43cfc14e12a81511743
         m_Version: 2
         m_Name: LayeredOffset (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569450071621790
         m_Modifiers: 1
@@ -1106,7 +1106,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 599.56665, y: -340.54102}
         m_Title: LayeredLightList (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -1116,11 +1116,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -1175,13 +1175,13 @@ MonoBehaviour:
           Hash: d77799ca21e8d755370f980ae13f577c
         m_Version: 2
         m_Name: LayeredLightList (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569450071621794
         m_Modifiers: 1
@@ -1207,7 +1207,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 584.56665, y: -304.891}
         m_Title: LogBaseBuffer (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -1217,11 +1217,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -1276,13 +1276,13 @@ MonoBehaviour:
           Hash: 364c10702a09a21303ee7ffb7e9ed346
         m_Version: 2
         m_Name: LogBaseBuffer (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569450071621798
         m_Modifiers: 1
@@ -1404,7 +1404,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 565.002, y: -265.85886}
         m_Title: BigTileLightList (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -1414,11 +1414,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -1473,13 +1473,13 @@ MonoBehaviour:
           Hash: fbe4c03f91178d038ed94d51da31fba8
         m_Version: 2
         m_Name: BigTileLightList (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569450071621805
         m_Modifiers: 1
@@ -1505,7 +1505,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 550.3579, y: -232.27235}
         m_Title: BigTileVolumetricLightList (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -1515,11 +1515,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -1574,13 +1574,13 @@ MonoBehaviour:
           Hash: b378a401952edb0adc70c7907365f0a9
         m_Version: 2
         m_Name: BigTileVolumetricLightList (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 5491569450071621809
         m_Modifiers: 1
@@ -2061,8 +2061,8 @@ MonoBehaviour:
           Hash: 0f27443488aa00fe7fe259b3455a461b
         m_Version: 2
         m_Position: {x: 4916.537, y: 1104.0576}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -2080,11 +2080,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -2183,7 +2183,7 @@ MonoBehaviour:
     - rid: 5491569460029161597
       type: {class: AntialiasingPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 5491569460029161598
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -2735,8 +2735,8 @@ MonoBehaviour:
           Hash: ddec4f3fec2d41202ed5dd313aa16e48
         m_Version: 2
         m_Position: {x: 490.96216, y: 502.00677}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -2756,11 +2756,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -2835,7 +2835,7 @@ MonoBehaviour:
     - rid: 6538283325395304458
       type: {class: MaterialClassificationPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 6538283325395304459
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -2879,8 +2879,8 @@ MonoBehaviour:
           Hash: 7adbbf865ec2745e142ba947b956294d
         m_Version: 2
         m_Position: {x: -971.501, y: 1552.3157}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -2890,27 +2890,23 @@ MonoBehaviour:
           - __option_Override_m_Attributes0
           - __option_Override_m_Attributes1
           - __option_Override_m_Barycentrics
-          - __option_DebugExport
-          - m_VisibleMeshletRenderRequests
-          - m_VisibleMeshletIndirectArgs
           - m_Depth_In
+          - __option_EnumParameter:m_RasterizationPath
           m_ValueList:
           - rid: 6538283856277274921
           - rid: 6538283856277274922
           - rid: 6538283856277274923
           - rid: 6538283856277274924
-          - rid: 6538283856277274925
-          - rid: 6538283856277274926
-          - rid: 6538283856277274927
           - rid: 6538283856277274928
+          - rid: 7407773072319578204
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -2929,8 +2925,8 @@ MonoBehaviour:
           Hash: f8ad005d4e5d0039b1dd2a03f4f37714
         m_Version: 2
         m_Position: {x: 988.499, y: 1432.3157}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -2966,11 +2962,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -3662,28 +3658,6 @@ MonoBehaviour:
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
         m_Value: 0
-    - rid: 6538283856277274925
-      type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value: 0
-    - rid: 6538283856277274926
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            Count: 1
-            Stride: 4
-            Target: 16
-            Name: Buffer
-    - rid: 6538283856277274927
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            Count: 1
-            Stride: 4
-            Target: 16
-            Name: Buffer
     - rid: 6538283856277274928
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -3715,7 +3689,7 @@ MonoBehaviour:
     - rid: 6538283856277274929
       type: {class: VisibilityBufferPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 6538283856277274930
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -3859,7 +3833,7 @@ MonoBehaviour:
     - rid: 6538283856277274941
       type: {class: VisibilityBufferGBufferResolvePass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 6538283856277274943
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -4060,7 +4034,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 0, y: 0}
         m_Title: LayerAux0 (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -4070,11 +4044,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -4098,7 +4072,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 0, y: 0}
         m_Title: LayerAux1 (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -4108,11 +4082,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -4199,13 +4173,13 @@ MonoBehaviour:
           Hash: ec12f9ebf407c98323a6dafabcbb58d8
         m_Version: 2
         m_Name: LayerAux0 (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 6538283856277275149
         m_Modifiers: 1
@@ -4221,13 +4195,13 @@ MonoBehaviour:
           Hash: 9b94a007a5128e099470f95667e236a8
         m_Version: 2
         m_Name: LayerAux1 (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 6538283856277275150
         m_Modifiers: 1
@@ -4412,62 +4386,6 @@ MonoBehaviour:
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
         m_Value: 0
-    - rid: 7407772934903955735
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            Width: 1920
-            Height: 1080
-            Slices: 1
-            Dimension: 2
-            ColorFormat: 4
-            DepthBufferBits: 0
-            MsaaSamples: 1
-            FilterMode: 1
-            WrapMode: 1
-            AnisoLevel: 1
-            MipMapBias: 0
-            UseMipMap: 0
-            AutoGenerateMips: 0
-            MipCount: 1
-            ClearBuffer: 0
-            ClearColor: {r: 0, g: 0, b: 0, a: 0}
-            IsShadowMap: 0
-            EnableRandomWrite: 0
-            BindTextureMS: 0
-            UseDynamicScale: 0
-            UseDynamicScaleExplicit: 0
-            ScaleFactor: {x: 1, y: 1}
-            Name: Texture
-    - rid: 7407772934903955736
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            Width: 1920
-            Height: 1080
-            Slices: 1
-            Dimension: 2
-            ColorFormat: 4
-            DepthBufferBits: 0
-            MsaaSamples: 1
-            FilterMode: 1
-            WrapMode: 1
-            AnisoLevel: 1
-            MipMapBias: 0
-            UseMipMap: 0
-            AutoGenerateMips: 0
-            MipCount: 1
-            ClearBuffer: 0
-            ClearColor: {r: 0, g: 0, b: 0, a: 0}
-            IsShadowMap: 0
-            EnableRandomWrite: 0
-            BindTextureMS: 0
-            UseDynamicScale: 0
-            UseDynamicScaleExplicit: 0
-            ScaleFactor: {x: 1, y: 1}
-            Name: Texture
     - rid: 7407772934903955753
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -4532,6 +4450,235 @@ MonoBehaviour:
           m_PortDirection: 1
           m_PortOrientation: 0
           m_Title: GBuffer1 (R)
+    - rid: 7407773072319578199
+      type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 6722716786771441658
+          m_Value1: 13322310530068992224
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: fa3711914ce34b5de05035acd75ae2b8
+        m_Version: 2
+        m_Position: {x: 1442, y: 396}
+        m_Title: 
+        m_Tooltip: 
+        m_NodePreviewModel:
+          rid: -2
+        m_State: 0
+        m_InputConstantsById:
+          m_KeyList:
+          - __option_DebugExport
+          - m_DepthTexture
+          - m_GBuffer1
+          - m_PageTable_In
+          m_ValueList:
+          - rid: 7407773072319578205
+          - rid: 7407773072319578206
+          - rid: 7407773072319578207
+          - rid: 7407773072319578208
+        m_InputPortInfos:
+          expandedPortsById:
+            m_KeyList: []
+            m_ValueList: 
+        m_OutputPortInfos:
+          expandedPortsById:
+            m_KeyList: []
+            m_ValueList: 
+        m_Collapsed: 0
+        m_CurrentModeIndex: 0
+        m_ElementColor:
+          m_Color: {r: 0, g: 0, b: 0, a: 0}
+          m_HasUserColor: 0
+        m_Node:
+          rid: 7407773072319578209
+    - rid: 7407773072319578200
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 12170647363289006792
+          m_Value1: 2525409281462707476
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: c8c262474bd3e6a814250f7e5c0e0c23
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 6722716786771441658
+            m_Value1: 13322310530068992224
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: fa3711914ce34b5de05035acd75ae2b8
+          m_UniqueId: m_PageTable_Out
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: VSMPageTable (W)
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 13452917271151572255
+            m_Value1: 5654668131305242374
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 1ff5b443fb5cb2ba06bf2ba9b46a794e
+          m_UniqueId: m_VSMPageTable
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: VSMPageTable (R)
+    - rid: 7407773072319578201
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 17013860034686296044
+          m_Value1: 11659649790080742356
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: ec1fb1e98e5f1decd4733867b565cfa1
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 6806278648107096954
+            m_Value1: 5560070568736795412
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 7adbbf865ec2745e142ba947b956294d
+          m_UniqueId: m_Depth_Out
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: Depth (W, Depth)
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 6722716786771441658
+            m_Value1: 13322310530068992224
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: fa3711914ce34b5de05035acd75ae2b8
+          m_UniqueId: m_DepthTexture
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: Depth (R)
+    - rid: 7407773072319578202
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 5262045884322813785
+          m_Value1: 15053404787832106679
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 5917de2eda8a0649b7aee5eee56fe8d0
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 4107385451311050232
+            m_Value1: 1474915632337837489
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: f8ad005d4e5d0039b1dd2a03f4f37714
+          m_UniqueId: m_GBuffer1_Out
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: GBuffer1 (W, A1)
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 6722716786771441658
+            m_Value1: 13322310530068992224
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: fa3711914ce34b5de05035acd75ae2b8
+          m_UniqueId: m_GBuffer1
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: GBuffer1 (R)
+    - rid: 7407773072319578203
+      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          desc:
+            Count: 1
+            Stride: 4
+            Target: 16
+            Name: Buffer
+    - rid: 7407773072319578204
+      type: {class: EnumConstant, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          m_EnumType:
+            m_Identification: VividRP.Runtime.RenderPass.Core.VisibilityBufferRasterizationPath, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+          m_Value: 0
+        m_EnumType:
+          m_Identification: VividRP.Runtime.RenderPass.Core.VisibilityBufferRasterizationPath, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+    - rid: 7407773072319578205
+      type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value: 0
+    - rid: 7407773072319578206
+      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          desc:
+            Width: 1920
+            Height: 1080
+            Slices: 1
+            Dimension: 2
+            ColorFormat: 4
+            DepthBufferBits: 0
+            MsaaSamples: 1
+            FilterMode: 1
+            WrapMode: 1
+            AnisoLevel: 1
+            MipMapBias: 0
+            UseMipMap: 0
+            AutoGenerateMips: 0
+            MipCount: 1
+            ClearBuffer: 0
+            ClearColor: {r: 0, g: 0, b: 0, a: 0}
+            IsShadowMap: 0
+            EnableRandomWrite: 0
+            BindTextureMS: 0
+            UseDynamicScale: 0
+            UseDynamicScaleExplicit: 0
+            ScaleFactor: {x: 1, y: 1}
+            Name: Texture
+    - rid: 7407773072319578207
+      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          desc:
+            Width: 1920
+            Height: 1080
+            Slices: 1
+            Dimension: 2
+            ColorFormat: 4
+            DepthBufferBits: 0
+            MsaaSamples: 1
+            FilterMode: 1
+            WrapMode: 1
+            AnisoLevel: 1
+            MipMapBias: 0
+            UseMipMap: 0
+            AutoGenerateMips: 0
+            MipCount: 1
+            ClearBuffer: 0
+            ClearColor: {r: 0, g: 0, b: 0, a: 0}
+            IsShadowMap: 0
+            EnableRandomWrite: 0
+            BindTextureMS: 0
+            UseDynamicScale: 0
+            UseDynamicScaleExplicit: 0
+            ScaleFactor: {x: 1, y: 1}
+            Name: Texture
+    - rid: 7407773072319578208
+      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          desc:
+            Count: 1
+            Stride: 4
+            Target: 16
+            Name: Buffer
+    - rid: 7407773072319578209
+      type: {class: VSMShadowPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
+      data:
+        m_PassName: 
     - rid: 8515051663678505028
       type: {class: GraphModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -4541,7 +4688,7 @@ MonoBehaviour:
         m_HashGuid:
           serializedVersion: 2
           Hash: 5011419995d9d9b6e53f556b816ea21f
-        m_Name:
+        m_Name: 
         m_GraphNodeModels:
         - rid: 8515051663678505381
         - rid: 8515051663678505384
@@ -4565,6 +4712,7 @@ MonoBehaviour:
         - rid: 5491569460029161592
         - rid: 6538283856277274897
         - rid: 6538283856277274898
+        - rid: 7407773072319578199
         m_GraphWireModels:
         - rid: 8515051663678505411
         - rid: 8515051663678505412
@@ -4629,6 +4777,9 @@ MonoBehaviour:
         - rid: 6538283856277275160
         - rid: 7407772934903955753
         - rid: 7407772934903955754
+        - rid: 7407773072319578200
+        - rid: 7407773072319578201
+        - rid: 7407773072319578202
         m_GraphStickyNoteModels: []
         m_GraphPlacematModels: []
         m_GraphVariableModels: []
@@ -5325,6 +5476,38 @@ MonoBehaviour:
             Hash: 7a7d7da95882e9adc388cbbee9557e73
           m_Category: 2
           m_Index: 62
+        - m_Guid:
+            m_Value0: 6722716786771441658
+            m_Value1: 13322310530068992224
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: fa3711914ce34b5de05035acd75ae2b8
+          m_Category: 0
+          m_Index: 22
+        - m_Guid:
+            m_Value0: 12170647363289006792
+            m_Value1: 2525409281462707476
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: c8c262474bd3e6a814250f7e5c0e0c23
+          m_Category: 2
+          m_Index: 63
+        - m_Guid:
+            m_Value0: 17013860034686296044
+            m_Value1: 11659649790080742356
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: ec1fb1e98e5f1decd4733867b565cfa1
+          m_Category: 2
+          m_Index: 64
+        - m_Guid:
+            m_Value0: 5262045884322813785
+            m_Value1: 15053404787832106679
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: 5917de2eda8a0649b7aee5eee56fe8d0
+          m_Category: 2
+          m_Index: 65
         m_Graph:
           rid: 8515051663678505030
     - rid: 8515051663678505029
@@ -5338,7 +5521,7 @@ MonoBehaviour:
           Hash: 680849a1e209e66469039df7eb5cd73e
         m_Version: 2
         m_Items: []
-        m_Title:
+        m_Title: 
     - rid: 8515051663678505030
       type: {class: RenderGraphEditorGraph, ns: VividRP.Editor.RenderGraph, asm: VividRP.Editor}
       data:
@@ -5354,8 +5537,8 @@ MonoBehaviour:
           Hash: 39bf09e246a773d3cf3d6fe361497551
         m_Version: 2
         m_Position: {x: 5860.096, y: 1252.2822}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -5365,11 +5548,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -5388,8 +5571,8 @@ MonoBehaviour:
           Hash: 3668d329eed90d6795a03a5d3ba98a6b
         m_Version: 2
         m_Position: {x: 1059.335, y: 732.22174}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -5407,11 +5590,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -5430,8 +5613,8 @@ MonoBehaviour:
           Hash: f0331645481539cb89ec2c66bc7c321a
         m_Version: 2
         m_Position: {x: -1630.5062, y: 1255.4303}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -5447,11 +5630,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -5470,8 +5653,8 @@ MonoBehaviour:
           Hash: 3341a1f175a968290eef0033039d2c2c
         m_Version: 2
         m_Position: {x: 2946.711, y: 311.09058}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -5489,11 +5672,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -5532,8 +5715,8 @@ MonoBehaviour:
           Hash: 7dbf76ecf71b71af2b1cd34eee5bb9c5
         m_Version: 2
         m_Position: {x: 2536.9436, y: 455.9935}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -5583,11 +5766,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -5626,8 +5809,8 @@ MonoBehaviour:
           Hash: 5254ae4616619ebacf078b46ee45ecb3
         m_Version: 2
         m_Position: {x: 4009.9812, y: 206.63881}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -5641,11 +5824,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -5664,8 +5847,8 @@ MonoBehaviour:
           Hash: b83bd93235896ad0f04d623cbc9447ad
         m_Version: 2
         m_Position: {x: 6090.1963, y: 983.41486}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -5683,11 +5866,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -6995,7 +7178,7 @@ MonoBehaviour:
     - rid: 8515051663678505426
       type: {class: ColorGradingPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505433
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -7051,7 +7234,7 @@ MonoBehaviour:
     - rid: 8515051663678505437
       type: {class: MotionVectorPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505445
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -7079,7 +7262,7 @@ MonoBehaviour:
     - rid: 8515051663678505448
       type: {class: PreDepthPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505456
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -7415,7 +7598,7 @@ MonoBehaviour:
     - rid: 8515051663678505469
       type: {class: AutoExposurePass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505470
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -7479,7 +7662,7 @@ MonoBehaviour:
     - rid: 8515051663678505473
       type: {class: FinalBlitPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505513
       type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -7491,8 +7674,8 @@ MonoBehaviour:
           Hash: 4a892a74dc2c1682c87d84086046d29a
         m_Version: 2
         m_Position: {x: 756.965, y: 85.05}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -7514,11 +7697,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -7538,7 +7721,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 160, y: 4.7391396}
         m_Title: Color (R, A0)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -7548,11 +7731,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -7576,7 +7759,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 174, y: 116.913086}
         m_Title: Depth (R, Depth)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -7586,11 +7769,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -7614,7 +7797,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 1504, y: 77.782616}
         m_Title: Color (W, A0)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -7624,11 +7807,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -7652,7 +7835,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 1638.6499, y: 188.77827}
         m_Title: Depth (W, Depth)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -7662,11 +7845,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -7690,7 +7873,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 75, y: 195.17393}
         m_Title: DirectionalShadowTexture (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -7700,11 +7883,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -7727,8 +7910,8 @@ MonoBehaviour:
           Hash: 949f75c94464dcff2fe5ce6979f62971
         m_Version: 2
         m_Position: {x: 1240.787, y: 375.50778}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -7748,11 +7931,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -7899,13 +8082,13 @@ MonoBehaviour:
           Hash: cdb8c8013522b72e476c462ec2208d13
         m_Version: 2
         m_Name: Color (R, A0)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505623
         m_Modifiers: 1
@@ -7921,13 +8104,13 @@ MonoBehaviour:
           Hash: 0bdef9901f7cd8fcffcd15dffbfbb03f
         m_Version: 2
         m_Name: Depth (R, Depth)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505624
         m_Modifiers: 1
@@ -7943,13 +8126,13 @@ MonoBehaviour:
           Hash: 88ad6d4fcfee554199ab491f44d4f946
         m_Version: 2
         m_Name: Color (W, A0)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505625
         m_Modifiers: 2
@@ -7965,13 +8148,13 @@ MonoBehaviour:
           Hash: 5b5daeeb103e29195742dae14abc7897
         m_Version: 2
         m_Name: Depth (W, Depth)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505626
         m_Modifiers: 2
@@ -7987,13 +8170,13 @@ MonoBehaviour:
           Hash: 04bf48976740c5c48cf6cb500ead70b6
         m_Version: 2
         m_Name: DirectionalShadowTexture (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505627
         m_Modifiers: 1
@@ -8015,7 +8198,7 @@ MonoBehaviour:
         - rid: 8515051663678505530
         - rid: 8515051663678505531
         - rid: 8515051898187808885
-        m_Title:
+        m_Title: 
     - rid: 8515051663678505533
       type: {class: RenderGraphSubSystemGraph, ns: VividRP.Editor.RenderGraph, asm: VividRP.Editor}
       data:
@@ -8031,8 +8214,8 @@ MonoBehaviour:
           Hash: c2ad2fda7f3c3471d4b9792676fc2cf7
         m_Version: 2
         m_Position: {x: 1329.6914, y: -113.79898}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8088,11 +8271,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8112,7 +8295,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 17.799995, y: 191.74255}
         m_Title: GBuffer0 (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8122,11 +8305,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8150,7 +8333,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 43, y: 276.3723}
         m_Title: GBuffer1 (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8160,11 +8343,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8188,7 +8371,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 26, y: 358.7021}
         m_Title: GBuffer2 (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8198,11 +8381,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8226,7 +8409,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 16, y: 439.8723}
         m_Title: GBuffer3 (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8236,11 +8419,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8264,7 +8447,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: -27, y: 526.8404}
         m_Title: Depth (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8274,11 +8457,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8302,7 +8485,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 4334.0146, y: 453.2131}
         m_Title: Color (W, A0)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8312,11 +8495,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8340,7 +8523,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 37, y: 14.049992}
         m_Title: DirectionalShadowTexture (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8350,11 +8533,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8378,7 +8561,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: -53, y: 594.8}
         m_Title: GBuffer4 (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8388,11 +8571,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8415,8 +8598,8 @@ MonoBehaviour:
           Hash: 22aad1d3673e186ddea097e63b9dd865
         m_Version: 2
         m_Position: {x: 1925.5999, y: 554.54065}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8436,11 +8619,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8460,7 +8643,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 50.188965, y: 939.90076}
         m_Title: ForwardRenderList (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8470,11 +8653,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8498,7 +8681,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 2710, y: 551}
         m_Title: Depth (W, Depth)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8508,11 +8691,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8536,7 +8719,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 2817.4783, y: 805.6152}
         m_Title: DebugOutputTexture (W, A0)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -8546,11 +8729,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -8957,13 +9140,13 @@ MonoBehaviour:
           Hash: c2f0ded8851c1c551f6fb2dfd53a2399
         m_Version: 2
         m_Name: GBuffer0 (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505671
         m_Modifiers: 1
@@ -8979,13 +9162,13 @@ MonoBehaviour:
           Hash: 263e8a977a36b6e7af4d768b439210e9
         m_Version: 2
         m_Name: GBuffer1 (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505672
         m_Modifiers: 1
@@ -9001,13 +9184,13 @@ MonoBehaviour:
           Hash: 676ae0bd9a0e0670db04b45fab8fa619
         m_Version: 2
         m_Name: GBuffer2 (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505673
         m_Modifiers: 1
@@ -9023,13 +9206,13 @@ MonoBehaviour:
           Hash: c3653ae7cd6b45172eba0ebc9eda509d
         m_Version: 2
         m_Name: GBuffer3 (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505674
         m_Modifiers: 1
@@ -9045,13 +9228,13 @@ MonoBehaviour:
           Hash: ce408386317dde85ebde9723e54d1a3c
         m_Version: 2
         m_Name: Depth (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505675
         m_Modifiers: 1
@@ -9067,13 +9250,13 @@ MonoBehaviour:
           Hash: 51a30e98b2f555b97a59fbddc730b04f
         m_Version: 2
         m_Name: Color (W, A0)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505676
         m_Modifiers: 2
@@ -9089,13 +9272,13 @@ MonoBehaviour:
           Hash: ad2be82864ad901ae37506114cce1e44
         m_Version: 2
         m_Name: DirectionalShadowTexture (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505677
         m_Modifiers: 1
@@ -9111,13 +9294,13 @@ MonoBehaviour:
           Hash: 30203e08711974886c6c259cb687b3db
         m_Version: 2
         m_Name: DiffuseIrradiance (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505678
         m_Modifiers: 1
@@ -9133,13 +9316,13 @@ MonoBehaviour:
           Hash: 4a008f1b50a1c555f86389e32a62bd91
         m_Version: 2
         m_Name: ForwardRenderList (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphRenderList, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505679
         m_Modifiers: 1
@@ -9155,13 +9338,13 @@ MonoBehaviour:
           Hash: 1755b75579d27f3f443314effd4904de
         m_Version: 2
         m_Name: Depth (W, Depth)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505680
         m_Modifiers: 2
@@ -9177,13 +9360,13 @@ MonoBehaviour:
           Hash: f60d267dd72f99ca7c3bb0f122f587e1
         m_Version: 2
         m_Name: DebugOutputTexture (W, A0)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051663678505681
         m_Modifiers: 2
@@ -9223,7 +9406,7 @@ MonoBehaviour:
         - rid: 5491569450071621808
         - rid: 6538283856277275147
         - rid: 6538283856277275148
-        m_Title:
+        m_Title: 
     - rid: 8515051663678505591
       type: {class: RenderGraphSubSystemGraph, ns: VividRP.Editor.RenderGraph, asm: VividRP.Editor}
       data:
@@ -9319,7 +9502,7 @@ MonoBehaviour:
     - rid: 8515051663678505617
       type: {class: SkyInjectionPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505618
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -9411,7 +9594,7 @@ MonoBehaviour:
     - rid: 8515051663678505622
       type: {class: AtmosphericScatteringPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505623
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -9855,7 +10038,7 @@ MonoBehaviour:
     - rid: 8515051663678505654
       type: {class: DeferredLightingPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505661
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -9919,7 +10102,7 @@ MonoBehaviour:
     - rid: 8515051663678505665
       type: {class: DrawObjectPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051663678505671
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -10231,28 +10414,26 @@ MonoBehaviour:
           Hash: 1ff5b443fb5cb2ba06bf2ba9b46a794e
         m_Version: 2
         m_Position: {x: 1742, y: 396}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
         m_InputConstantsById:
           m_KeyList:
           - __option_DebugExport
-          - m_DepthTexture
-          - m_GBuffer1
+          - m_VSMPageTable
           m_ValueList:
           - rid: 7407772934903955734
-          - rid: 7407772934903955735
-          - rid: 7407772934903955736
+          - rid: 7407773072319578203
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -10263,7 +10444,7 @@ MonoBehaviour:
     - rid: 8515051670614835201
       type: {class: CSMShadowPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051670614835202
       type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -10275,8 +10456,8 @@ MonoBehaviour:
           Hash: 15de50f8e84ee08d6696af38f7561baf
         m_Version: 2
         m_Position: {x: 2106.7048, y: 197.845}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -10294,11 +10475,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -10397,7 +10578,7 @@ MonoBehaviour:
     - rid: 8515051670614835207
       type: {class: CSMShadowResolvePass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051670614835212
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -10469,8 +10650,8 @@ MonoBehaviour:
           Hash: 6880ae4828e3ff10f594da707832005f
         m_Version: 2
         m_Position: {x: 4003.4473, y: 504.5368}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -10484,11 +10665,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -10531,7 +10712,7 @@ MonoBehaviour:
     - rid: 8515051684490641474
       type: {class: BloomPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051684490641477
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -10552,8 +10733,8 @@ MonoBehaviour:
           Hash: d301fc295ff80afa1b3869e8c1d4cce7
         m_Version: 2
         m_Position: {x: 3528.2002, y: 267.95013}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -10567,11 +10748,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -10614,7 +10795,7 @@ MonoBehaviour:
     - rid: 8515051697972183106
       type: {class: StopNaNPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051697972183107
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -10718,8 +10899,8 @@ MonoBehaviour:
           Hash: d06468a91930839a7eceb9e15c318b77
         m_Version: 2
         m_Position: {x: 676.6971, y: 1069.3258}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -10735,11 +10916,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -10782,7 +10963,7 @@ MonoBehaviour:
     - rid: 8515051720831926350
       type: {class: GTAOPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051720831926352
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -10858,8 +11039,8 @@ MonoBehaviour:
           Hash: 154cf2c349c6f03e9beab7b4ad0700ca
         m_Version: 2
         m_Position: {x: 3713.3225, y: 1419.6102}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -10873,11 +11054,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -10920,7 +11101,7 @@ MonoBehaviour:
     - rid: 8515051741483630668
       type: {class: GenerateViewZPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051741483630669
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -10964,8 +11145,8 @@ MonoBehaviour:
           Hash: 9e62450aacffb5ea7966451d8c13ccb2
         m_Version: 2
         m_Position: {x: 4139.799, y: 1249.6}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -10983,11 +11164,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -11086,7 +11267,7 @@ MonoBehaviour:
     - rid: 8515051741483630679
       type: {class: DepthOfFieldPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051741483630680
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -11318,8 +11499,8 @@ MonoBehaviour:
           Hash: 7a10c6800714fa365cb326009687561f
         m_Version: 2
         m_Position: {x: 3277, y: 857}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -11335,11 +11516,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -11410,7 +11591,7 @@ MonoBehaviour:
     - rid: 8515051808828424265
       type: {class: DataDrivenLensFlarePass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051808828424268
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -11454,8 +11635,8 @@ MonoBehaviour:
           Hash: 8c6f5faeba4da678a00e2e85e60335d6
         m_Version: 2
         m_Position: {x: 4565.2, y: 601.05005}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -11471,11 +11652,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -11546,7 +11727,7 @@ MonoBehaviour:
     - rid: 8515051808828424273
       type: {class: ScreenSpaceLensFlarePass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051808828424274
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -11738,8 +11919,8 @@ MonoBehaviour:
           Hash: 602f887e88df4b3203cf0b9b5668f507
         m_Version: 2
         m_Position: {x: 3038.6287, y: -235.58069}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -11781,11 +11962,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -11942,7 +12123,7 @@ MonoBehaviour:
     - rid: 8515051876925309051
       type: {class: VolumetricLightingPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051876925309059
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -12018,8 +12199,8 @@ MonoBehaviour:
           Hash: 30fd1065c8debf4f436bf8a4f25b090c
         m_Version: 2
         m_Position: {x: 2315.097, y: 125.78618}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -12045,11 +12226,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -12064,7 +12245,7 @@ MonoBehaviour:
     - rid: 8515051876925309069
       type: {class: VolumetricDensityPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051876925309070
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -12168,8 +12349,8 @@ MonoBehaviour:
           Hash: 4e1c9982e7c023acfc843414601c2497
         m_Version: 2
         m_Position: {x: 2134.0325, y: -250.05966}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -12185,11 +12366,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -12236,7 +12417,7 @@ MonoBehaviour:
     - rid: 8515051890838077509
       type: {class: VolumetricMaxZPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051890838077510
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -12423,8 +12604,8 @@ MonoBehaviour:
           Hash: 6e6bc5ff46496e2553a12fb5c1c099b0
         m_Version: 2
         m_Position: {x: 2396.864, y: 827.63696}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -12460,11 +12641,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -12475,7 +12656,7 @@ MonoBehaviour:
     - rid: 8515051898187808858
       type: {class: ClusterDebugPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051898187808865
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -12551,8 +12732,8 @@ MonoBehaviour:
           Hash: 4eff25f7bd8fca7775f39e12ae275f72
         m_Version: 2
         m_Position: {x: 5600.1074, y: 565.5128}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -12590,11 +12771,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -12699,7 +12880,7 @@ MonoBehaviour:
     - rid: 8515051898187808877
       type: {class: OverlayDebugPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515051898187808882
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -12740,7 +12921,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 154, y: 332.6}
         m_Title: VBufferLighting (R)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -12750,11 +12931,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -12809,13 +12990,13 @@ MonoBehaviour:
           Hash: d25f7fd1956ac07aa12ad77fbbc23363
         m_Version: 2
         m_Name: VBufferLighting (R)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051898187808886
         m_Modifiers: 1
@@ -12920,7 +13101,7 @@ MonoBehaviour:
         m_Version: 2
         m_Position: {x: 4333, y: 594.39166}
         m_Title: VBufferLighting (W)
-        m_Tooltip:
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -12930,11 +13111,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -12989,13 +13170,13 @@ MonoBehaviour:
           Hash: ae19b16bfdb6a7cc8f3edb55b88a9363
         m_Version: 2
         m_Name: VBufferLighting (W)
-        m_UniqueId:
+        m_UniqueId: 
         m_DataType:
           m_Identification: VividRP.Runtime.RenderGraphTexture, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
         m_IsExposed: 0
         m_Scope: 0
         m_ShowOnInspectorOnly: 0
-        m_Tooltip:
+        m_Tooltip: 
         m_InitializationValue:
           rid: 8515051898187808892
         m_Modifiers: 2
@@ -13087,8 +13268,8 @@ MonoBehaviour:
           Hash: f34be423b5c8f541b3a33f8ff25f8209
         m_Version: 2
         m_Position: {x: 5345, y: 982}
-        m_Title:
-        m_Tooltip:
+        m_Title: 
+        m_Tooltip: 
         m_NodePreviewModel:
           rid: -2
         m_State: 0
@@ -13122,11 +13303,11 @@ MonoBehaviour:
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_OutputPortInfos:
           expandedPortsById:
             m_KeyList: []
-            m_ValueList:
+            m_ValueList: 
         m_Collapsed: 0
         m_CurrentModeIndex: 0
         m_ElementColor:
@@ -13350,7 +13531,7 @@ MonoBehaviour:
     - rid: 8515052000000000011
       type: {class: MaterialDebugPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data:
-        m_PassName:
+        m_PassName: 
     - rid: 8515052000000000012
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:

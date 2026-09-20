@@ -1,7 +1,0 @@
-{
-  "CSMShadowResolve.compute": "8c72cf59ae38bb13a3964d4b0405e632c6b2baac39693b8c8d6c5bebb7c3424c",
-  "VSMSMRT.hlsl": "7b4671d13a253d833443fd53f339b9424a12d7e9537a22b9ab78480e2640911a",
-  "VividVirtualShadowMapAddressing.hlsl": "d9c24113fa2ae2a63bd0b7f17bbc9df8de193f257dae6be36e305281bb62c500",
-  "VividVirtualShadowMapCaster.hlsl": "dfd57db2e8edf83a3df87e96be7c041f901207f6fdcf22799a223003e9df3b70",
-  "VirtualShadowMapSamplingTests.compute": "420509ae8739910efa960618566fda677646c91bb08b5c4f4cb3649a340f1137"
-}

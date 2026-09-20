@@ -1,4 +1,0 @@
-Sponza dirty=False
-SponzaLightingDay dirty=False
-playing=False background=False
-productionShaderErrors=0

@@ -1,1 +1,0 @@
-Nsight Graphics 2026.3.1 doctor passed. GPU Trace attach to verified main Unity PID 6848 failed: Cannot find process (pid: 6848). Current Editor was not relaunched. No Nsight timing claim.

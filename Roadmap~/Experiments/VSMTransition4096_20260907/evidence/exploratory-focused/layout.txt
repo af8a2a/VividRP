@@ -1,8 +1,0 @@
-Native ROI top-left x=680 y=170 width=560 height=650; binary rows flipY.
-shadow RHalf, source/output RGBAHalf. Debug0/3/4/5/6/7/8 RGBAFloat entire 480x270 exact native grid (4*id+2), rows flipY.
-debug0 preferred/sampled/transition/blend; debug3 footprintXY/worldTexel/valid; debug4 attemptedTaps/completedCompares/attemptedLevels/transitionSample; debug5 missing/replay/source/error; debug6 desired/minCovered/preferred/ratio; debug7 worldXYZ/valid; debug8 coverageBlend/lodBlend/normalizedCoverageWidth/edgeClearance.
-4096,256pages,bounded level3 focus only, preserve original level2 and level4+ windows. Coverage fractions .2/.05; density-LOD transition .2 throughout. PCF and TSR unchanged.
-Per variant static32 translate96 yaw128, >=128warmup and aligned first jitter. Every frame metadata+counters, static every frame and dynamic every4th+last raw capture.
-Translate 0..63 sin(pi*s/63)*(1.5,0,1.5) world m then32rest. Yaw0..95 sin(2*pi*s/95)*12deg worldY then32rest.
-Central median depth calibrates focus distance once; level3 origin stays inside level4 and contains original level2 with one child-page guard. Quarter-page hysteresis. Fixed EV10012.252064. Readbacks excluded from performance conclusions.
-After the two focused variants, repeat020_static restores the original camera-centered layout and width .2 for a 32-frame A/A control.

@@ -1,1 +1,0 @@
-Priority allocator HEAD 4c39274a. 4096/384 pages. Bounded L3 .05 coverage transition (LOD width .2). Empty pool each stage, >=128 warmup, first jitter aligned. Static32, translate96 (64 move,32 rest), yaw128 (96 move,32 rest). Current AA, fixed exposure12.252064. Captures are not performance measurements.

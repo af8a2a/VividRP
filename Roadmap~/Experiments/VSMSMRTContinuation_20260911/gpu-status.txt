@@ -1,1 +1,0 @@
-gpu=Direct3D12 device=NVIDIA GeForce RTX 5070 Ti unity=6000.7.0a6 completed=448 error=none

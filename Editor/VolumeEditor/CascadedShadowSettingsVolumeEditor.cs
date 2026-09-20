@@ -1,3 +1,4 @@
+using VividRP.Runtime.VirtualShadowMap;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -60,6 +61,7 @@ namespace VividRP.Editor
         private SerializedDataParameter m_EnableVirtualShadowMapPrototype;
         private SerializedDataParameter m_VirtualShadowMapResolution;
         private SerializedDataParameter m_VirtualShadowMapPhysicalPageBudget;
+        private SerializedDataParameter m_VirtualShadowMapPageUpdateBudget;
         private SerializedDataParameter m_VirtualShadowMapViewCoverage;
         private SerializedDataParameter m_VirtualShadowMapCoverageTransition;
         private SerializedDataParameter m_VirtualShadowMapFirstLevel;
@@ -102,6 +104,7 @@ namespace VividRP.Editor
             m_EnableVirtualShadowMapPrototype = Unpack(fetcher.Find(x => x.enableVirtualShadowMapPrototype));
             m_VirtualShadowMapResolution = Unpack(fetcher.Find(x => x.virtualShadowMapResolution));
             m_VirtualShadowMapPhysicalPageBudget = Unpack(fetcher.Find(x => x.virtualShadowMapPhysicalPageBudget));
+            m_VirtualShadowMapPageUpdateBudget = Unpack(fetcher.Find(x => x.virtualShadowMapPageUpdateBudget));
             m_VirtualShadowMapViewCoverage = Unpack(fetcher.Find(x => x.virtualShadowMapViewCoverage));
             m_VirtualShadowMapCoverageTransition = Unpack(fetcher.Find(x => x.virtualShadowMapCoverageTransition));
             m_VirtualShadowMapFirstLevel = Unpack(fetcher.Find(x => x.virtualShadowMapFirstLevel));
@@ -136,6 +139,7 @@ namespace VividRP.Editor
             PropertyField(m_EnableVirtualShadowMapPrototype, s_EnableVirtualShadowMapPrototypeLabel);
             PropertyField(m_VirtualShadowMapResolution);
             PropertyField(m_VirtualShadowMapPhysicalPageBudget);
+            PropertyField(m_VirtualShadowMapPageUpdateBudget);
             PropertyField(m_VirtualShadowMapViewCoverage);
             PropertyField(m_VirtualShadowMapFirstLevel);
             PropertyField(m_VirtualShadowMapScreenDensity);

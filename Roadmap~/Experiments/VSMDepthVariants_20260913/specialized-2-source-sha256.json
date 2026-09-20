@@ -1,7 +1,0 @@
-{
-  "Shaders/Core/Private/CSMShadowResolve.compute": "d433d2e0501573aac7c1ce8f5fcedc54f28bcea0a0a32002fad8c5ace0a6d172",
-  "Shaders/Core/Private/VSMSMRT.hlsl": "7b4671d13a253d833443fd53f339b9424a12d7e9537a22b9ab78480e2640911a",
-  "Shaders/Core/Public/Shadow/VividVirtualShadowMapAddressing.hlsl": "2e1f7122294eb870b021493d75b78ec43d9301562f06b4fe525182ef77d8448d",
-  "Shaders/Core/Public/Shadow/VividVirtualShadowMapCaster.hlsl": "dfd57db2e8edf83a3df87e96be7c041f901207f6fdcf22799a223003e9df3b70",
-  "Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute": "3d126ed0d1da25554558f7dc6128da2fa7c029b2c8a78c52cd174de417f8b40e"
-}

@@ -8,8 +8,34 @@ namespace VividRP.Editor.Tests
 {
     public class RenderGraphNodeMenuVisibilityTests
     {
-        [Test]
-        public void RenderGraphEditor_DoesNotExposeTestAssemblyNodeTypes_InGraphToolkitFactory()
+        [TestCase(typeof(RenderGraphEditorGraph))]
+        [TestCase(typeof(RenderGraphSubSystemGraph))]
+        public void RenderGraph_DoesNotExposeTestAssemblyNodeTypes_InGraphToolkitFactory(Type graphType)
+        {
+            var offendingTypes = GetNodeTypes(graphType)
+                .Where(type => type != null && type.Assembly == typeof(RenderGraphNodeMenuVisibilityTests).Assembly)
+                .Select(type => type.FullName)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+
+            Assert.That(offendingTypes, Is.Empty);
+        }
+
+        [TestCase(typeof(RenderGraphEditorGraph))]
+        [TestCase(typeof(RenderGraphSubSystemGraph))]
+        public void RenderGraph_ExposesEachNodeExactlyOnce_InGraphToolkitFactory(Type graphType)
+        {
+            var nodeTypes = GetNodeTypes(graphType);
+            var expectedTypes = typeof(RenderGraphNodeData).Assembly.GetTypes()
+                .Where(type => typeof(RenderGraphNodeData).IsAssignableFrom(type) && !type.IsAbstract)
+                .ToArray();
+
+            Assert.That(expectedTypes, Is.Not.Empty);
+            Assert.That(nodeTypes, Is.Unique);
+            Assert.That(nodeTypes, Is.SupersetOf(expectedTypes));
+        }
+
+        private static Type[] GetNodeTypes(Type graphType)
         {
             var factoryType = Type.GetType(
                 "Unity.GraphToolkit.Editor.Implementation.PublicGraphFactory, UnityEditor.GraphToolkitModule",
@@ -23,17 +49,10 @@ namespace VividRP.Editor.Tests
 
             Assert.That(getNodeTypesMethod, Is.Not.Null);
 
-            var nodeTypes = getNodeTypesMethod.Invoke(null, new object[] { typeof(RenderGraphEditorGraph) }) as System.Collections.IEnumerable;
+            var nodeTypes = getNodeTypesMethod.Invoke(null, new object[] { graphType }) as System.Collections.IEnumerable;
             Assert.That(nodeTypes, Is.Not.Null);
 
-            var offendingTypes = nodeTypes
-                .Cast<Type>()
-                .Where(type => type != null && type.Assembly == typeof(RenderGraphNodeMenuVisibilityTests).Assembly)
-                .Select(type => type.FullName)
-                .OrderBy(name => name, System.StringComparer.Ordinal)
-                .ToArray();
-
-            Assert.That(offendingTypes, Is.Empty);
+            return nodeTypes.Cast<Type>().ToArray();
         }
     }
 }

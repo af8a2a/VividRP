@@ -10,10 +10,7 @@ namespace VividRP.Editor.RenderGraph
     /// Graph Toolkit authoring model for VividRP RenderGraph.
     /// </summary>
     [Serializable]
-    [Graph(
-        AssetExtension,
-        GraphOptions.SupportsSubgraphs
-        | GraphOptions.DisableAutoInclusionOfNodesFromGraphAssembly)]
+    [Graph(AssetExtension, GraphOptions.SupportsSubgraphs)]
     internal class RenderGraphEditorGraph : Graph
     {
         internal const int CurrentSchemaVersion = 5;

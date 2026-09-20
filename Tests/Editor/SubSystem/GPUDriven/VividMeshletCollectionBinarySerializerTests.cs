@@ -13,6 +13,70 @@ namespace VividRP.Editor.Tests
         private const uint MeshletBlobMagic = 0x564D4342u;
 
         [Test]
+        public void LZ4Codec_DecodesIntoCallerStorageWithoutAllocating()
+        {
+            var source = new byte[65537];
+            for (int index = 0; index < source.Length; index++)
+                source[index] = (byte)(index % 19);
+            byte[] compressed = VividLZ4Codec.Compress(source);
+            var destination = new byte[source.Length + 2];
+            destination[0] = destination[destination.Length - 1] = 123;
+            VividLZ4Codec.Decompress(compressed.AsSpan(), destination.AsSpan(1, source.Length));
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 32; iteration++)
+                VividLZ4Codec.Decompress(compressed.AsSpan(), destination.AsSpan(1, source.Length));
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            Assert.That(destination[0], Is.EqualTo(123));
+            Assert.That(destination[destination.Length - 1], Is.EqualTo(123));
+            for (int index = 0; index < source.Length; index++)
+                Assert.That(destination[index + 1], Is.EqualTo(source[index]));
+        }
+
+        [Test]
+        public void Deserialize_ReusesTemporaryPayloadAndKeepsOutputOwnership()
+        {
+            var vertices = new VividMeshletVertex[4096];
+            vertices[0].Position = new float3(1, 2, 3);
+            byte[] blob = VividMeshletCollectionBinarySerializer.Serialize(
+                Array.Empty<int>(), Array.Empty<VividMeshLODNode>(), Array.Empty<VividMeshlet>(), vertices, new byte[] { 0, 1, 2 });
+            VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out _, out _, out var first, out _);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out _, out _, out var second, out var indices);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            // Only the owned vertex/index arrays and small reader/stream objects remain.
+            Assert.That(allocated, Is.LessThan(vertices.Length * 32L + 4096));
+            Assert.That(first, Is.Not.SameAs(second));
+            first[0].Position = new float3(4, 5, 6);
+            Assert.That(second[0].Position, Is.EqualTo(vertices[0].Position));
+            CollectionAssert.AreEqual(new byte[] { 0, 1, 2 }, indices);
+        }
+
+        [Test]
+        public void LZ4Codec_RejectsTruncatedLiteralsAndInvalidMatchOffsets()
+        {
+            Assert.Throws<InvalidDataException>(() => VividLZ4Codec.Decompress(new byte[] { 0x20, 1 }, 2));
+            Assert.Throws<InvalidDataException>(() => VividLZ4Codec.Decompress(new byte[] { 0, 0, 0 }, 4));
+        }
+
+        [Test]
+        public void Deserialize_RejectsArrayThatExtendsBeyondPayloadIntoPooledCapacity()
+        {
+            byte[] compressed = VividLZ4Codec.Compress(BitConverter.GetBytes(1));
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write(MeshletBlobMagic);
+            writer.Write(VividMeshletCollectionBinarySerializer.CurrentVersion);
+            writer.Write(VividMeshletCollectionBinarySerializer.LZ4CompressionCodec);
+            writer.Write(sizeof(int)); // A count of one, but no element bytes.
+            writer.Write(compressed.Length);
+            writer.Write(compressed);
+            byte[] blob = stream.ToArray();
+            Assert.Throws<EndOfStreamException>(() => VividMeshletCollectionBinarySerializer.Deserialize(
+                blob, out _, out _, out _, out _, out _));
+        }
+
+        [Test]
         public void LZ4Codec_RoundTripsLiteralRepeatedAndRandomPayloads()
         {
             var random = new System.Random(12345);

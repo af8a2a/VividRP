@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
@@ -87,34 +88,46 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             uint version = headerReader.ReadUInt32();
-            byte[] payload = version switch
+            byte[] payload = null;
+            int payloadLength = 0;
+            try
             {
-                LegacyGZipVersion => ReadLegacyGZipPayload(inputStream, headerReader),
-                LegacyLZ4Version => ReadLZ4Payload(inputStream, headerReader),
-                PackedVertexLegacyMetadataVersion => ReadLZ4Payload(inputStream, headerReader),
-                CurrentVersion => ReadLZ4Payload(inputStream, headerReader),
-                _ => throw new InvalidDataException(
-                    $"Unsupported meshlet blob version {version}. Expected versions " +
-                    $"{LegacyGZipVersion}, {LegacyLZ4Version}, " +
-                    $"{PackedVertexLegacyMetadataVersion}, or {CurrentVersion}."
-                ),
-            };
-            bool usesLegacyVertexLayout = version <= LegacyLZ4Version;
-            bool usesLegacyMetadataLayout = version <= PackedVertexLegacyMetadataVersion;
+                payload = version switch
+                {
+                    LegacyGZipVersion => ReadLegacyGZipPayload(inputStream, headerReader),
+                    LegacyLZ4Version => ReadLZ4Payload(serializedData, inputStream, headerReader, out payloadLength),
+                    PackedVertexLegacyMetadataVersion => ReadLZ4Payload(serializedData, inputStream, headerReader, out payloadLength),
+                    CurrentVersion => ReadLZ4Payload(serializedData, inputStream, headerReader, out payloadLength),
+                    _ => throw new InvalidDataException(
+                        $"Unsupported meshlet blob version {version}. Expected versions " +
+                        $"{LegacyGZipVersion}, {LegacyLZ4Version}, " +
+                        $"{PackedVertexLegacyMetadataVersion}, or {CurrentVersion}."
+                    ),
+                };
+                bool usesLegacyVertexLayout = version <= LegacyLZ4Version;
+                bool usesLegacyMetadataLayout = version <= PackedVertexLegacyMetadataVersion;
 
-            using var payloadStream = new MemoryStream(payload, writable: false);
-            using var payloadReader = new BinaryReader(payloadStream, Encoding.UTF8, leaveOpen: true);
-            meshLODLevelNodeCounts = ReadIntArray(payloadReader);
-            meshLODNodes = usesLegacyMetadataLayout
-                ? ConvertLegacyMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy64>(payloadReader))
-                : ReadStructArray<VividMeshLODNode>(payloadReader);
-            meshlets = usesLegacyMetadataLayout
-                ? ConvertLegacyMeshlets(ReadStructArray<VividMeshletLegacy64>(payloadReader))
-                : ReadStructArray<VividMeshlet>(payloadReader);
-            vertexBuffer = usesLegacyVertexLayout
-                ? ConvertLegacyVertices(ReadStructArray<VividMeshletVertexLegacy64>(payloadReader))
-                : ReadStructArray<VividMeshletVertex>(payloadReader);
-            indexBuffer = ReadByteArray(payloadReader);
+                if (version == LegacyGZipVersion)
+                    payloadLength = payload.Length;
+                using var payloadStream = new MemoryStream(payload, 0, payloadLength, writable: false);
+                using var payloadReader = new BinaryReader(payloadStream, Encoding.UTF8, leaveOpen: true);
+                meshLODLevelNodeCounts = ReadIntArray(payloadReader);
+                meshLODNodes = usesLegacyMetadataLayout
+                    ? ConvertLegacyMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy64>(payloadReader))
+                    : ReadStructArray<VividMeshLODNode>(payloadReader);
+                meshlets = usesLegacyMetadataLayout
+                    ? ConvertLegacyMeshlets(ReadStructArray<VividMeshletLegacy64>(payloadReader))
+                    : ReadStructArray<VividMeshlet>(payloadReader);
+                vertexBuffer = usesLegacyVertexLayout
+                    ? ConvertLegacyVertices(ReadStructArray<VividMeshletVertexLegacy64>(payloadReader))
+                    : ReadStructArray<VividMeshletVertex>(payloadReader);
+                indexBuffer = ReadByteArray(payloadReader);
+            }
+            finally
+            {
+                if (payload != null && version != LegacyGZipVersion)
+                    ArrayPool<byte>.Shared.Return(payload);
+            }
         }
 
         internal static VividMeshletVertex[] ConvertLegacyVertices(VividMeshletVertexLegacy64[] legacyVertices)
@@ -188,7 +201,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             return meshlets;
         }
 
-        private static byte[] ReadLZ4Payload(MemoryStream inputStream, BinaryReader headerReader)
+        private static byte[] ReadLZ4Payload(byte[] serializedData, MemoryStream inputStream, BinaryReader headerReader, out int payloadLength)
         {
             uint compressionCodec = headerReader.ReadUInt32();
             if (compressionCodec != LZ4CompressionCodec)
@@ -196,7 +209,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 throw new InvalidDataException($"Unsupported meshlet compression codec {compressionCodec}.");
             }
 
-            int payloadLength = ReadPayloadLength(headerReader);
+            payloadLength = ReadPayloadLength(headerReader);
             int compressedLength = headerReader.ReadInt32();
             if (compressedLength < 0 || compressedLength != inputStream.Length - inputStream.Position)
             {
@@ -206,8 +219,19 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 );
             }
 
-            byte[] compressedPayload = headerReader.ReadBytes(compressedLength);
-            return VividLZ4Codec.Decompress(compressedPayload, payloadLength);
+            byte[] payload = ArrayPool<byte>.Shared.Rent(Math.Max(1, payloadLength));
+            try
+            {
+                VividLZ4Codec.Decompress(
+                    serializedData.AsSpan((int)inputStream.Position, compressedLength),
+                    payload.AsSpan(0, payloadLength));
+                return payload;
+            }
+            catch
+            {
+                ArrayPool<byte>.Shared.Return(payload);
+                throw;
+            }
         }
 
         private static byte[] ReadLegacyGZipPayload(MemoryStream inputStream, BinaryReader headerReader)
@@ -256,22 +280,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         private static int[] ReadIntArray(BinaryReader reader)
         {
-            int count = reader.ReadInt32();
-            if (count <= 0)
-            {
-                return Array.Empty<int>();
-            }
-
-            int byteCount = checked(count * sizeof(int));
-            byte[] bytes = reader.ReadBytes(byteCount);
-            if (bytes.Length != byteCount)
-            {
-                throw new EndOfStreamException($"Expected {byteCount} bytes for int array, got {bytes.Length}.");
-            }
-
-            var result = new int[count];
-            Buffer.BlockCopy(bytes, 0, result, 0, byteCount);
-            return result;
+            return ReadStructArray<int>(reader);
         }
 
         private static unsafe void WriteStructArray<T>(BinaryWriter writer, T[] values)
@@ -295,7 +304,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             writer.Write(bytes);
         }
 
-        private static unsafe T[] ReadStructArray<T>(BinaryReader reader)
+        private static T[] ReadStructArray<T>(BinaryReader reader)
             where T : unmanaged
         {
             int count = reader.ReadInt32();
@@ -305,17 +314,18 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             int byteCount = checked(count * UnsafeUtility.SizeOf<T>());
-            byte[] bytes = reader.ReadBytes(byteCount);
-            if (bytes.Length != byteCount)
-            {
-                throw new EndOfStreamException($"Expected {byteCount} bytes for {typeof(T).Name} array, got {bytes.Length}.");
-            }
+            if (byteCount > reader.BaseStream.Length - reader.BaseStream.Position)
+                throw new EndOfStreamException($"Expected {byteCount} bytes for {typeof(T).Name} array.");
 
             var result = new T[count];
-            fixed (byte* sourcePtr = bytes)
-            fixed (T* destinationPtr = result)
+            Span<byte> destination = MemoryMarshal.AsBytes(result.AsSpan());
+            int bytesRead = 0;
+            while (bytesRead < byteCount)
             {
-                UnsafeUtility.MemCpy(destinationPtr, sourcePtr, byteCount);
+                int read = reader.Read(destination.Slice(bytesRead));
+                if (read == 0)
+                    throw new EndOfStreamException($"Expected {byteCount} bytes for {typeof(T).Name} array.");
+                bytesRead += read;
             }
 
             return result;

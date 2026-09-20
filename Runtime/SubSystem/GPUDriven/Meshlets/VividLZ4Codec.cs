@@ -91,17 +91,23 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 throw new ArgumentOutOfRangeException(nameof(decompressedLength));
             }
 
-            if (decompressedLength == 0)
+            var output = decompressedLength == 0 ? Array.Empty<byte>() : new byte[decompressedLength];
+            Decompress(input.AsSpan(), output.AsSpan());
+            return output;
+        }
+
+        internal static void Decompress(ReadOnlySpan<byte> input, Span<byte> output)
+        {
+            if (output.Length == 0)
             {
                 if (input.Length != 0)
                 {
                     throw new InvalidDataException("An empty LZ4 payload must not contain compressed bytes.");
                 }
 
-                return Array.Empty<byte>();
+                return;
             }
 
-            var output = new byte[decompressedLength];
             int inputIndex = 0;
             int outputIndex = 0;
 
@@ -111,7 +117,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 int literalLength = ReadLength(input, ref inputIndex, token >> 4);
                 ValidateCopyRange(input.Length, inputIndex, literalLength, "LZ4 literal input");
                 ValidateCopyRange(output.Length, outputIndex, literalLength, "LZ4 literal output");
-                Buffer.BlockCopy(input, inputIndex, output, outputIndex, literalLength);
+                input.Slice(inputIndex, literalLength).CopyTo(output.Slice(outputIndex, literalLength));
                 inputIndex += literalLength;
                 outputIndex += literalLength;
 
@@ -124,7 +130,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                         );
                     }
 
-                    return output;
+                    return;
                 }
 
                 if (input.Length - inputIndex < sizeof(ushort))
@@ -218,7 +224,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             output.WriteByte((byte) length);
         }
 
-        private static int ReadLength(byte[] input, ref int inputIndex, int baseLength)
+        private static int ReadLength(ReadOnlySpan<byte> input, ref int inputIndex, int baseLength)
         {
             int length = baseLength;
             if (baseLength != 15)

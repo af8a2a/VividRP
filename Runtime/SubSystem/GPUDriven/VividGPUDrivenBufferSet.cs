@@ -25,23 +25,6 @@ namespace VividRP.Runtime.GPUDriven
         private GraphicsBuffer m_MeshletsBuffer;
         private GraphicsBuffer m_SharedVertexBuffer;
         private GraphicsBuffer m_SharedIndexBuffer;
-        private VividInstanceData[] m_InstanceUploadData = Array.Empty<VividInstanceData>();
-        private VividMaterialData[] m_MaterialUploadData = Array.Empty<VividMaterialData>();
-        private VividDualSlabMaterialData[] m_DualSlabMaterialUploadData =
-            Array.Empty<VividDualSlabMaterialData>();
-        private uint4[] m_MaterialParameterUploadData = Array.Empty<uint4>();
-        private VividMaterialResourceData[] m_MaterialResourceUploadData =
-            Array.Empty<VividMaterialResourceData>();
-        private VividMaterialRuntimeHeader[] m_MaterialRuntimeHeaderUploadData =
-            Array.Empty<VividMaterialRuntimeHeader>();
-        private VividMaterialProgramData[] m_MaterialProgramUploadData =
-            Array.Empty<VividMaterialProgramData>();
-        private VividSurfaceBindingData[] m_SurfaceBindingUploadData = Array.Empty<VividSurfaceBindingData>();
-        private VividTerrainMaterialData[] m_TerrainMaterialUploadData = Array.Empty<VividTerrainMaterialData>();
-        private VividTerrainLayerGPUData[] m_TerrainLayerUploadData = Array.Empty<VividTerrainLayerGPUData>();
-        private VividMeshLODNode[] m_MeshLODNodeUploadData = Array.Empty<VividMeshLODNode>();
-        private VividMeshlet[] m_MeshletUploadData = Array.Empty<VividMeshlet>();
-        private VividMeshletVertex[] m_VertexUploadData = Array.Empty<VividMeshletVertex>();
         private byte[] m_PaddedIndexUploadData = Array.Empty<byte>();
         private bool m_IsDisposed;
 
@@ -141,7 +124,6 @@ namespace VividRP.Runtime.GPUDriven
                 UploadStructuredBuffer(
                     ref m_InstanceDataBuffer,
                     sceneData.MutableInstances,
-                    ref m_InstanceUploadData,
                     UnsafeUtility.SizeOf<VividInstanceData>(),
                     "VividGPUDriven_InstanceData"
                 );
@@ -151,63 +133,54 @@ namespace VividRP.Runtime.GPUDriven
                 UploadStructuredBuffer(
                     ref m_MaterialDataBuffer,
                     sceneData.MutableMaterials,
-                    ref m_MaterialUploadData,
                     UnsafeUtility.SizeOf<VividMaterialData>(),
                     "VividGPUDriven_MaterialData"
                 );
                 UploadStructuredBuffer(
                     ref m_DualSlabMaterialDataBuffer,
                     sceneData.MutableDualSlabMaterials,
-                    ref m_DualSlabMaterialUploadData,
                     UnsafeUtility.SizeOf<VividDualSlabMaterialData>(),
                     "VividGPUDriven_DualSlabMaterialData"
                 );
                 UploadStructuredBuffer(
                     ref m_MaterialParameterDataBuffer,
                     sceneData.MutableMaterialParameterLanes,
-                    ref m_MaterialParameterUploadData,
                     UnsafeUtility.SizeOf<uint4>(),
                     "VividGPUDriven_MaterialParameterData"
                 );
                 UploadStructuredBuffer(
                     ref m_MaterialResourceDataBuffer,
                     sceneData.MutableMaterialResources,
-                    ref m_MaterialResourceUploadData,
                     UnsafeUtility.SizeOf<VividMaterialResourceData>(),
                     "VividGPUDriven_MaterialResourceData"
                 );
                 UploadStructuredBuffer(
                     ref m_MaterialRuntimeHeaderBuffer,
                     sceneData.MutableMaterialRuntimeHeaders,
-                    ref m_MaterialRuntimeHeaderUploadData,
                     UnsafeUtility.SizeOf<VividMaterialRuntimeHeader>(),
                     "VividGPUDriven_MaterialRuntimeHeaders"
                 );
                 UploadStructuredBuffer(
                     ref m_MaterialProgramBuffer,
                     sceneData.MutableMaterialPrograms,
-                    ref m_MaterialProgramUploadData,
                     UnsafeUtility.SizeOf<VividMaterialProgramData>(),
                     "VividGPUDriven_MaterialPrograms"
                 );
                 UploadStructuredBuffer(
                     ref m_SurfaceBindingDataBuffer,
                     sceneData.MutableSurfaceBindings,
-                    ref m_SurfaceBindingUploadData,
                     UnsafeUtility.SizeOf<VividSurfaceBindingData>(),
                     "VividGPUDriven_SurfaceBindingData"
                 );
                 UploadStructuredBuffer(
                     ref m_TerrainMaterialDataBuffer,
                     sceneData.MutableTerrainMaterials,
-                    ref m_TerrainMaterialUploadData,
                     UnsafeUtility.SizeOf<VividTerrainMaterialData>(),
                     "VividGPUDriven_TerrainMaterialData"
                 );
                 UploadStructuredBuffer(
                     ref m_TerrainLayerDataBuffer,
                     sceneData.MutableTerrainLayers,
-                    ref m_TerrainLayerUploadData,
                     UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(),
                     "VividGPUDriven_TerrainLayerData"
                 );
@@ -218,21 +191,18 @@ namespace VividRP.Runtime.GPUDriven
                 UploadStructuredBuffer(
                     ref m_MeshLODNodesBuffer,
                     sceneData.MutableMeshLODNodes,
-                    ref m_MeshLODNodeUploadData,
                     UnsafeUtility.SizeOf<VividMeshLODNode>(),
                     "VividGPUDriven_MeshLODNodes"
                 );
                 UploadStructuredBuffer(
                     ref m_MeshletsBuffer,
                     sceneData.MutableMeshlets,
-                    ref m_MeshletUploadData,
                     UnsafeUtility.SizeOf<VividMeshlet>(),
                     "VividGPUDriven_Meshlets"
                 );
                 UploadStructuredBuffer(
                     ref m_SharedVertexBuffer,
                     sceneData.MutableVertices,
-                    ref m_VertexUploadData,
                     UnsafeUtility.SizeOf<VividMeshletVertex>(),
                     "VividGPUDriven_SharedVertices"
                 );
@@ -334,19 +304,6 @@ namespace VividRP.Runtime.GPUDriven
             m_MeshletsBuffer = null;
             m_SharedVertexBuffer = null;
             m_SharedIndexBuffer = null;
-            m_InstanceUploadData = Array.Empty<VividInstanceData>();
-            m_MaterialUploadData = Array.Empty<VividMaterialData>();
-            m_DualSlabMaterialUploadData = Array.Empty<VividDualSlabMaterialData>();
-            m_MaterialParameterUploadData = Array.Empty<uint4>();
-            m_MaterialResourceUploadData = Array.Empty<VividMaterialResourceData>();
-            m_MaterialRuntimeHeaderUploadData = Array.Empty<VividMaterialRuntimeHeader>();
-            m_MaterialProgramUploadData = Array.Empty<VividMaterialProgramData>();
-            m_SurfaceBindingUploadData = Array.Empty<VividSurfaceBindingData>();
-            m_TerrainMaterialUploadData = Array.Empty<VividTerrainMaterialData>();
-            m_TerrainLayerUploadData = Array.Empty<VividTerrainLayerGPUData>();
-            m_MeshLODNodeUploadData = Array.Empty<VividMeshLODNode>();
-            m_MeshletUploadData = Array.Empty<VividMeshlet>();
-            m_VertexUploadData = Array.Empty<VividMeshletVertex>();
             m_PaddedIndexUploadData = Array.Empty<byte>();
             m_IsDisposed = true;
         }
@@ -378,7 +335,6 @@ namespace VividRP.Runtime.GPUDriven
         private static void UploadStructuredBuffer<T>(
             ref GraphicsBuffer buffer,
             List<T> data,
-            ref T[] uploadData,
             int stride,
             string bufferName
         )
@@ -389,20 +345,8 @@ namespace VividRP.Runtime.GPUDriven
 
             if (data.Count > 0)
             {
-                EnsureUploadArrayCapacity(ref uploadData, data.Count);
-                data.CopyTo(uploadData, 0);
-                buffer.SetData(uploadData, 0, 0, data.Count);
+                buffer.SetData(data, 0, 0, data.Count);
             }
-        }
-
-        private static void EnsureUploadArrayCapacity<T>(ref T[] uploadData, int count)
-        {
-            if (uploadData.Length >= count)
-            {
-                return;
-            }
-
-            uploadData = new T[count];
         }
 
         private static void EnsureStructuredBuffer(

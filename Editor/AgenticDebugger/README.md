@@ -1,5 +1,8 @@
 # AgenticDebugger — Frame Debugger
 
+CPU Profiler 的 `status / frames / frame / allocation` GC 分配查询见 [GCProfiler.md](GCProfiler.md)。
+该接口独立于下面的 Frame Debugger，不受 Raster 事件白名单影响，也不会观察 RasterPass。
+
 通过 Editor API / Unity CLI 读取 Unity Frame Debugger，不需要操作桌面窗口。
 核心程序集仅在 Editor 加载；`Pipeline/` 是可选的 `com.unity.pipeline` CLI 适配。
 当前验证目标：Unity **6000.7.0a6**。私有 API 被隔离在 `FrameDebuggerApi.cs`；

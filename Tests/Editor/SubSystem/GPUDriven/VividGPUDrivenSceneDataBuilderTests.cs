@@ -213,6 +213,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MeshletCount, Is.EqualTo(1));
                 Assert.That(sceneData.VertexCount, Is.EqualTo(3));
                 Assert.That(sceneData.IndexCount, Is.EqualTo(3));
+                Assert.That(sceneData.MutableMeshlets.Capacity, Is.EqualTo(sceneData.MeshletCount));
+                Assert.That(sceneData.MutableMeshLODNodes.Capacity, Is.EqualTo(sceneData.MeshLODNodeCount));
+                Assert.That(sceneData.MutableVertices.Capacity, Is.EqualTo(sceneData.VertexCount));
+                Assert.That(sceneData.MutableIndices.Capacity, Is.EqualTo(sceneData.IndexCount));
                 Assert.That(sceneData.MaxMeshletListBuildJobCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(2));
                 Assert.That(sceneData.Instances[0].MaterialIndex, Is.EqualTo(sceneData.Instances[1].MaterialIndex));

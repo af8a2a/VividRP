@@ -434,6 +434,16 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.SharedVertexBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.SharedVertexBuffer.stride, Is.EqualTo(32));
             Assert.That(bufferSet.SharedIndexBuffer.count, Is.EqualTo(1));
+            // Exercise the upload itself, not the unchanged-data skip path.
+            bufferSet.Upload(sceneData);
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 32; iteration++)
+                bufferSet.Upload(sceneData);
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            var uploadedVertices = new VividMeshletVertex[1];
+            bufferSet.SharedVertexBuffer.GetData(uploadedVertices);
+            Assert.That(uploadedVertices[0].Position, Is.EqualTo(sceneData.Vertices[0].Position));
         }
 
         [Test]

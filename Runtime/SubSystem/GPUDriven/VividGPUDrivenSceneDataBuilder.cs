@@ -225,6 +225,8 @@ namespace VividRP.Runtime.GPUDriven
             bindingLifecycle?.BeginSurfaceBindingUpdate();
             try
             {
+                if (staticDataChanged)
+                    ReserveMeshletSceneCapacity(sceneData);
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataAppendRenderersMarker.Auto())
                 {
                     IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
@@ -1090,6 +1092,31 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return true;
+        }
+
+        private void ReserveMeshletSceneCapacity(VividGPUDrivenSceneData sceneData)
+        {
+            int meshlets = 0;
+            int nodes = 0;
+            int vertices = 0;
+            int indices = 0;
+            // This list already contains only unique assets referenced by renderable renderers.
+            for (int index = 0; index < m_CurrentReferencedMeshletAssets.Count; index++)
+            {
+                VividMeshletCollectionAsset asset = m_CurrentReferencedMeshletAssets[index];
+                meshlets = checked(meshlets + (asset.Meshlets?.Length ?? 0));
+                nodes = checked(nodes + (asset.MeshLODNodes?.Length ?? 0));
+                vertices = checked(vertices + (asset.VertexBuffer?.Length ?? 0));
+                indices = checked(indices + (asset.IndexBuffer?.Length ?? 0));
+            }
+            if (sceneData.MutableMeshlets.Capacity < meshlets)
+                sceneData.MutableMeshlets.Capacity = meshlets;
+            if (sceneData.MutableMeshLODNodes.Capacity < nodes)
+                sceneData.MutableMeshLODNodes.Capacity = nodes;
+            if (sceneData.MutableVertices.Capacity < vertices)
+                sceneData.MutableVertices.Capacity = vertices;
+            if (sceneData.MutableIndices.Capacity < indices)
+                sceneData.MutableIndices.Capacity = indices;
         }
 
         private MeshletAssetMetadata GetOrAppendMeshletAsset(

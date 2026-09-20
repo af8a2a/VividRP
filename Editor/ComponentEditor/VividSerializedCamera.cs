@@ -28,6 +28,15 @@ namespace VividRP.Editor
         public SerializedProperty taaAntiFlickerIntensity { get; }
 #if DLSS_PLUGIN_INTEGRATE
         public SerializedProperty dlssQuality { get; }
+        public SerializedProperty dlssNeuralRenderingPreset { get; }
+        public SerializedProperty dlssNeuralRenderingStyle { get; }
+        public SerializedProperty dlssNeuralRenderingUpscaling { get; }
+        public SerializedProperty dlssNeuralRenderingIntensity { get; }
+        public SerializedProperty dlssNeuralRenderingLocalToneStrength { get; }
+        public SerializedProperty dlssNeuralRenderingLocalStructureStrength { get; }
+        public SerializedProperty dlssNeuralRenderingSkinStructureStrength { get; }
+        public SerializedProperty dlssNeuralRenderingUseAutoMask { get; }
+        public SerializedProperty dlssNeuralRenderingUICorrection { get; }
 #endif
         public SerializedProperty fsr3Quality { get; }
         public SerializedProperty fsr3EnableSharpening { get; }
@@ -80,6 +89,15 @@ namespace VividRP.Editor
             taaAntiFlickerIntensity = serializedAdditionalDataObject.FindProperty("m_TAAAntiFlickerIntensity");
 #if DLSS_PLUGIN_INTEGRATE
             dlssQuality = serializedAdditionalDataObject.FindProperty("m_DLSSQuality");
+            dlssNeuralRenderingPreset = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingPreset");
+            dlssNeuralRenderingStyle = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingStyle");
+            dlssNeuralRenderingUpscaling = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingUpscaling");
+            dlssNeuralRenderingIntensity = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingIntensity");
+            dlssNeuralRenderingLocalToneStrength = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingLocalToneStrength");
+            dlssNeuralRenderingLocalStructureStrength = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingLocalStructureStrength");
+            dlssNeuralRenderingSkinStructureStrength = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingSkinStructureStrength");
+            dlssNeuralRenderingUseAutoMask = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingUseAutoMask");
+            dlssNeuralRenderingUICorrection = serializedAdditionalDataObject.FindProperty("m_DLSSNeuralRenderingUICorrection");
 #endif
             fsr3Quality = serializedAdditionalDataObject.FindProperty("m_FSR3Quality");
             fsr3EnableSharpening = serializedAdditionalDataObject.FindProperty("m_FSR3EnableSharpening");

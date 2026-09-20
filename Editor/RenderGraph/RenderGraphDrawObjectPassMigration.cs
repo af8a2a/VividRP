@@ -145,9 +145,16 @@ namespace VividRP.Editor.RenderGraph
             changed |= RenderGraphStandardOpaqueMigration.Migrate(graph, assetPath);
             changed |= MigrateShadowReceiverInputs(graph);
 
+            changed |= RenderGraphPostProcessMigration.Migrate(graph);
+
             if (graph.SchemaVersion < RenderGraphEditorGraph.CurrentSchemaVersion)
             {
                 graph.SchemaVersion = RenderGraphEditorGraph.CurrentSchemaVersion;
+                foreach (var pass in graph.GetNodes().OfType<RenderPassNodeData>())
+                {
+                    if (pass.GetPassType() == typeof(FinalBlitPass))
+                        pass.DefineNode();
+                }
                 changed = true;
             }
 

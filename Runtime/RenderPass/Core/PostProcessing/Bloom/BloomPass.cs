@@ -393,7 +393,7 @@ namespace VividRP.Runtime
                 cmd.DispatchCompute(m_UpsampleCS, m_UpsampleKernel, DivUp(hw, 8), DivUp(hh, 8), 1);
             }
 
-            // ---- 5. Bind globals for FinalBlitPass ----
+            // ---- 5. Bind globals for UberPostPass ----
             var bloomOutput = (RTHandle)bloomTexture.innerHandle;
             var screenSpaceLensFlareMipOutput = (RTHandle)screenSpaceLensFlareBloomMipTexture.innerHandle;
 

@@ -107,6 +107,15 @@ namespace VividRP.Editor.RenderGraph
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
         {
+            // Keep legacy inputs until the importer transfers their connections to UberPost.
+            if (GetPassType() == typeof(VividRP.Runtime.RenderPass.Core.FinalBlitPass)
+                && Graph is RenderGraphEditorGraph graph
+                && graph.SchemaVersion < RenderGraphPostProcessMigration.SchemaVersion)
+            {
+                context.AddInputPort<RenderGraphTexture>("colorGradingLut").Build();
+                context.AddInputPort<RenderGraphTexture>("bloomTexture").Build();
+            }
+
             var passType = GetPassType();
             if (passType == null)
                 return;

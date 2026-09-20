@@ -290,7 +290,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
 
                 // DLSS-RR preserves the HDR exposure domain of its input.
-                // VividRP's AutoExposure and FinalBlit consume pre-exposed
+                // VividRP's AutoExposure and UberPost consume pre-exposed
                 // scene color, so restore that pipeline contract exactly once
                 // after RR (or its fallback), never inside the NGX inputs.
                 cmd.SetComputeTextureParam(

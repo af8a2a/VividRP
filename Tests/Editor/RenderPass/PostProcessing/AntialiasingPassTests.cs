@@ -161,6 +161,65 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
         }
 
+#if DLSS_PLUGIN_INTEGRATE
+        [Test]
+        public void Prepare_NeuralRenderingDefersUpscalingUntilAfterUberPost()
+        {
+            var pass = new AntialiasingPass();
+            var frameData = CreateFrameData(
+                960,
+                540,
+                VividAntialiasingMode.DLSSNeuralRendering,
+                new Vector2Int(960, 540),
+                new Vector2Int(1920, 1080));
+
+            pass.Prepare(frameData);
+
+            var outputTexture = GetTextureField(pass, "AntialiasingOutput");
+            Assert.That(outputTexture.desc.Width, Is.EqualTo(960));
+            Assert.That(outputTexture.desc.Height, Is.EqualTo(540));
+            Assert.That(outputTexture.desc.EnableRandomWrite, Is.False);
+        }
+
+        [Test]
+        public void ResolveRenderSize_NeuralRenderingUsesExactEvenTwoTimesPath()
+        {
+            var gameObject = new GameObject("Neural Rendering Size Test");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                additionalData.dlssNeuralRenderingUpscaling = true;
+
+                Assert.That(
+                    VividAntialiasingRuntimeUtility.ResolveRenderSize(
+                        new Vector2Int(1920, 1080),
+                        additionalData,
+                        VividAntialiasingMode.DLSSNeuralRendering),
+                    Is.EqualTo(new Vector2Int(960, 540)));
+                Assert.That(
+                    VividAntialiasingRuntimeUtility.ResolveRenderSize(
+                        new Vector2Int(1919, 1079),
+                        additionalData,
+                        VividAntialiasingMode.DLSSNeuralRendering),
+                    Is.EqualTo(new Vector2Int(1919, 1079)));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void NeuralRendering_DoesNotRequestProjectionJitter()
+        {
+            Assert.That(
+                VividAntialiasingRuntimeUtility.UsesTemporalJitter(
+                    VividAntialiasingMode.DLSSNeuralRendering),
+                Is.False);
+        }
+#endif
+
         [Test]
         public void Prepare_ReusesOutputDescriptorInstance()
         {
@@ -392,7 +451,7 @@ namespace VividRP.Editor.Tests
             Assert.That(utilityType, Is.Not.Null);
             var resolveMethod = utilityType.GetMethod("Resolve", BindingFlags.Static | BindingFlags.NonPublic);
             Assert.That(resolveMethod, Is.Not.Null);
-            resolveMethod.Invoke(null, new object[] { camera, additionalData, hasAntialiasingPass, data });
+            resolveMethod.Invoke(null, new object[] { camera, additionalData, hasAntialiasingPass, data, false });
         }
 
         private static void InvokeResolverClear()

@@ -183,6 +183,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     if (TryRecordDlssPass(context))
                         return;
                     break;
+                case VividAntialiasingMode.DLSSNeuralRendering:
+                    if (TryRegisterPassthrough(context))
+                        return;
+                    break;
 #endif
             }
 
@@ -450,6 +454,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 exposureData,
                 m_ResetHistory);
         }
+
 #endif
 
         private bool TryRecordStpPass(RenderGraphRecordingContext context)
@@ -672,7 +677,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var outputSize = ResolveOutputDimensions(cameraData, antialiasingData);
 
-            if (m_EffectiveMode == VividAntialiasingMode.None)
+            var usesPassthroughOutput = m_EffectiveMode == VividAntialiasingMode.None;
+#if DLSS_PLUGIN_INTEGRATE
+            usesPassthroughOutput |= m_EffectiveMode == VividAntialiasingMode.DLSSNeuralRendering;
+#endif
+            if (usesPassthroughOutput)
             {
                 outputDescriptor.Name = "AntialiasingOutput";
                 outputDescriptor.Width = Mathf.Max(1, outputSize.x);

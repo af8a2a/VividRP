@@ -8,6 +8,7 @@ namespace VividRP.Runtime
     public sealed class VividAntialiasingData : ContextItem
     {
         public bool hasAntialiasingPass;
+        public bool hasNeuralRenderingPass;
         public VividAntialiasingMode requestedMode;
         public VividAntialiasingMode effectiveMode;
         public Vector2Int renderSize;
@@ -18,6 +19,7 @@ namespace VividRP.Runtime
         public override void Reset()
         {
             hasAntialiasingPass = false;
+            hasNeuralRenderingPass = false;
             requestedMode = VividAntialiasingMode.None;
             effectiveMode = VividAntialiasingMode.None;
             renderSize = Vector2Int.one;
@@ -40,6 +42,8 @@ namespace VividRP.Runtime
 #if DLSS_PLUGIN_INTEGRATE
         private static bool s_HasResolvedDlssSupport;
         private static bool s_CachedDlssSupport;
+        private static bool s_HasResolvedDlssNeuralRenderingSupport;
+        private static bool s_CachedDlssNeuralRenderingSupport;
 #endif
 
         internal static void Clear()
@@ -54,6 +58,8 @@ namespace VividRP.Runtime
 #if DLSS_PLUGIN_INTEGRATE
             s_HasResolvedDlssSupport = false;
             s_CachedDlssSupport = false;
+            s_HasResolvedDlssNeuralRenderingSupport = false;
+            s_CachedDlssNeuralRenderingSupport = false;
 #endif
         }
 
@@ -61,15 +67,22 @@ namespace VividRP.Runtime
             Camera camera,
             VividAdditionalCameraData additionalData,
             bool hasAntialiasingPass,
-            VividAntialiasingData data)
+            VividAntialiasingData data,
+            bool hasNeuralRenderingPass = false)
         {
             if (data == null)
                 return;
 
             var outputSize = ResolveOutputSize(camera);
             data.hasAntialiasingPass = hasAntialiasingPass;
+            data.hasNeuralRenderingPass = hasNeuralRenderingPass;
             data.requestedMode = additionalData != null ? additionalData.antialiasing : VividAntialiasingMode.None;
-            data.effectiveMode = hasAntialiasingPass
+            var hasRequestedPass = hasAntialiasingPass;
+#if DLSS_PLUGIN_INTEGRATE
+            if (data.requestedMode == VividAntialiasingMode.DLSSNeuralRendering)
+                hasRequestedPass = hasNeuralRenderingPass;
+#endif
+            data.effectiveMode = hasRequestedPass
                 ? ResolveEffectiveMode(additionalData)
                 : VividAntialiasingMode.None;
             data.outputSize = outputSize;
@@ -156,6 +169,16 @@ namespace VividRP.Runtime
             if (effectiveMode == VividAntialiasingMode.TemporalSuperResolution)
                 return TSRUpscalerUtility.ResolveRenderSize(width, height, additionalData.tsrQuality);
 
+#if DLSS_PLUGIN_INTEGRATE
+            if (effectiveMode == VividAntialiasingMode.DLSSNeuralRendering
+                && additionalData.dlssNeuralRenderingUpscaling
+                && (width & 1) == 0
+                && (height & 1) == 0)
+            {
+                return new Vector2Int(width / 2, height / 2);
+            }
+#endif
+
             return new Vector2Int(width, height);
         }
 
@@ -203,6 +226,10 @@ namespace VividRP.Runtime
                 case VividAntialiasingMode.DeepLearningSuperSampling:
                     return IsDlssSupported()
                         ? VividAntialiasingMode.DeepLearningSuperSampling
+                        : VividAntialiasingMode.None;
+                case VividAntialiasingMode.DLSSNeuralRendering:
+                    return IsDlssNeuralRenderingSupported()
+                        ? VividAntialiasingMode.DLSSNeuralRendering
                         : VividAntialiasingMode.None;
 #endif
                 default:
@@ -253,6 +280,18 @@ namespace VividRP.Runtime
             }
 
             return s_CachedDlssSupport;
+        }
+
+        internal static bool IsDlssNeuralRenderingSupported()
+        {
+            if (!s_HasResolvedDlssNeuralRenderingSupport)
+            {
+                s_CachedDlssNeuralRenderingSupport =
+                    DLSSExtension.IsNeuralRenderingSupported;
+                s_HasResolvedDlssNeuralRenderingSupport = true;
+            }
+
+            return s_CachedDlssNeuralRenderingSupport;
         }
 #endif
 

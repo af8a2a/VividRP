@@ -59,9 +59,12 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GetFinalBlitScaleBias_FlipsY_WhenOriginsDiffer()
         {
-            var method = typeof(FinalBlitPass).GetMethod(
-                "GetFinalBlitScaleBias",
-                BindingFlags.Static | BindingFlags.NonPublic);
+            var method = typeof(TextureScaleBiasUtility).GetMethod(
+                "GetScaleBias",
+                BindingFlags.Static | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(Vector2), typeof(TextureUVOrigin), typeof(TextureUVOrigin) },
+                null);
 
             Assert.That(method, Is.Not.Null);
             Assert.That(
@@ -104,26 +107,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersReadOnlySourceAndColorGradingTextures()
+        public void Initialize_RegistersOnlyReadOnlySource()
         {
-            IRenderPass renderPass = new FinalBlitPass();
-
-            var resources = renderPass.Initialize();
-
-            Assert.That(resources.Textures, Has.Length.EqualTo(3));
-            Assert.That(resources.Buffers, Is.Empty);
+            var resources = ((IRenderPass)new FinalBlitPass()).Initialize();
+            Assert.That(resources.Textures, Has.Length.EqualTo(1));
             Assert.That(resources.Textures[0].Name, Is.EqualTo("source"));
             Assert.That(resources.Textures[0].Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(resources.Textures[0].AttachmentIndex, Is.EqualTo(-1));
-            Assert.That(resources.Textures[0].IsDepthAttachment, Is.False);
-            Assert.That(resources.Textures[1].Name, Is.EqualTo("ColorGradingTexture"));
-            Assert.That(resources.Textures[1].Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(resources.Textures[1].AttachmentIndex, Is.EqualTo(-1));
-            Assert.That(resources.Textures[1].IsDepthAttachment, Is.False);
-            Assert.That(resources.Textures[2].Name, Is.EqualTo("BloomTexture"));
-            Assert.That(resources.Textures[2].Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(resources.Textures[2].AttachmentIndex, Is.EqualTo(-1));
-            Assert.That(resources.Textures[2].IsDepthAttachment, Is.False);
+            Assert.That(resources.Buffers, Is.Empty);
         }
 
         [Test]
@@ -359,6 +349,7 @@ namespace VividRP.Editor.Tests
 
             return null;
         }
+
 
         private static void AssertSourceOverrideBehavior(
             IDynamicPassResourceLayout pass,

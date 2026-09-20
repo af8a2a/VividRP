@@ -16,7 +16,7 @@ namespace VividRP.Editor.RenderGraph
         | GraphOptions.DisableAutoInclusionOfNodesFromGraphAssembly)]
     internal class RenderGraphEditorGraph : Graph
     {
-        internal const int CurrentSchemaVersion = 4;
+        internal const int CurrentSchemaVersion = 5;
         internal const string AssetExtension = "vrdg";
         internal const string StandardGraphTemplateMenuPath = "Assets/Create/VividRP/Standard Render Graph";
         internal const string StandardGraphTemplateRelativePath = "Editor/RenderGraph/Templates/StandardRenderGraph.vrdg.txt";

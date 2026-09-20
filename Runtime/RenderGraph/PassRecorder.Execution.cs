@@ -138,7 +138,8 @@ namespace VividRP.Runtime
                         camera,
                         additionalCameraData,
                         hasAntialiasingPass,
-                        antialiasingData);
+                        antialiasingData,
+                        HasNeuralRenderingPass(s_RenderPasses));
                 }
             }
 
@@ -218,7 +219,7 @@ namespace VividRP.Runtime
                 return Vector2Int.one;
 
             if (antialiasingData != null
-                && antialiasingData.hasAntialiasingPass
+                && (antialiasingData.hasAntialiasingPass || antialiasingData.hasNeuralRenderingPass)
                 && antialiasingData.renderSize.x > 0
                 && antialiasingData.renderSize.y > 0)
             {
@@ -643,6 +644,20 @@ namespace VividRP.Runtime
             {
                 var renderPass = renderPasses[index];
                 if (renderPass is AntialiasingPass)
+                    return true;
+            }
+
+            return false;
+        }
+
+        internal static bool HasNeuralRenderingPass(IReadOnlyList<IRenderPass> renderPasses)
+        {
+            if (renderPasses == null)
+                return false;
+
+            for (var index = 0; index < renderPasses.Count; index++)
+            {
+                if (renderPasses[index] is DLSSNeuralRenderingPass)
                     return true;
             }
 

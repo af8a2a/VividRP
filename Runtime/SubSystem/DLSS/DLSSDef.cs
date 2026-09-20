@@ -55,7 +55,10 @@ namespace VividRP.Runtime
         /// <summary>Super Resolution - temporal upscaling</summary>
         SuperResolution = 1,
         /// <summary>Ray Reconstruction - ray tracing denoiser with upscaling</summary>
-        RayReconstruction = 2
+        RayReconstruction = 2,
+
+        /// <summary>DLSS 5 Neural Rendering - standalone raster post-process</summary>
+        NeuralRendering = 3
     }
 
     /// <summary>

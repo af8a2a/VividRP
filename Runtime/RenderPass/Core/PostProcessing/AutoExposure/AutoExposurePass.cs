@@ -286,7 +286,7 @@ namespace VividRP.Runtime.RenderPass
                 return;
             }
 
-            // Publish the exact buffer FinalBlit will consume during Prepare.
+            // Publish the exact buffer UberPost will consume during Prepare.
             // The exposure buffer is camera history owned outside RenderGraph,
             // so it must be imported explicitly to establish the UAV-write to
             // fragment-read dependency and resource transition.

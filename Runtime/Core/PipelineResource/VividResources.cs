@@ -13,6 +13,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/StopNaN")]
         public Shader StopNaNShader;
 
+        [VividResourcePath("Shaders/Core/Private/UberPost")]
+        public Shader UberPostShader;
+
         [VividResourcePath("Shaders/Core/Private/FinalBlit")]
         public Shader FinalBlitShader;
 

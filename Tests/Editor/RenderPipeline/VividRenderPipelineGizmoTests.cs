@@ -98,7 +98,7 @@ namespace VividRP.Editor.Tests
             IReadOnlyList<IRenderPass> renderPasses = new IRenderPass[]
             {
                 new FullScreenPass(),
-                new FinalBlitPass(),
+                new UberPostPass(),
             };
 
             Assert.That(PassRecorder.HasRenderGizmoPrePostProcessBoundary(renderPasses), Is.True);

@@ -401,8 +401,20 @@ namespace VividRP.Runtime
 
             if (!m_HasPermanentFailure && UsesSharedChunkManager)
             {
+                int maxStoredByteSize = 0;
+                if (m_BuiltData.ContainerSchemaVersion >= VividVirtualTextureBuiltData.CurrentContainerSchemaVersion)
+                {
+                    for (int index = 0; index < m_BuiltData.ChunkCount; index++)
+                        maxStoredByteSize = Math.Max(maxStoredByteSize, m_BuiltData.Chunks[index].StoredByteSize);
+                }
+                else
+                {
+                    for (int index = 0; index < m_BuiltData.TileCount; index++)
+                        maxStoredByteSize = Math.Max(maxStoredByteSize, m_BuiltData.Tiles[index].ByteSize);
+                }
                 VTStreamChunkManager.Shared.PrepareAsset(
-                    m_ResolvedStreamDataPath, m_BuiltData.ContentVersion, m_BuiltData.ChunkCount, m_BuiltData.TileCount);
+                    m_ResolvedStreamDataPath, m_BuiltData.ContentVersion, m_BuiltData.ChunkCount, m_BuiltData.TileCount,
+                    maxStoredByteSize);
                 int requestCapacity = Math.Min(m_BuiltData.TileCount,
                     VTVirtualTextureStreamRequestGate.DefaultMaxPendingReadCount);
                 m_ChunkRequests.EnsureCapacity(requestCapacity);

@@ -805,6 +805,159 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AsyncReadBatch_ReusesNativeStorageAndSubmitsOnlyCurrentCommands()
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
+            File.WriteAllBytes(path, new byte[] { 2, 3, 5, 7, 11, 13 });
+            try
+            {
+                using var backend = new VTAsyncReadManagerBackend();
+                var commands = new[] { new VTIOReadCommand(0, 1, false) };
+                IVTIOBatch first = backend.CreateBatch(path, commands);
+                const System.Reflection.BindingFlags flags =
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var bufferField = first.GetType().GetField("m_Buffer", flags);
+                var commandsField = first.GetType().GetField("m_ReadCommands", flags);
+                var handleField = first.GetType().GetField("m_ReadHandle", flags);
+                var initialCommands = (NativeArray<Unity.IO.LowLevel.Unsafe.ReadCommand>)commandsField.GetValue(first);
+                first.Dispose();
+
+                using (IVTIOBatch larger = backend.CreateBatch(path, new[]
+                {
+                    new VTIOReadCommand(0, 3, false),
+                    new VTIOReadCommand(3, 3, false),
+                }))
+                {
+                    Assert.That(larger, Is.SameAs(first));
+                    Assert.That(((NativeArray<byte>)bufferField.GetValue(larger)).Length, Is.GreaterThanOrEqualTo(6));
+                    Assert.That(((NativeArray<Unity.IO.LowLevel.Unsafe.ReadCommand>)commandsField.GetValue(larger)).Equals(initialCommands), Is.True);
+                }
+
+                var grownBuffer = (NativeArray<byte>)bufferField.GetValue(first);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 64; iteration++)
+                    backend.CreateBatch(path, commands).Dispose();
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(((NativeArray<byte>)bufferField.GetValue(first)).Equals(grownBuffer), Is.True);
+                Assert.That(((NativeArray<Unity.IO.LowLevel.Unsafe.ReadCommand>)commandsField.GetValue(first)).Equals(initialCommands), Is.True);
+
+                commands[0] = new VTIOReadCommand(4, 2, false);
+                using var reused = (IVTNativeIOBatch)backend.CreateBatch(path, commands);
+                using IVTIOBatch other = backend.CreateBatch(path, commands);
+                Assert.That(((NativeArray<byte>)bufferField.GetValue(other)).Equals(grownBuffer), Is.False);
+                DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!reused.IsCompleted && DateTime.UtcNow < deadline)
+                    Thread.Sleep(1);
+                Assert.That(reused.IsCompleted && !reused.Failed, Is.True, reused.Error);
+                Assert.That(((Unity.IO.LowLevel.Unsafe.ReadHandle)handleField.GetValue(reused)).ReadCount, Is.EqualTo(1));
+                Assert.That(reused.TryGetNativeResult(0, out var result), Is.True);
+                Assert.That(result.ToArray(), Is.EqualTo(new byte[] { 11, 13 }));
+                Assert.That(reused.TryGetNativeResult(1, out _), Is.False);
+                other.Dispose();
+                reused.Dispose();
+                backend.Dispose();
+                Assert.That(((NativeArray<byte>)bufferField.GetValue(reused)).IsCreated, Is.False);
+                Assert.That(((NativeArray<byte>)bufferField.GetValue(other)).IsCreated, Is.False);
+                Assert.That(((NativeArray<Unity.IO.LowLevel.Unsafe.ReadCommand>)commandsField.GetValue(reused)).IsCreated, Is.False);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [TestCase(4)]
+        [TestCase(80)]
+        public void AsyncReadBatch_PreparedFirstConcurrentBurstReusesNativeStorage(int batchCount)
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
+            File.WriteAllBytes(path, new byte[] { 2 });
+            try
+            {
+                using var backend = new VTAsyncReadManagerBackend();
+                backend.Prepare(batchCount, 143200);
+                var commands = new[] { new VTIOReadCommand(0, 1, false) };
+                backend.CreateBatch(path, commands).Dispose(); // Warm the file cache and methods, not concurrency.
+                const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+                object free = typeof(VTAsyncReadManagerBackend).GetField("m_FreeBatch", flags).GetValue(backend);
+                var nextField = free.GetType().GetField("NextFree", flags);
+                var bufferField = free.GetType().GetField("m_Buffer", flags);
+                var commandField = free.GetType().GetField("m_ReadCommands", flags);
+                var buffers = new NativeArray<byte>[batchCount];
+                var commandBuffers = new NativeArray<Unity.IO.LowLevel.Unsafe.ReadCommand>[batchCount];
+                var batches = new IVTIOBatch[batchCount];
+                for (int index = 0; index < batchCount; index++)
+                {
+                    buffers[index] = (NativeArray<byte>)bufferField.GetValue(free);
+                    commandBuffers[index] = (NativeArray<Unity.IO.LowLevel.Unsafe.ReadCommand>)commandField.GetValue(free);
+                    free = nextField.GetValue(free);
+                }
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                backend.Prepare(batchCount, 143200);
+                for (int index = 0; index < batchCount; index++)
+                    batches[index] = backend.CreateBatch(path, commands);
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                try
+                {
+                    Assert.That(allocated, Is.Zero);
+                    for (int index = 0; index < batchCount; index++)
+                    {
+                        Assert.That(buffers[index].Length, Is.EqualTo(143200));
+                        Assert.That(((NativeArray<byte>)bufferField.GetValue(batches[index])).Equals(buffers[index]), Is.True);
+                        Assert.That(((NativeArray<Unity.IO.LowLevel.Unsafe.ReadCommand>)commandField.GetValue(batches[index])).Equals(commandBuffers[index]), Is.True);
+                    }
+                }
+                finally
+                {
+                    for (int index = 0; index < batchCount; index++)
+                        batches[index]?.Dispose();
+                }
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [TestCase(32, 3)]
+        [TestCase(8, 5)]
+        public void ChunkManager_PreparedReadCapacitySplitsBatchesWithoutDroppingCommands(int byteCapacity, int batchCount)
+        {
+            using var manager = new VTStreamChunkManager();
+            var backend = new RecordingIOBackend();
+            manager.SetIOBackendForTesting(backend);
+            manager.PrepareAsset("prepared.stream", 1, 5, maxStoredByteSize: byteCapacity);
+            var leases = new VTChunkLease[5];
+            try
+            {
+                for (int index = 0; index < leases.Length; index++)
+                    leases[index] = manager.Acquire("prepared.stream", 1, CreateRawLocation(index, index * 16), false);
+                manager.SubmitPendingReads();
+                Assert.That(backend.Batches.Count, Is.EqualTo(batchCount));
+                int nextOffset = 0;
+                foreach (var batch in backend.Batches)
+                {
+                    int byteSize = 0;
+                    foreach (var command in batch)
+                    {
+                        Assert.That(command.FileOffset, Is.EqualTo(nextOffset));
+                        nextOffset += command.ByteSize;
+                        byteSize += command.ByteSize;
+                    }
+                    Assert.That(byteSize, Is.LessThanOrEqualTo(Math.Max(16, byteCapacity)));
+                }
+                Assert.That(nextOffset, Is.EqualTo(5 * 16));
+            }
+            finally
+            {
+                foreach (var lease in leases)
+                    lease?.Dispose();
+            }
+        }
+
+        [Test]
         public void ChunkManager_PreparedAssets_AllowNewBurstWhileEarlierChunksRemainCached()
         {
             using var manager = new VTStreamChunkManager();

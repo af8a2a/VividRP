@@ -640,6 +640,45 @@ namespace VividRP.Editor.Tests
             Assert.That(allocated, Is.Zero);
         }
 
+        [TestCase("MarkUploadDirty", "m_UploadIndices", "m_UploadMask")]
+        [TestCase("MarkRecomputeDirty", "m_RecomputeIndices", "m_RecomputeMask")]
+        public void PageTableDirtyIndices_FirstFullBurstAndReuseDoNotAllocate(
+            string methodName, string indicesName, string maskName)
+        {
+            const int pageCount = 257;
+            using var updater = new VTPageTableUpdater("DirtyIndicesAllocationTest", pageCount);
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var markDirty = (System.Action<int>)System.Delegate.CreateDelegate(
+                typeof(System.Action<int>), updater, typeof(VTPageTableUpdater).GetMethod(methodName, flags));
+            var indices = (List<int>)typeof(VTPageTableUpdater).GetField(indicesName, flags).GetValue(updater);
+            var mask = (bool[])typeof(VTPageTableUpdater).GetField(maskName, flags).GetValue(updater);
+
+            // Warm the method without warming capacity to the size of the measured burst.
+            markDirty(0);
+            markDirty(0);
+            indices.Clear();
+            System.Array.Clear(mask, 0, mask.Length);
+            bool correct = true;
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 32; iteration++)
+            {
+                for (int index = pageCount - 1; index >= 0; index--)
+                {
+                    markDirty(index);
+                    markDirty(index);
+                }
+                correct &= indices.Count == pageCount;
+                for (int index = 0; index < pageCount; index++)
+                    correct &= indices[index] == pageCount - 1 - index && mask[index];
+                indices.Clear();
+                System.Array.Clear(mask, 0, mask.Length);
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(correct, Is.True);
+            Assert.That(allocated, Is.Zero);
+        }
+
         [Test]
         public void EncodedStaging_PreparesBothBatchesAndReusesTexturesAfterCapacityGrowth()
         {

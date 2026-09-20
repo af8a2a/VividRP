@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.IO.LowLevel.Unsafe;
+using Unity.Profiling;
 
 namespace VividRP.Runtime
 {
@@ -59,8 +60,13 @@ namespace VividRP.Runtime
 
     internal sealed unsafe class VTAsyncReadManagerBackend : IVTIOBackend
     {
+        private static readonly ProfilerMarker s_GrowReadBufferMarker = new("VividVT.StreamIO.GrowReadBuffer");
+        private static readonly ProfilerMarker s_CreateReadCommandsMarker = new("VividVT.StreamIO.CreateReadCommands");
         private readonly Dictionary<string, SharedFile> m_Files = new(StringComparer.OrdinalIgnoreCase);
         private Batch m_FreeBatch;
+        private int m_BatchCount;
+        private int m_PreparedBatchCount;
+        private int m_PreparedByteCapacity;
         private bool m_Disposed;
 
         private sealed class SharedFile
@@ -73,7 +79,36 @@ namespace VividRP.Runtime
         {
             // At most one batch per in-flight chunk under the default streaming budget.
             for (int index = 0; index < VTVirtualTextureStreamRequestGate.DefaultMaxPendingReadCount; index++)
+            {
                 ReturnBatch(new Batch(this));
+                m_BatchCount++;
+            }
+        }
+
+        internal void Prepare(int batchCount, int byteCapacity)
+        {
+            if (m_Disposed)
+                throw new ObjectDisposedException(nameof(VTAsyncReadManagerBackend));
+            if (byteCapacity <= 0 || batchCount <= 0
+                || (batchCount <= m_PreparedBatchCount && byteCapacity <= m_PreparedByteCapacity))
+                return;
+
+            int targetBatchCount = Math.Max(m_PreparedBatchCount, batchCount);
+            int targetByteCapacity = Math.Max(m_PreparedByteCapacity, byteCapacity);
+            while (m_BatchCount < targetBatchCount)
+            {
+                ReturnBatch(new Batch(this));
+                m_BatchCount++;
+            }
+            // Active reads/decode views must keep their storage until their batch is returned.
+            int preparedCount = 0;
+            for (Batch batch = m_FreeBatch; batch != null && preparedCount < targetBatchCount; batch = batch.NextFree)
+            {
+                batch.EnsureCapacity(targetByteCapacity);
+                preparedCount++;
+            }
+            m_PreparedBatchCount = targetBatchCount;
+            m_PreparedByteCapacity = targetByteCapacity;
         }
 
         public string Name => nameof(VividVirtualTextureIOBackendMode.AsyncReadManager);
@@ -84,19 +119,20 @@ namespace VividRP.Runtime
         {
             if (m_Disposed)
                 throw new ObjectDisposedException(nameof(VTAsyncReadManagerBackend));
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("VT stream path must be non-empty.", nameof(path));
+            if (commands == null || commands.Count == 0 || commands.Count > 64)
+                throw new ArgumentOutOfRangeException(nameof(commands));
+
+            int totalByteSize = 0;
+            for (int index = 0; index < commands.Count; index++)
+                totalByteSize = checked(totalByteSize + commands[index].ByteSize);
 
             SharedFile file = AcquireFile(path);
-            Batch batch = m_FreeBatch;
-            if (batch != null)
-            {
-                m_FreeBatch = batch.NextFree;
-                batch.NextFree = null;
-            }
-            else
-                batch = new Batch(this);
+            Batch batch = RentBatch(Math.Max(1, totalByteSize));
             try
             {
-                batch.Initialize(path, file, commands);
+                batch.Initialize(path, file, commands, totalByteSize);
                 return batch;
             }
             catch
@@ -107,6 +143,41 @@ namespace VividRP.Runtime
             }
         }
 
+        private Batch RentBatch(int requiredCapacity)
+        {
+            // Prefer the smallest fitting buffer; otherwise grow the largest free one.
+            // Return order must not force a smaller buffer to grow while a suitable one is idle.
+            Batch best = null;
+            Batch bestPrevious = null;
+            Batch previous = null;
+            for (Batch candidate = m_FreeBatch; candidate != null; candidate = candidate.NextFree)
+            {
+                int capacity = candidate.BufferCapacity;
+                if (best == null
+                    || (capacity >= requiredCapacity
+                        ? best.BufferCapacity < requiredCapacity || capacity < best.BufferCapacity
+                        : best.BufferCapacity < requiredCapacity && capacity > best.BufferCapacity))
+                {
+                    best = candidate;
+                    bestPrevious = previous;
+                    if (capacity == requiredCapacity)
+                        break;
+                }
+                previous = candidate;
+            }
+            if (best == null)
+            {
+                m_BatchCount++;
+                return new Batch(this);
+            }
+            if (bestPrevious == null)
+                m_FreeBatch = best.NextFree;
+            else
+                bestPrevious.NextFree = best.NextFree;
+            best.NextFree = null;
+            return best;
+        }
+
         public void Dispose()
         {
             if (m_Disposed)
@@ -115,7 +186,13 @@ namespace VividRP.Runtime
             foreach (SharedFile file in m_Files.Values)
                 CloseFile(file);
             m_Files.Clear();
-            m_FreeBatch = null;
+            while (m_FreeBatch != null)
+            {
+                Batch batch = m_FreeBatch;
+                m_FreeBatch = batch.NextFree;
+                batch.NextFree = null;
+                batch.ReleaseBuffers();
+            }
             m_Disposed = true;
         }
 
@@ -126,6 +203,8 @@ namespace VividRP.Runtime
                 batch.NextFree = m_FreeBatch;
                 m_FreeBatch = batch;
             }
+            else
+                batch.ReleaseBuffers();
         }
 
         private SharedFile AcquireFile(string path)
@@ -191,13 +270,9 @@ namespace VividRP.Runtime
             internal void Initialize(
                 string path,
                 SharedFile file,
-                IReadOnlyList<VTIOReadCommand> commands)
+                IReadOnlyList<VTIOReadCommand> commands,
+                int totalByteSize)
             {
-                if (string.IsNullOrWhiteSpace(path))
-                    throw new ArgumentException("VT stream path must be non-empty.", nameof(path));
-                if (commands == null || commands.Count == 0 || commands.Count > 64)
-                    throw new ArgumentOutOfRangeException(nameof(commands));
-
                 m_Path = path;
                 m_File = file;
 
@@ -207,22 +282,15 @@ namespace VividRP.Runtime
                 m_ReadHandle = default;
                 try
                 {
-                    int totalByteSize = 0;
+                    int byteOffset = 0;
                     for (int commandIndex = 0; commandIndex < commands.Count; commandIndex++)
                     {
-                        m_BufferOffsets[commandIndex] = totalByteSize;
+                        m_BufferOffsets[commandIndex] = byteOffset;
                         m_ByteSizes[commandIndex] = commands[commandIndex].ByteSize;
-                        totalByteSize = checked(totalByteSize + commands[commandIndex].ByteSize);
+                        byteOffset += commands[commandIndex].ByteSize;
                     }
 
-                    m_Buffer = new NativeArray<byte>(
-                        Math.Max(1, totalByteSize),
-                        Allocator.Persistent,
-                        NativeArrayOptions.UninitializedMemory);
-                    m_ReadCommands = new NativeArray<ReadCommand>(
-                        commands.Count,
-                        Allocator.Persistent,
-                        NativeArrayOptions.UninitializedMemory);
+                    EnsureCapacity(Math.Max(1, totalByteSize));
                     byte* buffer = (byte*)NativeArrayUnsafeUtility.GetUnsafePtr(m_Buffer);
                     for (int commandIndex = 0; commandIndex < commands.Count; commandIndex++)
                     {
@@ -237,12 +305,7 @@ namespace VividRP.Runtime
                 }
                 catch
                 {
-                    if (m_ReadCommands.IsCreated)
-                        m_ReadCommands.Dispose();
-                    if (m_Buffer.IsCreated)
-                        m_Buffer.Dispose();
-                    m_Buffer = default;
-                    m_ReadCommands = default;
+                    ReleaseBuffers();
                     m_File = null;
                     m_Path = null;
                     m_Disposed = true;
@@ -251,6 +314,27 @@ namespace VividRP.Runtime
             }
 
             public int Count { get; private set; }
+
+            internal int BufferCapacity => m_Buffer.IsCreated ? m_Buffer.Length : 0;
+
+            internal void EnsureCapacity(int requiredCapacity)
+            {
+                if (!m_Buffer.IsCreated || m_Buffer.Length < requiredCapacity)
+                {
+                    using var marker = s_GrowReadBufferMarker.Auto();
+                    int capacity = (int)Math.Max(requiredCapacity, Math.Min(int.MaxValue, (long)m_Buffer.Length * 2));
+                    if (m_Buffer.IsCreated)
+                        m_Buffer.Dispose();
+                    m_Buffer = default;
+                    m_Buffer = new NativeArray<byte>(capacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                }
+                if (!m_ReadCommands.IsCreated)
+                {
+                    using var marker = s_CreateReadCommandsMarker.Auto();
+                    m_ReadCommands = new NativeArray<ReadCommand>(
+                        m_BufferOffsets.Length, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                }
+            }
 
             public bool IsCompleted
             {
@@ -329,19 +413,23 @@ namespace VividRP.Runtime
                     m_ReadHandle.Dispose();
                 }
 
-                if (m_ReadCommands.IsCreated)
-                    m_ReadCommands.Dispose();
-                if (m_Buffer.IsCreated)
-                    m_Buffer.Dispose();
                 m_Owner.ReleaseFile(m_Path, m_File);
-                m_Buffer = default;
-                m_ReadCommands = default;
                 m_ReadHandle = default;
                 m_HasReadHandle = false;
                 m_Path = null;
                 m_File = null;
                 m_Disposed = true;
                 m_Owner.ReturnBatch(this);
+            }
+
+            internal void ReleaseBuffers()
+            {
+                if (m_ReadCommands.IsCreated)
+                    m_ReadCommands.Dispose();
+                if (m_Buffer.IsCreated)
+                    m_Buffer.Dispose();
+                m_Buffer = default;
+                m_ReadCommands = default;
             }
 
             private void EnsureSubmitted()
@@ -356,7 +444,7 @@ namespace VividRP.Runtime
                 var commands = new ReadCommandArray
                 {
                     ReadCommands = (ReadCommand*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(m_ReadCommands),
-                    CommandCount = m_ReadCommands.Length,
+                    CommandCount = Count,
                 };
                 m_ReadHandle = AsyncReadManager.Read(in m_File.Handle, commands);
                 m_HasReadHandle = true;

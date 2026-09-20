@@ -321,6 +321,7 @@ namespace VividRP.Runtime
         private readonly Dictionary<(string Path, uint Version), (int Chunks, int Leases)> m_PreparedAssets = new();
         private int m_PreparedChunkCount;
         private int m_PreparedLeaseCount;
+        private int m_PreparedReadByteCapacity;
         private int m_EntryCapacity = 64;
         private int m_LeaseCapacity = 64;
         private readonly List<ChunkEntry> m_QueuedEntries = new(64);
@@ -408,7 +409,8 @@ namespace VividRP.Runtime
                 decodeConcurrency,
                 decodedCacheBudgetMiB);
             foreach (var asset in previous.m_PreparedAssets)
-                replacement.PrepareAsset(asset.Key.Path, asset.Key.Version, asset.Value.Chunks, asset.Value.Leases);
+                replacement.PrepareAsset(asset.Key.Path, asset.Key.Version, asset.Value.Chunks, asset.Value.Leases,
+                    previous.m_PreparedReadByteCapacity);
             s_Shared = replacement;
         }
 
@@ -455,13 +457,19 @@ namespace VividRP.Runtime
                 TryReplaceBackend();
             }
 
+            PrepareReadBuffers();
             TrimCache();
         }
 
         // Ready chunks retain their entries after leaving the in-flight budget. Reserve
         // those entries when registering assets, plus room for outstanding read batches.
-        internal void PrepareAsset(string path, uint contentVersion, int chunkCount, int tileCount = 0)
+        internal void PrepareAsset(string path, uint contentVersion, int chunkCount, int tileCount = 0, int maxStoredByteSize = 0)
         {
+            if (maxStoredByteSize > m_PreparedReadByteCapacity)
+            {
+                m_PreparedReadByteCapacity = maxStoredByteSize;
+                PrepareReadBuffers();
+            }
             var key = (path, contentVersion);
             m_PreparedAssets.TryGetValue(key, out var previous);
             int chunks = Math.Max(previous.Chunks, chunkCount);
@@ -475,6 +483,14 @@ namespace VividRP.Runtime
             m_PreparedLeaseCount += leases - previous.Leases;
             EnsureEntryCapacity();
             EnsureLeaseCapacity();
+        }
+
+        private void PrepareReadBuffers()
+        {
+            if (m_IOBackend is VTAsyncReadManagerBackend asyncBackend)
+                asyncBackend.Prepare(m_MaxInFlightChunkCount, m_PreparedReadByteCapacity);
+            if (m_FallbackIOBackend is VTAsyncReadManagerBackend fallbackBackend)
+                fallbackBackend.Prepare(m_MaxInFlightChunkCount, m_PreparedReadByteCapacity);
         }
 
         private void EnsureLeaseCapacity()
@@ -516,6 +532,7 @@ namespace VividRP.Runtime
             m_IOBackend = ioBackend;
             m_FallbackIOBackend = null;
             m_BackendNeedsReplacement = false;
+            PrepareReadBuffers();
         }
 
         internal void BeginFrame()
@@ -618,6 +635,7 @@ namespace VividRP.Runtime
                         m_SubmissionEntries[entryIndex].PriorityKey.UsesHighIOPriority;
                     ActiveBatch activeBatch = RentActiveBatch();
                     m_SubmissionCommands.Clear();
+                    long batchByteSize = 0;
                     while (entryIndex < m_SubmissionEntries.Count
                            && activeBatch.Entries.Count < 64
                            && string.Equals(
@@ -626,10 +644,17 @@ namespace VividRP.Runtime
                                StringComparison.OrdinalIgnoreCase)
                            && m_SubmissionEntries[entryIndex].PriorityKey.UsesHighIOPriority == highPriority)
                     {
-                        ChunkEntry entry = m_SubmissionEntries[entryIndex++];
+                        ChunkEntry entry = m_SubmissionEntries[entryIndex];
+                        // Keep normal batches within the storage reserved at asset registration.
+                        // A single oversized/unregistered chunk still takes the growth fallback.
+                        if (activeBatch.Entries.Count > 0 && m_PreparedReadByteCapacity > 0
+                            && batchByteSize + entry.Location.StoredByteSize > m_PreparedReadByteCapacity)
+                            break;
+                        entryIndex++;
                         if (entry.ReferenceCount <= 0 || entry.State != VTStreamChunkState.Queued)
                             continue;
 
+                        batchByteSize += entry.Location.StoredByteSize;
                         entry.BatchReferenceCount += 1;
                         activeBatch.Entries.Add(entry);
                         m_SubmissionCommands.Add(new VTIOReadCommand(
@@ -653,6 +678,7 @@ namespace VividRP.Runtime
                                 && m_DirectStorageRejectedPaths.Contains(path))
                             {
                                 m_FallbackIOBackend ??= new VTAsyncReadManagerBackend();
+                                PrepareReadBuffers();
                                 ioBatch = m_FallbackIOBackend.CreateBatch(path, m_SubmissionCommands);
                             }
                             else
@@ -674,6 +700,7 @@ namespace VividRP.Runtime
                                     }
 
                                     m_FallbackIOBackend ??= new VTAsyncReadManagerBackend();
+                                    PrepareReadBuffers();
                                     ioBatch = m_FallbackIOBackend.CreateBatch(path, m_SubmissionCommands);
                                 }
                             }
@@ -1190,6 +1217,7 @@ namespace VividRP.Runtime
             m_IOBackend = CreateBackend(m_BackendMode);
             m_DirectStorageRejectedPaths.Clear();
             m_BackendNeedsReplacement = false;
+            PrepareReadBuffers();
         }
 
         private static IVTIOBackend CreateBackend(VividVirtualTextureIOBackendMode mode)

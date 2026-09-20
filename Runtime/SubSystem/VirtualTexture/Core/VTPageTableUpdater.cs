@@ -15,8 +15,8 @@ namespace VividRP.Runtime
         private readonly VirtualTexturePageTableEntry[] m_PageTableEntries;
         private readonly bool[] m_RecomputeMask;
         private readonly bool[] m_UploadMask;
-        private readonly List<int> m_RecomputeIndices = new();
-        private readonly List<int> m_UploadIndices = new();
+        private readonly List<int> m_RecomputeIndices;
+        private readonly List<int> m_UploadIndices;
         private readonly GraphicsBuffer m_PageTableBuffer;
 
         private bool m_HasBuiltPageTable;
@@ -41,6 +41,9 @@ namespace VividRP.Runtime
             m_PageTableEntries = new VirtualTexturePageTableEntry[totalPageCount];
             m_RecomputeMask = new bool[totalPageCount];
             m_UploadMask = new bool[totalPageCount];
+            // Masks deduplicate indices, so even a full-table change fits without growing.
+            m_RecomputeIndices = new List<int>(totalPageCount);
+            m_UploadIndices = new List<int>(totalPageCount);
             for (int pageIndex = 0; pageIndex < m_PageTableEntries.Length; pageIndex++)
                 m_PageTableEntries[pageIndex] = VirtualTexturePageTableEntry.Invalid();
 

@@ -515,9 +515,10 @@ namespace VividRP.Runtime
 #if VT_DEBUG
         private readonly VTPageRequestDebugInfo[] m_PendingRequestDebugInfos;
 #endif
-        private readonly List<int> m_DirtyPageTableUpdates = new();
-        private readonly List<int> m_TransitioningPageIndices = new();
-        private readonly List<int> m_QueuedTransitionPageIndices = new();
+        private readonly List<int> m_DirtyPageTableUpdates;
+        private readonly bool[] m_DirtyPageTableMask;
+        private readonly List<int> m_TransitioningPageIndices;
+        private readonly List<int> m_QueuedTransitionPageIndices;
 
         private NativeArray<VTRequestPreparationResult> m_RequestPreparationResults;
         private JobHandle m_RequestPreparationJobHandle;
@@ -554,6 +555,10 @@ namespace VividRP.Runtime
             m_MipOffsets = mipOffsets;
             m_PhysicalPool = physicalPool ?? throw new ArgumentNullException(nameof(physicalPool));
             m_PageStates = new VTPageRuntimeState[totalPageCount];
+            m_DirtyPageTableUpdates = new List<int>(totalPageCount);
+            m_DirtyPageTableMask = new bool[totalPageCount];
+            m_TransitioningPageIndices = new List<int>(totalPageCount);
+            m_QueuedTransitionPageIndices = new List<int>(totalPageCount);
             m_PageStateFlags = new NativeArray<byte>(
                 totalPageCount,
                 Allocator.Persistent,
@@ -1717,6 +1722,8 @@ namespace VividRP.Runtime
 
         internal void ClearDirtyPageTableUpdates()
         {
+            for (int index = 0; index < m_DirtyPageTableUpdates.Count; index++)
+                m_DirtyPageTableMask[m_DirtyPageTableUpdates[index]] = false;
             m_DirtyPageTableUpdates.Clear();
         }
 
@@ -1821,7 +1828,7 @@ namespace VividRP.Runtime
             m_PendingRequests.Clear();
             m_PendingDataRequestCount = 0;
             m_PendingUploadRequestCount = 0;
-            m_DirtyPageTableUpdates.Clear();
+            ClearDirtyPageTableUpdates();
             m_TransitioningPageIndices.Clear();
             m_QueuedTransitionPageIndices.Clear();
             m_PageTableDirty = false;
@@ -2780,6 +2787,9 @@ namespace VividRP.Runtime
                 return;
 
             m_PageTableDirty = true;
+            if (m_DirtyPageTableMask[pageIndex])
+                return;
+            m_DirtyPageTableMask[pageIndex] = true;
             m_DirtyPageTableUpdates.Add(pageIndex);
         }
 

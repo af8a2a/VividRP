@@ -7,6 +7,8 @@ namespace VividRP.Runtime
 {
     internal sealed class VTPageTableUpdater : IDisposable
     {
+        private static readonly Comparison<int> s_AscendingIndexComparison = (left, right) => left.CompareTo(right);
+        private static readonly Comparison<int> s_DescendingIndexComparison = (left, right) => right.CompareTo(left);
         private readonly int[] m_BestPhysicalPageIds;
         private readonly int[] m_BestResolvedMips;
         private readonly byte[] m_BestTransitionPhases;
@@ -121,7 +123,7 @@ namespace VividRP.Runtime
 
             // Mip offsets are laid out from the finest mip to the coarsest mip. Descending
             // flat indices therefore guarantee that a fallback parent is updated first.
-            m_RecomputeIndices.Sort(static (left, right) => right.CompareTo(left));
+            m_RecomputeIndices.Sort(s_DescendingIndexComparison);
             for (int dirtyIndex = 0; dirtyIndex < m_RecomputeIndices.Count; dirtyIndex++)
             {
                 int pageIndex = m_RecomputeIndices[dirtyIndex];
@@ -204,7 +206,7 @@ namespace VividRP.Runtime
                 return m_PageTableEntries.Length;
             }
 
-            m_UploadIndices.Sort();
+            m_UploadIndices.Sort(s_AscendingIndexComparison);
             for (int dirtyIndex = 0; dirtyIndex < m_UploadIndices.Count; dirtyIndex++)
             {
                 int pageIndex = m_UploadIndices[dirtyIndex];
@@ -247,7 +249,7 @@ namespace VividRP.Runtime
             }
             else
             {
-                m_UploadIndices.Sort();
+                m_UploadIndices.Sort(s_AscendingIndexComparison);
                 int rangeStart = m_UploadIndices[0];
                 int previousIndex = rangeStart;
                 for (int dirtyIndex = 1; dirtyIndex <= m_UploadIndices.Count; dirtyIndex++)

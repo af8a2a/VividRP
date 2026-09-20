@@ -44,6 +44,94 @@ namespace VividRP.Editor.Tests
             VirtualTextureSystem.Deinitialize();
         }
 
+        [Test]
+        public void DirtyPageTableUpdates_DeduplicateAndResetWithoutAllocating()
+        {
+            var desc = CreateDesc("DirtyPages");
+            using var pool = CreatePhysicalPoolForTesting(desc.CachePageCount);
+            using var residency = new VTResidencyManager(
+                1, VTProducerHandle.Invalid, "Producer", "DirtyPages", desc,
+                desc.PageTableEntryCount,
+                VirtualTextureSpaceUtility.BuildMipOffsets(
+                    desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount), pool);
+            var markDirty = (System.Action<int>)typeof(VTResidencyManager)
+                .GetMethod("MarkPageTableDirty", System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.NonPublic)
+                .CreateDelegate(typeof(System.Action<int>), residency);
+            markDirty(0);
+            residency.ClearDirtyPageTableUpdates();
+            residency.ConsumePageTableDirtyFlag();
+
+            bool complete = true;
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                for (int page = 0; page < desc.PageTableEntryCount; page++)
+                {
+                    markDirty(page);
+                    markDirty(page);
+                }
+                complete &= residency.DirtyPageTableUpdates.Count == desc.PageTableEntryCount;
+                complete &= residency.ConsumePageTableDirtyFlag();
+                for (int page = 0; page < desc.PageTableEntryCount; page++)
+                    complete &= residency.DirtyPageTableUpdates[page] == page;
+                // Consuming the flag must not prevent an already-listed page from
+                // flagging another change before the update list has been cleared.
+                markDirty(0);
+                complete &= residency.ConsumePageTableDirtyFlag();
+                residency.ClearDirtyPageTableUpdates();
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(complete, Is.True);
+            Assert.That(allocated, Is.Zero);
+            Assert.That(residency.DirtyPageTableUpdates.Count, Is.Zero);
+        }
+
+        [Test]
+        public void PageTransitions_FirstFullBurstAndRepeatedSchedulingDoNotAllocate()
+        {
+            var desc = CreateDesc("TransitionAllocation");
+            using var pool = CreatePhysicalPoolForTesting(desc.CachePageCount);
+            using var residency = new VTResidencyManager(
+                1, VTProducerHandle.Invalid, "Producer", "TransitionAllocation", desc,
+                desc.PageTableEntryCount, VirtualTextureSpaceUtility.BuildMipOffsets(
+                    desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount), pool);
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var stateType = typeof(VTResidencyManager).GetNestedType("VTPageRuntimeState", System.Reflection.BindingFlags.NonPublic);
+            var state = System.Linq.Expressions.Expression.Variable(stateType);
+            var page = System.Linq.Expressions.Expression.Parameter(typeof(int));
+            var target = System.Linq.Expressions.Expression.Constant(residency);
+            var schedule = typeof(VTResidencyManager).GetMethod("SchedulePageTransition", flags);
+            var begin = typeof(VTResidencyManager).GetMethod("BeginPageTransition", flags);
+            var call = System.Linq.Expressions.Expression.Call(target, schedule, page, state,
+                System.Linq.Expressions.Expression.Constant(1));
+            var transition = System.Linq.Expressions.Expression.Lambda<System.Action<int>>(
+                System.Linq.Expressions.Expression.Block(new[] { state },
+                    System.Linq.Expressions.Expression.Assign(state, System.Linq.Expressions.Expression.Default(stateType)),
+                    System.Linq.Expressions.Expression.Assign(System.Linq.Expressions.Expression.Field(state, "PhysicalPageId"),
+                        System.Linq.Expressions.Expression.Constant(-1)),
+                    call, call,
+                    System.Linq.Expressions.Expression.Call(target, begin, page, state,
+                        System.Linq.Expressions.Expression.Constant(1), System.Linq.Expressions.Expression.Constant(-1))), page).Compile();
+            var queued = (List<int>)typeof(VTResidencyManager).GetField("m_QueuedTransitionPageIndices", flags).GetValue(residency);
+            var active = (List<int>)typeof(VTResidencyManager).GetField("m_TransitioningPageIndices", flags).GetValue(residency);
+            transition(0);
+            residency.ResetPageTransitionsForRuntimeReset();
+            bool complete = true;
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                for (int index = 0; index < desc.PageTableEntryCount; index++)
+                    transition(index);
+                complete &= queued.Count == desc.PageTableEntryCount && active.Count == desc.PageTableEntryCount;
+                residency.ResetPageTransitionsForRuntimeReset();
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(complete, Is.True);
+            Assert.That(allocated, Is.Zero);
+        }
+
         [TestCase(4, 4)]
         [TestCase(8, 8)]
         [TestCase(16, 8)]

@@ -177,6 +177,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         }
 
         private readonly List<AtlasEntry> m_Entries = new(InitialEntryCapacity);
+        private readonly VirtualTextureSpaceDesc m_SpaceDesc;
         private readonly int[,] m_EntryIndicesByBasePage;
         private readonly ComputeShader m_ComputeShader;
         private readonly int m_Kernel;
@@ -198,6 +199,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 throw new ArgumentException("GPUDriven VT page producer compute shader is missing the 'CS' kernel.", nameof(computeShader));
 
             m_Kernel = m_ComputeShader.FindKernel("CS");
+            m_SpaceDesc = desc;
             ProducerDesc = VTProducerDesc.FromSpaceDesc(Name, desc);
             m_EntryIndicesByBasePage = new int[desc.VirtualPageCountX, desc.VirtualPageCountY];
         }
@@ -296,6 +298,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 maxUploadsPerFrame: 1,
                 feedbackCapacity: 16);
             var entry = new AtlasEntry(pageRegion, asset, localDesc);
+            entry.StreamedProducer.PrepareUploads(m_SpaceDesc);
             StoreEntry(entry);
         }
 

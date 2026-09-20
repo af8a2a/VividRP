@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEngine;
 
@@ -134,7 +133,7 @@ namespace VividRP.Runtime
             internal byte[] StoredData;
             internal NativeArray<byte> NativeStoredData;
             internal byte[] DecodedData;
-            internal Task<DecodeResult> DecodeTask;
+            internal DecodeWorker DecodeWorker;
             internal string Error;
             internal ChunkEntry LruPrevious;
             internal ChunkEntry LruNext;
@@ -153,6 +152,92 @@ namespace VividRP.Runtime
             internal string Error { get; }
 
             internal bool Succeeded => Data != null && Error == null;
+        }
+
+        // One reusable work slot per thread. The main thread owns assignment/release;
+        // the volatile completion flag publishes the result before the slot is reused.
+        internal sealed class DecodeWorker : IDisposable
+        {
+            private readonly Func<object, DecodeResult> m_Work;
+            private readonly AutoResetEvent m_Wakeup = new(false);
+            private readonly Thread m_Thread;
+            private ChunkEntry m_Entry;
+            private DecodeResult m_Result;
+            private volatile bool m_Completed;
+            private volatile bool m_Stop;
+            private bool m_Disposed;
+
+            internal DecodeWorker(Func<object, DecodeResult> work)
+            {
+                m_Work = work;
+                m_Thread = new Thread(Run) { IsBackground = true, Name = "VT Chunk Decode" };
+                if (ExecutionContext.IsFlowSuppressed())
+                    m_Thread.Start();
+                else
+                {
+                    using (ExecutionContext.SuppressFlow())
+                        m_Thread.Start();
+                }
+            }
+
+            internal bool IsIdle => m_Entry == null;
+            internal bool IsCompleted => m_Completed;
+
+            internal void Start(ChunkEntry entry)
+            {
+                m_Entry = entry;
+                m_Wakeup.Set();
+            }
+
+            internal DecodeResult TakeResult()
+            {
+                DecodeResult result = m_Result;
+                m_Result = default;
+                m_Entry = null;
+                m_Completed = false;
+                return result;
+            }
+
+            private void Run()
+            {
+                while (true)
+                {
+                    m_Wakeup.WaitOne();
+                    ChunkEntry entry = m_Entry;
+                    if (entry != null && !m_Completed)
+                    {
+                        try
+                        {
+                            m_Result = m_Work(entry);
+                        }
+                        catch (Exception exception)
+                        {
+                            m_Result = new DecodeResult(null, exception.GetBaseException().Message);
+                        }
+                        m_Completed = true;
+                    }
+                    if (m_Stop)
+                        return;
+                }
+            }
+
+            internal void RequestStop()
+            {
+                m_Stop = true;
+                m_Wakeup.Set();
+            }
+
+            public void Dispose()
+            {
+                if (m_Disposed)
+                    return;
+                RequestStop();
+                m_Thread.Join();
+                m_Wakeup.Dispose();
+                m_Entry = null;
+                m_Result = default;
+                m_Disposed = true;
+            }
         }
 
         private sealed class ActiveBatch
@@ -233,6 +318,9 @@ namespace VividRP.Runtime
         private static readonly Comparison<ChunkEntry> s_QueuedEntryComparison = new QueuedEntryComparer().Compare;
 
         private readonly Dictionary<ChunkKey, ChunkEntry> m_Entries = new(64);
+        private readonly Dictionary<(string Path, uint Version), int> m_PreparedAssets = new();
+        private int m_PreparedChunkCount;
+        private int m_EntryCapacity = 64;
         private readonly List<ChunkEntry> m_QueuedEntries = new(64);
         private readonly List<ChunkEntry> m_PendingDecodeEntries = new();
         private readonly List<ChunkEntry> m_DecodingEntries = new();
@@ -248,6 +336,7 @@ namespace VividRP.Runtime
         private readonly HashSet<string> m_DirectStorageRejectedPaths =
             new(StringComparer.OrdinalIgnoreCase);
         private readonly Func<object, DecodeResult> m_DecodeWork;
+        private readonly List<DecodeWorker> m_DecodeWorkers = new(64);
         private IVTIOBackend m_IOBackend;
         private IVTIOBackend m_FallbackIOBackend;
         private VividVirtualTextureIOBackendMode m_BackendMode = VividVirtualTextureIOBackendMode.Auto;
@@ -271,6 +360,7 @@ namespace VividRP.Runtime
             }
             m_IOBackend = CreateBackend(m_BackendMode);
             m_DecodeWork = decodeWork ?? DecodeEntry;
+            EnsureDecodeWorkers();
         }
 
         internal static VTStreamChunkManager Shared => s_Shared ??= new VTStreamChunkManager();
@@ -308,6 +398,8 @@ namespace VividRP.Runtime
                 maxInFlightChunkCount,
                 decodeConcurrency,
                 decodedCacheBudgetMiB);
+            foreach (var asset in previous.m_PreparedAssets)
+                replacement.PrepareAsset(asset.Key.Path, asset.Key.Version, asset.Value);
             s_Shared = replacement;
         }
 
@@ -334,8 +426,10 @@ namespace VividRP.Runtime
             int decodedCacheBudgetMiB)
         {
             m_MaxInFlightChunkCount = Mathf.Max(1, maxInFlightChunkCount);
+            EnsureEntryCapacity();
             int clampedDecodeConcurrency = Mathf.Clamp(decodeConcurrency, 1, 64);
             m_DecodeConcurrency = clampedDecodeConcurrency;
+            EnsureDecodeWorkers();
 
             m_DecodedCacheBudget = Math.Max(0, decodedCacheBudgetMiB) * 1024L * 1024L;
             if (backendMode != m_BackendMode)
@@ -346,6 +440,33 @@ namespace VividRP.Runtime
             }
 
             TrimCache();
+        }
+
+        // Ready chunks retain their entries after leaving the in-flight budget. Reserve
+        // those entries when registering assets, plus room for outstanding read batches.
+        internal void PrepareAsset(string path, uint contentVersion, int chunkCount)
+        {
+            var key = (path, contentVersion);
+            if (m_PreparedAssets.ContainsKey(key))
+                return;
+
+            m_PreparedAssets.Add(key, chunkCount);
+            m_PreparedChunkCount += chunkCount;
+            EnsureEntryCapacity();
+        }
+
+        private void EnsureEntryCapacity()
+        {
+            int capacity = m_PreparedChunkCount + m_MaxInFlightChunkCount;
+            if (capacity <= m_EntryCapacity)
+                return;
+
+            m_Entries.EnsureCapacity(capacity);
+            while (m_EntryCapacity < capacity)
+            {
+                m_FreeEntry = new ChunkEntry { NextFree = m_FreeEntry };
+                m_EntryCapacity++;
+            }
         }
 
         internal void SetIOBackendForTesting(IVTIOBackend ioBackend)
@@ -427,7 +548,10 @@ namespace VividRP.Runtime
                 entry.NextFree = null;
             }
             else
+            {
                 entry = new ChunkEntry();
+                m_EntryCapacity++;
+            }
             entry.Key = key;
             entry.Location = location;
             entry.PriorityKey = priorityKey;
@@ -594,7 +718,7 @@ namespace VividRP.Runtime
                 RetireEntry(entry);
             }
             else if (entry.State == VTStreamChunkState.Decoding
-                     && entry.DecodeTask == null
+                     && entry.DecodeWorker == null
                      && m_PendingDecodeEntries.Remove(entry))
             {
                 entry.StoredData = null;
@@ -622,28 +746,13 @@ namespace VividRP.Runtime
             m_FreeLease = null;
             m_FreeEntry = null;
 
-            if (m_DecodingEntries.Count > 0)
-            {
-                var decodeTasks = new List<Task>(m_DecodingEntries.Count);
-                for (int entryIndex = 0; entryIndex < m_DecodingEntries.Count; entryIndex++)
-                {
-                    Task<DecodeResult> decodeTask = m_DecodingEntries[entryIndex].DecodeTask;
-                    if (decodeTask != null)
-                        decodeTasks.Add(decodeTask);
-                }
+            for (int index = 0; index < m_DecodeWorkers.Count; index++)
+                m_DecodeWorkers[index].RequestStop();
+            for (int index = 0; index < m_DecodeWorkers.Count; index++)
+                m_DecodeWorkers[index].Dispose();
+            m_DecodeWorkers.Clear();
 
-                try
-                {
-                    Task.WaitAll(decodeTasks.ToArray());
-                }
-                catch (AggregateException)
-                {
-                    // Decode failures are already represented by the chunk state. Shutdown only
-                    // needs to keep manager-owned entry data alive until tasks retire.
-                }
-            }
-
-            // Workers can still be reading native views until all decode tasks finish.
+            // Workers can still be reading native views until all decode workers stop.
             for (int batchIndex = 0; batchIndex < m_RetainedReadBatches.Count; batchIndex++)
                 m_RetainedReadBatches[batchIndex].Batch.Dispose();
             m_RetainedReadBatches.Clear();
@@ -741,6 +850,12 @@ namespace VividRP.Runtime
             m_PendingDecodeEntries.Add(entry);
         }
 
+        private void EnsureDecodeWorkers()
+        {
+            while (m_DecodeWorkers.Count < m_DecodeConcurrency)
+                m_DecodeWorkers.Add(new DecodeWorker(m_DecodeWork));
+        }
+
         private void PumpDecodeQueue()
         {
             if (m_PendingDecodeEntries.Count == 0)
@@ -764,12 +879,15 @@ namespace VividRP.Runtime
                 {
                     ChunkEntry entry = m_PendingDecodeEntries[0];
                     m_PendingDecodeEntries.RemoveAt(0);
-                    entry.DecodeTask = Task.Factory.StartNew(
-                        m_DecodeWork,
-                        entry,
-                        CancellationToken.None,
-                        TaskCreationOptions.DenyChildAttach,
-                        TaskScheduler.Default);
+                    for (int workerIndex = 0; workerIndex < m_DecodeWorkers.Count; workerIndex++)
+                    {
+                        DecodeWorker worker = m_DecodeWorkers[workerIndex];
+                        if (!worker.IsIdle)
+                            continue;
+                        entry.DecodeWorker = worker;
+                        worker.Start(entry);
+                        break;
+                    }
                     m_DecodingEntries.Add(entry);
                 }
             }
@@ -830,16 +948,11 @@ namespace VividRP.Runtime
             for (int entryIndex = m_DecodingEntries.Count - 1; entryIndex >= 0; entryIndex--)
             {
                 ChunkEntry entry = m_DecodingEntries[entryIndex];
-                if (!entry.DecodeTask.IsCompleted)
+                if (!entry.DecodeWorker.IsCompleted)
                     continue;
 
-                DecodeResult result;
-                if (entry.DecodeTask.IsCompletedSuccessfully)
-                    result = entry.DecodeTask.Result;
-                else
-                    result = new DecodeResult(null, entry.DecodeTask.Exception?.GetBaseException().Message ?? "VT chunk decode failed.");
-
-                entry.DecodeTask = null;
+                DecodeResult result = entry.DecodeWorker.TakeResult();
+                entry.DecodeWorker = null;
                 entry.StoredData = null;
                 entry.NativeStoredData = default;
                 m_DecodingEntries.RemoveAt(entryIndex);
@@ -984,7 +1097,7 @@ namespace VividRP.Runtime
         {
             // Retained native batches still inspect their entries after decode completion.
             if (m_Disposed || !entry.Retired || entry.BatchReferenceCount != 0
-                || entry.ReferenceCount != 0 || entry.DecodeTask != null)
+                || entry.ReferenceCount != 0 || entry.DecodeWorker != null)
                 return;
 
             entry.Retired = false;

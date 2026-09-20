@@ -486,6 +486,12 @@ namespace VividRP.Runtime
             VirtualTextureStatsRegistry.Clear();
         }
 
+        internal static void PrepareEncodedUploads(in VirtualTextureSpaceDesc desc)
+        {
+            Initialize();
+            s_UploadScheduler.PrepareEncodedUploads(desc);
+        }
+
         internal static int RegisterSpace(in VirtualTextureSpaceDesc desc)
         {
             return RegisterAddressSpace(desc, null);

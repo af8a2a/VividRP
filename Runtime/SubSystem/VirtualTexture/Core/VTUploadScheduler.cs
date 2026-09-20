@@ -630,6 +630,7 @@ namespace VividRP.Runtime
             private readonly UploadPoolKey m_Key;
             private readonly List<UploadBatch> m_Batches = new();
             private readonly bool[] m_TouchedEncodedGroups;
+            private bool m_PrepareEncodedStaging;
 
             internal UploadPool(string name, in UploadPoolKey key, int batchCapacity)
             {
@@ -689,6 +690,19 @@ namespace VividRP.Runtime
             }
 
             internal int AvailableBatchCapacity => FindAvailableBatch()?.Capacity ?? 0;
+
+            internal void PrepareEncodedStaging()
+            {
+                m_PrepareEncodedStaging = true;
+                for (int batchIndex = 0; batchIndex < m_Batches.Count; batchIndex++)
+                    PrepareEncodedStaging(m_Batches[batchIndex]);
+            }
+
+            private void PrepareEncodedStaging(UploadBatch batch)
+            {
+                for (int group = 0; group < m_Key.PhysicalGroupCount; group++)
+                    batch.GetEncodedStagingTexture(group);
+            }
 
             internal void EnsureBatchCapacity(int batchCapacity)
             {
@@ -1064,13 +1078,24 @@ namespace VividRP.Runtime
 
             private UploadBatch CreateBatch(int batchIndex)
             {
-                return new UploadBatch(
+                var batch = new UploadBatch(
                     m_Name,
                     m_Key.PhysicalPageSize,
                     m_Key.LayerCount,
                     BatchCapacity,
                     batchIndex,
                     m_Key);
+                try
+                {
+                    if (m_PrepareEncodedStaging)
+                        PrepareEncodedStaging(batch);
+                    return batch;
+                }
+                catch
+                {
+                    batch.Dispose();
+                    throw;
+                }
             }
         }
 
@@ -1191,6 +1216,12 @@ namespace VividRP.Runtime
                 committedAny |= pool.CommitCompletedUploads(committerResolver, frameIndex);
 
             return committedAny;
+        }
+
+        internal void PrepareEncodedUploads(in VirtualTextureSpaceDesc desc)
+        {
+            UploadPoolKey key = GetUploadPoolKey(desc);
+            GetOrCreatePool(desc.SpaceName, key, desc.MaxUploadsPerFrame).PrepareEncodedStaging();
         }
 
         internal int GetAvailableBatchCapacity(string spaceName, in VirtualTextureSpaceDesc desc)

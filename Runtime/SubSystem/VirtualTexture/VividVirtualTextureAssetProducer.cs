@@ -401,6 +401,8 @@ namespace VividRP.Runtime
 
             if (!m_HasPermanentFailure && UsesSharedChunkManager)
             {
+                VTStreamChunkManager.Shared.PrepareAsset(
+                    m_ResolvedStreamDataPath, m_BuiltData.ContentVersion, m_BuiltData.ChunkCount);
                 int requestCapacity = Math.Min(m_BuiltData.TileCount,
                     VTVirtualTextureStreamRequestGate.DefaultMaxPendingReadCount);
                 m_ChunkRequests.EnsureCapacity(requestCapacity);
@@ -430,6 +432,13 @@ namespace VividRP.Runtime
         public string Name => $"{nameof(VividVirtualTextureAssetProducer)}({m_Asset.name})";
 
         public VTProducerDesc ProducerDesc { get; }
+
+        internal void PrepareUploads(in VirtualTextureSpaceDesc desc)
+        {
+            if (!m_HasPermanentFailure && UsesSharedChunkManager
+                && m_BuiltData.StorageProfile != VividVirtualTextureStorageProfile.LegacyRGBA32)
+                VirtualTextureSystem.PrepareEncodedUploads(desc);
+        }
 
         public VTPageRequestStatus RequestPageData(
             in VirtualTextureSpaceDesc desc,

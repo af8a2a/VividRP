@@ -113,6 +113,7 @@ namespace VividRP.Runtime.SubSystem.Decal
         private const int k_PrepareJobBatchSize = 32;
         private const int k_CullJobBatchSize = 64;
         private static readonly Quaternion s_ProjectorToDecalSpaceRotation = Quaternion.Euler(-90.0f, 0.0f, 0.0f);
+        private static readonly System.Comparison<TerrainVirtualTextureDecalData> s_VirtualTextureDecalComparison = CompareVirtualTextureDecals;
 
         private readonly List<DecalProjector> m_Projectors = new();
         private readonly List<TerrainVirtualTextureDecalData> m_VirtualTextureDecals = new();
@@ -736,7 +737,7 @@ namespace VividRP.Runtime.SubSystem.Decal
                     default));
             }
 
-            m_VirtualTextureDecals.Sort(CompareVirtualTextureDecals);
+            m_VirtualTextureDecals.Sort(s_VirtualTextureDecalComparison);
             if (m_VirtualTextureDirtyRegions.Count > 0)
                 IncrementVirtualTextureRevision();
 

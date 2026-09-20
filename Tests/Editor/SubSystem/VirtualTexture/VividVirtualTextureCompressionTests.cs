@@ -805,6 +805,160 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ChunkManager_PreparedAssets_AllowNewBurstWhileEarlierChunksRemainCached()
+        {
+            using var manager = new VTStreamChunkManager();
+            manager.PrepareAsset("cached.stream", 1, 128);
+            manager.PrepareAsset("next.stream", 1, 64);
+            manager.PrepareAsset("next.stream", 1, 64);
+            manager.SetIOBackendForTesting(new CompletedIOBackend());
+            var warmLocation = CreateRawLocation(0, 0);
+            manager.Acquire("warm.stream", 1, warmLocation, false).Dispose();
+            for (int index = 0; index < 128; index++)
+            {
+                var location = CreateRawLocation(index, index * 64);
+                using VTChunkLease lease = manager.Acquire("cached.stream", 1, location, false);
+                manager.SubmitPendingReads();
+                WaitForLease(manager, lease);
+                Assert.That(lease.State, Is.EqualTo(VTStreamChunkState.Ready), lease.Error);
+            }
+
+            var leases = new VTChunkLease[64];
+            var locations = new VividVirtualTextureTilePayloadLocation[64];
+            for (int index = 0; index < locations.Length; index++)
+                locations[index] = CreateRawLocation(index, index * 64);
+            bool acquired = true;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 16; iteration++)
+            {
+                for (int index = 0; index < leases.Length; index++)
+                {
+                    leases[index] = manager.Acquire("next.stream", 1, locations[index], false);
+                    acquired &= leases[index] != null;
+                }
+                for (int index = 0; index < leases.Length; index++)
+                    leases[index]?.Dispose();
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(acquired, Is.True);
+            Assert.That(allocated, Is.Zero);
+            Assert.That(manager.PendingChunkCount, Is.Zero);
+            using VTChunkLease cached = manager.Acquire("cached.stream", 1, locations[0], false);
+            Assert.That(cached.State, Is.EqualTo(VTStreamChunkState.Ready));
+        }
+
+        private static bool WaitForDecodeWorker(VTStreamChunkManager.DecodeWorker worker)
+        {
+            long deadline = System.Diagnostics.Stopwatch.GetTimestamp()
+                + 5 * System.Diagnostics.Stopwatch.Frequency;
+            while (!worker.IsCompleted)
+            {
+                if (System.Diagnostics.Stopwatch.GetTimestamp() >= deadline)
+                    return false;
+                Thread.Yield();
+            }
+            return true;
+        }
+
+        [Test]
+        public void DecodeWorker_ReusesWorkSlotWithoutAllocatingOrFlowingContext()
+        {
+            var ambient = new AsyncLocal<object> { Value = new object() };
+            var entry = new VTStreamChunkManager.ChunkEntry { StoredData = new byte[16] };
+            bool contextWasClear = true;
+            long workerBytes = 0;
+            using var worker = new VTStreamChunkManager.DecodeWorker(state =>
+            {
+                contextWasClear &= ambient.Value == null && SynchronizationContext.Current == null;
+                workerBytes = GC.GetAllocatedBytesForCurrentThread();
+                return new VTStreamChunkManager.DecodeResult(((VTStreamChunkManager.ChunkEntry)state).StoredData, null);
+            });
+            for (int warmup = 0; warmup < 2; warmup++)
+            {
+                worker.Start(entry);
+                Assert.That(WaitForDecodeWorker(worker), Is.True);
+                var result = worker.TakeResult();
+                Assert.That(result.Succeeded && ReferenceEquals(result.Data, entry.StoredData) && worker.IsIdle, Is.True);
+            }
+            long workerBefore = workerBytes;
+            bool correct = true;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                worker.Start(entry);
+                if (!WaitForDecodeWorker(worker))
+                {
+                    correct = false;
+                    break;
+                }
+                var result = worker.TakeResult();
+                correct &= result.Succeeded && ReferenceEquals(result.Data, entry.StoredData) && worker.IsIdle;
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(correct && contextWasClear, Is.True);
+            Assert.That(allocated, Is.Zero);
+            Assert.That(workerBytes - workerBefore, Is.Zero);
+        }
+
+        [Test]
+        public void DecodeWorker_ReportsFailureAndCanDecodeNextEntry()
+        {
+            using var worker = new VTStreamChunkManager.DecodeWorker(state =>
+            {
+                var entry = (VTStreamChunkManager.ChunkEntry)state;
+                if (entry.StoredData == null)
+                    throw new InvalidOperationException("decode test failure");
+                return new VTStreamChunkManager.DecodeResult(entry.StoredData, null);
+            });
+            var entry = new VTStreamChunkManager.ChunkEntry();
+            worker.Start(entry);
+            Assert.That(WaitForDecodeWorker(worker), Is.True);
+            Assert.That(worker.TakeResult().Error, Is.EqualTo("decode test failure"));
+            entry.StoredData = new byte[16];
+            worker.Start(entry);
+            Assert.That(WaitForDecodeWorker(worker), Is.True);
+            Assert.That(worker.TakeResult().Data, Is.SameAs(entry.StoredData));
+        }
+
+        [Test]
+        public void DecodeWorker_DisposeWaitsForRunningDecode()
+        {
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            using var disposeStarted = new ManualResetEventSlim();
+            using var disposed = new ManualResetEventSlim();
+            var worker = new VTStreamChunkManager.DecodeWorker(state =>
+            {
+                entered.Set();
+                release.Wait(TimeSpan.FromSeconds(5));
+                return new VTStreamChunkManager.DecodeResult(((VTStreamChunkManager.ChunkEntry)state).StoredData, null);
+            });
+            var disposer = new Thread(() =>
+            {
+                disposeStarted.Set();
+                worker.Dispose();
+                disposed.Set();
+            });
+            try
+            {
+                worker.Start(new VTStreamChunkManager.ChunkEntry { StoredData = new byte[16] });
+                Assert.That(entered.Wait(TimeSpan.FromSeconds(5)), Is.True);
+                disposer.Start();
+                Assert.That(disposeStarted.Wait(TimeSpan.FromSeconds(5)), Is.True);
+                Assert.That(disposed.Wait(50), Is.False);
+                release.Set();
+                Assert.That(disposed.Wait(TimeSpan.FromSeconds(5)), Is.True);
+            }
+            finally
+            {
+                release.Set();
+                if ((disposer.ThreadState & ThreadState.Unstarted) == 0)
+                    disposer.Join();
+                worker.Dispose();
+            }
+        }
+
+        [Test]
         public void ChunkManager_DefaultBurstAndQueuedCancellation_ReuseEntriesAndLeasesWithoutAllocation()
         {
             using var manager = new VTStreamChunkManager();

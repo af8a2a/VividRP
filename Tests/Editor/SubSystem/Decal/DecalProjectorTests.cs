@@ -12,6 +12,31 @@ namespace VividRP.Editor.Tests
     public sealed class DecalProjectorTests
     {
         [Test]
+        public void VirtualTextureDecalSort_PreservesDrawOrderWithoutAllocating()
+        {
+            var comparison = (System.Comparison<TerrainVirtualTextureDecalData>)typeof(DecalSystem)
+                .GetField("s_VirtualTextureDecalComparison",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).GetValue(null);
+            var decals = new List<TerrainVirtualTextureDecalData>(32);
+            for (int index = 0; index < 32; index++)
+                decals.Add(new TerrainVirtualTextureDecalData(null, default, default, default,
+                    default, 0, 0, 0, 31 - index, null, 0));
+            decals.Sort(comparison);
+            decals.Reverse();
+            decals.Sort(comparison);
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                decals.Reverse();
+                decals.Sort(comparison);
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            for (int index = 0; index < decals.Count; index++)
+                Assert.That(decals[index].DrawOrder, Is.EqualTo(index));
+        }
+
+        [Test]
         public void TryCreateBoundProxyWorldData_UsesTransformRotationForDecalBounds()
         {
             var owner = new GameObject("Decal Projector Test");

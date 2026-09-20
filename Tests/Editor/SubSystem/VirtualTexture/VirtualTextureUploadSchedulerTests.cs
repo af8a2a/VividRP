@@ -614,6 +614,81 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CopyPendingPageTableUpdates_SortsSparseIndicesWithoutAllocating()
+        {
+            using var updater = new VTPageTableUpdater("SparseAllocationTest", 64);
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var indices = (List<int>)typeof(VTPageTableUpdater).GetField("m_UploadIndices", flags).GetValue(updater);
+            indices.AddRange(new[] { 31, 5, 19 });
+            typeof(VTPageTableUpdater).GetField("m_PageTableDirty", flags).SetValue(updater, true);
+            var updates = new VTPageTableScatterUpdate[5];
+            updater.CopyPendingUpdates(updates, 1, out _, out _);
+            indices.Reverse();
+            updater.CopyPendingUpdates(updates, 1, out _, out _);
+            bool correct = true;
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 256; iteration++)
+            {
+                indices.Reverse();
+                correct &= updater.CopyPendingUpdates(updates, 1, out _, out bool fullUpload) == 3;
+                correct &= !fullUpload && updates[1].DestinationIndex == 5
+                    && updates[2].DestinationIndex == 19 && updates[3].DestinationIndex == 31;
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(correct, Is.True);
+            Assert.That(allocated, Is.Zero);
+        }
+
+        [Test]
+        public void EncodedStaging_PreparesBothBatchesAndReusesTexturesAfterCapacityGrowth()
+        {
+            using var scheduler = new VTUploadScheduler();
+            var desc = CreateDesc("PreparedEncoded", maxUploadsPerFrame: 1);
+            scheduler.PrepareEncodedUploads(desc);
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var pools = (System.Collections.IDictionary)typeof(VTUploadScheduler)
+                .GetField("m_Pools", flags).GetValue(scheduler);
+            object pool = null;
+            foreach (System.Collections.DictionaryEntry pair in pools)
+                pool = pair.Value;
+            var batches = (System.Collections.IList)pool.GetType().GetField("m_Batches", flags).GetValue(pool);
+            var oldTextures = new Texture2DArray[batches.Count];
+            for (int index = 0; index < batches.Count; index++)
+            {
+                var textures = (Texture2DArray[])batches[index].GetType()
+                    .GetField("m_EncodedStagingTextures", flags).GetValue(batches[index]);
+                Assert.That(textures[0], Is.Not.Null);
+                oldTextures[index] = textures[0];
+            }
+
+            desc = CreateDesc("PreparedEncoded", maxUploadsPerFrame: 4);
+            scheduler.PrepareEncodedUploads(desc);
+            Assert.That(batches.Count, Is.EqualTo(2));
+            for (int index = 0; index < batches.Count; index++)
+            {
+                var textures = (Texture2DArray[])batches[index].GetType()
+                    .GetField("m_EncodedStagingTextures", flags).GetValue(batches[index]);
+                Texture2DArray expected = textures[0];
+                Assert.That(expected, Is.Not.Null);
+                Assert.That(expected, Is.Not.SameAs(oldTextures[index]));
+                Assert.That(expected.depth, Is.EqualTo(4));
+                var getTexture = (System.Func<int, Texture2DArray>)batches[index].GetType()
+                    .GetMethod("GetEncodedStagingTexture", flags)
+                    .CreateDelegate(typeof(System.Func<int, Texture2DArray>), batches[index]);
+                getTexture(0);
+                bool reused = true;
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 256; iteration++)
+                    reused &= ReferenceEquals(getTexture(0), expected);
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(reused, Is.True);
+                Assert.That(allocated, Is.Zero);
+            }
+        }
+
+        [Test]
         public void UploadPoolLayout_CacheMatchesOriginalKeysAcrossLayoutChanges()
         {
             using var scheduler = new VTUploadScheduler();

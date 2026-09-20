@@ -255,12 +255,20 @@ namespace VividRP.Runtime
         internal static IVTPageProducer Resolve(VTProducer producer, in VirtualTextureSpaceDesc desc)
         {
             if (producer is IVTPageProducer pageProducer)
+            {
+                if (pageProducer is VividVirtualTextureAssetProducer assetProducer)
+                    assetProducer.PrepareUploads(desc);
                 return pageProducer;
+            }
 
             if (producer is VividVirtualTextureAsset virtualTextureAsset)
-                return virtualTextureAsset.BuiltData != null
-                    ? new VividVirtualTextureAssetProducer(virtualTextureAsset)
-                    : null;
+            {
+                if (virtualTextureAsset.BuiltData == null)
+                    return null;
+                var assetProducer = new VividVirtualTextureAssetProducer(virtualTextureAsset);
+                assetProducer.PrepareUploads(desc);
+                return assetProducer;
+            }
 
             return producer is IVTRuntimePageProducer runtimeProducer
                 ? CreateAdapter(runtimeProducer, desc)

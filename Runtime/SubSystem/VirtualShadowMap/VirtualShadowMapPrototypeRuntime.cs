@@ -36,8 +36,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static RTHandle s_RasterDepth;
         private static RTHandle s_UnityRasterDepth;
         internal static readonly VirtualShadowMapProjectionSet Projections = new();
-        private static GraphicsBuffer s_PreviousPageTable;
-        private static GraphicsBuffer s_PreviousPageMetadata;
+        private static GraphicsBuffer s_RemapPageMetadata;
         private static GraphicsBuffer s_PageTable;
         private static GraphicsBuffer s_PageMetadata;
         private static GraphicsBuffer s_PhysicalPageOwners;
@@ -89,8 +88,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static RTHandle DynamicPhysicalPage => s_DynamicPhysicalPage;
         internal static RTHandle RasterDepth => s_RasterDepth;
         internal static RTHandle UnityRasterDepth => s_UnityRasterDepth;
-        internal static GraphicsBuffer PreviousPageTable => s_PreviousPageTable;
-        internal static GraphicsBuffer PreviousPageMetadata => s_PreviousPageMetadata;
+        internal static GraphicsBuffer RemapPageMetadata => s_RemapPageMetadata;
         internal static GraphicsBuffer PageTable => s_PageTable;
         internal static GraphicsBuffer PageMetadata => s_PageMetadata;
         internal static GraphicsBuffer PhysicalPageOwners => s_PhysicalPageOwners;
@@ -462,10 +460,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_PageTable != null
                 && s_PageTable.IsValid()
                 && s_PageTable.count == pageTableEntryCount
-                && s_PreviousPageTable != null && s_PreviousPageTable.IsValid()
-                && s_PreviousPageTable.count == pageTableEntryCount
-                && s_PreviousPageMetadata != null && s_PreviousPageMetadata.IsValid()
-                && s_PreviousPageMetadata.count == pageTableEntryCount
+                && s_RemapPageMetadata != null && s_RemapPageMetadata.IsValid()
+                && s_RemapPageMetadata.count == physicalPageCapacity
                 && s_PageTableUpload?.Length == pageTableEntryCount
                 && s_PageMetadata != null
                 && s_PageMetadata.IsValid()
@@ -558,10 +554,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 Marshal.SizeOf<PageMetadataData>());
             s_PageMetadata.name = "VSMPrototypePageMetadata";
             s_PageMetadata.SetData(s_PageMetadataUpload);
-            s_PreviousPageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopyDestination, pageTableEntryCount, 4);
-            s_PreviousPageTable.name = "VSMPreviousPageTable";
-            s_PreviousPageMetadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopyDestination, pageTableEntryCount, 16);
-            s_PreviousPageMetadata.name = "VSMPreviousPageMetadata";
+            s_RemapPageMetadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, physicalPageCapacity, 16);
+            s_RemapPageMetadata.name = "VSMRemapPageMetadata";
 
             s_PhysicalPageOwnersUpload = new uint[physicalPageCapacity];
             s_PhysicalPageOwners = new GraphicsBuffer(
@@ -830,10 +824,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             if (s_DynamicInvalidationScratch.IsCreated)
                 s_DynamicInvalidationScratch.Dispose();
             Projections.InvalidateLayout();
-            s_PreviousPageTable?.Dispose();
-            s_PreviousPageTable = null;
-            s_PreviousPageMetadata?.Dispose();
-            s_PreviousPageMetadata = null;
+            s_RemapPageMetadata?.Dispose();
+            s_RemapPageMetadata = null;
             InvalidateCache();
             s_StaticPhysicalPage?.Release();
             s_StaticPhysicalPage = null;

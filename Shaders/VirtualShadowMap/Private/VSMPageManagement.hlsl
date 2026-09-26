@@ -388,37 +388,58 @@ void VSMPrototypeResetReceiverFeedback(uint3 dispatchThreadID : SV_DispatchThrea
     _VSMPrototypePageMetadata[virtualPageIndex] = metadata;
 }
 
+// Update cached virtual addresses in physical-slot order, matching UE's
+// UpdatePhysicalPageAddresses. Depth texels never move. Preserve all metadata
+// (including dirty/deferred flags, request age and debug state) for retained pages.
 [numthreads(64, 1, 1)]
-void VSMResetPhysicalOwners(uint3 id : SV_DispatchThreadID)
+void VSMUpdatePhysicalPageAddresses(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x < (uint)_VSMPrototypePhysicalPageCapacity)
-        _VSMPrototypePhysicalPageOwners[id.x] = 0u;
+    uint slot = id.x;
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    uint nextOwner = 0u;
+    uint4 metadata = 0u;
+    if (owner != 0u)
+    {
+        uint source = owner - 1u;
+        uint axis = (uint)_VSMPrototypePagesPerAxis;
+        uint perLevel = axis * axis;
+        uint level = source / perLevel;
+        uint page = source % perLevel;
+        int4 remap = _VSMProjectionRemap[level];
+        // CPU delta is current origin minus previous origin, so an old page's
+        // address moves by -delta (the inverse of the former destination gather).
+        int2 destXY = int2(page % axis, page / axis) - remap.xy;
+        if (remap.z == 0 && all(destXY >= 0) && all(destXY < (int)axis))
+        {
+            nextOwner = level * perLevel + (uint)destXY.y * axis + (uint)destXY.x + 1u;
+            metadata = _VSMPrototypePageMetadata[source];
+        }
+    }
+    _VSMRemapPageMetadata[slot] = metadata;
+    _VSMPrototypePhysicalPageOwners[slot] = nextOwner;
+}
+
+[numthreads(64, 1, 1)]
+void VSMClearVirtualPageMappings(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_VSMPrototypePageTableEntryCount) return;
+    // Unmapped pages have no persistent cache state. Current receiver demand
+    // is generated after layout recording, independently of previous requests.
+    _VSMPrototypeWritablePageTable[id.x] = 0u;
+    _VSMPrototypePageMetadata[id.x] = 0u;
 }
 
 [numthreads(64, 1, 1)]
 void VSMRemapPages(uint3 id : SV_DispatchThreadID)
 {
-    uint dest = id.x;
-    if (dest >= (uint)_VSMPrototypePageTableEntryCount)
-        return;
-    uint axis = (uint)_VSMPrototypePagesPerAxis;
-    uint perLevel = axis * axis;
-    uint level = dest / perLevel;
-    uint page = dest % perLevel;
-    int4 remap = _VSMProjectionRemap[level];
-    int2 sourceXY = int2(page % axis, page / axis) + remap.xy;
-    uint table = 0u;
-    uint4 metadata = 0u;
-    if (remap.z == 0 && all(sourceXY >= 0) && all(sourceXY < (int)axis))
-    {
-        uint source = level * perLevel + (uint)sourceXY.y * axis + (uint)sourceXY.x;
-        table = _VSMPreviousPageTable[source];
-        metadata = _VSMPreviousPageMetadata[source];
-    }
-    _VSMPrototypeWritablePageTable[dest] = table;
-    _VSMPrototypePageMetadata[dest] = metadata;
-    if (table != 0u)
-        _VSMPrototypePhysicalPageOwners[table - 1u] = dest + 1u;
+    uint slot = id.x;
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    if (owner == 0u) return;
+    // Translation is one-to-one within each level; retained owners cannot collide.
+    _VSMPrototypeWritablePageTable[owner - 1u] = slot + 1u;
+    _VSMPrototypePageMetadata[owner - 1u] = _VSMRemapPageMetadata[slot];
 }
 
 // Each word has one writer. Dispatch across the complete table rather than

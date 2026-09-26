@@ -5,7 +5,7 @@
 #pragma kernel VSMPrototypeResetReceiverFeedback
 #pragma kernel VSMPrototypePrepareAllocation
 #pragma kernel VSMPrototypeAllocatePages
-#pragma kernel VSMResetPhysicalOwners
+#pragma kernel VSMUpdatePhysicalPageAddresses
 #pragma kernel VSMRemapPages
 #pragma kernel VSMPrototypeMarkAllAllocatedPagesDirty
 #pragma kernel VSMPrototypeInvalidateStaticPages
@@ -35,6 +35,7 @@
 #pragma kernel VSMReducePageOccupancyIndirect
 #pragma kernel VSMReceiverCost VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_SMRT_COST VIVID_VSM_ADAPTIVE_RAYS
 #pragma kernel VSMShadowResolveAdaptive VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS
+#pragma kernel VSMClearVirtualPageMappings
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -68,8 +69,7 @@ RWStructuredBuffer<uint4> _VSMPagePressureRW;
 float4 _VSMReceiverQuality; // density mode: 0 off, 1 fixed, 2 budget adaptive
 
 
-StructuredBuffer<uint> _VSMPreviousPageTable;
-StructuredBuffer<uint4> _VSMPreviousPageMetadata;
+RWStructuredBuffer<uint4> _VSMRemapPageMetadata;
 StructuredBuffer<int4> _VSMProjectionRemap;
 
 struct VSMPrototypeStaticInvalidationBounds

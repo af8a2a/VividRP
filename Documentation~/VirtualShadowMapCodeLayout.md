@@ -62,6 +62,18 @@
 
 本轮拆分阴影生成与资源生命周期；屏幕空间 Resolve 和 Compute 入口仍共用，Shader、kernel 顺序及 SMRT 隔离不变。验证见 [独立 Pass 报告](../Temp~/VSM/Roadmap~/Experiments/VSMShadowPassSplit_20260917/README.md)。
 
+## 布局重映射
+
+`VSMShadowPass.RecordVirtualShadowMapLayout` 在布局变化时依次派发：
+
+1. `VSMUpdatePhysicalPageAddresses`：每个物理槽读取旧 owner 对应的虚拟页元数据，按 clipmap 原点差更新地址；失效基准或越界的槽解除所有权。
+2. `VSMClearVirtualPageMappings`：清空密集虚拟页表和虚拟页元数据。
+3. `VSMRemapPages`：按保留物理槽的 owner 写回映射及完整元数据。
+
+第一步全部完成后才能清空，清空完成后才能写回，防止平移重叠覆盖尚未读取的来源。临时 `RemapPageMetadata` 为每个物理槽 16 字节，由 runtime 随物理池容量创建、复用和释放。物理深度不搬移；已驻留页的 dirty、Deferred、请求年龄和调试快照保留，未驻留的旧请求由随后当帧标记重新生成。布局无变化时不派发这三个 kernel。
+
+该阶段采用 UE 按物理页更新虚拟地址的组织方式；当前密集虚拟页表仍需一次全表清零。相机/光源/布局基准的兼容判定、全组重置条件及后续分配策略仍由 VividRP 管理。
+
 ## 动态缓存扩展（2026-09-17）
 
 带 `VividVSMConservativeBounds=1` ShadowCaster Pass 的普通 MeshRenderer 使用 Unity culling 的聚合投影物 bounds。Runtime 合并上次成功提交和当前 bounds，只失效覆盖页面；当前覆盖仍逐帧重绘，覆盖之外可复用。四个无顶点形变的内置材质已声明该契约；Skinned、Terrain、粒子及未声明契约的自定义材质保留全量刷新。

@@ -300,6 +300,9 @@ namespace VividRP.Editor.Tests
                 var pool = VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
                 var workList = VirtualShadowMapPrototypeRuntime.PageWorkList;
                 var workArgs = VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs;
+                var remapMetadata = VirtualShadowMapPrototypeRuntime.RemapPageMetadata;
+                Assert.That(remapMetadata.count, Is.EqualTo(budget));
+                Assert.That(remapMetadata.stride, Is.EqualTo(16));
                 Assert.That(workList.count, Is.EqualTo(budget * 2));
                 Assert.That(workArgs.count, Is.EqualTo(6));
                 Assert.That(workArgs.target, Is.EqualTo(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments));
@@ -311,11 +314,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage, Is.SameAs(pool));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList, Is.SameAs(workList));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, Is.SameAs(workArgs));
+                Assert.That(VirtualShadowMapPrototypeRuntime.RemapPageMetadata, Is.SameAs(remapMetadata));
                 VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(256));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList.count, Is.EqualTo(512));
             }
             finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); }
+            Assert.That(VirtualShadowMapPrototypeRuntime.RemapPageMetadata, Is.Null);
             Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList, Is.Null);
             Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, Is.Null);
         }
@@ -324,11 +329,15 @@ namespace VividRP.Editor.Tests
             int lod = -1, float error = 1)
             => new(1, 1, 1, 1, 8, 512, lod, error, 1, new Vector4(0, 0, 1, 0), mask, generation);
 
+        [TestCase(0, 0)]
         [TestCase(1, 0)]
         [TestCase(-1, 1)]
         [TestCase(4, 0)]
+        [TestCase(-4, -4)]
         [TestCase(0, 0, true)]
-        public void Remap_PreservesFeedbackAndSlotsAndAllocatorReusesHoles(int dx, int dy, bool resetBasis = false)
+        [TestCase(1, -1, false, true)]
+        public void Remap_PreservesFeedbackAndSlotsAndAllocatorReusesHoles(int dx, int dy,
+            bool resetBasis = false, bool mixedLevels = false)
         {
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var source = AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -338,27 +347,46 @@ namespace VividRP.Editor.Tests
             try
             {
                 // Eight levels exercise indexing above the legacy four-cascade limit.
-                const int count = 128, capacity = 4;
+                const int count = 128, capacity = 65;
                 var tableData = new uint[count];
                 var metadataData = new uint4[count];
                 tableData[0] = 1;
                 tableData[10] = 4;
-                tableData[117] = 3;
+                tableData[117] = 65; // Exercise the second physical dispatch group.
                 for (int i = 0; i < count; i++)
                     metadataData[i] = new uint4(tableData[i] == 0 ? 0u : 11u, tableData[i], 7, 8);
-                using var previous = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4);
-                using var previousMetadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
+                // Keep dirty, deferred, occupancy, age and debug state bit-for-bit.
+                metadataData[0].x |= (1u << 2) | (1u << 17);
+                metadataData[10].x |= (1u << 15) | (1u << 14);
+                metadataData[117].w = 0x12345678u;
+                // Unallocated feedback must not reappear as cached state after remap.
+                metadataData[54] = new uint4(1u | (1u << 9), 0u, 6u, 0xfeedu);
+                using var remapMetadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 16);
                 using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4);
                 using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
                 using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
                 using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
                 using var remap = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, 16);
-                previous.SetData(tableData);
-                previousMetadata.SetData(metadataData);
+                using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (count + 31) / 32, 4);
+                using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
+                pressure.SetData(new uint4[3]);
+                table.SetData(tableData);
+                metadata.SetData(metadataData);
+                var ownersData = new uint[capacity];
+                for (int page = 0; page < count; page++)
+                    if (tableData[page] != 0u) ownersData[tableData[page] - 1u] = (uint)page + 1u;
+                owners.SetData(ownersData);
                 var remaps = new int4[8];
                 for (int i = 0; i < 8; i++) remaps[i] = new int4(dx, dy, resetBasis ? 1 : 0, 0);
                 remap.SetData(remaps);
-                int reset = shader.FindKernel("VSMResetPhysicalOwners");
+                if (mixedLevels)
+                {
+                    remaps[0] = int4.zero;
+                    remaps[7] = new int4(-1, 0, 0, 0);
+                    remap.SetData(remaps);
+                }
+                int update = shader.FindKernel("VSMUpdatePhysicalPageAddresses");
+                int clear = shader.FindKernel("VSMClearVirtualPageMappings");
                 int move = shader.FindKernel("VSMRemapPages");
                 int allocate = shader.FindKernel("VSMPrototypeAllocatePages");
                 shader.SetInt("_VSMProjectionCount", 8);
@@ -366,31 +394,38 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_VSMPrototypePagesPerAxis", 4);
                 shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
                 shader.SetInt("_VSMPrototypeFeedbackFrameIndex", 7);
-                shader.SetBuffer(reset, "_VSMPrototypePhysicalPageOwners", owners);
-                shader.Dispatch(reset, 1, 1, 1);
-                shader.SetBuffer(move, "_VSMPreviousPageTable", previous);
-                shader.SetBuffer(move, "_VSMPreviousPageMetadata", previousMetadata);
-                shader.SetBuffer(move, "_VSMProjectionRemap", remap);
+                shader.SetBuffer(update, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(update, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(update, "_VSMRemapPageMetadata", remapMetadata);
+                shader.SetBuffer(update, "_VSMProjectionRemap", remap);
+                shader.Dispatch(update, (capacity + 63) / 64, 1, 1);
+                shader.SetBuffer(clear, "_VSMPrototypeWritablePageTable", table);
+                shader.SetBuffer(clear, "_VSMPrototypePageMetadata", metadata);
+                shader.Dispatch(clear, (count + 63) / 64, 1, 1);
+                shader.SetBuffer(move, "_VSMRemapPageMetadata", remapMetadata);
                 shader.SetBuffer(move, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(move, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(move, "_VSMPrototypePhysicalPageOwners", owners);
-                shader.Dispatch(move, 2, 1, 1);
+                shader.Dispatch(move, (capacity + 63) / 64, 1, 1);
                 var actual = new uint[count];
                 var actualMetadata = new uint4[count];
                 var actualOwners = new uint[capacity];
                 table.GetData(actual);
                 metadata.GetData(actualMetadata);
                 owners.GetData(actualOwners);
+                var expectedOwners = new uint[capacity];
                 for (int dest = 0; dest < count; dest++)
                 {
-                    int x = dest % 4 + dx, y = dest % 16 / 4 + dy;
-                    bool inside = !resetBasis && x >= 0 && x < 4 && y >= 0 && y < 4;
+                    int4 delta = remaps[dest / 16];
+                    int x = dest % 4 + delta.x, y = dest % 16 / 4 + delta.y;
+                    bool inside = delta.z == 0 && x >= 0 && x < 4 && y >= 0 && y < 4;
                     int src = dest / 16 * 16 + y * 4 + x;
                     Assert.That(actual[dest], Is.EqualTo(inside ? tableData[src] : 0u));
-                    Assert.That(actualMetadata[dest], Is.EqualTo(inside ? metadataData[src] : uint4.zero));
+                    Assert.That(actualMetadata[dest], Is.EqualTo(inside && tableData[src] != 0u ? metadataData[src] : uint4.zero));
                     if (actual[dest] != 0)
-                        Assert.That(actualOwners[actual[dest] - 1], Is.EqualTo((uint)dest + 1));
+                        expectedOwners[actual[dest] - 1] = (uint)dest + 1;
                 }
+                Assert.That(actualOwners, Is.EqualTo(expectedOwners));
                 int free = System.Array.IndexOf(actualOwners, 0u);
                 int missing = System.Array.IndexOf(actual, 0u);
                 Assert.That(free, Is.GreaterThanOrEqualTo(0));
@@ -400,6 +435,12 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(allocate, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(allocate, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(allocate, "_VSMPrototypeAllocatorCounters", counters);
+                int prepare = shader.FindKernel("VSMPrototypePrepareAllocation");
+                shader.SetBuffer(prepare, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(prepare, "_VSMAllocationRequests", requests);
+                shader.Dispatch(prepare, (count + 63) / 64, 1, 1);
+                shader.SetBuffer(allocate, "_VSMAllocationRequests", requests);
+                shader.SetBuffer(allocate, "_VSMPagePressureRW", pressure);
                 shader.Dispatch(allocate, 1, 1, 1);
                 var allocated = new uint[count];
                 table.GetData(allocated);

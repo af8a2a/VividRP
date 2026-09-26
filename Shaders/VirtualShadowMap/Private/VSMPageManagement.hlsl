@@ -280,8 +280,14 @@ bool GetVSMPageRange(
         instanceData.ObjectToWorldMatrix);
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
     const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
+#if defined(VIVID_VSM_AFFINE_BOUNDS)
+    if (!VividVSMProjectLocalBounds(meshlet.BoundingSphere.xyz, 0.0, meshlet.BoundingSphere.w, true,
+            mul(_VSMProjections[cascadeIndex].worldToShadow, instanceData.ObjectToWorldMatrix),
+            (uint)max(_VSMPrototypeVirtualResolution, 1), minVirtualTexel, maxVirtualTexel)) return false;
+#else
     if (!VividVSMProjectCasterSphere(sphereWS, _VSMProjections[cascadeIndex].worldToShadow,
             (uint)max(_VSMPrototypeVirtualResolution, 1), minVirtualTexel, maxVirtualTexel)) return false;
+#endif
     minPage = min(minVirtualTexel / pageSize, pagesPerAxis - 1u);
     maxPage = min(maxVirtualTexel / pageSize, pagesPerAxis - 1u);
     return all(maxPage >= minPage);
@@ -1262,4 +1268,9 @@ void VSMPrototypeCullMeshletsToPages(uint3 id : SV_DispatchThreadID) { RunVSMCul
 void VSMPrepareMeshletPageRequestsCompacted(uint index : SV_GroupIndex) { RunVSMPrepareMeshletPageRequests(index); }
 [numthreads(64, 1, 1)]
 void VSMCullMeshletsToPagesCompacted(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
+#endif
+
+#if defined(VIVID_VSM_AFFINE_BOUNDS)
+[numthreads(64, 1, 1)]
+void VSMCullMeshletsToPagesAffine(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
 #endif

@@ -11,6 +11,7 @@
 
 #pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
+#pragma kernel CSVSMBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -398,11 +399,20 @@ bool TryResolveCulledMeshlet(
     const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
     boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
 
+#if defined(VIVID_VSM_AFFINE_BOUNDS)
+    if (!VividVSMFrustumVsLocalBounds(cullingContext.FrustumPlanes, meshlet.BoundingSphere.xyz,
+            0.0, meshlet.BoundingSphere.w, true, instanceData.ObjectToWorldMatrix)
+        || !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, meshlet.BoundingSphere.xyz,
+            0.0, meshlet.BoundingSphere.w, true,
+            mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix))) return false;
+#else
     if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
         !LightSphereCulling(cullingContext, boundingSphereWS))
     {
         return false;
     }
+
+#endif
 
     if ((rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
         !ConeCulling(cullingContext, instanceData, meshlet))
@@ -439,7 +449,7 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
-#if defined(VIVID_VSM_EARLY_CULL)
+#if defined(VIVID_VSM_EARLY_CULL) && !defined(VIVID_VSM_AFFINE_BOUNDS)
     // Reuse the sphere from frustum/cone culling before visible-list atomics.
     if (!VividVSMCasterSphereOverlaps(cullingContextIndex, boundingSphereWS)) return;
 #endif
@@ -614,4 +624,9 @@ void CSVSMCompacted(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     RunCulling(dispatchThreadID);
 }
+#endif
+
+#if defined(VIVID_VSM_AFFINE_BOUNDS)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMBounds(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
 #endif

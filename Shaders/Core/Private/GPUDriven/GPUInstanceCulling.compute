@@ -3,6 +3,7 @@
 #pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
 #pragma kernel CSCompactVSMViews VIVID_VSM_EARLY_CULL VIVID_VSM_BUILD_COMPACT_VIEWS
+#pragma kernel CSVSMHierarchy VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
@@ -26,6 +27,68 @@ uint _VividPrimitiveDrawSetEnabled;
 RWStructuredBuffer<VividMeshletListBuildJob> _MeshletListBuildJobs;
 RWStructuredBuffer<uint> _MeshletListBuildJobCounter;
 RWStructuredBuffer<uint> _MeshletListBuildIndirectArgs;
+
+#if defined(VIVID_VSM_LOD_HIERARCHY)
+struct VSMLodHierarchyNode
+{
+    float4 Min;
+    float4 Max;
+    uint4 Range;
+};
+StructuredBuffer<VSMLodHierarchyNode> _VSMLodHierarchy;
+StructuredBuffer<uint> _VSMLodRoots;
+uint _VSMLodHierarchyCount;
+uint _VSMLodRootCount;
+uint _ForcedMeshLODNodeDepth;
+
+void EmitVSMLodJob(uint instanceID, uint contextIndex, uint jobsOffset, uint offset, uint count)
+{
+    uint index;
+    InterlockedAdd(_MeshletListBuildJobCounter[contextIndex], 1u, index);
+    InterlockedMax(_MeshletListBuildIndirectArgs[0], index + 1u);
+    VividMeshletListBuildJob job;
+    job.InstanceID = instanceID; job.MeshLODNodeOffset = offset;
+    job.MeshLODNodeCount = count; job.Padding0 = 0u;
+    _MeshletListBuildJobs[jobsOffset + index] = job;
+}
+
+// Stackless preorder traversal. Every leaf is aligned to a 32-record job in
+// this mesh, so surviving jobs cannot exceed the existing queue capacity.
+void TraverseVSMLodHierarchy(uint instanceID, VividInstanceData instance, uint contextIndex,
+    uint jobsOffset, float4x4 localToShadow)
+{
+    uint start = instance.TopMeshLODStartIndex;
+    uint count = start < _VSMLodRootCount ? min(instance.TotalMeshLODCount, _VSMLodRootCount - start) : 0u;
+    if (count == 0u) return;
+    uint end = start + count;
+    uint index = start < _VSMLodRootCount ? _VSMLodRoots[start] : 0xffffffffu;
+    if (index >= _VSMLodHierarchyCount)
+    {
+        // Preserve the original guarded flat path for incomplete source data.
+        for (uint offset = 0u; offset < count; offset += 32u)
+            EmitVSMLodJob(instanceID, contextIndex, jobsOffset, offset, min(count - offset, 32u));
+        return;
+    }
+    uint stop = _VSMLodHierarchy[index].Range.z;
+    uint leafLevel = instance.MeshLODLevelCount - 1u;
+    [loop] while (index < stop)
+    {
+        VSMLodHierarchyNode node = _VSMLodHierarchy[index];
+        bool overlaps = node.Range.x < end && node.Range.x + node.Range.y > start;
+        if (_ForcedMeshLODNodeDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
+            overlaps = overlaps && ((_ForcedMeshLODNodeDepth >= node.Min.w && _ForcedMeshLODNodeDepth <= node.Max.w)
+                || (leafLevel < _ForcedMeshLODNodeDepth && leafLevel >= node.Min.w && leafLevel <= node.Max.w));
+        if (overlaps)
+            overlaps = VividVSMCasterLocalBoundsOverlaps(contextIndex,
+                (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false, localToShadow);
+        if (!overlaps) { index = node.Range.z; continue; }
+        if (node.Range.w == 0u) { index++; continue; }
+        uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
+        EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first);
+        index = node.Range.z;
+    }
+}
+#endif
 
 void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -74,6 +137,14 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
+#if defined(VIVID_VSM_AFFINE_BOUNDS)
+    float3 centerOS = (instanceData.AABBMin.xyz + instanceData.AABBMax.xyz) * 0.5;
+    float3 extentOS = (instanceData.AABBMax.xyz - instanceData.AABBMin.xyz) * 0.5;
+    if (!VividVSMFrustumVsLocalBounds(cullingContext.FrustumPlanes, centerOS, extentOS,
+            0.0, false, instanceData.ObjectToWorldMatrix)) return;
+    float4x4 localToShadow = mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix);
+    if (!VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, centerOS, extentOS, 0.0, false, localToShadow)) return;
+#else
     const float4 boundingSphereWS = ComputeInstanceBoundingSphereWS(instanceData);
     if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
         !LightSphereCulling(cullingContext, boundingSphereWS))
@@ -86,11 +157,18 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
     if (!VividVSMCasterSphereOverlaps(cullingContextIndex, boundingSphereWS)) return;
 #endif
 
+#endif
+
     const uint totalMeshLODCount = instanceData.TotalMeshLODCount;
     if (totalMeshLODCount == 0u)
     {
         return;
     }
+
+#if defined(VIVID_VSM_LOD_HIERARCHY)
+    TraverseVSMLodHierarchy(instanceID, instanceData, cullingContextIndex, cullingContext.MeshletListBuildJobsOffset, localToShadow);
+    return;
+#endif
 
     const uint jobCount = (totalMeshLODCount + MAX_LODNODES_PER_THREAD_GROUP - 1u) / MAX_LODNODES_PER_THREAD_GROUP;
 
@@ -146,4 +224,9 @@ void CSVSMCompacted(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     RunCulling(dispatchThreadID);
 }
+#endif
+
+#if defined(VIVID_VSM_LOD_HIERARCHY)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMHierarchy(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
 #endif

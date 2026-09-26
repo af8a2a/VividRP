@@ -170,7 +170,7 @@ UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`Virt
 
 三个阶段共用 `VSMPageCulling.hlsl`：先投影，再与对应静态/动态补绘矩形相交，最后查询最细可覆盖的 H-mip（最多 2×2 节点）。只有预算已选中的对应 Dirty 标志产生需求，Deferred 页不会重新进入 source 工作列表；静态仍整页绘制，动态才使用 receiver mask。最终 `VSMPrototypeCullMeshletsToPages` 保留逐页状态、owner 和 mask 的精确检查。
 
-这是按页面生产需求进行保守拒绝，不进行深度/HZB 遮挡裁剪；完整请求、父链以及静态/动态各 16 层遮挡深度保留。当前 LOD 仍遍历既有扁平节点列表，并非 UE/Nanite 的完整层级遍历迁移。实现验证记录位于忽略目录 `Temp~/VSM/EarlyHierarchy_20260926/`。
+这是按页面生产需求进行保守拒绝，不进行深度/HZB 遮挡裁剪；完整请求、父链以及静态/动态各 16 层遮挡深度保留。此阶段初始实现遍历既有扁平节点列表；当前生产路径已加入下节的节点范围树，仍未迁移 UE/Nanite 的完整层级遍历。实现验证记录位于忽略目录 `Temp~/VSM/EarlyHierarchy_20260926/`。
 
 ## 层级传播短路（2026-09-26）
 
@@ -189,6 +189,18 @@ UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`Virt
 `VirtualShadowMapPrototypeRuntime` 管理 `ActiveViews`、`InstanceDispatchArgs`、`PageCullDispatchArgs` 的有效尺寸复用和释放，RenderGraph 声明读写。每帧先用缓存数组录制小量初始化，确保无 GPU caster、未进入 source cull 的层也是空列表和零任务；生产路径无 CPU readback。所有新 kernel 追加到旧入口之后，旧 CS/CSVSM 仍可用于对照，普通相机与 CSM 保持原入口。
 
 本次压缩覆盖 GPU-driven source 到最终 meshlet→page 的工作网格。计数器清空仍使用原 projection 布局，Fixup 仍启动原层数的一线程组并让无效 ordinal 退出，prepare 仍扫描物理槽；普通 Unity RendererList 的投影/瓦片循环尚未压缩。完整请求、父链、静态整页覆盖和静态/动态各 16 层深度不变。验证记录位于忽略目录 `Temp~/VSM/CompactViews_20260926/`，派发组数的减少不能直接换算为整帧耗时收益。
+
+## 局部包围体投影与 LOD 范围树
+
+GPU-driven 定向光 VSM 的生产入口为 `GPUInstanceCulling::CSVSMHierarchy`、`MeshletListBuild::CSVSMBounds`、`GPUMeshletCulling::CSVSMBounds` 和 `VSMCullMeshletsToPagesAffine`。普通相机/CSM 仍选择原入口；原 VSM sphere/compacted 入口保留用于对照，kernel 顺序不变。
+
+`VSMPageCulling.hlsl` 直接用 `worldToShadow × objectToWorld` 投影局部包围体：实例使用原局部 AABB，LOD 节点和 meshlet 使用局部球。球在每条投影轴的半径为该矩阵行向量长度乘局部半径，盒为行向量绝对值与半尺寸的点积，避免先扩张成世界空间球。对应 frustum 检查将平面变换回局部空间并求相同的支撑半径。支持非均匀缩放、反射和剪切，并留有浮点向外余量；非仿射投影或无效投影数值保守保留整个虚拟视口。原 LOD 误差选择及 cone culling 不在此改动范围。
+
+`VirtualShadowMapLODHierarchy` 随 `VividGPUDrivenBufferSet` 管理辅助范围树及根索引。树节点为 48 字节（局部 AABB、LOD 层号范围、源记录范围、子树结束索引）；根索引按原 `TopMeshLODStartIndex` 查询。树只在几何更新、出现新的实例源范围或缓冲失效时重建，稳定更新复用 CPU/GPU 存储，资源随 BufferSet 释放，并由 VSMShadowPass 导入 RenderGraph。
+
+树保持原始节点顺序与序列化数据，叶段最多 32 个源节点。实例线程先做无栈的先序遍历，按补绘边界、PageFlags/receiver mask 和强制 LOD 层号跳过整段，再为存活叶段写入既有 job 队列；job 数不会超过原分配容量。自动 LOD 模式仍由叶段执行原误差判定，未建立 Nanite 式误差层级/DAG 或持久 GPU 工作队列。树的收益取决于原节点顺序的空间聚集程度，范围重叠时仍需访问多个分支。
+
+该优化只缩减 caster 生产工作。完整接收请求、父链、补绘预算、Deferred 语义、静态整页覆盖及静态/动态各 16 层存储继续沿用。独立 GPU 对照、变换保守性、缓存生命周期与实际帧验证记录在忽略目录 `Temp~/VSM/AffineLOD_20260926/`。
 
 ## SMRT 成本诊断（2026-09-17）
 

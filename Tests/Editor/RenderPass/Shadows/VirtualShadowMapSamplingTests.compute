@@ -29,6 +29,7 @@
 #pragma kernel InspectVSMPageHierarchy
 #pragma kernel InspectVSMHierarchyMip
 #pragma kernel InspectVSMUncachedRect
+#pragma kernel InspectVSMAffineBounds
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -432,4 +433,16 @@ void InspectVSMUncachedRect(uint3 id : SV_DispatchThreadID)
     _SamplingResults[id.x] = float2(overlaps ? 1 : 0, overlaps ? VividVSMHierarchyMipForRect(first, last) : 0);
     _SamplingClippedRects[id.x * 2u] = uint4(first, last);
     _SamplingClippedRects[id.x * 2u + 1u] = uint4(low, high);
+}
+
+[numthreads(64, 1, 1)]
+void InspectVSMAffineBounds(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 center = _SamplingInputs[id.x], extent = _SamplingNormals[id.x];
+    uint2 low, high;
+    bool valid = VividVSMProjectLocalBounds(center.xyz, extent.xyz, center.w, extent.w != 0.0,
+        _VSMProjections[id.x].worldToShadow, (uint)_VSMPrototypeVirtualResolution, low, high);
+    _SamplingClippedRects[id.x] = uint4(low, high);
+    _SamplingResults[id.x] = float2(valid, 0);
 }

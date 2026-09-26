@@ -147,6 +147,103 @@ namespace VividRP.Editor.Tests
             finally { Object.DestroyImmediate(shader); }
         }
 
+        [TestCase(1)]
+        [TestCase(32)]
+        [TestCase(33)]
+        [TestCase(65)]
+        [TestCase(1025)]
+        public void LodHierarchy_PreservesRangesAndBounds_AndReusesStableGeometry(int count)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var source = new System.Collections.Generic.List<VividMeshLODNode>(count + 3);
+            for (int i = 0; i < count + 3; i++) source.Add(new VividMeshLODNode
+                { Bounds = new float4(i, i % 7, -i, .25f), LevelIndex = (uint)(i % 3) });
+            var instances = new System.Collections.Generic.List<VividInstanceData>
+                { new() { TopMeshLODStartIndex = 3, TotalMeshLODCount = (uint)count, MeshLODLevelCount = 3 } };
+            using var hierarchy = new VirtualShadowMapLODHierarchy();
+            hierarchy.Update(source, instances, true);
+            var roots = new uint[source.Count]; hierarchy.Roots.GetData(roots);
+            int root = (int)roots[3], end = (int)hierarchy.CpuNodes[root].Range.z;
+            var covered = new int[count];
+            for (int index = root; index < end; index++)
+            {
+                var node = hierarchy.CpuNodes[index];
+                Assert.That(node.Range.z, Is.GreaterThan((uint)index).And.LessThanOrEqualTo((uint)end));
+                for (uint n = node.Range.x; n < node.Range.x + node.Range.y; n++)
+                {
+                    var child = source[(int)n];
+                    Assert.That(math.all(node.Min.xyz <= child.Bounds.xyz - child.Bounds.w), Is.True);
+                    Assert.That(math.all(node.Max.xyz >= child.Bounds.xyz + child.Bounds.w), Is.True);
+                    Assert.That(child.LevelIndex >= node.Min.w && child.LevelIndex <= node.Max.w, Is.True);
+                }
+                if (node.Range.w == 0) continue;
+                Assert.That(node.Range.y, Is.InRange(1u, 32u));
+                Assert.That((node.Range.x - 3u) % 32u, Is.Zero);
+                for (uint n = node.Range.x; n < node.Range.x + node.Range.y; n++) covered[n - 3]++;
+            }
+            foreach (int visits in covered) Assert.That(visits, Is.EqualTo(1));
+            var nodeBuffer = hierarchy.Nodes; var rootBuffer = hierarchy.Roots;
+            for (int i = 0; i < 32; i++) hierarchy.Update(source, instances, false);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1024; i++) hierarchy.Update(source, instances, false);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero); Assert.That(hierarchy.Nodes, Is.SameAs(nodeBuffer));
+            Assert.That(hierarchy.Roots, Is.SameAs(rootBuffer));
+            // Adding a previously unused range must work without a geometry upload.
+            instances.Add(new VividInstanceData { TopMeshLODStartIndex = 0, TotalMeshLODCount = 3, MeshLODLevelCount = 3 });
+            hierarchy.Update(source, instances, false); hierarchy.Roots.GetData(roots);
+            Assert.That(roots[0], Is.Not.EqualTo(uint.MaxValue));
+            var changed = source[3]; changed.Bounds = new float4(-1000, 0, 0, 1); source[3] = changed;
+            hierarchy.Update(source, instances, true); hierarchy.Roots.GetData(roots);
+            Assert.That(hierarchy.CpuNodes[(int)roots[3]].Min.x, Is.LessThanOrEqualTo(-1001));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void AffineProjection_ContainsTransformedBoundSamples(bool sphere)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
+            try
+            {
+                using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+                using var extents = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+                using var projection = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 160);
+                using var rects = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+                using var results = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 8);
+                Vector3 center = new(.1f, -.2f, .05f), extent = new(.08f, .025f, .04f);
+                Matrix4x4 matrix = Matrix4x4.TRS(new Vector3(.5f, .5f, 0), Quaternion.Euler(15, 25, 35), new Vector3(-2, .4f, 1.7f));
+                matrix.m01 += .7f; // Shear must not use a max-axis world sphere.
+                inputs.SetData(new[] { new Vector4(center.x, center.y, center.z, .08f) });
+                extents.SetData(new[] { new Vector4(extent.x, extent.y, extent.z, sphere ? 1 : 0) });
+                projection.SetData(new[] { new VirtualShadowMapProjection { WorldToShadow = matrix } });
+                int k = shader.FindKernel("InspectVSMAffineBounds");
+                shader.SetInt("_SamplingCount", 1); shader.SetInt("_VSMPrototypeVirtualResolution", 4096);
+                shader.SetBuffer(k, "_SamplingInputs", inputs); shader.SetBuffer(k, "_SamplingNormals", extents);
+                shader.SetBuffer(k, "_VSMProjections", projection); shader.SetBuffer(k, "_SamplingClippedRects", rects);
+                shader.SetBuffer(k, "_SamplingResults", results); shader.Dispatch(k, 1, 1, 1);
+                var actual = new uint4[1]; var valid = new Vector2[1]; rects.GetData(actual); results.GetData(valid);
+                Assert.That(valid[0].x, Is.EqualTo(1));
+                for (int i = 0; i < (sphere ? 256 : 8); i++)
+                {
+                    Vector3 point;
+                    if (sphere)
+                    {
+                        double z = 1 - 2 * (i + .5) / 256, angle = i * 2.399963229728653;
+                        double radius = Math.Sqrt(1 - z * z);
+                        point = center + .08f * new Vector3((float)(radius * Math.Cos(angle)), (float)(radius * Math.Sin(angle)), (float)z);
+                    }
+                    else point = center + Vector3.Scale(extent, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                    Vector3 uv = matrix.MultiplyPoint3x4(point);
+                    if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) continue;
+                    uint x = (uint)Math.Min(4095, Math.Floor(uv.x * 4096)), y = (uint)Math.Min(4095, Math.Floor(uv.y * 4096));
+                    Assert.That(x, Is.InRange(actual[0].x, actual[0].z)); Assert.That(y, Is.InRange(actual[0].y, actual[0].w));
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(0, false, true)]
         [TestCase(0, true, true)]
         [TestCase(1, false, false)]

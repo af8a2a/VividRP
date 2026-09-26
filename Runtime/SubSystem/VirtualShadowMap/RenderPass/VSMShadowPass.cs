@@ -96,7 +96,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private const string VSMPrototypePrepareMeshletPageRequestsKernelName = "VSMPrepareMeshletPageRequestsCompacted";
 
-        private const string VSMPrototypeCullMeshletsToPagesKernelName = "VSMCullMeshletsToPagesCompacted";
+        private const string VSMPrototypeCullMeshletsToPagesKernelName = "VSMCullMeshletsToPagesAffine";
 
         private static readonly GlobalKeyword s_VirtualShadowMapCasterKeyword =
             GlobalKeyword.Create(VirtualShadowMapCasterKeywordName);
@@ -532,6 +532,12 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullHierarchy, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds, AccessFlags.ReadWrite);
+            var lodHierarchy = VividGPUDrivenSystem.instance?.BufferSet?.VSMLODHierarchy;
+            if (lodHierarchy?.Nodes != null && lodHierarchy.Roots != null)
+            {
+                PassRecorder.ImportBufferForPass(this, lodHierarchy.Nodes, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(this, lodHierarchy.Roots, AccessFlags.Read);
+            }
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.ActiveViews, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.InstanceDispatchArgs, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs, AccessFlags.ReadWrite);

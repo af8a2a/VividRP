@@ -259,7 +259,7 @@ namespace VividRP.Runtime.GPUDriven
                     cullingContextCount,
                     sceneBuffers,
                     drawSetEnabled,
-                    drawSetInstanceIndices, in vsmCulling);
+                    drawSetInstanceIndices, forcedMeshLODNodeDepth, in vsmCulling);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchMeshletListBuildMarker.Auto())
@@ -324,7 +324,7 @@ namespace VividRP.Runtime.GPUDriven
             int cullingContextCount,
             VividGPUDrivenBufferSet sceneBuffers,
             bool drawSetEnabled,
-            GraphicsBuffer drawSetInstanceIndices,
+            GraphicsBuffer drawSetInstanceIndices, int forcedMeshLODNodeDepth,
             in VirtualShadowMapCullingParameters vsmCulling
         )
         {
@@ -335,8 +335,9 @@ namespace VividRP.Runtime.GPUDriven
                 kernel = m_GPUInstanceVSMCullingKernel;
                 if (vsmCulling.UsesCompactedViews)
                 {
-                    if (m_GPUInstanceVSMCompactedKernel < 0) m_GPUInstanceVSMCompactedKernel = m_GPUInstanceCullingCompute.FindKernel("CSVSMCompacted");
+                    if (m_GPUInstanceVSMCompactedKernel < 0) m_GPUInstanceVSMCompactedKernel = m_GPUInstanceCullingCompute.FindKernel("CSVSMHierarchy");
                     kernel = m_GPUInstanceVSMCompactedKernel;
+                    sceneBuffers.VSMLODHierarchy.Bind(cmd, m_GPUInstanceCullingCompute, kernel, forcedMeshLODNodeDepth);
                 }
                 vsmCulling.Bind(cmd, m_GPUInstanceCullingCompute, kernel);
             }
@@ -490,7 +491,7 @@ namespace VividRP.Runtime.GPUDriven
                 kernel = m_MeshletListBuildVSMKernel;
                 if (vsmCulling.UsesCompactedViews)
                 {
-                    if (m_MeshletListBuildVSMCompactedKernel < 0) m_MeshletListBuildVSMCompactedKernel = m_MeshletListBuildCompute.FindKernel("CSVSMCompacted");
+                    if (m_MeshletListBuildVSMCompactedKernel < 0) m_MeshletListBuildVSMCompactedKernel = m_MeshletListBuildCompute.FindKernel("CSVSMBounds");
                     kernel = m_MeshletListBuildVSMCompactedKernel;
                 }
                 vsmCulling.Bind(cmd, m_MeshletListBuildCompute, kernel);
@@ -663,7 +664,7 @@ namespace VividRP.Runtime.GPUDriven
                 kernel = m_GPUMeshletVSMCullingKernel;
                 if (vsmCulling.UsesCompactedViews)
                 {
-                    if (m_GPUMeshletVSMCompactedKernel < 0) m_GPUMeshletVSMCompactedKernel = m_GPUMeshletCullingCompute.FindKernel("CSVSMCompacted");
+                    if (m_GPUMeshletVSMCompactedKernel < 0) m_GPUMeshletVSMCompactedKernel = m_GPUMeshletCullingCompute.FindKernel("CSVSMBounds");
                     kernel = m_GPUMeshletVSMCompactedKernel;
                 }
                 vsmCulling.Bind(cmd, m_GPUMeshletCullingCompute, kernel);

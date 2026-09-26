@@ -2,6 +2,7 @@
 
 #pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
+#pragma kernel CSVSMBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
@@ -90,9 +91,15 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
         }
 
 #if defined(VIVID_VSM_EARLY_CULL)
+#if defined(VIVID_VSM_AFFINE_BOUNDS)
+        if (!VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, meshLODNode.Bounds.xyz,
+            0.0, meshLODNode.Bounds.w, true,
+            mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix))) continue;
+#else
         // Reject selected node bounds before expanding meshlets and reserving requests.
         if (!VividVSMCasterSphereOverlaps(cullingContextIndex,
                 TransformSphere(meshLODNode.Bounds, instanceData.ObjectToWorldMatrix))) continue;
+#endif
 #endif
 
         const uint rendererListIndex = min(
@@ -137,4 +144,9 @@ void CSVSMCompacted(uint3 groupThreadID : SV_GroupThreadID, uint3 groupID : SV_G
 {
     RunCulling(groupThreadID, groupID);
 }
+#endif
+
+#if defined(VIVID_VSM_AFFINE_BOUNDS)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMBounds(uint3 lane : SV_GroupThreadID, uint3 group : SV_GroupID) { RunCulling(lane, group); }
 #endif

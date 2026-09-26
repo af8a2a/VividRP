@@ -27,6 +27,7 @@
 #pragma kernel MarkFootprintPairs VIVID_VSM_MARK_RECEIVERS
 #pragma kernel ResolveOnlyReceivers VIVID_VSM_RESOLVE_RECEIVERS
 #pragma kernel InspectVSMPageHierarchy
+#pragma kernel InspectVSMHierarchyMip
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -40,6 +41,16 @@ RWStructuredBuffer<float2> _SamplingResults;
 int _SamplingCount;
 int2 _SamplingPixel;
 float2 _SamplingAdaptive; // wave adaptation enabled, use production uniform binding
+
+[numthreads(64, 1, 1)]
+void InspectVSMHierarchyMip(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    uint4 rect = (uint4)_SamplingInputs[id.x];
+    uint mip = VividVSMHierarchyMipForRect(rect.xy, rect.zw);
+    uint2 count = (rect.zw >> mip) - (rect.xy >> mip) + 1u;
+    _SamplingResults[id.x] = float2(mip, count.x * count.y);
+}
 
 // Compare the fast conservative test with the shipping exact page predicates.
 [numthreads(64, 1, 1)]

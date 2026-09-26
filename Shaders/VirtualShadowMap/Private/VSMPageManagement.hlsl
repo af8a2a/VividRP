@@ -74,8 +74,7 @@ bool VSMCasterHierarchyOverlaps(uint level, uint2 low, uint2 high)
     if (_VSMPageCullHierarchyEnabled == 0) return true;
     uint pageSize = (uint)_VSMPrototypePageSize;
     uint2 lowPage = low / pageSize, highPage = high / pageSize;
-    uint span = max(highPage.x - lowPage.x + 1u, highPage.y - lowPage.y + 1u);
-    uint mip = span > 1u ? (uint)firstbithigh(span - 1u) + 1u : 0u;
+    uint mip = VividVSMHierarchyMipForRect(lowPage, highPage);
     uint axis = (uint)_VSMPrototypePagesPerAxis;
     uint2 first = lowPage >> mip, last = highPage >> mip;
     uint flag = _VSMPrototypeCasterLayer == 0 ? kVSMPageDirty : kVSMPageDynamicDirty;

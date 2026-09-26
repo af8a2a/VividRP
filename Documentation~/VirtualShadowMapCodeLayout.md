@@ -144,7 +144,7 @@ UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`Virt
 
 `PageCullHierarchy` 为每个 clipmap 保存从页网格到 1×1 根节点的 `uint3` 数组，x 是上述标志，yz 是动态 mask。页轴向上补齐到二次幂，补齐叶子保持空，支持非二次幂分辨率。Runtime 按有效布局复用、释放，RenderGraph 声明读写；不持久化当帧层级数据。
 
-生产 meshlet cull 在枚举页面前，根据投影矩形尺寸选取 H-mip，最多读取四个节点提前拒绝无补绘需求的 caster；通过后仍执行原逐页精确检查。层级是每个 clipmap 内的空间汇总，不生成额外父 clipmap 请求或删除现有请求。普通 Unity caster 仍使用已有逐 texel mask 裁剪。
+生产 meshlet cull 在枚举页面前，选取网格对齐后能以最多 2×2 节点覆盖投影矩形的最细 H-mip，规则对应 UE `MipLevelForRect(rect, 2)`。先按页面端点差计算候选层，只有对齐后跨度仍超过两个节点时才升一级；单页选择 mip 0。最多读取四个节点提前拒绝无补绘需求的 caster，通过后仍执行原逐页精确检查。层级是每个 clipmap 内的空间汇总，不生成额外父 clipmap 请求或删除现有请求。普通 Unity caster 仍使用已有逐 texel mask 裁剪。
 
 该流程对应 UE `VirtualShadowMapPageManagement.usf::GenerateHierarchicalPageFlags` 的按物理页传播 PageFlags/receiver mask；存储采用结构化缓冲，标志遵守 VividRP 的补绘预算。UE 的 Allocated/UncachedPageRectBounds 尚未迁移。新增计时项为 `VSM.MarkCoarsePages`、`VSM.ClearPageHierarchy`、`VSM.BuildPageHierarchy`；验证证据位于忽略目录 `Temp~/VSM/CoarseHierarchy_20260926/`，尚无生产 GPU 耗时收益结论。
 

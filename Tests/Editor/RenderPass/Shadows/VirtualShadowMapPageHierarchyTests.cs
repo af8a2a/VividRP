@@ -10,6 +10,101 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VirtualShadowMapPageHierarchyTests
     {
+        [TestCase(1)]
+        [TestCase(3)]
+        [TestCase(16)]
+        public void HierarchyMip_IsFinestCoveringAtMostTwoByTwoNodes(int axis)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
+            try
+            {
+                int intervals = axis * (axis + 1) / 2;
+                var rects = new Vector4[intervals * intervals];
+                int index = 0;
+                for (int x0 = 0; x0 < axis; x0++)
+                    for (int x1 = x0; x1 < axis; x1++)
+                        for (int y0 = 0; y0 < axis; y0++)
+                            for (int y1 = y0; y1 < axis; y1++)
+                                rects[index++] = new Vector4(x0, y0, x1, y1);
+                using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, rects.Length, 16);
+                using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, rects.Length, 8);
+                input.SetData(rects);
+                int kernel = shader.FindKernel("InspectVSMHierarchyMip");
+                shader.SetBuffer(kernel, "_SamplingInputs", input);
+                shader.SetBuffer(kernel, "_SamplingResults", output);
+                shader.SetInt("_SamplingCount", rects.Length);
+                shader.Dispatch(kernel, (rects.Length + 63) / 64, 1, 1);
+                var result = new Vector2[rects.Length]; output.GetData(result);
+                for (int i = 0; i < rects.Length; i++)
+                {
+                    Vector4 r = rects[i];
+                    // Independent oracle: search from leaves until the shifted
+                    // rectangle fits, rather than repeating firstbithigh math.
+                    int expected = 0;
+                    while (((int)r.z >> expected) - ((int)r.x >> expected) > 1
+                        || ((int)r.w >> expected) - ((int)r.y >> expected) > 1) expected++;
+                    Assert.That(result[i].x, Is.EqualTo(expected));
+                    Assert.That(result[i].y, Is.InRange(1f, 4f));
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
+        [TestCase(0, false)]
+        [TestCase(5, true)]
+        [TestCase(10, true)]
+        [TestCase(15, false)]
+        public void PageHierarchy_TwoByTwoPageRect_RejectsAdjacentDirtyPages(int dirtyPage, bool overlaps)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
+            try
+            {
+                using var masks = new VirtualShadowMapReceiverMaskTestBuffers(shader, 16, 1, true);
+                using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
+                using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 16);
+                using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+                using var hierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 21, 12);
+                using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+                using var levels = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+                using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 8);
+                var map = new uint[16]; map[dirtyPage] = 1; table.SetData(map);
+                var meta = new uint4[16]; meta[dirtyPage] = new uint4(2u | 4u | 32768u, 1, 0, 0); metadata.SetData(meta);
+                var mask = new uint2[16]; mask[dirtyPage] = new uint2(uint.MaxValue); masks.Requests.SetData(mask);
+                owners.SetData(new[] { (uint)dirtyPage + 1u });
+                input.SetData(new[] { new Vector4(128, 128, 383, 383) }); // Pages [1,1]..[2,2].
+                levels.SetData(new[] { Vector4.zero });
+                shader.SetInt("_VSMProjectionCount", 1); shader.SetInt("_VSMPrototypePagesPerAxis", 4);
+                shader.SetInt("_VSMPrototypePageSize", 128); shader.SetInt("_VSMPrototypePageTableEntryCount", 16);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", 1); shader.SetInt("_VSMPageCullHierarchyEnabled", 1);
+                int clear = shader.FindKernel("VSMClearPageCullHierarchy"), build = shader.FindKernel("VSMBuildPageCullHierarchy");
+                int inspect = shader.FindKernel("InspectVSMPageHierarchy");
+                foreach (int kernel in new[] { build, inspect })
+                {
+                    shader.SetBuffer(kernel, "_VSMPrototypePageTable", table);
+                    shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                    shader.SetBuffer(kernel, "_VSMPageReceiverMasks", masks.Requests);
+                }
+                shader.SetBuffer(clear, "_VSMPageCullHierarchyRW", hierarchy);
+                shader.SetBuffer(build, "_VSMPageCullHierarchyRW", hierarchy);
+                shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.Dispatch(clear, 1, 1, 1); shader.Dispatch(build, 1, 1, 1);
+                shader.SetBuffer(inspect, "_VSMPageCullHierarchy", hierarchy);
+                shader.SetBuffer(inspect, "_SamplingInputs", input); shader.SetBuffer(inspect, "_SamplingNormals", levels);
+                shader.SetBuffer(inspect, "_SamplingResults", output); shader.SetInt("_SamplingCount", 1);
+                var result = new Vector2[1];
+                for (int layer = 0; layer < 2; layer++)
+                {
+                    shader.SetInt("_VSMPrototypeCasterLayer", layer); shader.Dispatch(inspect, 1, 1, 1); output.GetData(result);
+                    Assert.That(result[0], Is.EqualTo(new Vector2(overlaps ? 1 : 0, overlaps ? 1 : 0)));
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(0.5f, 0.5f)]
         [TestCase(0.625f, 0.375f)]
         [TestCase(0.01f, 0.99f)]

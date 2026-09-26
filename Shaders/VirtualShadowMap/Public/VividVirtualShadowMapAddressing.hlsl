@@ -54,6 +54,16 @@ uint VividVSMHierarchyAddress(uint level, uint2 coord, uint mip, uint axis)
     return level * VividVSMHierarchyNodesPerLevel(axis) + offset + coord.y * mipAxis + coord.x;
 }
 
+// Inclusive, ordered page rectangle. Match UE MipLevelForRect(rect, 2):
+// choose the finest mip that fits in 2x2 nodes after grid alignment.
+uint VividVSMHierarchyMipForRect(uint2 lowPage, uint2 highPage)
+{
+    uint2 extent = highPage - lowPage;
+    uint mip = (uint)max((int)firstbithigh(max(extent.x, extent.y)), 0);
+    if (any((highPage >> mip) - (lowPage >> mip) > 1u)) mip++;
+    return mip;
+}
+
 // OR each 2x2 group of cells into a 4x4 quadrant of the parent 8x8 mask.
 uint2 VividVSMReduceReceiverMask(uint2 mask, uint2 quadrant)
 {

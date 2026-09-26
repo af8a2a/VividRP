@@ -157,13 +157,20 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var source = new System.Collections.Generic.List<VividMeshLODNode>(count + 3);
             for (int i = 0; i < count + 3; i++) source.Add(new VividMeshLODNode
-                { Bounds = new float4(i, i % 7, -i, .25f), LevelIndex = (uint)(i % 3) });
+                {
+                    Bounds = new float4(i, i % 7, -i, .25f), LevelIndex = (uint)(i % 3),
+                    Error = (i + 1) * .001f,
+                    ParentBounds = new float4(i, i % 7, -i, .3f + (i % 5) * .01f),
+                    ParentError = i == count + 2 ? -1f : .03567f + (i % 7) * .002f,
+                });
             var instances = new System.Collections.Generic.List<VividInstanceData>
                 { new() { TopMeshLODStartIndex = 3, TotalMeshLODCount = (uint)count, MeshLODLevelCount = 3 } };
             using var hierarchy = new VirtualShadowMapLODHierarchy();
             hierarchy.Update(source, instances, true);
             var roots = new uint[source.Count]; hierarchy.Roots.GetData(roots);
             int root = (int)roots[3], end = (int)hierarchy.CpuNodes[root].Range.z;
+            Assert.That(hierarchy.Nodes.stride, Is.EqualTo(64));
+            Assert.That(System.Runtime.InteropServices.Marshal.SizeOf<VirtualShadowMapLODHierarchy.Node>(), Is.EqualTo(64));
             var covered = new int[count];
             for (int index = root; index < end; index++)
             {
@@ -175,6 +182,14 @@ namespace VividRP.Editor.Tests
                     Assert.That(math.all(node.Min.xyz <= child.Bounds.xyz - child.Bounds.w), Is.True);
                     Assert.That(math.all(node.Max.xyz >= child.Bounds.xyz + child.Bounds.w), Is.True);
                     Assert.That(child.LevelIndex >= node.Min.w && child.LevelIndex <= node.Max.w, Is.True);
+                    Assert.That(node.ErrorBounds.x, Is.LessThanOrEqualTo(child.Error));
+                    Assert.That(node.ErrorBounds.y, Is.LessThanOrEqualTo(child.Bounds.w));
+                    if (child.ParentError < 0f) Assert.That(node.ErrorBounds.z, Is.EqualTo(float.PositiveInfinity));
+                    else
+                    {
+                        Assert.That(node.ErrorBounds.z, Is.GreaterThanOrEqualTo(child.ParentError));
+                        Assert.That(node.ErrorBounds.w, Is.GreaterThanOrEqualTo(child.ParentBounds.w));
+                    }
                 }
                 if (node.Range.w == 0) continue;
                 Assert.That(node.Range.y, Is.InRange(1u, 32u));
@@ -193,9 +208,11 @@ namespace VividRP.Editor.Tests
             instances.Add(new VividInstanceData { TopMeshLODStartIndex = 0, TotalMeshLODCount = 3, MeshLODLevelCount = 3 });
             hierarchy.Update(source, instances, false); hierarchy.Roots.GetData(roots);
             Assert.That(roots[0], Is.Not.EqualTo(uint.MaxValue));
-            var changed = source[3]; changed.Bounds = new float4(-1000, 0, 0, 1); source[3] = changed;
+            var changed = source[3]; changed.Bounds = new float4(-1000, 0, 0, 1); changed.Error = float.NaN; source[3] = changed;
             hierarchy.Update(source, instances, true); hierarchy.Roots.GetData(roots);
             Assert.That(hierarchy.CpuNodes[(int)roots[3]].Min.x, Is.LessThanOrEqualTo(-1001));
+            Assert.That(hierarchy.CpuNodes[(int)roots[3]].ErrorBounds.x, Is.Zero,
+                "Geometry invalidation must rebuild error bounds and retain invalid inputs conservatively.");
         }
 
         [TestCase(false)]

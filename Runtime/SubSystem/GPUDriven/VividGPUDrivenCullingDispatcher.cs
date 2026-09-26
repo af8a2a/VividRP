@@ -259,7 +259,7 @@ namespace VividRP.Runtime.GPUDriven
                     cullingContextCount,
                     sceneBuffers,
                     drawSetEnabled,
-                    drawSetInstanceIndices, forcedMeshLODNodeDepth, in vsmCulling);
+                    drawSetInstanceIndices, forcedMeshLODNodeDepth, meshLODErrorThreshold, in vsmCulling);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchMeshletListBuildMarker.Auto())
@@ -324,7 +324,7 @@ namespace VividRP.Runtime.GPUDriven
             int cullingContextCount,
             VividGPUDrivenBufferSet sceneBuffers,
             bool drawSetEnabled,
-            GraphicsBuffer drawSetInstanceIndices, int forcedMeshLODNodeDepth,
+            GraphicsBuffer drawSetInstanceIndices, int forcedMeshLODNodeDepth, float meshLODErrorThreshold,
             in VirtualShadowMapCullingParameters vsmCulling
         )
         {
@@ -338,6 +338,10 @@ namespace VividRP.Runtime.GPUDriven
                     if (m_GPUInstanceVSMCompactedKernel < 0) m_GPUInstanceVSMCompactedKernel = m_GPUInstanceCullingCompute.FindKernel("CSVSMHierarchy");
                     kernel = m_GPUInstanceVSMCompactedKernel;
                     sceneBuffers.VSMLODHierarchy.Bind(cmd, m_GPUInstanceCullingCompute, kernel, forcedMeshLODNodeDepth);
+                    cmd.SetComputeBufferParam(m_GPUInstanceCullingCompute, kernel,
+                        VividGPUDrivenShaderIDs._LODSelectionContexts, BufferSet.LodSelectionContextBuffer);
+                    cmd.SetComputeFloatParam(m_GPUInstanceCullingCompute,
+                        VividGPUDrivenShaderIDs._MeshLODErrorThreshold, Mathf.Max(0.0f, meshLODErrorThreshold));
                 }
                 vsmCulling.Bind(cmd, m_GPUInstanceCullingCompute, kernel);
             }

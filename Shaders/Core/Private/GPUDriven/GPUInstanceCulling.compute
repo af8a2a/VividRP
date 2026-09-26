@@ -34,12 +34,42 @@ struct VSMLodHierarchyNode
     float4 Min;
     float4 Max;
     uint4 Range;
+    float4 ErrorBounds; // min error/radius, max decoded parent error/radius
 };
 StructuredBuffer<VSMLodHierarchyNode> _VSMLodHierarchy;
 StructuredBuffer<uint> _VSMLodRoots;
 uint _VSMLodHierarchyCount;
 uint _VSMLodRootCount;
 uint _ForcedMeshLODNodeDepth;
+float _MeshLODErrorThreshold;
+StructuredBuffer<VividGPULODSelectionContext> _LODSelectionContexts;
+
+bool VSMLodRangeMaySelect(VSMLodHierarchyNode node, VividInstanceData instance,
+    float instanceScale, float texelScaleSq, float threshold)
+{
+    // TransformSphere (the unchanged leaf contract) subtracts transformed points.
+    // Bound its cancellation/rounding error from the largest input magnitude in
+    // this range; a simple error * radius^2 bound is unsafe at large translations.
+    float3 maxLocalPoint = max(abs(node.Min.xyz), abs(node.Max.xyz)) + node.ErrorBounds.w;
+    float3 worldMagnitude = mul(abs((float3x3)instance.ObjectToWorldMatrix), maxLocalPoint)
+        + abs(float3(instance.ObjectToWorldMatrix._m03, instance.ObjectToWorldMatrix._m13,
+            instance.ObjectToWorldMatrix._m23));
+    if (!all(isfinite(worldMagnitude))) return true;
+    float roundoff = max(1e-18f, 1e-5f * length(worldMagnitude));
+    if (!isfinite(roundoff)) return true;
+
+    float minRadius = max(0.0f, node.ErrorBounds.y * instanceScale - roundoff);
+    float maxParentRadius = node.ErrorBounds.w * instanceScale + roundoff;
+    // Keep the leaf multiplication order and leave ambiguous equality/underflow
+    // cases to the leaf. An unbounded parent interval (including the no-parent
+    // sentinel) disables parent rejection.
+    float minError = node.ErrorBounds.x * minRadius * minRadius * texelScaleSq;
+    float maxParentError = node.ErrorBounds.z * maxParentRadius * maxParentRadius * texelScaleSq;
+    float tolerance = max(1e-30f, threshold * 1e-5f);
+    bool ownErrorTooHigh = isfinite(minError) && minError > threshold + tolerance;
+    bool allParentsTooLow = isfinite(maxParentError) && maxParentError < threshold - tolerance;
+    return !(ownErrorTooHigh || allParentsTooLow);
+}
 
 void EmitVSMLodJob(uint instanceID, uint contextIndex, uint jobsOffset, uint offset, uint count)
 {
@@ -71,6 +101,20 @@ void TraverseVSMLodHierarchy(uint instanceID, VividInstanceData instance, uint c
     }
     uint stop = _VSMLodHierarchy[index].Range.z;
     uint leafLevel = instance.MeshLODLevelCount - 1u;
+    VividGPUCullingContext context = _CullingContexts[contextIndex];
+    VividGPULODSelectionContext lodContext = _LODSelectionContexts[0];
+    // Match MeshletListBuild's shadow-texel predicate and view scale exactly.
+    float texelsPerWorldUnit = length(context.ViewProjectionMatrix[0].xyz) * lodContext.ScreenSizePixels.x * 0.5;
+    float texelScaleSq = texelsPerWorldUnit * texelsPerWorldUnit;
+    float threshold = _MeshLODErrorThreshold * instance.LODErrorScale;
+    float3x3 columns = transpose((float3x3)instance.ObjectToWorldMatrix);
+    float instanceScale = max(length(columns[0]), max(length(columns[1]), length(columns[2])));
+    bool automaticErrorBounds = _ForcedMeshLODNodeDepth == VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH
+        && lodContext.CameraPosition.w == 0.0f && context.CameraIsPerspective == 0
+        && ((uint)context.PassMask & VIVIDINSTANCEPASSMASK_SHADOWS) != 0u
+        && isfinite(threshold) && threshold >= 0.0f
+        && isfinite(texelScaleSq) && texelScaleSq > 0.0f
+        && isfinite(instanceScale) && instanceScale > 0.0f;
     [loop] while (index < stop)
     {
         VSMLodHierarchyNode node = _VSMLodHierarchy[index];
@@ -78,6 +122,8 @@ void TraverseVSMLodHierarchy(uint instanceID, VividInstanceData instance, uint c
         if (_ForcedMeshLODNodeDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
             overlaps = overlaps && ((_ForcedMeshLODNodeDepth >= node.Min.w && _ForcedMeshLODNodeDepth <= node.Max.w)
                 || (leafLevel < _ForcedMeshLODNodeDepth && leafLevel >= node.Min.w && leafLevel <= node.Max.w));
+        if (overlaps && automaticErrorBounds)
+            overlaps = VSMLodRangeMaySelect(node, instance, instanceScale, texelScaleSq, threshold);
         if (overlaps)
             overlaps = VividVSMCasterLocalBoundsOverlaps(contextIndex,
                 (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false, localToShadow);

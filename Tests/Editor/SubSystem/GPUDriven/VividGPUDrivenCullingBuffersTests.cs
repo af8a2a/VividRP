@@ -68,7 +68,7 @@ namespace VividRP.Editor.Tests
                 int[] depths = { -1, -1, -1, -2, int.MinValue, 0, 1, 2, 8, int.MaxValue, -1 };
                 float[] thresholds = { .02f, .2f, 2f, .2f, .2f, .02f, 2f, 2f, 2f, 2f, .2f };
                 uint[] levels = { 2, 1, 0, 1, 1, 0, 1, 2, 2, 2, 1 };
-                var count = new uint[1]; var requests = new VividMeshletRenderRequestPacked[nodeCount];
+                var count = new uint[1]; var jobs = new uint[1]; var requests = new VividMeshletRenderRequestPacked[nodeCount];
                 for (int i = 0; i < depths.Length; i++)
                 {
                     cmd.Clear();
@@ -77,6 +77,9 @@ namespace VividRP.Editor.Tests
                     Graphics.ExecuteCommandBuffer(cmd);
                     dispatcher.BufferSet.VisibleMeshletRenderRequestCounterBuffer.GetData(count);
                     dispatcher.BufferSet.CandidateMeshletRenderRequestsBuffer.GetData(requests);
+                    dispatcher.BufferSet.MeshletListBuildJobCounterBuffer.GetData(jobs);
+                    Assert.That(jobs[0], Is.EqualTo(mode == 2 ? 1u : 3u),
+                        "The hierarchy must skip nonselected error ranges before submitting leaf jobs.");
                     Assert.That(count[0], Is.EqualTo((uint)nodesPerLevel), $"mode={mode}, depth={depths[i]}, threshold={thresholds[i]}");
                     uint seen = 0;
                     for (int n = 0; n < count[0]; n++)

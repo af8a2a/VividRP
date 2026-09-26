@@ -69,6 +69,84 @@ namespace VividRP.Editor.Tests
             finally { Object.DestroyImmediate(shader); }
         }
 
+        [TestCase(3)]
+        [TestCase(16)]
+        [TestCase(33)]
+        public void PageHierarchy_PropagatesNewMaskWithExistingFlags_AndNewFlagsWithExistingMask(int axis)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            try
+            {
+                const int levels = 2;
+                int pages = axis * axis * levels, capacity = Math.Min(pages, 1024);
+                int padded = Mathf.NextPowerOfTwo(axis), nodes = VirtualShadowMapPrototypeRuntime.CalculateHierarchyNodesPerLevel(axis);
+                using var masks = new VirtualShadowMapReceiverMaskTestBuffers(shader, pages, capacity, true);
+                using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 4);
+                using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 16);
+                using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
+                using var hierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, nodes * levels, 12);
+                var map = new uint[pages]; var meta = new uint4[pages]; var own = new uint[capacity]; var mask = new uint2[pages];
+                var expected = new uint3[nodes * levels]; var actual = new uint3[expected.Length];
+                var expectedBounds = new uint4[levels * 2]; var actualBounds = new uint4[levels * 2];
+                for (int i = 0; i < expectedBounds.Length; i++) expectedBounds[i] = new uint4((uint)axis, (uint)axis, 0, 0);
+                for (int slot = 0; slot < capacity; slot++)
+                {
+                    int p = slot * 257 % pages;
+                    map[p] = (uint)slot + 1; own[slot] = (uint)p + 1;
+                }
+                table.SetData(map); owners.SetData(own);
+                int clear = shader.FindKernel("VSMClearPageCullHierarchy"), build = shader.FindKernel("VSMBuildPageCullHierarchy");
+                shader.SetInt("_VSMProjectionCount", levels); shader.SetInt("_VSMPrototypePagesPerAxis", axis);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", pages); shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
+                shader.SetBuffer(clear, "_VSMPageCullHierarchyRW", hierarchy);
+                shader.SetBuffer(build, "_VSMPageCullHierarchyRW", hierarchy);
+                shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(build, "_VSMPrototypePageTable", table); shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                shader.Dispatch(clear, (expected.Length + 63) / 64, 1, 1);
+                // Add coverage after all flags already exist, then add a flag
+                // after all mask bits exist. Finally repeat identical inputs.
+                for (int phase = 0; phase < 4; phase++)
+                {
+                    uint flags = 2u | 32768u | (phase >= 2 ? 4u : 0u);
+                    for (int slot = 0; slot < capacity; slot++)
+                    {
+                        int p = (int)own[slot] - 1, px = p % axis, py = p % (axis * axis) / axis, level = p / (axis * axis);
+                        meta[p] = new uint4(flags, (uint)slot + 1, 0, 0);
+                        mask[p] = phase == 0 ? new uint2(1u << (slot & 31), 0) : new uint2(0, 1u << (31 - (slot & 31)));
+                        ulong bits = mask[p].x | ((ulong)mask[p].y << 32);
+                        int offset = level * nodes;
+                        for (int mip = 0, n = padded; n > 0; mip++, offset += n * n, n >>= 1)
+                        {
+                            int index = offset + (py >> mip) * n + (px >> mip);
+                            expected[index].x |= flags;
+                            // Independent cell-coordinate projection, not the shader's bit reduction.
+                            for (int bit = 0; bit < 64; bit++)
+                                if ((bits & (1UL << bit)) != 0)
+                                {
+                                    int x = ((px * 8 + bit % 8) >> mip) & 7, y = ((py * 8 + bit / 8) >> mip) & 7;
+                                    if (y < 4) expected[index].y |= 1u << (y * 8 + x);
+                                    else expected[index].z |= 1u << ((y - 4) * 8 + x);
+                                }
+                        }
+                        for (int layer = 0; layer < 2; layer++)
+                            if ((flags & (layer == 0 ? 4u : 32768u)) != 0)
+                            {
+                                int b = level * 2 + layer; var coord = new uint2((uint)px, (uint)py);
+                                expectedBounds[b] = new uint4(math.min(expectedBounds[b].xy, coord), math.max(expectedBounds[b].zw, coord));
+                            }
+                    }
+                    metadata.SetData(meta); masks.Requests.SetData(mask);
+                    shader.Dispatch(build, (capacity + 63) / 64, 1, 1); hierarchy.GetData(actual);
+                    masks.UncachedBounds.GetData(actualBounds, 0, 0, actualBounds.Length);
+                    Assert.That(actual, Is.EqualTo(expected), "Flags and receiver coverage must propagate independently.");
+                    Assert.That(actualBounds, Is.EqualTo(expectedBounds), "Bounds must be reduced before hierarchy early exit.");
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(0, false, true)]
         [TestCase(0, true, true)]
         [TestCase(1, false, false)]

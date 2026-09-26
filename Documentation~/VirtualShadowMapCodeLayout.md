@@ -172,6 +172,14 @@ UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`Virt
 
 这是按页面生产需求进行保守拒绝，不进行深度/HZB 遮挡裁剪；完整请求、父链以及静态/动态各 16 层遮挡深度保留。当前 LOD 仍遍历既有扁平节点列表，并非 UE/Nanite 的完整层级遍历迁移。实现验证记录位于忽略目录 `Temp~/VSM/EarlyHierarchy_20260926/`。
 
+## 层级传播短路（2026-09-26）
+
+`VSMBuildPageCullHierarchy` 使用 `InterlockedOr` 返回的旧值，分别计算 flags、receiver mask 两个字的新增位；仅把新增位带到下一级。flags 已存在时可以跳过后续 flags 原子操作，但 mask 有新覆盖仍继续传播；三者均无新增时结束当前页的父链，根节点之后也不再归约 mask。`UncachedPageRectBounds` 仍在传播循环之前完整归约。
+
+正确性依赖同一次构建中只进行单调 OR，且清零在独立 dispatch 完成：观察到的旧位必有先前原子写入者负责继续上传；mask 的 2×2 OR 归约对按位 OR 可分配，因此新增子位映射后能够完整覆盖父层。没有增加跨线程等待、组屏障或深度遮挡拒绝，也不修改完整请求、预算、缓存和多层遮挡语义。
+
+对应本地 UE `VirtualShadowMapPageManagement.usf::ProcessMipLevel` 的重复 flags 停止传播。UE 参考使用完整值相等判断、mask 另行传播；VividRP 使用位差集判断，分别维护 flags 和 64-bit mask 的贡献，并不把 flags 短路作为 mask 退出条件。隔离 GPU 三路对照、实景层级一致性及原子调用计数记录于忽略目录 `Temp~/VSM/HierarchyPropagation_20260926/`，尚未取得生产 GPU 毫秒收益测量。
+
 ## 压缩空 clipmap/view（2026-09-26）
 
 页层级和 `UncachedPageRectBounds` 构建完成后，GPU-driven 每个 caster 层先执行 `CSCompactVSMViews`。`VSMViewCompaction.hlsl` 仅保留当帧补绘矩形非空的原 projection ID，按原顺序写入 `ActiveViews`，并生成实例间接派发参数。静态、动态层各自拥有 count/ID 段及 args 段；判断来自预算选择后的边界，完整请求和 Deferred 状态不变。`VSM.CompactViews` 单独记录生成成本。

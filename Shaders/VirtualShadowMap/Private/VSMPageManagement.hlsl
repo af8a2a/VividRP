@@ -79,10 +79,30 @@ void VSMBuildPageCullHierarchy(uint3 id : SV_DispatchThreadID)
     for (uint mip = 0u; (hierarchyAxis >> mip) > 0u; mip++)
     {
         uint address = VividVSMHierarchyAddress(level, coord, mip, axis);
-        InterlockedOr(_VSMPageCullHierarchyRW[address].x, flags);
-        if (mask.x != 0u) InterlockedOr(_VSMPageCullHierarchyRW[address].y, mask.x);
-        if (mask.y != 0u) InterlockedOr(_VSMPageCullHierarchyRW[address].z, mask.y);
-        mask = VividVSMReduceReceiverMask(mask, coord & 1u);
+        // Only the thread that first adds a bit must carry it to ancestors.
+        // Keep flags and mask deltas independent: unchanged flags do not imply
+        // unchanged receiver coverage. The clear/build dispatch boundary and
+        // monotonic atomic ORs guarantee that another writer carries old bits.
+        uint previous;
+        if (flags != 0u)
+        {
+            InterlockedOr(_VSMPageCullHierarchyRW[address].x, flags, previous);
+            flags &= ~previous;
+        }
+        if (mask.x != 0u)
+        {
+            InterlockedOr(_VSMPageCullHierarchyRW[address].y, mask.x, previous);
+            mask.x &= ~previous;
+        }
+        if (mask.y != 0u)
+        {
+            InterlockedOr(_VSMPageCullHierarchyRW[address].z, mask.y, previous);
+            mask.y &= ~previous;
+        }
+        if ((flags | mask.x | mask.y) == 0u || (hierarchyAxis >> mip) == 1u) break;
+        // Reduction distributes over OR, so only newly inserted mask bits need
+        // to be reduced into this child's quadrant of the parent.
+        if (any(mask != 0u)) mask = VividVSMReduceReceiverMask(mask, coord & 1u);
         coord >>= 1u;
     }
 }

@@ -3,6 +3,7 @@
 struct VSMReceiverPageFootprint
 {
     uint2 minPage, maxPage;
+    uint2 minTexel, maxTexel;
     uint request;
 };
 
@@ -14,8 +15,10 @@ VSMReceiverPageFootprint BuildVSMReceiverPageFootprint(float2 uv, int level, uin
     if (_VSMPrototypeRequestEnabled == 0 || level < 0 || level >= _VSMProjectionCount
         || !VividVSMTryOffsetVirtualTexel(uv, int2(0, 0), resolution, texel)) return footprint;
     uint pageSize = (uint)_VSMPrototypePageSize;
-    footprint.minPage = (uint2)max(texel - halo, 0) / pageSize;
-    footprint.maxPage = (uint2)min(texel + halo, (int)resolution - 1) / pageSize;
+    footprint.minTexel = (uint2)max(texel - halo, 0);
+    footprint.maxTexel = (uint2)min(texel + halo, (int)resolution - 1);
+    footprint.minPage = footprint.minTexel / pageSize;
+    footprint.maxPage = footprint.maxTexel / pageSize;
     footprint.request = kVSMPageRequested | role;
     if (level == _VSMProjectionCount - 1) footprint.request |= kVSMPageCoarseRequested;
     return footprint;
@@ -26,19 +29,36 @@ bool VSMFootprintContains(VSMReceiverPageFootprint footprint, uint2 page)
     return footprint.request != 0u && all(page >= footprint.minPage) && all(page <= footprint.maxPage);
 }
 
-void EmitVSMReceiverPage(uint2 coord, int level, uint request)
+uint2 VSMFootprintPageMask(VSMReceiverPageFootprint footprint, uint2 page)
+{
+    if (!VSMFootprintContains(footprint, page)) return 0u;
+    uint size = (uint)_VSMPrototypePageSize;
+    uint2 origin = page * size;
+    return VividVSMReceiverMaskRect(max(footprint.minTexel, origin) - origin,
+        min(footprint.maxTexel, origin + size - 1u) - origin, size);
+}
+
+void EmitVSMReceiverPage(uint2 coord, int level, uint request, uint2 receiverMask)
 {
 #if !defined(VIVID_VSM_RECEIVER_DEBUG) && !defined(VIVID_VSM_RESOLVE_RECEIVERS)
     uint axis = (uint)_VSMPrototypePagesPerAxis;
     uint page = (uint)level * axis * axis + coord.y * axis + coord.x;
+    // Terminal pages are a complete safety net, including fallback ray origins.
+    if ((request & kVSMPageCoarseRequested) != 0u) receiverMask = 0xffffffffu;
 #if defined(VIVID_VSM_MARK_RECEIVERS)
     if (WaveActiveAllEqual(page))
     {
         request = WaveActiveBitOr(request);
+        receiverMask = WaveActiveBitOr(receiverMask);
         if (!WaveIsFirstLane()) return;
     }
 #endif
     InterlockedOr(_VSMPageRequestFlags[page], request);
+    if (_VSMReceiverMaskEnabled != 0)
+    {
+        InterlockedOr(_VSMPageReceiverMasks[page].x, receiverMask.x);
+        InterlockedOr(_VSMPageReceiverMasks[page].y, receiverMask.y);
+    }
 #endif
 }
 
@@ -52,7 +72,8 @@ void EmitVSMReceiverFootprints(int level, VSMReceiverPageFootprint a, VSMReceive
             for (uint x = a.minPage.x; x <= a.maxPage.x; x++)
             {
                 uint2 page = uint2(x, y);
-                EmitVSMReceiverPage(page, level, a.request | (VSMFootprintContains(b, page) ? b.request : 0u));
+                EmitVSMReceiverPage(page, level, a.request | (VSMFootprintContains(b, page) ? b.request : 0u),
+                    VSMFootprintPageMask(a, page) | VSMFootprintPageMask(b, page));
             }
     // PCF is usually wholly enclosed by the conservative SMRT footprint.
     if (b.request != 0u && !(VSMFootprintContains(a, b.minPage) && VSMFootprintContains(a, b.maxPage)))
@@ -60,7 +81,7 @@ void EmitVSMReceiverFootprints(int level, VSMReceiverPageFootprint a, VSMReceive
             for (uint x = b.minPage.x; x <= b.maxPage.x; x++)
             {
                 uint2 page = uint2(x, y);
-                if (!VSMFootprintContains(a, page)) EmitVSMReceiverPage(page, level, b.request);
+                if (!VSMFootprintContains(a, page)) EmitVSMReceiverPage(page, level, b.request, VSMFootprintPageMask(b, page));
             }
 }
 

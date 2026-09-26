@@ -59,9 +59,24 @@ bool HasVSMSMRTFootprint(float2 uv, int index, VSMSMRTProjection projection)
             for (int x = lowPage.x; x <= highPage.x; x++)
             {
                 int2 physical;
+                uint flags;
                 VSM_COST_ADD(6, 1u);
-                if (!TryResolveVSMPhysicalTexel(int2(x, y) * _VSMPrototypePageSize, level, physical))
+                int2 pageOrigin = int2(x, y) * _VSMPrototypePageSize;
+                if (!TryResolveVSMPhysicalTexelInternal(pageOrigin, level, physical, flags, false))
                     return false;
+                if (_VSMReceiverMaskEnabled != 0)
+                {
+                    uint2 mask = VividVSMReceiverMaskRect((uint2)(max(low, pageOrigin) - pageOrigin),
+                        (uint2)(min(high, pageOrigin + _VSMPrototypePageSize - 1) - pageOrigin),
+                        (uint)_VSMPrototypePageSize);
+                    if (!VividVSMReceiverMaskContains(LoadVSMPhysicalReceiverMask(physical), mask))
+                    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+                        g_VSMDebugMissing |= 16u;
+#endif
+                        return false;
+                    }
+                }
             }
         if (end >= _VSMSMRTParameters.z) return true;
     }
@@ -175,6 +190,7 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
     float previousSurface = -1;
     int2 pageLow = 0, pageHigh = 0, physicalOffset = 0;
     uint pageFlags = 0u;
+    uint2 receiverMask = 0u;
     [loop]
     for (int sampleIndex = 0; sampleIndex < budget; sampleIndex++)
     {
@@ -196,11 +212,21 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
             pageLow = (cell / _VSMPrototypePageSize) * _VSMPrototypePageSize;
             pageHigh = pageLow + _VSMPrototypePageSize;
             physicalOffset = physical - cell;
+            receiverMask = LoadVSMPhysicalReceiverMask(physical);
         }
         else
         {
             VSM_COST_ADD(12, 1u);
             physical = cell + physicalOffset;
+        }
+        // Mapping reuse must not imply coverage of another cell in the page.
+        if (!VividVSMReceiverMaskTexel(receiverMask, (uint2)(cell - pageLow), (uint)_VSMPrototypePageSize))
+        {
+            VSM_COST_ADD(28, 1u);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+            g_VSMDebugMissing |= 16u;
+#endif
+            return false;
         }
         uint2 frontDepths = LoadVSMDepthLayer(physical, 0, pageFlags);
         uint rawDepth = max(frontDepths.x, frontDepths.y);

@@ -147,10 +147,13 @@ bool GetVSMPageRange(
     VividMeshletRenderRequestPacked sourceRequest,
     uint cascadeIndex,
     out uint2 minPage,
-    out uint2 maxPage)
+    out uint2 maxPage,
+    out uint2 minVirtualTexel,
+    out uint2 maxVirtualTexel)
 {
     minPage = 0u;
     maxPage = 0u;
+    minVirtualTexel = maxVirtualTexel = 0u;
     if (sourceRequest.InstanceID_LOD >= _InstanceDataCount
         || sourceRequest.MeshletID >= _MeshletCount)
     {
@@ -189,13 +192,20 @@ bool GetVSMPageRange(
         1);
     const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
-    const uint2 minVirtualTexel = VividVSMUVToVirtualTexel(
+    minVirtualTexel = VividVSMUVToVirtualTexel(
         minUV, virtualResolution);
-    const uint2 maxVirtualTexel = VividVSMUVToVirtualTexel(
+    maxVirtualTexel = VividVSMUVToVirtualTexel(
         maxUV, virtualResolution);
     minPage = min(minVirtualTexel / pageSize, pagesPerAxis - 1u);
     maxPage = min(maxVirtualTexel / pageSize, pagesPerAxis - 1u);
     return all(maxPage >= minPage);
+}
+
+bool VSMCasterOverlapsReceiverMask(uint page, uint2 coord, uint2 low, uint2 high)
+{
+    return _VSMReceiverMaskEnabled == 0 || _VSMPrototypeCasterLayer == 0
+        || VividVSMReceiverMaskOverlapsRect(_VSMPageReceiverMasks[page], coord, low, high,
+            (uint)_VSMPrototypePageSize);
 }
 
 [numthreads(64, 1, 1)]
@@ -235,11 +245,12 @@ void VSMPrototypeCullMeshletsToPages(
 
     uint2 minPage;
     uint2 maxPage;
+    uint2 minTexel, maxTexel;
     if (!GetVSMPageRange(
             sourceRequest,
             cascadeIndex,
             minPage,
-            maxPage))
+            maxPage, minTexel, maxTexel))
     {
         return;
     }
@@ -258,7 +269,8 @@ void VSMPrototypeCullMeshletsToPages(
                         * pagesPerCascade
                     + pageY * pagesPerAxis
                     + pageX;
-                if (!IsVSMCasterPageRelevant(virtualPageIndex))
+                if (!IsVSMCasterPageRelevant(virtualPageIndex)
+                    || !VSMCasterOverlapsReceiverMask(virtualPageIndex, uint2(pageX, pageY), minTexel, maxTexel))
                     continue;
 
                 const uint rasterPageCount = _VSMPrototypeMeshletRasterPages[0];
@@ -292,7 +304,8 @@ void VSMPrototypeCullMeshletsToPages(
             const uint virtualPageIndex = cascadeIndex * pagesPerCascade
                 + pageY * pagesPerAxis
                 + pageX;
-            if (!IsVSMCasterPageRelevant(virtualPageIndex))
+            if (!IsVSMCasterPageRelevant(virtualPageIndex)
+                || !VSMCasterOverlapsReceiverMask(virtualPageIndex, uint2(pageX, pageY), minTexel, maxTexel))
                 continue;
 
             AppendVSMPageMeshletRequest(
@@ -369,7 +382,10 @@ void VSMPrototypeClearReceiverRequests(uint3 id : SV_DispatchThreadID)
 {
     if (id.x == 0u) UpdateVSMPagePressure(false);
     if (id.x < (uint)_VSMPrototypePageTableEntryCount)
+    {
         _VSMPageRequestFlags[id.x] = 0u;
+        if (_VSMReceiverMaskEnabled != 0) _VSMPageReceiverMasks[id.x] = 0u;
+    }
 }
 
 [numthreads(64, 1, 1)]
@@ -381,6 +397,7 @@ void VSMPrototypeResetReceiverFeedback(uint3 dispatchThreadID : SV_DispatchThrea
         return;
 
     _VSMPageRequestFlags[virtualPageIndex] = 0u;
+    if (_VSMReceiverMaskEnabled != 0) _VSMPageReceiverMasks[virtualPageIndex] = 0u;
     // A different camera's same-frame requests must not survive as either
     // receiver demand or eviction protection. Keep depth/cache ownership intact.
     _VSMPrototypePageMetadata[virtualPageIndex].z = 0u;
@@ -467,6 +484,15 @@ void VSMPrototypePrepareAllocation(uint3 dispatchThreadID : SV_DispatchThreadID)
             {
                 metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
                 requests |= 1u << bit;
+                // Static pages remain complete. Dynamic cache reuse requires
+                // every currently requested cell to have completed production.
+                if (_VSMReceiverMaskEnabled != 0 && (metadata.x & kVSMPageAllocated) != 0u)
+                {
+                    bool covered = metadata.y > 0u && metadata.y <= (uint)_VSMPrototypePhysicalPageCapacity;
+                    if (covered) covered = VividVSMReceiverMaskContains(
+                        _VSMPhysicalReceiverMasks[metadata.y - 1u], _VSMPageReceiverMasks[page]);
+                    if (!covered) metadata.x = (metadata.x | kVSMPageDynamicDirty) & ~kVSMPageCached;
+                }
             }
             _VSMPrototypePageMetadata[page] = metadata;
         }
@@ -658,6 +684,7 @@ void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
                             metadata.w = metadata.x;
                             _VSMPrototypeWritablePageTable[page] = encoded;
                             _VSMPrototypePhysicalPageOwners[candidate.z] = page + 1u;
+                            if (_VSMReceiverMaskEnabled != 0) _VSMPhysicalReceiverMasks[candidate.z] = 0u;
                             counts.z++;
                         }
                         else
@@ -1059,6 +1086,10 @@ void VSMPrototypeFinalizeDirtyPages(
     }
 
     uint redrawn = metadata.x & (kVSMPageDirty | kVSMPageDynamicDirty);
+    if (_VSMReceiverMaskEnabled != 0 && (redrawn & kVSMPageDynamicDirty) != 0u)
+        // The dynamic page was cleared in full, so replace, never OR coverage.
+        // Deferred pages return above and cannot publish unproduced coverage.
+        _VSMPhysicalReceiverMasks[metadata.y - 1u] = _VSMPageReceiverMasks[virtualPageIndex];
     metadata.x = (metadata.x | kVSMPageCached) & ~(kVSMPageDirty | kVSMPageDynamicDirty);
     // Preserve local/full invalidation as dirty/redrawn, not an immediate cache hit.
     metadata.w = (metadata.w | redrawn) & ~(kVSMPageCached | kVSMPageDeferred);

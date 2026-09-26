@@ -146,6 +146,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Static = PassRecorder.ImportTextureForPass(this, VirtualShadowMapPrototypeRuntime.StaticPhysicalPage, AccessFlags.Read);
             m_Dynamic = PassRecorder.ImportTextureForPass(this, VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PagePressure, AccessFlags.Read);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.Read);
             m_Table = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageTable, AccessFlags.Read);
             m_Metadata = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageMetadata, AccessFlags.Read);
             m_RequestFlags = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.Read);
@@ -172,6 +173,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_Shadow.innerHandle.IsValid() || !m_Output.innerHandle.IsValid() || !m_Data.innerHandle.IsValid()) return;
             var cmd = context.cmd;
             BlueNoise.Instance?.Bind(cmd, m_Compute, m_Kernel);
+            cmd.SetComputeIntParam(m_Compute, VirtualShadowMapPrototypeRuntime.ReceiverMaskEnabledId, 1);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId,
+                VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapReceiverQuality.PressureId,
                 VirtualShadowMapPrototypeRuntime.PagePressure);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, DepthId, m_Depth.innerHandle);

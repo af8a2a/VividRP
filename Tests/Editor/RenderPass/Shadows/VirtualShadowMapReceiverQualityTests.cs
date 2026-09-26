@@ -88,6 +88,7 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = UnityEngine.Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
             var state = new[] { new uint4(math.asuint(1f), 0, 800, 0), new uint4(0, 0, 0, math.asuint(1f)), uint4.zero };
@@ -174,6 +175,7 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = UnityEngine.Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 160);
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
             using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);

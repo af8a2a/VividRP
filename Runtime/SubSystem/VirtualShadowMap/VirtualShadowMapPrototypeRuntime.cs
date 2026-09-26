@@ -40,6 +40,10 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_PageTable;
         private static GraphicsBuffer s_PageMetadata;
         private static GraphicsBuffer s_PageRequestFlags;
+        private static GraphicsBuffer s_PageReceiverMasks, s_PhysicalReceiverMasks;
+        internal static readonly int ReceiverMaskEnabledId = Shader.PropertyToID("_VSMReceiverMaskEnabled");
+        internal static readonly int PageReceiverMasksId = Shader.PropertyToID("_VSMPageReceiverMasks");
+        internal static readonly int PhysicalReceiverMasksId = Shader.PropertyToID("_VSMPhysicalReceiverMasks");
         private static GraphicsBuffer s_PhysicalPageOwners;
         private static GraphicsBuffer s_AllocatorCounters;
         private static GraphicsBuffer s_AllocationRequests;
@@ -93,6 +97,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static GraphicsBuffer PageTable => s_PageTable;
         internal static GraphicsBuffer PageMetadata => s_PageMetadata;
         internal static GraphicsBuffer PageRequestFlags => s_PageRequestFlags;
+        internal static GraphicsBuffer PageReceiverMasks => s_PageReceiverMasks;
+        internal static GraphicsBuffer PhysicalReceiverMasks => s_PhysicalReceiverMasks;
         internal static GraphicsBuffer PhysicalPageOwners => s_PhysicalPageOwners;
         internal static GraphicsBuffer AllocatorCounters => s_AllocatorCounters;
         internal static GraphicsBuffer AllocationRequests => s_AllocationRequests;
@@ -126,6 +132,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             && s_PageMetadata?.IsValid() == true
             && s_PageRequestFlags?.IsValid() == true
             && s_PageRequestFlags.count == PageTableEntryCount
+            && s_PageReceiverMasks?.IsValid() == true && s_PageReceiverMasks.count == PageTableEntryCount
+            && s_PhysicalReceiverMasks?.IsValid() == true
             && s_PageTable.count == PageTableEntryCount
             && s_PageMetadata.count == PageTableEntryCount;
         internal static VirtualShadowMapPrototypeFrameState FrameState => s_FrameState;
@@ -245,6 +253,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 { name = "VSMPageRequestFlags" };
                 s_PageRequestFlags.SetData(new uint[pageCount]);
             }
+            EnsureReceiverMaskBuffer(ref s_PageReceiverMasks, pageCount, "VSMPageReceiverMasks");
+            EnsureReceiverMaskBuffer(ref s_PhysicalReceiverMasks, Mathf.Max(s_PhysicalPageCapacity, 1), "VSMPhysicalReceiverMasks");
             int words = CoreUtils.DivRoundUp(pageCount, 32);
             if (s_AllocationRequests == null || !s_AllocationRequests.IsValid() || s_AllocationRequests.count != words)
             {
@@ -259,6 +269,15 @@ namespace VividRP.Runtime.VirtualShadowMap
                 { name = "VSMPagePressure" };
                 s_PagePressure.SetData(s_PagePressureUpload);
             }
+        }
+
+        private static void EnsureReceiverMaskBuffer(ref GraphicsBuffer buffer, int count, string name)
+        {
+            if (buffer != null && buffer.IsValid() && buffer.count == count) return;
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopySource, count, sizeof(uint) * 2)
+            { name = name };
+            buffer.SetData(new Unity.Mathematics.uint2[count]);
         }
 
         internal static bool EnsureMeshletPageRequestCapacity(
@@ -480,6 +499,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_PageMetadataUpload?.Length == pageTableEntryCount
                 && s_PageRequestFlags != null && s_PageRequestFlags.IsValid()
                 && s_PageRequestFlags.count == pageTableEntryCount
+                && s_PageReceiverMasks != null && s_PageReceiverMasks.IsValid() && s_PageReceiverMasks.count == pageTableEntryCount
+                && s_PhysicalReceiverMasks != null && s_PhysicalReceiverMasks.IsValid() && s_PhysicalReceiverMasks.count == physicalPageCapacity
                 && s_PhysicalPageOwners != null
                 && s_PhysicalPageOwners.IsValid()
                 && s_PhysicalPageOwners.count == physicalPageCapacity
@@ -854,6 +875,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_PageMetadata = null;
             s_PageRequestFlags?.Dispose();
             s_PageRequestFlags = null;
+            s_PageReceiverMasks?.Dispose(); s_PageReceiverMasks = null;
+            s_PhysicalReceiverMasks?.Dispose(); s_PhysicalReceiverMasks = null;
             s_PhysicalPageOwners?.Dispose();
             s_PhysicalPageOwners = null;
             s_AllocatorCounters?.Dispose();

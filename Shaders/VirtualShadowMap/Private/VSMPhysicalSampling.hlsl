@@ -29,8 +29,8 @@ float VSMFilterGuard(int index, bool smrt)
     return radius / _VSMPrototypeVirtualResolution;
 }
 
-bool TryResolveVSMPhysicalTexel(int2 virtualTexel, int cascadeIndex, out int2 physicalTexel,
-    out uint pageFlags)
+bool TryResolveVSMPhysicalTexelInternal(int2 virtualTexel, int cascadeIndex, out int2 physicalTexel,
+    out uint pageFlags, bool checkReceiverMask)
 {
     physicalTexel = 0;
     pageFlags = 0u;
@@ -59,10 +59,31 @@ bool TryResolveVSMPhysicalTexel(int2 virtualTexel, int cascadeIndex, out int2 ph
         return false;
     }
     uint slot = encoded - 1u;
+    if (checkReceiverMask && _VSMReceiverMaskEnabled != 0
+        && !VividVSMReceiverMaskTexel(_VSMPhysicalReceiverMasks[slot], texelInPage, pageSize))
+    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugMissing |= 16u;
+#endif
+        return false;
+    }
     uint rowSize = (uint)_VSMPrototypePhysicalPagesPerRow;
     physicalTexel = (int2)(uint2(slot % rowSize, slot / rowSize) * pageSize + texelInPage);
     pageFlags = _VSMPageOccupancySkipDisabled != 0 ? 0u : metadata.x;
     return true;
+}
+
+bool TryResolveVSMPhysicalTexel(int2 virtualTexel, int cascadeIndex, out int2 physicalTexel,
+    out uint pageFlags)
+{
+    return TryResolveVSMPhysicalTexelInternal(virtualTexel, cascadeIndex, physicalTexel, pageFlags, true);
+}
+
+uint2 LoadVSMPhysicalReceiverMask(int2 physicalTexel)
+{
+    if (_VSMReceiverMaskEnabled == 0) return 0xffffffffu;
+    uint2 page = (uint2)physicalTexel / (uint)_VSMPrototypePageSize;
+    return _VSMPhysicalReceiverMasks[page.y * (uint)_VSMPrototypePhysicalPagesPerRow + page.x];
 }
 
 bool TryResolveVSMPhysicalTexel(int2 virtualTexel, int cascadeIndex, out int2 physicalTexel)

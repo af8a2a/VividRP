@@ -7,6 +7,8 @@
 RWTexture2DArray<uint> _VSMPrototypePhysicalPage : register(u0);
 StructuredBuffer<uint> _VSMPrototypePageTable;
 StructuredBuffer<uint4> _VSMPrototypePageMetadata;
+StructuredBuffer<uint2> _VSMPageReceiverMasks;
+int _VSMReceiverMaskEnabled;
 int _VSMPrototypePageSize;
 int _VSMPrototypeVirtualResolution;
 int _VSMPrototypePagesPerAxis;
@@ -18,6 +20,28 @@ float4 _VSMRasterOrigin;
 static const uint kVividVSMPageDirty = 1u << 2;
 static const uint kVividVSMPageDynamicDirty = 1u << 15;
 static const uint kVividVSMPageDeferred = 1u << 17;
+
+bool VividVSMCasterReceiverTexel(uint page, uint2 texel)
+{
+    // Cached static pages always contain complete geometry.
+    return _VSMReceiverMaskEnabled == 0 || _VSMPrototypeCasterLayer == 0
+        || VividVSMReceiverMaskTexel(_VSMPageReceiverMasks[page], texel, (uint)_VSMPrototypePageSize);
+}
+
+bool VividVSMCasterReceiverSphere(uint page, float4 sphereWS, float4x4 worldToShadow)
+{
+    if (_VSMReceiverMaskEnabled == 0 || _VSMPrototypeCasterLayer == 0) return true;
+    float4 center = mul(worldToShadow, float4(sphereWS.xyz, 1));
+    float inverseW = rcp(max(abs(center.w), 1e-6));
+    float2 radius = sphereWS.w * float2(length(worldToShadow[0].xyz), length(worldToShadow[1].xyz)) * inverseW;
+    uint resolution = (uint)_VSMPrototypeVirtualResolution;
+    uint2 low = VividVSMUVToVirtualTexel(center.xy * inverseW - radius, resolution);
+    uint2 high = VividVSMUVToVirtualTexel(center.xy * inverseW + radius, resolution);
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint2 coord = uint2(page % axis, (page / axis) % axis);
+    return VividVSMReceiverMaskOverlapsRect(_VSMPageReceiverMasks[page], coord, low, high,
+        (uint)_VSMPrototypePageSize);
+}
 
 bool VividTryResolveVSMPhysicalTexel(
     float4 positionCS,
@@ -45,6 +69,7 @@ bool VividTryResolveVSMPhysicalTexel(
         + virtualPage.y * pagesPerAxis
         + virtualPage.x;
     const uint encodedPhysicalPage = _VSMPrototypePageTable[pageTableIndex];
+    if (!VividVSMCasterReceiverTexel(pageTableIndex, texelInPage)) return false;
     if (encodedPhysicalPage == 0u)
         return false;
     if ((_VSMPrototypePageMetadata[pageTableIndex].x & kVividVSMPageDeferred) != 0u)
@@ -101,6 +126,7 @@ void VividWriteVSMDepth(float4 positionCS)
 // virtual page identity, never reinterpret the local SV_Position as a virtual UV.
 void VividWriteVSMPageDepth(float4 positionCS, uint virtualPageIndex)
 {
+    if (!VividVSMCasterReceiverTexel(virtualPageIndex, (uint2)positionCS.xy)) return;
     uint encodedPage = _VSMPrototypePageTable[virtualPageIndex];
     if (encodedPage == 0u)
         return;

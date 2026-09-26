@@ -596,6 +596,7 @@ namespace VividRP.Editor.Tests
             ComputeShader shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
             Assert.That(shader, Is.Not.Null);
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             int kernel = shader.FindKernel("VSMPrototypeAllocatePages");
             var pageTableData = new uint[8];
             var metadataData = new TestPageMetadata[8];
@@ -668,6 +669,7 @@ namespace VividRP.Editor.Tests
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
             Assert.That(source, Is.Not.Null);
             ComputeShader shader = Object.Instantiate(source);
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             try
             {
                 int pageCount = pagesPerLevel * 2;
@@ -748,6 +750,7 @@ namespace VividRP.Editor.Tests
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
             Assert.That(source, Is.Not.Null);
             ComputeShader shader = Object.Instantiate(source);
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             try
             {
                 const uint requested = 1u;
@@ -890,6 +893,7 @@ namespace VividRP.Editor.Tests
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
             Assert.That(source, Is.Not.Null);
             ComputeShader shader = Object.Instantiate(source);
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             try
             {
                 for (int pool = 0; pool < 2; pool++)
@@ -974,6 +978,7 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2, 16);
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2, 4);
@@ -1097,6 +1102,7 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 16);
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, 4);
             using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
@@ -1169,6 +1175,7 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 16);
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, 4);
             using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
@@ -1254,6 +1261,7 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 16);
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2 + 1, 4);
@@ -1326,6 +1334,7 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             var upload = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
             var descriptor = new RenderTextureDescriptor(16, 16)
@@ -1606,6 +1615,7 @@ namespace VividRP.Editor.Tests
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
             Assert.That(source, Is.Not.Null);
             ComputeShader shader = Object.Instantiate(source);
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             try
             {
                 var tableData = new uint[8];
@@ -1813,6 +1823,8 @@ namespace VividRP.Editor.Tests
                 for (int iteration = 0; iteration < warmupCount; iteration++)
                     VirtualShadowMapPrototypeRuntime.EnsureResources(512, 4);
 
+                var requestMasks = VirtualShadowMapPrototypeRuntime.PageReceiverMasks;
+                var completedMasks = VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks;
                 int readyCount = 0;
                 long allocatedBefore = global::System.GC
                     .GetAllocatedBytesForCurrentThread();
@@ -1826,6 +1838,8 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(readyCount, Is.EqualTo(iterationCount));
                 Assert.That(allocatedBytes, Is.Zero);
+                Assert.That(VirtualShadowMapPrototypeRuntime.PageReceiverMasks, Is.SameAs(requestMasks));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, Is.SameAs(completedMasks));
             }
             finally
             {
@@ -1878,6 +1892,7 @@ namespace VividRP.Editor.Tests
             ComputeShader shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
             Assert.That(shader, Is.Not.Null);
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             int prepare = shader.FindKernel("VSMPrototypePrepareMeshletPageRequests");
             int cull = shader.FindKernel("VSMPrototypeCullMeshletsToPages");
             const int pageCount = 256;

@@ -57,6 +57,10 @@ RWStructuredBuffer<uint> _VSMPrototypeWritablePageTable;
 RWStructuredBuffer<uint4> _VSMPrototypePageMetadata;
 // Transient demand in virtual-page order; cleared before marking each camera.
 RWStructuredBuffer<uint> _VSMPageRequestFlags;
+// Current virtual demand and completed dynamic coverage in physical-slot order.
+RWStructuredBuffer<uint2> _VSMPageReceiverMasks;
+RWStructuredBuffer<uint2> _VSMPhysicalReceiverMasks;
+int _VSMReceiverMaskEnabled;
 RWStructuredBuffer<uint> _VSMPrototypePhysicalPageOwners;
 RWStructuredBuffer<uint> _VSMPrototypeAllocatorCounters;
 RWStructuredBuffer<uint> _VSMAllocationRequests;

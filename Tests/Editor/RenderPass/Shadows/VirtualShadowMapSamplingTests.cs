@@ -19,6 +19,7 @@ namespace VividRP.Editor.Tests
         private sealed class Fixture : IDisposable
         {
             internal readonly ComputeShader Shader;
+            internal readonly VirtualShadowMapReceiverMaskTestBuffers ReceiverMasks;
             internal readonly uint[] TableData = new uint[12];
             internal readonly uint4[] MetadataData = new uint4[12];
             internal readonly uint[] RequestData = new uint[12];
@@ -71,6 +72,7 @@ namespace VividRP.Editor.Tests
                 var source = AssetDatabase.LoadAssetAtPath<ComputeShader>(path);
                 Assert.That(source, Is.Not.Null, path);
                 Shader = Object.Instantiate(source);
+                ReceiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(Shader, 12, 16);
                 Pressure.SetData(new uint4[3]);
                 m_UploadShader = allocator ? Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                     "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute")) : Shader;
@@ -273,6 +275,7 @@ namespace VividRP.Editor.Tests
 
             public void Dispose()
             {
+                ReceiverMasks.Dispose();
                 Table.Dispose(); Metadata.Dispose(); Owners.Dispose(); Counters.Dispose(); m_Projections.Dispose();
                 Pressure.Dispose(); RequestFlags.Dispose();
                 m_StaticUpload.Dispose(); m_DynamicUpload.Dispose();
@@ -280,6 +283,25 @@ namespace VividRP.Editor.Tests
                 if (m_UploadShader != Shader) Object.DestroyImmediate(m_UploadShader);
                 Object.DestroyImmediate(m_Static); Object.DestroyImmediate(m_Dynamic); Object.DestroyImmediate(Shader);
             }
+        }
+
+        [Test]
+        public void ReceiverMask_UncoveredTexelInCompletedEmptyPageIsUnavailable()
+        {
+            using var f = new Fixture();
+            f.Map(0, 5);
+            f.MetadataData[0].x |= 4096u | 8192u | 16384u | 65536u;
+            f.Upload();
+            f.Shader.SetInt("_VSMReceiverMaskEnabled", 1);
+            var coverage = new uint2[16]; coverage[5] = new uint2(1, 0);
+            f.ReceiverMasks.Completed.SetData(coverage);
+            var result = f.Run("SampleTaps", new[]
+            {
+                new float4(.5f / 8, .5f / 8, .5f, 0),
+                new float4(1.5f / 8, .5f / 8, .5f, 0),
+            });
+            Assert.That(result[0], Is.EqualTo(new float2(1, 1)));
+            Assert.That(result[1].x, Is.Zero);
         }
 
         private static void DispatchAllocation(ComputeShader shader, int kernel, GraphicsBuffer metadata, GraphicsBuffer pressure, GraphicsBuffer requestFlags)
@@ -1565,6 +1587,7 @@ namespace VividRP.Editor.Tests
         {
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4);
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);

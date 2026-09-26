@@ -50,7 +50,7 @@ static int3 g_VSMDebugLevels;
 static float g_VSMDebugBlend;
 // Depth lookups count paired front/linear reads or individual ordered-search probes, not scalar pool loads.
 static uint3 g_VSMDebugWork; // attempted queries, completed depth lookups, attempted levels
-static uint g_VSMDebugMissing; // unmapped=1, dirty=2, inconsistent=4, outside=8
+static uint g_VSMDebugMissing; // unmapped=1, dirty=2, inconsistent=4, outside=8, uncovered=16
 static float4 g_VSMDebugQuality; // desired LOD, minimum covered, selected, footprint/target
 static uint4 g_VSMDebugSMRT; // rays, unoccluded parallel tails, failed footprints, final PCF fallback
 #endif

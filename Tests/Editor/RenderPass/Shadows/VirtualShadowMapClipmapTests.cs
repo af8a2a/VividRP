@@ -349,6 +349,7 @@ namespace VividRP.Editor.Tests
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
             Assert.That(source, Is.Not.Null);
             ComputeShader shader = Object.Instantiate(source);
+            using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
             try
             {
                 // Eight levels exercise indexing above the legacy four-cascade limit.

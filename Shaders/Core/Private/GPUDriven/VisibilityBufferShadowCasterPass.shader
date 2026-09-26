@@ -202,6 +202,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 #endif
                 const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
                 const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+#if defined(VIVID_VSM_PAGE_CASTER)
+                // Large records fan out over all relevant pages. Recheck this
+                // particular page before vertex pulling, as well as in compute.
+                if (!VividVSMCasterReceiverSphere(virtualPageIndex,
+                        TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix),
+                        _VSMProjections[cascadeIndex].worldToShadow)) return output;
+#endif
                 const uint indexCount = meshlet.TriangleCount * 3u;
 
                 if (vertexID >= indexCount)

@@ -120,6 +120,20 @@
 
 实现对照、故障注入、完整请求等价与质量回放记录位于忽略目录 `Temp~/VSM/RecoveryOrder_20260926/`。
 
+## Receiver mask 与动态缓存覆盖（2026-09-26）
+
+每个虚拟页以两个 `uint` 保存 8×8 receiver 单元。`VSMPageMarking.hlsl` 保留 SMRT continuation、PCF halo、过渡层和完整父链请求，在精确 footprint 并集上生成 mask；末层 Coarse 请求始终为完整 mask。普通清请求和切换接收相机的 reset 均同步清除当帧 mask。
+
+`VSMPrototypeCullMeshletsToPages` 对动态 meshlet 的投影范围与 mask 做交集测试；大记录展开后在 vertex 阶段再次按具体页面裁剪，Unity 普通 caster 和分页 caster 均在深度层插入前拒绝未请求的 texel。静态缓存始终整页绘制，静态/动态双池各 16 层不变。
+
+`PageReceiverMasks` 为当帧虚拟页需求，`PhysicalReceiverMasks` 为动态物理页已完成的覆盖。分配准备发现需求超出旧覆盖时只标记 DynamicDirty，之后服从已有补绘预算；Finalize 只在动态页实际完成后替换覆盖，延期页不提交。动态页整页清除，所以覆盖不能与旧值 OR。页平移保留物理槽及其覆盖；槽重新分配时覆盖清零。需求收缩可以复用旧覆盖，未变化的页面继续复用动态缓存。
+
+PCF、SMRT 逐格采样和 SMRT 整段 footprint 预检都检查完成覆盖；空页标记和页内地址复用不能绕过检查。缺覆盖仍走较粗层回退，Availability 调试原因增加 bit 16（uncovered）。这避免把部分绘制页当成完整、全亮页面。
+
+UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`VirtualShadowMapBuildPerPageDrawCommands.usf` 的静态缓存禁用 mask 裁剪，以及 `VirtualShadowMapPhysicalPageManagement.usf` 对部分动态页的有效性限制。本实现用完成覆盖检查保留动态复用；尚未采用 UE 的 mask 纹理 mip 层级或 froxel 标记。
+
+资源由 `VirtualShadowMapPrototypeRuntime` 按有效尺寸复用和释放，并纳入 RenderGraph 访问声明。独立 GPU 检查、合成质量回放和实际场景单帧记录位于忽略目录 `Temp~/VSM/ReceiverMask_20260926/`。
+
 ## SMRT 成本诊断（2026-09-17）
 
 `VIVID_VSM_SMRT_COST` 仅为新增 `VSMReceiverCost` 入口启用计数，源码仍位于 `Shaders/VirtualShadowMap/Private`。Editor 的 `SMRTCostCapture` 负责一次性读回的统计归约，`VividDiagnostics` 暴露 `smrt-cost` 操作。钩子位于 raw resolve 与降噪之间，默认无订阅/派发。见 [使用说明](SMRTCostDiagnostics.md) 与 [实测报告](../Temp~/VSM/Roadmap~/Experiments/SMRTCost_20260917/README.md)。

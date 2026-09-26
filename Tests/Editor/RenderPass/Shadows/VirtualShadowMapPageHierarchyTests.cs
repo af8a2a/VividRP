@@ -12,6 +12,63 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VirtualShadowMapPageHierarchyTests
     {
+        [TestCase(1)]
+        [TestCase(3)]
+        [TestCase(10)]
+        [TestCase(16)]
+        public void CompactViews_PreservesProjectionIdsAndOtherLayer_AndClearsEmptyDispatch(int levels)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/GPUInstanceCulling.compute"));
+            using var bounds = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels * 2, 16);
+            using var views = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (levels + 1) * 2, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            using var listArgs = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 3, 4);
+            using var cmd = new CommandBuffer();
+            try
+            {
+                int kernel = shader.FindKernel("CSCompactVSMViews");
+                var rects = new uint4[levels * 2]; var result = new uint[(levels + 1) * 2];
+                var initial = new uint[result.Length]; Array.Fill(initial, 0xeeeeeeeeu);
+                var indirect = new uint[6]; var initialArgs = new uint[6]; Array.Fill(initialArgs, 0xeeeeeeeeu);
+                var list = new uint[3];
+                foreach (int layer in new[] { 0, 1 })
+                foreach (int pattern in new[] { 1, 2, 0, 3 }) // sparse -> other sparse -> empty -> full
+                foreach (int instances in new[] { 0, 1, 32, 33, 1025 })
+                {
+                    uint expected = 0;
+                    for (int i = 0; i < levels; i++)
+                        for (int l = 0; l < 2; l++)
+                            rects[i * 2 + l] = pattern == 3 || (pattern != 0 && (i + l) % 3 == pattern - 1)
+                                ? new uint4(0) : new uint4(1, 1, 0, 0);
+                    bounds.SetData(rects); views.SetData(initial); args.SetData(initialArgs);
+                    var parameters = new VirtualShadowMapCullingParameters(null, null, bounds, 1, 128, 128, layer, true, views, args);
+                    cmd.Clear(); parameters.CompactViews(cmd, shader, kernel, instances, levels, listArgs);
+                    Graphics.ExecuteCommandBuffer(cmd); views.GetData(result); args.GetData(indirect); listArgs.GetData(list);
+                    int offset = layer * (levels + 1);
+                    for (int i = 0; i < levels; i++)
+                        if (rects[i * 2 + layer].x <= rects[i * 2 + layer].z)
+                            Assert.That(result[offset + 1 + expected++], Is.EqualTo((uint)i));
+                    Assert.That(result[offset], Is.EqualTo(expected));
+                    for (uint i = expected; i < levels; i++) Assert.That(result[offset + 1 + i], Is.EqualTo(uint.MaxValue));
+                    int other = (1 - layer) * (levels + 1);
+                    for (int i = 0; i <= levels; i++) Assert.That(result[other + i], Is.EqualTo(0xeeeeeeeeu));
+                    for (int i = 0; i < 3; i++) Assert.That(indirect[(1 - layer) * 3 + i], Is.EqualTo(0xeeeeeeeeu));
+                    Assert.That(indirect[layer * 3], Is.EqualTo(expected == 0 ? 0u : (uint)(instances + 31) / 32));
+                    Assert.That(indirect[layer * 3 + 1], Is.EqualTo(expected));
+                    Assert.That(indirect[layer * 3 + 2], Is.EqualTo(1u));
+                    Assert.That(list, Is.EqualTo(new[] { 0u, expected, 1u }));
+                }
+                var stable = new VirtualShadowMapCullingParameters(null, null, bounds, 1, 128, 128, 0, true, views, args);
+                for (int i = 0; i < 16; i++) { cmd.Clear(); stable.CompactViews(cmd, shader, kernel, 33, levels, listArgs); }
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++) { cmd.Clear(); stable.CompactViews(cmd, shader, kernel, 33, levels, listArgs); }
+                Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(0, false, true)]
         [TestCase(0, true, true)]
         [TestCase(1, false, false)]

@@ -172,6 +172,16 @@ UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`Virt
 
 这是按页面生产需求进行保守拒绝，不进行深度/HZB 遮挡裁剪；完整请求、父链以及静态/动态各 16 层遮挡深度保留。当前 LOD 仍遍历既有扁平节点列表，并非 UE/Nanite 的完整层级遍历迁移。实现验证记录位于忽略目录 `Temp~/VSM/EarlyHierarchy_20260926/`。
 
+## 压缩空 clipmap/view（2026-09-26）
+
+页层级和 `UncachedPageRectBounds` 构建完成后，GPU-driven 每个 caster 层先执行 `CSCompactVSMViews`。`VSMViewCompaction.hlsl` 仅保留当帧补绘矩形非空的原 projection ID，按原顺序写入 `ActiveViews`，并生成实例间接派发参数。静态、动态层各自拥有 count/ID 段及 args 段；判断来自预算选择后的边界，完整请求和 Deferred 状态不变。`VSM.CompactViews` 单独记录生成成本。
+
+`GPUInstanceCulling`、`MeshletListBuild`、`GPUMeshletCulling` 的 `CSVSMCompacted` 入口把 dispatch 的 Y 映射回原 projection ID。Fixup 同样通过有效列表读取原段并设置后续派发 Y。`VSMPrepareMeshletPageRequestsCompacted` 生成末级页裁剪 args，`VSMCullMeshletsToPagesCompacted` 使用同一列表间接派发。所有队列偏移、投影和页地址继续使用原 ID；不重排投影数据或队列存储。
+
+`VirtualShadowMapPrototypeRuntime` 管理 `ActiveViews`、`InstanceDispatchArgs`、`PageCullDispatchArgs` 的有效尺寸复用和释放，RenderGraph 声明读写。每帧先用缓存数组录制小量初始化，确保无 GPU caster、未进入 source cull 的层也是空列表和零任务；生产路径无 CPU readback。所有新 kernel 追加到旧入口之后，旧 CS/CSVSM 仍可用于对照，普通相机与 CSM 保持原入口。
+
+本次压缩覆盖 GPU-driven source 到最终 meshlet→page 的工作网格。计数器清空仍使用原 projection 布局，Fixup 仍启动原层数的一线程组并让无效 ordinal 退出，prepare 仍扫描物理槽；普通 Unity RendererList 的投影/瓦片循环尚未压缩。完整请求、父链、静态整页覆盖和静态/动态各 16 层深度不变。验证记录位于忽略目录 `Temp~/VSM/CompactViews_20260926/`，派发组数的减少不能直接换算为整帧耗时收益。
+
 ## SMRT 成本诊断（2026-09-17）
 
 `VIVID_VSM_SMRT_COST` 仅为新增 `VSMReceiverCost` 入口启用计数，源码仍位于 `Shaders/VirtualShadowMap/Private`。Editor 的 `SMRTCostCapture` 负责一次性读回的统计归约，`VividDiagnostics` 暴露 `smrt-cost` 操作。钩子位于 raw resolve 与降噪之间，默认无订阅/派发。见 [使用说明](SMRTCostDiagnostics.md) 与 [实测报告](../Temp~/VSM/Roadmap~/Experiments/SMRTCost_20260917/README.md)。

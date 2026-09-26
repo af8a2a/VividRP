@@ -1,4 +1,8 @@
 #include "VSMPageCulling.hlsl"
+#if defined(VIVID_VSM_COMPACT_VIEWS)
+#include "VSMViewCompaction.hlsl"
+RWStructuredBuffer<uint> _VSMPageCullDispatchArgsRW;
+#endif
 
 uint GetVSMSourceDrawArgsIndex(
     uint cascadeIndex,
@@ -134,9 +138,18 @@ groupshared uint g_VSMRasterPageCount;
 groupshared uint g_VSMRasterLevelCounts[VIVID_VSM_RASTER_MAX_LEVELS];
 groupshared uint g_VSMRasterLevelOffsets[VIVID_VSM_RASTER_MAX_LEVELS];
 
-[numthreads(64, 1, 1)]
-void VSMPrototypePrepareMeshletPageRequests(uint groupIndex : SV_GroupIndex)
+void RunVSMPrepareMeshletPageRequests(uint groupIndex)
 {
+#if defined(VIVID_VSM_COMPACT_VIEWS)
+    if (groupIndex == 0u)
+    {
+        uint activeCount = VividVSMActiveViewCount();
+        uint offset = (uint)_VSMPrototypeCasterLayer * 3u;
+        _VSMPageCullDispatchArgsRW[offset] = activeCount == 0u ? 0u : ((uint)_VSMPrototypeSourceRequestsPerCascadeCapacity + 63u) / 64u;
+        _VSMPageCullDispatchArgsRW[offset + 1u] = activeCount;
+        _VSMPageCullDispatchArgsRW[offset + 2u] = VIVIDRENDERERLISTID_COUNT;
+    }
+#endif
     if (groupIndex == 0u) g_VSMRasterPageCount = 0u;
     if (groupIndex < VIVID_VSM_RASTER_MAX_LEVELS) g_VSMRasterLevelCounts[groupIndex] = 0u;
     GroupMemoryBarrierWithGroupSync();
@@ -261,12 +274,15 @@ bool VSMCasterOverlapsReceiverMask(uint page, uint2 coord, uint2 low, uint2 high
             (uint)_VSMPrototypePageSize);
 }
 
-[numthreads(64, 1, 1)]
-void VSMPrototypeCullMeshletsToPages(
-    uint3 dispatchThreadID : SV_DispatchThreadID)
+void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
 {
     const uint localRequestIndex = dispatchThreadID.x;
+#if defined(VIVID_VSM_COMPACT_VIEWS)
+    uint cascadeIndex;
+    if (!VividVSMResolveActiveView(dispatchThreadID.y, cascadeIndex)) return;
+#else
     const uint cascadeIndex = dispatchThreadID.y;
+#endif
     const uint rendererListIndex = dispatchThreadID.z;
     if (localRequestIndex
             >= (uint)_VSMPrototypeSourceRequestsPerCascadeCapacity
@@ -1216,3 +1232,14 @@ void VSMReducePageOccupancyIndirect(uint3 group : SV_GroupID, uint lane : SV_Gro
     ReduceVSMPageOccupancy(_VSMPageWorkList[(uint)_VSMPrototypePhysicalPageCapacity + group.x], lane);
 }
 
+
+[numthreads(64, 1, 1)]
+void VSMPrototypePrepareMeshletPageRequests(uint index : SV_GroupIndex) { RunVSMPrepareMeshletPageRequests(index); }
+[numthreads(64, 1, 1)]
+void VSMPrototypeCullMeshletsToPages(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
+#if defined(VIVID_VSM_COMPACT_VIEWS)
+[numthreads(64, 1, 1)]
+void VSMPrepareMeshletPageRequestsCompacted(uint index : SV_GroupIndex) { RunVSMPrepareMeshletPageRequests(index); }
+[numthreads(64, 1, 1)]
+void VSMCullMeshletsToPagesCompacted(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
+#endif

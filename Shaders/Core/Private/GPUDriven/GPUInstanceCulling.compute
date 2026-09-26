@@ -1,11 +1,17 @@
 #pragma kernel CS
 
 #pragma kernel CSVSM VIVID_VSM_EARLY_CULL
+#pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
+#pragma kernel CSCompactVSMViews VIVID_VSM_EARLY_CULL VIVID_VSM_BUILD_COMPACT_VIEWS
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
 #if defined(VIVID_VSM_EARLY_CULL)
 #include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMPageCulling.hlsl"
+#endif
+
+#if defined(VIVID_VSM_COMPACT_VIEWS) || defined(VIVID_VSM_BUILD_COMPACT_VIEWS)
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMViewCompaction.hlsl"
 #endif
 
 #define THREAD_GROUP_SIZE 32
@@ -24,17 +30,25 @@ RWStructuredBuffer<uint> _MeshletListBuildIndirectArgs;
 void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     const uint cullingContextCount = max(_CullingContextCount, 1u);
+#if defined(VIVID_VSM_COMPACT_VIEWS)
+    uint cullingContextIndex;
+    if (!VividVSMResolveActiveView(dispatchThreadID.y, cullingContextIndex)) return;
+#else
     const uint cullingContextIndex = dispatchThreadID.y;
+#endif
     if (cullingContextIndex >= cullingContextCount)
     {
         return;
     }
 
+#if !defined(VIVID_VSM_COMPACT_VIEWS)
     if (dispatchThreadID.x == 0u && cullingContextIndex == 0u)
     {
         _MeshletListBuildIndirectArgs[1] = cullingContextCount;
         _MeshletListBuildIndirectArgs[2] = 1u;
     }
+
+#endif
 
     const uint dispatchInstanceIndex = dispatchThreadID.x;
     if (_VividPrimitiveDrawSetEnabled != 0u &&
@@ -112,3 +126,24 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     RunCulling(dispatchThreadID);
 }
+
+#if defined(VIVID_VSM_BUILD_COMPACT_VIEWS)
+[numthreads(1, 1, 1)]
+void CSCompactVSMViews(uint3 id : SV_DispatchThreadID)
+{
+    uint activeCount;
+    VividVSMCompactViews(_CullingContextCount, (uint)_VSMCasterCullingParameters.w, activeCount);
+    // This must also run for an empty view set, when the instance dispatch does not.
+    _MeshletListBuildIndirectArgs[0] = 0u;
+    _MeshletListBuildIndirectArgs[1] = activeCount;
+    _MeshletListBuildIndirectArgs[2] = 1u;
+}
+#endif
+
+#if defined(VIVID_VSM_COMPACT_VIEWS)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMCompacted(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    RunCulling(dispatchThreadID);
+}
+#endif

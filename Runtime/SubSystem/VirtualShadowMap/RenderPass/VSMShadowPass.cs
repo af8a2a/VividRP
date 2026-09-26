@@ -94,9 +94,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private const string VSMPrototypeFinalizeDirtyPagesKernelName = "VSMPrototypeFinalizeDirtyPages";
 
-        private const string VSMPrototypePrepareMeshletPageRequestsKernelName = "VSMPrototypePrepareMeshletPageRequests";
+        private const string VSMPrototypePrepareMeshletPageRequestsKernelName = "VSMPrepareMeshletPageRequestsCompacted";
 
-        private const string VSMPrototypeCullMeshletsToPagesKernelName = "VSMPrototypeCullMeshletsToPages";
+        private const string VSMPrototypeCullMeshletsToPagesKernelName = "VSMCullMeshletsToPagesCompacted";
 
         private static readonly GlobalKeyword s_VirtualShadowMapCasterKeyword =
             GlobalKeyword.Create(VirtualShadowMapCasterKeywordName);
@@ -532,6 +532,9 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullHierarchy, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.ActiveViews, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.InstanceDispatchArgs, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalPageOwners, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.AllocationRequests, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageWorkList, AccessFlags.ReadWrite);
@@ -820,6 +823,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 return false;
 
             ComputeShader compute = m_VirtualShadowMapPageManagementCompute;
+            var vsmCulling = VirtualShadowMapCullingParameters.ForCurrentFrame(casterLayer);
+            vsmCulling.BindViews(nativeCmd, compute, m_VirtualShadowMapPrepareMeshletPageRequestsKernel);
+            vsmCulling.BindViews(nativeCmd, compute, m_VirtualShadowMapCullMeshletsToPagesKernel);
+            nativeCmd.SetComputeBufferParam(compute, m_VirtualShadowMapPrepareMeshletPageRequestsKernel,
+                VirtualShadowMapPrototypeRuntime.PageCullDispatchArgsRWId, VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs);
             nativeCmd.SetComputeIntParam(
                 compute,
                 VSMPrototypeSourceRequestsPerCascadeCapacityId,
@@ -935,11 +943,8 @@ namespace VividRP.Runtime.RenderPass.Core
             nativeCmd.DispatchCompute(
                 compute,
                 m_VirtualShadowMapCullMeshletsToPagesKernel,
-                CoreUtils.DivRoundUp(
-                    sourceRequestsPerCascadeCapacity,
-                    64),
-                VirtualShadowMapPrototypeRuntime.Projections.Count,
-                RendererListCount);
+                VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs,
+                (uint)casterLayer * 3u * sizeof(uint));
             return true;
         }
 
@@ -1204,6 +1209,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 nativeCmd.DispatchCompute(shader, m_VSMBuildPageWorkListsKernel, 1, 1, 1);
             }
 
+            VirtualShadowMapPrototypeRuntime.ResetCompactedViews(nativeCmd);
             RecordPageCullHierarchy(nativeCmd);
 
             using (new ProfilingScope(nativeCmd, VSMProfiling.Clear))

@@ -39,6 +39,8 @@
 #pragma kernel VSMMarkCoarsePages
 #pragma kernel VSMClearPageCullHierarchy
 #pragma kernel VSMBuildPageCullHierarchy
+#pragma kernel VSMPrepareMeshletPageRequestsCompacted VIVID_VSM_COMPACT_VIEWS
+#pragma kernel VSMCullMeshletsToPagesCompacted VIVID_VSM_COMPACT_VIEWS
 #pragma use_dxc
 #pragma require Native16Bit
 

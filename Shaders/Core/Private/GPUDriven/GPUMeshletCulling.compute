@@ -414,8 +414,12 @@ bool TryResolveCulledMeshlet(
 
 #endif
 
+    // Use the material's local-facing side. GetRendererListID already compensates
+    // mirrored winding in raster state; applying that flip to the local cone twice
+    // would reject the visible side of reflected instances.
     if ((rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
-        !ConeCulling(cullingContext, instanceData, meshlet))
+        !ConeCulling(cullingContext, instanceData, meshlet,
+            (materialData.RendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u))
     {
         return false;
     }

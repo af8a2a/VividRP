@@ -405,58 +405,74 @@ float3 GetViewForwardDir(const float4x4 viewMatrix)
 bool ConeCulling(
     const VividGPUCullingContext cullingContext,
     const VividInstanceData instanceData,
-    const VividDecodedMeshlet meshlet
+    const VividDecodedMeshlet meshlet,
+    const bool cullFrontFaces
 )
 {
-    if (meshlet.ConeValid == 0u)
-    {
-        return true;
-    }
-
-    float3 coneAxisWS = mul(meshlet.ConeAxis, (float3x3) instanceData.WorldToObjectMatrix);
-    const float axisLengthSq = LengthSq(coneAxisWS);
-
-    if (axisLengthSq <= 1e-8f)
-    {
-        return true;
-    }
-
-    coneAxisWS *= rsqrt(axisLengthSq);
-
-    float3 viewDirWS;
     float coneCutoff = meshlet.ConeCutoff;
+    if (meshlet.ConeValid == 0u || !(coneCutoff >= 0.0f && coneCutoff < 1.0f))
+    {
+        return true;
+    }
+
+    // Keep the normal cone and the viewing rays in object space. Transforming only
+    // the axis to world space leaves an invalid opening angle under nonuniform scale
+    // or shear: nWS dot vWS has the sign of nOS dot (worldToObject * vWS).
+    const float inverseDeterminant = determinant((float3x3) instanceData.WorldToObjectMatrix);
+    const float axisLengthSq = LengthSq(meshlet.ConeAxis);
+    if (!isfinite(inverseDeterminant) || inverseDeterminant == 0.0f ||
+        !isfinite(axisLengthSq) || axisLengthSq <= 1e-8f)
+    {
+        return true;
+    }
+
+    const float3 coneAxisOS = meshlet.ConeAxis *
+        ((cullFrontFaces ? -1.0f : 1.0f) * rsqrt(axisLengthSq));
+    float3 viewVectorOS;
     if (cullingContext.CameraIsPerspective != 0)
     {
-        const float4 boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
-        const float3 viewVectorWS = boundingSphereWS.xyz - cullingContext.CameraPosition.xyz;
-        const float viewDistanceSq = LengthSq(viewVectorWS);
-        const float radiusSq = boundingSphereWS.w * boundingSphereWS.w;
-        if (viewDistanceSq <= max(radiusSq, 1e-8f))
-        {
-            return true;
-        }
-
-        const float inverseViewDistance = rsqrt(viewDistanceSq);
-        viewDirWS = viewVectorWS * inverseViewDistance;
-        const float sinViewCone = saturate(boundingSphereWS.w * inverseViewDistance);
-        const float cosViewCone = sqrt(max(0.0f, 1.0f - sinViewCone * sinViewCone));
-        const float sinNormalCone = sqrt(max(0.0f, 1.0f - coneCutoff * coneCutoff));
-        if (coneCutoff >= 0.0f && sinViewCone >= sinNormalCone)
-        {
-            return true;
-        }
-
-        coneCutoff = min(
-            1.0f,
-            coneCutoff * cosViewCone + sinNormalCone * sinViewCone);
+        const float3 cameraPositionOS = mul(
+            instanceData.WorldToObjectMatrix, float4(cullingContext.CameraPosition.xyz, 1.0f)).xyz;
+        viewVectorOS = meshlet.BoundingSphere.xyz - cameraPositionOS;
     }
     else
     {
-        viewDirWS = GetViewForwardDir(cullingContext.ViewMatrix);
+        viewVectorOS = mul((float3x3) instanceData.WorldToObjectMatrix,
+            GetViewForwardDir(cullingContext.ViewMatrix));
     }
 
-    const float dotResult = dot(viewDirWS, coneAxisWS);
-    return !(dotResult >= coneCutoff);
+    const float viewDistanceSq = LengthSq(viewVectorOS);
+    if (!isfinite(viewDistanceSq) || viewDistanceSq <= 1e-8f)
+    {
+        return true;
+    }
+
+    const float inverseViewDistance = rsqrt(viewDistanceSq);
+    const float3 viewDirOS = viewVectorOS * inverseViewDistance;
+    if (cullingContext.CameraIsPerspective != 0)
+    {
+        // The original local sphere bounds every ray even under affine transforms;
+        // a world sphere fitted to the transformed axes does not cover general shear.
+        const float radius = meshlet.BoundingSphere.w;
+        if (!isfinite(radius) || radius < 0.0f || viewDistanceSq <= radius * radius)
+        {
+            return true;
+        }
+
+        const float sinViewCone = saturate(radius * inverseViewDistance);
+        const float cosViewCone = sqrt(max(0.0f, 1.0f - sinViewCone * sinViewCone));
+        const float cosNormalCone = sqrt(max(0.0f, 1.0f - coneCutoff * coneCutoff));
+        if (sinViewCone >= cosNormalCone)
+        {
+            return true;
+        }
+
+        coneCutoff = min(1.0f, coneCutoff * cosViewCone + cosNormalCone * sinViewCone);
+    }
+
+    // Retain tangent / numerically ambiguous cones. Packing already expands the
+    // cutoff for axis quantization; this margin covers the floating-point test.
+    return !(dot(viewDirOS, coneAxisOS) > coneCutoff + 1e-5f);
 }
 
 bool ShouldSelectMeshLODNode(

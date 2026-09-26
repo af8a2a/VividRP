@@ -90,6 +90,108 @@ namespace VividRP.Editor.Tests
             finally { foreach (var shader in shaders) if (shader != null) Object.DestroyImmediate(shader); }
         }
 
+        [TestCase(0)] // Main view / CSM.
+        [TestCase(1)] // VSM without compacted views.
+        [TestCase(2)] // VSM affine bounds + hierarchy + compacted views.
+        public void Dispatcher_NormalCone_PreservesAffineFacingAndMaterialCullMode(int mode)
+        {
+            Assume.That(SystemInfo.supportsComputeShaders, Is.True);
+            var center = new float3(.5f, .5f, 0);
+            var sphere = new float4(center, .01f);
+            (string Name, float3 Scale, float ShearXZ, float3 DirectionWS, uint CullMode,
+                bool TwoSided, float Cutoff, bool Visible)[] cases =
+            {
+                ("anisotropic", new float3(.1f, 1, 1), 0f, new float3(.8f, 0, .6f), 0u, false, .5f, true),
+                ("shear", new float3(1), 2f, new float3(0, 0, 1), 0u, false, .5f, true),
+                ("back reject", new float3(2, 1, .2f), 0f, new float3(0, 0, 1), 0u, false, .5f, false),
+                ("front retain", new float3(1), 0f, new float3(0, 0, -1), 0u, false, .5f, true),
+                ("cull front retain", new float3(1), 0f, new float3(0, 0, 1), 1u, false, .5f, true),
+                ("cull front reject", new float3(1), 0f, new float3(0, 0, -1), 1u, false, .5f, false),
+                ("mirror anisotropic", new float3(-.1f, 1, 1), 0f, new float3(-.8f, 0, .6f), 0u, false, .5f, true),
+                ("mirror back reject", new float3(-1, 1, 1), 0f, new float3(0, 0, 1), 0u, false, .5f, false),
+                ("mirror cull front retain", new float3(-1, 1, 1), 0f, new float3(0, 0, 1), 1u, false, .5f, true),
+                ("mirror cull front reject", new float3(-1, 1, 1), 0f, new float3(0, 0, -1), 1u, false, .5f, false),
+                ("cull off", new float3(1), 0f, new float3(0, 0, 1), 2u, false, .5f, true),
+                ("two sided shadow", new float3(1), 0f, new float3(0, 0, 1), 0u, true, .5f, true),
+                ("invalid cone", new float3(1), 0f, new float3(0, 0, 1), 0u, false, float.NaN, true),
+                ("wide cone", new float3(1), 0f, new float3(0, 0, 1), 0u, false, 1f, true),
+                ("zero inverse", new float3(1), 0f, new float3(0, 0, 1), 0u, false, .5f, true),
+                ("tangent retain", new float3(1), 0f, new float3(.8660254f, 0, .5f), 0u, false, .5f, true),
+                ("camera inside sphere", new float3(1), 0f, new float3(0, 0, 1), 0u, false, .5f, false),
+            };
+            using var sceneBuffers = new VividGPUDrivenBufferSet();
+            using var dispatcher = new VividGPUDrivenCullingDispatcher(supportsOcclusion: false);
+            using var cmd = new CommandBuffer();
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 160);
+            using var hierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 12);
+            using var bounds = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
+            using var views = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            projections.SetData(new[] { new VirtualShadowMapProjection { WorldToShadow = Matrix4x4.identity } });
+            hierarchy.SetData(new[] { new uint3(2u | 4u, uint.MaxValue, uint.MaxValue) });
+            bounds.SetData(new[] { new uint4(0), new uint4(0) });
+            var parameters = mode == 0 ? default : new VirtualShadowMapCullingParameters(
+                projections, hierarchy, bounds, 1, 128, 128, 0, false, mode == 2 ? views : null, mode == 2 ? args : null);
+            var lod = new VividGPULODSelectionContext { ScreenSizePixels = new float2(128) };
+            var contexts = new VividGPUCullingContext[1];
+            var counts = new uint[(int)VividRendererListID.Count];
+            var candidates = new uint[1];
+            var shaders = new ComputeShader[4];
+            string[] names = { "GPUInstanceCulling", "MeshletListBuild", "GPUMeshletCulling", "FixupVisibleMeshletIndirectDrawArgs" };
+            try
+            {
+                for (int i = 0; i < shaders.Length; i++) shaders[i] = Object.Instantiate(
+                    UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                        "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/" + names[i] + ".compute"));
+                foreach (var c in cases)
+                for (int perspective = 0; perspective < 2; perspective++)
+                {
+                    var transform = float4x4.Scale(c.Scale);
+                    transform.c2.x = c.ShearXZ;
+                    transform.c3 = new float4(center - math.transform(transform, center), 1);
+                    var instance = new VividInstanceData
+                    {
+                        ObjectToWorldMatrix = transform,
+                        WorldToObjectMatrix = c.Name == "zero inverse" ? default : math.inverse(transform),
+                        AABBMin = new float4(center - .02f, 0), AABBMax = new float4(center + .02f, 0),
+                        TotalMeshLODCount = 1, MeshLODLevelCount = 1, LODErrorScale = 1,
+                        PassMask = VividInstancePassMask.Shadows,
+                        Flags = (c.Scale.x < 0 ? VividInstanceFlags.FlipWindingOrder : 0)
+                            | (c.TwoSided ? VividInstanceFlags.TwoSidedShadows : 0),
+                    };
+                    var scene = new VividGPUDrivenSceneData();
+                    scene.MutableMaterials.Add(new VividMaterialData { RendererListID = (VividRendererListID)c.CullMode });
+                    scene.MutableMeshLODNodes.Add(new VividMeshLODNode
+                        { Bounds = sphere, ParentBounds = sphere, ParentError = -1, MeshletCount = 1 });
+                    scene.MutableMeshlets.Add(new VividMeshlet
+                        { BoundingSphere = sphere, PackedCone = VividMeshletMetadataPacking.PackCone(new float3(0, 0, 1), c.Cutoff) });
+                    scene.AddInstance(instance, 1);
+                    sceneBuffers.Upload(scene);
+                    var view = float4x4.identity;
+                    view.c0.z = -c.DirectionWS.x; view.c1.z = -c.DirectionWS.y; view.c2.z = -c.DirectionWS.z;
+                    contexts[0] = new VividGPUCullingContext
+                    {
+                        ViewMatrix = view, ViewProjectionMatrix = float4x4.identity,
+                        CameraPosition = new float4(center - c.DirectionWS * (c.Name == "camera inside sphere" ? .005f : 10f), 1),
+                        CameraIsPerspective = perspective, PassMask = (int)VividInstancePassMask.Shadows,
+                    };
+                    cmd.Clear();
+                    dispatcher.DispatchBatch(cmd, contexts, 1, lod, scene, sceneBuffers,
+                        shaders[0], shaders[1], shaders[2], shaders[3], -1, 1f, vsmCulling: parameters);
+                    Graphics.ExecuteCommandBuffer(cmd);
+                    dispatcher.BufferSet.VisibleMeshletRenderRequestCounterBuffer.GetData(candidates);
+                    dispatcher.BufferSet.VisibleRendererListMeshletCountsBuffer.GetData(counts);
+                    uint visible = 0; foreach (uint count in counts) visible += count;
+                    bool expected = c.Visible || (c.Name == "camera inside sphere" && perspective != 0);
+                    Assert.That(candidates[0], Is.EqualTo(1u), $"Candidate missing: {c.Name}, mode={mode}, perspective={perspective}");
+                    Assert.That(visible, Is.EqualTo(expected ? 1u : 0u), $"{c.Name}, mode={mode}, perspective={perspective}");
+                    uint rendererList = c.TwoSided ? 2u : c.CullMode == 2u ? 2u : c.CullMode ^ (c.Scale.x < 0 ? 1u : 0u);
+                    Assert.That(counts[rendererList], Is.EqualTo(visible), "Raster winding / material cull mode mismatch");
+                }
+            }
+            finally { foreach (var shader in shaders) if (shader != null) Object.DestroyImmediate(shader); }
+        }
+
         [Test]
         public void EnsureCapacity_CreatesIndirectDrawArgsBufferForAllRendererLists()
         {

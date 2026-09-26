@@ -10,13 +10,133 @@ namespace VividRP.Editor.Tests
 {
     public class VividGPUDrivenCullingBuffersTests
     {
-        [TestCase(0)] // Ordinary CS path used by main view / CSM.
-        [TestCase(1)] // VSM without view compaction.
-        [TestCase(2)] // Production VSM hierarchy + compacted views.
-        public void Dispatcher_LODSentinel_SelectsAutomaticErrorsAndPreservesForcedDepth(int mode)
+        [Test]
+        public void VSMTraversalQueue_ReusesStorageAndClearsIndirectWork()
+        {
+            using var buffers = new VividGPUDrivenCullingBuffers(supportsOcclusion: false);
+            using var cmd = new CommandBuffer();
+            var scene = new VividGPUDrivenSceneData();
+            buffers.EnsureCapacity(scene, 3);
+            Assert.That(buffers.VSMLodTraversalTasks, Is.Null);
+            buffers.EnsureVSMTraversalCapacity(17, 3);
+            var tasks = buffers.VSMLodTraversalTasks;
+            var args = buffers.VSMLodTraversalArgs;
+            Assert.That(tasks.count, Is.EqualTo(51));
+            Assert.That(tasks.stride, Is.EqualTo(8));
+            Assert.That(args.count, Is.EqualTo(4));
+            Assert.That(args.target, Is.EqualTo(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments));
+            for (int i = 0; i < 8; i++) { buffers.EnsureVSMTraversalCapacity(17, 3); cmd.Clear(); buffers.Reset(cmd); }
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++) { buffers.EnsureVSMTraversalCapacity(17, 3); cmd.Clear(); buffers.Reset(cmd); }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            Assert.That(buffers.VSMLodTraversalTasks, Is.SameAs(tasks));
+            Assert.That(buffers.VSMLodTraversalArgs, Is.SameAs(args));
+            args.SetData(new uint[] { 7, 3, 1, 17 });
+            cmd.Clear(); buffers.Reset(cmd); Graphics.ExecuteCommandBuffer(cmd);
+            var readback = new uint[4]; args.GetData(readback);
+            Assert.That(readback, Is.EqualTo(new uint[] { 0, 1, 1, 0 }));
+            buffers.EnsureVSMTraversalCapacity(0, 3);
+            Assert.That(buffers.VSMLodTraversalTasks.count, Is.EqualTo(1));
+            Assert.Throws<System.InvalidOperationException>(() => buffers.EnsureVSMTraversalCapacity(int.MaxValue, 2));
+        }
+
+        [TestCase(33, false)]
+        [TestCase(129, false)]
+        [TestCase(1025, false)]
+        [TestCase(129, true)]
+        public void Dispatcher_VSMBatchesVariableMeshletCountsAndClearsEmptyDrawSet(int nodeCount, bool missingRoot)
         {
             Assume.That(SystemInfo.supportsComputeShaders, Is.True);
-            const int nodesPerLevel = 32, nodeCount = 3 * nodesPerLevel;
+            var scene = new VividGPUDrivenSceneData();
+            scene.MutableMaterials.Add(default);
+            int[] expansion = { 0, 1, 3, 8 };
+            for (int n = 0; n < nodeCount; n++)
+            {
+                int count = expansion[n % expansion.Length];
+                scene.MutableMeshLODNodes.Add(new VividMeshLODNode
+                {
+                    Bounds = new float4(.5f, .5f, 0, .01f), ParentError = -1,
+                    ParentBounds = new float4(.5f, .5f, 0, .01f),
+                    MeshletStartIndex = (uint)scene.MutableMeshlets.Count, MeshletCount = (uint)count,
+                });
+                for (int m = 0; m < count; m++)
+                    scene.MutableMeshlets.Add(new VividMeshlet { BoundingSphere = new float4(.5f, .5f, 0, .01f) });
+            }
+            int expected = scene.MutableMeshlets.Count;
+            scene.AddInstance(new VividInstanceData
+            {
+                ObjectToWorldMatrix = float4x4.identity, WorldToObjectMatrix = float4x4.identity,
+                AABBMin = new float4(.48f, .48f, -.02f, 0), AABBMax = new float4(.52f, .52f, .02f, 0),
+                TotalMeshLODCount = (uint)nodeCount, MeshLODLevelCount = 1, LODErrorScale = 1,
+                PassMask = VividInstancePassMask.Shadows, Flags = VividInstanceFlags.TwoSidedShadows,
+            }, expected);
+            using var geometry = new VividGPUDrivenBufferSet(); geometry.Upload(scene);
+            if (missingRoot)
+            {
+                var roots = new uint[geometry.VSMLODHierarchy.Roots.count];
+                for (int i = 0; i < roots.Length; i++) roots[i] = uint.MaxValue;
+                geometry.VSMLODHierarchy.Roots.SetData(roots);
+            }
+            using var dispatcher = new VividGPUDrivenCullingDispatcher(supportsOcclusion: false);
+            using var cmd = new CommandBuffer();
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 160);
+            using var hierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 12);
+            using var bounds = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
+            using var views = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            projections.SetData(new[] { new VirtualShadowMapProjection { WorldToShadow = Matrix4x4.identity } });
+            hierarchy.SetData(new[] { new uint3(6, uint.MaxValue, uint.MaxValue) });
+            bounds.SetData(new[] { new uint4(0), new uint4(0) });
+            var parameters = new VirtualShadowMapCullingParameters(projections, hierarchy, bounds, 1, 128, 128, 0, false, views, args);
+            var contexts = new[] { new VividGPUCullingContext { ViewProjectionMatrix = float4x4.identity, PassMask = (int)VividInstancePassMask.Shadows } };
+            var lod = new VividGPULODSelectionContext { ScreenSizePixels = new float2(128) };
+            var shaders = new ComputeShader[4];
+            string[] names = { "GPUInstanceCulling", "MeshletListBuild", "GPUMeshletCulling", "FixupVisibleMeshletIndirectDrawArgs" };
+            try
+            {
+                for (int i = 0; i < shaders.Length; i++) shaders[i] = Object.Instantiate(UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                    "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/" + names[i] + ".compute"));
+                var count = new uint[1]; var queue = new uint[4]; var requests = new VividMeshletRenderRequestPacked[expected];
+                GraphicsBuffer tasks = null;
+                for (int iteration = 0; iteration < 3; iteration++)
+                {
+                    bool empty = iteration == 1;
+                    cmd.Clear(); dispatcher.DispatchBatch(cmd, contexts, 1, lod, scene, geometry,
+                        shaders[0], shaders[1], shaders[2], shaders[3], 0, .2f,
+                        drawSetInstanceCount: empty ? 0 : -1, vsmCulling: parameters);
+                    Graphics.ExecuteCommandBuffer(cmd);
+                    dispatcher.BufferSet.VisibleMeshletRenderRequestCounterBuffer.GetData(count);
+                    dispatcher.BufferSet.VSMLodTraversalArgs.GetData(queue);
+                    Assert.That(count[0], Is.EqualTo(empty ? 0u : (uint)expected));
+                    Assert.That(queue[3], Is.EqualTo(!empty && nodeCount > 128 ? 1u : 0u));
+                    if (tasks == null) tasks = dispatcher.BufferSet.VSMLodTraversalTasks;
+                    Assert.That(dispatcher.BufferSet.VSMLodTraversalTasks, Is.SameAs(tasks), "An empty DrawSet must not recreate the task queue.");
+                    if (empty) { Assert.That(queue, Is.EqualTo(new uint[] { 0, 1, 1, 0 })); continue; }
+                    dispatcher.BufferSet.CandidateMeshletRenderRequestsBuffer.GetData(requests);
+                    var seen = new bool[expected];
+                    foreach (var request in requests)
+                    {
+                        Assert.That(request.InstanceID_LOD, Is.Zero);
+                        Assert.That(request.MeshletID, Is.LessThan((uint)expected));
+                        Assert.That(seen[request.MeshletID], Is.False, "Batch expansion produced a duplicate.");
+                        seen[request.MeshletID] = true;
+                    }
+                    Assert.That(seen, Is.All.True);
+                }
+            }
+            finally { foreach (var shader in shaders) if (shader != null) Object.DestroyImmediate(shader); }
+        }
+
+        [TestCase(0, 32)] // Ordinary CS path used by main view / CSM.
+        [TestCase(1, 32)] // VSM without view compaction.
+        [TestCase(2, 32)] // Production VSM hierarchy + compacted views.
+        [TestCase(2, 64)] // Parallel frontier finishes with fewer than 32 leaves.
+        [TestCase(2, 352)] // Parallel frontier splits into independent subtrees.
+        public void Dispatcher_LODSentinel_SelectsAutomaticErrorsAndPreservesForcedDepth(int mode, int nodesPerLevel)
+        {
+            Assume.That(SystemInfo.supportsComputeShaders, Is.True);
+            int nodeCount = 3 * nodesPerLevel;
             var scene = new VividGPUDrivenSceneData();
             scene.MutableMaterials.Add(default);
             for (int n = 0; n < nodeCount; n++)
@@ -36,7 +156,7 @@ namespace VividRP.Editor.Tests
             {
                 ObjectToWorldMatrix = float4x4.identity, WorldToObjectMatrix = float4x4.identity,
                 AABBMin = new float4(.48f, .48f, -.02f, 0), AABBMax = new float4(.52f, .52f, .02f, 0),
-                TotalMeshLODCount = nodeCount, MeshLODLevelCount = 3, LODErrorScale = 1,
+                TotalMeshLODCount = (uint)nodeCount, MeshLODLevelCount = 3, LODErrorScale = 1,
                 PassMask = VividInstancePassMask.Shadows, Flags = VividInstanceFlags.TwoSidedShadows,
             }, nodeCount);
             using var sceneBuffers = new VividGPUDrivenBufferSet();
@@ -78,16 +198,18 @@ namespace VividRP.Editor.Tests
                     dispatcher.BufferSet.VisibleMeshletRenderRequestCounterBuffer.GetData(count);
                     dispatcher.BufferSet.CandidateMeshletRenderRequestsBuffer.GetData(requests);
                     dispatcher.BufferSet.MeshletListBuildJobCounterBuffer.GetData(jobs);
-                    Assert.That(jobs[0], Is.EqualTo(mode == 2 ? 1u : 3u),
+                    Assert.That(jobs[0], Is.EqualTo((uint)(mode == 2 ? nodesPerLevel / 32 : nodeCount / 32)),
                         "The hierarchy must skip nonselected error ranges before submitting leaf jobs.");
                     Assert.That(count[0], Is.EqualTo((uint)nodesPerLevel), $"mode={mode}, depth={depths[i]}, threshold={thresholds[i]}");
-                    uint seen = 0;
+                    var seen = new bool[nodesPerLevel];
                     for (int n = 0; n < count[0]; n++)
                     {
                         Assert.That(requests[n].MeshletID / nodesPerLevel, Is.EqualTo(levels[i]));
-                        seen |= 1u << (int)(requests[n].MeshletID % nodesPerLevel);
+                        int index = (int)(requests[n].MeshletID % nodesPerLevel);
+                        Assert.That(seen[index], Is.False, "Duplicate candidate in the selected range.");
+                        seen[index] = true;
                     }
-                    Assert.That(seen, Is.EqualTo(uint.MaxValue));
+                    Assert.That(seen, Is.All.True);
                 }
             }
             finally { foreach (var shader in shaders) if (shader != null) Object.DestroyImmediate(shader); }

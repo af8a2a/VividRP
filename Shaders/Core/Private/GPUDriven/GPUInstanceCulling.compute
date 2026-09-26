@@ -4,7 +4,10 @@
 #pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
 #pragma kernel CSCompactVSMViews VIVID_VSM_EARLY_CULL VIVID_VSM_BUILD_COMPACT_VIEWS
 #pragma kernel CSVSMHierarchy VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY
+#pragma kernel CSVSMHierarchyEnqueue VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY VIVID_VSM_BATCH
+#pragma kernel CSVSMHierarchyTraverse VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY VIVID_VSM_BATCH
 #pragma use_dxc
+#pragma require wavebasic waveballot wavemath : VIVID_VSM_BATCH
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
 #if defined(VIVID_VSM_EARLY_CULL)
@@ -74,12 +77,67 @@ bool VSMLodRangeMaySelect(VSMLodHierarchyNode node, VividInstanceData instance,
 void EmitVSMLodJob(uint instanceID, uint contextIndex, uint jobsOffset, uint offset, uint count)
 {
     uint index;
+#if defined(VIVID_VSM_BATCH)
+    uint batchCount = WaveActiveCountBits(true), prefix = WavePrefixCountBits(true);
+    uint baseIndex = 0u;
+    if (WaveIsFirstLane())
+    {
+        InterlockedAdd(_MeshletListBuildJobCounter[contextIndex], batchCount, baseIndex);
+        InterlockedMax(_MeshletListBuildIndirectArgs[0], baseIndex + batchCount);
+    }
+    index = WaveReadLaneFirst(baseIndex) + prefix;
+#else
     InterlockedAdd(_MeshletListBuildJobCounter[contextIndex], 1u, index);
     InterlockedMax(_MeshletListBuildIndirectArgs[0], index + 1u);
+#endif
     VividMeshletListBuildJob job;
     job.InstanceID = instanceID; job.MeshLODNodeOffset = offset;
     job.MeshLODNodeCount = count; job.Padding0 = 0u;
     _MeshletListBuildJobs[jobsOffset + index] = job;
+}
+
+struct VSMLodTraversalState
+{
+    uint start, end, leafLevel;
+    float instanceScale, texelScaleSq, threshold;
+    bool automaticErrorBounds;
+};
+VSMLodTraversalState VSMLodState(VividInstanceData instance, uint contextIndex, uint start, uint end)
+{
+    uint leafLevel = instance.MeshLODLevelCount - 1u;
+    VividGPUCullingContext context = _CullingContexts[contextIndex];
+    VividGPULODSelectionContext lodContext = _LODSelectionContexts[0];
+    // Match MeshletListBuild's shadow-texel predicate and view scale exactly.
+    float texelsPerWorldUnit = length(context.ViewProjectionMatrix[0].xyz) * lodContext.ScreenSizePixels.x * 0.5;
+    float texelScaleSq = texelsPerWorldUnit * texelsPerWorldUnit;
+    float threshold = _MeshLODErrorThreshold * instance.LODErrorScale;
+    float3x3 columns = transpose((float3x3)instance.ObjectToWorldMatrix);
+    float instanceScale = max(length(columns[0]), max(length(columns[1]), length(columns[2])));
+    bool automaticErrorBounds = _ForcedMeshLODNodeDepth == VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH
+        && lodContext.CameraPosition.w == 0.0f && context.CameraIsPerspective == 0
+        && ((uint)context.PassMask & VIVIDINSTANCEPASSMASK_SHADOWS) != 0u
+        && isfinite(threshold) && threshold >= 0.0f
+        && isfinite(texelScaleSq) && texelScaleSq > 0.0f
+        && isfinite(instanceScale) && instanceScale > 0.0f;
+    VSMLodTraversalState state;
+    state.start = start; state.end = end; state.leafLevel = leafLevel;
+    state.instanceScale = instanceScale; state.texelScaleSq = texelScaleSq;
+    state.threshold = threshold; state.automaticErrorBounds = automaticErrorBounds;
+    return state;
+}
+bool VSMLodMayVisit(VSMLodHierarchyNode node, VividInstanceData instance, uint contextIndex,
+    float4x4 localToShadow, VSMLodTraversalState state)
+{
+    bool overlaps = node.Range.x < state.end && node.Range.x + node.Range.y > state.start;
+    if (_ForcedMeshLODNodeDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
+        overlaps = overlaps && ((_ForcedMeshLODNodeDepth >= node.Min.w && _ForcedMeshLODNodeDepth <= node.Max.w)
+            || (state.leafLevel < _ForcedMeshLODNodeDepth && state.leafLevel >= node.Min.w && state.leafLevel <= node.Max.w));
+    if (overlaps && state.automaticErrorBounds)
+        overlaps = VSMLodRangeMaySelect(node, instance, state.instanceScale, state.texelScaleSq, state.threshold);
+    if (overlaps)
+        overlaps = VividVSMCasterLocalBoundsOverlaps(contextIndex,
+            (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false, localToShadow);
+    return overlaps;
 }
 
 // Stackless preorder traversal. Every leaf is aligned to a 32-record job in
@@ -100,33 +158,11 @@ void TraverseVSMLodHierarchy(uint instanceID, VividInstanceData instance, uint c
         return;
     }
     uint stop = _VSMLodHierarchy[index].Range.z;
-    uint leafLevel = instance.MeshLODLevelCount - 1u;
-    VividGPUCullingContext context = _CullingContexts[contextIndex];
-    VividGPULODSelectionContext lodContext = _LODSelectionContexts[0];
-    // Match MeshletListBuild's shadow-texel predicate and view scale exactly.
-    float texelsPerWorldUnit = length(context.ViewProjectionMatrix[0].xyz) * lodContext.ScreenSizePixels.x * 0.5;
-    float texelScaleSq = texelsPerWorldUnit * texelsPerWorldUnit;
-    float threshold = _MeshLODErrorThreshold * instance.LODErrorScale;
-    float3x3 columns = transpose((float3x3)instance.ObjectToWorldMatrix);
-    float instanceScale = max(length(columns[0]), max(length(columns[1]), length(columns[2])));
-    bool automaticErrorBounds = _ForcedMeshLODNodeDepth == VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH
-        && lodContext.CameraPosition.w == 0.0f && context.CameraIsPerspective == 0
-        && ((uint)context.PassMask & VIVIDINSTANCEPASSMASK_SHADOWS) != 0u
-        && isfinite(threshold) && threshold >= 0.0f
-        && isfinite(texelScaleSq) && texelScaleSq > 0.0f
-        && isfinite(instanceScale) && instanceScale > 0.0f;
+    VSMLodTraversalState state = VSMLodState(instance, contextIndex, start, end);
     [loop] while (index < stop)
     {
         VSMLodHierarchyNode node = _VSMLodHierarchy[index];
-        bool overlaps = node.Range.x < end && node.Range.x + node.Range.y > start;
-        if (_ForcedMeshLODNodeDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
-            overlaps = overlaps && ((_ForcedMeshLODNodeDepth >= node.Min.w && _ForcedMeshLODNodeDepth <= node.Max.w)
-                || (leafLevel < _ForcedMeshLODNodeDepth && leafLevel >= node.Min.w && leafLevel <= node.Max.w));
-        if (overlaps && automaticErrorBounds)
-            overlaps = VSMLodRangeMaySelect(node, instance, instanceScale, texelScaleSq, threshold);
-        if (overlaps)
-            overlaps = VividVSMCasterLocalBoundsOverlaps(contextIndex,
-                (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false, localToShadow);
+        bool overlaps = VSMLodMayVisit(node, instance, contextIndex, localToShadow, state);
         if (!overlaps) { index = node.Range.z; continue; }
         if (node.Range.w == 0u) { index++; continue; }
         uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
@@ -134,6 +170,95 @@ void TraverseVSMLodHierarchy(uint instanceID, VividInstanceData instance, uint c
         index = node.Range.z;
     }
 }
+#if defined(VIVID_VSM_BATCH)
+// One record per surviving long instance/view. The fourth args word is its count;
+// the first three tile the work over X/Y so X never exceeds the dispatch limit.
+RWStructuredBuffer<uint2> _VSMLodTraversalTasks;
+RWStructuredBuffer<uint> _VSMLodTraversalArgs;
+groupshared uint gVSMLodFrontier[32];
+groupshared uint gVSMLodFrontierCount, gVSMLodNextCount;
+
+void EnqueueVSMLodTraversal(uint instanceID, uint contextIndex)
+{
+    uint count = WaveActiveCountBits(true), prefix = WavePrefixCountBits(true), baseIndex = 0u;
+    if (WaveIsFirstLane())
+    {
+        InterlockedAdd(_VSMLodTraversalArgs[3], count, baseIndex);
+        uint end = baseIndex + count;
+        InterlockedMax(_VSMLodTraversalArgs[0], min(end, 65535u));
+        InterlockedMax(_VSMLodTraversalArgs[1], (end + 65534u) / 65535u);
+    }
+    _VSMLodTraversalTasks[WaveReadLaneFirst(baseIndex) + prefix] = uint2(instanceID, contextIndex);
+}
+
+void TraverseVSMLodGroup(uint lane, uint instanceID, uint contextIndex)
+{
+    VividInstanceData instance = PullInstanceData(instanceID);
+    uint start = instance.TopMeshLODStartIndex;
+    uint count = start < _VSMLodRootCount ? min(instance.TotalMeshLODCount, _VSMLodRootCount - start) : 0u;
+    if (count == 0u) return; // Uniform for the entire group.
+    uint end = start + count, root = _VSMLodRoots[start];
+    uint jobsOffset = _CullingContexts[contextIndex].MeshletListBuildJobsOffset;
+    if (root >= _VSMLodHierarchyCount)
+    {
+        // Disjoint 32-record chunks, including an incomplete final chunk.
+        for (uint offset = lane * 32u; offset < count; offset += 1024u)
+            EmitVSMLodJob(instanceID, contextIndex, jobsOffset, offset, min(32u, count - offset));
+        return;
+    }
+    VSMLodTraversalState state = VSMLodState(instance, contextIndex, start, end);
+    float4x4 localToShadow = mul(_VSMProjections[contextIndex].worldToShadow, instance.ObjectToWorldMatrix);
+    if (lane == 0u) { gVSMLodFrontier[0] = root; gVSMLodFrontierCount = 1u; }
+    GroupMemoryBarrierWithGroupSync();
+    // Split only while at most 16 nodes are pending: two children per node always
+    // fit in 32 slots. No unbounded stack, persistent queue or overflow fallback.
+    [loop] while (gVSMLodFrontierCount != 0u && gVSMLodFrontierCount <= 16u)
+    {
+        bool branch = false;
+        uint left = 0u, right = 0u;
+        if (lane < gVSMLodFrontierCount)
+        {
+            uint index = gVSMLodFrontier[lane];
+            VSMLodHierarchyNode node = _VSMLodHierarchy[index];
+            if (VSMLodMayVisit(node, instance, contextIndex, localToShadow, state))
+            {
+                if (node.Range.w != 0u)
+                {
+                    uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
+                    EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first);
+                }
+                else { branch = true; left = index + 1u; right = _VSMLodHierarchy[left].Range.z; }
+            }
+        }
+        // All old frontier reads finish before any lane replaces its entries.
+        GroupMemoryBarrierWithGroupSync();
+        if (lane == 0u) gVSMLodNextCount = 0u;
+        GroupMemoryBarrierWithGroupSync();
+        uint children = branch ? 2u : 0u;
+        uint prefix = WavePrefixSum(children), waveCount = WaveActiveSum(children), waveBase = 0u;
+        if (WaveIsFirstLane() && waveCount != 0u) InterlockedAdd(gVSMLodNextCount, waveCount, waveBase);
+        waveBase = WaveReadLaneFirst(waveBase);
+        if (branch) { gVSMLodFrontier[waveBase + prefix] = left; gVSMLodFrontier[waveBase + prefix + 1u] = right; }
+        GroupMemoryBarrierWithGroupSync();
+        if (lane == 0u) gVSMLodFrontierCount = gVSMLodNextCount;
+        GroupMemoryBarrierWithGroupSync();
+    }
+    // At most one disjoint subtree per lane. Wave compaction remains valid for
+    // wave sizes below or above 32; no assumed hardware lane width or lane mask.
+    uint index = lane < gVSMLodFrontierCount ? gVSMLodFrontier[lane] : 0u;
+    uint stop = lane < gVSMLodFrontierCount ? _VSMLodHierarchy[index].Range.z : 0u;
+    [loop] while (index < stop)
+    {
+        VSMLodHierarchyNode node = _VSMLodHierarchy[index];
+        if (!VSMLodMayVisit(node, instance, contextIndex, localToShadow, state)) { index = node.Range.z; continue; }
+        if (node.Range.w == 0u) { index++; continue; }
+        uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
+        EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first);
+        index = node.Range.z;
+    }
+}
+#endif
+
 #endif
 
 void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
@@ -211,6 +336,14 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
+#if defined(VIVID_VSM_BATCH)
+    // Small ranges stay distributed across instance lanes; long ranges get a group.
+    if (totalMeshLODCount > 128u)
+    {
+        EnqueueVSMLodTraversal(instanceID, cullingContextIndex);
+        return;
+    }
+#endif
 #if defined(VIVID_VSM_LOD_HIERARCHY)
     TraverseVSMLodHierarchy(instanceID, instanceData, cullingContextIndex, cullingContext.MeshletListBuildJobsOffset, localToShadow);
     return;
@@ -275,4 +408,18 @@ void CSVSMCompacted(uint3 dispatchThreadID : SV_DispatchThreadID)
 #if defined(VIVID_VSM_LOD_HIERARCHY)
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSVSMHierarchy(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
+#endif
+
+#if defined(VIVID_VSM_BATCH)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMHierarchyEnqueue(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMHierarchyTraverse(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    uint task = group.x + group.y * 65535u;
+    if (task >= _VSMLodTraversalArgs[3]) return;
+    uint2 request = _VSMLodTraversalTasks[task];
+    if (request.x >= _InstanceDataCount || request.y >= _CullingContextCount) return;
+    TraverseVSMLodGroup(lane, request.x, request.y);
+}
 #endif

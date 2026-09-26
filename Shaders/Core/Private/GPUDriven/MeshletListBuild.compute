@@ -3,7 +3,9 @@
 #pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
 #pragma kernel CSVSMBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
+#pragma kernel CSVSMBoundsBatched VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_BATCH
 #pragma use_dxc
+#pragma require wavebasic waveballot wavemath : VIVID_VSM_BATCH
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
 #if defined(VIVID_VSM_EARLY_CULL)
@@ -106,6 +108,25 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
             GetRendererListID(instanceData, materialData, (uint) cullingContext.PassMask),
             VIVIDRENDERERLISTID_COUNT - 1u);
 
+#if defined(VIVID_VSM_BATCH)
+        // Every lane in a job shares the instance/material/view, so this wave can
+        // reserve both counters once for the complete variable-length expansion.
+        uint batchCount = WaveActiveSum(meshLODNode.MeshletCount);
+        uint prefix = WavePrefixSum(meshLODNode.MeshletCount), baseIndex = 0u;
+        if (WaveIsFirstLane() && batchCount != 0u)
+        {
+            InterlockedAdd(_VisibleMeshletRenderRequestCounter[cullingContextIndex], batchCount, baseIndex);
+            InterlockedAdd(_VisibleRendererListMeshletCounts[cullingContextIndex * VIVIDRENDERERLISTID_COUNT + rendererListIndex], batchCount);
+        }
+        uint firstRequest = WaveReadLaneFirst(baseIndex) + prefix;
+        [loop] for (uint meshletIndex = 0u; meshletIndex < meshLODNode.MeshletCount; ++meshletIndex)
+        {
+            VividMeshletRenderRequestPacked request;
+            request.InstanceID_LOD = job.InstanceID;
+            request.MeshletID = meshLODNode.MeshletStartIndex + meshletIndex;
+            _CandidateMeshletRenderRequests[cullingContext.MeshletRenderRequestsOffset + firstRequest + meshletIndex] = request;
+        }
+#else
         [loop]
         for (uint meshletIndex = 0u; meshletIndex < meshLODNode.MeshletCount; ++meshletIndex)
         {
@@ -121,6 +142,7 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
                 cullingContextIndex * VIVIDRENDERERLISTID_COUNT + rendererListIndex;
             InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListCountIndex], 1u);
         }
+#endif
     }
 }
 
@@ -149,4 +171,9 @@ void CSVSMCompacted(uint3 groupThreadID : SV_GroupThreadID, uint3 groupID : SV_G
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSVSMBounds(uint3 lane : SV_GroupThreadID, uint3 group : SV_GroupID) { RunCulling(lane, group); }
+#endif
+
+#if defined(VIVID_VSM_BATCH)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMBoundsBatched(uint3 lane : SV_GroupThreadID, uint3 group : SV_GroupID) { RunCulling(lane, group); }
 #endif

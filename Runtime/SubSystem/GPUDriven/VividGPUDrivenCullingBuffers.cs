@@ -20,6 +20,10 @@ namespace VividRP.Runtime.GPUDriven
         private NativeArray<uint> m_ZeroRendererListCountsUpload;
         private NativeArray<uint> m_ZeroIndirectDrawArgsWordsUpload;
 
+        private NativeArray<uint> m_InitialVSMLodTraversalArgs;
+        private GraphicsBuffer m_VSMLodTraversalTasks;
+        private GraphicsBuffer m_VSMLodTraversalArgs;
+
         private GraphicsBuffer m_CullingContextBuffer;
         private GraphicsBuffer m_LodSelectionContextBuffer;
         private GraphicsBuffer m_MeshletListBuildJobsBuffer;
@@ -96,6 +100,10 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer RecoveredRendererListMeshletCountsBuffer => m_RecoveredRendererListMeshletCountsBuffer;
 
         public GraphicsBuffer RecoveredMeshletIndirectDrawArgsBuffer => m_RecoveredMeshletIndirectDrawArgsBuffer;
+
+        public GraphicsBuffer VSMLodTraversalTasks => m_VSMLodTraversalTasks;
+
+        public GraphicsBuffer VSMLodTraversalArgs => m_VSMLodTraversalArgs;
 
         public bool SupportsOcclusion { get; }
 
@@ -345,6 +353,28 @@ namespace VividRP.Runtime.GPUDriven
                            * IndirectDrawArgsByteStride);
         }
 
+        // At most one long-range task per dispatched instance/view. Keep this
+        // storage lazy so non-VSM culling does not allocate a traversal queue.
+        public void EnsureVSMTraversalCapacity(int instanceDispatchCount, int cullingContextCount)
+        {
+            ThrowIfDisposed();
+            if (instanceDispatchCount < 0)
+                throw new ArgumentOutOfRangeException(nameof(instanceDispatchCount));
+            if (cullingContextCount <= 0)
+                throw new ArgumentOutOfRangeException(nameof(cullingContextCount));
+            EnsureStructuredBuffer(ref m_VSMLodTraversalTasks,
+                MultiplyCapacity(instanceDispatchCount, cullingContextCount), sizeof(uint) * 2,
+                "VividVSM_LODTraversalTasks");
+            EnsureStructuredBuffer(ref m_VSMLodTraversalArgs, 4, sizeof(uint),
+                GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
+                "VividVSM_LODTraversalArgs");
+            if (!m_InitialVSMLodTraversalArgs.IsCreated)
+            {
+                m_InitialVSMLodTraversalArgs = new NativeArray<uint>(4, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                m_InitialVSMLodTraversalArgs[1] = m_InitialVSMLodTraversalArgs[2] = 1u;
+            }
+        }
+
         public void Reset(CommandBuffer cmd)
         {
             ThrowIfDisposed();
@@ -354,6 +384,8 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(cmd));
             }
 
+            if (m_VSMLodTraversalArgs != null)
+                cmd.SetBufferData(m_VSMLodTraversalArgs, m_InitialVSMLodTraversalArgs);
             cmd.SetBufferData(MeshletListBuildJobCounterBuffer, m_ZeroUintUpload);
             cmd.SetBufferData(MeshletListBuildIndirectArgsBuffer, m_InitialIndirectDispatchArgsUpload);
             cmd.SetBufferData(GPUMeshletCullingIndirectDispatchArgsBuffer, m_InitialIndirectDispatchArgsUpload);
@@ -405,6 +437,11 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
+            m_VSMLodTraversalTasks?.Dispose();
+            m_VSMLodTraversalArgs?.Dispose();
+            m_VSMLodTraversalTasks = null;
+            m_VSMLodTraversalArgs = null;
+            DisposeNativeArray(ref m_InitialVSMLodTraversalArgs);
             m_CullingContextBuffer?.Dispose();
             m_LodSelectionContextBuffer?.Dispose();
             m_MeshletListBuildJobsBuffer?.Dispose();

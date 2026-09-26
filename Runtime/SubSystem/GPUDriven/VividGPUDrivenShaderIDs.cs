@@ -61,6 +61,9 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _VividPrimitiveDrawSetEnabled =
             Shader.PropertyToID(nameof(_VividPrimitiveDrawSetEnabled));
 
+        public static readonly int _VSMLodTraversalTasks = Shader.PropertyToID(nameof(_VSMLodTraversalTasks));
+        public static readonly int _VSMLodTraversalArgs = Shader.PropertyToID(nameof(_VSMLodTraversalArgs));
+
         public static readonly int _CullingContexts = Shader.PropertyToID(nameof(_CullingContexts));
         public static readonly int _CullingContextCount = Shader.PropertyToID(nameof(_CullingContextCount));
         public static readonly int _LODSelectionContexts = Shader.PropertyToID(nameof(_LODSelectionContexts));

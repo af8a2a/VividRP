@@ -29,12 +29,12 @@
 
 | 目录 / 文件 | 职责 |
 | --- | --- |
-| `Public/VividVirtualShadowMapAddressing.hlsl` | 共享虚拟页寻址 |
+| `Public/VividVirtualShadowMapAddressing.hlsl` | 共享虚拟页寻址、receiver mask 和页层级寻址/归约 |
 | `Public/VividVirtualShadowMapProjection.hlsl` | 投影 ABI 和坐标变换 |
 | `Public/VividVirtualShadowMapCaster.hlsl` | Caster 多层深度插入 |
 | `Private/VSMPageDefinitions.hlsl` | 页标志、请求优先级及调试统计定义 |
-| `Private/VSMPageManagement.hlsl` | Meshlet 页请求、分配、重映射、失效、清页、占用归约 |
-| `Private/VSMPageMarking.hlsl` | 专用接收点请求生成；逐层合并 SMRT 和 PCF footprint，保留独立角色与完整回退链 |
+| `Private/VSMPageManagement.hlsl` | Meshlet 页请求、分配、重映射、失效、清页、占用归约和 PageFlags/mask 层级裁剪 |
+| `Private/VSMPageMarking.hlsl` | 独立末层粗页和接收点请求生成；逐层合并 SMRT 和 PCF footprint，保留独立角色与完整回退链 |
 | `Private/VSMPhysicalSampling.hlsl` | 页解析、深度层读取、虚拟采样 |
 | `Private/VSMReceiverNormal.hlsl` | 接收面法线重建 |
 | `Private/VSMReceiverResolve.hlsl` | 接收面偏移、PCF、层间过渡和阴影求值 |
@@ -50,7 +50,7 @@
 - `Runtime/SubSystem/VirtualShadowMap/RenderPass/VSMShadowPass.cs` 独立准备和执行 VSM；其生命周期管理 VSM 资源释放。公开 Pass 类型沿用调试 Pass 所在的 `VividRP.Runtime.RenderPass.Core` 命名空间，算法与状态仍属于 VirtualShadowMap 子系统。
 - `Runtime/RenderPass/Core/CSMShadowPass.cs` 只绘制传统级联阴影，VSM 当帧成功后跳过绘制。`ShadowCasterPass.cs` 仅共享 Meshlet、材质和虚拟纹理绑定等 caster 基础代码，不持有 VSM 页管理或 CSM 投影算法。
 - `Runtime/RenderPass/Core/CSMShadowResolvePass.cs` 保留共用 resolve 调度与屏幕空间历史资源绑定。
-- `Shaders/Core/Private/CSMShadowResolve.compute` 保留 CSM 算法、共享资源声明和 31 个 kernel 入口；VSM 算法通过新目录的模块引入。新增 kernel 继续追加，避免热重载期间改变已缓存的索引。
+- `Shaders/Core/Private/CSMShadowResolve.compute` 保留 CSM 算法、共享资源声明和 kernel 入口；VSM 算法通过新目录的模块引入。新增 kernel 继续追加，避免热重载期间改变已缓存的索引。
 - `CascadedShadowSettingsVolume` 继续承载现有 CSM/VSM 序列化设置。PrimitiveScene、GPUDriven 的 caster 变化记录及失效通知仍属于各自子系统。
 - VSM 录制和质量复现工具集中于 `Editor/Tools/VirtualShadowMap/`；共用诊断入口仍在 `Editor/Tools/Diagnostics/`。
 - `VividResources.cs` 的调试 shader 路径已更新；`PipelineResources.asset` 由 `PipelineResourceUpdater` 同步，GUID 不变。现有包路径别名使用同一组新相对路径。
@@ -130,9 +130,23 @@
 
 PCF、SMRT 逐格采样和 SMRT 整段 footprint 预检都检查完成覆盖；空页标记和页内地址复用不能绕过检查。缺覆盖仍走较粗层回退，Availability 调试原因增加 bit 16（uncovered）。这避免把部分绘制页当成完整、全亮页面。
 
-UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`VirtualShadowMapBuildPerPageDrawCommands.usf` 的静态缓存禁用 mask 裁剪，以及 `VirtualShadowMapPhysicalPageManagement.usf` 对部分动态页的有效性限制。本实现用完成覆盖检查保留动态复用；尚未采用 UE 的 mask 纹理 mip 层级或 froxel 标记。
+UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`VirtualShadowMapBuildPerPageDrawCommands.usf` 的静态缓存禁用 mask 裁剪，以及 `VirtualShadowMapPhysicalPageManagement.usf` 对部分动态页的有效性限制。本实现用完成覆盖检查保留动态复用；新增的 mask 层级使用结构化缓冲，见下一节，尚未采用 froxel 标记。
 
 资源由 `VirtualShadowMapPrototypeRuntime` 按有效尺寸复用和释放，并纳入 RenderGraph 访问声明。独立 GPU 检查、合成质量回放和实际场景单帧记录位于忽略目录 `Temp~/VSM/ReceiverMask_20260926/`。
+
+## 独立粗页与分配后的层级裁剪
+
+`RecordReceiverPageRequests` 清空当帧请求后先派发 `VSMMarkCoarsePages`，再执行像素标记。粗页 kernel 不读取 Depth/GBuffer，以最粗 clipmap 原点的投影为中心，按 `floor(pageAddress - 0.5)` / `ceil(pageAddress - 0.5)` 标记最多四页，将 Requested/Coarse 角色和完整 mask OR 入当帧缓冲。原有像素请求、SMRT continuation、过渡层、PCF 和完整父链继续保留。当前整个 Pass 仍要求有效的 Depth/GBuffer 输入；这里的独立指粗页生成本身不依赖可见接收点。
+
+此实现对应 UE `VirtualShadowMapPageMarking.usf::MarkCoarsePages` 的定向光原点覆盖方式，当前只启用末层，没有迁移 UE 可配置的中间 coarse clipmap 范围、局部光或体积接收点策略。
+
+页分配提交、静态/动态失效和 `VSMBuildPageWorkLists` 全部完成后，`RecordPageCullHierarchy` 先清空层级，再按物理槽并行构建。每个有效 owner 校验页表/元数据一致性，将 Allocated 和已选中的 StaticDirty/DynamicDirty 标志逐级 OR；Deferred 页仅贡献 Allocated。动态页的 8×8 当帧 mask 通过 2×2 单元 OR 保守缩小并传播到父节点，静态绘制始终不受 receiver mask 限制。
+
+`PageCullHierarchy` 为每个 clipmap 保存从页网格到 1×1 根节点的 `uint3` 数组，x 是上述标志，yz 是动态 mask。页轴向上补齐到二次幂，补齐叶子保持空，支持非二次幂分辨率。Runtime 按有效布局复用、释放，RenderGraph 声明读写；不持久化当帧层级数据。
+
+生产 meshlet cull 在枚举页面前，根据投影矩形尺寸选取 H-mip，最多读取四个节点提前拒绝无补绘需求的 caster；通过后仍执行原逐页精确检查。层级是每个 clipmap 内的空间汇总，不生成额外父 clipmap 请求或删除现有请求。普通 Unity caster 仍使用已有逐 texel mask 裁剪。
+
+该流程对应 UE `VirtualShadowMapPageManagement.usf::GenerateHierarchicalPageFlags` 的按物理页传播 PageFlags/receiver mask；存储采用结构化缓冲，标志遵守 VividRP 的补绘预算。UE 的 Allocated/UncachedPageRectBounds 尚未迁移。新增计时项为 `VSM.MarkCoarsePages`、`VSM.ClearPageHierarchy`、`VSM.BuildPageHierarchy`；验证证据位于忽略目录 `Temp~/VSM/CoarseHierarchy_20260926/`，尚无生产 GPU 耗时收益结论。
 
 ## SMRT 成本诊断（2026-09-17）
 

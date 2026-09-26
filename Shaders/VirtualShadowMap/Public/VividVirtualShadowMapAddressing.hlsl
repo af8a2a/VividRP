@@ -38,6 +38,39 @@ bool VividVSMReceiverMaskOverlapsRect(uint2 mask, uint2 page, uint2 low, uint2 h
     return any((mask & rect) != 0u);
 }
 
+// Spatial hierarchy within each clipmap, not requests for another clipmap.
+// Pad arbitrary page axes to a power of two; padded leaves stay empty.
+uint VividVSMHierarchyAxis(uint axis) { return axis <= 1u ? 1u : 1u << ((uint)firstbithigh(axis - 1u) + 1u); }
+uint VividVSMHierarchyNodesPerLevel(uint axis)
+{
+    axis = VividVSMHierarchyAxis(axis);
+    return (4u * axis * axis - 1u) / 3u;
+}
+uint VividVSMHierarchyAddress(uint level, uint2 coord, uint mip, uint axis)
+{
+    axis = VividVSMHierarchyAxis(axis);
+    uint mipAxis = axis >> mip;
+    uint offset = 4u * (axis * axis - mipAxis * mipAxis) / 3u;
+    return level * VividVSMHierarchyNodesPerLevel(axis) + offset + coord.y * mipAxis + coord.x;
+}
+
+// OR each 2x2 group of cells into a 4x4 quadrant of the parent 8x8 mask.
+uint2 VividVSMReduceReceiverMask(uint2 mask, uint2 quadrant)
+{
+    uint2 result = 0u;
+    [unroll] for (uint y = 0u; y < 4u; y++)
+    {
+        uint rows = mask[y >> 1u] >> ((y & 1u) * 16u);
+        uint bits = (rows | (rows >> 8u)) & 0xffu;
+        bits = (bits | (bits >> 1u)) & 0x55u;
+        bits = (bits | (bits >> 1u)) & 0x33u;
+        bits = (bits | (bits >> 2u)) & 0x0fu;
+        uint row = quadrant.y * 4u + y;
+        result[row >> 2u] |= bits << ((row & 3u) * 8u + quadrant.x * 4u);
+    }
+    return result;
+}
+
 // Callers provide a positive resolution. SV_Position is in non-negative
 // raster coordinates; truncation selects its pixel, including pixel centers.
 uint2 VividVSMRasterPositionToVirtualTexel(

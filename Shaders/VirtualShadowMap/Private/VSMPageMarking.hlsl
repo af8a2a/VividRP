@@ -85,6 +85,25 @@ void EmitVSMReceiverFootprints(int level, VSMReceiverPageFootprint a, VSMReceive
             }
 }
 
+// UE's independent terminal coarse coverage: up to four pages surrounding the
+// clipmap origin, even with no visible receivers. OR preserves all pixel roles.
+// Start with the terminal level; intermediate coarse ranges are a separate policy.
+[numthreads(1, 1, 1)]
+void VSMMarkCoarsePages(uint3 id : SV_DispatchThreadID)
+{
+    if (_VSMProjectionCount <= 0 || _VSMPrototypeRequestEnabled == 0) return;
+    int level = _VSMProjectionCount - 1;
+    VividVSMProjection p = _VSMProjections[level];
+    float2 uv = mul(p.worldToShadow, float4(p.selectionSphere.xyz, 1)).xy;
+    float2 center = uv * _VSMPrototypePagesPerAxis - 0.5;
+    int2 low = max((int2)floor(center), 0);
+    int2 high = min((int2)ceil(center), _VSMPrototypePagesPerAxis - 1);
+    for (int y = low.y; y <= high.y; y++)
+        for (int x = low.x; x <= high.x; x++)
+            EmitVSMReceiverPage(uint2(x, y), level,
+                kVSMPageRequested | kVSMPageCoarseRequested, 0xffffffffu);
+}
+
 void MarkVSMReceiverPage(float2 uv, int level, uint role, int halo)
 {
     EmitVSMReceiverFootprints(level, BuildVSMReceiverPageFootprint(uv, level, role, halo),

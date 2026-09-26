@@ -26,6 +26,7 @@
 #pragma kernel MarkReceiverInputs VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE
 #pragma kernel MarkFootprintPairs VIVID_VSM_MARK_RECEIVERS
 #pragma kernel ResolveOnlyReceivers VIVID_VSM_RESOLVE_RECEIVERS
+#pragma kernel InspectVSMPageHierarchy
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -39,6 +40,27 @@ RWStructuredBuffer<float2> _SamplingResults;
 int _SamplingCount;
 int2 _SamplingPixel;
 float2 _SamplingAdaptive; // wave adaptation enabled, use production uniform binding
+
+// Compare the fast conservative test with the shipping exact page predicates.
+[numthreads(64, 1, 1)]
+void InspectVSMPageHierarchy(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    uint4 rect = (uint4)_SamplingInputs[id.x];
+    uint level = (uint)_SamplingNormals[id.x].x;
+    uint2 first = rect.xy / (uint)_VSMPrototypePageSize;
+    uint2 last = rect.zw / (uint)_VSMPrototypePageSize;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    bool exact = false;
+    for (uint y = first.y; y <= last.y; y++)
+        for (uint x = first.x; x <= last.x; x++)
+        {
+            uint page = level * axis * axis + y * axis + x;
+            if (IsVSMCasterPageRelevant(page) && VSMCasterOverlapsReceiverMask(page, uint2(x, y), rect.xy, rect.zw))
+                exact = true;
+        }
+    _SamplingResults[id.x] = float2(VSMCasterHierarchyOverlaps(level, rect.xy, rect.zw), exact);
+}
 
 // Test the production marker without any resident metadata or physical pools.
 [numthreads(64, 1, 1)]

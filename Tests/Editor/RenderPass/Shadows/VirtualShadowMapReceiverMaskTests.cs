@@ -13,11 +13,14 @@ namespace VividRP.Editor.Tests
     internal sealed class VirtualShadowMapReceiverMaskTestBuffers : IDisposable
     {
         internal readonly GraphicsBuffer Requests, Completed;
+        private readonly GraphicsBuffer m_DisabledHierarchy;
         private static readonly string[] s_Kernels =
         {
             "CSMShadowResolve",
             "VSMReceiverDebug",
             "VSMMarkReceiverPages",
+            "VSMMarkCoarsePages",
+            "VSMBuildPageCullHierarchy",
             "VSMPrototypeClearReceiverRequests",
             "VSMPrototypeResetReceiverFeedback",
             "VSMPrototypePrepareAllocation",
@@ -48,6 +51,8 @@ namespace VividRP.Editor.Tests
         {
             Requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 8);
             Completed = new GraphicsBuffer(GraphicsBuffer.Target.Structured, slots, 8);
+            m_DisabledHierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 12);
+            shader.SetInt("_VSMPageCullHierarchyEnabled", 0);
             Requests.SetData(new uint2[pages]); Completed.SetData(new uint2[slots]);
             shader.SetInt("_VSMReceiverMaskEnabled", enabled ? 1 : 0);
             foreach (string name in s_Kernels)
@@ -56,10 +61,12 @@ namespace VividRP.Editor.Tests
                 int kernel = shader.FindKernel(name);
                 shader.SetBuffer(kernel, "_VSMPageReceiverMasks", Requests);
                 shader.SetBuffer(kernel, "_VSMPhysicalReceiverMasks", Completed);
+                if (name == "VSMPrototypeCullMeshletsToPages")
+                    shader.SetBuffer(kernel, "_VSMPageCullHierarchy", m_DisabledHierarchy);
             }
         }
 
-        public void Dispose() { Requests.Dispose(); Completed.Dispose(); }
+        public void Dispose() { Requests.Dispose(); Completed.Dispose(); m_DisabledHierarchy.Dispose(); }
     }
 
     public sealed class VirtualShadowMapReceiverMaskTests

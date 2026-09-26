@@ -26,6 +26,70 @@ bool IsVSMCasterPageRelevant(uint virtualPageIndex)
     return (flags & (_VSMPrototypeCasterLayer == 0 ? kVSMPageDirty : kVSMPageDynamicDirty)) != 0u;
 }
 
+[numthreads(64, 1, 1)]
+void VSMClearPageCullHierarchy(uint3 id : SV_DispatchThreadID)
+{
+    uint count = (uint)_VSMProjectionCount * VividVSMHierarchyNodesPerLevel((uint)_VSMPrototypePagesPerAxis);
+    if (id.x < count) _VSMPageCullHierarchyRW[id.x] = 0u;
+}
+
+// Run after invalidation and budget selection. Each physical owner contributes
+// only its allocated flag and its selected (non-deferred) production work.
+// All levels are atomically built in one dispatch, after the separate clear.
+[numthreads(64, 1, 1)]
+void VSMBuildPageCullHierarchy(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[id.x];
+    if (owner == 0u || owner > (uint)_VSMPrototypePageTableEntryCount) return;
+    uint page = owner - 1u;
+    uint4 metadata = _VSMPrototypePageMetadata[page];
+    if (_VSMPrototypePageTable[page] != id.x + 1u || metadata.y != id.x + 1u
+        || (metadata.x & kVSMPageAllocated) == 0u) return;
+    uint flags = kVSMPageAllocated;
+    if ((metadata.x & kVSMPageDeferred) == 0u)
+        flags |= metadata.x & (kVSMPageDirty | kVSMPageDynamicDirty);
+    uint2 mask = 0u;
+    if ((flags & kVSMPageDynamicDirty) != 0u)
+        mask = _VSMReceiverMaskEnabled != 0 ? _VSMPageReceiverMasks[page] : 0xffffffffu;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint level = page / (axis * axis);
+    uint2 coord = uint2(page % axis, (page / axis) % axis);
+    uint hierarchyAxis = VividVSMHierarchyAxis(axis);
+    for (uint mip = 0u; (hierarchyAxis >> mip) > 0u; mip++)
+    {
+        uint address = VividVSMHierarchyAddress(level, coord, mip, axis);
+        InterlockedOr(_VSMPageCullHierarchyRW[address].x, flags);
+        if (mask.x != 0u) InterlockedOr(_VSMPageCullHierarchyRW[address].y, mask.x);
+        if (mask.y != 0u) InterlockedOr(_VSMPageCullHierarchyRW[address].z, mask.y);
+        mask = VividVSMReduceReceiverMask(mask, coord & 1u);
+        coord >>= 1u;
+    }
+}
+
+// At most four H-mip nodes for a rectangle. Positive results are conservative;
+// the existing per-page checks still decide which records to submit.
+bool VSMCasterHierarchyOverlaps(uint level, uint2 low, uint2 high)
+{
+    if (_VSMPageCullHierarchyEnabled == 0) return true;
+    uint pageSize = (uint)_VSMPrototypePageSize;
+    uint2 lowPage = low / pageSize, highPage = high / pageSize;
+    uint span = max(highPage.x - lowPage.x + 1u, highPage.y - lowPage.y + 1u);
+    uint mip = span > 1u ? (uint)firstbithigh(span - 1u) + 1u : 0u;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint2 first = lowPage >> mip, last = highPage >> mip;
+    uint flag = _VSMPrototypeCasterLayer == 0 ? kVSMPageDirty : kVSMPageDynamicDirty;
+    for (uint y = first.y; y <= last.y; y++)
+        for (uint x = first.x; x <= last.x; x++)
+        {
+            uint3 node = _VSMPageCullHierarchy[VividVSMHierarchyAddress(level, uint2(x, y), mip, axis)];
+            if ((node.x & flag) != 0u && (_VSMPrototypeCasterLayer == 0 || _VSMReceiverMaskEnabled == 0
+                || VividVSMReceiverMaskOverlapsRect(node.yz, uint2(x, y), low, high, pageSize << mip)))
+                return true;
+        }
+    return false;
+}
+
 void AppendVSMPageMeshletRequest(
     uint rendererListIndex,
     VividMeshletRenderRequestPacked sourceRequest,
@@ -254,6 +318,8 @@ void VSMPrototypeCullMeshletsToPages(
     {
         return;
     }
+
+    if (!VSMCasterHierarchyOverlaps(cascadeIndex, minTexel, maxTexel)) return;
 
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
     const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;

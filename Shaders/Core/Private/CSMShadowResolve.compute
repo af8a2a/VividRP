@@ -36,6 +36,9 @@
 #pragma kernel VSMReceiverCost VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_SMRT_COST VIVID_VSM_ADAPTIVE_RAYS
 #pragma kernel VSMShadowResolveAdaptive VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS
 #pragma kernel VSMClearVirtualPageMappings
+#pragma kernel VSMMarkCoarsePages
+#pragma kernel VSMClearPageCullHierarchy
+#pragma kernel VSMBuildPageCullHierarchy
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -61,6 +64,10 @@ RWStructuredBuffer<uint> _VSMPageRequestFlags;
 RWStructuredBuffer<uint2> _VSMPageReceiverMasks;
 RWStructuredBuffer<uint2> _VSMPhysicalReceiverMasks;
 int _VSMReceiverMaskEnabled;
+// Per-clipmap spatial H-mips: allocated/selected dirty flags, dynamic mask xy.
+StructuredBuffer<uint3> _VSMPageCullHierarchy;
+RWStructuredBuffer<uint3> _VSMPageCullHierarchyRW;
+int _VSMPageCullHierarchyEnabled;
 RWStructuredBuffer<uint> _VSMPrototypePhysicalPageOwners;
 RWStructuredBuffer<uint> _VSMPrototypeAllocatorCounters;
 RWStructuredBuffer<uint> _VSMAllocationRequests;

@@ -41,9 +41,13 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_PageMetadata;
         private static GraphicsBuffer s_PageRequestFlags;
         private static GraphicsBuffer s_PageReceiverMasks, s_PhysicalReceiverMasks;
+        private static GraphicsBuffer s_PageCullHierarchy;
         internal static readonly int ReceiverMaskEnabledId = Shader.PropertyToID("_VSMReceiverMaskEnabled");
         internal static readonly int PageReceiverMasksId = Shader.PropertyToID("_VSMPageReceiverMasks");
         internal static readonly int PhysicalReceiverMasksId = Shader.PropertyToID("_VSMPhysicalReceiverMasks");
+        internal static readonly int PageCullHierarchyId = Shader.PropertyToID("_VSMPageCullHierarchy");
+        internal static readonly int PageCullHierarchyRWId = Shader.PropertyToID("_VSMPageCullHierarchyRW");
+        internal static readonly int PageCullHierarchyEnabledId = Shader.PropertyToID("_VSMPageCullHierarchyEnabled");
         private static GraphicsBuffer s_PhysicalPageOwners;
         private static GraphicsBuffer s_AllocatorCounters;
         private static GraphicsBuffer s_AllocationRequests;
@@ -99,6 +103,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static GraphicsBuffer PageRequestFlags => s_PageRequestFlags;
         internal static GraphicsBuffer PageReceiverMasks => s_PageReceiverMasks;
         internal static GraphicsBuffer PhysicalReceiverMasks => s_PhysicalReceiverMasks;
+        internal static GraphicsBuffer PageCullHierarchy => s_PageCullHierarchy;
         internal static GraphicsBuffer PhysicalPageOwners => s_PhysicalPageOwners;
         internal static GraphicsBuffer AllocatorCounters => s_AllocatorCounters;
         internal static GraphicsBuffer AllocationRequests => s_AllocationRequests;
@@ -134,6 +139,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             && s_PageRequestFlags.count == PageTableEntryCount
             && s_PageReceiverMasks?.IsValid() == true && s_PageReceiverMasks.count == PageTableEntryCount
             && s_PhysicalReceiverMasks?.IsValid() == true
+            && s_PageCullHierarchy?.IsValid() == true
             && s_PageTable.count == PageTableEntryCount
             && s_PageMetadata.count == PageTableEntryCount;
         internal static VirtualShadowMapPrototypeFrameState FrameState => s_FrameState;
@@ -255,6 +261,14 @@ namespace VividRP.Runtime.VirtualShadowMap
             }
             EnsureReceiverMaskBuffer(ref s_PageReceiverMasks, pageCount, "VSMPageReceiverMasks");
             EnsureReceiverMaskBuffer(ref s_PhysicalReceiverMasks, Mathf.Max(s_PhysicalPageCapacity, 1), "VSMPhysicalReceiverMasks");
+            int hierarchyCount = CalculateHierarchyNodesPerLevel(s_PagesPerAxis) * Mathf.Max(s_CascadeCount, 1);
+            if (s_PageCullHierarchy == null || !s_PageCullHierarchy.IsValid() || s_PageCullHierarchy.count != hierarchyCount)
+            {
+                s_PageCullHierarchy?.Dispose();
+                s_PageCullHierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, hierarchyCount, sizeof(uint) * 3)
+                { name = "VSMPageCullHierarchy" };
+                // Every frame clears this buffer before generation or consumption.
+            }
             int words = CoreUtils.DivRoundUp(pageCount, 32);
             if (s_AllocationRequests == null || !s_AllocationRequests.IsValid() || s_AllocationRequests.count != words)
             {
@@ -269,6 +283,12 @@ namespace VividRP.Runtime.VirtualShadowMap
                 { name = "VSMPagePressure" };
                 s_PagePressure.SetData(s_PagePressureUpload);
             }
+        }
+
+        internal static int CalculateHierarchyNodesPerLevel(int pagesPerAxis)
+        {
+            int axis = Mathf.NextPowerOfTwo(Mathf.Max(pagesPerAxis, 1));
+            return (4 * axis * axis - 1) / 3;
         }
 
         private static void EnsureReceiverMaskBuffer(ref GraphicsBuffer buffer, int count, string name)
@@ -501,6 +521,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_PageRequestFlags.count == pageTableEntryCount
                 && s_PageReceiverMasks != null && s_PageReceiverMasks.IsValid() && s_PageReceiverMasks.count == pageTableEntryCount
                 && s_PhysicalReceiverMasks != null && s_PhysicalReceiverMasks.IsValid() && s_PhysicalReceiverMasks.count == physicalPageCapacity
+                && s_PageCullHierarchy != null && s_PageCullHierarchy.IsValid()
+                && s_PageCullHierarchy.count == CalculateHierarchyNodesPerLevel(pagesPerAxis) * resolvedCascadeCount
                 && s_PhysicalPageOwners != null
                 && s_PhysicalPageOwners.IsValid()
                 && s_PhysicalPageOwners.count == physicalPageCapacity
@@ -877,6 +899,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_PageRequestFlags = null;
             s_PageReceiverMasks?.Dispose(); s_PageReceiverMasks = null;
             s_PhysicalReceiverMasks?.Dispose(); s_PhysicalReceiverMasks = null;
+            s_PageCullHierarchy?.Dispose(); s_PageCullHierarchy = null;
             s_PhysicalPageOwners?.Dispose();
             s_PhysicalPageOwners = null;
             s_AllocatorCounters?.Dispose();

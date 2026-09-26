@@ -1,8 +1,12 @@
 #pragma kernel CS
 
+#pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+#if defined(VIVID_VSM_EARLY_CULL)
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMPageCulling.hlsl"
+#endif
 
 #define THREAD_GROUP_SIZE 32
 
@@ -20,8 +24,7 @@ RWStructuredBuffer<VividMeshletRenderRequestPacked> _CandidateMeshletRenderReque
 RWStructuredBuffer<uint> _VisibleMeshletRenderRequestCounter;
 RWStructuredBuffer<uint> _VisibleRendererListMeshletCounts;
 
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_GroupID)
+void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_GroupID)
 {
     const uint cullingContextIndex = groupID.y;
     if (cullingContextIndex >= max(_CullingContextCount, 1u) ||
@@ -41,6 +44,9 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
     const float distanceToViewSq = LengthSq(lodSelectionContext.CameraPosition.xyz - aabbCenterWS);
     const uint baseNodeIndex = instanceData.TopMeshLODStartIndex + job.MeshLODNodeOffset;
 
+#if defined(VIVID_VSM_EARLY_CULL)
+    [loop]
+#endif
     for (uint nodeOffset = groupThreadID.x; nodeOffset < job.MeshLODNodeCount; nodeOffset += THREAD_GROUP_SIZE)
     {
         const uint nodeIndex = baseNodeIndex + nodeOffset;
@@ -73,6 +79,12 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
             continue;
         }
 
+#if defined(VIVID_VSM_EARLY_CULL)
+        // Reject selected node bounds before expanding meshlets and reserving requests.
+        if (!VividVSMCasterSphereOverlaps(cullingContextIndex,
+                TransformSphere(meshLODNode.Bounds, instanceData.ObjectToWorldMatrix))) continue;
+#endif
+
         const uint rendererListIndex = min(
             GetRendererListID(instanceData, materialData, (uint) cullingContext.PassMask),
             VIVIDRENDERERLISTID_COUNT - 1u);
@@ -93,4 +105,18 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
             InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListCountIndex], 1u);
         }
     }
+}
+
+#if defined(VIVID_VSM_EARLY_CULL)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSM(uint3 groupThreadID : SV_GroupThreadID, uint3 groupID : SV_GroupID)
+{
+    RunCulling(groupThreadID, groupID);
+}
+#endif
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CS(uint3 groupThreadID : SV_GroupThreadID, uint3 groupID : SV_GroupID)
+{
+    RunCulling(groupThreadID, groupID);
 }

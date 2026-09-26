@@ -3,6 +3,7 @@ using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
 using VividRP.Runtime.PrimitiveScene;
+using VividRP.Runtime.VirtualShadowMap;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -252,7 +253,8 @@ namespace VividRP.Runtime.RenderPass.Core
             out bool hasDraws,
             VividGPUCullingContext[] cullingContexts,
             int projectionCount,
-            in VividGPULODSelectionContext lodContext)
+            in VividGPULODSelectionContext lodContext,
+            VirtualShadowMapCullingParameters vsmCulling = default)
         {
             requestsBuffer = null;
             argsBuffer = null;
@@ -275,7 +277,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 resources.MeshletListBuildCompute,
                 resources.GPUMeshletCullingCompute,
                 resources.FixupVisibleMeshletIndirectDrawArgsCompute,
-                drawSet);
+                drawSet, vsmCulling);
             requestsBuffer = system.GetShadowVisibleMeshletRenderRequestsBuffer(0);
             argsBuffer = system.GetShadowVisibleMeshletIndirectDrawArgsBuffer(0);
             hasDraws = requestsBuffer != null && argsBuffer != null;

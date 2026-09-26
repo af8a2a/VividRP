@@ -1253,7 +1253,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     meshletContext.StaticDrawSet,
                     out staticRequestsBuffer,
                     out staticArgsBuffer,
-                    out bool hasStaticDraws, m_ClipmapCullingContexts, VirtualShadowMapPrototypeRuntime.Projections.Count, in m_ClipmapLODContext))
+                    out bool hasStaticDraws, m_ClipmapCullingContexts, VirtualShadowMapPrototypeRuntime.Projections.Count, in m_ClipmapLODContext,
+                    VirtualShadowMapCullingParameters.ForCurrentFrame(0)))
                 {
                     fallbackReason = VirtualShadowMapPrototypeFallbackReason
                         .RecordPreparationFailed;
@@ -1321,7 +1322,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     meshletContext.DynamicDrawSet,
                     out dynamicRequestsBuffer,
                     out dynamicArgsBuffer,
-                    out bool hasDynamicDraws, m_ClipmapCullingContexts, VirtualShadowMapPrototypeRuntime.Projections.Count, in m_ClipmapLODContext))
+                    out bool hasDynamicDraws, m_ClipmapCullingContexts, VirtualShadowMapPrototypeRuntime.Projections.Count, in m_ClipmapLODContext,
+                    VirtualShadowMapCullingParameters.ForCurrentFrame(1)))
                 {
                     fallbackReason = VirtualShadowMapPrototypeFallbackReason
                         .RecordPreparationFailed;

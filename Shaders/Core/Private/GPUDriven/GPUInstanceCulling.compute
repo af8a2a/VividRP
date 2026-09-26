@@ -1,8 +1,12 @@
 #pragma kernel CS
 
+#pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+#if defined(VIVID_VSM_EARLY_CULL)
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMPageCulling.hlsl"
+#endif
 
 #define THREAD_GROUP_SIZE 32
 #define MAX_LODNODES_PER_THREAD_GROUP 32u
@@ -17,8 +21,7 @@ RWStructuredBuffer<VividMeshletListBuildJob> _MeshletListBuildJobs;
 RWStructuredBuffer<uint> _MeshletListBuildJobCounter;
 RWStructuredBuffer<uint> _MeshletListBuildIndirectArgs;
 
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     const uint cullingContextCount = max(_CullingContextCount, 1u);
     const uint cullingContextIndex = dispatchThreadID.y;
@@ -64,6 +67,11 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
+#if defined(VIVID_VSM_EARLY_CULL)
+    // Reject before allocating LOD traversal jobs.
+    if (!VividVSMCasterSphereOverlaps(cullingContextIndex, boundingSphereWS)) return;
+#endif
+
     const uint totalMeshLODCount = instanceData.TotalMeshLODCount;
     if (totalMeshLODCount == 0u)
     {
@@ -89,4 +97,18 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
         job.Padding0 = 0u;
         _MeshletListBuildJobs[cullingContext.MeshletListBuildJobsOffset + jobWriteOffset + jobIndex] = job;
     }
+}
+
+#if defined(VIVID_VSM_EARLY_CULL)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSM(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    RunCulling(dispatchThreadID);
+}
+#endif
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    RunCulling(dispatchThreadID);
 }

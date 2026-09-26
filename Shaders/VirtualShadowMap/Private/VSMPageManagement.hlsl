@@ -1,3 +1,5 @@
+#include "VSMPageCulling.hlsl"
+
 uint GetVSMSourceDrawArgsIndex(
     uint cascadeIndex,
     uint rendererListIndex)
@@ -88,13 +90,8 @@ bool ClipVSMCasterToUncachedPages(uint level, inout uint2 minPage, inout uint2 m
 {
     if (_VSMUncachedPageRectBoundsEnabled == 0) return true;
     uint4 bounds = _VSMUncachedPageRectBounds[level * 2u + (uint)_VSMPrototypeCasterLayer];
-    minPage = max(minPage, bounds.xy);
-    maxPage = min(maxPage, bounds.zw);
-    if (any(minPage > maxPage)) return false;
-    uint pageSize = (uint)_VSMPrototypePageSize;
-    minTexel = max(minTexel, minPage * pageSize);
-    maxTexel = min(maxTexel, (maxPage + 1u) * pageSize - 1u);
-    return true;
+    return VividVSMClipCasterRect(bounds, (uint)_VSMPrototypePageSize,
+        minPage, maxPage, minTexel, maxTexel);
 }
 
 // At most four H-mip nodes for a rectangle. Positive results are conservative;
@@ -102,21 +99,9 @@ bool ClipVSMCasterToUncachedPages(uint level, inout uint2 minPage, inout uint2 m
 bool VSMCasterHierarchyOverlaps(uint level, uint2 low, uint2 high)
 {
     if (_VSMPageCullHierarchyEnabled == 0) return true;
-    uint pageSize = (uint)_VSMPrototypePageSize;
-    uint2 lowPage = low / pageSize, highPage = high / pageSize;
-    uint mip = VividVSMHierarchyMipForRect(lowPage, highPage);
-    uint axis = (uint)_VSMPrototypePagesPerAxis;
-    uint2 first = lowPage >> mip, last = highPage >> mip;
-    uint flag = _VSMPrototypeCasterLayer == 0 ? kVSMPageDirty : kVSMPageDynamicDirty;
-    for (uint y = first.y; y <= last.y; y++)
-        for (uint x = first.x; x <= last.x; x++)
-        {
-            uint3 node = _VSMPageCullHierarchy[VividVSMHierarchyAddress(level, uint2(x, y), mip, axis)];
-            if ((node.x & flag) != 0u && (_VSMPrototypeCasterLayer == 0 || _VSMReceiverMaskEnabled == 0
-                || VividVSMReceiverMaskOverlapsRect(node.yz, uint2(x, y), low, high, pageSize << mip)))
-                return true;
-        }
-    return false;
+    return VividVSMHierarchyOverlaps(level, (uint)_VSMPrototypePagesPerAxis,
+        (uint)_VSMPrototypePageSize, _VSMPrototypeCasterLayer == 0 ? kVSMPageDirty : kVSMPageDynamicDirty,
+        _VSMPrototypeCasterLayer != 0 && _VSMReceiverMaskEnabled != 0, low, high);
 }
 
 void AppendVSMPageMeshletRequest(
@@ -260,35 +245,10 @@ bool GetVSMPageRange(
     const float4 sphereWS = TransformSphere(
         meshlet.BoundingSphere,
         instanceData.ObjectToWorldMatrix);
-    const float4x4 worldToShadow = _VSMProjections[cascadeIndex].worldToShadow;
-    const float4 centerShadow = mul(
-        worldToShadow,
-        float4(sphereWS.xyz, 1.0));
-    const float inverseW = rcp(max(abs(centerShadow.w), 1e-6));
-    const float2 centerUV = centerShadow.xy * inverseW;
-    const float2 radiusUV = sphereWS.w * float2(
-        length(float3(
-            worldToShadow._m00,
-            worldToShadow._m01,
-            worldToShadow._m02)),
-        length(float3(
-            worldToShadow._m10,
-            worldToShadow._m11,
-            worldToShadow._m12))) * inverseW;
-    const float2 minUV = centerUV - radiusUV;
-    const float2 maxUV = centerUV + radiusUV;
-    if (any(maxUV < 0.0) || any(minUV > 1.0))
-        return false;
-
-    const uint virtualResolution = (uint)max(
-        _VSMPrototypeVirtualResolution,
-        1);
-    const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
-    minVirtualTexel = VividVSMUVToVirtualTexel(
-        minUV, virtualResolution);
-    maxVirtualTexel = VividVSMUVToVirtualTexel(
-        maxUV, virtualResolution);
+    const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
+    if (!VividVSMProjectCasterSphere(sphereWS, _VSMProjections[cascadeIndex].worldToShadow,
+            (uint)max(_VSMPrototypeVirtualResolution, 1), minVirtualTexel, maxVirtualTexel)) return false;
     minPage = min(minVirtualTexel / pageSize, pagesPerAxis - 1u);
     maxPage = min(maxVirtualTexel / pageSize, pagesPerAxis - 1u);
     return all(maxPage >= minPage);

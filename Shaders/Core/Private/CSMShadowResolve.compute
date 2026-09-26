@@ -65,7 +65,6 @@ RWStructuredBuffer<uint2> _VSMPageReceiverMasks;
 RWStructuredBuffer<uint2> _VSMPhysicalReceiverMasks;
 int _VSMReceiverMaskEnabled;
 // Per-clipmap spatial H-mips: allocated/selected dirty flags, dynamic mask xy.
-StructuredBuffer<uint3> _VSMPageCullHierarchy;
 RWStructuredBuffer<uint3> _VSMPageCullHierarchyRW;
 int _VSMPageCullHierarchyEnabled;
 // Inclusive page bounds indexed by clipmap * 2 + caster layer. Min > max is empty.

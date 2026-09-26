@@ -5,6 +5,7 @@ using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven.Bindless;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
 using VividRP.Runtime.PrimitiveScene;
+using VividRP.Runtime.VirtualShadowMap;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -847,7 +848,8 @@ namespace VividRP.Runtime.GPUDriven
             ComputeShader meshletListBuildCompute,
             ComputeShader gpuMeshletCullingCompute,
             ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
-            VividPrimitiveDrawSet drawSet
+            VividPrimitiveDrawSet drawSet,
+            VirtualShadowMapCullingParameters vsmCulling = default
         )
         {
             ThrowIfDisposed();
@@ -878,7 +880,8 @@ namespace VividRP.Runtime.GPUDriven
                 MeshLODErrorThreshold,
                 default,
                 drawSet?.LegacyInstanceIndexBuffer,
-                drawSet?.DrawCount ?? -1
+                drawSet?.DrawCount ?? -1,
+                vsmCulling
             );
             m_ShadowCullingContextCount = cullingContextCount;
         }

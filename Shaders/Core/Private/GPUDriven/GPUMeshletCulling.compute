@@ -9,10 +9,14 @@
 #pragma kernel CSCopyOccluderDepth
 #pragma kernel CSDownsampleOccluderDepth
 
+#pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma use_dxc
 #pragma require Native16Bit
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+#if defined(VIVID_VSM_EARLY_CULL)
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMPageCulling.hlsl"
+#endif
 
 #define FFX_WAVE 1
 #define A_GPU 1
@@ -404,8 +408,7 @@ bool TryResolveCulledMeshlet(
     return true;
 }
 
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     const uint cullingContextIndex = dispatchThreadID.y;
     if (cullingContextIndex >= max(_CullingContextCount, 1u))
@@ -425,6 +428,11 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
     {
         return;
     }
+
+#if defined(VIVID_VSM_EARLY_CULL)
+    // Reuse the sphere from frustum/cone culling before visible-list atomics.
+    if (!VividVSMCasterSphereOverlaps(cullingContextIndex, boundingSphereWS)) return;
+#endif
 
     AppendVisibleMeshlet(renderRequest, rendererListIndex, cullingContextIndex);
 }
@@ -574,4 +582,18 @@ void CSDownsampleOccluderDepth(
         numWorkGroups,
         workGroupID.z,
         workGroupOffset);
+}
+
+#if defined(VIVID_VSM_EARLY_CULL)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSM(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    RunCulling(dispatchThreadID);
+}
+#endif
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    RunCulling(dispatchThreadID);
 }

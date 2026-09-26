@@ -14,7 +14,15 @@ uint2 VividVSMReceiverMaskRect(uint2 low, uint2 high, uint pageSize)
     uint2 last = min(high * 8u / pageSize, 7u);
     uint row = ((1u << (last.x - first.x + 1u)) - 1u) << first.x;
     uint2 mask = 0u;
-    for (uint y = first.y; y <= last.y; y++) mask[y >> 2u] |= row << ((y & 3u) * 8u);
+    // Avoid dynamically indexing an l-value vector: legacy HLSL compilation
+    // otherwise forces callers' traversal loops to unroll as well.
+    [loop]
+    for (uint y = first.y; y <= last.y; y++)
+    {
+        uint bits = row << ((y & 3u) * 8u);
+        if (y < 4u) mask.x |= bits;
+        else mask.y |= bits;
+    }
     return mask;
 }
 

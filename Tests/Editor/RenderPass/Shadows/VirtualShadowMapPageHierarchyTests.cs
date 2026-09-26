@@ -3,6 +3,8 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
+using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.VirtualShadowMap;
 using Object = UnityEngine.Object;
 
@@ -10,6 +12,65 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VirtualShadowMapPageHierarchyTests
     {
+        [TestCase(0, false, true)]
+        [TestCase(0, true, true)]
+        [TestCase(1, false, false)]
+        [TestCase(1, true, true)]
+        public void EarlyInstanceCulling_UsesSelectedLayerAndMask_BeforeCreatingJobs(int layer, bool fullMask, bool expected)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/GPUInstanceCulling.compute"));
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 160);
+            using var hierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 12);
+            using var bounds = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
+            using var instances = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1,
+                System.Runtime.InteropServices.Marshal.SizeOf<VividInstanceData>());
+            using var contexts = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 288);
+            using var indices = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            using var jobs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            using var counts = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 4);
+            using var cmd = new CommandBuffer();
+            try
+            {
+                projections.SetData(new[] { new VirtualShadowMapProjection { WorldToShadow = Matrix4x4.identity } });
+                hierarchy.SetData(new[] { new uint3(4u | 32768u, fullMask ? uint.MaxValue : 0u, fullMask ? uint.MaxValue : 0u) });
+                bounds.SetData(new uint4[2]);
+                instances.SetData(new[] { new VividInstanceData { ObjectToWorldMatrix = float4x4.identity,
+                    AABBMin = new float4(.4f, .4f, 0, 0), AABBMax = new float4(.6f, .6f, 0, 0),
+                    PassMask = VividInstancePassMask.Shadows, TotalMeshLODCount = 1 } });
+                // Shader ABI: two matrices, camera, six planes, light sphere, eight scalar words.
+                var context = new uint[72]; context[64] = (uint)VividInstancePassMask.Shadows; contexts.SetData(context);
+                indices.SetData(new uint[1]);
+                int kernel = shader.FindKernel("CSVSM");
+                shader.SetInt("_InstanceDataCount", 1); shader.SetInt("_CullingContextCount", 1);
+                shader.SetInt("_VividPrimitiveDrawSetEnabled", 0);
+                shader.SetBuffer(kernel, "_CullingContexts", contexts); shader.SetBuffer(kernel, "_InstanceData", instances);
+                shader.SetBuffer(kernel, "_VividPrimitiveDrawSetInstanceIndices", indices);
+                shader.SetBuffer(kernel, "_MeshletListBuildJobs", jobs); shader.SetBuffer(kernel, "_MeshletListBuildJobCounter", counts);
+                shader.SetBuffer(kernel, "_MeshletListBuildIndirectArgs", args);
+                var parameters = new VirtualShadowMapCullingParameters(projections, hierarchy, bounds, 1, 128, 128, layer, true);
+                var result = new uint[1];
+                for (int empty = 0; empty < 2; empty++)
+                {
+                    counts.SetData(new uint[1]); args.SetData(new uint[3]);
+                    if (empty != 0) bounds.SetData(new[] { new uint4(1, 1, 0, 0), new uint4(1, 1, 0, 0) });
+                    cmd.Clear(); parameters.Bind(cmd, shader, kernel); cmd.DispatchCompute(shader, kernel, 1, 1, 1);
+                    Graphics.ExecuteCommandBuffer(cmd); counts.GetData(result);
+                    Assert.That(result[0], Is.EqualTo(empty == 0 && expected ? 1u : 0u));
+                }
+                // Stable command recording must neither allocate nor replace the borrowed resources.
+                for (int i = 0; i < 16; i++) { cmd.Clear(); parameters.Bind(cmd, shader, kernel); }
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++) { cmd.Clear(); parameters.Bind(cmd, shader, kernel); }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(default(VirtualShadowMapCullingParameters).IsEnabled, Is.False);
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(1)]
         [TestCase(3)]
         [TestCase(16)]

@@ -15,6 +15,7 @@
 | `VirtualShadowMapFrameState.cs` | 帧状态、回退原因 |
 | `VirtualShadowMapUnityCasterCompatibility.cs` | Unity caster 能力验证、保守 bounds 契约及对象变化跟踪 |
 | `VirtualShadowMapProjection.cs` | GPU 投影数据布局与绑定 |
+| `VirtualShadowMapCullingParameters.cs` | 当帧预算后层级的只读绑定，供实例、LOD 节点和 meshlet 提前裁剪 |
 | `VirtualShadowMapClipmapLayout.cs` | Clipmap 布局、移动和页重映射 |
 | `VirtualShadowMapReceiverQuality.cs` | 接收面质量参数、SMRT 和补页压力控制参数 |
 | `VSMProfiling.cs` | VSM 分阶段计时标记 |
@@ -33,6 +34,7 @@
 | `Public/VividVirtualShadowMapProjection.hlsl` | 投影 ABI 和坐标变换 |
 | `Public/VividVirtualShadowMapCaster.hlsl` | Caster 多层深度插入 |
 | `Private/VSMPageDefinitions.hlsl` | 页标志、请求优先级及调试统计定义 |
+| `Private/VSMPageCulling.hlsl` | caster 投影、补绘矩形裁剪及最多 2×2 节点的 PageFlags/receiver mask 查询，供源裁剪与最终分页共享 |
 | `Private/VSMPageManagement.hlsl` | Meshlet 页请求、分配、重映射、失效、清页、占用归约和 PageFlags/mask 层级裁剪 |
 | `Private/VSMPageMarking.hlsl` | 独立末层粗页和接收点请求生成；逐层合并 SMRT 和 PCF footprint，保留独立角色与完整回退链 |
 | `Private/VSMPhysicalSampling.hlsl` | 页解析、深度层读取、虚拟采样 |
@@ -154,7 +156,21 @@ UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`Virt
 
 `VSMPrototypeCullMeshletsToPages` 先将投影页范围与当前 caster 层的边界相交，再同步收缩 texel 范围，保留页内原有端点。空交集立即退出，非空交集用于 H-mip 查询和逐页枚举；原精确页状态与 receiver mask 检查继续执行。矩形变小后，大 meshlet 可以转为最多四条逐页记录；有效页面覆盖不变。静态页仍完整绘制，多层深度存储不变。
 
-对应 UE `GenerateHierarchicalPageFlags` 的 `OutUncachedPageRectBounds` 归约，以及 `VirtualShadowMapClipPageRect` / `VirtualShadowMapClipScreenRect` 的包含端点裁剪。VividRP 按独立静态/动态池和生产预算分别统计，每个 clipmap 增加 32 字节 GPU 缓冲；Runtime 按有效布局复用并纳入 RenderGraph 生命周期。当前消费范围为 GPU meshlet 页裁剪，普通 Unity caster 不使用该矩形。
+对应 UE `GenerateHierarchicalPageFlags` 的 `OutUncachedPageRectBounds` 归约，以及 `VirtualShadowMapClipPageRect` / `VirtualShadowMapClipScreenRect` 的包含端点裁剪。VividRP 按独立静态/动态池和生产预算分别统计，每个 clipmap 增加 32 字节 GPU 缓冲；Runtime 按有效布局复用并纳入 RenderGraph 生命周期。该矩形同时用于下节的 GPU-driven 源裁剪与最终 meshlet 页裁剪；普通 Unity caster 不使用该矩形。
+
+## 提前消费页层级（2026-09-26）
+
+`RecordPageCullHierarchy` 仍在分配、失效和补绘预算选择完成后执行；随后静态、动态 source culling 分别携带 `VirtualShadowMapCullingParameters`，绑定对应 caster 层以及当帧 projection、`UncachedPageRectBounds` 和 `PageCullHierarchy`。三个 GPU-driven compute 末尾追加专用 `CSVSM` kernel，默认参数选择原 `CS`，避免 CSM、主相机或后续相机消费残留 VSM 状态。稳定路径复用现有 GPU 缓冲并缓存 kernel 和属性 ID。
+
+裁剪提前到三个写入点之前：
+
+1. `GPUInstanceCulling` 使用实例包围球，在分配 LOD job 计数和写入 job 队列前拒绝无补绘需求的实例。
+2. `MeshletListBuild` 使用已选择 LOD 节点的保守包围球，在展开 meshlet、递增 renderer 计数和写入候选列表前拒绝节点。
+3. `GPUMeshletCulling` 复用 frustum/cone 阶段得到的 meshlet 包围球，在 visible-list 原子操作和写入前拒绝 meshlet。
+
+三个阶段共用 `VSMPageCulling.hlsl`：先投影，再与对应静态/动态补绘矩形相交，最后查询最细可覆盖的 H-mip（最多 2×2 节点）。只有预算已选中的对应 Dirty 标志产生需求，Deferred 页不会重新进入 source 工作列表；静态仍整页绘制，动态才使用 receiver mask。最终 `VSMPrototypeCullMeshletsToPages` 保留逐页状态、owner 和 mask 的精确检查。
+
+这是按页面生产需求进行保守拒绝，不进行深度/HZB 遮挡裁剪；完整请求、父链以及静态/动态各 16 层遮挡深度保留。当前 LOD 仍遍历既有扁平节点列表，并非 UE/Nanite 的完整层级遍历迁移。实现验证记录位于忽略目录 `Temp~/VSM/EarlyHierarchy_20260926/`。
 
 ## SMRT 成本诊断（2026-09-17）
 

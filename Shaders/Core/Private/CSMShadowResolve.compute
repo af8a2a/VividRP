@@ -68,6 +68,10 @@ int _VSMReceiverMaskEnabled;
 StructuredBuffer<uint3> _VSMPageCullHierarchy;
 RWStructuredBuffer<uint3> _VSMPageCullHierarchyRW;
 int _VSMPageCullHierarchyEnabled;
+// Inclusive page bounds indexed by clipmap * 2 + caster layer. Min > max is empty.
+StructuredBuffer<uint4> _VSMUncachedPageRectBounds;
+RWStructuredBuffer<uint4> _VSMUncachedPageRectBoundsRW;
+int _VSMUncachedPageRectBoundsEnabled;
 RWStructuredBuffer<uint> _VSMPrototypePhysicalPageOwners;
 RWStructuredBuffer<uint> _VSMPrototypeAllocatorCounters;
 RWStructuredBuffer<uint> _VSMAllocationRequests;

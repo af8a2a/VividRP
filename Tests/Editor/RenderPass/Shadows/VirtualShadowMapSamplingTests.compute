@@ -28,6 +28,7 @@
 #pragma kernel ResolveOnlyReceivers VIVID_VSM_RESOLVE_RECEIVERS
 #pragma kernel InspectVSMPageHierarchy
 #pragma kernel InspectVSMHierarchyMip
+#pragma kernel InspectVSMUncachedRect
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -416,4 +417,19 @@ void InspectPressureDensity(uint3 id : SV_DispatchThreadID)
     float blend;
     int level = SelectVSMDensityLevel(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz, false, blend);
     _SamplingResults[id.x] = float2(level, blend);
+}
+
+// Return the actual shipping clip result, including its sub-page texel limits.
+RWStructuredBuffer<uint4> _SamplingClippedRects;
+[numthreads(64, 1, 1)]
+void InspectVSMUncachedRect(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    uint4 rect = (uint4)_SamplingInputs[id.x];
+    uint2 low = rect.xy, high = rect.zw;
+    uint2 first = low / (uint)_VSMPrototypePageSize, last = high / (uint)_VSMPrototypePageSize;
+    bool overlaps = ClipVSMCasterToUncachedPages((uint)_SamplingNormals[id.x].x, first, last, low, high);
+    _SamplingResults[id.x] = float2(overlaps ? 1 : 0, overlaps ? VividVSMHierarchyMipForRect(first, last) : 0);
+    _SamplingClippedRects[id.x * 2u] = uint4(first, last);
+    _SamplingClippedRects[id.x * 2u + 1u] = uint4(low, high);
 }

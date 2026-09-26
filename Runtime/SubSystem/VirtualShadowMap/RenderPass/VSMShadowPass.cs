@@ -531,6 +531,7 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageReceiverMasks, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullHierarchy, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalPageOwners, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.AllocationRequests, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageWorkList, AccessFlags.ReadWrite);
@@ -907,6 +908,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 VirtualShadowMapPrototypeRuntime.PageMetadata);
             nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, m_VirtualShadowMapCullMeshletsToPagesKernel,
                 VirtualShadowMapPrototypeRuntime.PageReceiverMasksId, VirtualShadowMapPrototypeRuntime.PageReceiverMasks);
+            nativeCmd.SetComputeIntParam(compute, VirtualShadowMapPrototypeRuntime.UncachedPageRectBoundsEnabledId, 1);
+            nativeCmd.SetComputeBufferParam(compute, m_VirtualShadowMapCullMeshletsToPagesKernel,
+                VirtualShadowMapPrototypeRuntime.UncachedPageRectBoundsId, VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds);
             nativeCmd.SetComputeIntParam(compute, VirtualShadowMapPrototypeRuntime.PageCullHierarchyEnabledId, 1);
             nativeCmd.SetComputeBufferParam(compute, m_VirtualShadowMapCullMeshletsToPagesKernel,
                 VirtualShadowMapPrototypeRuntime.PageCullHierarchyId, VirtualShadowMapPrototypeRuntime.PageCullHierarchy);
@@ -1554,16 +1558,21 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var shader = m_VirtualShadowMapPageManagementCompute;
             var hierarchy = VirtualShadowMapPrototypeRuntime.PageCullHierarchy;
+            var bounds = VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds;
             using (new ProfilingScope(cmd, VSMProfiling.ClearPageHierarchy))
             {
                 cmd.SetComputeBufferParam(shader, m_VSMClearPageHierarchyKernel,
                     VirtualShadowMapPrototypeRuntime.PageCullHierarchyRWId, hierarchy);
-                cmd.DispatchCompute(shader, m_VSMClearPageHierarchyKernel, CoreUtils.DivRoundUp(hierarchy.count, 64), 1, 1);
+                cmd.SetComputeBufferParam(shader, m_VSMClearPageHierarchyKernel,
+                    VirtualShadowMapPrototypeRuntime.UncachedPageRectBoundsRWId, bounds);
+                cmd.DispatchCompute(shader, m_VSMClearPageHierarchyKernel,
+                    CoreUtils.DivRoundUp(Mathf.Max(hierarchy.count, bounds.count), 64), 1, 1);
             }
             using (new ProfilingScope(cmd, VSMProfiling.BuildPageHierarchy))
             {
                 int kernel = m_VSMBuildPageHierarchyKernel;
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapPrototypeRuntime.PageCullHierarchyRWId, hierarchy);
+                cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapPrototypeRuntime.UncachedPageRectBoundsRWId, bounds);
                 cmd.SetComputeBufferParam(shader, kernel, VSMPrototypePageTableId, VirtualShadowMapPrototypeRuntime.PageTable);
                 cmd.SetComputeBufferParam(shader, kernel, VSMPrototypePageMetadataId, VirtualShadowMapPrototypeRuntime.PageMetadata);
                 cmd.SetComputeBufferParam(shader, kernel, VSMPrototypePhysicalPageOwnersId, VirtualShadowMapPrototypeRuntime.PhysicalPageOwners);

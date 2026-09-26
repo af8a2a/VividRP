@@ -198,10 +198,19 @@ namespace VividRP.Editor.Tests
                 shader.Dispatch(build, (capacity + 63) / 64, 1, 1);
                 var actual = new uint3[nodes * 2]; hierarchy.GetData(actual);
                 var expected = new uint3[nodes * 2];
+                var expectedBounds = new uint4[4];
+                for (int i = 0; i < expectedBounds.Length; i++) expectedBounds[i] = new uint4((uint)axis, (uint)axis, 0, 0);
                 for (int slot = 0; slot < capacity; slot++)
                 {
                     int p = (int)own[slot] - 1, px = p % axis, py = p % (axis * axis) / axis, level = p / (axis * axis);
                     uint flags = 2u | ((meta[p].x & 131072u) == 0 ? meta[p].x & (4u | 32768u) : 0u);
+                    for (int layer = 0; layer < 2; layer++)
+                        if ((flags & (layer == 0 ? 4u : 32768u)) != 0)
+                        {
+                            int b = level * 2 + layer;
+                            expectedBounds[b] = new uint4(math.min(expectedBounds[b].xy, new uint2((uint)px, (uint)py)),
+                                math.max(expectedBounds[b].zw, new uint2((uint)px, (uint)py)));
+                        }
                     ulong bits = (flags & 32768u) != 0 ? mask[p].x | ((ulong)mask[p].y << 32) : 0;
                     int offset = level * nodes;
                     for (int mip = 0, n = padded; n > 0; mip++, offset += n * n, n >>= 1)
@@ -219,6 +228,8 @@ namespace VividRP.Editor.Tests
                     }
                 }
                 Assert.That(actual, Is.EqualTo(expected));
+                var actualBounds = new uint4[4]; masks.UncachedBounds.GetData(actualBounds, 0, 0, 4);
+                Assert.That(actualBounds, Is.EqualTo(expectedBounds), "Only selected work belongs in uncached bounds.");
                 var rects = new Vector4[128]; var clipmaps = new Vector4[128]; var result = new Vector2[128];
                 for (int i = 0; i < rects.Length; i++)
                 {
@@ -226,7 +237,15 @@ namespace VividRP.Editor.Tests
                     rects[i] = new Vector4(x, y, Math.Min(axis * 128 - 1, x + random.Next(256)), Math.Min(axis * 128 - 1, y + random.Next(256)));
                     clipmaps[i].x = i & 1;
                 }
+                rects[0] = new Vector4(0, 0, axis * 128 - 1, axis * 128 - 1);
                 input.SetData(rects); levels.SetData(clipmaps);
+                using var clipped = new GraphicsBuffer(GraphicsBuffer.Target.Structured, rects.Length * 2, 16);
+                var clippedData = new uint4[rects.Length * 2];
+                int clip = shader.FindKernel("InspectVSMUncachedRect");
+                shader.SetInt("_VSMUncachedPageRectBoundsEnabled", 1);
+                shader.SetBuffer(clip, "_VSMUncachedPageRectBounds", masks.UncachedBounds);
+                shader.SetBuffer(clip, "_SamplingInputs", input); shader.SetBuffer(clip, "_SamplingNormals", levels);
+                shader.SetBuffer(clip, "_SamplingResults", results); shader.SetBuffer(clip, "_SamplingClippedRects", clipped);
                 shader.SetBuffer(inspect, "_VSMPageCullHierarchy", hierarchy);
                 shader.SetBuffer(inspect, "_SamplingInputs", input); shader.SetBuffer(inspect, "_SamplingNormals", levels);
                 shader.SetBuffer(inspect, "_SamplingResults", results); shader.SetInt("_SamplingCount", 128);
@@ -234,12 +253,27 @@ namespace VividRP.Editor.Tests
                 {
                     shader.SetInt("_VSMPrototypeCasterLayer", layer); shader.Dispatch(inspect, 2, 1, 1); results.GetData(result);
                     foreach (var pair in result) Assert.That(pair.x >= pair.y, Is.True, "Hierarchy rejected required work.");
+                    shader.Dispatch(clip, 2, 1, 1); results.GetData(result); clipped.GetData(clippedData);
+                    for (int i = 0; i < rects.Length; i++)
+                    {
+                        var b = expectedBounds[(i & 1) * 2 + layer];
+                        uint x0 = Math.Max((uint)rects[i].x, b.x * 128u), y0 = Math.Max((uint)rects[i].y, b.y * 128u);
+                        uint x1 = Math.Min((uint)rects[i].z, (b.z + 1u) * 128u - 1u);
+                        uint y1 = Math.Min((uint)rects[i].w, (b.w + 1u) * 128u - 1u);
+                        bool overlaps = x0 <= x1 && y0 <= y1;
+                        Assert.That(result[i].x, Is.EqualTo(overlaps ? 1f : 0f));
+                        if (!overlaps) continue;
+                        Assert.That(clippedData[i * 2 + 1], Is.EqualTo(new uint4(x0, y0, x1, y1)));
+                        Assert.That(clippedData[i * 2], Is.EqualTo(new uint4(x0 / 128u, y0 / 128u, x1 / 128u, y1 / 128u)));
+                    }
                 }
                 // The next frame must not retain any prior mask or flags, including padding/root.
                 owners.SetData(new uint[capacity]);
                 shader.Dispatch(clear, (nodes * 2 + 63) / 64, 1, 1);
                 shader.Dispatch(build, (capacity + 63) / 64, 1, 1); hierarchy.GetData(actual);
                 Assert.That(actual, Is.EqualTo(new uint3[nodes * 2]));
+                masks.UncachedBounds.GetData(actualBounds, 0, 0, 4);
+                foreach (var bounds in actualBounds) Assert.That(bounds, Is.EqualTo(new uint4((uint)axis, (uint)axis, 0, 0)));
             }
             finally { Object.DestroyImmediate(shader); }
         }

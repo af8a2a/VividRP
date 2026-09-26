@@ -146,7 +146,15 @@ UE 参考关系：`VirtualShadowMapPageMarking.usf` 的 8×8 mask 标记、`Virt
 
 生产 meshlet cull 在枚举页面前，选取网格对齐后能以最多 2×2 节点覆盖投影矩形的最细 H-mip，规则对应 UE `MipLevelForRect(rect, 2)`。先按页面端点差计算候选层，只有对齐后跨度仍超过两个节点时才升一级；单页选择 mip 0。最多读取四个节点提前拒绝无补绘需求的 caster，通过后仍执行原逐页精确检查。层级是每个 clipmap 内的空间汇总，不生成额外父 clipmap 请求或删除现有请求。普通 Unity caster 仍使用已有逐 texel mask 裁剪。
 
-该流程对应 UE `VirtualShadowMapPageManagement.usf::GenerateHierarchicalPageFlags` 的按物理页传播 PageFlags/receiver mask；存储采用结构化缓冲，标志遵守 VividRP 的补绘预算。UE 的 Allocated/UncachedPageRectBounds 尚未迁移。新增计时项为 `VSM.MarkCoarsePages`、`VSM.ClearPageHierarchy`、`VSM.BuildPageHierarchy`；验证证据位于忽略目录 `Temp~/VSM/CoarseHierarchy_20260926/`，尚无生产 GPU 耗时收益结论。
+该流程对应 UE `VirtualShadowMapPageManagement.usf::GenerateHierarchicalPageFlags` 的按物理页传播 PageFlags/receiver mask；存储采用结构化缓冲，标志遵守 VividRP 的补绘预算。`UncachedPageRectBounds` 的生成和消费见下文；`AllocatedPageRectBounds` 尚未迁移。新增计时项为 `VSM.MarkCoarsePages`、`VSM.ClearPageHierarchy`、`VSM.BuildPageHierarchy`；验证证据位于忽略目录 `Temp~/VSM/CoarseHierarchy_20260926/`，尚无生产 GPU 耗时收益结论。
+
+## 当帧补绘矩形边界
+
+`UncachedPageRectBounds` 每个 clipmap 保存静态、动态两个 `uint4(minX, minY, maxX, maxY)`，端点均包含在内。它随 `PageCullHierarchy` 在同一组清空/构建 dispatch 中生成：清空为 `(pagesPerAxis, pagesPerAxis, 0, 0)` 空矩形；只有 owner、页表和元数据一致、已分配且未 Deferred 的对应 Dirty 页参与 min/max 归约。边界反映补绘预算选中的页，不改变完整接收点请求，也不把延迟页重新加入绘制。
+
+`VSMPrototypeCullMeshletsToPages` 先将投影页范围与当前 caster 层的边界相交，再同步收缩 texel 范围，保留页内原有端点。空交集立即退出，非空交集用于 H-mip 查询和逐页枚举；原精确页状态与 receiver mask 检查继续执行。矩形变小后，大 meshlet 可以转为最多四条逐页记录；有效页面覆盖不变。静态页仍完整绘制，多层深度存储不变。
+
+对应 UE `GenerateHierarchicalPageFlags` 的 `OutUncachedPageRectBounds` 归约，以及 `VirtualShadowMapClipPageRect` / `VirtualShadowMapClipScreenRect` 的包含端点裁剪。VividRP 按独立静态/动态池和生产预算分别统计，每个 clipmap 增加 32 字节 GPU 缓冲；Runtime 按有效布局复用并纳入 RenderGraph 生命周期。当前消费范围为 GPU meshlet 页裁剪，普通 Unity caster 不使用该矩形。
 
 ## SMRT 成本诊断（2026-09-17）
 

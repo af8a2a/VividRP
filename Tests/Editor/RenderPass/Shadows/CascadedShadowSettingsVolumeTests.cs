@@ -1826,6 +1826,7 @@ namespace VividRP.Editor.Tests
                 var requestMasks = VirtualShadowMapPrototypeRuntime.PageReceiverMasks;
                 var completedMasks = VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks;
                 var pageHierarchy = VirtualShadowMapPrototypeRuntime.PageCullHierarchy;
+                var uncachedBounds = VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds;
                 int readyCount = 0;
                 long allocatedBefore = global::System.GC
                     .GetAllocatedBytesForCurrentThread();
@@ -1842,6 +1843,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageReceiverMasks, Is.SameAs(requestMasks));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, Is.SameAs(completedMasks));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageCullHierarchy, Is.SameAs(pageHierarchy));
+                Assert.That(VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds, Is.SameAs(uncachedBounds));
             }
             finally
             {

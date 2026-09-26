@@ -12,7 +12,7 @@ namespace VividRP.Editor.Tests
     // rather than inheriting a live Editor compute asset's production settings.
     internal sealed class VirtualShadowMapReceiverMaskTestBuffers : IDisposable
     {
-        internal readonly GraphicsBuffer Requests, Completed;
+        internal readonly GraphicsBuffer Requests, Completed, UncachedBounds;
         private readonly GraphicsBuffer m_DisabledHierarchy;
         private static readonly string[] s_Kernels =
         {
@@ -20,6 +20,7 @@ namespace VividRP.Editor.Tests
             "VSMReceiverDebug",
             "VSMMarkReceiverPages",
             "VSMMarkCoarsePages",
+            "VSMClearPageCullHierarchy",
             "VSMBuildPageCullHierarchy",
             "VSMPrototypeClearReceiverRequests",
             "VSMPrototypeResetReceiverFeedback",
@@ -52,6 +53,8 @@ namespace VividRP.Editor.Tests
             Requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 8);
             Completed = new GraphicsBuffer(GraphicsBuffer.Target.Structured, slots, 8);
             m_DisabledHierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 12);
+            UncachedBounds = new GraphicsBuffer(GraphicsBuffer.Target.Structured, VirtualShadowMapClipmapLayout.MaxLevels * 2, 16);
+            shader.SetInt("_VSMUncachedPageRectBoundsEnabled", 0);
             shader.SetInt("_VSMPageCullHierarchyEnabled", 0);
             Requests.SetData(new uint2[pages]); Completed.SetData(new uint2[slots]);
             shader.SetInt("_VSMReceiverMaskEnabled", enabled ? 1 : 0);
@@ -61,12 +64,17 @@ namespace VividRP.Editor.Tests
                 int kernel = shader.FindKernel(name);
                 shader.SetBuffer(kernel, "_VSMPageReceiverMasks", Requests);
                 shader.SetBuffer(kernel, "_VSMPhysicalReceiverMasks", Completed);
+                if (name == "VSMClearPageCullHierarchy" || name == "VSMBuildPageCullHierarchy")
+                    shader.SetBuffer(kernel, "_VSMUncachedPageRectBoundsRW", UncachedBounds);
                 if (name == "VSMPrototypeCullMeshletsToPages")
+                {
+                    shader.SetBuffer(kernel, "_VSMUncachedPageRectBounds", UncachedBounds);
                     shader.SetBuffer(kernel, "_VSMPageCullHierarchy", m_DisabledHierarchy);
+                }
             }
         }
 
-        public void Dispose() { Requests.Dispose(); Completed.Dispose(); m_DisabledHierarchy.Dispose(); }
+        public void Dispose() { Requests.Dispose(); Completed.Dispose(); m_DisabledHierarchy.Dispose(); UncachedBounds.Dispose(); }
     }
 
     public sealed class VirtualShadowMapReceiverMaskTests

@@ -31,6 +31,8 @@ void VSMClearPageCullHierarchy(uint3 id : SV_DispatchThreadID)
 {
     uint count = (uint)_VSMProjectionCount * VividVSMHierarchyNodesPerLevel((uint)_VSMPrototypePagesPerAxis);
     if (id.x < count) _VSMPageCullHierarchyRW[id.x] = 0u;
+    if (id.x < (uint)_VSMProjectionCount * 2u)
+        _VSMUncachedPageRectBoundsRW[id.x] = uint4(_VSMPrototypePagesPerAxis, _VSMPrototypePagesPerAxis, 0u, 0u);
 }
 
 // Run after invalidation and budget selection. Each physical owner contributes
@@ -55,6 +57,18 @@ void VSMBuildPageCullHierarchy(uint3 id : SV_DispatchThreadID)
     uint axis = (uint)_VSMPrototypePagesPerAxis;
     uint level = page / (axis * axis);
     uint2 coord = uint2(page % axis, (page / axis) % axis);
+    // UE GenerateHierarchicalPageFlags also reduces UncachedPageRectBounds.
+    // Keep layers separate and use only this frame's budget-selected work.
+    for (uint layer = 0u; layer < 2u; layer++)
+    {
+        uint dirtyFlag = layer == 0u ? kVSMPageDirty : kVSMPageDynamicDirty;
+        if ((flags & dirtyFlag) == 0u) continue;
+        uint boundsIndex = level * 2u + layer;
+        InterlockedMin(_VSMUncachedPageRectBoundsRW[boundsIndex].x, coord.x);
+        InterlockedMin(_VSMUncachedPageRectBoundsRW[boundsIndex].y, coord.y);
+        InterlockedMax(_VSMUncachedPageRectBoundsRW[boundsIndex].z, coord.x);
+        InterlockedMax(_VSMUncachedPageRectBoundsRW[boundsIndex].w, coord.y);
+    }
     uint hierarchyAxis = VividVSMHierarchyAxis(axis);
     for (uint mip = 0u; (hierarchyAxis >> mip) > 0u; mip++)
     {
@@ -65,6 +79,22 @@ void VSMBuildPageCullHierarchy(uint3 id : SV_DispatchThreadID)
         mask = VividVSMReduceReceiverMask(mask, coord & 1u);
         coord >>= 1u;
     }
+}
+
+// Intersect before H-mip selection and page enumeration, like UE's
+// VirtualShadowMapClipScreenRect. Preserve the original sub-page footprint.
+bool ClipVSMCasterToUncachedPages(uint level, inout uint2 minPage, inout uint2 maxPage,
+    inout uint2 minTexel, inout uint2 maxTexel)
+{
+    if (_VSMUncachedPageRectBoundsEnabled == 0) return true;
+    uint4 bounds = _VSMUncachedPageRectBounds[level * 2u + (uint)_VSMPrototypeCasterLayer];
+    minPage = max(minPage, bounds.xy);
+    maxPage = min(maxPage, bounds.zw);
+    if (any(minPage > maxPage)) return false;
+    uint pageSize = (uint)_VSMPrototypePageSize;
+    minTexel = max(minTexel, minPage * pageSize);
+    maxTexel = min(maxTexel, (maxPage + 1u) * pageSize - 1u);
+    return true;
 }
 
 // At most four H-mip nodes for a rectangle. Positive results are conservative;
@@ -318,6 +348,7 @@ void VSMPrototypeCullMeshletsToPages(
         return;
     }
 
+    if (!ClipVSMCasterToUncachedPages(cascadeIndex, minPage, maxPage, minTexel, maxTexel)) return;
     if (!VSMCasterHierarchyOverlaps(cascadeIndex, minTexel, maxTexel)) return;
 
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);

@@ -575,7 +575,7 @@ namespace VividRP.Runtime.GPUDriven
             cmd.SetComputeIntParam(
                 m_MeshletListBuildCompute,
                 VividGPUDrivenShaderIDs._ForcedMeshLODNodeDepth,
-                forcedMeshLODNodeDepth < 0 ? int.MaxValue : forcedMeshLODNodeDepth
+                forcedMeshLODNodeDepth < 0 ? VividGPUDrivenDefaults.ForcedMeshLODNodeDepth : forcedMeshLODNodeDepth
             );
             cmd.SetComputeFloatParam(
                 m_MeshletListBuildCompute,

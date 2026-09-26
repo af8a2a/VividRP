@@ -104,7 +104,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             cmd.SetComputeBufferParam(shader, kernel, s_RootsId, m_RootBuffer);
             cmd.SetComputeIntParam(shader, s_CountId, m_Nodes.Count);
             cmd.SetComputeIntParam(shader, s_RootCountId, m_Roots.Length);
-            cmd.SetComputeIntParam(shader, s_ForcedDepthId, forcedDepth < 0 ? int.MaxValue : forcedDepth);
+            cmd.SetComputeIntParam(shader, s_ForcedDepthId, forcedDepth < 0 ? VividGPUDrivenDefaults.ForcedMeshLODNodeDepth : forcedDepth);
         }
 
         public void Dispose()

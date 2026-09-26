@@ -1,4 +1,6 @@
 using System.IO;
+using Unity.Mathematics;
+using VividRP.Runtime.VirtualShadowMap;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -8,6 +10,86 @@ namespace VividRP.Editor.Tests
 {
     public class VividGPUDrivenCullingBuffersTests
     {
+        [TestCase(0)] // Ordinary CS path used by main view / CSM.
+        [TestCase(1)] // VSM without view compaction.
+        [TestCase(2)] // Production VSM hierarchy + compacted views.
+        public void Dispatcher_LODSentinel_SelectsAutomaticErrorsAndPreservesForcedDepth(int mode)
+        {
+            Assume.That(SystemInfo.supportsComputeShaders, Is.True);
+            const int nodesPerLevel = 32, nodeCount = 3 * nodesPerLevel;
+            var scene = new VividGPUDrivenSceneData();
+            scene.MutableMaterials.Add(default);
+            for (int n = 0; n < nodeCount; n++)
+            {
+                int level = n / nodesPerLevel;
+                scene.MutableMeshLODNodes.Add(new VividMeshLODNode
+                {
+                    Bounds = new float4(.5f, .5f, 0, .01f),
+                    Error = level == 0 ? 1f : level == 1 ? .1f : 0f,
+                    ParentError = level == 0 ? -1f : level == 1 ? 1f : .1f,
+                    ParentBounds = new float4(.5f, .5f, 0, .01f),
+                    LevelIndex = (uint)level, MeshletStartIndex = (uint)n, MeshletCount = 1,
+                });
+                scene.MutableMeshlets.Add(new VividMeshlet { BoundingSphere = new float4(.5f, .5f, 0, .01f) });
+            }
+            scene.AddInstance(new VividInstanceData
+            {
+                ObjectToWorldMatrix = float4x4.identity, WorldToObjectMatrix = float4x4.identity,
+                AABBMin = new float4(.48f, .48f, -.02f, 0), AABBMax = new float4(.52f, .52f, .02f, 0),
+                TotalMeshLODCount = nodeCount, MeshLODLevelCount = 3, LODErrorScale = 1,
+                PassMask = VividInstancePassMask.Shadows, Flags = VividInstanceFlags.TwoSidedShadows,
+            }, nodeCount);
+            using var sceneBuffers = new VividGPUDrivenBufferSet();
+            sceneBuffers.Upload(scene);
+            using var dispatcher = new VividGPUDrivenCullingDispatcher(supportsOcclusion: false);
+            using var cmd = new CommandBuffer();
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 160);
+            using var hierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 12);
+            using var bounds = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
+            using var views = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            projections.SetData(new[] { new VirtualShadowMapProjection { WorldToShadow = Matrix4x4.identity } });
+            hierarchy.SetData(new[] { new uint3(2u | 4u, uint.MaxValue, uint.MaxValue) });
+            bounds.SetData(new[] { new uint4(0), new uint4(0) });
+            var parameters = mode == 0 ? default : new VirtualShadowMapCullingParameters(
+                projections, hierarchy, bounds, 1, 128, 128, 0, false, mode == 2 ? views : null, mode == 2 ? args : null);
+            var contexts = new[] { new VividGPUCullingContext
+                { ViewProjectionMatrix = float4x4.identity, PassMask = (int)VividInstancePassMask.Shadows } };
+            var lod = new VividGPULODSelectionContext { ScreenSizePixels = new float2(128) };
+            var shaders = new ComputeShader[4];
+            string[] names = { "GPUInstanceCulling", "MeshletListBuild", "GPUMeshletCulling", "FixupVisibleMeshletIndirectDrawArgs" };
+            try
+            {
+                for (int i = 0; i < shaders.Length; i++) shaders[i] = Object.Instantiate(
+                    UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                        "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/" + names[i] + ".compute"));
+                // 32 records per level put the levels in separate hierarchy leaves.
+                // A wrong tree sentinel must not hide nodes from a correct leaf selector.
+                int[] depths = { -1, -1, -1, -2, int.MinValue, 0, 1, 2, 8, int.MaxValue, -1 };
+                float[] thresholds = { .02f, .2f, 2f, .2f, .2f, .02f, 2f, 2f, 2f, 2f, .2f };
+                uint[] levels = { 2, 1, 0, 1, 1, 0, 1, 2, 2, 2, 1 };
+                var count = new uint[1]; var requests = new VividMeshletRenderRequestPacked[nodeCount];
+                for (int i = 0; i < depths.Length; i++)
+                {
+                    cmd.Clear();
+                    dispatcher.DispatchBatch(cmd, contexts, 1, lod, scene, sceneBuffers,
+                        shaders[0], shaders[1], shaders[2], shaders[3], depths[i], thresholds[i], vsmCulling: parameters);
+                    Graphics.ExecuteCommandBuffer(cmd);
+                    dispatcher.BufferSet.VisibleMeshletRenderRequestCounterBuffer.GetData(count);
+                    dispatcher.BufferSet.CandidateMeshletRenderRequestsBuffer.GetData(requests);
+                    Assert.That(count[0], Is.EqualTo((uint)nodesPerLevel), $"mode={mode}, depth={depths[i]}, threshold={thresholds[i]}");
+                    uint seen = 0;
+                    for (int n = 0; n < count[0]; n++)
+                    {
+                        Assert.That(requests[n].MeshletID / nodesPerLevel, Is.EqualTo(levels[i]));
+                        seen |= 1u << (int)(requests[n].MeshletID % nodesPerLevel);
+                    }
+                    Assert.That(seen, Is.EqualTo(uint.MaxValue));
+                }
+            }
+            finally { foreach (var shader in shaders) if (shader != null) Object.DestroyImmediate(shader); }
+        }
+
         [Test]
         public void EnsureCapacity_CreatesIndirectDrawArgsBufferForAllRendererLists()
         {

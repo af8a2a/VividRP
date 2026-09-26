@@ -21,11 +21,13 @@ namespace VividRP.Editor.Tests
             internal readonly ComputeShader Shader;
             internal readonly uint[] TableData = new uint[12];
             internal readonly uint4[] MetadataData = new uint4[12];
+            internal readonly uint[] RequestData = new uint[12];
             internal readonly uint[] OwnerData = new uint[16];
             internal readonly uint[] StaticData = new uint[256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount], DynamicData = new uint[256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount];
             internal readonly VirtualShadowMapProjection[] ProjectionData = new VirtualShadowMapProjection[3];
             internal readonly GraphicsBuffer Table = new(GraphicsBuffer.Target.Structured, 12, 4);
             internal readonly GraphicsBuffer Metadata = new(GraphicsBuffer.Target.Structured, 12, 16);
+            internal readonly GraphicsBuffer RequestFlags = new(GraphicsBuffer.Target.Structured, 12, 4);
             internal readonly GraphicsBuffer Owners = new(GraphicsBuffer.Target.Structured, 16, 4);
             internal readonly GraphicsBuffer Counters = new(GraphicsBuffer.Target.Structured, 4, 4);
             internal readonly GraphicsBuffer Pressure = new(GraphicsBuffer.Target.Structured, 3, 16);
@@ -119,6 +121,7 @@ namespace VividRP.Editor.Tests
             internal void Upload()
             {
                 Table.SetData(TableData); Metadata.SetData(MetadataData); Owners.SetData(OwnerData);
+                RequestFlags.SetData(RequestData);
                 Counters.SetData(new uint[4]); m_Projections.SetData(ProjectionData);
                 m_StaticUpload.SetData(StaticData); m_DynamicUpload.SetData(DynamicData);
                 int upload = m_UploadShader.FindKernel("UploadTestPools");
@@ -151,7 +154,11 @@ namespace VividRP.Editor.Tests
                     Shader.SetInt("_CSMOutputWidth", depth.width);
                     Shader.SetInt("_CSMOutputHeight", depth.height);
                 }
-                if (!inspectOnly) Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
+                if (!inspectOnly)
+                {
+                    Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
+                    Shader.SetBuffer(kernel, "_VSMPageRequestFlags", RequestFlags);
+                }
                 if (kernelName != "MarkFootprints")
                 {
                     Shader.SetBuffer(kernel, "_SamplingResults", output);
@@ -173,14 +180,15 @@ namespace VividRP.Editor.Tests
                 Shader.Dispatch(kernel, (inputs.Length + 63) / 64, 1, 1);
                 var result = new float2[inputs.Length];
                 if (kernelName != "MarkFootprints") output.GetData(result);
-                Metadata.GetData(MetadataData);
+                Metadata.GetData(MetadataData); RequestFlags.GetData(RequestData);
                 return result;
             }
 
             internal void MarkScreen(Texture depth, Texture normal, int frame, bool resetAge)
             {
                 int clear = Shader.FindKernel(resetAge ? "VSMPrototypeResetReceiverFeedback" : "VSMPrototypeClearReceiverRequests");
-                Shader.SetBuffer(clear, "_VSMPrototypePageMetadata", Metadata);
+                if (resetAge) Shader.SetBuffer(clear, "_VSMPrototypePageMetadata", Metadata);
+                Shader.SetBuffer(clear, "_VSMPageRequestFlags", RequestFlags);
                 Shader.SetBuffer(clear, "_VSMPagePressureRW", Pressure);
                 Shader.Dispatch(clear, 1, 1, 1);
                 int mark = Shader.FindKernel("VSMMarkReceiverPages");
@@ -189,12 +197,12 @@ namespace VividRP.Editor.Tests
                 Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
                 Shader.SetMatrix("_CSMInvViewProjMatrix", Matrix4x4.identity);
                 Shader.SetBuffer(mark, "_VSMProjections", m_Projections);
-                Shader.SetBuffer(mark, "_VSMPrototypePageMetadata", Metadata);
+                Shader.SetBuffer(mark, "_VSMPageRequestFlags", RequestFlags);
                 Shader.SetTexture(mark, "_DepthTexture", depth);
                 Shader.SetTexture(mark, "_GBuffer1", normal);
                 // No physical pool or page-table binding: cold start must work.
                 Shader.Dispatch(mark, 1, 1, 1);
-                Metadata.GetData(MetadataData);
+                Metadata.GetData(MetadataData); RequestFlags.GetData(RequestData);
             }
 
             internal void Allocate()
@@ -204,8 +212,8 @@ namespace VividRP.Editor.Tests
                 Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
                 Shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", Owners);
                 Shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", Counters);
-                DispatchAllocation(Shader, kernel, Metadata, Pressure);
-                Table.GetData(TableData); Metadata.GetData(MetadataData); Owners.GetData(OwnerData);
+                DispatchAllocation(Shader, kernel, Metadata, Pressure, RequestFlags);
+                Table.GetData(TableData); Metadata.GetData(MetadataData); RequestFlags.GetData(RequestData); Owners.GetData(OwnerData);
             }
 
             internal float4 RunDiagnostic(float4 receiver, int mode, bool footprint = false,
@@ -235,7 +243,7 @@ namespace VividRP.Editor.Tests
                 }
                 Shader.Dispatch(kernel, 1, 1, 1);
                 var result = new float4[1]; output.GetData(result);
-                Metadata.GetData(MetadataData);
+                Metadata.GetData(MetadataData); RequestFlags.GetData(RequestData);
                 return result[0];
             }
 
@@ -252,6 +260,7 @@ namespace VividRP.Editor.Tests
                 Shader.SetBuffer(kernel, "_VSMProjections", m_Projections);
                 Shader.SetBuffer(kernel, "_VSMPrototypePageTable", Table);
                 Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
+                Shader.SetBuffer(kernel, "_VSMPageRequestFlags", RequestFlags);
                 Shader.SetTexture(kernel, "_VSMPrototypeStaticPhysicalPage", m_Static);
                 Shader.SetTexture(kernel, "_VSMPrototypeDynamicPhysicalPage", m_Dynamic);
                 Shader.SetTexture(kernel, "_DepthTexture", depth);
@@ -265,7 +274,7 @@ namespace VividRP.Editor.Tests
             public void Dispose()
             {
                 Table.Dispose(); Metadata.Dispose(); Owners.Dispose(); Counters.Dispose(); m_Projections.Dispose();
-                Pressure.Dispose();
+                Pressure.Dispose(); RequestFlags.Dispose();
                 m_StaticUpload.Dispose(); m_DynamicUpload.Dispose();
                 m_Static.Release(); m_Dynamic.Release();
                 if (m_UploadShader != Shader) Object.DestroyImmediate(m_UploadShader);
@@ -273,16 +282,69 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        private static void DispatchAllocation(ComputeShader shader, int kernel, GraphicsBuffer metadata, GraphicsBuffer pressure)
+        private static void DispatchAllocation(ComputeShader shader, int kernel, GraphicsBuffer metadata, GraphicsBuffer pressure, GraphicsBuffer requestFlags)
         {
             using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (metadata.count + 31) / 32, 4);
             int prepare = shader.FindKernel("VSMPrototypePrepareAllocation");
             shader.SetBuffer(prepare, "_VSMPrototypePageMetadata", metadata);
+            shader.SetBuffer(prepare, "_VSMPageRequestFlags", requestFlags);
+            shader.SetBuffer(kernel, "_VSMPageRequestFlags", requestFlags);
             shader.SetBuffer(prepare, "_VSMAllocationRequests", requests);
             shader.Dispatch(prepare, (requests.count + 63) / 64, 1, 1);
             shader.SetBuffer(kernel, "_VSMAllocationRequests", requests);
             shader.SetBuffer(kernel, "_VSMPagePressureRW", pressure);
             shader.Dispatch(kernel, 1, 1, 1);
+        }
+
+        [TestCase(false, 11)]
+        [TestCase(true, 0)]
+        public void RequestFlags_ClearAndConsumePreserveResidentState(bool resetAge, int frame)
+        {
+            using var f = new Fixture(allocator: true);
+            const uint known = (1u << 14) | (1u << 16);
+            const uint dirtyDeferred = 4u | (1u << 15) | (1u << 17);
+            f.Map(0, 0); f.Map(11, 1);
+            f.MetadataData[0].x |= known | dirtyDeferred;
+            f.MetadataData[0].w = 128u;
+            f.MetadataData[11].z = 31;
+            f.RequestData[0] = 3841u;
+            var before = (uint4[])f.MetadataData.Clone();
+            f.Upload();
+            int clear = f.Shader.FindKernel(resetAge ? "VSMPrototypeResetReceiverFeedback" : "VSMPrototypeClearReceiverRequests");
+            f.Shader.SetBuffer(clear, "_VSMPageRequestFlags", f.RequestFlags);
+            f.Shader.SetBuffer(clear, "_VSMPagePressureRW", f.Pressure);
+            if (resetAge) f.Shader.SetBuffer(clear, "_VSMPrototypePageMetadata", f.Metadata);
+            f.Shader.Dispatch(clear, 1, 1, 1);
+            f.RequestFlags.GetData(f.RequestData); f.Metadata.GetData(f.MetadataData);
+            Assert.That(f.RequestData, Is.EqualTo(new uint[12]));
+            for (int page = 0; page < before.Length; page++)
+            {
+                if (resetAge) before[page].z = 0u;
+                Assert.That(f.MetadataData[page], Is.EqualTo(before[page]));
+            }
+
+            f.RequestData[0] = 513u;
+            f.RequestData[5] = 1025u; // Nonresident demand still receives an age.
+            f.RequestFlags.SetData(f.RequestData);
+            f.Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
+            using var bits = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            int prepare = f.Shader.FindKernel("VSMPrototypePrepareAllocation");
+            f.Shader.SetBuffer(prepare, "_VSMPageRequestFlags", f.RequestFlags);
+            f.Shader.SetBuffer(prepare, "_VSMPrototypePageMetadata", f.Metadata);
+            f.Shader.SetBuffer(prepare, "_VSMAllocationRequests", bits);
+            f.Shader.Dispatch(prepare, 1, 1, 1);
+            f.Metadata.GetData(f.MetadataData);
+            for (int page = 0; page < before.Length; page++)
+            {
+                before[page].w = before[page].x;
+                if (page == 0 || page == 5) before[page].z = (uint)frame;
+                Assert.That(f.MetadataData[page], Is.EqualTo(before[page]));
+                Assert.That((f.MetadataData[page].x | f.MetadataData[page].w) & 3841u, Is.Zero);
+            }
+            var actualBits = new uint[1]; bits.GetData(actualBits);
+            Assert.That(actualBits[0], Is.EqualTo((1u << 8) | (1u << 5)));
+            var demand = (uint[])f.RequestData.Clone(); f.RequestFlags.GetData(f.RequestData);
+            Assert.That(f.RequestData, Is.EqualTo(demand));
         }
 
         [TestCase(false, false)]
@@ -304,18 +366,18 @@ namespace VividRP.Editor.Tests
                 f.MarkScreen(depth, normal, 0, true);
                 int requested = 0;
                 var roles = new uint[f.MetadataData.Length];
-                for (int i = 0; i < roles.Length; i++) roles[i] = f.MetadataData[i].x & 3841u;
+                for (int i = 0; i < roles.Length; i++) roles[i] = f.RequestData[i] & 3841u;
                 for (int i = 0; i < f.MetadataData.Length; i++)
-                    if ((f.MetadataData[i].x & 1) != 0) { requested++; Assert.That(f.MetadataData[i].z, Is.Zero); }
+                    if ((f.RequestData[i] & 1) != 0) { requested++; Assert.That(f.MetadataData[i].z, Is.Zero); }
                 Assert.That(requested, Is.GreaterThan(0));
                 f.Allocate();
                 var counters = new uint[4]; f.Counters.GetData(counters);
                 Assert.That(counters[1], Is.EqualTo(requested));
                 Assert.That(counters[2], Is.EqualTo(requested));
                 Assert.That(counters[3], Is.Zero);
-                // Allocation consumes roles; the next marker must still request every receiver.
+                // Allocation preserves demand for work/debug; the next marker starts from clear.
                 f.MarkScreen(depth, normal, 1, false);
-                for (int i = 0; i < roles.Length; i++) Assert.That(f.MetadataData[i].x & 3841u, Is.EqualTo(roles[i]));
+                for (int i = 0; i < roles.Length; i++) Assert.That(f.RequestData[i] & 3841u, Is.EqualTo(roles[i]));
                 f.Allocate();
                 f.Counters.GetData(counters);
                 Assert.That(counters[1], Is.EqualTo(requested));
@@ -588,7 +650,7 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(new float2(1, 1)));
             f.Run("ResolveReceivers", new[] { new float4(0, 0, 0, 0) });
             for (int page = 4; page < 12; page++)
-                Assert.That(f.MetadataData[page].x & 512u, Is.Not.Zero, "Continuation depth is a primary dependency");
+                Assert.That(f.RequestData[page] & 512u, Is.Not.Zero, "Continuation depth is a primary dependency");
         }
 
         [Test]
@@ -635,11 +697,12 @@ namespace VividRP.Editor.Tests
             f.MetadataData[3].x |= 4; f.Upload();
             Assert.That(f.Run("ResolveReceivers", receiver)[0].x, Is.Zero);
             var requested = new uint[12];
-            for (int page = 0; page < 12; page++) requested[page] = f.MetadataData[page].x & 3841u;
+            for (int page = 0; page < 12; page++) requested[page] = f.RequestData[page] & 3841u;
             for (int page = 0; page < 12; page++) f.Map(page, 11 - page, page >= 4 && page < 8 ? .8f : 0);
+            Array.Clear(f.RequestData, 0, f.RequestData.Length);
             f.Upload(); f.Run("ResolveReceivers", receiver);
             for (int page = 0; page < 12; page++)
-                Assert.That(f.MetadataData[page].x & 3841u, Is.EqualTo(requested[page]));
+                Assert.That(f.RequestData[page] & 3841u, Is.EqualTo(requested[page]));
             for (int page = 0; page < 12; page++) f.Map(page, 11 - page, .8f);
             f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 0));
             f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 100, .5f)); f.Upload();
@@ -1079,10 +1142,10 @@ namespace VividRP.Editor.Tests
             Assert.That(f.RunDiagnostic(float4.zero, 0).xyz, Is.EqualTo(new float3(1, 2, -1)));
             float2[] result = f.Run("ResolveReceivers", new[] { float4.zero }, normals: new[] { new float4(0, 0, 1, 0) });
             Assert.That(result[0].x, Is.Zero);
-            for (int i = 0; i < 4; i++) Assert.That(f.MetadataData[i].x & 1u, Is.Zero);
-            Assert.That(Array.Exists(f.MetadataData, x => (x.x & 256u) != 0), Is.True);
+            for (int i = 0; i < 4; i++) Assert.That(f.RequestData[i] & 1u, Is.Zero);
+            Assert.That(Array.Exists(f.RequestData, x => (x & 256u) != 0), Is.True);
             bool requestedPreferred = false;
-            for (int i = 4; i < 8; i++) requestedPreferred |= (f.MetadataData[i].x & 1u) != 0;
+            for (int i = 4; i < 8; i++) requestedPreferred |= (f.RequestData[i] & 1u) != 0;
             Assert.That(requestedPreferred, Is.True);
         }
 
@@ -1132,6 +1195,7 @@ namespace VividRP.Editor.Tests
             int frame = pattern == 0 ? 0 : 17;
             var inputs = new float4[count]; var halos = new float4[count];
             var expected = new uint4[12];
+            var expectedRequests = new uint[12];
             for (int page = 0; page < 12; page++)
             {
                 expected[page] = new uint4(10u, (uint)(page + 1), (uint)(page % 2 == 0 ? 0 : 19), 64u);
@@ -1155,8 +1219,7 @@ namespace VividRP.Editor.Tests
                 for (int px = Mathf.Max(0, tx - halo) / 4; px <= Mathf.Min(7, tx + halo) / 4; px++)
                 {
                     int page = level * 4 + py * 2 + px;
-                    expected[page].x |= 1u | role | (level == 2 ? 256u : 0u);
-                    expected[page].z = Math.Max(expected[page].z, (uint)frame);
+                    expectedRequests[page] |= 1u | role | (level == 2 ? 256u : 0u);
                 }
             }
             f.Upload();
@@ -1167,10 +1230,73 @@ namespace VividRP.Editor.Tests
             f.Shader.SetInt("_SamplingCount", count); f.Shader.SetInt("_CSMFrameIndex", frame);
             f.Shader.SetBuffer(kernel, "_SamplingInputs", input);
             f.Shader.SetBuffer(kernel, "_SamplingNormals", haloInput);
-            f.Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", f.Metadata);
+            f.Shader.SetBuffer(kernel, "_VSMPageRequestFlags", f.RequestFlags);
             f.Shader.Dispatch(kernel, (count + 63) / 64, 1, 1);
             f.Metadata.GetData(f.MetadataData);
             Assert.That(f.MetadataData, Is.EqualTo(expected));
+            f.RequestFlags.GetData(f.RequestData);
+            Assert.That(f.RequestData, Is.EqualTo(expectedRequests));
+        }
+
+        [TestCase(0)] // Disjoint pages: roles must not leak across the union.
+        [TestCase(1)] // Coincident footprints.
+        [TestCase(2)] // A contains B.
+        [TestCase(3)] // B contains A.
+        [TestCase(4)] // Invalid A still permits B.
+        [TestCase(5)] // Invalid B still permits A.
+        [TestCase(6)] // Clipped halos at opposite edges.
+        [TestCase(7)] // Divergent levels, roles and partial waves.
+        public void MarkingFootprintUnion_PreservesExactPagesAndRoles(int pattern)
+        {
+            using var f = new Fixture();
+            int count = pattern == 7 ? 193 : 1;
+            var pairs = new float4[count * 2]; var levels = new float4[count];
+            var expected = new uint[12];
+            for (int i = 0; i < count; i++)
+            {
+                int level = pattern == 7 ? i % 3 : 2;
+                float4 a = new(.125f, .125f, 512, pattern == 2 ? 7 : 0);
+                float4 b = new(pattern == 1 ? .125f : .625f, .125f, 1024, pattern == 3 ? 7 : 0);
+                if (pattern == 4) a.x = -0.01f;
+                if (pattern == 5) b.x = 1f;
+                if (pattern == 6) { a.xy = 0; a.w = 1; b.xy = .999f; b.w = 1; }
+                if (pattern == 7) { a.w = i % 5; b.x = i % 11 == 0 ? 1 : .625f; b.w = i % 3; }
+                pairs[i * 2] = a; pairs[i * 2 + 1] = b; levels[i].z = level;
+                // Independent CPU union of the two clipped rectangles.
+                for (int j = 0; j < 2; j++)
+                {
+                    float4 p = pairs[i * 2 + j];
+                    if (p.x < 0 || p.x >= 1 || p.y < 0 || p.y >= 1) continue;
+                    int tx = Mathf.FloorToInt(p.x * 8), ty = Mathf.FloorToInt(p.y * 8), halo = (int)p.w;
+                    for (int y = Mathf.Max(0, ty - halo) / 4; y <= Mathf.Min(7, ty + halo) / 4; y++)
+                    for (int x = Mathf.Max(0, tx - halo) / 4; x <= Mathf.Min(7, tx + halo) / 4; x++)
+                        expected[level * 4 + y * 2 + x] |= 1u | (uint)p.z | (level == 2 ? 256u : 0u);
+                }
+            }
+            using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pairs.Length, 16);
+            using var normal = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
+            input.SetData(pairs); normal.SetData(levels);
+            int kernel = f.Shader.FindKernel("MarkFootprintPairs");
+            f.Shader.SetInt("_SamplingCount", count);
+            f.Shader.SetBuffer(kernel, "_SamplingInputs", input);
+            f.Shader.SetBuffer(kernel, "_SamplingNormals", normal);
+            f.Shader.SetBuffer(kernel, "_VSMPageRequestFlags", f.RequestFlags);
+            f.RequestFlags.SetData(new uint[12]);
+            f.Shader.Dispatch(kernel, (count + 63) / 64, 1, 1);
+            f.RequestFlags.GetData(f.RequestData);
+            Assert.That(f.RequestData, Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void ResolveOnly_DoesNotChangeRequestFlags()
+        {
+            using var f = new Fixture();
+            f.Map(3, 0, .8f);
+            for (int i = 0; i < 12; i++) f.RequestData[i] = i % 2 == 0 ? 513u : 3073u;
+            var before = (uint[])f.RequestData.Clone();
+            f.Upload();
+            Assert.That(f.Run("ResolveOnlyReceivers", new[] { float4.zero })[0].x, Is.Zero);
+            Assert.That(f.RequestData, Is.EqualTo(before));
         }
 
         [TestCase(false)]
@@ -1190,8 +1316,8 @@ namespace VividRP.Editor.Tests
                 normals: new[] { normalBias ? new float4(1, 0, 0, 0) : float4.zero });
             Assert.That(result[0].x, Is.Zero);
             // Fine demand survives fallback, and the coarsest footprint is prioritized.
-            Assert.That(f.MetadataData[3].x & 1, Is.EqualTo(1));
-            Assert.That(f.MetadataData[normalBias ? 9 : 8].x & 257, Is.EqualTo(257));
+            Assert.That(f.RequestData[3] & 1, Is.EqualTo(1));
+            Assert.That(f.RequestData[normalBias ? 9 : 8] & 257, Is.EqualTo(257));
         }
 
         [TestCase(false, 0f)]
@@ -1227,8 +1353,8 @@ namespace VividRP.Editor.Tests
             Assert.That(f.Run("ResolveReceivers", new[] { float4.zero })[0].x, Is.EqualTo(1));
             for (int page = 0; page < 12; page++)
             {
-                Assert.That(f.MetadataData[page].x, Is.EqualTo(page >= 8 ? 257u : page < 4 ? 513u : 2049u));
-                Assert.That(f.MetadataData[page].z, Is.EqualTo(7));
+                Assert.That(f.RequestData[page], Is.EqualTo(page >= 8 ? 257u : page < 4 ? 513u : 2049u));
+                Assert.That(f.MetadataData[page].z, Is.Zero, "Marking must not update age.");
             }
         }
 
@@ -1239,7 +1365,7 @@ namespace VividRP.Editor.Tests
             f.Upload();
             f.Run("MarkFootprints", new[] { new float4(0, 0, 0, 2), new float4(1, 0, 0, 0) });
             for (int page = 0; page < 12; page++)
-                Assert.That(f.MetadataData[page].x, Is.EqualTo(page == 8 ? 257u : 0u));
+                Assert.That(f.RequestData[page], Is.EqualTo(page == 8 ? 257u : 0u));
         }
 
         [Test]
@@ -1249,7 +1375,7 @@ namespace VividRP.Editor.Tests
             f.Upload();
             f.Run("MarkFootprints", new[] { new float4(.5f, .5f, 512, 0), new float4(.5f, .5f, 1024, 0) });
             for (int page = 0; page < 4; page++)
-                Assert.That(f.MetadataData[page].x, Is.EqualTo(1537u));
+                Assert.That(f.RequestData[page], Is.EqualTo(1537u));
         }
 
         [Test]
@@ -1260,9 +1386,9 @@ namespace VividRP.Editor.Tests
             f.Map(0, 0); f.Map(1, 1);
             for (int frame = 7; frame < 10; frame++)
             {
-                f.MetadataData[0].x |= 1; f.MetadataData[0].z = (uint)frame;
-                f.MetadataData[1].x |= 1; f.MetadataData[1].z = (uint)frame;
-                f.MetadataData[11].x |= 257; f.MetadataData[11].z = (uint)frame;
+                f.RequestData[0] |= 1; f.MetadataData[0].z = (uint)frame;
+                f.RequestData[1] |= 1; f.MetadataData[1].z = (uint)frame;
+                f.RequestData[11] |= 257; f.MetadataData[11].z = (uint)frame;
                 f.Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
                 f.Upload(); f.Allocate();
                 Assert.That(f.TableData[11], Is.EqualTo(1));
@@ -1270,7 +1396,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(f.TableData[1], Is.EqualTo(2));
                 var counters = new uint[4]; f.Counters.GetData(counters);
                 Assert.That(counters, Is.EqualTo(new uint[] { 2, 3, frame == 7 ? 1u : 0u, 1 }));
-                Assert.That(f.MetadataData[0].w & 129, Is.EqualTo(129));
+                Assert.That((f.MetadataData[0].w | f.RequestData[0]) & 129, Is.EqualTo(129));
                 Assert.That(f.MetadataData[11].x & 257, Is.Zero);
             }
         }
@@ -1286,7 +1412,7 @@ namespace VividRP.Editor.Tests
                 for (int page = 0; page < 12; page++)
                 {
                     if (page >= 6 && page != 11) continue;
-                    f.MetadataData[page].x |= page == 11 ? 257u : 1u;
+                    f.RequestData[page] |= page == 11 ? 257u : 1u;
                     f.MetadataData[page].z = (uint)frame;
                 }
                 f.Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
@@ -1298,7 +1424,7 @@ namespace VividRP.Editor.Tests
                 for (int page = 0; page < 3; page++)
                 {
                     Assert.That(f.TableData[page], Is.Zero);
-                    Assert.That(f.MetadataData[page].w & 129u, Is.EqualTo(129u));
+                    Assert.That((f.MetadataData[page].w | f.RequestData[page]) & 129u, Is.EqualTo(129u));
                 }
                 var counters = new uint[4]; f.Counters.GetData(counters);
                 Assert.That(counters, Is.EqualTo(new uint[] { 4, 7, frame == 7 ? 3u : 0u, 3 }));
@@ -1310,8 +1436,8 @@ namespace VividRP.Editor.Tests
         {
             using var f = new Fixture(allocator: true);
             f.Shader.SetInt("_VSMPrototypePhysicalPageCapacity", 4);
-            for (int page = 0; page < 6; page++) f.MetadataData[page] = new uint4(1, 0, 7, 0);
-            f.MetadataData[11] = new uint4(257, 0, 7, 0);
+            for (int page = 0; page < 6; page++) f.RequestData[page] = 1;
+            f.RequestData[11] = 257;
             f.Upload(); f.Allocate();
             Assert.That(f.TableData[11], Is.EqualTo(1));
             Assert.That(f.TableData[4], Is.EqualTo(2));
@@ -1326,8 +1452,8 @@ namespace VividRP.Editor.Tests
         {
             using var f = new Fixture(allocator: true);
             f.Shader.SetInt("_VSMPrototypePhysicalPageCapacity", 2);
-            f.MetadataData[0] = new uint4(1, 0, 7, 0);
-            for (int page = 8; page < 12; page++) f.MetadataData[page] = new uint4(257, 0, 7, 0);
+            f.RequestData[0] = 1;
+            for (int page = 8; page < 12; page++) f.RequestData[page] = 257;
             f.Upload(); f.Allocate();
             Assert.That(f.TableData[8], Is.EqualTo(1));
             Assert.That(f.TableData[9], Is.EqualTo(2));
@@ -1340,16 +1466,19 @@ namespace VividRP.Editor.Tests
         public void FeedbackReset_DropsOldPriorityWithoutDiscardingCompletedDepth()
         {
             using var f = new Fixture(allocator: true);
-            f.Map(11, 3); f.MetadataData[11].x |= 3841;
+            f.Map(11, 3); f.RequestData[11] |= 3841;
             f.Upload();
             int kernel = f.Shader.FindKernel("VSMPrototypeResetReceiverFeedback");
             f.Shader.SetBuffer(kernel, "_VSMPagePressureRW", f.Pressure);
+            f.Shader.SetBuffer(kernel, "_VSMPageRequestFlags", f.RequestFlags);
             f.Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", f.Metadata);
             f.Shader.Dispatch(kernel, 1, 1, 1);
             f.Metadata.GetData(f.MetadataData);
             Assert.That(f.MetadataData[11].x, Is.EqualTo(10));
             Assert.That(f.MetadataData[11].y, Is.EqualTo(4));
             Assert.That(f.MetadataData[11].z, Is.Zero);
+            f.RequestFlags.GetData(f.RequestData);
+            Assert.That(f.RequestData, Is.EqualTo(new uint[12]));
         }
 
         [TestCase(0)]
@@ -1359,12 +1488,12 @@ namespace VividRP.Editor.Tests
             using var f = new Fixture(allocator: true);
             f.Shader.SetInt("_VSMPrototypePhysicalPageCapacity", 4);
             f.Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
-            f.MetadataData[0] = new uint4(513, 0, (uint)frame, 0);
-            f.MetadataData[1] = new uint4(1025, 0, (uint)frame, 0);
-            f.MetadataData[2] = new uint4(1537, 0, (uint)frame, 0); // Shared primary/transition: primary wins.
-            f.MetadataData[4] = new uint4(1, 0, (uint)frame, 0);
-            f.MetadataData[5] = new uint4(3073, 0, (uint)frame, 0);
-            f.MetadataData[11] = new uint4(3841, 0, (uint)frame, 0); // Terminal always wins.
+            f.RequestData[0] = 513;
+            f.RequestData[1] = 1025;
+            f.RequestData[2] = 1537; // Shared primary/transition: primary wins.
+            f.RequestData[4] = 1;
+            f.RequestData[5] = 3073;
+            f.RequestData[11] = 3841; // Terminal always wins.
             f.Upload(); f.Allocate();
             Assert.That(f.TableData[11], Is.EqualTo(1));
             Assert.That(f.TableData[0], Is.EqualTo(3));
@@ -1374,7 +1503,7 @@ namespace VividRP.Editor.Tests
             var counters = new uint[4]; f.Counters.GetData(counters);
             Assert.That(counters, Is.EqualTo(new uint[] { 4, 6, 4, 2 }));
             foreach (uint4 metadata in f.MetadataData) Assert.That(metadata.x & 3841u, Is.Zero);
-            Assert.That(f.MetadataData[2].w & 1537u, Is.EqualTo(1537u));
+            Assert.That((f.MetadataData[2].w | f.RequestData[2]) & 1537u, Is.EqualTo(1537u));
         }
 
         [Test]
@@ -1389,7 +1518,7 @@ namespace VividRP.Editor.Tests
             {
                 for (int i = 0; i < pages.Length; i++)
                 {
-                    f.MetadataData[pages[i]].x |= roles[i];
+                    f.RequestData[pages[i]] |= roles[i];
                     f.MetadataData[pages[i]].z = (uint)frame;
                 }
                 f.Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
@@ -1401,20 +1530,28 @@ namespace VividRP.Editor.Tests
                 Assert.That(f.TableData[6], Is.Zero);
                 var counters = new uint[4]; f.Counters.GetData(counters);
                 Assert.That(counters, Is.EqualTo(new uint[] { 4, 5, frame == 7 ? 1u : 0u, 1 }));
-                Assert.That(f.MetadataData[6].w & 129u, Is.EqualTo(129u));
+                Assert.That((f.MetadataData[6].w | f.RequestData[6]) & 129u, Is.EqualTo(129u));
                 for (int slot = 0; slot < 4; slot++)
                     Assert.That(f.TableData[f.OwnerData[slot] - 1], Is.EqualTo(slot + 1));
             }
         }
 
         [Test]
-        public void Allocator_StaleRoleBitsDoNotProtectAResident()
+        public void Allocator_ClearedDemandDoesNotProtectAResident()
         {
             using var f = new Fixture(allocator: true);
             f.Shader.SetInt("_VSMPrototypePhysicalPageCapacity", 1);
-            f.Map(0, 0); f.MetadataData[0].x |= 3841; f.MetadataData[0].z = 6;
-            f.MetadataData[1] = new uint4(513, 0, 7, 0);
-            f.Upload(); f.Allocate();
+            f.Map(0, 0); f.MetadataData[0].z = 6;
+            f.RequestData[0] = 3841;
+            f.Upload();
+            int clear = f.Shader.FindKernel("VSMPrototypeClearReceiverRequests");
+            f.Shader.SetBuffer(clear, "_VSMPagePressureRW", f.Pressure);
+            f.Shader.SetBuffer(clear, "_VSMPageRequestFlags", f.RequestFlags);
+            f.Shader.Dispatch(clear, 1, 1, 1);
+            f.RequestFlags.GetData(f.RequestData);
+            f.RequestData[1] = 513;
+            f.RequestFlags.SetData(f.RequestData);
+            f.Allocate();
             Assert.That(f.TableData[0], Is.Zero);
             Assert.That(f.TableData[1], Is.EqualTo(1));
             Assert.That(f.MetadataData[0].x & 3841u, Is.Zero);
@@ -1438,10 +1575,12 @@ namespace VividRP.Editor.Tests
                 int[] indices = { 0, 31, 32, count == 64 ? 33 : 2047, count == 64 ? 34 : 2048, count - 1 };
                 var pages = new int[indices.Length];
                 var data = new uint4[count]; var mappings = new uint[count];
+                var demands = new uint[count];
+                using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4);
                 for (int i = 0; i < indices.Length; i++)
                 {
                     pages[i] = (levels - 1 - indices[i] / perLevel) * perLevel + indices[i] % perLevel;
-                    data[pages[i]] = new uint4(i == 0 ? 257u : 513u, 0, 7, 0);
+                    demands[pages[i]] = i == 0 ? 257u : 513u;
                 }
                 table.SetData(mappings); metadata.SetData(data); owners.SetData(new uint[4]); counters.SetData(new uint[4]);
                 int kernel = shader.FindKernel("VSMPrototypeAllocatePages");
@@ -1455,7 +1594,8 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", counters);
                 using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
                 pressure.SetData(new uint4[3]);
-                DispatchAllocation(shader, kernel, metadata, pressure);
+                requestFlags.SetData(demands);
+                DispatchAllocation(shader, kernel, metadata, pressure, requestFlags);
                 table.GetData(mappings); metadata.GetData(data);
                 var counts = new uint[4]; counters.GetData(counts);
                 Assert.That(counts, Is.EqualTo(new uint[] { 4, 6, 4, 2 }));
@@ -1479,12 +1619,13 @@ namespace VividRP.Editor.Tests
             for (int resident = 0; resident < 2; resident++)
             {
                 Array.Clear(f.MetadataData, 0, f.MetadataData.Length);
+                Array.Clear(f.RequestData, 0, f.RequestData.Length);
                 if (resident != 0) for (int page = 0; page < 12; page++) f.Map(page, page);
                 f.Upload(); f.Run("ResolveReceivers", new[] { receiver });
                 bool primary = false, blend = false;
                 for (int page = 0; page < 12; page++)
                 {
-                    uint request = f.MetadataData[page].x & 3841u;
+                    uint request = f.RequestData[page] & 3841u;
                     if (resident == 0) expected[page] = request;
                     else Assert.That(request, Is.EqualTo(expected[page]));
                     if ((request & 1u) == 0) continue;
@@ -1605,7 +1746,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(diagnostic.x, Is.Zero);
                 Assert.That(diagnostic.y, Is.EqualTo(1));
             }
-            for (int page = 0; page < 4; page++) Assert.That(f.MetadataData[page].x & 1, Is.EqualTo(1));
+            for (int page = 0; page < 4; page++) Assert.That(f.RequestData[page] & 1, Is.EqualTo(1));
             // The experimental option does not enable PCF by itself.
             f.Shader.SetVector("_VSMReceiverParameters", new Vector4(0, 0, 0, 1));
             Assert.That(f.Run("ResolveReceivers", new[] { receiver })[0].x, Is.Zero);
@@ -1762,7 +1903,7 @@ namespace VividRP.Editor.Tests
             for (int page = 4; page < 8; page++) f.Map(page, page - 4);
             f.Upload();
             Assert.That(f.Run("ResolveReceivers", new[] { float4.zero })[0].x, Is.EqualTo(expected));
-            for (int page = 0; page < 4; page++) Assert.That(f.MetadataData[page].x & 1, Is.EqualTo(1));
+            for (int page = 0; page < 4; page++) Assert.That(f.RequestData[page] & 1, Is.EqualTo(1));
         }
 
         [Test]

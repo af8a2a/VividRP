@@ -29,61 +29,6 @@ float VSMFilterGuard(int index, bool smrt)
     return radius / _VSMPrototypeVirtualResolution;
 }
 
-void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex, uint requestRole, int halo)
-{
-#if defined(VIVID_VSM_RECEIVER_DEBUG) || defined(VIVID_VSM_RESOLVE_RECEIVERS)
-    // Sampling and inspection never mutate the demand consumed by allocation.
-    return;
-#else
-    if (_VSMPrototypeRequestEnabled == 0
-        || cascadeIndex < 0 || cascadeIndex >= _VSMProjectionCount)
-        return;
-
-    int2 virtualTexel;
-    uint resolution = (uint)_VSMPrototypeVirtualResolution;
-    if (!VividVSMTryOffsetVirtualTexel(shadowUV, int2(0, 0), resolution, virtualTexel))
-        return;
-    uint pageSize = (uint)_VSMPrototypePageSize;
-    uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
-    // One stable union for all ray phases, emitted once per distinct page.
-    uint2 minPage = (uint2)max(virtualTexel - halo, 0) / pageSize;
-    uint2 maxPage = (uint2)min(virtualTexel + halo, (int)resolution - 1) / pageSize;
-    uint request = kVSMPageRequested | requestRole;
-    if (cascadeIndex == _VSMProjectionCount - 1)
-        request |= kVSMPageCoarseRequested;
-    for (uint y = minPage.y; y <= maxPage.y; y++)
-    {
-        for (uint x = minPage.x; x <= maxPage.x; x++)
-        {
-            uint page = (uint)cascadeIndex * pagesPerAxis * pagesPerAxis + y * pagesPerAxis + x;
-            uint pageRequest = request;
-#if defined(VIVID_VSM_MARK_RECEIVERS)
-            // Coherent receivers often request the same page. Merge only the
-            // current active lanes and this iteration's roles; divergent pages
-            // retain their individual requests. No receiver or halo is skipped.
-            if (WaveActiveAllEqual(page))
-            {
-                pageRequest = WaveActiveBitOr(pageRequest);
-                if (!WaveIsFirstLane()) continue;
-            }
-#endif
-            InterlockedOr(_VSMPrototypePageMetadata[page].x, pageRequest);
-            InterlockedMax(_VSMPrototypePageMetadata[page].z, (uint)_CSMFrameIndex);
-        }
-    }
-#endif
-}
-
-void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex, uint requestRole)
-{
-    MarkVSMReceiverPage(shadowUV, cascadeIndex, requestRole, 1);
-}
-
-void MarkVSMReceiverPage(float2 shadowUV, int cascadeIndex)
-{
-    MarkVSMReceiverPage(shadowUV, cascadeIndex, 0u);
-}
-
 bool TryResolveVSMPhysicalTexel(int2 virtualTexel, int cascadeIndex, out int2 physicalTexel,
     out uint pageFlags)
 {

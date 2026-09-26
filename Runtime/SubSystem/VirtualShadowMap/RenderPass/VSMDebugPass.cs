@@ -66,6 +66,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_VSMDebugPoolMode");
         private static readonly int PageTableId = Shader.PropertyToID("_VSMPrototypePageTable");
         private static readonly int PageMetadataId = Shader.PropertyToID("_VSMPrototypePageMetadata");
+        private static readonly int PageRequestFlagsId = Shader.PropertyToID("_VSMPageRequestFlags");
         private static readonly int AllocatorCountersId = Shader.PropertyToID("_VSMPrototypeAllocatorCounters");
         private static readonly int PageLayoutId = Shader.PropertyToID("_VSMDebugPageLayout");
         private static readonly int OutputSizeId = Shader.PropertyToID("_VSMDebugOutputSize");
@@ -177,9 +178,11 @@ namespace VividRP.Runtime.RenderPass.Core
                             this, VirtualShadowMapPrototypeRuntime.PageTable, AccessFlags.Read).IsValid();
                         bool metadataValid = PassRecorder.ImportBufferForPass(
                             this, VirtualShadowMapPrototypeRuntime.PageMetadata, AccessFlags.Read).IsValid();
+                        bool requestsValid = PassRecorder.ImportBufferForPass(
+                            this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.Read).IsValid();
                         bool countersValid = PassRecorder.ImportBufferForPass(
                             this, VirtualShadowMapPrototypeRuntime.AllocatorCounters, AccessFlags.Read).IsValid();
-                        m_PageStateResourcesAvailable = tableValid && metadataValid && countersValid;
+                        m_PageStateResourcesAvailable = tableValid && metadataValid && requestsValid && countersValid;
                     }
                 }
                 else
@@ -301,6 +304,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             properties.SetBuffer(PageTableId, VirtualShadowMapPrototypeRuntime.PageTable);
             properties.SetBuffer(PageMetadataId, VirtualShadowMapPrototypeRuntime.PageMetadata);
+            properties.SetBuffer(PageRequestFlagsId, VirtualShadowMapPrototypeRuntime.PageRequestFlags);
             properties.SetBuffer(AllocatorCountersId, VirtualShadowMapPrototypeRuntime.AllocatorCounters);
             properties.SetVector(PageLayoutId, new Vector4(
                 VirtualShadowMapPrototypeRuntime.PagesPerAxis,

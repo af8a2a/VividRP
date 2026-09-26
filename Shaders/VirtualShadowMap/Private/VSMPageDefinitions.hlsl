@@ -1,3 +1,5 @@
+// Request bits live only in _VSMPageRequestFlags. Metadata.x/w hold resident
+// state/debug snapshots, metadata.y the slot and metadata.z the last request age.
 static const uint kVSMPageRequested = 1u << 0;
 static const uint kVSMPageAllocated = 1u << 1;
 static const uint kVSMPageDirty = 1u << 2;

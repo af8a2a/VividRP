@@ -369,7 +369,7 @@ void VSMPrototypeClearReceiverRequests(uint3 id : SV_DispatchThreadID)
 {
     if (id.x == 0u) UpdateVSMPagePressure(false);
     if (id.x < (uint)_VSMPrototypePageTableEntryCount)
-        _VSMPrototypePageMetadata[id.x].x &= ~kVSMPageRequestMask;
+        _VSMPageRequestFlags[id.x] = 0u;
 }
 
 [numthreads(64, 1, 1)]
@@ -380,12 +380,10 @@ void VSMPrototypeResetReceiverFeedback(uint3 dispatchThreadID : SV_DispatchThrea
     if (virtualPageIndex >= (uint)_VSMPrototypePageTableEntryCount)
         return;
 
-    uint4 metadata = _VSMPrototypePageMetadata[virtualPageIndex];
-    metadata.x &= ~kVSMPageRequestMask;
+    _VSMPageRequestFlags[virtualPageIndex] = 0u;
     // A different camera's same-frame requests must not survive as either
     // receiver demand or eviction protection. Keep depth/cache ownership intact.
-    metadata.z = 0u;
-    _VSMPrototypePageMetadata[virtualPageIndex] = metadata;
+    _VSMPrototypePageMetadata[virtualPageIndex].z = 0u;
 }
 
 // Update cached virtual addresses in physical-slot order, matching UE's
@@ -451,8 +449,9 @@ void VSMPrototypePrepareAllocation(uint3 dispatchThreadID : SV_DispatchThreadID)
     uint levelCount = (uint)max(_VSMProjectionCount, 1);
     uint pagesPerLevel = pageCount / levelCount;
     uint wordCount = (pageCount + 31u) / 32u;
-    // Snapshot and clear stale feedback in parallel. Each word/page has one writer;
-    // the bitset records coarse-to-fine order, including sub-32-page test layouts.
+    // Consume this camera's freshly marked demand once per virtual page. Marking
+    // never touches resident metadata; this unique writer stamps LRU age before
+    // the allocator builds its victim order. Requests remain intact for work/debug.
     if (dispatchThreadID.x < wordCount)
     {
         uint word = dispatchThreadID.x;
@@ -462,14 +461,13 @@ void VSMPrototypePrepareAllocation(uint3 dispatchThreadID : SV_DispatchThreadID)
             uint index = word * 32u + bit;
             uint page = (levelCount - 1u - index / pagesPerLevel) * pagesPerLevel + index % pagesPerLevel;
             uint4 metadata = _VSMPrototypePageMetadata[page];
-            bool current = metadata.z == (uint)_VSMPrototypeFeedbackFrameIndex;
-            metadata.w = metadata.x & ~kVSMPageRequestMask;
-            if (current)
+            uint flags = _VSMPageRequestFlags[page];
+            metadata.w = metadata.x;
+            if ((flags & kVSMPageRequested) != 0u)
             {
-                metadata.w |= metadata.x & kVSMPageRequestMask;
-                if ((metadata.x & kVSMPageRequested) != 0u) requests |= 1u << bit;
+                metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
+                requests |= 1u << bit;
             }
-            else metadata.x &= ~kVSMPageRequestMask;
             _VSMPrototypePageMetadata[page] = metadata;
         }
         _VSMAllocationRequests[word] = requests;
@@ -516,9 +514,9 @@ void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
             {
                 counts.x++;
                 uint4 metadata = _VSMPrototypePageMetadata[owner - 1u];
-                bool current = (metadata.x & kVSMPageRequested) != 0u
-                    && metadata.z == (uint)_VSMPrototypeFeedbackFrameIndex;
-                key.xy = uint2(current ? 5u - VSMPageRequestPriority(metadata.x) : 1u, metadata.z);
+                uint flags = _VSMPageRequestFlags[owner - 1u];
+                bool current = (flags & kVSMPageRequested) != 0u;
+                key.xy = uint2(current ? 5u - VSMPageRequestPriority(flags) : 1u, metadata.z);
             }
         }
         g_VSMAllocationSlots[slot] = key;
@@ -570,7 +568,7 @@ void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
                 // A word may span levels in small diagnostic layouts.
                 if (index < levelStart || index >= levelEnd) continue;
                 uint page = level * pagesPerLevel + index - levelStart;
-                uint flags = _VSMPrototypePageMetadata[page].x;
+                uint flags = _VSMPageRequestFlags[page];
                 if ((flags & kVSMPageRequested) != 0u && VSMPageRequestPriority(flags) == phase)
                     matching |= 1u << bit;
             }
@@ -634,7 +632,7 @@ void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
                 {
                     counts.y++;
                     if (phase < 3u) pressureCounts.x++;
-                    bool primary = (metadata.x & kVSMPagePrimaryRequested) != 0u;
+                    bool primary = (_VSMPageRequestFlags[page] & kVSMPagePrimaryRequested) != 0u;
                     if (primary) pressureCounts.z++;
                     if (g_VSMMissingRequest[lane] != 0u)
                     {
@@ -646,9 +644,9 @@ void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
                             {
                                 uint evicted = candidate.w - 1u;
                                 uint4 evictedMetadata = _VSMPrototypePageMetadata[evicted];
-                                evictedMetadata.x &= kVSMPageRequestMask;
+                                evictedMetadata.x = 0u;
                                 evictedMetadata.y = 0u;
-                                evictedMetadata.w = kVSMPageDebugEvicted | (evictedMetadata.w & kVSMPageRequestMask);
+                                evictedMetadata.w = kVSMPageDebugEvicted;
                                 _VSMPrototypePageMetadata[evicted] = evictedMetadata;
                                 _VSMPrototypeWritablePageTable[evicted] = 0u;
                             }
@@ -670,18 +668,12 @@ void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
                         }
                     }
                     if (primary && (metadata.x & kVSMPageAllocated) != 0u) pressureCounts.w++;
-                    if ((metadata.x & kVSMPageAllocated) == 0u) metadata.x &= ~kVSMPageRequestMask;
                     _VSMPrototypePageMetadata[page] = metadata;
                 }
                 // Later roles/levels must see evictions before loading metadata.
                 AllMemoryBarrierWithGroupSync();
             }
         }
-    }
-    for (uint slot = lane; slot < capacity; slot += 64u)
-    {
-        uint owner = _VSMPrototypePhysicalPageOwners[slot];
-        if (owner != 0u) _VSMPrototypePageMetadata[owner - 1u].x &= ~kVSMPageRequestMask;
     }
     g_VSMAllocationCounts[lane] = counts;
     g_VSMAllocationPressure[lane] = pressureCounts;
@@ -839,6 +831,10 @@ void VSMPrototypeInvalidateDynamicPages(uint3 id : SV_GroupID, uint lane : SV_Gr
 
 groupshared uint g_VSMClearPageCount;
 groupshared uint g_VSMOccupancyPageCount;
+groupshared uint g_VSMCoarseRequestCount;
+groupshared uint g_VSMCoarseUnavailableCount;
+groupshared uint g_VSMEssentialPageCount;
+groupshared uint g_VSMFallbackPageCount;
 
 // Build after allocation/remap and all invalidation, before either pool is
 // cleared. Owners and dirty bits remain stable until occupancy is reduced.
@@ -851,6 +847,10 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
     {
         g_VSMClearPageCount = 0u;
         g_VSMOccupancyPageCount = 0u;
+        g_VSMCoarseRequestCount = 0u;
+        g_VSMCoarseUnavailableCount = 0u;
+        g_VSMEssentialPageCount = 0u;
+        g_VSMFallbackPageCount = 0u;
     }
     GroupMemoryBarrierWithGroupSync();
     uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
@@ -859,9 +859,39 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
     uint pagesPerLevel = max((uint)_VSMPrototypePageTableEntryCount / levelCount, 1u);
     uint sortCount = 1u;
     while (sortCount < capacity) sortCount <<= 1u;
+    // A request/allocation is not a usable fallback. Require the entire current
+    // terminal footprint to be readable before spending the budget on detail.
+    // Scan virtual requests, including pages that failed physical allocation.
+    if (_VSMPageUpdateBudget > 0)
+    {
+        uint coarseStart = (levelCount - 1u) * pagesPerLevel;
+        uint requestedCount = 0u, unavailableCount = 0u;
+        for (uint offset = lane; offset < pagesPerLevel; offset += 64u)
+        {
+            uint page = coarseStart + offset;
+            uint request = _VSMPageRequestFlags[page];
+            if ((request & (kVSMPageRequested | kVSMPageCoarseRequested))
+                != (kVSMPageRequested | kVSMPageCoarseRequested)) continue;
+            requestedCount++;
+            uint4 metadata = _VSMPrototypePageMetadata[page];
+            uint encoded = _VSMPrototypePageTable[page];
+            bool ready = encoded != 0u && encoded <= capacity && metadata.y == encoded
+                && (metadata.x & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty | kVSMPageDeferred)) == kVSMPageAllocated;
+            if (ready) ready = _VSMPrototypePhysicalPageOwners[encoded - 1u] == page + 1u;
+            if (!ready) unavailableCount++;
+        }
+        InterlockedAdd(g_VSMCoarseRequestCount, requestedCount);
+        InterlockedAdd(g_VSMCoarseUnavailableCount, unavailableCount);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    bool coarseReady = g_VSMCoarseRequestCount != 0u && g_VSMCoarseUnavailableCount == 0u;
+    // Reserve a small share every eighth frame for the remaining parent chain,
+    // even under continuous primary/nearest-parent invalidation.
+    bool refineParents = ((uint)_VSMPrototypeFeedbackFrameIndex & 7u) == 0u;
     // Reuse the allocation kernel's shared scratch (kernels execute separately).
     // Only current demand consumes a finite update budget. Unlimited mode keeps
     // the original all-dirty-page behavior, including unrequested cached pages.
+    uint essentialCount = 0u, fallbackCount = 0u;
     for (uint slot = lane; slot < sortCount; slot += 64u)
     {
         uint4 key = uint4(0xffffffffu, 0u, slot, 0u);
@@ -873,16 +903,39 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
             {
                 uint4 metadata = _VSMPrototypePageMetadata[owner - 1u];
                 bool dirty = (metadata.x & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u;
-                bool requested = metadata.z == (uint)_VSMPrototypeFeedbackFrameIndex
-                    && (metadata.w & kVSMPageRequested) != 0u;
+                uint request = _VSMPageRequestFlags[owner - 1u];
+                bool requested = (request & kVSMPageRequested) != 0u;
                 if (dirty && (requested || _VSMPageUpdateBudget <= 0))
+                {
                     key.x = _VSMPageUpdateBudget > 0 ? levelCount - 1u - (owner - 1u) / pagesPerLevel : 0u;
+                    if (coarseReady)
+                    {
+                        // Primary includes SMRT continuation. Coarse-to-fine
+                        // within a class completes dependencies before origins.
+                        bool parent = (request & kVSMPageParentRequested) != 0u;
+                        bool essential = (request & (kVSMPagePrimaryRequested | kVSMPageTransitionRequested)) != 0u || parent;
+                        essentialCount += essential ? 1u : 0u;
+                        fallbackCount += essential ? 0u : 1u;
+                        // Ordinary turns refine coarse-to-fine. Maintenance
+                        // treats fallback levels equally to avoid starvation.
+                        key.x = essential ? key.x : levelCount + (refineParents ? 0u : key.x);
+                    }
+                }
                 // Rotate equal-level priority; physical ownership is re-read every
                 // frame, so eviction/remap never leaves a stale queued slot behind.
-                key.y = (slot + (uint)_VSMPrototypeFeedbackFrameIndex % capacity) % capacity;
+                uint rotation = (uint)_VSMPrototypeFeedbackFrameIndex;
+                // Advance by one per refinement turn, not eight physical slots;
+                // otherwise power-of-two pools can repeatedly select a subset.
+                if (coarseReady && refineParents) rotation >>= 3u;
+                key.y = (slot + rotation % capacity) % capacity;
             }
         }
         g_VSMAllocationSlots[slot] = key;
+    }
+    if (coarseReady)
+    {
+        InterlockedAdd(g_VSMEssentialPageCount, essentialCount);
+        InterlockedAdd(g_VSMFallbackPageCount, fallbackCount);
     }
     GroupMemoryBarrierWithGroupSync();
     for (uint width = 2u; width <= sortCount; width <<= 1u)
@@ -903,6 +956,12 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
         }
         GroupMemoryBarrierWithGroupSync();
     }
+    uint essentialBudget = budget;
+    if (coarseReady)
+    {
+        uint reserve = refineParents ? min(g_VSMFallbackPageCount, max(budget / 8u, 1u)) : 0u;
+        essentialBudget = min(g_VSMEssentialPageCount, budget - reserve);
+    }
     for (uint rank = lane; rank < sortCount; rank += 64u)
     {
         uint4 key = g_VSMAllocationSlots[rank];
@@ -911,6 +970,10 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
         uint flags = _VSMPrototypePageMetadata[owner - 1u].x & ~kVSMPageDeferred;
         bool dirty = (flags & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u;
         bool selected = dirty && rank < budget && key.x != 0xffffffffu;
+        if (coarseReady)
+            selected = dirty && key.x != 0xffffffffu
+                && (rank < essentialBudget || (rank >= g_VSMEssentialPageCount
+                    && rank - g_VSMEssentialPageCount < budget - essentialBudget));
         if (dirty && !selected) flags |= kVSMPageDeferred;
         _VSMPrototypePageMetadata[owner - 1u].x = flags;
         uint index;

@@ -138,6 +138,7 @@ Shader "Hidden/VividRP/VSMDebug"
 
             StructuredBuffer<uint> _VSMPrototypePageTable;
             StructuredBuffer<uint4> _VSMPrototypePageMetadata;
+            StructuredBuffer<uint> _VSMPageRequestFlags;
             StructuredBuffer<uint> _VSMPrototypeAllocatorCounters;
             float4 _VSMDebugPageLayout; // pages/axis, virtual entry count, physical capacity
             float4 _VSMDebugOutputSize;
@@ -280,7 +281,7 @@ Shader "Hidden/VividRP/VSMDebug"
                     return float4(0.015, 0.015, 0.015, 1.0);
 
                 uint4 metadata = _VSMPrototypePageMetadata[index];
-                uint flags = metadata.w; // last allocation/static-render submission, not next feedback
+                uint flags = metadata.w | _VSMPageRequestFlags[index];
                 bool allocated = _VSMPrototypePageTable[index] != 0u && (metadata.x & 2u) != 0u;
                 uint dirtyMask = kVSMPageDirty | kVSMPageDynamicDirty;
                 uint state = !allocated ? 8u : ((flags & dirtyMask) != 0u ? 6u : ((flags & 8u) != 0u ? 7u : 5u));

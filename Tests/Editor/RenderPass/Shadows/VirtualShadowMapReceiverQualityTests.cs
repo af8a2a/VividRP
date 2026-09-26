@@ -93,8 +93,12 @@ namespace VividRP.Editor.Tests
             var state = new[] { new uint4(math.asuint(1f), 0, 800, 0), new uint4(0, 0, 0, math.asuint(1f)), uint4.zero };
             try
             {
+                using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+                requestFlags.SetData(new uint[1]);
                 int clear = shader.FindKernel("VSMPrototypeClearReceiverRequests");
+                shader.SetBuffer(clear, "_VSMPageRequestFlags", requestFlags);
                 int reset = shader.FindKernel("VSMPrototypeResetReceiverFeedback");
+                shader.SetBuffer(reset, "_VSMPageRequestFlags", requestFlags);
                 metadata.SetData(new uint4[1]);
                 pressure.SetData(state);
                 shader.SetInt("_VSMPrototypePageTableEntryCount", 1);

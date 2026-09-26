@@ -110,7 +110,9 @@ void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
                 bool allocated = mapping != 0u && (metadata.x & kVSMPageAllocated) != 0u;
                 if (_VSMReceiverDebugMode == 8)
                 {
-                    data = float4(metadata.x, metadata.w, mapping, level);
+                    // Preserve the exported cache/request snapshot without storing
+                    // transient request roles in the resident metadata buffer.
+                    data = float4(metadata.x, metadata.w | _VSMPageRequestFlags[index], mapping, level);
                     color = VSMDebugCacheColor(metadata, allocated, 0u);
                 }
                 else

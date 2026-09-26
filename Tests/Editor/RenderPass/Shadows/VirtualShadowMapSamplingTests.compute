@@ -23,6 +23,9 @@
 #pragma kernel CompareSMRTOutputs
 #pragma kernel FilterSMRTAdaptive VIVID_VSM_RECEIVER_DEBUG VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_ADAPTIVE_RAYS
 #pragma kernel InspectSMRTWavePolicy
+#pragma kernel MarkReceiverInputs VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE
+#pragma kernel MarkFootprintPairs VIVID_VSM_MARK_RECEIVERS
+#pragma kernel ResolveOnlyReceivers VIVID_VSM_RESOLVE_RECEIVERS
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -36,6 +39,25 @@ RWStructuredBuffer<float2> _SamplingResults;
 int _SamplingCount;
 int2 _SamplingPixel;
 float2 _SamplingAdaptive; // wave adaptation enabled, use production uniform binding
+
+// Test the production marker without any resident metadata or physical pools.
+[numthreads(64, 1, 1)]
+void MarkReceiverInputs(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    MarkVSMReceiver(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz);
+}
+
+[numthreads(64, 1, 1)]
+void MarkFootprintPairs(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 a = _SamplingInputs[id.x * 2], b = _SamplingInputs[id.x * 2 + 1];
+    int level = (int)_SamplingNormals[id.x].z;
+    EmitVSMReceiverFootprints(level,
+        BuildVSMReceiverPageFootprint(a.xy, level, (uint)a.z, (int)a.w),
+        BuildVSMReceiverPageFootprint(b.xy, level, (uint)b.z, (int)b.w));
+}
 
 StructuredBuffer<uint> _TestStaticData;
 StructuredBuffer<uint> _TestDynamicData;
@@ -165,8 +187,18 @@ void SampleTaps(uint3 id : SV_DispatchThreadID)
 void ResolveReceivers(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= (uint)_SamplingCount) return;
+    // Exercise the two production stages explicitly; resolve itself is read-only.
+    MarkVSMReceiver(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz);
     _SamplingResults[id.x] = float2(
         ResolveVSMReceiver(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz, uint2(_SamplingPixel)), 0.0);
+}
+
+[numthreads(64, 1, 1)]
+void ResolveOnlyReceivers(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    _SamplingResults[id.x] = float2(
+        ResolveVSMReceiver(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz, uint2(_SamplingPixel)), 0);
 }
 
 [numthreads(64, 1, 1)]

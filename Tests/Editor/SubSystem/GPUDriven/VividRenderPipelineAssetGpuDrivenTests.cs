@@ -795,7 +795,8 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("MarkReceiverResolveProduced(", resolve);
             StringAssert.Contains("#pragma kernel VSMMarkReceiverPages VIVID_VSM_MARK_RECEIVERS", shader);
             string clear = SliceSource(shader, "void VSMPrototypeClearReceiverRequests(", "void VSMPrototypeResetReceiverFeedback(");
-            StringAssert.Contains(".x &= ~kVSMPageRequestMask", clear);
+            StringAssert.Contains("_VSMPageRequestFlags[id.x] = 0u", clear);
+            StringAssert.DoesNotContain("_VSMPrototypePageMetadata", clear);
             StringAssert.DoesNotContain(".z =", clear);
         }
 

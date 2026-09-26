@@ -55,6 +55,8 @@ Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
 StructuredBuffer<uint> _VSMPrototypePageTable;
 RWStructuredBuffer<uint> _VSMPrototypeWritablePageTable;
 RWStructuredBuffer<uint4> _VSMPrototypePageMetadata;
+// Transient demand in virtual-page order; cleared before marking each camera.
+RWStructuredBuffer<uint> _VSMPageRequestFlags;
 RWStructuredBuffer<uint> _VSMPrototypePhysicalPageOwners;
 RWStructuredBuffer<uint> _VSMPrototypeAllocatorCounters;
 RWStructuredBuffer<uint> _VSMAllocationRequests;

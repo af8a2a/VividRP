@@ -301,6 +301,9 @@ namespace VividRP.Editor.Tests
                 var workList = VirtualShadowMapPrototypeRuntime.PageWorkList;
                 var workArgs = VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs;
                 var remapMetadata = VirtualShadowMapPrototypeRuntime.RemapPageMetadata;
+                var requestFlags = VirtualShadowMapPrototypeRuntime.PageRequestFlags;
+                Assert.That(requestFlags.count, Is.EqualTo(VirtualShadowMapPrototypeRuntime.PageTableEntryCount));
+                Assert.That(requestFlags.stride, Is.EqualTo(4));
                 Assert.That(remapMetadata.count, Is.EqualTo(budget));
                 Assert.That(remapMetadata.stride, Is.EqualTo(16));
                 Assert.That(workList.count, Is.EqualTo(budget * 2));
@@ -315,12 +318,14 @@ namespace VividRP.Editor.Tests
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList, Is.SameAs(workList));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, Is.SameAs(workArgs));
                 Assert.That(VirtualShadowMapPrototypeRuntime.RemapPageMetadata, Is.SameAs(remapMetadata));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PageRequestFlags, Is.SameAs(requestFlags));
                 VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(256));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList.count, Is.EqualTo(512));
             }
             finally { VirtualShadowMapPrototypeRuntime.ReleaseResources(); }
             Assert.That(VirtualShadowMapPrototypeRuntime.RemapPageMetadata, Is.Null);
+            Assert.That(VirtualShadowMapPrototypeRuntime.PageRequestFlags, Is.Null);
             Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList, Is.Null);
             Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, Is.Null);
         }
@@ -354,13 +359,13 @@ namespace VividRP.Editor.Tests
                 tableData[10] = 4;
                 tableData[117] = 65; // Exercise the second physical dispatch group.
                 for (int i = 0; i < count; i++)
-                    metadataData[i] = new uint4(tableData[i] == 0 ? 0u : 11u, tableData[i], 7, 8);
+                    metadataData[i] = new uint4(tableData[i] == 0 ? 0u : 10u, tableData[i], 7, 8);
                 // Keep dirty, deferred, occupancy, age and debug state bit-for-bit.
                 metadataData[0].x |= (1u << 2) | (1u << 17);
                 metadataData[10].x |= (1u << 15) | (1u << 14);
                 metadataData[117].w = 0x12345678u;
                 // Unallocated feedback must not reappear as cached state after remap.
-                metadataData[54] = new uint4(1u | (1u << 9), 0u, 6u, 0xfeedu);
+                metadataData[54] = new uint4(0u, 0u, 6u, 0xfeedu);
                 using var remapMetadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 16);
                 using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4);
                 using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
@@ -429,14 +434,17 @@ namespace VividRP.Editor.Tests
                 int free = System.Array.IndexOf(actualOwners, 0u);
                 int missing = System.Array.IndexOf(actual, 0u);
                 Assert.That(free, Is.GreaterThanOrEqualTo(0));
-                actualMetadata[missing] = new uint4(1, 0, 7, 0);
-                metadata.SetData(actualMetadata);
+                using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4);
+                var demand = new uint[count]; demand[missing] = 1u;
+                requestFlags.SetData(demand);
+                shader.SetBuffer(allocate, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(allocate, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(allocate, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(allocate, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(allocate, "_VSMPrototypeAllocatorCounters", counters);
                 int prepare = shader.FindKernel("VSMPrototypePrepareAllocation");
                 shader.SetBuffer(prepare, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(prepare, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(prepare, "_VSMAllocationRequests", requests);
                 shader.Dispatch(prepare, (count + 63) / 64, 1, 1);
                 shader.SetBuffer(allocate, "_VSMAllocationRequests", requests);

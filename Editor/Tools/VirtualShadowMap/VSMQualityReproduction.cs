@@ -25,6 +25,7 @@ namespace VividRP.Editor
             "_VSMPrototypePageMetadata", "_VSMReceiverDebugMode", "_CSMInvViewProjMatrix",
             "_VSMReceiverParameters", "_CSMOutputWidth", "_CSMOutputHeight", "_VSMPrototypeEnabled",
             "_VSMPrototypeVirtualResolution", "_VSMPrototypePageSize", "_VSMPrototypePagesPerAxis", "_VSMPrototypePhysicalPagesPerRow", "_CSMFrameIndex" };
+        private static readonly int s_RequestFlagsId = Shader.PropertyToID("_VSMPageRequestFlags");
         private static readonly int[] s_Ids = BuildIds();
         private static int[] BuildIds()
         {
@@ -380,6 +381,7 @@ namespace VividRP.Editor
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[6], VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_Ids[7], VirtualShadowMapPrototypeRuntime.PageTable);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_Ids[8], VirtualShadowMapPrototypeRuntime.PageMetadata);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_RequestFlagsId, VirtualShadowMapPrototypeRuntime.PageRequestFlags);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapProjectionSet.BufferId, VirtualShadowMapPrototypeRuntime.Projections.Buffer);
             cmd.SetComputeIntParam(m_Compute, VirtualShadowMapProjectionSet.CountId, VirtualShadowMapPrototypeRuntime.Projections.Count);
             Matrix4x4 vp = camera.GetGPUViewProjectionMatrix(true);

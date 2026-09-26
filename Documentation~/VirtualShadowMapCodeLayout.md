@@ -34,6 +34,7 @@
 | `Public/VividVirtualShadowMapCaster.hlsl` | Caster 多层深度插入 |
 | `Private/VSMPageDefinitions.hlsl` | 页标志、请求优先级及调试统计定义 |
 | `Private/VSMPageManagement.hlsl` | Meshlet 页请求、分配、重映射、失效、清页、占用归约 |
+| `Private/VSMPageMarking.hlsl` | 专用接收点请求生成；逐层合并 SMRT 和 PCF footprint，保留独立角色与完整回退链 |
 | `Private/VSMPhysicalSampling.hlsl` | 页解析、深度层读取、虚拟采样 |
 | `Private/VSMReceiverNormal.hlsl` | 接收面法线重建 |
 | `Private/VSMReceiverResolve.hlsl` | 接收面偏移、PCF、层间过渡和阴影求值 |
@@ -74,6 +75,16 @@
 
 该阶段采用 UE 按物理页更新虚拟地址的组织方式；当前密集虚拟页表仍需一次全表清零。相机/光源/布局基准的兼容判定、全组重置条件及后续分配策略仍由 VividRP 管理。
 
+## 当帧请求与常驻状态
+
+`PageRequestFlags` 为每个虚拟页保存一个 uint，由 `VirtualShadowMapPrototypeRuntime` 按布局创建、稳定复用和释放。`VSMShadowPass` 先完成布局更新，再清空请求缓冲并从当前接收点标记。请求不参与布局重映射；换相机或帧回退时额外重置请求年龄。
+
+标记只对 `_VSMPageRequestFlags` 合并角色，不写常驻元数据或年龄。`VSMPrototypePrepareAllocation` 在逐页生成分配 bitset 时更新已请求页的年龄。`PageMetadata` 的 x/y/z/w 分别保存常驻状态、物理槽编码、最后请求帧及状态调试快照，不再保存请求角色。分配器与限额补绘列表读取同一份请求缓冲；请求保留到下一次标记前清空，供 Requested/Request Role 调试读取。调试导出在读取时合并请求和状态，保持原输出格式。
+
+请求角色、优先级、跨层覆盖及 SMRT/PCF footprint 不变。此分离不包含 receiver mask、像素步长或 UE 层级选择策略的迁移。
+
+`VSMMarkReceiverPages` 通过 `MarkVSMReceiver` 独立生成需求；阴影求值不再负责标记。SMRT 与 PCF 各自选择起始层和过渡权重，在共同层级复用投影准备，按页面矩形的精确并集合并请求：交集只提交一次并合并角色，独有页面保留原角色。SMRT continuation 仍为 Primary，完整父链及末层 Coarse 请求保留；选择不读取常驻状态、物理深度或随机射线相位。
+
 ## 动态缓存扩展（2026-09-17）
 
 带 `VividVSMConservativeBounds=1` ShadowCaster Pass 的普通 MeshRenderer 使用 Unity culling 的聚合投影物 bounds。Runtime 合并上次成功提交和当前 bounds，只失效覆盖页面；当前覆盖仍逐帧重绘，覆盖之外可复用。四个无顶点形变的内置材质已声明该契约；Skinned、Terrain、粒子及未声明契约的自定义材质保留全量刷新。
@@ -82,7 +93,7 @@
 
 ## 分配提交并行化（2026-09-17）
 
-`VSMPrototypeAllocatePages` 保留原候选排序，按同角色、同 clipmap 压缩请求，每批 64 个请求并行读取/提交元数据，最后并行清请求位和归约统计。lane 0 仅保留共享内存中的顺序槽配对。请求 bitset、两个分配 dispatch、31 个 kernel 顺序、CPU 绑定与持久资源不变；组共享声明增至约 26.75 KiB。完整状态等价和隔离 GPU 计时见 [分配提交报告](../Temp~/VSM/Roadmap~/Experiments/VSMAllocationCommit_20260917/README.md)。
+`VSMPrototypeAllocatePages` 保留原候选排序，按同角色、同 clipmap 压缩请求，每批 64 个请求并行读取/提交元数据，最后归约统计。lane 0 仅保留共享内存中的顺序槽配对。请求分离后仍保留 bitset 和两个分配 dispatch，移除了提交末尾清元数据请求位的循环；当帧请求由下一次标记前统一清空。组共享声明约 26.75 KiB。该轮完整状态等价和隔离 GPU 计时见 [分配提交报告](../Temp~/VSM/Roadmap~/Experiments/VSMAllocationCommit_20260917/README.md)。
 
 ## 目录整理时的验证
 
@@ -98,6 +109,16 @@
 ## 脏页工作列表（2026-09-17）
 
 `VSMShadowPass` 在全部失效标记后构建 GPU 页列表，以间接派发执行清页和占用归约。`VirtualShadowMapPrototypeRuntime` 管理按预算复用的 `PageWorkList` 与 `PageWorkDispatchArgs`，`VSMProfiling.BuildPageWorkLists` 单独记录构建成本。旧直接入口保留，新三个 kernel 追加；完整双池 16 层不变。实现、实测和未结案挂起记录见 [报告](../Temp~/VSM/Roadmap~/Experiments/VSMPageWorkLists_20260917/README.md)。
+
+## 完整请求下的补绘顺序（2026-09-26）
+
+`VSMBuildPageWorkLists` 只改变有限预算内的补绘选择，不裁剪请求、分配需求或父链，不改变静态/动态 16 层深度池。末层当前 Coarse 请求必须全部可读（页表、元数据和物理 owner 一致，已分配且无 dirty/deferred）才进入细节恢复；检查包含尚未分配的虚拟页。否则保持从粗到细补齐兜底。已完成的空页也算可读。
+
+兜底就绪后，Primary（含 SMRT continuation）、Transition 和最近一级 Parent 优先，同组仍从粗到细。其余父链使用剩余预算；每 8 帧从原预算中保留 `max(budget / 8, 1)` 页给这些请求，按其实际积压数量截断，未用份额回给优先组。该维护轮将远端父层视作同组，并按维护轮次旋转物理槽，避免持续失效使完整父链永久排队。无限预算保持原有行为。
+
+工作列表仍逐帧依据当前 owner 重建，未选脏页保持 Deferred，接收端继续拒绝读取；无需持久 CPU 队列或新增 GPU buffer。`VSMShadowPass` 为工作列表入口补充页表只读绑定。提前恢复细节可能增加随后失效时的重绘总量，也可能短暂使用更粗的中间回退；此调度不保证逐帧阴影误差单调下降。
+
+实现对照、故障注入、完整请求等价与质量回放记录位于忽略目录 `Temp~/VSM/RecoveryOrder_20260926/`。
 
 ## SMRT 成本诊断（2026-09-17）
 

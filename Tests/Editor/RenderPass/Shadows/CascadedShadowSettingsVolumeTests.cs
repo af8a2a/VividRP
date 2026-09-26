@@ -567,14 +567,18 @@ namespace VividRP.Editor.Tests
         }
 
         private static void DispatchVSMAllocation(ComputeShader shader, int kernel, int pageCount,
-            GraphicsBuffer metadata)
+            GraphicsBuffer metadata, uint[] demand)
         {
+            using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, sizeof(uint));
+            requestFlags.SetData(demand);
             using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
                 CoreUtils.DivRoundUp(pageCount, 32), sizeof(uint));
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint) * 4);
             pressure.SetData(new uint4[3]);
             int prepare = shader.FindKernel("VSMPrototypePrepareAllocation");
             shader.SetBuffer(prepare, "_VSMPrototypePageMetadata", metadata);
+            shader.SetBuffer(prepare, "_VSMPageRequestFlags", requestFlags);
+            shader.SetBuffer(kernel, "_VSMPageRequestFlags", requestFlags);
             shader.SetBuffer(prepare, "_VSMAllocationRequests", requests);
             shader.Dispatch(prepare, CoreUtils.DivRoundUp(requests.count, 64), 1, 1);
             shader.SetBuffer(kernel, "_VSMAllocationRequests", requests);
@@ -595,11 +599,12 @@ namespace VividRP.Editor.Tests
             int kernel = shader.FindKernel("VSMPrototypeAllocatePages");
             var pageTableData = new uint[8];
             var metadataData = new TestPageMetadata[8];
-            metadataData[1].Flags = 1u;
+            var demand = new uint[8];
+            demand[1] = 1u;
             metadataData[1].LastRequestedFrame = 7u;
-            metadataData[3].Flags = 1u;
+            demand[3] = 1u;
             metadataData[3].LastRequestedFrame = 7u;
-            metadataData[7].Flags = 1u;
+            demand[7] = 1u;
             metadataData[7].LastRequestedFrame = 7u;
             var ownerData = new uint[2];
             var counterData = new uint[4];
@@ -633,7 +638,7 @@ namespace VividRP.Editor.Tests
             shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
             shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", owners);
             shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", counters);
-            DispatchVSMAllocation(shader, kernel, pageTableData.Length, metadata);
+            DispatchVSMAllocation(shader, kernel, pageTableData.Length, metadata, demand);
 
             pageTable.GetData(pageTableData);
             metadata.GetData(metadataData);
@@ -670,6 +675,7 @@ namespace VividRP.Editor.Tests
                 const uint allocated = 2u;
                 var pageData = new uint[pageCount];
                 var metaData = new TestPageMetadata[pageCount];
+                var demand = new uint[pageCount];
                 var ownerData = new uint[capacity];
                 var counterData = new uint[4];
                 // All slots belong to requested fine pages. Coarse requests of
@@ -678,13 +684,14 @@ namespace VividRP.Editor.Tests
                 {
                     pageData[slot] = (uint)slot + 1u;
                     ownerData[slot] = (uint)slot + 1u;
-                    metaData[slot].Flags = requestedPrimary | allocated;
+                    metaData[slot].Flags = allocated;
+                    demand[slot] = requestedPrimary;
                     metaData[slot].EncodedPhysicalPage = (uint)slot + 1u;
                     metaData[slot].LastRequestedFrame = 7u;
                 }
                 for (int page = pagesPerLevel; page < pageCount; page++)
                 {
-                    metaData[page].Flags = requestedPrimary;
+                    demand[page] = requestedPrimary;
                     metaData[page].LastRequestedFrame = 7u;
                 }
                 using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, sizeof(uint));
@@ -703,7 +710,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", counters);
-                DispatchVSMAllocation(shader, kernel, pageCount, metadata);
+                DispatchVSMAllocation(shader, kernel, pageCount, metadata, demand);
                 table.GetData(pageData);
                 metadata.GetData(metaData);
                 owners.GetData(ownerData);
@@ -766,6 +773,7 @@ namespace VividRP.Editor.Tests
                 var pageTableData = new uint[8];
                 var previousPageTable = new uint[8];
                 var metadataData = new TestPageMetadata[8];
+                var demand = new uint[8];
                 var ownerData = new uint[2];
                 var counterData = new uint[4];
                 using var pageTable = new GraphicsBuffer(
@@ -797,20 +805,20 @@ namespace VividRP.Editor.Tests
                     uint feedbackFrame = (uint)frameIndex + 6u;
                     uint requestCount = 0u;
                     System.Array.Copy(pageTableData, previousPageTable, pageTableData.Length);
-                    // Stale feedback must neither allocate nor prevent eviction.
+                    // Old request age must neither allocate nor prevent eviction.
+                    System.Array.Clear(demand, 0, demand.Length);
                     metadataData[6].LastRequestedFrame = feedbackFrame - 1u;
                     for (int page = 0; page < metadataData.Length; page++)
                     {
-                        metadataData[page].Flags |= requested;
                         if ((frame.Requests & (1u << page)) == 0u)
                             continue;
-                        metadataData[page].LastRequestedFrame = feedbackFrame;
+                        demand[page] = requested;
                         requestCount++;
                     }
 
                     metadata.SetData(metadataData);
                     shader.SetInt("_VSMPrototypeFeedbackFrameIndex", (int)feedbackFrame);
-                    DispatchVSMAllocation(shader, allocateKernel, pageTableData.Length, metadata);
+                    DispatchVSMAllocation(shader, allocateKernel, pageTableData.Length, metadata, demand);
                     pageTable.GetData(pageTableData);
                     metadata.GetData(metadataData);
                     owners.GetData(ownerData);
@@ -828,7 +836,7 @@ namespace VividRP.Editor.Tests
                         bool wasRequested = (frame.Requests & (1u << page)) != 0u;
                         bool evicted = previousPageTable[page] != 0u && mapping == 0u;
                         bool overflow = wasRequested && mapping == 0u;
-                        uint snapshot = metadataData[page].Reserved;
+                        uint snapshot = metadataData[page].Reserved | demand[page];
                         Assert.That((snapshot & 1u) != 0u, Is.EqualTo(wasRequested));
                         Assert.That((snapshot & 64u) != 0u, Is.EqualTo(evicted));
                         Assert.That((snapshot & 128u) != 0u, Is.EqualTo(overflow));
@@ -978,7 +986,7 @@ namespace VividRP.Editor.Tests
                 {
                     int page = slot / 2 + (slot % 2) * capacity;
                     owner[slot] = (uint)page + 1;
-                    data[page] = new uint4(2u | dirty | known, (uint)slot + 1, 0, 1);
+                    data[page] = new uint4(2u | dirty | known, (uint)slot + 1, 0, 0);
                 }
                 owners.SetData(owner);
                 shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
@@ -987,8 +995,15 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_VSMPrototypePageSize", 128);
                 shader.SetInt("_VSMPageUpdateBudget", budget);
                 shader.SetInt("_VSMPageOccupancySkipDisabled", 0);
+                using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                var demands = new uint[metadata.count];
+                requestFlags.SetData(demands);
                 int build = shader.FindKernel("VSMBuildPageWorkLists");
+                shader.SetBuffer(build, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                using var pageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                pageTable.SetData(new uint[metadata.count]);
+                shader.SetBuffer(build, "_VSMPrototypePageTable", pageTable);
                 shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
@@ -1000,6 +1015,7 @@ namespace VividRP.Editor.Tests
                 for (int frame = 0; frame <= (capacity + budget - 1) / budget + 1; frame++)
                 {
                     expected.Clear();
+                    System.Array.Clear(demands, 0, demands.Length);
                     if (remap && frame == 1)
                     {
                         // A deferred physical slot changes virtual owner before
@@ -1017,8 +1033,8 @@ namespace VividRP.Editor.Tests
                         data[page].z = (uint)frame;
                         // One initially unrequested dirty page must wait, even
                         // when there is spare budget, then resume on new demand.
-                        data[page].w = frame == 0 && slot == 0 ? 0u : 1u;
-                        if ((data[page].x & dirty) != 0 && data[page].w != 0) expected.Add(slot);
+                        demands[page] = frame == 0 && slot == 0 ? 0u : 1u;
+                        if ((data[page].x & dirty) != 0 && demands[page] != 0) expected.Add(slot);
                     }
                     expected.Sort((a, b) => {
                         int level = ((owner[b] - 1) / (uint)capacity).CompareTo((owner[a] - 1) / (uint)capacity);
@@ -1026,6 +1042,7 @@ namespace VividRP.Editor.Tests
                     });
                     if (expected.Count > limit) expected.RemoveRange(limit, expected.Count - limit);
                     metadata.SetData(data);
+                    requestFlags.SetData(demands);
                     shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
                     shader.Dispatch(build, 1, 1, 1);
                     args.GetData(dispatch); work.GetData(entries); metadata.GetData(data);
@@ -1057,6 +1074,150 @@ namespace VividRP.Editor.Tests
                 }
                 Assert.That(completed, Is.EqualTo(capacity));
                 Assert.That(dispatch[2] + dispatch[3], Is.Zero);
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
+        [TestCase(0, 1, 1, 2)] // Readable terminal: nearest parent and transition before far parents.
+        [TestCase(0, 8, 2, 7)] // Maintenance reserves one slot without taking the whole budget.
+        [TestCase(1, 1, 5, 7)] // Static dirty terminal.
+        [TestCase(2, 1, 5, 7)] // Dynamic dirty terminal.
+        [TestCase(3, 1, 4, 7)] // Deferred terminal.
+        [TestCase(4, 1, 4, 7)] // Not allocated.
+        [TestCase(5, 1, 4, 7)] // Missing page table entry.
+        [TestCase(6, 1, 4, 7)] // Table and metadata disagree.
+        [TestCase(7, 1, 4, 7)] // Physical owner is gone.
+        [TestCase(8, 1, 4, 7)] // Metadata points to another slot.
+        [TestCase(9, 1, 4, 7)] // Another terminal request has no physical slot.
+        [TestCase(10, 1, 4, 7)] // No explicit terminal demand: conservative old order.
+        [TestCase(11, 1, 1, 2)] // Completed empty terminal is a valid fallback.
+        [TestCase(12, 1, 4, 7)] // Out-of-range physical slot.
+        public void PageUpdateBudget_RequiresReadableTerminalBeforePrioritizingDetail(int fault, int frame, int first, int second)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 16);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, 4);
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
+            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
+            using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            try
+            {
+                const uint dirty = 4u, deferred = 1u << 17, known = (1u << 14) | (1u << 16);
+                var data = new uint4[12]; var mapping = new uint[12]; var demands = new uint[12];
+                uint[] owner = { 1, 3, 5, 7, 9, 11, 2, 10 };
+                uint[] roles = { 512, 2048, 1024, 0, 0, 256, 512, 0 };
+                for (int slot = 0; slot < 8; slot++)
+                {
+                    int page = (int)owner[slot] - 1;
+                    mapping[page] = (uint)slot + 1;
+                    data[page] = new uint4(2u | known | (slot == 5 ? 0u : dirty), mapping[page], 0, 0);
+                    demands[page] = 1u | roles[slot];
+                }
+                switch (fault)
+                {
+                    case 1: data[10].x |= dirty; break;
+                    case 2: data[10].x |= 1u << 15; break;
+                    case 3: data[10].x |= deferred; break;
+                    case 4: data[10].x &= ~2u; break;
+                    case 5: mapping[10] = 0; break;
+                    case 6: mapping[10] = 7; break;
+                    case 7: owner[5] = 0; break;
+                    case 8: data[10].y = 7; break;
+                    case 9: demands[11] = 1u | 256u; break;
+                    case 10: demands[10] = 1; break;
+                    case 11: data[10].x |= (1u << 12) | (1u << 13); break;
+                    case 12: mapping[10] = data[10].y = 9; break;
+                }
+                metadata.SetData(data); owners.SetData(owner); table.SetData(mapping); requests.SetData(demands);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", 8);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", 12);
+                shader.SetInt("_VSMProjectionCount", 6);
+                shader.SetInt("_VSMPrototypePageSize", 128);
+                shader.SetInt("_VSMPageUpdateBudget", 2);
+                shader.SetInt("_VSMPageOccupancySkipDisabled", 0);
+                shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
+                int build = shader.FindKernel("VSMBuildPageWorkLists");
+                shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(build, "_VSMPrototypePageTable", table);
+                shader.SetBuffer(build, "_VSMPageRequestFlags", requests);
+                shader.SetBuffer(build, "_VSMPageWorkListRW", work);
+                shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
+                shader.Dispatch(build, 1, 1, 1);
+                var dispatch = new uint[6]; var entries = new uint[16]; var actualRequests = new uint[12];
+                args.GetData(dispatch); work.GetData(entries); metadata.GetData(data); requests.GetData(actualRequests);
+                Assert.That(dispatch[2], Is.EqualTo(2));
+                CollectionAssert.AreEquivalent(new[] { (uint)first, (uint)second }, new[] { entries[0], entries[1] });
+                CollectionAssert.AreEqual(demands, actualRequests);
+                for (int slot = 0; slot < 8; slot++)
+                {
+                    if (owner[slot] == 0) continue;
+                    uint flags = data[owner[slot] - 1].x;
+                    if ((flags & (dirty | (1u << 15))) != 0)
+                        Assert.That((flags & deferred) == 0, Is.EqualTo(slot == first || slot == second));
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
+        [Test]
+        public void PageUpdateBudget_FullParentChainProgressesUnderContinuousEssentialInvalidation()
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 16);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, 4);
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
+            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
+            using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            try
+            {
+                var data = new uint4[12]; var mapping = new uint[12]; var demands = new uint[12];
+                uint[] owner = { 1, 3, 5, 7, 9, 11, 2, 10 };
+                uint[] roles = { 512, 2048, 1024, 0, 0, 256, 512, 0 };
+                for (int slot = 0; slot < 8; slot++)
+                {
+                    int page = (int)owner[slot] - 1;
+                    mapping[page] = (uint)slot + 1;
+                    data[page] = new uint4(slot == 5 ? 10u : 6u, mapping[page], 0, 0);
+                    demands[page] = 1u | roles[slot];
+                }
+                owners.SetData(owner); table.SetData(mapping); requests.SetData(demands);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", 8);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", 12);
+                shader.SetInt("_VSMProjectionCount", 6);
+                shader.SetInt("_VSMPrototypePageSize", 128);
+                shader.SetInt("_VSMPageUpdateBudget", 2);
+                int build = shader.FindKernel("VSMBuildPageWorkLists"), finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
+                shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(build, "_VSMPrototypePageTable", table);
+                shader.SetBuffer(build, "_VSMPageRequestFlags", requests);
+                shader.SetBuffer(build, "_VSMPageWorkListRW", work);
+                shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
+                shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
+                var dispatch = new uint[6]; var actualRequests = new uint[12];
+                for (int frame = 1; frame <= 24; frame++)
+                {
+                    foreach (int page in new[] { 0, 1, 2, 4 }) data[page].x |= 4u;
+                    metadata.SetData(data);
+                    shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
+                    shader.Dispatch(build, 1, 1, 1);
+                    args.GetData(dispatch);
+                    Assert.That(dispatch[2], Is.EqualTo(2));
+                    // Selected pages represent completed empty caster output.
+                    shader.Dispatch(finalize, 1, 1, 1);
+                    metadata.GetData(data);
+                }
+                foreach (int page in new[] { 6, 8, 9 })
+                    Assert.That(data[page].x & (4u | (1u << 17) | 8u), Is.EqualTo(8u));
+                requests.GetData(actualRequests);
+                CollectionAssert.AreEqual(demands, actualRequests);
             }
             finally { Object.DestroyImmediate(shader); }
         }
@@ -1099,8 +1260,15 @@ namespace VividRP.Editor.Tests
             using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 7, 4);
             try
             {
+                using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                var demands = new uint[metadata.count];
+                requestFlags.SetData(demands);
                 int build = shader.FindKernel("VSMBuildPageWorkLists");
+                shader.SetBuffer(build, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                using var pageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                pageTable.SetData(new uint[metadata.count]);
+                shader.SetBuffer(build, "_VSMPrototypePageTable", pageTable);
                 shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
@@ -1193,8 +1361,15 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_VSMPrototypePageSize", 4);
                 shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 4);
                 shader.SetInt("_VSMPageOccupancySkipDisabled", 0);
+                using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                var demands = new uint[metadata.count];
+                requestFlags.SetData(demands);
                 int build = shader.FindKernel("VSMBuildPageWorkLists");
+                shader.SetBuffer(build, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                using var pageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                pageTable.SetData(new uint[metadata.count]);
+                shader.SetBuffer(build, "_VSMPrototypePageTable", pageTable);
                 shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
@@ -1437,16 +1612,17 @@ namespace VividRP.Editor.Tests
                 tableData[1] = 1u;
                 tableData[3] = 2u;
                 var metadataData = new TestPageMetadata[8];
+                var demand = new uint[8];
                 metadataData[1] = new TestPageMetadata
                 {
-                    Flags = 59u, EncodedPhysicalPage = 1u,
+                    Flags = 58u, EncodedPhysicalPage = 1u,
                     LastRequestedFrame = 100u, Reserved = 123u,
                 };
                 metadataData[3] = new TestPageMetadata
                 {
                     Flags = 54u, EncodedPhysicalPage = 2u, LastRequestedFrame = 99u,
                 };
-                metadataData[5].Flags = 1u;
+                demand[5] = 1u;
                 metadataData[5].LastRequestedFrame = 100u;
                 var ownerData = new uint[] { 2u, 4u };
                 var counterData = new uint[] { 2u, 0u, 0u, 0u };
@@ -1466,9 +1642,15 @@ namespace VividRP.Editor.Tests
                 pressure.SetData(new uint4[3]);
                 shader.SetVector("_VSMReceiverQuality", Vector4.zero);
                 shader.SetBuffer(reset, "_VSMPagePressureRW", pressure);
+                using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, sizeof(uint));
+                demand[1] = 1u;
+                requestFlags.SetData(demand);
+                shader.SetBuffer(reset, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(reset, "_VSMPrototypePageMetadata", metadata);
                 shader.Dispatch(reset, 1, 1, 1);
                 metadata.GetData(metadataData);
+                requestFlags.GetData(demand);
+                Assert.That(demand, Is.EqualTo(new uint[8]));
                 Assert.That(metadataData[1].Flags, Is.EqualTo(58u));
                 Assert.That(metadataData[1].EncodedPhysicalPage, Is.EqualTo(1u));
                 Assert.That(metadataData[1].Reserved, Is.EqualTo(123u));
@@ -1479,7 +1661,7 @@ namespace VividRP.Editor.Tests
 
                 // Only the new producer requests page 7. Old residents remain evictable,
                 // even when a rewind produces feedback at frame zero.
-                metadataData[7].Flags = 1u;
+                demand[7] = 1u;
                 metadataData[7].LastRequestedFrame = (uint)frame;
                 metadata.SetData(metadataData);
                 shader.SetInt("_VSMPrototypePhysicalPageCapacity", 2);
@@ -1488,7 +1670,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(allocate, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(allocate, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(allocate, "_VSMPrototypeAllocatorCounters", counters);
-                DispatchVSMAllocation(shader, allocate, 8, metadata);
+                DispatchVSMAllocation(shader, allocate, 8, metadata, demand);
                 table.GetData(tableData);
                 metadata.GetData(metadataData);
                 owners.GetData(ownerData);

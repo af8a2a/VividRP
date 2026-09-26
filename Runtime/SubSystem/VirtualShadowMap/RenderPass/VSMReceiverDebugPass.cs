@@ -40,6 +40,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DynamicId = Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
         private static readonly int TableId = Shader.PropertyToID("_VSMPrototypePageTable");
         private static readonly int MetadataId = Shader.PropertyToID("_VSMPrototypePageMetadata");
+        private static readonly int RequestFlagsId = Shader.PropertyToID("_VSMPageRequestFlags");
         private static readonly int EnabledId = Shader.PropertyToID("_VSMPrototypeEnabled");
         private static readonly int ParametersId = Shader.PropertyToID("_VSMReceiverParameters");
         private static readonly int HistoryParametersId = Shader.PropertyToID("_VSMHistoryParameters");
@@ -83,7 +84,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_SMRTParameters;
         private bool m_AdaptiveRays;
         private TextureHandle m_Static, m_Dynamic;
-        private BufferHandle m_Table, m_Metadata, m_Projections;
+        private BufferHandle m_Table, m_Metadata, m_RequestFlags, m_Projections;
 
         public VSMReceiverDebugPass()
         {
@@ -118,7 +119,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedVisualizationMode = VisualizationMode;
             m_Ready = false;
             m_Static = m_Dynamic = default;
-            m_Table = m_Metadata = m_Projections = default;
+            m_Table = m_Metadata = m_RequestFlags = m_Projections = default;
             var camera = frameData.GetOrCreate<VividCameraData>();
             ConfigureOutputSize(camera.actualWidth, camera.actualHeight);
             if (DebugPassCameraUtility.ShouldSkipExecution(camera)) return;
@@ -147,9 +148,10 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PagePressure, AccessFlags.Read);
             m_Table = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageTable, AccessFlags.Read);
             m_Metadata = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageMetadata, AccessFlags.Read);
+            m_RequestFlags = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.Read);
             m_Projections = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.Projections.Buffer, AccessFlags.Read);
             m_Ready = m_Static.IsValid() && m_Dynamic.IsValid() && m_Table.IsValid()
-                && m_Metadata.IsValid() && m_Projections.IsValid();
+                && m_Metadata.IsValid() && m_RequestFlags.IsValid() && m_Projections.IsValid();
         }
 
         internal void ConfigureOutputSize(int width, int height)
@@ -181,6 +183,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, DynamicId, m_Dynamic);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, TableId, m_Table);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, MetadataId, m_Metadata);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, RequestFlagsId, m_RequestFlags);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapProjectionSet.BufferId, m_Projections);
             cmd.SetComputeIntParam(m_Compute, VirtualShadowMapProjectionSet.CountId, VirtualShadowMapPrototypeRuntime.Projections.Count);
             cmd.SetComputeIntParam(m_Compute, ModeId, (int)m_ResolvedVisualizationMode);
@@ -208,7 +211,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Kernel = -1;
             m_Ready = false;
             m_Static = m_Dynamic = default;
-            m_Table = m_Metadata = m_Projections = default;
+            m_Table = m_Metadata = m_RequestFlags = m_Projections = default;
         }
     }
 }

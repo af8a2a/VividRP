@@ -204,15 +204,12 @@ float VSMTransitionWeight(float edge, float border)
 // Reproject the original world receiver (including THIS level's normal bias)
 // at every fallback level. Reusing a fine UV/depth or shifting a physical texel
 // would sample unrelated data after clipmap scrolling.
-bool TryEvaluateVSMProjection(float3 positionWS, VSMReceiverProjection prepared, int index,
-    bool sampleDepth, uint2 pixel, uint requestRole, bool smrt,
-    inout VSMSMRTReceiverSamples samples, out bool covered, out float shadow)
+bool TryEvaluateVSMProjection(VSMReceiverProjection prepared, int index,
+    bool sampleDepth, uint2 pixel, bool smrt,
+    inout VSMSMRTReceiverSamples samples, out float shadow)
 {
-    covered = false;
     shadow = 1.0;
-#if defined(VIVID_VSM_RECEIVER_DEBUG) || defined(VIVID_VSM_RESOLVE_RECEIVERS)
     if (!sampleDepth) return false;
-#endif
     VSM_COST_ADD(1, smrt ? 1u : 0u);
     VSM_COST_ADD(29, smrt ? 0u : 1u);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
@@ -221,25 +218,6 @@ bool TryEvaluateVSMProjection(float3 positionWS, VSMReceiverProjection prepared,
     VividVSMProjection projection = prepared.projection;
     float4 bias = prepared.bias;
     float3 coord = prepared.coord;
-    if (smrt)
-    {
-        // Every finer start can continue through this level. Mark around the
-        // unbiased receiver, enclosing all finer normal offsets and PCF origins.
-        // This stays one level walk, rather than marking each continuation chain.
-        float2 center = mul(projection.worldToShadow, float4(positionWS, 1)).xy;
-        float radius = VSMSMRTRayLength(index) * _VSMSMRTParameters.w / projection.parameters.x;
-        float originGuard = (_VSMReceiverParameters.x >= 0.5 ? 1.5 : 0) + abs(projection.parameters.y);
-        int halo = (int)ceil(radius + originGuard + 0.001);
-        float guard = (float)halo / _VSMPrototypeVirtualResolution;
-        if (all(center >= -guard) && all(center < 1 + guard))
-        {
-            // A finer normal-biased origin can be covered even when the original
-            // receiver is just outside. Clamp only the marking center: its halo
-            // then conservatively encloses the part overlapping this projection.
-            float halfTexel = 0.5 / _VSMPrototypeVirtualResolution;
-            MarkVSMReceiverPage(clamp(center, halfTexel, 1 - halfTexel), index, requestRole, halo);
-        }
-    }
     if (!all(coord >= 0.0) || !all(coord <= 1.0))
     {
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
@@ -247,48 +225,17 @@ bool TryEvaluateVSMProjection(float3 positionWS, VSMReceiverProjection prepared,
 #endif
         return false;
     }
-    covered = true;
-    if (!smrt) MarkVSMReceiverPage(coord.xy, index, requestRole, 1);
-#if defined(VIVID_VSM_MARK_RECEIVERS)
-    // Compile out depth sampling: marking has no dependency on page residency,
-    // the physical pools or the stochastic ray phase.
-    return false;
-#else
-    if (!sampleDepth || _VSMPrototypeEnabled == 0)
-        return false;
+    if (_VSMPrototypeEnabled == 0) return false;
     // HLSL conditional expressions may evaluate both operands and overwrite the
     // shared out parameter. Keep the two filters behind an actual branch.
     [branch]
     if (smrt) return TryFilterVSMSMRT(coord, bias, index, pixel,
         PrepareVSMSMRTProjection(projection), samples, shadow);
     return TryFilterVSMProjection(coord, bias, index, pixel, shadow);
-#endif
-}
-
-bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
-    bool sampleDepth, uint2 pixel, uint requestRole, bool smrt, out bool covered, out float shadow)
-{
-    float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-8));
-    VSMSMRTReceiverSamples samples = (VSMSMRTReceiverSamples)0;
-    return TryEvaluateVSMProjection(positionWS, PrepareVSMReceiverProjection(positionWS, normal, index),
-        index, sampleDepth, pixel, requestRole, smrt, samples, covered, shadow);
-}
-
-bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
-    bool sampleDepth, uint2 pixel, uint requestRole, out bool covered, out float shadow)
-{
-    return TryEvaluateVSMProjection(positionWS, normalWS, index, sampleDepth, pixel,
-        requestRole, UseVSMSMRT(), covered, shadow);
-}
-
-bool TryEvaluateVSMProjection(float3 positionWS, float3 normalWS, int index,
-    bool sampleDepth, out float shadow)
-{
-    bool covered;
-    return TryEvaluateVSMProjection(positionWS, normalWS, index, sampleDepth, uint2(0, 0), 0u, covered, shadow);
 }
 
 #include "VSMReceiverQuality.hlsl"
+#include "VSMPageMarking.hlsl"
 
 float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bool smrt, out bool unavailable)
 {
@@ -325,37 +272,21 @@ float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bo
         float transition = 1.0;
         int sampledLevel = -1;
         bool hasTransition = false;
-        uint requestRole = kVSMPagePrimaryRequested;
         for (int level = index; level < _VSMProjectionCount; level++)
         {
-            // Roles follow geometric coverage and the intended blend, never page
-            // residency. Missing primary depth must not promote its entire fallback
-            // chain (or suppress current-frame transition demand during bootstrap).
             bool needSample = sampledLevel < 0 || (sampledLevel == index && blend > 0.0 && !hasTransition);
             float sampleShadow;
-            bool covered;
-            // Coarse continuation depth is part of the primary soft estimate,
-            // not merely an optional parent fallback. Keep its allocation priority.
-            uint levelRole = requestRole;
-            if (smrt && level > index && VSMSMRTRayLength(level - 1) < _VSMSMRTParameters.z)
-                levelRole |= kVSMPagePrimaryRequested;
             VSMReceiverProjection prepared = selected;
-#if defined(VIVID_VSM_RECEIVER_DEBUG) || defined(VIVID_VSM_RESOLVE_RECEIVERS)
-            // Resolve-only iterations still update roles/counters below, but do
-            // not prepare a projection after primary/transition are complete.
+            // Only prepare projections that still need a depth estimate.
             if (needSample)
-#endif
             {
                 if (!densityPolicy || level != firstLevel)
                     prepared = PrepareVSMReceiverProjection(positionWS, normal, level);
             }
-            bool sampled = TryEvaluateVSMProjection(positionWS, prepared, level, needSample, pixel,
-                levelRole, smrt, samples, covered, sampleShadow);
+            bool sampled = TryEvaluateVSMProjection(prepared, level, needSample, pixel,
+                smrt, samples, sampleShadow);
             VSM_COST_ADD(2, smrt && needSample && sampledLevel < 0 && level > index ? 1u : 0u);
             VSM_COST_ADD(3, smrt && needSample && sampledLevel >= 0 ? 1u : 0u);
-            if (covered)
-                requestRole = requestRole == kVSMPagePrimaryRequested
-                    ? kVSMPageParentRequested | (blend > 0.0 ? kVSMPageTransitionRequested : 0u) : 0u;
             if (!sampled) continue;
             if (sampledLevel < 0)
             {
@@ -415,23 +346,6 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS)
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
 #include "VSMReceiverDebug.hlsl"
 #endif
-
-#if defined(VIVID_VSM_MARK_RECEIVERS)
-[numthreads(8, 8, 1)]
-void VSMMarkReceiverPages(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
-    float depth = _DepthTexture.Load(int3(id.xy, 0));
-    if (IsSkyPixel(depth)) return;
-    float3 position = ReconstructWorldPosition(id.xy, depth);
-    float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(id.xy, 0)).xy);
-    normal = ReconstructVSMReceiverNormal(id.xy, depth, position, normal);
-    // The same receiver walk emits primary, parent, transition and terminal
-    // roles. SMRT also requests its PCF fallback independently of residency.
-    ResolveVSMReceiver(position, normal, id.xy);
-}
-#endif
-
 
 #if defined(VIVID_VSM_SMRT_COST)
 RWStructuredBuffer<uint4> _VSMSMRTCostOutput;

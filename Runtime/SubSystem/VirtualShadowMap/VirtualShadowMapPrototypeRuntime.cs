@@ -39,6 +39,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_RemapPageMetadata;
         private static GraphicsBuffer s_PageTable;
         private static GraphicsBuffer s_PageMetadata;
+        private static GraphicsBuffer s_PageRequestFlags;
         private static GraphicsBuffer s_PhysicalPageOwners;
         private static GraphicsBuffer s_AllocatorCounters;
         private static GraphicsBuffer s_AllocationRequests;
@@ -91,6 +92,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static GraphicsBuffer RemapPageMetadata => s_RemapPageMetadata;
         internal static GraphicsBuffer PageTable => s_PageTable;
         internal static GraphicsBuffer PageMetadata => s_PageMetadata;
+        internal static GraphicsBuffer PageRequestFlags => s_PageRequestFlags;
         internal static GraphicsBuffer PhysicalPageOwners => s_PhysicalPageOwners;
         internal static GraphicsBuffer AllocatorCounters => s_AllocatorCounters;
         internal static GraphicsBuffer AllocationRequests => s_AllocationRequests;
@@ -122,6 +124,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 * s_CascadeCount
             && s_PageTable?.IsValid() == true
             && s_PageMetadata?.IsValid() == true
+            && s_PageRequestFlags?.IsValid() == true
+            && s_PageRequestFlags.count == PageTableEntryCount
             && s_PageTable.count == PageTableEntryCount
             && s_PageMetadata.count == PageTableEntryCount;
         internal static VirtualShadowMapPrototypeFrameState FrameState => s_FrameState;
@@ -234,6 +238,13 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         private static void EnsureAllocationResources(int pageCount)
         {
+            if (s_PageRequestFlags == null || !s_PageRequestFlags.IsValid() || s_PageRequestFlags.count != pageCount)
+            {
+                s_PageRequestFlags?.Dispose();
+                s_PageRequestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, sizeof(uint))
+                { name = "VSMPageRequestFlags" };
+                s_PageRequestFlags.SetData(new uint[pageCount]);
+            }
             int words = CoreUtils.DivRoundUp(pageCount, 32);
             if (s_AllocationRequests == null || !s_AllocationRequests.IsValid() || s_AllocationRequests.count != words)
             {
@@ -467,6 +478,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_PageMetadata.IsValid()
                 && s_PageMetadata.count == pageTableEntryCount
                 && s_PageMetadataUpload?.Length == pageTableEntryCount
+                && s_PageRequestFlags != null && s_PageRequestFlags.IsValid()
+                && s_PageRequestFlags.count == pageTableEntryCount
                 && s_PhysicalPageOwners != null
                 && s_PhysicalPageOwners.IsValid()
                 && s_PhysicalPageOwners.count == physicalPageCapacity
@@ -839,6 +852,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_PageTable = null;
             s_PageMetadata?.Dispose();
             s_PageMetadata = null;
+            s_PageRequestFlags?.Dispose();
+            s_PageRequestFlags = null;
             s_PhysicalPageOwners?.Dispose();
             s_PhysicalPageOwners = null;
             s_AllocatorCounters?.Dispose();

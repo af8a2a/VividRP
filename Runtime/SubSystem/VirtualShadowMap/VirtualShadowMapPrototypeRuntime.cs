@@ -57,6 +57,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_PhysicalPageOwners;
         private static GraphicsBuffer s_AllocatorCounters;
         private static GraphicsBuffer s_AllocationRequests;
+        private static GraphicsBuffer s_AllocationSummary;
         private static GraphicsBuffer s_PageWorkList;
         private static GraphicsBuffer s_PageWorkDispatchArgs;
         private static GraphicsBuffer s_PagePressure;
@@ -118,6 +119,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static GraphicsBuffer PhysicalPageOwners => s_PhysicalPageOwners;
         internal static GraphicsBuffer AllocatorCounters => s_AllocatorCounters;
         internal static GraphicsBuffer AllocationRequests => s_AllocationRequests;
+        internal static GraphicsBuffer AllocationSummary => s_AllocationSummary;
         internal static GraphicsBuffer PageWorkList => s_PageWorkList;
         internal static GraphicsBuffer PageWorkDispatchArgs => s_PageWorkDispatchArgs;
         internal static GraphicsBuffer PagePressure => s_PagePressure;
@@ -318,6 +320,13 @@ namespace VividRP.Runtime.VirtualShadowMap
             }
             // Compaction overwrites the selected layer before any indirect dispatch.
             int words = CoreUtils.DivRoundUp(pageCount, 32);
+            int groups = CoreUtils.DivRoundUp(words, 64);
+            if (s_AllocationSummary == null || !s_AllocationSummary.IsValid() || s_AllocationSummary.count != groups)
+            {
+                s_AllocationSummary?.Dispose();
+                s_AllocationSummary = new GraphicsBuffer(GraphicsBuffer.Target.Structured, groups, 4 * sizeof(uint))
+                { name = "VSMAllocationSummary" };
+            }
             if (s_AllocationRequests == null || !s_AllocationRequests.IsValid() || s_AllocationRequests.count != words)
             {
                 s_AllocationRequests?.Dispose();
@@ -594,6 +603,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_AllocatorCounters.count == s_AllocatorCountersUpload.Length
                 && s_AllocationRequests != null && s_AllocationRequests.IsValid()
                 && s_AllocationRequests.count == CoreUtils.DivRoundUp(pageTableEntryCount, 32)
+                && s_AllocationSummary != null && s_AllocationSummary.IsValid()
+                && s_AllocationSummary.count == CoreUtils.DivRoundUp(pageTableEntryCount, 2048)
                 && s_PageWorkList != null && s_PageWorkList.IsValid()
                 && s_PageWorkList.count == physicalPageCapacity * 2
                 && s_PageWorkDispatchArgs != null && s_PageWorkDispatchArgs.IsValid()
@@ -972,6 +983,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_AllocatorCounters = null;
             s_AllocationRequests?.Dispose();
             s_AllocationRequests = null;
+            s_AllocationSummary?.Dispose();
+            s_AllocationSummary = null;
             s_PageWorkList?.Dispose();
             s_PageWorkList = null;
             s_PageWorkDispatchArgs?.Dispose();

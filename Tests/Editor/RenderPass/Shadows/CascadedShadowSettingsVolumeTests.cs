@@ -575,7 +575,15 @@ namespace VividRP.Editor.Tests
                 CoreUtils.DivRoundUp(pageCount, 32), sizeof(uint));
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint) * 4);
             pressure.SetData(new uint4[3]);
-            int prepare = shader.FindKernel("VSMPrototypePrepareAllocation");
+            bool cached = kernel == shader.FindKernel("VSMAllocatePagesCached");
+            int prepare = shader.FindKernel(cached ? "VSMPrepareAllocationCached" : "VSMPrototypePrepareAllocation");
+            using var summary = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
+                CoreUtils.DivRoundUp(pageCount, 2048), sizeof(uint) * 4);
+            if (cached)
+            {
+                shader.SetBuffer(prepare, "_VSMAllocationSummary", summary);
+                shader.SetBuffer(kernel, "_VSMAllocationSummary", summary);
+            }
             shader.SetBuffer(prepare, "_VSMPrototypePageMetadata", metadata);
             shader.SetBuffer(prepare, "_VSMPageRequestFlags", requestFlags);
             shader.SetBuffer(kernel, "_VSMPageRequestFlags", requestFlags);
@@ -586,8 +594,9 @@ namespace VividRP.Editor.Tests
             shader.Dispatch(kernel, 1, 1, 1);
         }
 
-        [Test]
-        public void VirtualShadowMapPrototypeAllocator_AllocatesRequestedPagesDeterministically()
+        [TestCase("VSMPrototypeAllocatePages")]
+        [TestCase("VSMAllocatePagesCached")]
+        public void VirtualShadowMapPrototypeAllocator_AllocatesRequestedPagesDeterministically(string kernelName)
         {
             Assume.That(
                 VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(),
@@ -597,7 +606,7 @@ namespace VividRP.Editor.Tests
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
             Assert.That(shader, Is.Not.Null);
             using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
-            int kernel = shader.FindKernel("VSMPrototypeAllocatePages");
+            int kernel = shader.FindKernel(kernelName);
             var pageTableData = new uint[8];
             var metadataData = new TestPageMetadata[8];
             var demand = new uint[8];
@@ -656,13 +665,29 @@ namespace VividRP.Editor.Tests
             Assert.That(metadataData[3].EncodedPhysicalPage, Is.EqualTo(2u));
             Assert.That(metadataData[7].Flags, Is.Zero);
             Assert.That(metadataData[7].LastRequestedFrame, Is.EqualTo(7u));
+
+            // Warm/no-miss and then empty demand must refresh counters without
+            // clearing resident mappings or retaining the previous overflow count.
+            demand[7] = 0u;
+            DispatchVSMAllocation(shader, kernel, pageTableData.Length, metadata, demand);
+            counters.GetData(counterData);
+            Assert.That(counterData, Is.EqualTo(new uint[] { 2u, 2u, 0u, 0u }));
+            System.Array.Clear(demand, 0, demand.Length);
+            DispatchVSMAllocation(shader, kernel, pageTableData.Length, metadata, demand);
+            counters.GetData(counterData);
+            Assert.That(counterData, Is.EqualTo(new uint[] { 2u, 0u, 0u, 0u }));
+            var retained = new uint[pageTableData.Length]; pageTable.GetData(retained);
+            Assert.That(retained, Is.EqualTo(pageTableData));
         }
 
-        [TestCase(16, 7)]
-        [TestCase(128, 65)]
-        [TestCase(4096, 1024)]
+        [TestCase(16, 7, false)]
+        [TestCase(16, 7, true)]
+        [TestCase(128, 65, false)]
+        [TestCase(128, 65, true)]
+        [TestCase(4096, 1024, false)]
+        [TestCase(4096, 1024, true)]
         public void VirtualShadowMapPrototypeAllocator_ProtectsCoarseRequestsAcrossCommitBatches(
-            int pagesPerLevel, int capacity)
+            int pagesPerLevel, int capacity, bool cached)
         {
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             ComputeShader source = AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -703,7 +728,7 @@ namespace VividRP.Editor.Tests
                 table.SetData(pageData);
                 metadata.SetData(metaData);
                 owners.SetData(ownerData);
-                int kernel = shader.FindKernel("VSMPrototypeAllocatePages");
+                int kernel = shader.FindKernel(cached ? "VSMAllocatePagesCached" : "VSMPrototypeAllocatePages");
                 shader.SetInt("_VSMPrototypePageTableEntryCount", pageCount);
                 shader.SetInt("_VSMProjectionCount", 2);
                 shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);

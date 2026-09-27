@@ -558,13 +558,23 @@ void VSMRemapPages(uint3 id : SV_DispatchThreadID)
 
 // Each word has one writer. Dispatch across the complete table rather than
 // making one group process every virtual page before serial allocation.
-[numthreads(64, 1, 1)]
-void VSMPrototypePrepareAllocation(uint3 dispatchThreadID : SV_DispatchThreadID)
+#if defined(VIVID_VSM_ALLOCATION_SUMMARY_WRITE)
+// requested, essential, primary, missing; one entry per prepare group
+RWStructuredBuffer<uint4> _VSMAllocationSummary;
+groupshared uint4 g_VSMPrepareSummary[64];
+#elif defined(VIVID_VSM_ALLOCATION_SUMMARY)
+StructuredBuffer<uint4> _VSMAllocationSummary;
+#endif
+
+void RunVSMPrepareAllocation(uint3 dispatchThreadID)
 {
     uint pageCount = (uint)_VSMPrototypePageTableEntryCount;
     uint levelCount = (uint)max(_VSMProjectionCount, 1);
     uint pagesPerLevel = pageCount / levelCount;
     uint wordCount = (pageCount + 31u) / 32u;
+#if defined(VIVID_VSM_ALLOCATION_SUMMARY_WRITE)
+    uint4 summary = 0u;
+#endif
     // Consume this camera's freshly marked demand once per virtual page. Marking
     // never touches resident metadata; this unique writer stamps LRU age before
     // the allocator builds its victim order. Requests remain intact for work/debug.
@@ -583,6 +593,11 @@ void VSMPrototypePrepareAllocation(uint3 dispatchThreadID : SV_DispatchThreadID)
             {
                 metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
                 requests |= 1u << bit;
+#if defined(VIVID_VSM_ALLOCATION_SUMMARY_WRITE)
+                summary += uint4(1u, VSMPageRequestPriority(flags) < 3u ? 1u : 0u,
+                    (flags & kVSMPagePrimaryRequested) != 0u ? 1u : 0u,
+                    (metadata.x & kVSMPageAllocated) == 0u ? 1u : 0u);
+#endif
                 // Static pages remain complete. Dynamic cache reuse requires
                 // every currently requested cell to have completed production.
                 if (_VSMReceiverMaskEnabled != 0 && (metadata.x & kVSMPageAllocated) != 0u)
@@ -597,7 +612,26 @@ void VSMPrototypePrepareAllocation(uint3 dispatchThreadID : SV_DispatchThreadID)
         }
         _VSMAllocationRequests[word] = requests;
     }
+#if defined(VIVID_VSM_ALLOCATION_SUMMARY_WRITE)
+    // Padded lanes still participate; every entry is overwritten this frame.
+    uint lane = dispatchThreadID.x & 63u;
+    g_VSMPrepareSummary[lane] = summary;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u)
+    {
+        if (lane < stride) g_VSMPrepareSummary[lane] += g_VSMPrepareSummary[lane + stride];
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (lane == 0u) _VSMAllocationSummary[dispatchThreadID.x / 64u] = g_VSMPrepareSummary[0];
+#endif
 }
+
+[numthreads(64, 1, 1)]
+void VSMPrototypePrepareAllocation(uint3 id : SV_DispatchThreadID) { RunVSMPrepareAllocation(id); }
+#if defined(VIVID_VSM_ALLOCATION_SUMMARY_WRITE)
+[numthreads(64, 1, 1)]
+void VSMPrepareAllocationCached(uint3 id : SV_DispatchThreadID) { RunVSMPrepareAllocation(id); }
+#endif
 
 // Free slots first, then lower-value demand, oldest age and physical slot.
 // This is the original victim order, sorted once instead of scanning the pool
@@ -619,11 +653,52 @@ groupshared uint g_VSMSlotCursor;
 groupshared uint4 g_VSMAllocationCounts[64];
 groupshared uint4 g_VSMAllocationPressure[64];
 
-[numthreads(64, 1, 1)]
-void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
+void RunVSMAllocation(uint3 dispatchThreadID)
 {
     uint lane = dispatchThreadID.x;
     uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
+#if defined(VIVID_VSM_ALLOCATION_SUMMARY)
+    uint4 summary = 0u;
+    uint summaryCount = ((uint)_VSMPrototypePageTableEntryCount + 2047u) / 2048u;
+    for (uint group = lane; group < summaryCount; group += 64u) summary += _VSMAllocationSummary[group];
+    g_VSMAllocationPressure[lane] = summary;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u)
+    {
+        if (lane < stride) g_VSMAllocationPressure[lane] += g_VSMAllocationPressure[lane + stride];
+        GroupMemoryBarrierWithGroupSync();
+    }
+    summary = g_VSMAllocationPressure[0];
+    if (summary.w == 0u)
+    {
+        // No slot can be evicted or assigned when every request is resident.
+        // Prepare has already stamped age/debug state and validated receiver masks.
+        uint residentCount = 0u;
+        for (uint slot = lane; slot < capacity; slot += 64u)
+            residentCount += _VSMPrototypePhysicalPageOwners[slot] != 0u ? 1u : 0u;
+        g_VSMAllocationCounts[lane] = uint4(residentCount, 0u, 0u, 0u);
+        GroupMemoryBarrierWithGroupSync();
+        for (uint stride = 32u; stride > 0u; stride >>= 1u)
+        {
+            if (lane < stride) g_VSMAllocationCounts[lane] += g_VSMAllocationCounts[lane + stride];
+            GroupMemoryBarrierWithGroupSync();
+        }
+        if (lane == 0u)
+        {
+            _VSMPrototypeAllocatorCounters[0] = g_VSMAllocationCounts[0].x;
+            _VSMPrototypeAllocatorCounters[1] = summary.x;
+            _VSMPrototypeAllocatorCounters[2] = 0u;
+            _VSMPrototypeAllocatorCounters[3] = 0u;
+            uint4 pressure = _VSMPagePressureRW[0]; pressure.zw = uint2(summary.y, 0u);
+            _VSMPagePressureRW[0] = pressure;
+            uint4 detail = _VSMPagePressureRW[1]; detail.xy = summary.zz;
+            _VSMPagePressureRW[1] = detail;
+        }
+        return;
+    }
+    // Misses may evict finer/lower-priority requests, making them missing later.
+    // Keep the complete ordered request walk in that case, not just initial misses.
+#endif
     uint sortCount = 1u;
     while (sortCount < capacity) sortCount <<= 1u;
     uint4 counts = 0u; // allocated, requested, newly allocated, overflow
@@ -825,6 +900,14 @@ void VSMPrototypeAllocatePages(uint3 dispatchThreadID : SV_DispatchThreadID)
         _VSMPagePressureRW[1] = detail;
     }
 }
+
+[numthreads(64, 1, 1)]
+void VSMPrototypeAllocatePages(uint3 id : SV_DispatchThreadID) { RunVSMAllocation(id); }
+
+#if defined(VIVID_VSM_ALLOCATION_SUMMARY)
+[numthreads(64, 1, 1)]
+void VSMAllocatePagesCached(uint3 id : SV_DispatchThreadID) { RunVSMAllocation(id); }
+#endif
 
 [numthreads(64, 1, 1)]
 void VSMPrototypeMarkAllAllocatedPagesDirty(

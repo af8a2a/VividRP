@@ -26,6 +26,8 @@ namespace VividRP.Editor.Tests
             "VSMPrototypeResetReceiverFeedback",
             "VSMPrototypePrepareAllocation",
             "VSMPrototypeAllocatePages",
+            "VSMPrepareAllocationCached",
+            "VSMAllocatePagesCached",
             "VSMPrototypeFinalizeDirtyPages",
             "VSMPrototypeCullMeshletsToPages",
             "CSMShadowResolveTiles",

@@ -253,25 +253,40 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 output.uv0 = vertex.UV.xy;
 #if defined(VIVID_VSM_PAGE_CASTER)
 #if defined(VIVID_VSM_STABLE_RASTER)
-                // Every vertex carries the same original-triangle coefficients;
-                // clipping or winding must not select a different depth plane.
-                float4 triangleClip[3];
-                uint triangleBase = (vertexID / 3u) * 3u;
-                [unroll] for (uint corner = 0u; corner < 3u; corner++)
+                // D3D triangle lists use corner 0 for nointerpolation attributes,
+                // including when that original vertex is clipped. Only that lane
+                // needs to pull the other corners and prepare the depth plane.
+                // Keep identical per-vertex coefficients on other backends until
+                // their provoking-vertex convention is explicitly validated.
+#if defined(SHADER_API_D3D11)
+                [branch] if (vertexID % 3u == 0u)
+#endif
                 {
-                    if (corner == vertexID % 3u)
-                        triangleClip[corner] = output.positionCS;
-                    else
+                    float4 triangleClip[3];
+                    uint triangleBase = (vertexID / 3u) * 3u;
+#if defined(SHADER_API_D3D11)
+                    triangleClip[0] = output.positionCS;
+                    [unroll] for (uint corner = 1u; corner < 3u; corner++)
+#else
+                    [unroll] for (uint corner = 0u; corner < 3u; corner++)
+#endif
                     {
-                        VividDecodedMeshletVertex v = PullVertex(meshlet, PullIndex(meshlet, triangleBase + corner));
-                        float3 world = TransformPosition(instanceData.ObjectToWorldMatrix, v.Position.xyz);
-                        triangleClip[corner] = ApplyVividShadowClamping(mul(
-                            _VSMProjections[cascadeIndex].worldToClip, float4(world, 1.0)));
+#if !defined(SHADER_API_D3D11)
+                        if (corner == vertexID % 3u)
+                            triangleClip[corner] = output.positionCS;
+                        else
+#endif
+                        {
+                            VividDecodedMeshletVertex v = PullVertex(meshlet, PullIndex(meshlet, triangleBase + corner));
+                            float3 world = TransformPosition(instanceData.ObjectToWorldMatrix, v.Position.xyz);
+                            triangleClip[corner] = ApplyVividShadowClamping(mul(
+                                _VSMProjections[cascadeIndex].worldToClip, float4(world, 1.0)));
+                        }
                     }
+                    if (!VividVSMBuildDepthPlane(triangleClip[0], triangleClip[1], triangleClip[2],
+                            (uint)_VSMPrototypeVirtualResolution, output.depthGradientOrigin, output.depthBase))
+                        windowExtent = 0u;
                 }
-                if (!VividVSMBuildDepthPlane(triangleClip[0], triangleClip[1], triangleClip[2],
-                        (uint)_VSMPrototypeVirtualResolution, output.depthGradientOrigin, output.depthBase))
-                    return output;
                 // Page clip planes retriangulate geometry differently per window.
                 // Use the raster viewport and the per-fragment extent check.
                 output.pageClipDistances = 1.0;
@@ -318,8 +333,16 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                     validTexel = VividTryResolveVSMWindowPhysicalTexel(input.positionCS,
                         input.virtualPageIndex, input.windowExtent, physicalTexel);
                 else
+                {
+#if defined(VIVID_VSM_STABLE_RASTER)
+                    // An empty flat extent rejects the entire invalid primitive.
+                    // Window raster already checks this in its texel resolver.
+                    if (any(input.windowExtent == 0u))
+                        return;
+#endif
                     validTexel = VividTryResolveVSMPagePhysicalTexel(input.positionCS,
                         input.virtualPageIndex, physicalTexel);
+                }
                 if (!validTexel)
                     return;
 #endif

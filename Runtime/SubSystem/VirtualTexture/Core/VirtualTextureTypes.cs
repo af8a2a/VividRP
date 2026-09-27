@@ -633,7 +633,7 @@ namespace VividRP.Runtime
 
         public Vector4[] LayerFallbacks { get; }
 
-        // Snapshot of page-table changes (including eviction/reveal) and in-place
+        // Snapshot of sampling changes (excluding pending-only changes) and in-place
         // resident uploads. Upload acknowledgement must not reset this identity.
         internal ulong SamplingRevision { get; }
 

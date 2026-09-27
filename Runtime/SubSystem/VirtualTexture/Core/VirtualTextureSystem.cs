@@ -1754,6 +1754,16 @@ namespace VividRP.Runtime
             return s_PageTableScatterUploader.Record(renderGraph, s_PageTableSpaces.Values);
         }
 
+        internal static bool TryCollectSamplingChanges(
+            in VirtualTextureSpaceBinding binding, ulong previous, List<Rect> regions)
+        {
+            regions.Clear();
+            return binding.IsValid
+                && s_PageTableSpaces.TryGetValue(binding.SpaceId, out VTPageTableSpace space)
+                && ReferenceEquals(space.PageTableBuffer, binding.PageTableBuffer)
+                && space.TryCollectSamplingChanges(previous, binding.SamplingRevision, regions);
+        }
+
         internal static bool TryGetSpaceBinding(
             int spaceId,
             out VirtualTextureSpaceBinding binding)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
@@ -63,6 +64,8 @@ namespace VividRP.Runtime.GPUDriven
         private GraphicsBuffer m_ShadowVirtualTexturePageTable;
         private ulong m_ShadowVirtualTextureSamplingRevision;
         private float m_ShadowVirtualTextureMipBias;
+        private readonly List<Rect> m_ShadowVirtualTextureChanges = new(VTSamplingChangeJournal.Capacity);
+        private readonly List<bool> m_ShadowVirtualTextureMaterials = new(64);
         private int m_ShadowCullingContextCount;
         private bool m_IsDisposed;
 
@@ -321,10 +324,23 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            // Track the same allocation and resolved bias as the caster shader.
-            // Until texture-to-caster dependencies exist, localize conservatively
-            // to alpha casters in both pools, preserving unrelated opaque pages.
-            PrimitiveScene.InvalidateAlphaTestShadowCasters();
+            bool canLocalize = ReferenceEquals(m_ShadowVirtualTexturePageTable, pageTable)
+                && m_ShadowVirtualTextureMipBias.Equals(mipBias)
+                && VirtualTextureSystem.TryCollectSamplingChanges(
+                    binding, m_ShadowVirtualTextureSamplingRevision, m_ShadowVirtualTextureChanges);
+            if (canLocalize)
+            {
+                m_ShadowVirtualTextureMaterials.Clear();
+                for (int i = 0; i < SceneData.MaterialCount; i++)
+                    m_ShadowVirtualTextureMaterials.Add(
+                        SceneData.ShadowMaterialIntersectsVTChanges(i, m_ShadowVirtualTextureChanges));
+                PrimitiveScene.InvalidateAlphaTestShadowCasters(m_ShadowVirtualTextureMaterials);
+            }
+            else
+            {
+                // Resource replacement, bias changes, or expired/unknown history.
+                PrimitiveScene.InvalidateAlphaTestShadowCasters();
+            }
             m_ShadowVirtualTexturePageTable = pageTable;
             m_ShadowVirtualTextureSamplingRevision = samplingRevision;
             m_ShadowVirtualTextureMipBias = mipBias;

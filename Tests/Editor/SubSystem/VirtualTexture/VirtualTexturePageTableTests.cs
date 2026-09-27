@@ -576,6 +576,63 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SamplingRevision_PendingOnlyChangesStillUploadWithoutInvalidatingSamples()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("Pending sampling", 8, 8, 4, 16, 4));
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var before), Is.True);
+            var coord = new VirtualTexturePageCoord(0, 0, 2);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(spaceId, coord, out var oldEntry), Is.True);
+            RequestPages(spaceId, coord);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(spaceId, coord, out var pending), Is.True);
+            Assert.That(pending.PackedValue ^ oldEntry.PackedValue, Is.EqualTo(1u << 28));
+            Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var after), Is.True);
+            Assert.That(after.SamplingRevision, Is.EqualTo(before.SamplingRevision));
+            Assert.That(VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                spaceId, out var updates, out int version, out bool full), Is.True);
+            Assert.That(updates.Length, Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                spaceId, version, full, updates.Length), Is.True);
+            var regions = new List<Rect>(VTSamplingChangeJournal.Capacity);
+            Assert.That(VirtualTextureSystem.TryCollectSamplingChanges(after, before.SamplingRevision, regions), Is.True);
+            Assert.That(regions, Is.Empty);
+        }
+
+        [Test]
+        public void SamplingChangeJournal_PreservesConsumersCoalescesRegionsAndBoundsHistory()
+        {
+            var journal = new VTSamplingChangeJournal();
+            var region = new Rect(0.25f, 0.5f, 0.125f, 0.125f);
+            var output = new List<Rect>(VTSamplingChangeJournal.Capacity);
+            journal.Record(1, region);
+            journal.Record(2, region);
+            Assert.That(journal.TryCollect(0, 2, output), Is.True);
+            Assert.That(output, Is.EqualTo(new[] { region }));
+            Assert.That(journal.TryCollect(0, 2, output), Is.True, "Another consumer retains the same history.");
+            Assert.That(journal.TryCollect(0, 1, output), Is.False, "A stale binding takes the conservative path.");
+            for (ulong i = 3; i <= VTSamplingChangeJournal.Capacity + 2; i++)
+                journal.Record(i, region);
+            Assert.That(journal.TryCollect(0, VTSamplingChangeJournal.Capacity + 2, output), Is.False);
+            Assert.That(journal.TryCollect(2, VTSamplingChangeJournal.Capacity + 2, output), Is.True);
+            ulong current = VTSamplingChangeJournal.Capacity + 2;
+            for (int i = 0; i < 8; i++) journal.TryCollect(current - 1, current, output);
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++)
+            {
+                journal.Record(++current, region);
+                journal.TryCollect(current - 1, current, output);
+            }
+            Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        }
+
+        [Test]
+        public void SamplingChangeMask_OnlyExcludesPendingWork()
+        {
+            Assert.That(VTPageTableUpdater.SamplingChanged(0, 1u << 28), Is.False);
+            foreach (int bit in new[] { 0, 20, 26, 27, 29, 30, 31 })
+                Assert.That(VTPageTableUpdater.SamplingChanged(0, 1u << bit), Is.True);
+        }
+
+        [Test]
         public void SamplingRevision_TracksArrivalRevealAndEvictionAndSurvivesUploadAcknowledgement()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("Shadow Sampling", 4, 4, 3, 8, 4));
@@ -585,6 +642,8 @@ namespace VividRP.Editor.Tests
 
             var coord = new VirtualTexturePageCoord(0, 0, 0);
             VirtualTextureUploadRequest request = RequestAndCommit(spaceId, coord);
+            // Queued arrivals still sample their ancestor; begin the transition first.
+            VirtualTextureSystem.AdvancePageTransitionsForTesting(request.RequestFrame + 1);
             Assert.That(VirtualTextureSystem.TryGetSpaceBinding(spaceId, out var arrived), Is.True);
             Assert.That(arrived.SamplingRevision, Is.Not.EqualTo(initial.SamplingRevision));
             Assert.That(arrived.WithBindingIndex(3).SamplingRevision, Is.EqualTo(arrived.SamplingRevision));
@@ -635,6 +694,9 @@ namespace VividRP.Editor.Tests
             Assert.That(unchanged.PackedValue, Is.EqualTo(entry.PackedValue));
             Assert.That(after.SamplingRevision, Is.Not.EqualTo(before.SamplingRevision));
             Assert.That(after.SamplingRevision >> 32, Is.EqualTo(before.SamplingRevision >> 32));
+            var regions = new List<Rect>(VTSamplingChangeJournal.Capacity);
+            Assert.That(VirtualTextureSystem.TryCollectSamplingChanges(after, before.SamplingRevision, regions), Is.True);
+            Assert.That(regions, Is.EqualTo(new[] { new Rect(0, 0, 1, 1) }));
         }
 
         [Test]

@@ -5,6 +5,55 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    // Bounded, non-destructive history: consumers keep their own revision cursor.
+    internal sealed class VTSamplingChangeJournal
+    {
+        internal const int Capacity = 1024;
+        private readonly ulong[] m_Revisions = new ulong[Capacity];
+        private readonly Rect[] m_Regions = new Rect[Capacity];
+        private int m_Start;
+        private int m_Count;
+        private ulong m_Baseline;
+        private ulong m_Current;
+
+        internal void Record(ulong revision, Rect region)
+        {
+            if (m_Count == Capacity)
+            {
+                m_Baseline = m_Revisions[m_Start];
+                m_Start = (m_Start + 1) % Capacity;
+                m_Count--;
+            }
+            int index = (m_Start + m_Count++) % Capacity;
+            m_Revisions[index] = revision;
+            m_Regions[index] = region;
+            m_Current = revision;
+        }
+
+        internal bool TryCollect(ulong previous, ulong current, List<Rect> regions)
+        {
+            regions.Clear();
+            // An old frame snapshot or an expired cursor cannot be localized safely.
+            if (current != m_Current)
+                return false;
+            if (previous == current)
+                return true;
+            int first = previous == m_Baseline ? 0 : -1;
+            for (int i = 0; i < m_Count && first < 0; i++)
+                if (m_Revisions[(m_Start + i) % Capacity] == previous)
+                    first = i + 1;
+            if (first < 0)
+                return false;
+            for (int i = first; i < m_Count; i++)
+            {
+                Rect region = m_Regions[(m_Start + i) % Capacity];
+                if (!regions.Contains(region))
+                    regions.Add(region);
+            }
+            return true;
+        }
+    }
+
     internal sealed class VTPageTableUpdater : IDisposable
     {
         private static readonly Comparison<int> s_AscendingIndexComparison = (left, right) => left.CompareTo(right);
@@ -23,6 +72,10 @@ namespace VividRP.Runtime
         private bool m_FullBufferUploadRequired;
         private bool m_PageTableDirty;
         private int m_PendingUploadVersion;
+        private uint m_SamplingVersion;
+        private uint m_ResidentContentRevision;
+        private readonly VTSamplingChangeJournal m_SamplingChanges = new();
+
         private int m_RebuildCount;
         private int m_LastRecomputedEntryCount;
         private int m_LastUploadedEntryCount;
@@ -92,6 +145,34 @@ namespace VividRP.Runtime
 
         internal int PendingUploadVersion => m_PendingUploadVersion;
 
+        internal ulong SamplingRevision => ((ulong)m_SamplingVersion << 32) | m_ResidentContentRevision;
+
+        internal static bool SamplingChanged(uint before, uint after)
+        {
+            // Pending work changes feedback/diagnostics, not the sampled texture.
+            // Keep locked and transition bits: the shader consumes both.
+            return ((before ^ after) & ~(1u << VirtualTexturePageTableEntry.PendingUploadBitOffset)) != 0;
+        }
+
+        internal bool TryCollectSamplingChanges(ulong previous, ulong current, List<Rect> regions)
+            => m_SamplingChanges.TryCollect(previous, current, regions);
+
+        internal void RecordResidentContentChange(in VirtualTextureSpaceDesc desc, in VirtualTexturePageCoord coord)
+        {
+            m_ResidentContentRevision = unchecked(m_ResidentContentRevision + 1u);
+            RecordSamplingRegion(desc, coord);
+        }
+
+        private void RecordSamplingRegion(in VirtualTextureSpaceDesc desc, in VirtualTexturePageCoord coord)
+        {
+            float width = VirtualTextureSpaceUtility.GetPageCountX(desc.VirtualPageCountX, coord.Mip);
+            float height = VirtualTextureSpaceUtility.GetPageCountY(desc.VirtualPageCountY, coord.Mip);
+            // Parent changes cover their entire descendant UV region, including
+            // fallback and transition ancestor users whose own entry stays fixed.
+            m_SamplingChanges.Record(SamplingRevision,
+                new Rect(coord.X / width, coord.Y / height, 1f / width, 1f / height));
+        }
+
         internal void Rebuild(
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
@@ -113,6 +194,8 @@ namespace VividRP.Runtime
                 m_FullBufferUploadRequired = true;
                 m_PageTableDirty = true;
                 m_PendingUploadVersion = unchecked(m_PendingUploadVersion + 1);
+                m_SamplingVersion = unchecked(m_SamplingVersion + 1u);
+                m_SamplingChanges.Record(SamplingRevision, new Rect(0, 0, 1, 1));
                 m_LastRecomputedEntryCount = m_PageTableEntries.Length;
                 return;
             }
@@ -136,6 +219,12 @@ namespace VividRP.Runtime
                 {
                     m_PendingUploadVersion = unchecked(m_PendingUploadVersion + 1);
                     MarkUploadDirty(pageIndex);
+                    if (SamplingChanged(previousValue, m_PageTableEntries[pageIndex].PackedValue))
+                    {
+                        m_SamplingVersion = unchecked(m_SamplingVersion + 1u);
+                        if (TryGetPageCoord(desc, mipOffsets, pageIndex, out VirtualTexturePageCoord coord))
+                            RecordSamplingRegion(desc, coord);
+                    }
                 }
 
                 m_RecomputeMask[pageIndex] = false;

@@ -337,7 +337,7 @@ namespace VividRP.Runtime.PrimitiveScene
             RecordStaticShadowInvalidation(data.WorldBoundsMin, data.WorldBoundsMax);
         }
 
-        internal void InvalidateAlphaTestShadowCasters()
+        internal void InvalidateAlphaTestShadowCasters(IReadOnlyList<bool> affectedMaterials = null)
         {
             ThrowIfDisposed();
             for (int recordIndex = 0; recordIndex < m_ActiveCullRecords.Length; recordIndex++)
@@ -357,6 +357,11 @@ namespace VividRP.Runtime.PrimitiveScene
                     {
                         continue;
                     }
+
+                    uint materialIndex = MaterialTable[(int)section.MaterialIndex].LegacyMaterialIndex;
+                    if (affectedMaterials != null && materialIndex < (uint)affectedMaterials.Count
+                        && !affectedMaterials[(int)materialIndex])
+                        continue;
 
                     if (isStatic)
                     {

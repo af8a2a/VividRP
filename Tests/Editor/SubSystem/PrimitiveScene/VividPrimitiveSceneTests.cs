@@ -981,6 +981,65 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VTRegionDependencies_FilterMaterialsAndKeepUnknownCastersConservative()
+        {
+            var data = new VividGPUDrivenSceneData();
+            data.MutableSurfaceBindings.Add(new VividSurfaceBindingData
+            {
+                Flags = VividSurfaceBindingFlags.BaseColor,
+                UVScaleBias = new Unity.Mathematics.float4(0.125f, 0.125f, 0.25f, 0.5f)
+            });
+            data.MutableSurfaceBindings.Add(new VividSurfaceBindingData
+            {
+                Flags = VividSurfaceBindingFlags.BaseColor,
+                UVScaleBias = new Unity.Mathematics.float4(-0.125f, 0.125f, 0.75f, 0.5f)
+            });
+            data.AddLegacyMaterial(new VividMaterialData { SurfaceBindingIndex = 0 });
+            data.AddLegacyMaterial(new VividMaterialData { SurfaceBindingIndex = 1 });
+            var regions = new List<Rect> { new Rect(0.25f, 0.5f, 0.125f, 0.125f) };
+            var affected = new[] { data.ShadowMaterialIntersectsVTChanges(0, regions), data.ShadowMaterialIntersectsVTChanges(1, regions) };
+            Assert.That(affected, Is.EqualTo(new[] { true, false }));
+            regions[0] = new Rect(0, 0, 1, 1); // Parent/tail content covers both resources.
+            Assert.That(data.ShadowMaterialIntersectsVTChanges(1, regions), Is.True);
+            Assert.That(data.ShadowMaterialIntersectsVTChanges(100, regions), Is.True);
+
+            using var scene = new VividPrimitiveScene();
+            var geometry = CreateResourceKey(VividPrimitiveResourceDomain.MeshletGeometry, CreateEntity("Region Geometry"));
+            var alphaA = CreateResourceKey(VividPrimitiveResourceDomain.MaterialProxy, CreateEntity("Region A"));
+            var alphaB = CreateResourceKey(VividPrimitiveResourceDomain.MaterialProxy, CreateEntity("Region B"));
+            var unknown = CreateResourceKey(VividPrimitiveResourceDomain.MaterialProxy, CreateEntity("Region Unknown"));
+            var flags = VividPrimitiveFlags.Valid | VividPrimitiveFlags.Static;
+            scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("A"), new[] { CreateSection(0, geometry, alphaA), CreateSection(1, geometry, alphaA) }, flags: flags));
+            scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("B"), new[] { CreateSection(0, geometry, alphaB) }, flags: flags));
+            scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("Unknown"), new[] { CreateSection(0, geometry, unknown) }));
+            scene.UpdateMaterialPayload(alphaA, 0, new VividMaterialData { RendererListID = VividRendererListID.AlphaTest });
+            scene.UpdateMaterialPayload(alphaB, 1, new VividMaterialData { RendererListID = VividRendererListID.AlphaTest });
+            scene.UpdateMaterialPayload(unknown, 99, new VividMaterialData { RendererListID = VividRendererListID.AlphaTest });
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+            scene.AcknowledgeDynamicShadowInvalidations(scene.DynamicShadowRevision);
+            uint revision = scene.StaticShadowRevision;
+            scene.InvalidateAlphaTestShadowCasters(affected);
+            Assert.That(scene.StaticShadowRevision, Is.EqualTo(revision + 1));
+            Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
+            Assert.That(scene.PendingDynamicShadowInvalidationBounds.Length, Is.EqualTo(1));
+            for (int i = 0; i < 8; i++)
+            {
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                scene.AcknowledgeDynamicShadowInvalidations(scene.DynamicShadowRevision);
+                scene.InvalidateAlphaTestShadowCasters(affected);
+            }
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++)
+            {
+                data.ShadowMaterialIntersectsVTChanges(0, regions);
+                scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+                scene.AcknowledgeDynamicShadowInvalidations(scene.DynamicShadowRevision);
+                scene.InvalidateAlphaTestShadowCasters(affected);
+            }
+            Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        }
+
+        [Test]
         public void StaticShadowInvalidations_ReuseJournalWithoutManagedAllocation()
         {
             using var scene = new VividPrimitiveScene();

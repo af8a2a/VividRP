@@ -44,6 +44,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividInstanceData> m_Instances = new();
         private readonly List<VividGPUDrivenInstanceSourceData> m_InstanceSources = new();
         private readonly List<VividMaterialData> m_Materials = new();
+        private readonly List<int> m_ShadowMaterialResourceCounts = new();
         private readonly List<VividDualSlabMaterialData> m_DualSlabMaterials = new();
         private readonly List<uint4> m_MaterialParameterLanes = new();
         private readonly List<VividMaterialResourceData> m_MaterialResources = new();
@@ -253,6 +254,7 @@ namespace VividRP.Runtime.GPUDriven
             VividMaterialProgramData[] runtimePrograms =
                 GPUDrivenMaterialCompiler.CreateRuntimeProgramTable();
             m_Materials.Clear();
+            m_ShadowMaterialResourceCounts.Clear();
             m_DualSlabMaterials.Clear();
             m_MaterialParameterLanes.Clear();
             m_MaterialResources.Clear();
@@ -272,6 +274,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             int materialIndex = m_Materials.Count;
+            int shadowResourceCount = 0;
             bool usesLegacyParameterLayout =
                 runtimeHeader.ProgramID == VividMaterialProgramID.Invalid;
             if (runtimeHeader.ProgramID != VividMaterialProgramID.Invalid)
@@ -313,6 +316,7 @@ namespace VividRP.Runtime.GPUDriven
 
                 uint resourceBindingAddress = runtimeHeader.ResourceBindingAddress;
                 uint resourceRecordCount = (uint) programBinding.ResourceCount;
+                shadowResourceCount = programBinding.ResourceCount;
                 if (resourceBindingAddress > (uint) m_MaterialResources.Count
                     || resourceRecordCount
                         > (uint) m_MaterialResources.Count - resourceBindingAddress)
@@ -332,7 +336,58 @@ namespace VividRP.Runtime.GPUDriven
             }
             m_Materials.Add(materialData);
             m_MaterialRuntimeHeaders.Add(runtimeHeader);
+            m_ShadowMaterialResourceCounts.Add(shadowResourceCount);
             return materialIndex;
+        }
+
+        internal bool ShadowMaterialIntersectsVTChanges(int materialIndex, IReadOnlyList<Rect> regions)
+        {
+            if ((uint)materialIndex >= (uint)m_Materials.Count
+                || (uint)materialIndex >= (uint)m_MaterialRuntimeHeaders.Count
+                || (uint)materialIndex >= (uint)m_ShadowMaterialResourceCounts.Count)
+                return true;
+            VividMaterialRuntimeHeader header = m_MaterialRuntimeHeaders[materialIndex];
+            if (header.ProgramID == VividMaterialProgramID.Invalid)
+            {
+                uint index = m_Materials[materialIndex].SurfaceBindingIndex;
+                if (index >= (uint)m_SurfaceBindings.Count)
+                    return true;
+                VividSurfaceBindingData binding = m_SurfaceBindings[(int)index];
+                return (binding.Flags & VividSurfaceBindingFlags.BaseColor) != 0
+                    && VTRegionIntersects(binding.UVScaleBias, regions);
+            }
+            // Frozen AOT descriptors currently expose the material resource range,
+            // not per-stage usage. Cover every record rather than assume resource 0.
+            int count = m_ShadowMaterialResourceCounts[materialIndex];
+            uint start = header.ResourceBindingAddress;
+            if (start > (uint)m_MaterialResources.Count
+                || (uint)count > (uint)m_MaterialResources.Count - start)
+                return true;
+            for (int i = 0; i < count; i++)
+            {
+                VividMaterialResourceData resource = m_MaterialResources[(int)start + i];
+                if (resource.SurfaceBindingFlags != 0 && VTRegionIntersects(resource.UVScaleBias, regions))
+                    return true;
+            }
+            return false;
+        }
+
+        internal static bool VTRegionIntersects(float4 scaleBias, IReadOnlyList<Rect> regions)
+        {
+            if (!math.all(math.isfinite(scaleBias)))
+                return true;
+            float2 min = scaleBias.zw;
+            float2 max = min + math.abs(scaleBias.xy);
+            for (int i = 0; i < regions.Count; i++)
+            {
+                Rect region = regions[i];
+                // Inclusive edges cover clamp UV=1 and floating-point rounding.
+                const float epsilon = 1e-6f;
+                if (min.x <= region.xMax + epsilon && max.x >= region.xMin - epsilon
+                    && min.y <= region.yMax + epsilon && max.y >= region.yMin - epsilon)
+                    return true;
+            }
+            return false;
         }
 
         internal int AddLegacyMaterial(in VividMaterialData materialData)

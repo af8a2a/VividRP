@@ -19,6 +19,7 @@ namespace VividRP.Editor.Tests
             "CSMShadowResolve",
             "VSMReceiverDebug",
             "VSMMarkReceiverPages",
+            "VSMMarkReceiverPagesGrouped",
             "VSMMarkCoarsePages",
             "VSMClearPageCullHierarchy",
             "VSMBuildPageCullHierarchy",
@@ -46,6 +47,9 @@ namespace VividRP.Editor.Tests
             "InspectReceiverFootprint",
             "FilterSMRTAdaptive",
             "MarkReceiverInputs",
+            "MarkReceiverInputsGrouped",
+            "MarkPageWrites",
+            "MarkPageWritesGrouped",
             "MarkFootprintPairs",
             "ResolveOnlyReceivers",
         };
@@ -81,6 +85,49 @@ namespace VividRP.Editor.Tests
 
     public sealed class VirtualShadowMapReceiverMaskTests
     {
+        [TestCase(1, 31)]
+        [TestCase(2, 64)]
+        [TestCase(4, 193)]
+        [TestCase(32, 65)]
+        public void Marking_GroupedWritesPreservePerPageRolesAndMasks(int keyCount, int count)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
+            using var masks = new VirtualShadowMapReceiverMaskTestBuffers(shader, 256, 1, true);
+            using var flags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 256, 4);
+            using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
+            try
+            {
+                var values = new uint4[count]; var expectedFlags = new uint[256]; var expectedMask = new uint2[256];
+                for (int i = 0; i < count; i++)
+                {
+                    uint page = (uint)((i % keyCount) * 3 + 17);
+                    uint role = i % 7 == 1 ? 0u : 1u | (i % 4 == 0 ? 256u : i % 4 == 1 ? 512u : i % 4 == 2 ? 1024u : 2048u);
+                    uint2 mask = new(i % 3 == 0 ? 0u : 1u << (i % 32), i % 3 == 1 ? 0u : 1u << ((i * 7) % 32));
+                    values[i] = new uint4(page, role, mask.x, mask.y);
+                    if (role == 0u) continue;
+                    expectedFlags[page] |= role;
+                    expectedMask[page] |= (role & 256u) != 0u ? new uint2(uint.MaxValue) : mask;
+                }
+                inputs.SetData(values);
+                shader.SetInt("_SamplingCount", count); shader.SetInt("_VSMPrototypePagesPerAxis", 8);
+                foreach (string name in new[] { "MarkPageWrites", "MarkPageWritesGrouped" })
+                {
+                    int kernel = shader.FindKernel(name);
+                    flags.SetData(new uint[256]); masks.Requests.SetData(new uint2[256]);
+                    shader.SetBuffer(kernel, "_PageWriteInputs", inputs);
+                    shader.SetBuffer(kernel, "_VSMPageRequestFlags", flags);
+                    shader.Dispatch(kernel, (count + 63) / 64, 1, 1);
+                    var actualFlags = new uint[256]; var actualMask = new uint2[256];
+                    flags.GetData(actualFlags); masks.Requests.GetData(actualMask);
+                    Assert.That(actualFlags, Is.EqualTo(expectedFlags));
+                    Assert.That(actualMask, Is.EqualTo(expectedMask));
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(0)]
         [TestCase(1)]
         public void Marking_PreservesGapsBetweenFootprints_AndCompletesTerminalMask(int level)

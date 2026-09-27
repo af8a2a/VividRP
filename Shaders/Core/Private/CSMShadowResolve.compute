@@ -45,6 +45,7 @@
 #pragma kernel VSMCullMeshletsToPagesGeometryBounds VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS
 #pragma kernel VSMPrepareAllocationCached VIVID_VSM_ALLOCATION_SUMMARY_WRITE
 #pragma kernel VSMAllocatePagesCached VIVID_VSM_ALLOCATION_SUMMARY
+#pragma kernel VSMMarkReceiverPagesGrouped VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUPED_MARKING
 #pragma use_dxc
 #pragma require Native16Bit
 

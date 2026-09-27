@@ -38,6 +38,23 @@ uint2 VSMFootprintPageMask(VSMReceiverPageFootprint footprint, uint2 page)
         min(footprint.maxTexel, origin + size - 1u) - origin, size);
 }
 
+void WriteVSMReceiverPage(uint page, uint request, uint2 receiverMask)
+{
+#if !defined(VIVID_VSM_RECEIVER_DEBUG) && !defined(VIVID_VSM_RESOLVE_RECEIVERS)
+    InterlockedOr(_VSMPageRequestFlags[page], request);
+    if (_VSMReceiverMaskEnabled != 0)
+    {
+#if defined(VIVID_VSM_GROUPED_MARKING)
+        if (receiverMask.x != 0u) InterlockedOr(_VSMPageReceiverMasks[page].x, receiverMask.x);
+        if (receiverMask.y != 0u) InterlockedOr(_VSMPageReceiverMasks[page].y, receiverMask.y);
+#else
+        InterlockedOr(_VSMPageReceiverMasks[page].x, receiverMask.x);
+        InterlockedOr(_VSMPageReceiverMasks[page].y, receiverMask.y);
+#endif
+    }
+#endif
+}
+
 void EmitVSMReceiverPage(uint2 coord, int level, uint request, uint2 receiverMask)
 {
 #if !defined(VIVID_VSM_RECEIVER_DEBUG) && !defined(VIVID_VSM_RESOLVE_RECEIVERS)
@@ -50,15 +67,33 @@ void EmitVSMReceiverPage(uint2 coord, int level, uint request, uint2 receiverMas
     {
         request = WaveActiveBitOr(request);
         receiverMask = WaveActiveBitOr(receiverMask);
-        if (!WaveIsFirstLane()) return;
+        if (WaveIsFirstLane()) WriteVSMReceiverPage(page, request, receiverMask);
+        return;
+    }
+#if defined(VIVID_VSM_GROUPED_MARKING)
+    // Page boundaries often leave a few repeated keys in a wave. Merge only
+    // equal addresses: mixing roles across keys changes allocation priorities.
+    // Bound the search; scattered receivers retain the per-lane path.
+    [loop] for (uint batch = 0u; batch < 2u; ++batch)
+    {
+        uint key = WaveReadLaneFirst(page);
+        bool matches = page == key;
+        if (WaveActiveCountBits(matches) < 4u) break;
+        uint flags = WaveActiveBitOr(matches ? request : 0u);
+        uint2 mask = WaveActiveBitOr(matches ? receiverMask : 0u);
+        if (WaveIsFirstLane()) WriteVSMReceiverPage(key, flags, mask);
+        if (matches) return;
+        if (WaveActiveAllEqual(page))
+        {
+            request = WaveActiveBitOr(request);
+            receiverMask = WaveActiveBitOr(receiverMask);
+            if (WaveIsFirstLane()) WriteVSMReceiverPage(page, request, receiverMask);
+            return;
+        }
     }
 #endif
-    InterlockedOr(_VSMPageRequestFlags[page], request);
-    if (_VSMReceiverMaskEnabled != 0)
-    {
-        InterlockedOr(_VSMPageReceiverMasks[page].x, receiverMask.x);
-        InterlockedOr(_VSMPageReceiverMasks[page].y, receiverMask.y);
-    }
+#endif
+    WriteVSMReceiverPage(page, request, receiverMask);
 #endif
 }
 
@@ -216,4 +251,9 @@ void VSMMarkReceiverPages(uint3 id : SV_DispatchThreadID)
     normal = ReconstructVSMReceiverNormal(id.xy, depth, position, normal);
     MarkVSMReceiver(position, normal);
 }
+#endif
+
+#if defined(VIVID_VSM_GROUPED_MARKING) && defined(VIVID_VSM_MARK_RECEIVERS)
+[numthreads(8, 8, 1)]
+void VSMMarkReceiverPagesGrouped(uint3 id : SV_DispatchThreadID) { VSMMarkReceiverPages(id); }
 #endif

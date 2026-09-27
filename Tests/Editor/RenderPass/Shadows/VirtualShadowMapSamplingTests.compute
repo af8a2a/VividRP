@@ -30,6 +30,9 @@
 #pragma kernel InspectVSMHierarchyMip
 #pragma kernel InspectVSMUncachedRect
 #pragma kernel InspectVSMAffineBounds
+#pragma kernel MarkReceiverInputsGrouped VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUPED_MARKING
+#pragma kernel MarkPageWrites VIVID_VSM_MARK_RECEIVERS
+#pragma kernel MarkPageWritesGrouped VIVID_VSM_MARK_RECEIVERS VIVID_VSM_GROUPED_MARKING
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -446,3 +449,21 @@ void InspectVSMAffineBounds(uint3 id : SV_DispatchThreadID)
     _SamplingClippedRects[id.x] = uint4(low, high);
     _SamplingResults[id.x] = float2(valid, 0);
 }
+
+StructuredBuffer<uint4> _PageWriteInputs; // virtual page, request flags, mask low/high
+[numthreads(64, 1, 1)]
+void MarkPageWrites(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    uint4 input = _PageWriteInputs[id.x];
+    if (input.y == 0u) return;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    EmitVSMReceiverPage(uint2(input.x % axis, (input.x / axis) % axis),
+        (int)(input.x / (axis * axis)), input.y, input.zw);
+}
+#if defined(VIVID_VSM_GROUPED_MARKING)
+[numthreads(64, 1, 1)]
+void MarkPageWritesGrouped(uint3 id : SV_DispatchThreadID) { MarkPageWrites(id); }
+[numthreads(64, 1, 1)]
+void MarkReceiverInputsGrouped(uint3 id : SV_DispatchThreadID) { MarkReceiverInputs(id); }
+#endif

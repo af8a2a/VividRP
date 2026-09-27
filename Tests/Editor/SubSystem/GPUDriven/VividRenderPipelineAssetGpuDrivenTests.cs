@@ -989,7 +989,8 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("_VividShadowVP", raster);
             StringAssert.Contains("_VSMProjections[cascadeIndex].worldToClip", raster);
             StringAssert.Contains("VividVSMToRasterClip(", raster);
-            StringAssert.Contains("VividWriteVSMPageDepth(input.positionCS, input.virtualPageIndex)", raster);
+            StringAssert.Contains("VividTryResolveVSMPagePhysicalTexel(", raster);
+            StringAssert.Contains("VividInsertVSMDepth(physicalTexel,", raster);
         }
 
         [Test]

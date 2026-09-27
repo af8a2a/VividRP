@@ -256,6 +256,16 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 #ifdef _ALPHATEST_ON
                 const float2 uv0Ddx = ddx(input.uv0);
                 const float2 uv0Ddy = ddy(input.uv0);
+                #endif
+#if defined(VIVID_VSM_PAGE_CASTER)
+                // Capture derivatives before the receiver mask can split a quad.
+                // Resolve once, before material/VT coverage; keep all depth layers.
+                uint2 physicalTexel;
+                if (!VividTryResolveVSMPagePhysicalTexel(
+                        input.positionCS, input.virtualPageIndex, physicalTexel))
+                    return;
+#endif
+                #ifdef _ALPHATEST_ON
                 const VividInstanceData instanceData = PullInstanceData(input.instanceIndex);
                 VividMaterialCoverageEvaluation coverage;
                 const uint coverageStatus = VividEvaluateCoverageProgram(
@@ -283,7 +293,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 #endif
 
 #if defined(VIVID_VSM_PAGE_CASTER)
-                VividWriteVSMPageDepth(input.positionCS, input.virtualPageIndex);
+                VividInsertVSMDepth(physicalTexel, asuint(saturate(input.positionCS.z)));
 #else
                 VividWriteVSMDepth(input.positionCS);
 #endif

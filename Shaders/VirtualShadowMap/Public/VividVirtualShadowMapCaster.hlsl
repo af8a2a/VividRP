@@ -124,22 +124,31 @@ void VividWriteVSMDepth(float4 positionCS)
 }
 // Meshlet page draws target a physical-page-sized DSV layer. Use the request's
 // virtual page identity, never reinterpret the local SV_Position as a virtual UV.
-void VividWriteVSMPageDepth(float4 positionCS, uint virtualPageIndex)
+bool VividTryResolveVSMPagePhysicalTexel(
+    float4 positionCS, uint virtualPageIndex, out uint2 physicalTexel)
 {
-    if (!VividVSMCasterReceiverTexel(virtualPageIndex, (uint2)positionCS.xy)) return;
+    physicalTexel = 0u;
+    if (!VividVSMCasterReceiverTexel(virtualPageIndex, (uint2)positionCS.xy)) return false;
     uint encodedPage = _VSMPrototypePageTable[virtualPageIndex];
     if (encodedPage == 0u)
-        return;
+        return false;
     if ((_VSMPrototypePageMetadata[virtualPageIndex].x & kVividVSMPageDeferred) != 0u)
-        return;
+        return false;
     if ((_VSMPrototypePageMetadata[virtualPageIndex].x
             & (_VSMPrototypeCasterLayer == 0 ? kVividVSMPageDirty : kVividVSMPageDynamicDirty)) == 0u)
-        return;
+        return false;
     uint slot = encodedPage - 1u;
     uint rowSize = (uint)_VSMPrototypePhysicalPagesPerRow;
-    uint2 texel = uint2(slot % rowSize, slot / rowSize) * (uint)_VSMPrototypePageSize
+    physicalTexel = uint2(slot % rowSize, slot / rowSize) * (uint)_VSMPrototypePageSize
         + (uint2)positionCS.xy;
-    VividInsertVSMDepth(texel, asuint(saturate(positionCS.z)));
+    return true;
+}
+
+void VividWriteVSMPageDepth(float4 positionCS, uint virtualPageIndex)
+{
+    uint2 physicalTexel;
+    if (VividTryResolveVSMPagePhysicalTexel(positionCS, virtualPageIndex, physicalTexel))
+        VividInsertVSMDepth(physicalTexel, asuint(saturate(positionCS.z)));
 }
 #else
 void VividWriteVSMDepth(float4 positionCS, uint cascadeIndex)

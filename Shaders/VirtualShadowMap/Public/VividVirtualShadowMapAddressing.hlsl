@@ -6,6 +6,22 @@
 #define VIVID_VSM_RASTER_MAX_LEVELS 16
 #define VIVID_VSM_RASTER_PAGE_HEADER_SIZE (1 + 2 * VIVID_VSM_RASTER_MAX_LEVELS)
 
+// Bounded HW raster windows. Keep RasterWindowPages in the runtime in sync.
+#define VIVID_VSM_RASTER_WINDOW_PAGES 4u
+#define VIVID_VSM_PAGE_WINDOW_FLAG 0x80000000u
+
+// Front records keep z = virtual origin. w is either the single-page level or
+// this tagged level/extent; back records retain the legacy min/max page ABI.
+uint VividVSMEncodePageWindow(uint level, uint2 extent)
+{
+    return VIVID_VSM_PAGE_WINDOW_FLAG | level | (extent.x << 8u) | (extent.y << 12u);
+}
+uint2 VividVSMDecodePageWindow(uint tag)
+{
+    return (tag & VIVID_VSM_PAGE_WINDOW_FLAG) != 0u
+        ? uint2((tag >> 8u) & 15u, (tag >> 12u) & 15u) : uint2(1u, 1u);
+}
+
 // 8x8 receiver cells per page, packed as two row-major 32-bit masks. Endpoints
 // are inclusive texels; mask quantization expands coverage, never contracts it.
 uint2 VividVSMReceiverMaskRect(uint2 low, uint2 high, uint pageSize)

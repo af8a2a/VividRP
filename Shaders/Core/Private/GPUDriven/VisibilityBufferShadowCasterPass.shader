@@ -3,6 +3,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
     Properties
     {
         [HideInInspector] _Cull("Cull", Float) = 2
+        [HideInInspector] _VSMRasterWindowPages("Raster Window Pages", Integer) = 1
+        [HideInInspector] _ZWrite("ZWrite", Float) = 1
+        [HideInInspector] _ZTest("ZTest", Float) = 4
     }
 
     SubShader
@@ -21,8 +24,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 "LightMode" = "ShadowCaster"
             }
 
-            ZWrite On
-            ZTest LEqual
+            ZWrite [_ZWrite]
+            ZTest [_ZTest]
             Cull [_Cull]
             ColorMask 0
 
@@ -36,6 +39,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
             #pragma multi_compile_local_fragment _ VIVID_VSM_CASTER
             #pragma multi_compile_local _ VIVID_VSM_PAGE_CASTER
+            #pragma multi_compile_local _ VIVID_VSM_STABLE_RASTER
 
             #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
@@ -53,6 +57,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 
             StructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
 #if defined(VIVID_VSM_PAGE_CASTER)
+            int _VSMRasterWindowPages;
             StructuredBuffer<uint4> _VSMPrototypeMeshletPageRequests;
             StructuredBuffer<uint> _VSMPrototypeMeshletRasterPages;
 #endif
@@ -74,6 +79,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 #if defined(VIVID_VSM_PAGE_CASTER)
                 float4 pageClipDistances : SV_ClipDistance0;
                 nointerpolation uint virtualPageIndex : TEXCOORD2;
+                nointerpolation uint2 windowExtent : TEXCOORD3;
+#if defined(VIVID_VSM_STABLE_RASTER)
+                nointerpolation float4 depthGradientOrigin : TEXCOORD4;
+                nointerpolation float depthBase : TEXCOORD5;
+#endif
                 uint renderTargetArrayIndex : SV_RenderTargetArrayIndex;
 #endif
             };
@@ -107,7 +117,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             float4 GetVSMPageClipDistances(
                 float4 positionCS,
                 uint virtualPageIndex,
-                uint cascadeIndex)
+                uint cascadeIndex,
+                uint2 windowExtent)
             {
                 const uint pagesPerAxis = (uint)max(
                     _VSMPrototypePagesPerAxis,
@@ -120,7 +131,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                     cascadePageIndex / pagesPerAxis);
                 const float2 pageMinUV = (float2)pageCoord
                     / (float)pagesPerAxis;
-                const float2 pageMaxUV = (float2)(pageCoord + 1u)
+                const float2 pageMaxUV = (float2)(pageCoord + windowExtent)
                     / (float)pagesPerAxis;
                 const float minNdcX = pageMinUV.x * 2.0 - 1.0;
                 const float maxNdcX = pageMaxUV.x * 2.0 - 1.0;
@@ -150,6 +161,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 #if defined(VIVID_VSM_PAGE_CASTER)
                 output.pageClipDistances = -1.0;
                 output.virtualPageIndex = 0u;
+                output.windowExtent = 1u;
+#if defined(VIVID_VSM_STABLE_RASTER)
+                output.depthGradientOrigin = 0.0;
+                output.depthBase = 0.0;
+#endif
                 output.renderTargetArrayIndex = 0u;
 #endif
 
@@ -159,6 +175,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 uint4 pageRequest;
                 uint virtualPageIndex;
                 uint cascadeIndex;
+                uint2 windowExtent = 1u;
                 if (GetCommandID(0) >= VIVIDRENDERERLISTID_COUNT)
                 {
                     const uint pageCount = _VSMPrototypeMeshletRasterPages[0];
@@ -192,7 +209,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 {
                     pageRequest = _VSMPrototypeMeshletPageRequests[instanceID];
                     virtualPageIndex = pageRequest.z;
-                    cascadeIndex = pageRequest.w;
+                    cascadeIndex = pageRequest.w & 0xffu;
+                    windowExtent = VividVSMDecodePageWindow(pageRequest.w);
                 }
                 VividMeshletRenderRequestPacked renderRequest;
                 renderRequest.InstanceID_LOD = pageRequest.x;
@@ -205,7 +223,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 #if defined(VIVID_VSM_PAGE_CASTER)
                 // Large records fan out over all relevant pages. Recheck this
                 // particular page before vertex pulling, as well as in compute.
-                if (!VividVSMCasterReceiverSphere(virtualPageIndex,
+                if (all(windowExtent == 1u) && !VividVSMCasterReceiverSphere(virtualPageIndex,
                         TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix),
                         _VSMProjections[cascadeIndex].worldToShadow)) return output;
 #endif
@@ -234,18 +252,52 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 output.instanceIndex = renderRequest.InstanceID_LOD;
                 output.uv0 = vertex.UV.xy;
 #if defined(VIVID_VSM_PAGE_CASTER)
+#if defined(VIVID_VSM_STABLE_RASTER)
+                // Every vertex carries the same original-triangle coefficients;
+                // clipping or winding must not select a different depth plane.
+                float4 triangleClip[3];
+                uint triangleBase = (vertexID / 3u) * 3u;
+                [unroll] for (uint corner = 0u; corner < 3u; corner++)
+                {
+                    if (corner == vertexID % 3u)
+                        triangleClip[corner] = output.positionCS;
+                    else
+                    {
+                        VividDecodedMeshletVertex v = PullVertex(meshlet, PullIndex(meshlet, triangleBase + corner));
+                        float3 world = TransformPosition(instanceData.ObjectToWorldMatrix, v.Position.xyz);
+                        triangleClip[corner] = ApplyVividShadowClamping(mul(
+                            _VSMProjections[cascadeIndex].worldToClip, float4(world, 1.0)));
+                    }
+                }
+                if (!VividVSMBuildDepthPlane(triangleClip[0], triangleClip[1], triangleClip[2],
+                        (uint)_VSMPrototypeVirtualResolution, output.depthGradientOrigin, output.depthBase))
+                    return output;
+                // Page clip planes retriangulate geometry differently per window.
+                // Use the raster viewport and the per-fragment extent check.
+                output.pageClipDistances = 1.0;
+#else
                 output.pageClipDistances = GetVSMPageClipDistances(
                     output.positionCS,
                     virtualPageIndex,
-                    cascadeIndex);
+                    cascadeIndex, windowExtent);
+#endif
                 const uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
                 const uint pageInProjection = virtualPageIndex % (pagesPerAxis * pagesPerAxis);
                 const uint2 origin = uint2(pageInProjection % pagesPerAxis,
                     pageInProjection / pagesPerAxis) * (uint)_VSMPrototypePageSize;
+#if defined(VIVID_VSM_STABLE_RASTER)
+                output.positionCS = VividVSMToStableRasterClip(output.positionCS, origin,
+                    (uint)_VSMPrototypeVirtualResolution,
+                    (uint)_VSMPrototypePageSize * (uint)max(_VSMRasterWindowPages, 1));
+#else
                 output.positionCS = VividVSMToRasterClip(output.positionCS, origin,
-                    (uint)_VSMPrototypeVirtualResolution, (uint)_VSMPrototypePageSize);
+                    (uint)_VSMPrototypeVirtualResolution,
+                    (uint)_VSMPrototypePageSize * (uint)max(_VSMRasterWindowPages, 1));
+#endif
                 output.virtualPageIndex = virtualPageIndex;
-                output.renderTargetArrayIndex = _VSMPrototypePageTable[virtualPageIndex] - 1u;
+                output.windowExtent = windowExtent;
+                output.renderTargetArrayIndex = _VSMRasterWindowPages > 1
+                    ? 0u : _VSMPrototypePageTable[virtualPageIndex] - 1u;
 #endif
 
                 return output;
@@ -261,8 +313,14 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 // Capture derivatives before the receiver mask can split a quad.
                 // Resolve once, before material/VT coverage; keep all depth layers.
                 uint2 physicalTexel;
-                if (!VividTryResolveVSMPagePhysicalTexel(
-                        input.positionCS, input.virtualPageIndex, physicalTexel))
+                bool validTexel;
+                if (_VSMRasterWindowPages > 1)
+                    validTexel = VividTryResolveVSMWindowPhysicalTexel(input.positionCS,
+                        input.virtualPageIndex, input.windowExtent, physicalTexel);
+                else
+                    validTexel = VividTryResolveVSMPagePhysicalTexel(input.positionCS,
+                        input.virtualPageIndex, physicalTexel);
+                if (!validTexel)
                     return;
 #endif
                 #ifdef _ALPHATEST_ON
@@ -293,7 +351,16 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 #endif
 
 #if defined(VIVID_VSM_PAGE_CASTER)
+#if defined(VIVID_VSM_STABLE_RASTER)
+                uint axis = (uint)_VSMPrototypePagesPerAxis;
+                uint2 origin = uint2(input.virtualPageIndex % axis,
+                    (input.virtualPageIndex / axis) % axis) * (uint)_VSMPrototypePageSize;
+                float depth = VividVSMEvaluateDepthPlane(input.depthGradientOrigin,
+                    input.depthBase, origin + (uint2)input.positionCS.xy);
+                VividInsertVSMDepth(physicalTexel, asuint(saturate(depth)));
+#else
                 VividInsertVSMDepth(physicalTexel, asuint(saturate(input.positionCS.z)));
+#endif
 #else
                 VividWriteVSMDepth(input.positionCS);
 #endif

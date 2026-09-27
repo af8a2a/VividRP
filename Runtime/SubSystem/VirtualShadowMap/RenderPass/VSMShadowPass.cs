@@ -14,6 +14,9 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public sealed class VSMShadowPass : ShadowCasterPass
     {
+        private static readonly int RasterWindowPagesId = Shader.PropertyToID("_VSMRasterWindowPages");
+        private static readonly int ZWriteId = Shader.PropertyToID("_ZWrite");
+        private static readonly int ZTestId = Shader.PropertyToID("_ZTest");
         private static readonly int VSMPrototypePageTableId = Shader.PropertyToID("_VSMPrototypePageTable");
 
         private static readonly int VSMPrototypeWritablePageTableId = Shader.PropertyToID("_VSMPrototypeWritablePageTable");
@@ -211,8 +214,30 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer1 = m_DefaultReceiverNormal = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R8G8B8A8_UNorm);
         }
 
+        private bool m_RasterStateInitialized;
+        private bool m_RasterWindowsEnabled;
+
+        private void ConfigureRasterState()
+        {
+            bool windows = VirtualShadowMapPrototypeRuntime.ExperimentalPageWindows;
+            if (m_RasterStateInitialized && m_RasterWindowsEnabled == windows) return;
+            for (int i = 0; i < m_Materials.Length; i++)
+            {
+                Material material = m_Materials[i];
+                if (material == null) continue;
+                CoreUtils.SetKeyword(material, "VIVID_VSM_STABLE_RASTER", windows);
+                material.SetInteger(RasterWindowPagesId, VirtualShadowMapPrototypeRuntime.RasterWindowScale);
+                // A shared window target must not occlude the hidden UAV layers.
+                material.SetFloat(ZWriteId, windows ? 0f : 1f);
+                material.SetFloat(ZTestId, (float)(windows ? CompareFunction.Always : CompareFunction.LessEqual));
+            }
+            m_RasterWindowsEnabled = windows;
+            m_RasterStateInitialized = true;
+        }
+
         public override void Create()
         {
+            m_RasterStateInitialized = false;
             base.Create();
             m_VirtualShadowMapPageManagementCompute =
                 PipelineResourceManager.Get<VividRPCoreResources>()?.CSMShadowResolveCompute;
@@ -264,6 +289,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             VirtualShadowMapPrototypeRuntime.BeginFrame();
+            ConfigureRasterState();
             m_PageTable.ClearImportedBuffer();
             m_VirtualShadowMapPrototypeActive = false;
             m_VirtualShadowMapStaticPoolNeedsCacheRefresh = false;
@@ -837,6 +863,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 return false;
 
             ComputeShader compute = m_VirtualShadowMapPageManagementCompute;
+            nativeCmd.SetComputeIntParam(compute, RasterWindowPagesId,
+                VirtualShadowMapPrototypeRuntime.RasterWindowScale);
             var vsmCulling = VirtualShadowMapCullingParameters.ForCurrentFrame(casterLayer);
             vsmCulling.BindViews(nativeCmd, compute, m_VirtualShadowMapPrepareMeshletPageRequestsKernel);
             vsmCulling.BindViews(nativeCmd, compute, m_VirtualShadowMapCullMeshletsToPagesKernel);

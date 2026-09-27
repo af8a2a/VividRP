@@ -13,6 +13,13 @@ namespace VividRP.Runtime.VirtualShadowMap
     {
         internal const int PageSize = 128;
         internal const int DepthLayerCount = 16;
+        // Match VIVID_VSM_RASTER_WINDOW_PAGES. The DSV only provides a viewport;
+        // all visibility depths go to the 16-layer UAV, with depth testing off.
+        internal const int RasterWindowPages = 4;
+        // Experimental until page/window rasterization preserves the complete
+        // multi-depth set. Diagnostic callers must restore this after use.
+        internal static bool ExperimentalPageWindows { get; set; }
+        internal static int RasterWindowScale => ExperimentalPageWindows ? RasterWindowPages : 1;
         internal const int DefaultPhysicalPageCount = 256;
         internal const int MaxPhysicalPageCount = 1024;
         internal const int ClearWorkArgsOffset = 0;
@@ -567,9 +574,10 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_DynamicPhysicalPage.rt.volumeDepth == DepthLayerCount
                 && s_RasterDepth != null
                 && s_RasterDepth.rt != null
-                && s_RasterDepth.rt.width == PageSize
-                && s_RasterDepth.rt.height == PageSize
-                && s_RasterDepth.rt.volumeDepth == physicalPageCapacity
+                && s_RasterDepth.rt.width == PageSize * RasterWindowScale
+                && s_RasterDepth.rt.height == PageSize * RasterWindowScale
+                && s_RasterDepth.rt.dimension == TextureDimension.Tex2DArray
+                && s_RasterDepth.rt.volumeDepth == (ExperimentalPageWindows ? 1 : physicalPageCapacity)
                 && s_UnityRasterDepth != null
                 && s_UnityRasterDepth.rt != null
                 && s_UnityRasterDepth.rt.width == unityRasterSize
@@ -646,9 +654,9 @@ namespace VividRP.Runtime.VirtualShadowMap
                 filterMode: FilterMode.Point, isShadowMap: true,
                 name: "VSMUnityRasterDepth");
             s_RasterDepth = RTHandles.Alloc(
-                PageSize,
-                PageSize,
-                slices: physicalPageCapacity,
+                PageSize * RasterWindowScale,
+                PageSize * RasterWindowScale,
+                slices: ExperimentalPageWindows ? 1 : physicalPageCapacity,
                 depthBufferBits: DepthBits.Depth32,
                 colorFormat: GraphicsFormat.None,
                 filterMode: FilterMode.Point,

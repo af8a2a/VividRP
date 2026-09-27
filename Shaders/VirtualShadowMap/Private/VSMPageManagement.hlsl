@@ -1,3 +1,5 @@
+// 1 keeps the qualified per-page path; larger values enable experimental windows.
+int _VSMRasterWindowPages;
 #include "VSMPageCulling.hlsl"
 #if defined(VIVID_VSM_COMPACT_VIEWS)
 #include "VSMViewCompaction.hlsl"
@@ -247,7 +249,7 @@ void RunVSMPrepareMeshletPageRequests(uint groupIndex)
         outputStartInstance += sourceRequestCount
             * kVSMMaxPagesPerMeshletRequest;
         // Small requests grow from the front; large records grow from the back.
-        // A source emits either <= 4 small records or one large record, never both.
+        // A source emits either <= 4 single-page/window records or one large record, never both.
         _VSMPrototypeMeshletPageIndirectArgs.Store4(
             GetVSMPageDrawArgsAddress(rendererListIndex + VIVIDRENDERERLISTID_COUNT),
             uint4(VIVID_MAX_MESHLET_INDICES, 0u, 0u, outputStartInstance));
@@ -299,6 +301,46 @@ bool VSMCasterOverlapsReceiverMask(uint page, uint2 coord, uint2 low, uint2 high
     return _VSMReceiverMaskEnabled == 0 || _VSMPrototypeCasterLayer == 0
         || VividVSMReceiverMaskOverlapsRect(_VSMPageReceiverMasks[page], coord, low, high,
             (uint)_VSMPrototypePageSize);
+}
+
+// Stage at most four nonempty windows locally. Overflow falls back as a whole
+// source request: never leave a partial front submission that Finalize could
+// mistake for complete page contents. Front and back still share 4 slots/source.
+bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPacked sourceRequest,
+    uint level, uint2 minPage, uint2 maxPage, uint2 minTexel, uint2 maxTexel)
+{
+    uint2 windows[kVSMMaxPagesPerMeshletRequest]; // origin page, encoded level/extent
+    uint count = 0u;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    [loop] for (uint y = minPage.y; y <= maxPage.y; y += VIVID_VSM_RASTER_WINDOW_PAGES)
+    {
+        [loop] for (uint x = minPage.x; x <= maxPage.x; x += VIVID_VSM_RASTER_WINDOW_PAGES)
+        {
+            uint2 low = uint2(x, y);
+            uint2 high = min(low + VIVID_VSM_RASTER_WINDOW_PAGES - 1u, maxPage);
+            bool nonempty = false;
+            [loop] for (uint py = low.y; py <= high.y && !nonempty; py++)
+            {
+                [loop] for (uint px = low.x; px <= high.x; px++)
+                {
+                    uint page = level * axis * axis + py * axis + px;
+                    if (IsVSMCasterPageRelevant(page)
+                        && VSMCasterOverlapsReceiverMask(page, uint2(px, py), minTexel, maxTexel))
+                    {
+                        nonempty = true;
+                        break;
+                    }
+                }
+            }
+            if (!nonempty) continue;
+            if (count == kVSMMaxPagesPerMeshletRequest) return false;
+            windows[count++] = uint2(level * axis * axis + y * axis + x,
+                VividVSMEncodePageWindow(level, high - low + 1u));
+        }
+    }
+    for (uint i = 0u; i < count; i++)
+        AppendVSMPageMeshletRequest(rendererListIndex, sourceRequest, windows[i].x, windows[i].y);
+    return true;
 }
 
 void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
@@ -360,6 +402,13 @@ void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
         * (maxPage.y - minPage.y + 1u);
     if (coveredPageCount > kVSMMaxPagesPerMeshletRequest)
     {
+        // HLSL logical operators do not guarantee short circuit evaluation.
+        // Keep the function that appends UAV records inside an explicit branch.
+        [branch] if (_VSMRasterWindowPages > 1)
+        {
+            if (TryAppendVSMPageWindows(rendererListIndex, sourceRequest, cascadeIndex,
+                    minPage, maxPage, minTexel, maxTexel)) return;
+        }
         for (uint pageY = minPage.y; pageY <= maxPage.y; pageY++)
         {
             for (uint pageX = minPage.x; pageX <= maxPage.x; pageX++)

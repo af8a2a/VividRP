@@ -122,8 +122,7 @@ void VividWriteVSMDepth(float4 positionCS)
         return;
     VividWriteVSMDepth(positionCS, (uint)_VSMProjectionIndex);
 }
-// Meshlet page draws target a physical-page-sized DSV layer. Use the request's
-// virtual page identity, never reinterpret the local SV_Position as a virtual UV.
+// Resolve a page-local texel using the request identity, independent of the DSV.
 bool VividTryResolveVSMPagePhysicalTexel(
     float4 positionCS, uint virtualPageIndex, out uint2 physicalTexel)
 {
@@ -142,6 +141,25 @@ bool VividTryResolveVSMPagePhysicalTexel(
     physicalTexel = uint2(slot % rowSize, slot / rowSize) * (uint)_VSMPrototypePageSize
         + (uint2)positionCS.xy;
     return true;
+}
+
+// A window can contain unmapped, clean, deferred or masked holes. Resolve each
+// fragment independently, after derivatives but before coverage and UAV writes.
+bool VividTryResolveVSMWindowPhysicalTexel(float4 positionCS, uint originPage,
+    uint2 extent, out uint2 physicalTexel)
+{
+    physicalTexel = 0u;
+    uint pageSize = (uint)_VSMPrototypePageSize;
+    if (any(positionCS.xy < 0.0) || any(positionCS.xy >= (float2)(extent * pageSize))) return false;
+    uint2 localTexel = (uint2)positionCS.xy;
+    uint2 pageOffset = localTexel / pageSize;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint2 origin = uint2(originPage % axis, (originPage / axis) % axis);
+    if (any(origin + pageOffset >= axis)) return false;
+    uint page = originPage + pageOffset.y * axis + pageOffset.x;
+    if ((_VSMPrototypePageMetadata[page].x & (1u << 1u)) == 0u) return false;
+    positionCS.xy = (float2)(localTexel % pageSize);
+    return VividTryResolveVSMPagePhysicalTexel(positionCS, page, physicalTexel);
 }
 
 void VividWriteVSMPageDepth(float4 positionCS, uint virtualPageIndex)

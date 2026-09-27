@@ -149,7 +149,8 @@ namespace VividRP.Editor.Tests
                 Shader.SetBuffer(kernel, "_SamplingInputs", input);
                 bool inspectOnly = kernelName == "InspectBias" || kernelName == "InspectTransition"
                     || kernelName == "InspectScreenNormal" || kernelName == "InspectVSMStochasticSample"
-                    || kernelName == "InspectVSMStochasticTexelOffset" || kernelName == "InspectSMRTSamples";
+                    || kernelName == "InspectVSMStochasticTexelOffset" || kernelName == "InspectSMRTSamples"
+                    || kernelName == "InspectVSMStableDepth" || kernelName == "InspectVSMStableRasterGrid";
                 if (depth != null)
                 {
                     Shader.SetTexture(kernel, "_DepthTexture", depth);
@@ -2272,6 +2273,65 @@ namespace VividRP.Editor.Tests
                 * depthScale * texelSize).Within(1e-6));
             Assert.That(result[1].x, Is.EqualTo(Mathf.Min(slope, 4) * depthScale * texelSize).Within(1e-6));
             Assert.That(result[1].y, Is.Zero);
+        }
+
+        [Test]
+        public void StableRasterDepth_PreservesAdjacentFloatSurfacesAndRejectsInvalidPlanes()
+        {
+            using var f = new Fixture();
+            var inputs = new float4[34];
+            for (int i = 0; i < 32; i++)
+                inputs[i] = new float4(i * 127, 4095 - i, math.asfloat(0x3f000000u + (uint)i), 0);
+            inputs[32] = new float4(128, 511, 0.5f, 1); // degenerate triangle
+            inputs[33] = new float4(128, 511, 0.5f, 2); // non-finite triangle
+            float2[] results = f.Run("InspectVSMStableDepth", inputs);
+            for (int i = 0; i < 32; i++)
+            {
+                Assert.That(results[i].y, Is.EqualTo(1));
+                Assert.That(math.asuint(results[i].x), Is.EqualTo(0x3f000000u + (uint)i));
+            }
+            Assert.That(results[32], Is.EqualTo(float2.zero));
+            Assert.That(results[33], Is.EqualTo(float2.zero));
+        }
+
+        [Test]
+        public void StableRasterDepth_EvaluatesSlopedPlaneAtVirtualTexelCenters()
+        {
+            using var f = new Fixture();
+            var inputs = new[] { new float4(0, 0, 0.25f, 0), new float4(127, 128, 0.25f, 0),
+                new float4(511, 512, 0.25f, 0), new float4(4095, 4095, 0.25f, 0) };
+            var slope = new float4(1f / 16384f, 1f / 32768f, 0, 0);
+            var normals = new[] { slope, slope, slope, slope };
+            float2[] results = f.Run("InspectVSMStableDepth", inputs, normals: normals);
+            for (int i = 0; i < results.Length; i++)
+            {
+                float expected = 0.25f + (inputs[i].x + 0.5f) * slope.x + (inputs[i].y + 0.5f) * slope.y;
+                Assert.That(results[i].y, Is.EqualTo(1));
+                Assert.That(math.asuint(results[i].x), Is.EqualTo(math.asuint(expected)));
+            }
+        }
+
+        [Test]
+        public void StableRasterGrid_PageAndWindowShareSubpixelEdges()
+        {
+            using var f = new Fixture();
+            var points = new[] { new float2(127.998046875f, 128.001953125f),
+                new float2(511.998046875f, 512.001953125f), new float2(1023.25f, 2048.75f) };
+            var inputs = new float4[points.Length * 2];
+            var config = new float4[inputs.Length];
+            for (int i = 0; i < points.Length; i++)
+            {
+                inputs[i * 2] = inputs[i * 2 + 1] = new float4(points[i], 0, 0);
+                config[i * 2] = new float4(math.floor(points[i] / 128f) * 128f, 128, 0);
+                config[i * 2 + 1] = new float4(math.floor(points[i] / 512f) * 512f, 512, 0);
+            }
+            float2[] results = f.Run("InspectVSMStableRasterGrid", inputs, normals: config);
+            for (int i = 0; i < points.Length; i++)
+            {
+                float2 expected = math.floor(points[i] * 256f + 0.5f) / 256f;
+                Assert.That(results[i * 2], Is.EqualTo(expected));
+                Assert.That(results[i * 2 + 1], Is.EqualTo(expected));
+            }
         }
 
         [TestCase(0.01f, 1f)]

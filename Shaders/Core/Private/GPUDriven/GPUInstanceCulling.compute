@@ -38,6 +38,7 @@ struct VSMLodHierarchyNode
     float4 Max;
     uint4 Range;
     float4 ErrorBounds; // min error/radius, max decoded parent error/radius
+    float4 ErrorMagnitude; // original sphere-domain magnitude; spatial bounds may be tighter
 };
 StructuredBuffer<VSMLodHierarchyNode> _VSMLodHierarchy;
 StructuredBuffer<uint> _VSMLodRoots;
@@ -53,7 +54,7 @@ bool VSMLodRangeMaySelect(VSMLodHierarchyNode node, VividInstanceData instance,
     // TransformSphere (the unchanged leaf contract) subtracts transformed points.
     // Bound its cancellation/rounding error from the largest input magnitude in
     // this range; a simple error * radius^2 bound is unsafe at large translations.
-    float3 maxLocalPoint = max(abs(node.Min.xyz), abs(node.Max.xyz)) + node.ErrorBounds.w;
+    float3 maxLocalPoint = node.ErrorMagnitude.xyz + node.ErrorBounds.w;
     float3 worldMagnitude = mul(abs((float3x3)instance.ObjectToWorldMatrix), maxLocalPoint)
         + abs(float3(instance.ObjectToWorldMatrix._m03, instance.ObjectToWorldMatrix._m13,
             instance.ObjectToWorldMatrix._m23));

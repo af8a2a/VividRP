@@ -12,6 +12,7 @@
 #pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
 #pragma kernel CSVSMBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
+#pragma kernel CSVSMGeometryBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -400,10 +401,11 @@ bool TryResolveCulledMeshlet(
     boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
 
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
-    if (!VividVSMFrustumVsLocalBounds(cullingContext.FrustumPlanes, meshlet.BoundingSphere.xyz,
-            0.0, meshlet.BoundingSphere.w, true, instanceData.ObjectToWorldMatrix)
-        || !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, meshlet.BoundingSphere.xyz,
-            0.0, meshlet.BoundingSphere.w, true,
+    VividVSMLocalBounds bounds = VividVSMLoadMeshletBounds(renderRequest.MeshletID, meshlet.BoundingSphere);
+    if (!VividVSMFrustumVsLocalBounds(cullingContext.FrustumPlanes, bounds.center,
+            bounds.extent, bounds.radius, bounds.sphere, instanceData.ObjectToWorldMatrix)
+        || !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, bounds.center,
+            bounds.extent, bounds.radius, bounds.sphere,
             mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix))) return false;
 #else
     if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
@@ -633,4 +635,8 @@ void CSVSMCompacted(uint3 dispatchThreadID : SV_DispatchThreadID)
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSVSMBounds(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
+#if defined(VIVID_VSM_GEOMETRY_BOUNDS)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMGeometryBounds(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
+#endif
 #endif

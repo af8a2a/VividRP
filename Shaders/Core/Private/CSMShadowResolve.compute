@@ -42,6 +42,7 @@
 #pragma kernel VSMPrepareMeshletPageRequestsCompacted VIVID_VSM_COMPACT_VIEWS
 #pragma kernel VSMCullMeshletsToPagesCompacted VIVID_VSM_COMPACT_VIEWS
 #pragma kernel VSMCullMeshletsToPagesAffine VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
+#pragma kernel VSMCullMeshletsToPagesGeometryBounds VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS
 #pragma use_dxc
 #pragma require Native16Bit
 

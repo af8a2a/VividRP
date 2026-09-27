@@ -22,6 +22,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             // Independent bounds over decoded leaf inputs, before instance/view scaling.
             // A missing or invalid parent uses +infinity so it cannot reject a branch.
             internal float4 ErrorBounds; // min error, min radius, max parent error, max parent radius
+            internal float4 ErrorMagnitude; // original sphere-domain coordinate magnitude, independent of spatial AABB
         }
 
         private readonly List<Node> m_Nodes = new();
@@ -38,7 +39,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static readonly int s_ForcedDepthId = Shader.PropertyToID("_ForcedMeshLODNodeDepth");
 
         internal void Update(IReadOnlyList<VividMeshLODNode> lodNodes,
-            IReadOnlyList<VividInstanceData> instances, bool geometryChanged)
+            IReadOnlyList<VividInstanceData> instances, bool geometryChanged,
+            IReadOnlyList<VirtualShadowMapGeometryBounds.Bounds> geometryBounds = null)
         {
             int count = Math.Max(lodNodes.Count, 1);
             if (m_Roots.Length != count)
@@ -59,18 +61,20 @@ namespace VividRP.Runtime.VirtualShadowMap
             m_Nodes.Clear(); Array.Fill(m_Roots, uint.MaxValue);
             for (int start = 0; start < count; start++)
                 if (m_RangeCounts[start] != 0)
-                    m_Roots[start] = (uint)Build(lodNodes, start, (int)m_RangeCounts[start]);
+                    m_Roots[start] = (uint)Build(lodNodes, start, (int)m_RangeCounts[start], geometryBounds);
             Ensure(ref m_NodeBuffer, Math.Max(m_Nodes.Count, 1), Marshal.SizeOf<Node>(), "VSMLodHierarchy");
             Ensure(ref m_RootBuffer, count, 4, "VSMLodRoots");
             if (m_Nodes.Count != 0) m_NodeBuffer.SetData(m_Nodes);
             m_RootBuffer.SetData(m_Roots);
         }
 
-        private int Build(IReadOnlyList<VividMeshLODNode> source, int start, int count)
+        private int Build(IReadOnlyList<VividMeshLODNode> source, int start, int count,
+            IReadOnlyList<VirtualShadowMapGeometryBounds.Bounds> geometryBounds)
         {
             int index = m_Nodes.Count; m_Nodes.Add(default);
             float4 low = new(float.PositiveInfinity), high = new(float.NegativeInfinity);
             float4 errors = new(float.PositiveInfinity, float.PositiveInfinity, 0f, 0f);
+            float3 errorMagnitude = 0f;
             if (count <= NodesPerLeaf)
             {
                 for (int i = start; i < start + count; i++)
@@ -79,8 +83,12 @@ namespace VividRP.Runtime.VirtualShadowMap
                     float3 center = node.Bounds.xyz;
                     // Invalid bounds must conservatively keep this branch.
                     bool finite = math.all(math.isfinite(node.Bounds));
-                    low = math.min(low, new float4(finite ? center - radius : new float3(float.NegativeInfinity), node.LevelIndex));
-                    high = math.max(high, new float4(finite ? center + radius : new float3(float.PositiveInfinity), node.LevelIndex));
+                    float3 sphereLow = finite ? center - radius : new float3(float.NegativeInfinity);
+                    float3 sphereHigh = finite ? center + radius : new float3(float.PositiveInfinity);
+                    errorMagnitude = math.max(errorMagnitude, math.max(math.abs(sphereLow), math.abs(sphereHigh)));
+                    var box = geometryBounds != null && i < geometryBounds.Count ? geometryBounds[i] : default;
+                    low = math.min(low, new float4(box.IsValid ? box.Center.xyz - box.Extent.xyz : sphereLow, node.LevelIndex));
+                    high = math.max(high, new float4(box.IsValid ? box.Center.xyz + box.Extent.xyz : sphereHigh, node.LevelIndex));
                     // Read through the packed accessors used by GPU decoding, not
                     // the pre-quantization parent error/radius from the mesh baker.
                     float parentError = node.ParentError, parentRadius = node.ParentBounds.w;
@@ -96,13 +104,14 @@ namespace VividRP.Runtime.VirtualShadowMap
             {
                 int leaves = (count + NodesPerLeaf - 1) / NodesPerLeaf;
                 int leftCount = (leaves / 2) * NodesPerLeaf;
-                int left = Build(source, start, leftCount), right = Build(source, start + leftCount, count - leftCount);
+                int left = Build(source, start, leftCount, geometryBounds), right = Build(source, start + leftCount, count - leftCount, geometryBounds);
+                errorMagnitude = math.max(m_Nodes[left].ErrorMagnitude.xyz, m_Nodes[right].ErrorMagnitude.xyz);
                 low = math.min(m_Nodes[left].Min, m_Nodes[right].Min);
                 high = math.max(m_Nodes[left].Max, m_Nodes[right].Max);
                 errors = new float4(math.min(m_Nodes[left].ErrorBounds.xy, m_Nodes[right].ErrorBounds.xy),
                     math.max(m_Nodes[left].ErrorBounds.zw, m_Nodes[right].ErrorBounds.zw));
             }
-            m_Nodes[index] = new Node { Min = low, Max = high, ErrorBounds = errors,
+            m_Nodes[index] = new Node { Min = low, Max = high, ErrorBounds = errors, ErrorMagnitude = new float4(errorMagnitude, 0f),
                 Range = new uint4((uint)start, (uint)count, (uint)m_Nodes.Count, count <= NodesPerLeaf ? 1u : 0u) };
             return index;
         }

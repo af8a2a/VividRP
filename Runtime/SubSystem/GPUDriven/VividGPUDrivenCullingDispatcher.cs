@@ -535,8 +535,9 @@ namespace VividRP.Runtime.GPUDriven
                 kernel = m_MeshletListBuildVSMKernel;
                 if (vsmCulling.UsesCompactedViews)
                 {
-                    if (m_MeshletListBuildVSMCompactedKernel < 0) m_MeshletListBuildVSMCompactedKernel = m_MeshletListBuildCompute.FindKernel("CSVSMBoundsBatched");
+                    if (m_MeshletListBuildVSMCompactedKernel < 0) m_MeshletListBuildVSMCompactedKernel = m_MeshletListBuildCompute.FindKernel("CSVSMGeometryBoundsBatched");
                     kernel = m_MeshletListBuildVSMCompactedKernel;
+                    sceneBuffers.VSMGeometryBounds.BindLod(cmd, m_MeshletListBuildCompute, kernel);
                 }
                 vsmCulling.Bind(cmd, m_MeshletListBuildCompute, kernel);
             }
@@ -708,8 +709,9 @@ namespace VividRP.Runtime.GPUDriven
                 kernel = m_GPUMeshletVSMCullingKernel;
                 if (vsmCulling.UsesCompactedViews)
                 {
-                    if (m_GPUMeshletVSMCompactedKernel < 0) m_GPUMeshletVSMCompactedKernel = m_GPUMeshletCullingCompute.FindKernel("CSVSMBounds");
+                    if (m_GPUMeshletVSMCompactedKernel < 0) m_GPUMeshletVSMCompactedKernel = m_GPUMeshletCullingCompute.FindKernel("CSVSMGeometryBounds");
                     kernel = m_GPUMeshletVSMCompactedKernel;
+                    sceneBuffers.VSMGeometryBounds.BindMeshlets(cmd, m_GPUMeshletCullingCompute, kernel);
                 }
                 vsmCulling.Bind(cmd, m_GPUMeshletCullingCompute, kernel);
             }

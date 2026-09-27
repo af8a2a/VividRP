@@ -4,6 +4,7 @@
 #pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
 #pragma kernel CSVSMBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
 #pragma kernel CSVSMBoundsBatched VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_BATCH
+#pragma kernel CSVSMGeometryBoundsBatched VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_BATCH VIVID_VSM_GEOMETRY_BOUNDS
 #pragma use_dxc
 #pragma require wavebasic waveballot wavemath : VIVID_VSM_BATCH
 
@@ -94,8 +95,9 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
 
 #if defined(VIVID_VSM_EARLY_CULL)
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
-        if (!VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, meshLODNode.Bounds.xyz,
-            0.0, meshLODNode.Bounds.w, true,
+        VividVSMLocalBounds bounds = VividVSMLoadLodBounds(nodeIndex, meshLODNode.Bounds);
+        if (!VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, bounds.center,
+            bounds.extent, bounds.radius, bounds.sphere,
             mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix))) continue;
 #else
         // Reject selected node bounds before expanding meshlets and reserving requests.
@@ -176,4 +178,8 @@ void CSVSMBounds(uint3 lane : SV_GroupThreadID, uint3 group : SV_GroupID) { RunC
 #if defined(VIVID_VSM_BATCH)
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSVSMBoundsBatched(uint3 lane : SV_GroupThreadID, uint3 group : SV_GroupID) { RunCulling(lane, group); }
+#if defined(VIVID_VSM_GEOMETRY_BOUNDS)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMGeometryBoundsBatched(uint3 lane : SV_GroupThreadID, uint3 group : SV_GroupID) { RunCulling(lane, group); }
+#endif
 #endif

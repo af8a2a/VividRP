@@ -169,8 +169,8 @@ namespace VividRP.Editor.Tests
             hierarchy.Update(source, instances, true);
             var roots = new uint[source.Count]; hierarchy.Roots.GetData(roots);
             int root = (int)roots[3], end = (int)hierarchy.CpuNodes[root].Range.z;
-            Assert.That(hierarchy.Nodes.stride, Is.EqualTo(64));
-            Assert.That(System.Runtime.InteropServices.Marshal.SizeOf<VirtualShadowMapLODHierarchy.Node>(), Is.EqualTo(64));
+            Assert.That(hierarchy.Nodes.stride, Is.EqualTo(80));
+            Assert.That(System.Runtime.InteropServices.Marshal.SizeOf<VirtualShadowMapLODHierarchy.Node>(), Is.EqualTo(80));
             var covered = new int[count];
             for (int index = root; index < end; index++)
             {

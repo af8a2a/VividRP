@@ -28,6 +28,7 @@ namespace VividRP.Runtime.GPUDriven
         private byte[] m_PaddedIndexUploadData = Array.Empty<byte>();
         private bool m_IsDisposed;
         internal readonly VirtualShadowMap.VirtualShadowMapLODHierarchy VSMLODHierarchy = new();
+        internal readonly VirtualShadowMap.VirtualShadowMapGeometryBounds VSMGeometryBounds = new();
 
         public GraphicsBuffer InstanceDataBuffer => m_InstanceDataBuffer;
 
@@ -209,7 +210,8 @@ namespace VividRP.Runtime.GPUDriven
                 );
                 UploadRawIndexBuffer(sceneData.MutableIndices);
             }
-            VSMLODHierarchy.Update(sceneData.MeshLODNodes, sceneData.Instances, shouldUploadStaticData);
+            bool boundsChanged = VSMGeometryBounds.Update(sceneData, shouldUploadStaticData);
+            VSMLODHierarchy.Update(sceneData.MeshLODNodes, sceneData.Instances, boundsChanged, VSMGeometryBounds.CpuLodNodes);
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -278,6 +280,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             VSMLODHierarchy.Dispose();
+            VSMGeometryBounds.Dispose();
             m_InstanceDataBuffer?.Dispose();
             m_MaterialDataBuffer?.Dispose();
             m_DualSlabMaterialDataBuffer?.Dispose();

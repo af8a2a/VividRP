@@ -96,7 +96,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private const string VSMPrototypePrepareMeshletPageRequestsKernelName = "VSMPrepareMeshletPageRequestsCompacted";
 
-        private const string VSMPrototypeCullMeshletsToPagesKernelName = "VSMCullMeshletsToPagesAffine";
+        private const string VSMPrototypeCullMeshletsToPagesKernelName = "VSMCullMeshletsToPagesGeometryBounds";
 
         private static readonly GlobalKeyword s_VirtualShadowMapCasterKeyword =
             GlobalKeyword.Create(VirtualShadowMapCasterKeywordName);
@@ -532,6 +532,12 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullHierarchy, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds, AccessFlags.ReadWrite);
+            var geometryBounds = VividGPUDrivenSystem.instance?.BufferSet?.VSMGeometryBounds;
+            if (geometryBounds?.LodNodes != null && geometryBounds.Meshlets != null)
+            {
+                PassRecorder.ImportBufferForPass(this, geometryBounds.LodNodes, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(this, geometryBounds.Meshlets, AccessFlags.Read);
+            }
             var lodHierarchy = VividGPUDrivenSystem.instance?.BufferSet?.VSMLODHierarchy;
             if (lodHierarchy?.Nodes != null && lodHierarchy.Roots != null)
             {
@@ -946,6 +952,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 compute,
                 VividGPUDrivenShaderIDs._MeshletCount,
                 sceneBuffers.MeshletCount);
+            sceneBuffers.VSMGeometryBounds.BindMeshlets(nativeCmd, compute, m_VirtualShadowMapCullMeshletsToPagesKernel);
             nativeCmd.DispatchCompute(
                 compute,
                 m_VirtualShadowMapCullMeshletsToPagesKernel,

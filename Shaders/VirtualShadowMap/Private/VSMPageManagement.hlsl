@@ -281,7 +281,8 @@ bool GetVSMPageRange(
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
     const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
-    if (!VividVSMProjectLocalBounds(meshlet.BoundingSphere.xyz, 0.0, meshlet.BoundingSphere.w, true,
+    VividVSMLocalBounds bounds = VividVSMLoadMeshletBounds(sourceRequest.MeshletID, meshlet.BoundingSphere);
+    if (!VividVSMProjectLocalBounds(bounds.center, bounds.extent, bounds.radius, bounds.sphere,
             mul(_VSMProjections[cascadeIndex].worldToShadow, instanceData.ObjectToWorldMatrix),
             (uint)max(_VSMPrototypeVirtualResolution, 1), minVirtualTexel, maxVirtualTexel)) return false;
 #else
@@ -1273,4 +1274,8 @@ void VSMCullMeshletsToPagesCompacted(uint3 id : SV_DispatchThreadID) { RunVSMCul
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
 [numthreads(64, 1, 1)]
 void VSMCullMeshletsToPagesAffine(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
+#if defined(VIVID_VSM_GEOMETRY_BOUNDS)
+[numthreads(64, 1, 1)]
+void VSMCullMeshletsToPagesGeometryBounds(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
+#endif
 #endif

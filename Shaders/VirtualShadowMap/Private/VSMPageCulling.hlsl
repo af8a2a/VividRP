@@ -2,6 +2,7 @@
 #define VIVIDRP_VSM_PAGE_CULLING_INCLUDED
 
 #include "../Public/VividVirtualShadowMapAddressing.hlsl"
+#include "VSMGeometryBounds.hlsl"
 
 StructuredBuffer<uint3> _VSMPageCullHierarchy;
 

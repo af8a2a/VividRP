@@ -46,6 +46,10 @@
 #pragma kernel VSMPrepareAllocationCached VIVID_VSM_ALLOCATION_SUMMARY_WRITE
 #pragma kernel VSMAllocatePagesCached VIVID_VSM_ALLOCATION_SUMMARY
 #pragma kernel VSMMarkReceiverPagesGrouped VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUPED_MARKING
+#pragma kernel VSMUpdateProductionBudget
+#pragma kernel VSMCaptureProductionWork
+#pragma kernel VSMCompleteProductionFeedback
+#pragma kernel VSMBuildPageWorkListsFeedback VIVID_VSM_PRODUCTION_FEEDBACK
 #pragma use_dxc
 #pragma require Native16Bit
 

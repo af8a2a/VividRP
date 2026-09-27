@@ -1,3 +1,84 @@
+// GPU-only production feedback, independent of resident-page pressure.
+// [0]: vertices/page EMA bits, effective page budget, recovery age, target vertices.
+// [1]: current static/dynamic submitted vertices (float bits), selected pages, completion frame + 1.
+// [2]: last completed sample consumed by the controller, for diagnostics.
+// [3]: selected static/dynamic pool pages, configured page cap, reserved.
+RWStructuredBuffer<uint4> _VSMProductionFeedbackRW;
+int _VSMRasterVertexBudget;
+int _VSMProductionReset;
+uint _VSMProductionDrawMask;
+
+[numthreads(1, 1, 1)]
+void VSMUpdateProductionBudget(uint3 id : SV_DispatchThreadID)
+{
+    uint cap = _VSMPageUpdateBudget > 0
+        ? min((uint)_VSMPageUpdateBudget, (uint)_VSMPrototypePhysicalPageCapacity)
+        : (uint)_VSMPrototypePhysicalPageCapacity;
+    uint target = (uint)max(_VSMRasterVertexBudget, 0);
+    uint4 state = _VSMProductionFeedbackRW[0];
+    uint4 sample = _VSMProductionFeedbackRW[1];
+    bool valid = _VSMProductionReset == 0 && state.w == target
+        && _VSMProductionFeedbackRW[3].z == cap
+        && sample.w != 0u && sample.w == (uint)_VSMPrototypeFeedbackFrameIndex;
+    if (!valid || target == 0u || _VSMPageUpdateBudget <= 0)
+        state = uint4(0u, cap, 0u, target);
+    else if (sample.z != 0u)
+    {
+        float measured = (asfloat(sample.x) + asfloat(sample.y)) / (float)sample.z;
+        float history = asfloat(state.x);
+        if (isfinite(measured) && measured >= 0.0)
+        {
+            // Follow expensive work immediately; smooth decreases. Empty cache-hit
+            // frames never count as free production or cause a recovery burst.
+            float cost = history > 0.0 ? max(measured, lerp(history, measured, 0.125)) : measured;
+            state.x = asuint(cost);
+            state.y = clamp(state.y, 1u, cap);
+            float predicted = cost * (float)state.y;
+            if (predicted > (float)target * 1.1)
+            {
+                state.y = clamp((uint)((float)target / max(cost, 1.0)), 1u, cap);
+                state.z = 0u;
+            }
+            else if (predicted < (float)target * 0.75 && state.y < cap)
+            {
+                if (++state.z >= 8u)
+                {
+                    uint affordable = cost > 0.0 ? (uint)min((float)cap, (float)target / cost) : cap;
+                    state.y = min(min(cap, affordable), state.y + max(1u, state.y / 16u));
+                    state.z = 0u;
+                }
+            }
+            else state.z = 0u;
+        }
+    }
+    _VSMProductionFeedbackRW[0] = state;
+    _VSMProductionFeedbackRW[2] = valid ? sample : 0u;
+    _VSMProductionFeedbackRW[1] = 0u; // An interrupted frame must not become a sample.
+    _VSMProductionFeedbackRW[3] = uint4(0u, 0u, cap, 0u);
+}
+
+[numthreads(1, 1, 1)]
+void VSMCaptureProductionWork(uint3 id : SV_DispatchThreadID)
+{
+    float vertices = 0.0;
+    for (uint draw = 0u; draw < VIVIDRENDERERLISTID_COUNT * 2u; draw++)
+    {
+        if ((_VSMProductionDrawMask & (1u << draw)) == 0u) continue;
+        uint2 args = _VSMPrototypeMeshletPageIndirectArgs.Load2(draw * 16u);
+        // Convert before multiplying: large Pmax fan-out can overflow uint32.
+        vertices += (float)args.x * (float)args.y;
+    }
+    _VSMProductionFeedbackRW[1][(uint)_VSMPrototypeCasterLayer] = asuint(vertices);
+}
+
+[numthreads(1, 1, 1)]
+void VSMCompleteProductionFeedback(uint3 id : SV_DispatchThreadID)
+{
+    // Only issued after both pools and Finalize; shared page args were captured
+    // separately before the next caster layer reused them.
+    _VSMProductionFeedbackRW[1].w = (uint)_VSMPrototypeFeedbackFrameIndex + 1u;
+}
+
 // 1 keeps the qualified per-page path; larger values enable experimental windows.
 int _VSMRasterWindowPages;
 #include "VSMPageCulling.hlsl"
@@ -1098,8 +1179,7 @@ groupshared uint g_VSMFallbackPageCount;
 // cleared. Owners and dirty bits remain stable until occupancy is reduced.
 // Two capacity-sized ranges: selected dirty pages, then pages safe to scan.
 // Deferred pages retain dirty bits and all previous texels; receivers reject them.
-[numthreads(64, 1, 1)]
-void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
+void RunVSMBuildPageWorkLists(uint lane)
 {
     if (lane == 0u)
     {
@@ -1113,6 +1193,10 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
     GroupMemoryBarrierWithGroupSync();
     uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
     uint budget = _VSMPageUpdateBudget > 0 ? min((uint)_VSMPageUpdateBudget, capacity) : capacity;
+#if defined(VIVID_VSM_PRODUCTION_FEEDBACK)
+    if (_VSMPageUpdateBudget > 0 && _VSMRasterVertexBudget > 0)
+        budget = clamp(_VSMProductionFeedbackRW[0].y, 1u, budget);
+#endif
     uint levelCount = (uint)max(_VSMProjectionCount, 1);
     uint pagesPerLevel = max((uint)_VSMPrototypePageTableEntryCount / levelCount, 1u);
     uint sortCount = 1u;
@@ -1220,6 +1304,9 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
         uint reserve = refineParents ? min(g_VSMFallbackPageCount, max(budget / 8u, 1u)) : 0u;
         essentialBudget = min(g_VSMEssentialPageCount, budget - reserve);
     }
+#if defined(VIVID_VSM_PRODUCTION_FEEDBACK)
+    uint staticPages = 0u, dynamicPages = 0u;
+#endif
     for (uint rank = lane; rank < sortCount; rank += 64u)
     {
         uint4 key = g_VSMAllocationSlots[rank];
@@ -1237,6 +1324,10 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
         uint index;
         if (selected)
         {
+#if defined(VIVID_VSM_PRODUCTION_FEEDBACK)
+            staticPages += (flags & kVSMPageDirty) != 0u ? 1u : 0u;
+            dynamicPages += (flags & kVSMPageDynamicDirty) != 0u ? 1u : 0u;
+#endif
             InterlockedAdd(g_VSMClearPageCount, 1u, index);
             _VSMPageWorkListRW[index] = slot;
         }
@@ -1250,12 +1341,26 @@ void VSMBuildPageWorkLists(uint lane : SV_GroupIndex)
     GroupMemoryBarrierWithGroupSync();
     if (lane == 0u)
     {
+#if defined(VIVID_VSM_PRODUCTION_FEEDBACK)
+        _VSMProductionFeedbackRW[1].z = g_VSMClearPageCount;
+#endif
         uint tiles = ((uint)_VSMPrototypePageSize + 7u) / 8u;
         // Always overwrite all arguments, including zero-work frames.
         _VSMPageWorkDispatchArgsRW.Store3(0u, uint3(tiles, tiles, g_VSMClearPageCount));
         _VSMPageWorkDispatchArgsRW.Store3(12u, uint3(g_VSMOccupancyPageCount, 1u, 1u));
     }
+#if defined(VIVID_VSM_PRODUCTION_FEEDBACK)
+    if (staticPages != 0u) InterlockedAdd(_VSMProductionFeedbackRW[3].x, staticPages);
+    if (dynamicPages != 0u) InterlockedAdd(_VSMProductionFeedbackRW[3].y, dynamicPages);
+#endif
 }
+
+[numthreads(64, 1, 1)]
+void VSMBuildPageWorkLists(uint lane : SV_GroupIndex) { RunVSMBuildPageWorkLists(lane); }
+#if defined(VIVID_VSM_PRODUCTION_FEEDBACK)
+[numthreads(64, 1, 1)]
+void VSMBuildPageWorkListsFeedback(uint lane : SV_GroupIndex) { RunVSMBuildPageWorkLists(lane); }
+#endif
 
 void ClearVSMPhysicalPage(uint physicalPageIndex, uint2 texel)
 {

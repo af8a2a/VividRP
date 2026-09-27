@@ -993,12 +993,78 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(0, 5, 6400, 5, 16)] // Consecutive completed sample.
+        [TestCase(1, 5, 6400, 5, 64)] // Camera/history reset.
+        [TestCase(0, 6, 6400, 5, 64)] // Skipped frame.
+        [TestCase(0, 5, 3200, 5, 64)] // Changed target.
+        [TestCase(0, 5, 6400, 0, 64)] // Incomplete production.
+        public void ProductionFeedback_RejectsUnrelatedOrIncompleteSamples(int reset, int frame, int target, int stamp, int expected)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var feedback = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 16);
+            try
+            {
+                var state = new[] { new uint4(math.asuint(400f), 16, 0, 6400),
+                    new uint4(math.asuint(25600f), 0, 64, (uint)stamp), default(uint4), new uint4(0, 0, 64, 0) };
+                feedback.SetData(state);
+                int kernel = shader.FindKernel("VSMUpdateProductionBudget");
+                shader.SetBuffer(kernel, "_VSMProductionFeedbackRW", feedback);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", 64);
+                shader.SetInt("_VSMPageUpdateBudget", 64);
+                shader.SetInt("_VSMRasterVertexBudget", target);
+                shader.SetInt("_VSMProductionReset", reset);
+                shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
+                shader.Dispatch(kernel, 1, 1, 1);
+                feedback.GetData(state);
+                Assert.That(state[0].y, Is.EqualTo(expected));
+                Assert.That(state[1], Is.EqualTo(default(uint4))); // Never consume twice.
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
+        [Test]
+        public void ProductionFeedback_CapturesSubmittedBatchesBeforeSharedArgumentsAreReused()
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var feedback = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 16);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 64, 4);
+            try
+            {
+                var state = new uint4[4]; feedback.SetData(state);
+                var draws = new uint[64];
+                draws[0] = draws[32] = 192; draws[1] = 5; draws[33] = 11;
+                draws[4] = draws[5] = uint.MaxValue; // Unsubmitted batch must not count.
+                args.SetData(draws);
+                int kernel = shader.FindKernel("VSMCaptureProductionWork");
+                shader.SetBuffer(kernel, "_VSMProductionFeedbackRW", feedback);
+                shader.SetBuffer(kernel, "_VSMPrototypeMeshletPageIndirectArgs", args);
+                shader.SetInt("_VSMProductionDrawMask", 1 | (1 << 8));
+                shader.SetInt("_VSMPrototypeCasterLayer", 0);
+                shader.Dispatch(kernel, 1, 1, 1);
+                draws[0] = 192; draws[1] = 2; args.SetData(draws);
+                shader.SetInt("_VSMProductionDrawMask", 1);
+                shader.SetInt("_VSMPrototypeCasterLayer", 1);
+                shader.Dispatch(kernel, 1, 1, 1);
+                feedback.GetData(state);
+                Assert.That(math.asfloat(state[1].x), Is.EqualTo(3072f));
+                Assert.That(math.asfloat(state[1].y), Is.EqualTo(384f));
+                Assert.That(state[1].w, Is.Zero); // Capture alone cannot publish.
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(1, 1)]
         [TestCase(65, 7)]
         [TestCase(1024, 64)]
         [TestCase(65, 7, true)]
         [TestCase(65, 7, false, true)]
-        public void PageUpdateBudget_PrioritizesCoarsePagesAndConverges(int capacity, int budget, bool remap = false, bool unlimitedAfterFirst = false)
+        [TestCase(65, 7, false, false, true)]
+        [TestCase(65, 7, true, true, true)]
+        public void PageUpdateBudget_PrioritizesCoarsePagesAndConverges(int capacity, int budget, bool remap = false, bool unlimitedAfterFirst = false, bool feedback = false)
         {
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -1008,6 +1074,8 @@ namespace VividRP.Editor.Tests
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2, 4);
             using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            using var production = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 16);
+            var productionData = new uint4[4];
             try
             {
                 const uint dirty = 4u | (1u << 15), deferred = 1u << 17, known = (1u << 14) | (1u << 16);
@@ -1028,7 +1096,9 @@ namespace VividRP.Editor.Tests
                 using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
                 var demands = new uint[metadata.count];
                 requestFlags.SetData(demands);
-                int build = shader.FindKernel("VSMBuildPageWorkLists");
+                int build = shader.FindKernel(feedback ? "VSMBuildPageWorkListsFeedback" : "VSMBuildPageWorkLists");
+                if (feedback) shader.SetBuffer(build, "_VSMProductionFeedbackRW", production);
+                shader.SetInt("_VSMRasterVertexBudget", feedback ? 6400 : 0);
                 shader.SetBuffer(build, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
                 using var pageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
@@ -1056,7 +1126,10 @@ namespace VividRP.Editor.Tests
                     }
                     int currentBudget = unlimitedAfterFirst && frame > 0 ? 0 : budget;
                     int limit = currentBudget == 0 ? capacity : currentBudget;
-                    shader.SetInt("_VSMPageUpdateBudget", currentBudget);
+                    shader.SetInt("_VSMPageUpdateBudget", feedback && currentBudget > 0 ? capacity : currentBudget);
+                    productionData[0] = new uint4(0, (uint)budget, 0, 6400);
+                    productionData[1] = productionData[3] = default;
+                    production.SetData(productionData);
                     for (int slot = 0; slot < capacity; slot++)
                     {
                         int page = (int)owner[slot] - 1;
@@ -1077,6 +1150,12 @@ namespace VividRP.Editor.Tests
                     shader.Dispatch(build, 1, 1, 1);
                     args.GetData(dispatch); work.GetData(entries); metadata.GetData(data);
                     Assert.That(dispatch[2], Is.EqualTo(expected.Count));
+                    if (feedback)
+                    {
+                        production.GetData(productionData);
+                        Assert.That(productionData[1].z, Is.EqualTo(expected.Count));
+                        Assert.That(productionData[3].xy, Is.EqualTo(new uint2((uint)expected.Count)));
+                    }
                     Assert.That(dispatch[3], Is.EqualTo(expected.Count));
                     var clearSlots = new System.Collections.Generic.HashSet<int>();
                     var occupancySlots = new System.Collections.Generic.HashSet<int>();
@@ -1261,6 +1340,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.EqualTo(64));
+                Assert.That(settings.virtualShadowMapRasterVertexBudget.value, Is.Zero);
                 settings.virtualShadowMapPageUpdateBudget.value = -1;
                 Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.Zero);
                 settings.virtualShadowMapPageUpdateBudget.value = 2048;

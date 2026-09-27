@@ -26,6 +26,8 @@ namespace VividRP.Runtime
         public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, 1024);
         [Tooltip("Maximum physical pages rebuilt per camera render, coarse levels first. Each selected page completes all 16 depth layers in both dirty pools. Deferred fine pages use complete coarser coverage. 0 rebuilds all dirty pages; this bounds page count, not GPU milliseconds.")]
         public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(64, 0, 1024);
+        [Tooltip("Target submitted raster vertices per camera render. Uses completed GPU work feedback to reduce the finite Page Update Budget, with slow detail recovery. 0 disables feedback; Page Update Budget 0 remains unlimited. This is a geometry-work estimate, not a GPU time or fragment/UAV limit.")]
+        public ClampedIntParameter virtualShadowMapRasterVertexBudget = new(0, 0, 16777216);
         [Tooltip("Base-2 exponent of the finest directional clipmap radius in world units. Coarser levels double in size until Max Distance is covered.")]
         public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
         [Tooltip("Shift intermediate clipmaps toward the non-jittered camera frustum while preserving page alignment and nested coverage. The nearest and farthest levels remain camera-centred.")]

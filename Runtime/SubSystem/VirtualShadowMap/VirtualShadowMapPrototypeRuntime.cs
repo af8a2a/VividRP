@@ -67,6 +67,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_AllocationSummary;
         private static GraphicsBuffer s_PageWorkList;
         private static GraphicsBuffer s_PageWorkDispatchArgs;
+        private static GraphicsBuffer s_ProductionFeedback;
+        private static readonly Unity.Mathematics.uint4[] s_ProductionFeedbackUpload = new Unity.Mathematics.uint4[4];
         private static GraphicsBuffer s_PagePressure;
         private static readonly Unity.Mathematics.uint4[] s_PagePressureUpload = new Unity.Mathematics.uint4[3];
         private static GraphicsBuffer s_MeshletPageRequests;
@@ -129,6 +131,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static GraphicsBuffer AllocationSummary => s_AllocationSummary;
         internal static GraphicsBuffer PageWorkList => s_PageWorkList;
         internal static GraphicsBuffer PageWorkDispatchArgs => s_PageWorkDispatchArgs;
+        internal static GraphicsBuffer ProductionFeedback => s_ProductionFeedback;
         internal static GraphicsBuffer PagePressure => s_PagePressure;
         internal static GraphicsBuffer MeshletPageRequests =>
             s_MeshletPageRequests;
@@ -616,6 +619,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_PageWorkList != null && s_PageWorkList.IsValid()
                 && s_PageWorkList.count == physicalPageCapacity * 2
                 && s_PageWorkDispatchArgs != null && s_PageWorkDispatchArgs.IsValid()
+                && s_ProductionFeedback != null && s_ProductionFeedback.IsValid()
                 && s_PagePressure != null && s_PagePressure.IsValid()
                 && s_VirtualResolution == resolvedResolution
                 && s_CascadeCount == resolvedCascadeCount
@@ -713,6 +717,9 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_AllocatorCounters.name = "VSMPrototypeAllocatorCounters";
             s_AllocatorCounters.SetData(s_AllocatorCountersUpload);
             EnsureAllocationResources(pageTableEntryCount);
+            s_ProductionFeedback = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, sizeof(uint) * 4)
+            { name = "VSMProductionFeedback" };
+            s_ProductionFeedback.SetData(s_ProductionFeedbackUpload);
             s_PageWorkList = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
                 physicalPageCapacity * 2, sizeof(uint)) { name = "VSMPageWorkList" };
             s_PageWorkDispatchArgs = new GraphicsBuffer(
@@ -993,6 +1000,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_AllocationRequests = null;
             s_AllocationSummary?.Dispose();
             s_AllocationSummary = null;
+            s_ProductionFeedback?.Dispose(); s_ProductionFeedback = null;
             s_PageWorkList?.Dispose();
             s_PageWorkList = null;
             s_PageWorkDispatchArgs?.Dispose();

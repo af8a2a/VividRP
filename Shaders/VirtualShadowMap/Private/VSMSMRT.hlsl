@@ -25,6 +25,35 @@ VSMSMRTProjection PrepareVSMSMRTProjection(VividVSMProjection projection)
     return result;
 }
 
+// The projection buffer is immutable for this dispatch. Prepare compact data
+// once per 8x8 receiver group, rather than once per pixel/ray/clipmap segment.
+// Match the current CPU MaxLevels; larger diagnostic sets use the direct path.
+#if defined(VIVID_VSM_GROUP_PROJECTION_CACHE)
+#define VIVID_VSM_SMRT_CACHED_PROJECTIONS 16
+groupshared VSMSMRTProjection g_VSMSMRTProjections[VIVID_VSM_SMRT_CACHED_PROJECTIONS];
+#endif
+
+void InitializeVSMSMRTProjections(uint groupIndex)
+{
+#if defined(VIVID_VSM_GROUP_PROJECTION_CACHE)
+    // Uniform dispatch parameters: every lane takes the same barrier path.
+    // Call before pixel bounds, sky, or receiver-dependent early returns.
+    if (_VSMPrototypeEnabled == 0 || !UseVSMSMRT()) return;
+    if (groupIndex < min((uint)_VSMProjectionCount, (uint)VIVID_VSM_SMRT_CACHED_PROJECTIONS))
+        g_VSMSMRTProjections[groupIndex] = PrepareVSMSMRTProjection(_VSMProjections[groupIndex]);
+    GroupMemoryBarrierWithGroupSync();
+#endif
+}
+
+VSMSMRTProjection GetVSMSMRTProjection(int index)
+{
+#if defined(VIVID_VSM_GROUP_PROJECTION_CACHE)
+    if ((uint)index < VIVID_VSM_SMRT_CACHED_PROJECTIONS)
+        return g_VSMSMRTProjections[index];
+#endif
+    return PrepareVSMSMRTProjection(_VSMProjections[index]);
+}
+
 float3 VSMSMRTProjectionScale(VSMSMRTProjection from, VSMSMRTProjection to)
 {
     float xy = from.texelSize / to.texelSize;
@@ -45,7 +74,7 @@ bool HasVSMSMRTFootprint(float2 uv, int index, VSMSMRTProjection projection)
     {
         VSM_COST_ADD(5, 1u);
         VSMSMRTProjection destination = projection;
-        if (level != index) destination = PrepareVSMSMRTProjection(_VSMProjections[level]);
+        if (level != index) destination = GetVSMSMRTProjection(level);
         float end = VSMSMRTRayLength(level, destination.texelSize);
         float3 scale = VSMSMRTProjectionScale(projection, destination);
         float2 levelUV = VSMSMRTReproject(float3(uv, 0), projection, destination, scale).xy;
@@ -322,7 +351,7 @@ bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPe
     for (int level = index; level < _VSMProjectionCount; level++)
     {
         VSMSMRTProjection destination = projection;
-        if (level != index) destination = PrepareVSMSMRTProjection(_VSMProjections[level]);
+        if (level != index) destination = GetVSMSMRTProjection(level);
         float endTime = VSMSMRTRayLength(level, destination.texelSize);
         bool last = endTime >= _VSMSMRTParameters.z;
         float3 scale = VSMSMRTProjectionScale(projection, destination);
@@ -354,7 +383,7 @@ bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPe
     int budget, int index, out float visibility)
 {
     return TryTraceVSMSMRTClipmaps(origin, texelsPerWorld, depthPerWorld, budget, index,
-        PrepareVSMSMRTProjection(_VSMProjections[index]), visibility);
+        GetVSMSMRTProjection(index), visibility);
 }
 
 bool VSMWaveCanFinish(int rayIndex, float visibilitySum, bool rayValid, inout bool waveComplete)
@@ -462,12 +491,12 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool ad
 {
     VSMSMRTReceiverSamples samples = (VSMSMRTReceiverSamples)0;
     return TryFilterVSMSMRT(coord, bias, index, pixel, adaptive,
-        PrepareVSMSMRTProjection(_VSMProjections[index]), samples, shadow);
+        GetVSMSMRTProjection(index), samples, shadow);
 }
 
 bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, out float shadow)
 {
     VSMSMRTReceiverSamples samples = (VSMSMRTReceiverSamples)0;
     return TryFilterVSMSMRT(coord, bias, index, pixel,
-        PrepareVSMSMRTProjection(_VSMProjections[index]), samples, shadow);
+        GetVSMSMRTProjection(index), samples, shadow);
 }

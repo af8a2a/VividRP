@@ -676,6 +676,40 @@ namespace VividRP.Editor.Tests
                 Assert.That(f.RequestData[page] & 512u, Is.Not.Zero, "Continuation depth is a primary dependency");
         }
 
+        [TestCase(1, false)]
+        [TestCase(67, false)]
+        [TestCase(67, true)]
+        public void SMRT_GroupProjectionPreparationMatchesDirectWithPartialGroups(int count, bool receiverMasks)
+        {
+            using var f = new Fixture();
+            for (int page = 0; page < 12; page++) f.Map(page, 11 - page, .28f, .23f);
+            f.Shader.SetInt("_VSMReceiverMaskEnabled", receiverMasks ? 1 : 0);
+            var coverage = new uint2[16];
+            for (int slot = 0; slot < coverage.Length; slot++) coverage[slot] = uint.MaxValue;
+            f.ReceiverMasks.Completed.SetData(coverage);
+            for (int level = 0; level < 3; level++)
+            {
+                var p = f.ProjectionData[level];
+                p.WorldToShadow.m03 += .017f * level;
+                p.WorldToShadow.m13 -= .013f * level;
+                p.WorldToShadow.m22 = .75f / (1 << level);
+                f.ProjectionData[level] = p;
+            }
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 6, .5f));
+            f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 0));
+            var inputs = new float4[count];
+            for (int i = 0; i < count; i++)
+                inputs[i] = new float4(.48f + .01f * (i % 5), .49f, .2f, i % 3);
+            for (int state = 0; state < 3; state++)
+            {
+                f.MetadataData[3].x = state == 1 ? 14u : 10u;
+                f.TableData[3] = state == 2 ? 0u : 9u;
+                f.Upload();
+                CollectionAssert.AreEqual(f.Run("FilterSMRTFootprints", inputs),
+                    f.Run("FilterSMRTFootprintsCached", inputs));
+            }
+        }
+
         [Test]
         public void SMRT_FootprintValidityDoesNotDependOnRandomPhase()
         {

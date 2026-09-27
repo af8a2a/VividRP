@@ -230,7 +230,7 @@ bool TryEvaluateVSMProjection(VSMReceiverProjection prepared, int index,
     // shared out parameter. Keep the two filters behind an actual branch.
     [branch]
     if (smrt) return TryFilterVSMSMRT(coord, bias, index, pixel,
-        PrepareVSMSMRTProjection(projection), samples, shadow);
+        GetVSMSMRTProjection(index), samples, shadow);
     return TryFilterVSMProjection(coord, bias, index, pixel, shadow);
 }
 
@@ -356,6 +356,7 @@ Texture2D<float> _VSMSMRTCostReference;
 [numthreads(8, 8, 1)]
 void VSMReceiverCost(uint3 id : SV_DispatchThreadID)
 {
+    InitializeVSMSMRTProjections((id.x & 7u) + ((id.y & 7u) << 3u));
     if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
     [unroll] for (uint c = 0u; c < 8u; c++) g_VSMSMRTCost[c] = 0u;
     float depth = _DepthTexture.Load(int3(id.xy, 0));

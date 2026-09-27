@@ -1,5 +1,5 @@
-#pragma kernel CSMShadowResolve VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE
-#pragma kernel VSMReceiverDebug VIVID_VSM_RECEIVER_DEBUG VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS
+#pragma kernel CSMShadowResolve VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE
+#pragma kernel VSMReceiverDebug VIVID_VSM_RECEIVER_DEBUG VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE
 #pragma kernel VSMMarkReceiverPages VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE
 #pragma kernel VSMPrototypeClearReceiverRequests
 #pragma kernel VSMPrototypeResetReceiverFeedback
@@ -33,8 +33,8 @@
 #pragma kernel VSMBuildPageWorkLists
 #pragma kernel VSMClearPhysicalPagesIndirect
 #pragma kernel VSMReducePageOccupancyIndirect
-#pragma kernel VSMReceiverCost VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_SMRT_COST VIVID_VSM_ADAPTIVE_RAYS
-#pragma kernel VSMShadowResolveAdaptive VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS
+#pragma kernel VSMReceiverCost VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_SMRT_COST VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE
+#pragma kernel VSMShadowResolveAdaptive VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE
 #pragma kernel VSMClearVirtualPageMappings
 #pragma kernel VSMMarkCoarsePages
 #pragma kernel VSMClearPageCullHierarchy
@@ -1189,6 +1189,7 @@ void CSMShadowBilateralFilterV(
 [numthreads(8, 8, 1)]
 void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
+    InitializeVSMSMRTProjections((dispatchThreadID.x & 7u) + ((dispatchThreadID.y & 7u) << 3u));
     if (dispatchThreadID.x >= (uint)_CSMOutputWidth || dispatchThreadID.y >= (uint)_CSMOutputHeight)
         return;
 

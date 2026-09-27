@@ -35,6 +35,7 @@
 #pragma kernel MarkPageWritesGrouped VIVID_VSM_MARK_RECEIVERS VIVID_VSM_GROUPED_MARKING
 #pragma kernel InspectVSMStableDepth
 #pragma kernel InspectVSMStableRasterGrid
+#pragma kernel FilterSMRTFootprintsCached VIVID_VSM_GROUP_PROJECTION_CACHE
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -495,4 +496,12 @@ void InspectVSMStableRasterGrid(uint3 id : SV_DispatchThreadID)
     float4 clip = float4(pixel / 4096.0 * float2(2, -2) + float2(-1, 1), 0.5, 1);
     float4 local = VividVSMToStableRasterClip(clip, (uint2)config.xy, 4096u, (uint)config.z);
     _SamplingResults[id.x] = (local.xy * float2(0.5, -0.5) + 0.5) * config.z + config.xy;
+}
+
+// All 64 lanes initialize shared projections, including the inactive tail.
+[numthreads(64, 1, 1)]
+void FilterSMRTFootprintsCached(uint3 id : SV_DispatchThreadID)
+{
+    InitializeVSMSMRTProjections(id.x & 63u);
+    FilterSMRTFootprints(id);
 }

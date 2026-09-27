@@ -14,6 +14,7 @@ float3 VSMReceiverLevelColor(int level)
 [numthreads(8, 8, 1)]
 void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
 {
+    InitializeVSMSMRTProjections((id.x & 7u) + ((id.y & 7u) << 3u));
     if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
     uint2 pixel = id.xy;
     // Show the actual production mask without re-running filtering/SMRT.

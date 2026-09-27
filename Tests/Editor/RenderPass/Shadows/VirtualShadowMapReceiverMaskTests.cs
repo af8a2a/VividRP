@@ -37,6 +37,7 @@ namespace VividRP.Editor.Tests
             "TraceSMRTRays",
             "TraceSMRTClipmaps",
             "FilterSMRTFootprints",
+            "FilterSMRTFootprintsCached",
             "SampleTaps",
             "ResolveReceivers",
             "MarkFootprints",

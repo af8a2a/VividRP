@@ -401,8 +401,9 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void CollectMeshletRendererInstanceBatches_GroupsCompatibleMeshletInstances_ForAddInstances()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CollectMeshletRendererInstanceBatches_GroupsCompatibleMeshletInstances(bool enableInstancing)
         {
             Material material = null;
             Mesh mesh = null;
@@ -414,7 +415,7 @@ namespace VividRP.Editor.Tests
             {
                 mesh = CreateSingleSubMeshMesh("RTAS_MeshletBatch_Mesh");
                 material = CreateTestMaterial();
-                material.enableInstancing = true;
+                material.enableInstancing = enableInstancing;
 
                 var firstRenderer = CreateMeshletRenderer(
                     "RTAS_MeshletBatch_First",
@@ -453,7 +454,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(batches[0].ObjectToWorldMatrices, Has.Count.EqualTo(2));
                 Assert.That(batches[0].ObjectToWorldMatrices[0], Is.EqualTo(firstObject.transform.localToWorldMatrix));
                 Assert.That(batches[0].ObjectToWorldMatrices[1], Is.EqualTo(secondObject.transform.localToWorldMatrix));
-                Assert.That(RTASBuildPass.CanUseAddInstances(batches[0].Config.material, batches[0].ObjectToWorldMatrices.Count), Is.True);
+                Assert.That(RTASBuildPass.CanUseAddInstances(batches[0].Config.material, batches[0].ObjectToWorldMatrices.Count), Is.EqualTo(enableInstancing));
+                Assert.That(material.enableInstancing, Is.EqualTo(enableInstancing));
             }
             finally
             {
@@ -475,19 +477,99 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CanUseAddInstances_RequiresMaterialAndPositiveInstanceCount()
+        public void CanUseAddInstances_RequiresInstancingEnabledMaterialAndPositiveInstanceCount()
         {
             var material = CreateTestMaterial();
 
             try
             {
                 Assert.That(RTASBuildPass.CanUseAddInstances(null, 2), Is.False);
+                material.enableInstancing = true;
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, -1), Is.False);
                 Assert.That(RTASBuildPass.CanUseAddInstances(material, 0), Is.False);
                 Assert.That(RTASBuildPass.CanUseAddInstances(material, 1), Is.True);
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, 2), Is.True);
+
+                material.enableInstancing = false;
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, 1), Is.False);
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, 2), Is.False);
+                Assert.That(material.enableInstancing, Is.False);
+
+                material.enableInstancing = true;
                 Assert.That(RTASBuildPass.CanUseAddInstances(material, 2), Is.True);
             }
             finally
             {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CanUseAddInstances_DoesNotAllocateAfterWarmup(bool enableInstancing)
+        {
+            var material = CreateTestMaterial();
+            try
+            {
+                material.enableInstancing = enableInstancing;
+                for (var iteration = 0; iteration < 32; iteration++)
+                    RTASBuildPass.CanUseAddInstances(material, 2);
+
+                var acceptedCount = 0;
+                var allocatedBefore = System.GC.GetAllocatedBytesForCurrentThread();
+                for (var iteration = 0; iteration < 256; iteration++)
+                {
+                    if (RTASBuildPass.CanUseAddInstances(material, 2))
+                        acceptedCount++;
+                }
+                var allocatedBytes = System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+                Assert.That(allocatedBytes, Is.Zero);
+                Assert.That(acceptedCount, Is.EqualTo(enableInstancing ? 256 : 0));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [TestCase(1)]
+        [TestCase(2)]
+        public void AddMeshletRendererInstanceBatch_AddsAllInstances_WhenMaterialDisablesInstancing(int instanceCount)
+        {
+            if (!SystemInfo.supportsRayTracing)
+                Assert.Ignore("Requires hardware ray tracing support.");
+
+            var material = CreateTestMaterial();
+            var mesh = CreateSingleSubMeshMesh("RTAS_NonInstancedMaterial_Mesh");
+            try
+            {
+                material.enableInstancing = false;
+                var config = new RayTracingMeshInstanceConfig(mesh, 0, material);
+                var batch = new RTASBuildPass.MeshletRTASInstanceBatch(config);
+                for (var instanceIndex = 0; instanceIndex < instanceCount; instanceIndex++)
+                    batch.AddObjectToWorldMatrix(Matrix4x4.Translate(new Vector3(instanceIndex * 2f, 0f, 0f)));
+
+                using var accelerationStructure = new RayTracingAccelerationStructure(
+                    new RayTracingAccelerationStructure.Settings
+                    {
+                        managementMode = RayTracingAccelerationStructure.ManagementMode.Manual,
+                        rayTracingModeMask = RayTracingAccelerationStructure.RayTracingModeMask.Everything,
+                        layerMask = ~0,
+                    });
+                var submitBatch = typeof(RTASBuildPass).GetMethod(
+                    "AddMeshletRendererInstanceBatch",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                Assert.That(submitBatch, Is.Not.Null);
+                var pass = new RTASBuildPass();
+
+                Assert.DoesNotThrow(() => submitBatch.Invoke(pass, new object[] { accelerationStructure, batch }));
+                Assert.That(accelerationStructure.GetInstanceCount(), Is.EqualTo((uint)instanceCount));
+                Assert.That(material.enableInstancing, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(mesh);
                 Object.DestroyImmediate(material);
             }
         }

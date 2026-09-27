@@ -1231,7 +1231,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal static bool CanUseAddInstances(Material material, int instanceCount)
         {
-            return instanceCount > 0 && material != null;
+            // AddInstances requires GPU Instancing even for a single instance.
+            return instanceCount > 0 && material != null && material.enableInstancing;
         }
 
         private static bool IsCandidateMeshletRenderer(

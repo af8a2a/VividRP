@@ -22,6 +22,8 @@ namespace VividRP.Editor
             "VSM.StaticCasterCull", "VSM.DynamicCasterCull", "VSM.PageCull", "VSM.StaticRaster",
             "VSM.DynamicRaster", "VSM.UnityCompatibilityRaster", "VSM.FinalizePages", "VSM.ResetFeedback", "VSM.Resolve",
             "VSM.AllocationPrepare", "VSM.AllocationCommit", "VSM.LODTraversal",
+            "VSM.PagePrepare", "VSM.PageExpand", "VSM.StaticRasterClear", "VSM.StaticRasterDraw",
+            "VSM.DynamicRasterClear", "VSM.DynamicRasterDraw", "VSM.PageOccupancy",
         };
         private const int StageOffset = 5;
         private static readonly int[] s_RequiredStages = { 0, 1, 2, 4, 9, 11, 13 };

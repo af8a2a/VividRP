@@ -886,12 +886,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_VirtualShadowMapPrepareMeshletPageRequestsKernel,
                 VSMPrototypeMeshletPageIndirectArgsId,
                 pageArgsBuffer);
-            nativeCmd.DispatchCompute(
-                compute,
-                m_VirtualShadowMapPrepareMeshletPageRequestsKernel,
-                1,
-                1,
-                1);
+            using (new ProfilingScope(nativeCmd, VSMProfiling.PagePrepare))
+            {
+                nativeCmd.DispatchCompute(
+                    compute,
+                    m_VirtualShadowMapPrepareMeshletPageRequestsKernel,
+                    1,
+                    1,
+                    1);
+            }
 
             nativeCmd.SetComputeBufferParam(
                 compute,
@@ -955,11 +958,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 VividGPUDrivenShaderIDs._MeshletCount,
                 sceneBuffers.MeshletCount);
             sceneBuffers.VSMGeometryBounds.BindMeshlets(nativeCmd, compute, m_VirtualShadowMapCullMeshletsToPagesKernel);
-            nativeCmd.DispatchCompute(
-                compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
-                VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs,
-                (uint)casterLayer * 3u * sizeof(uint));
+            using (new ProfilingScope(nativeCmd, VSMProfiling.PageExpand))
+            {
+                nativeCmd.DispatchCompute(
+                    compute,
+                    m_VirtualShadowMapCullMeshletsToPagesKernel,
+                    VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs,
+                    (uint)casterLayer * 3u * sizeof(uint));
+            }
             return true;
         }
 
@@ -1308,6 +1314,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (canDrawStaticMeshletCasters)
             {
+#if UNITY_EDITOR
+                VSMProfiling.PageDrawDiagnostic?.Invoke(nativeCmd, 0,
+                    staticPageRequestsBuffer, staticPageArgsBuffer);
+#endif
                 using var rasterScope = new ProfilingScope(nativeCmd, VSMProfiling.StaticRaster);
                 nativeCmd.SetGlobalInt(VSMPrototypeCasterLayerId, 0);
                 using (new ProfilingScope(nativeCmd, VSMProfiling.StaticRasterClear))
@@ -1376,8 +1386,12 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             if (canDrawDynamicMeshletCasters)
-            using (new ProfilingScope(nativeCmd, VSMProfiling.DynamicRaster))
             {
+#if UNITY_EDITOR
+                VSMProfiling.PageDrawDiagnostic?.Invoke(nativeCmd, 1,
+                    dynamicPageRequestsBuffer, dynamicPageArgsBuffer);
+#endif
+                using var rasterScope = new ProfilingScope(nativeCmd, VSMProfiling.DynamicRaster);
                 nativeCmd.SetGlobalInt(VSMPrototypeCasterLayerId, 1);
                 using (new ProfilingScope(nativeCmd, VSMProfiling.DynamicRasterClear))
                 {

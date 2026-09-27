@@ -1,3 +1,4 @@
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime.VirtualShadowMap
@@ -24,6 +25,13 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static readonly ProfilingSampler DynamicInvalidate = new("VSM.InvalidateDynamic");
         internal static readonly ProfilingSampler StaticCull = new("VSM.StaticCasterCull");
         internal static readonly ProfilingSampler DynamicCull = new("VSM.DynamicCasterCull");
+#if UNITY_EDITOR
+        // Opt-in diagnostic command recording, after page expansion and before the
+        // shared scratch is reused by the other caster layer. No readback here.
+        internal static System.Action<CommandBuffer, int, GraphicsBuffer, GraphicsBuffer> PageDrawDiagnostic;
+#endif
+        internal static readonly ProfilingSampler PagePrepare = new("VSM.PagePrepare");
+        internal static readonly ProfilingSampler PageExpand = new("VSM.PageExpand");
         internal static readonly ProfilingSampler PageCull = new("VSM.PageCull");
         internal static readonly ProfilingSampler StaticRasterClear = new("VSM.StaticRasterClear");
         internal static readonly ProfilingSampler StaticRasterDraw = new("VSM.StaticRasterDraw");

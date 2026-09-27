@@ -1,5 +1,7 @@
 # AgenticDebugger — Frame Debugger
 
+PIX M0 的显式捕获、内容验收与可选原生工具见 [PIX.md](PIX.md)。
+
 CPU Profiler 的 `status / frames / frame / allocation` GC 分配查询见 [GCProfiler.md](GCProfiler.md)。
 该接口独立于下面的 Frame Debugger，不受 Raster 事件白名单影响，也不会观察 RasterPass。
 

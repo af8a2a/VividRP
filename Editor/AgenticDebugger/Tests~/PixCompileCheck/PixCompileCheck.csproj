@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../PixCaptureSession.cs;../../PixCaptureBridge.cs;../../PixCli/PixCaptureCommands.cs" />
+    <Compile Include="$(PipelinePackage)/Runtime/Common/CliCommandAttribute.cs;$(PipelinePackage)/Runtime/Common/CliArgAttribute.cs" />
+    <Reference Include="$(UnityManaged)/UnityEngine/*.dll" />
+    <Reference Include="$(NewtonsoftPath)" />
+  </ItemGroup>
+</Project>

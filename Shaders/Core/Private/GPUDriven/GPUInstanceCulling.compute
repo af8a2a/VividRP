@@ -6,6 +6,7 @@
 #pragma kernel CSVSMHierarchy VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY
 #pragma kernel CSVSMHierarchyEnqueue VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY VIVID_VSM_BATCH
 #pragma kernel CSVSMHierarchyTraverse VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY VIVID_VSM_BATCH
+#pragma kernel CSVSMHierarchyTraverseBalanced VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY VIVID_VSM_BATCH VIVID_VSM_BALANCED_TRAVERSAL
 #pragma use_dxc
 #pragma require wavebasic waveballot wavemath : VIVID_VSM_BATCH
 
@@ -248,6 +249,67 @@ void TraverseVSMLodGroup(uint lane, uint instanceID, uint contextIndex)
     // wave sizes below or above 32; no assumed hardware lane width or lane mask.
     uint index = lane < gVSMLodFrontierCount ? gVSMLodFrontier[lane] : 0u;
     uint stop = lane < gVSMLodFrontierCount ? _VSMLodHierarchy[index].Range.z : 0u;
+#if defined(VIVID_VSM_BALANCED_TRAVERSAL)
+    // A 32-thread group fits in one wave on these devices. Keep the original
+    // group-safe path for smaller hardware waves; never assume a wave width.
+    if (WaveGetLaneCount() >= 32u)
+    {
+        // Refill idle lanes every eight visits, without a global queue or an
+        // unbounded stack. Escape indices keep donated intervals disjoint.
+        [loop] while (true)
+        {
+            [loop] for (uint step = 0u; step < 8u && index < stop; ++step)
+            {
+                VSMLodHierarchyNode node = _VSMLodHierarchy[index];
+                if (!VSMLodMayVisit(node, instance, contextIndex, localToShadow, state)) { index = node.Range.z; continue; }
+                if (node.Range.w == 0u) { index++; continue; }
+                uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
+                EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first);
+                index = node.Range.z;
+            }
+            bool active = index < stop;
+            uint activeCount = WaveActiveCountBits(active);
+            if (activeCount == 0u) break;
+            if (activeCount == 32u) continue;
+            uint split = stop, donorStart = index;
+            if (active)
+            {
+                VSMLodHierarchyNode node = _VSMLodHierarchy[index];
+                split = node.Range.z;
+                if (split >= stop && node.Range.w == 0u
+                    && VSMLodMayVisit(node, instance, contextIndex, localToShadow, state))
+                {
+                    donorStart = index + 1u;
+                    split = _VSMLodHierarchy[donorStart].Range.z;
+                }
+            }
+            bool donate = active && split > index && split < stop;
+            uint donorRank = WavePrefixCountBits(donate);
+            uint idleRank = WavePrefixCountBits(!active);
+            uint4 donorMask = WaveActiveBallot(donate);
+            uint donationCount = min(WaveActiveCountBits(donate), 32u - activeCount);
+            // Select the matching donor. All lanes execute both lane reads
+            // before donors modify their state; source lanes are always active.
+            uint4 remaining = donorMask;
+            for (uint rank = 0u; rank < min(idleRank, donationCount); ++rank)
+            {
+                if (remaining.x != 0u) remaining.x &= remaining.x - 1u;
+                else if (remaining.y != 0u) remaining.y &= remaining.y - 1u;
+                else if (remaining.z != 0u) remaining.z &= remaining.z - 1u;
+                else remaining.w &= remaining.w - 1u;
+            }
+            uint source = remaining.x != 0u ? (uint)firstbitlow(remaining.x)
+                : remaining.y != 0u ? 32u + (uint)firstbitlow(remaining.y)
+                : remaining.z != 0u ? 64u + (uint)firstbitlow(remaining.z)
+                : remaining.w != 0u ? 96u + (uint)firstbitlow(remaining.w) : WaveGetLaneIndex();
+            uint donatedIndex = WaveReadLaneAt(split, source);
+            uint donatedStop = WaveReadLaneAt(stop, source);
+            if (donate && donorRank < donationCount) { index = donorStart; stop = split; }
+            if (!active && idleRank < donationCount) { index = donatedIndex; stop = donatedStop; }
+        }
+        return;
+    }
+#endif
     [loop] while (index < stop)
     {
         VSMLodHierarchyNode node = _VSMLodHierarchy[index];
@@ -414,8 +476,7 @@ void CSVSMHierarchy(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
 #if defined(VIVID_VSM_BATCH)
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSVSMHierarchyEnqueue(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void CSVSMHierarchyTraverse(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+void RunVSMHierarchyTraverse(uint3 group, uint lane)
 {
     uint task = group.x + group.y * 65535u;
     if (task >= _VSMLodTraversalArgs[3]) return;
@@ -423,4 +484,10 @@ void CSVSMHierarchyTraverse(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
     if (request.x >= _InstanceDataCount || request.y >= _CullingContextCount) return;
     TraverseVSMLodGroup(lane, request.x, request.y);
 }
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMHierarchyTraverse(uint3 group : SV_GroupID, uint lane : SV_GroupIndex) { RunVSMHierarchyTraverse(group, lane); }
+#if defined(VIVID_VSM_BALANCED_TRAVERSAL)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMHierarchyTraverseBalanced(uint3 group : SV_GroupID, uint lane : SV_GroupIndex) { RunVSMHierarchyTraverse(group, lane); }
+#endif
 #endif

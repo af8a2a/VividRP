@@ -444,7 +444,7 @@ namespace VividRP.Runtime.GPUDriven
             int forcedMeshLODNodeDepth, in VirtualShadowMapCullingParameters vsmCulling)
         {
             if (m_GPUInstanceVSMTraversalKernel < 0)
-                m_GPUInstanceVSMTraversalKernel = m_GPUInstanceCullingCompute.FindKernel("CSVSMHierarchyTraverse");
+                m_GPUInstanceVSMTraversalKernel = m_GPUInstanceCullingCompute.FindKernel("CSVSMHierarchyTraverseBalanced");
             using var scope = new ProfilingScope(cmd, VSMProfiling.LODTraversal);
             int kernel = m_GPUInstanceVSMTraversalKernel;
             BindVSMTraversalQueue(cmd, kernel);

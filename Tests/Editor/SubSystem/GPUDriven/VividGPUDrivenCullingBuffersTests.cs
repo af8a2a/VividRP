@@ -41,33 +41,38 @@ namespace VividRP.Editor.Tests
             Assert.Throws<System.InvalidOperationException>(() => buffers.EnsureVSMTraversalCapacity(int.MaxValue, 2));
         }
 
-        [TestCase(33, false)]
-        [TestCase(129, false)]
-        [TestCase(1025, false)]
-        [TestCase(129, true)]
-        public void Dispatcher_VSMBatchesVariableMeshletCountsAndClearsEmptyDrawSet(int nodeCount, bool missingRoot)
+        [TestCase(33, false, false)]
+        [TestCase(129, false, false)]
+        [TestCase(1025, false, false)]
+        [TestCase(129, true, false)]
+        [TestCase(32769, false, true)] // Sparse subtrees leave one long lane after the initial frontier.
+        [TestCase(32769, true, true)]
+        public void Dispatcher_VSMBatchesVariableMeshletCountsAndClearsEmptyDrawSet(int nodeCount, bool missingRoot, bool skewed)
         {
             Assume.That(SystemInfo.supportsComputeShaders, Is.True);
             var scene = new VividGPUDrivenSceneData();
             scene.MutableMaterials.Add(default);
+            int visibleExpected = 0;
             int[] expansion = { 0, 1, 3, 8 };
             for (int n = 0; n < nodeCount; n++)
             {
                 int count = expansion[n % expansion.Length];
+                float x = skewed && n >= 1024 && n % 1024 >= 32 ? 10f : .5f;
+                if (x < 1f) visibleExpected += count;
                 scene.MutableMeshLODNodes.Add(new VividMeshLODNode
                 {
-                    Bounds = new float4(.5f, .5f, 0, .01f), ParentError = -1,
-                    ParentBounds = new float4(.5f, .5f, 0, .01f),
+                    Bounds = new float4(x, .5f, 0, .01f), ParentError = -1,
+                    ParentBounds = new float4(x, .5f, 0, .01f),
                     MeshletStartIndex = (uint)scene.MutableMeshlets.Count, MeshletCount = (uint)count,
                 });
                 for (int m = 0; m < count; m++)
-                    scene.MutableMeshlets.Add(new VividMeshlet { BoundingSphere = new float4(.5f, .5f, 0, .01f) });
+                    scene.MutableMeshlets.Add(new VividMeshlet { BoundingSphere = new float4(x, .5f, 0, .01f) });
             }
             int expected = scene.MutableMeshlets.Count;
             scene.AddInstance(new VividInstanceData
             {
                 ObjectToWorldMatrix = float4x4.identity, WorldToObjectMatrix = float4x4.identity,
-                AABBMin = new float4(.48f, .48f, -.02f, 0), AABBMax = new float4(.52f, .52f, .02f, 0),
+                AABBMin = new float4(.48f, .48f, -.02f, 0), AABBMax = new float4(skewed ? 10.02f : .52f, .52f, .02f, 0),
                 TotalMeshLODCount = (uint)nodeCount, MeshLODLevelCount = 1, LODErrorScale = 1,
                 PassMask = VividInstancePassMask.Shadows, Flags = VividInstanceFlags.TwoSidedShadows,
             }, expected);
@@ -97,7 +102,7 @@ namespace VividRP.Editor.Tests
             {
                 for (int i = 0; i < shaders.Length; i++) shaders[i] = Object.Instantiate(UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
                     "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/" + names[i] + ".compute"));
-                var count = new uint[1]; var queue = new uint[4]; var requests = new VividMeshletRenderRequestPacked[expected];
+                var count = new uint[1]; var queue = new uint[4]; var requests = new VividMeshletRenderRequestPacked[visibleExpected];
                 GraphicsBuffer tasks = null;
                 for (int iteration = 0; iteration < 3; iteration++)
                 {
@@ -108,7 +113,7 @@ namespace VividRP.Editor.Tests
                     Graphics.ExecuteCommandBuffer(cmd);
                     dispatcher.BufferSet.VisibleMeshletRenderRequestCounterBuffer.GetData(count);
                     dispatcher.BufferSet.VSMLodTraversalArgs.GetData(queue);
-                    Assert.That(count[0], Is.EqualTo(empty ? 0u : (uint)expected));
+                    Assert.That(count[0], Is.EqualTo(empty ? 0u : (uint)visibleExpected));
                     Assert.That(queue[3], Is.EqualTo(!empty && nodeCount > 128 ? 1u : 0u));
                     if (tasks == null) tasks = dispatcher.BufferSet.VSMLodTraversalTasks;
                     Assert.That(dispatcher.BufferSet.VSMLodTraversalTasks, Is.SameAs(tasks), "An empty DrawSet must not recreate the task queue.");
@@ -122,7 +127,9 @@ namespace VividRP.Editor.Tests
                         Assert.That(seen[request.MeshletID], Is.False, "Batch expansion produced a duplicate.");
                         seen[request.MeshletID] = true;
                     }
-                    Assert.That(seen, Is.All.True);
+                    for (int i = 0; i < seen.Length; i++)
+                        Assert.That(seen[i], Is.EqualTo(scene.MutableMeshlets[i].BoundingSphere.x < 1f),
+                            "Traversal redistribution must preserve the visible candidate set.");
                 }
             }
             finally { foreach (var shader in shaders) if (shader != null) Object.DestroyImmediate(shader); }

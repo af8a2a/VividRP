@@ -1,0 +1,9 @@
+{
+    "name": "AgenticDebugger.Pix.Cli",
+    "references": ["AgenticDebugger", "Unity.Pipeline"],
+    "includePlatforms": ["Editor"],
+    "defineConstraints": ["AGENTIC_PIX_UNITY_PIPELINE"],
+    "versionDefines": [
+        { "name": "com.unity.pipeline", "expression": "0.4.0-exp.1", "define": "AGENTIC_PIX_UNITY_PIPELINE" }
+    ]
+}

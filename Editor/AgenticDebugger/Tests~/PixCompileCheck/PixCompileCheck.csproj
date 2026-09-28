@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>UNITY_EDITOR;UNITY_6000_7_OR_NEWER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../PixAnalysisJob.cs" />
+    <Compile Include="../../PixCaptureSession.cs;../../PixCaptureBridge.cs;../../PixQueueBoundary.cs;../../PixCli/*.cs;../../GpuDebuggerBridge.cs;../../FrameDebuggerBridge.cs;../../FrameDebuggerApi.cs;../../../../Runtime/RenderPipeline/VividCaptureHooks.cs" />
+    <Compile Include="$(PipelinePackage)/Runtime/Common/CliCommandAttribute.cs;$(PipelinePackage)/Runtime/Common/CliArgAttribute.cs" />
+    <Reference Include="$(UnityManaged)/UnityEngine/*.dll" />
+    <Reference Include="$(NewtonsoftPath)" />
+  </ItemGroup>
+</Project>

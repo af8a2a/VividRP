@@ -1,0 +1,3 @@
+# Optional locally built PIX binaries. Unity generates their metadata on import.
+x86_64/
+x86_64.meta

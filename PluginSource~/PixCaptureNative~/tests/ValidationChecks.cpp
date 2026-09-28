@@ -34,5 +34,37 @@ int main()
     auto zero = args; zero.replace(zero.find(">1<") + 1, 1, "0");
     check(!IsWork("Dispatch", "<Dispatch>" + zero + "</Dispatch>"), "zero-size dispatch");
     check(!IsWork("ExecuteIndirect", "<ExecuteIndirect><MaxCommandCount>1</MaxCommandCount></ExecuteIndirect>"), "indirect maximum is not actual work");
+    std::vector<QueueEvents> queues{{true, {{0, UINT32_MAX, begin, false}, {1, UINT32_MAX, end, false}}}};
+    for (const char* suffix : {"/Default", "/Background", "/Urgent"})
+    {
+        auto stream = valid;
+        stream.front().name += suffix;
+        stream.back().name += suffix;
+        if (std::string(suffix) != "/Background") { stream[1].name = "Other"; stream[2].work = false; }
+        queues.push_back({false, stream});
+    }
+    auto runQueues = [&](const std::vector<QueueEvents>& q) { return ValidateQueues(q, "abc", pass, true); };
+    auto all = runQueues(queues);
+    check(all.success && all.validatedScopes == 4 && all.workCount == 1, "work only on background queue accepted");
+    auto changed = queues; changed.pop_back(); check(!runQueues(changed).success, "every required queue needs evidence");
+    changed = queues; changed[2].events[2].work = false; check(runQueues(changed).code == "no_target_gpu_work", "async marker-only rejected");
+    changed = queues; changed[2].events.pop_back(); check(!runQueues(changed).success, "async missing end rejected");
+    changed = queues; std::swap(changed[2].events.front().name, changed[2].events.back().name);
+    check(runQueues(changed).code == "session_markers_reversed", "async reversed boundary rejected");
+    changed = queues; changed[3].events.push_back(changed[2].events.front());
+    check(runQueues(changed).code == "duplicate_session_marker", "cross-queue duplicate rejected");
+    changed = queues; changed[3].events.push_back(changed[2].events.back()); changed[2].events.pop_back();
+    check(runQueues(changed).code == "session_marker_queue_mismatch", "split queue marker pair rejected");
+    changed = queues; changed[0].graphics = false;
+    check(runQueues(changed).code == "session_marker_queue_mismatch", "primary scope must be graphics");
+    // Logical queues can alias one physical queue; all scopes enclose the work.
+    std::vector<Event> aliased;
+    for (const char* suffix : {"", "/Default", "/Background", "/Urgent"})
+        aliased.push_back({static_cast<uint32_t>(aliased.size()), UINT32_MAX, begin + suffix, false});
+    aliased.push_back({4, UINT32_MAX, pass, false}); aliased.push_back({5, 4, "Dispatch", true});
+    for (const char* suffix : {"/Default", "/Background", "/Urgent", ""})
+        aliased.push_back({static_cast<uint32_t>(aliased.size()), UINT32_MAX, end + suffix, false});
+    all = runQueues({{true, aliased}});
+    check(all.success && all.workCount == 1, "aliased queues do not duplicate work count");
     std::cout << checks << " validation checks passed\n";
 }

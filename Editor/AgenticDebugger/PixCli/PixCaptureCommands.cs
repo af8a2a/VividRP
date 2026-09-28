@@ -5,7 +5,7 @@ namespace VividRP.AgenticDebugger
 {
     public static class PixCaptureCommands
     {
-        [CliCommand("agentic_pix", "M0 PIX capture of the next normal target-camera render, with mandatory GPU work/session validation.",
+        [CliCommand("agentic_pix", "PIX capture at VividRP camera boundaries, with queue joins and mandatory GPU work/session validation.",
             MainThreadRequired = true)]
         public static JObject Execute(
             [CliArg("action", "status | capture | release")] string action = "status",

@@ -27,7 +27,7 @@ target_link_libraries(VividPixCapture PRIVATE d3d12 dxgi
 add_executable(vivid-pix-analyzer src/Analyzer.cpp)
 target_include_directories(vivid-pix-analyzer PRIVATE "${PIX_D3D12_DIR}/build/native/include" "${PIX_INSTALL_DIR}/include")
 target_compile_definitions(vivid-pix-analyzer PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(vivid-pix-analyzer PRIVATE ole32)
+target_link_libraries(vivid-pix-analyzer PRIVATE ole32 bcrypt)
 
 add_executable(PixValidationChecks tests/ValidationChecks.cpp)
 enable_testing()

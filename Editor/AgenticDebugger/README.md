@@ -1,6 +1,6 @@
 # AgenticDebugger — Frame Debugger
 
-PIX M0 的显式捕获、内容验收与可选原生工具见 [PIX.md](PIX.md)。
+PIX 的显式捕获、M1 管线边界/异步队列同步、M2 外部分析器及异步查询，以及统一入口 `agentic_gpu_debugger --backend pix|frame_debugger` 见 [PIX.md](PIX.md)。
 
 CPU Profiler 的 `status / frames / frame / allocation` GC 分配查询见 [GCProfiler.md](GCProfiler.md)。
 该接口独立于下面的 Frame Debugger，不受 Raster 事件白名单影响，也不会观察 RasterPass。

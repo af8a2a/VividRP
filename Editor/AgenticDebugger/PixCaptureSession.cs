@@ -4,6 +4,12 @@ namespace VividRP.AgenticDebugger
 {
     internal enum PixNativeState { Idle, Preparing, Armed, Capturing, WaitingForGpu, Finalizing, Captured, Failed }
 
+    internal sealed class PixCaptureFailure : Exception
+    {
+        internal readonly string Code;
+        internal PixCaptureFailure(string code, string message) : base(message) { Code = code; }
+    }
+
     internal sealed class PixValidationResult
     {
         public bool success { get; set; }
@@ -18,6 +24,8 @@ namespace VividRP.AgenticDebugger
         public bool endMarkerFound { get; set; }
         public bool expectedPassFound { get; set; }
         public bool markersOrdered { get; set; }
+        public string boundaryMode { get; set; }
+        public int validatedQueueScopes { get; set; }
     }
 
     internal interface IPixCaptureOperations : IDisposable
@@ -37,6 +45,7 @@ namespace VividRP.AgenticDebugger
         internal readonly string Id;
         internal readonly string Path;
         internal readonly string ExpectedPass;
+        internal readonly string BoundaryMode;
         internal readonly double Deadline;
         internal string State { get; private set; } = "preparing";
         internal string Code { get; private set; } = "pending";
@@ -48,11 +57,12 @@ namespace VividRP.AgenticDebugger
         private readonly IPixCaptureOperations operations;
         private bool disposed;
 
-        internal PixCaptureSession(string id, string path, string expectedPass, double deadline, IPixCaptureOperations operations)
+        internal PixCaptureSession(string id, string path, string expectedPass, double deadline, IPixCaptureOperations operations, string boundaryMode = "graphics")
         {
             Id = id;
             Path = path;
             ExpectedPass = expectedPass;
+            BoundaryMode = boundaryMode;
             Deadline = deadline;
             this.operations = operations;
         }
@@ -74,7 +84,7 @@ namespace VividRP.AgenticDebugger
                 {
                     if (!operations.TryGetValidation(out var result)) return;
                     Validation = result;
-                    if (!Accept(result, Id, Path, ExpectedPass))
+                    if (!Accept(result, Id, Path, ExpectedPass, BoundaryMode))
                     {
                         Fail(result?.code == null || result.code == "ok" ? "capture_validation_failed" : result.code,
                             result?.message ?? "The PIX result did not prove target-frame GPU work.");
@@ -109,14 +119,15 @@ namespace VividRP.AgenticDebugger
                     default: Fail("invalid_native_state", "The native capture lost its session."); break;
                 }
             }
-            catch (Exception e) { Fail("capture_failed", e.Message); }
+            catch (Exception e) { Fail(e is PixCaptureFailure failure ? failure.Code : "capture_failed", e.Message); }
         }
 
-        internal static bool Accept(PixValidationResult result, string id, string path, string pass)
+        internal static bool Accept(PixValidationResult result, string id, string path, string pass, string boundaryMode = "graphics")
             => result != null && result.success && result.code == "ok" && result.sessionId == id
                 && string.Equals(result.capturePath, path, StringComparison.OrdinalIgnoreCase)
                 && result.expectedPass == pass && result.queueCount > 0 && result.gpuWorkEventCount > 0
-                && result.beginMarkerFound && result.endMarkerFound && result.markersOrdered && result.expectedPassFound;
+                && result.beginMarkerFound && result.endMarkerFound && result.markersOrdered && result.expectedPassFound
+                && result.boundaryMode == boundaryMode && result.validatedQueueScopes == (boundaryMode == "all" ? 4 : 1);
 
         internal void Cancel(string reason) { if (!Terminal) Fail("cancelled", reason); }
 

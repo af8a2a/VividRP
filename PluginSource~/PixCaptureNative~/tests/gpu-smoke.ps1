@@ -14,17 +14,27 @@ $cases = @(
     @{File='missing_end'; Session='smoke'; Pass='SmokePass'; Code='target_frame_marker_missing'},
     @{File='valid'; Session='old'; Pass='SmokePass'; Code='target_frame_marker_missing'},
     @{File='valid'; Session='smoke'; Pass='OtherPass'; Code='expected_pass_missing'},
-    @{File='absent'; Session='smoke'; Pass='SmokePass'; Code='open_capture_failed'}
+    @{File='absent'; Session='smoke'; Pass='SmokePass'; Code='open_capture_failed'},
+    @{File='async_valid'; Session='smoke'; Pass='AsyncSmokePass'; Code='ok'; Mode='all'},
+    @{File='async_valid2'; Session='smoke'; Pass='AsyncSmokePass'; Code='ok'; Mode='all'},
+    @{File='async_marker_only'; Session='smoke'; Pass='AsyncSmokePass'; Code='no_target_gpu_work'; Mode='all'},
+    @{File='async_missing_end'; Session='smoke'; Pass='AsyncSmokePass'; Code='target_frame_marker_missing'; Mode='all'},
+    @{File='valid'; Session='smoke'; Pass='SmokePass'; Code='target_frame_marker_missing'; Mode='all'},
+    @{File='async_valid'; Session='smoke'; Pass='AsyncSmokePass'; Code='expected_pass_missing'; Mode='graphics'}
 )
 $index = 0
 foreach ($case in $cases) {
     $resultPath = Join-Path $output "result-$index.json"
-    & "$exe/vivid-pix-analyzer.exe" validate $PixInstall "$output/$($case.File).wpix" $case.Session $case.Pass $resultPath 2> "$output/result-$index.stderr.log" | Out-Null
+    $mode = if ($case.Mode) { $case.Mode } else { 'graphics' }
+    & "$exe/vivid-pix-analyzer.exe" validate $PixInstall "$output/$($case.File).wpix" $case.Session $case.Pass $resultPath $mode 2> "$output/result-$index.stderr.log" | Out-Null
     $exitCode = $LASTEXITCODE
     $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
     $expectedSuccess = $case.Code -eq 'ok'
     if ($result.success -ne $expectedSuccess -or $result.code -ne $case.Code -or ($expectedSuccess -ne ($exitCode -eq 0))) {
         throw "Unexpected result for case ${index}: $($result | ConvertTo-Json -Compress) (exit $exitCode)"
+    }
+    if ($expectedSuccess -and ($result.boundaryMode -ne $mode -or $result.validatedQueueScopes -ne $(if ($mode -eq 'all') { 4 } else { 1 }))) {
+        throw "Missing queue boundary proof for case $index"
     }
     $index++
 }

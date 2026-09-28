@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <DefineConstants>UNITY_EDITOR</DefineConstants>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../../Runtime/RenderPipeline/VividCaptureHooks.cs;../../PixQueueBoundary.cs;../../GpuDebuggerBridge.cs" />
+    <Reference Include="$(NewtonsoftPath)" />
+  </ItemGroup>
+</Project>

@@ -17,6 +17,7 @@ namespace VividRP.AgenticDebugger
         private static int settleTicks;
         private static Camera captureCamera;
         private static string captureSource;
+        internal static bool HasActiveCapture => session != null || (api ??= new FrameDebuggerApi()).Enabled();
         private static readonly EditorApplication.CallbackFunction TickCallback = Tick;
         private static readonly AssemblyReloadEvents.AssemblyReloadCallback ReloadCallback = Cleanup;
         private static readonly Action QuitCallback = Cleanup;
@@ -99,6 +100,8 @@ namespace VividRP.AgenticDebugger
 
         private static JObject Capture(float seconds, string source, string cameraName)
         {
+            if (PixCaptureBridge.HasSession)
+                return Failure("busy", "Release the PIX session before starting Frame Debugger.");
             if (float.IsNaN(seconds) || float.IsInfinity(seconds) || seconds < 1 || seconds > 300)
                 throw new ArgumentOutOfRangeException(nameof(seconds), "timeoutSeconds must be between 1 and 300.");
             if (session != null || api.Enabled())

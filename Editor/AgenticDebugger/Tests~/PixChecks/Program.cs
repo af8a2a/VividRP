@@ -5,7 +5,7 @@ static class Program
 {
     static int checks;
     static void Check(bool ok, string message) { if (!ok) throw new Exception(message); checks++; }
-    static PixValidationResult Valid() => new PixValidationResult { success = true, code = "ok", sessionId = "abc", capturePath = "capture.wpix", expectedPass = "Lighting", queueCount = 1, gpuWorkEventCount = 3, beginMarkerFound = true, endMarkerFound = true, markersOrdered = true, expectedPassFound = true };
+    static PixValidationResult Valid() => new PixValidationResult { success = true, code = "ok", sessionId = "abc", capturePath = "capture.wpix", expectedPass = "Lighting", queueCount = 1, gpuWorkEventCount = 3, beginMarkerFound = true, endMarkerFound = true, markersOrdered = true, expectedPassFound = true, boundaryMode = "graphics", validatedQueueScopes = 1 };
     static PixCaptureSession Session(Fake fake) => new PixCaptureSession("abc", "capture.wpix", "Lighting", 10, fake);
     static bool Accept(PixValidationResult result) => PixCaptureSession.Accept(result, "abc", "capture.wpix", "Lighting");
 
@@ -19,6 +19,13 @@ static class Program
             r => r.beginMarkerFound = false, r => r.endMarkerFound = false, r => r.markersOrdered = false, r => r.expectedPassFound = false
         };
         foreach (var corrupt in corruptions) { var r = Valid(); corrupt(r); Check(!Accept(r), "reject incomplete/stale proof"); }
+        var all = Valid(); all.boundaryMode = "all"; all.validatedQueueScopes = 4;
+        Check(PixCaptureSession.Accept(all, "abc", "capture.wpix", "Lighting", "all"), "async proof with all queue scopes");
+        Check(!Accept(all), "reject different boundary mode");
+        all.validatedQueueScopes = 3;
+        Check(!PixCaptureSession.Accept(all, "abc", "capture.wpix", "Lighting", "all"), "reject missing async scope");
+        var legacy = Valid(); legacy.boundaryMode = null;
+        Check(!Accept(legacy), "reject outdated validator evidence");
 
         var fake = new Fake(); var session = Session(fake); session.Start();
         session.Tick(1); Check(session.State == "preparing" && fake.Renders == 0, "no render before drain");
@@ -49,6 +56,8 @@ static class Program
         Check(session.Code == "capture_validation_failed", "reject stale validator success");
         fake = new Fake { State = PixNativeState.Captured }; session = Session(fake); session.Tick(1); session.Tick(10);
         Check(session.Code == "capture_timeout" && fake.Cancels == 1, "hung validator cancellation");
+        fake = new Fake { ThrowPipelineFailure = true }; session = Session(fake); session.Tick(1);
+        Check(session.Code == "target_camera_rendergraphfailed" && !session.CleanupPending, "pipeline failure code survives cleanup");
         Console.WriteLine(checks + " PIX session checks passed");
     }
 
@@ -56,10 +65,14 @@ static class Program
     {
         internal PixNativeState State = PixNativeState.Preparing;
         internal int Hr, Renders, Validations, Cancels, Disposals;
-        internal bool CancelFinalizing, ThrowRender, ThrowPrepare;
+        internal bool CancelFinalizing, ThrowRender, ThrowPrepare, ThrowPipelineFailure;
         internal PixValidationResult Result;
         public void Prepare() { if (ThrowPrepare) throw new Exception("prepare"); }
-        public PixNativeState Poll(out int hr) { hr = Hr; return State; }
+        public PixNativeState Poll(out int hr)
+        {
+            if (ThrowPipelineFailure) { ThrowPipelineFailure = false; throw new PixCaptureFailure("target_camera_rendergraphfailed", "RenderGraph failed"); }
+            hr = Hr; return State;
+        }
         public void ArmCamera() { Renders++; if (ThrowRender) throw new Exception("render"); }
         public void StartValidation() { Validations++; }
         public bool TryGetValidation(out PixValidationResult result) { result = Result; return result != null; }

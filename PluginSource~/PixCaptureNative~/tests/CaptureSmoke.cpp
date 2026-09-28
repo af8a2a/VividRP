@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <thread>
 #include <chrono>
+#include <array>
 
 using Microsoft::WRL::ComPtr;
 extern "C" HRESULT UNITY_INTERFACE_API VividPixPrepare(UINT64*, int*);
@@ -143,6 +144,69 @@ int wmain(int argc, wchar_t** argv)
             WaitState(active, 6);
             std::cout << kind << " capture completed\n";
             active = 0;
+        }
+        // M1: the expected work exists ONLY on an async compute queue. The
+        // graphics finish fence must wait for every compute tail first.
+        std::array<ComPtr<ID3D12CommandQueue>, 3> computeQueues;
+        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+        for (auto& compute : computeQueues) Check(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&compute)));
+        const char* queueNames[] = { "Default", "Background", "Urgent" };
+        for (const char* kind : { "async_valid", "async_valid2", "async_marker_only", "async_missing_end" })
+        {
+            int base;
+            Check(VividPixPrepare(&active, &base));
+            callback(base, reinterpret_cast<void*>(active)); WaitState(active, 2);
+            std::wstring name(kind, kind + strlen(kind));
+            Check(VividPixBegin(active, (output / (name + L".wpix")).c_str()));
+            std::array<ComPtr<ID3D12CommandAllocator>, 5> allocators;
+            std::array<ComPtr<ID3D12GraphicsCommandList>, 5> lists;
+            for (unsigned i = 0; i < lists.size(); ++i)
+            {
+                auto type = i < 2 ? D3D12_COMMAND_LIST_TYPE_DIRECT : D3D12_COMMAND_LIST_TYPE_COMPUTE;
+                Check(device->CreateCommandAllocator(type, IID_PPV_ARGS(&allocators[i])));
+                Check(device->CreateCommandList(0, type, allocators[i].Get(), pso.Get(), IID_PPV_ARGS(&lists[i])));
+            }
+            ComPtr<ID3D12Fence> start;
+            std::array<ComPtr<ID3D12Fence>, 3> tails;
+            Check(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&start)));
+            PIXBeginEvent(lists[0].Get(), 0, "VividRP.AgentCapture/smoke/FrameBegin"); PIXEndEvent(lists[0].Get());
+            Check(lists[0]->Close());
+            ID3D12CommandList* first[] = {lists[0].Get()}; queue->ExecuteCommandLists(1, first);
+            Check(queue->Signal(start.Get(), 1));
+            for (unsigned i = 0; i < computeQueues.size(); ++i)
+            {
+                auto* list = lists[i + 2].Get();
+                std::string begin = std::string("VividRP.AgentCapture/smoke/FrameBegin/") + queueNames[i];
+                std::string end = std::string("VividRP.AgentCapture/smoke/FrameEnd/") + queueNames[i];
+                PIXBeginEvent(list, 0, "%s", begin.c_str()); PIXEndEvent(list);
+                if (i == 1)
+                {
+                    PIXBeginEvent(list, 0, "AsyncSmokePass");
+                    if (std::string(kind) != "async_marker_only")
+                    {
+                        list->SetComputeRootSignature(root.Get());
+                        list->SetComputeRootUnorderedAccessView(0, buffer->GetGPUVirtualAddress());
+                        list->Dispatch(1, 1, 1);
+                    }
+                    PIXEndEvent(list);
+                }
+                if (i != 1 || std::string(kind) != "async_missing_end")
+                { PIXBeginEvent(list, 0, "%s", end.c_str()); PIXEndEvent(list); }
+                Check(list->Close());
+                Check(computeQueues[i]->Wait(start.Get(), 1));
+                ID3D12CommandList* compute[] = {list}; computeQueues[i]->ExecuteCommandLists(1, compute);
+                Check(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&tails[i])));
+                Check(computeQueues[i]->Signal(tails[i].Get(), 1));
+                Check(queue->Wait(tails[i].Get(), 1));
+            }
+            PIXBeginEvent(lists[1].Get(), 0, "VividRP.AgentCapture/smoke/FrameEnd"); PIXEndEvent(lists[1].Get());
+            Check(lists[1]->Close());
+            ID3D12CommandList* last[] = {lists[1].Get()}; queue->ExecuteCommandLists(1, last);
+            callback(base + 1, reinterpret_cast<void*>(active)); WaitState(active, 6);
+            for (const auto& tail : tails)
+                if (tail->GetCompletedValue() != 1) throw std::runtime_error("Native completion raced a compute queue tail");
+            active = 0;
+            std::cout << kind << " joined capture completed\n";
         }
         // A delayed callback from a released request cannot arm its successor.
         UINT64 stale = 0, next = 0;

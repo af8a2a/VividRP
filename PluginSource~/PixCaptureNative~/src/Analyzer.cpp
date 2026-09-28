@@ -7,6 +7,12 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <memory>
+#include <thread>
+#include <cmath>
+#include <cctype>
+#include <bcrypt.h>
+#include <experimental/PixApiCommonExperimentalInterfaces.h>
 #include "Validation.h"
 
 using Microsoft::WRL::ComPtr;
@@ -68,7 +74,7 @@ namespace
         if (!ok || written != result.size()) throw Error{HRESULT_FROM_WIN32(error ? error : ERROR_WRITE_FAULT), "write_result_file"};
     }
 
-    int Validate(const fs::path& pix, const fs::path& path, const std::string& id, const std::string& pass, const fs::path& output)
+    int Validate(const fs::path& pix, const fs::path& path, const std::string& id, const std::string& pass, const fs::path& output, bool allQueues)
     {
         vivid::pix::Validation result;
         UINT64 queueCount = 0;
@@ -82,9 +88,7 @@ namespace
             ComPtr<IPixCollection> queues;
             Check(document->GetQueues(IID_PPV_ARGS(&queues)), "get_queues_failed");
             queueCount = queues->GetCount();
-            const std::string begin = "VividRP.AgentCapture/" + id + "/FrameBegin";
-            const std::string end = "VividRP.AgentCapture/" + id + "/FrameEnd";
-            unsigned matchingQueues = 0, totalBegins = 0, totalEnds = 0;
+            std::vector<vivid::pix::QueueEvents> capturedQueues;
             for (UINT64 q = 0; q < queueCount; ++q)
             {
                 ComPtr<IPixGpuCaptureQueueInfo> queue;
@@ -96,39 +100,31 @@ namespace
                     PIX_EVENT_INFO event{};
                     Check(queue->GetEvent(i, &event), "get_event_failed");
                     std::string name = event.Name ? event.Name : "";
-                    if (queue->GetType() == PIX_QUEUE_TYPE_GRAPHICS && eventSample.size() < 16)
+                    if (eventSample.size() < 16)
                     {
                         std::ostringstream sample;
-                        sample << "{\"index\":" << event.Index << ",\"parent\":" << event.ParentIndex
+                        sample << "{\"queue\":" << q << ",\"index\":" << event.Index << ",\"parent\":" << event.ParentIndex
                                << ",\"name\":" << Json(name.substr(0, 512)) << ",\"apiCallData\":"
                                << Json(std::string(event.ApiCallData ? event.ApiCallData : "").substr(0, 512)) << '}';
                         eventSample.push_back(sample.str());
                     }
-                    totalBegins += name == begin;
-                    totalEnds += name == end;
                     events.push_back({event.Index, event.ParentIndex, name,
                         vivid::pix::IsWork(name, event.ApiCallData ? event.ApiCallData : "")});
                 }
-                if (queue->GetType() != PIX_QUEUE_TYPE_GRAPHICS) continue;
-                auto candidate = vivid::pix::Validate(events, begin, end, pass);
-                if (candidate.success) ++matchingQueues;
-                if (candidate.success || (!result.success && (candidate.beginFound || candidate.endFound))) result = candidate;
+                capturedQueues.push_back({queue->GetType() == PIX_QUEUE_TYPE_GRAPHICS, std::move(events)});
             }
-            if (matchingQueues != 1 || totalBegins != 1 || totalEnds != 1)
-            {
-                result.success = false;
-                if (totalBegins > 1 || totalEnds > 1) result.code = "duplicate_session_marker";
-                else if (!queueCount) result.code = "empty_capture";
-            }
+            result = vivid::pix::ValidateQueues(capturedQueues, id, pass, allQueues);
         }
         catch (const Error& error) { result.success = false; result.code = error.operation; hr = error.hr; }
         std::ostringstream json;
-        json << std::boolalpha << "{\n  \"schemaVersion\": 1,\n  \"success\": " << result.success
+        json << std::boolalpha << "{\n  \"schemaVersion\": 2,\n  \"success\": " << result.success
              << ",\n  \"code\": " << Json(result.code)
              << ",\n  \"hresult\": " << static_cast<int32_t>(hr)
              << ",\n  \"sessionId\": " << Json(id) << ",\n  \"capturePath\": " << Json(Utf8(fs::absolute(path).wstring()))
              << ",\n  \"expectedPass\": " << Json(pass) << ",\n  \"pixInstall\": " << Json(Utf8(pix.wstring()))
              << ",\n  \"queueCount\": " << queueCount << ",\n  \"gpuWorkEventCount\": " << result.workCount
+             << ",\n  \"boundaryMode\": " << Json(allQueues ? "all" : "graphics")
+             << ",\n  \"validatedQueueScopes\": " << result.validatedScopes
              << ",\n  \"beginMarkerFound\": " << result.beginFound << ",\n  \"endMarkerFound\": " << result.endFound
              << ",\n  \"markersOrdered\": " << result.ordered << ",\n  \"expectedPassFound\": " << result.passFound;
         if (!result.success)
@@ -143,19 +139,29 @@ namespace
         return result.success ? 0 : 2;
     }
 
+#include "Analysis.h"
 }
 
 int wmain(int argc, wchar_t** argv)
 {
-    if (argc != 7 || std::wstring(argv[1]) != L"validate")
+    const bool validate = argc > 1 && std::wstring(argv[1]) == L"validate";
+    if (argc < 7 || (validate && argc > 8) || (!validate && argc < 8) ||
+        (argc >= 8 && std::wstring(argv[7]) != L"all" && std::wstring(argv[7]) != L"graphics"))
     {
-        std::cerr << "Usage: vivid-pix-analyzer validate PIX_INSTALL capture.wpix SESSION EXPECTED_PASS new-result.json\n";
+        std::cerr << "Usage: vivid-pix-analyzer ACTION PIX_INSTALL capture.wpix SESSION EXPECTED_PASS new-result.json graphics|all [--queue ID --event INDEX --offset N --count 1..256 --marker NAME --counter ID --type INDEX --stage INDEX --experiment GUID --timeout_seconds 1..300 --request_id ID]\n";
         return 1;
     }
     HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(com)) return 3;
     int result = 3;
-    try { result = Validate(fs::absolute(argv[2]), fs::absolute(argv[3]), Utf8(argv[4]), Utf8(argv[5]), fs::absolute(argv[6])); }
+    try
+    {
+        auto pix = fs::absolute(argv[2]), path = fs::absolute(argv[3]), output = fs::absolute(argv[6]);
+        if (fs::exists(output)) throw Error{HRESULT_FROM_WIN32(ERROR_FILE_EXISTS), "result_file_exists"};
+        const bool all = argc >= 8 && std::wstring(argv[7]) == L"all";
+        if (validate) result = Validate(pix, path, Utf8(argv[4]), Utf8(argv[5]), output, all);
+        else result = Analyze(pix, path, Utf8(argv[4]), Utf8(argv[5]), output, all, ParseOptions(argc, argv));
+    }
     catch (const Error& error) { std::cerr << error.operation << ": 0x" << std::hex << error.hr << '\n'; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; }
     CoUninitialize();

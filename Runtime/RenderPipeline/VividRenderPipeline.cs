@@ -105,7 +105,13 @@ namespace VividRP.Runtime
             }
 
             if (!TryInitializeRuntimeResources())
+            {
+#if UNITY_EDITOR
+                foreach (var camera in cameras)
+                    VividCaptureHooks.Skip(camera, VividCaptureOutcome.ResourcesUnavailable);
+#endif
                 return;
+            }
 
             // Subsystems with global budgets must see one token for every camera in this render.
             int frameIndex = ResolvePipelineFrameIndex(
@@ -169,6 +175,29 @@ namespace VividRP.Runtime
 
         private void RenderCamera(ScriptableRenderContext context, Camera camera, int frameIndex)
         {
+#if UNITY_EDITOR
+            var observer = VividCaptureHooks.Begin(context, camera, frameIndex);
+            if (observer == null)
+            {
+                RenderCameraCore(context, camera, frameIndex);
+                return;
+            }
+            var outcome = VividCaptureOutcome.Failed;
+            try
+            {
+                outcome = RenderCameraCore(context, camera, frameIndex);
+            }
+            finally
+            {
+                VividCaptureHooks.End(observer, context, camera, frameIndex, outcome);
+            }
+#else
+            RenderCameraCore(context, camera, frameIndex);
+#endif
+        }
+
+        private VividCaptureOutcome RenderCameraCore(ScriptableRenderContext context, Camera camera, int frameIndex)
+        {
             using var renderCameraScope = s_RenderCameraMarker.Auto();
             using (s_BeginCameraRenderingMarker.Auto())
             {
@@ -210,7 +239,7 @@ namespace VividRP.Runtime
                 using (s_CullingParametersMarker.Auto())
                 {
                     if (!camera.TryGetCullingParameters(out cullingParameters))
-                        return;
+                        return VividCaptureOutcome.CullingUnavailable;
                 }
 
                 using (s_EmitGeometryMarker.Auto())
@@ -248,7 +277,7 @@ namespace VividRP.Runtime
                     }
 
                     shouldSubmit = true;
-                    return;
+                    return VividCaptureOutcome.PreviewCamera;
                 }
 
                 var graphAsset = m_Asset.RenderGraphAsset;
@@ -308,7 +337,7 @@ namespace VividRP.Runtime
                             graphAsset,
                             m_Asset != null && m_Asset.EnableAsyncCompute))
                     {
-                        return;
+                        return VividCaptureOutcome.RenderGraphFailed;
                     }
                 }
 
@@ -345,6 +374,7 @@ namespace VividRP.Runtime
 
                 cameraHistory.CommitFrame();
                 cameraHistoryFrameActive = false;
+                return VividCaptureOutcome.Submitted;
             }
             finally
             {

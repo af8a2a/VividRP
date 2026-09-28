@@ -37,6 +37,13 @@ if ($LASTEXITCODE) { throw 'Native build failed.' }
 if ($LASTEXITCODE) { throw 'Native validation checks failed.' }
 & dotnet run --project (Join-Path $packageRoot 'Editor/AgenticDebugger/Tests~/PixChecks/PixChecks.csproj')
 if ($LASTEXITCODE) { throw 'PIX session checks failed.' }
+$projectRoot = [IO.Path]::GetFullPath((Join-Path $packageRoot '../..'))
+$newtonsoft = Get-ChildItem -Path "$projectRoot/Library/PackageCache/com.unity.nuget.newtonsoft-json@*/Runtime/Newtonsoft.Json.dll" | Select-Object -First 1
+if (-not $newtonsoft) { throw 'Open/resolve the containing Unity project first: Newtonsoft.Json reference is missing for M1 checks.' }
+& dotnet run --project (Join-Path $packageRoot 'Editor/AgenticDebugger/Tests~/M1Checks/M1Checks.csproj') "-p:NewtonsoftPath=$($newtonsoft.FullName)"
+if ($LASTEXITCODE) { throw 'M1 pipeline hook/queue/router checks failed.' }
+& dotnet run --project (Join-Path $packageRoot 'Editor/AgenticDebugger/Tests~/M2Checks/M2Checks.csproj') "-p:NewtonsoftPath=$($newtonsoft.FullName)"
+if ($LASTEXITCODE) { throw 'M2 analysis process/evidence checks failed.' }
 
 if ($Deploy) {
     $plugin = Join-Path $packageRoot 'Editor/AgenticDebugger/Plugins/x86_64'

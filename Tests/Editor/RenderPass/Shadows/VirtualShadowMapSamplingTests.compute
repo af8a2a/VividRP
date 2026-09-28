@@ -604,7 +604,7 @@ void FilterSMRTFootprintsCached(uint3 id : SV_DispatchThreadID)
 void MarkUEReceiverInputs(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= (uint)_SamplingCount) return;
-    MarkVSMReceiverUE(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz, id.x & 63u);
+    MarkVSMReceiverUE(_SamplingInputs[id.x].xyz, id.x & 63u);
 }
 
 [numthreads(64, 1, 1)]

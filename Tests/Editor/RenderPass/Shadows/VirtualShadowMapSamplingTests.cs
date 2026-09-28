@@ -1465,7 +1465,7 @@ namespace VividRP.Editor.Tests
         [TestCase(1, 0)]
         [TestCase(2, 2)]
         [TestCase(3, 2)]
-        public void UEReceiverMarking_DiagonalDilationIsBoundedAndMasksCertifyWholePages(int phase, int level)
+        public void UEReceiverMarking_DilationRequestsPagesButOnlyPrimaryMarksOneCell(int phase, int level)
         {
             using var f = new Fixture();
             f.Shader.SetInt("_VSMReceiverMaskEnabled", 1);
@@ -1478,18 +1478,19 @@ namespace VividRP.Editor.Tests
                 int local = page % 4;
                 bool diagonal = (phase == 0 || phase == 3) ? local == 0 : local == 1 || local == 2;
                 bool expected = page / 4 == level && (local == 3 || diagonal);
-                uint flags = expected ? (level == 2 ? 769u : 513u) : 0u;
+                uint flags = expected ? 513u : 0u;
                 Assert.That(f.RequestData[page], Is.EqualTo(flags));
-                Assert.That(masks[page], Is.EqualTo(expected ? new uint2(uint.MaxValue) : uint2.zero));
+                Assert.That(masks[page], Is.EqualTo(page == level * 4 + 3 ? new uint2(1u, 0u) : uint2.zero));
             }
         }
 
-        [Test]
-        public void UEReceiverMarking_DoesNotExpandWorldRayOrRequestParentChain()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void UEReceiverMarking_DoesNotExpandWorldRayOrRequestParentChain(bool smrt)
         {
             using var f = new Fixture();
             var input = new[] { new float4(.625f, .625f, 0, 0) };
-            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 100, .5f));
+            f.Shader.SetVector("_VSMSMRTParameters", smrt ? new Vector4(4, 8, 100, .5f) : Vector4.zero);
             f.Shader.SetBuffer(f.Shader.FindKernel("MarkUEReceiverInputs"), "_VSMPagePressure", f.Pressure);
             f.Upload();
             f.Run("MarkUEReceiverInputs", input);

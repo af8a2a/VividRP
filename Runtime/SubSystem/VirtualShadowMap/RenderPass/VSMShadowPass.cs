@@ -109,7 +109,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
 
-        private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
 
         private static readonly int CSMInvViewProjMatrixId = Shader.PropertyToID("_CSMInvViewProjMatrix");
 
@@ -452,7 +451,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapPrototypeRuntime.PageReceiverMasksId,
                     VirtualShadowMapPrototypeRuntime.PageReceiverMasks);
                 cmd.SetComputeTextureParam(shader, kernel, DepthTextureId, m_DepthTexture.innerHandle);
-                cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
                 cmd.SetComputeMatrixParam(shader, CSMInvViewProjMatrixId, m_ReceiverViewProjection.inverse);
                 cmd.SetComputeMatrixParam(shader, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ReceiverViewProjection);
                 cmd.SetComputeVectorParam(shader, VirtualShadowMapReceiverQuality.ParametersId, m_ReceiverQuality);
@@ -462,9 +460,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeIntParam(shader, CSMOutputHeightId, m_ReceiverHeight);
                 cmd.SetComputeIntParam(shader, CSMFrameIndexId, m_FrameIndex);
                 cmd.SetComputeIntParam(shader, VSMPrototypeRequestEnabledId, 1);
-                // Match UE PageMarkingPixelStrideX/Y = 2 for the SMRT marker.
-                // Hard/PCF still uses its existing full-resolution footprint path.
-                int stride = m_ReceiverSMRTParameters.x > 0 && m_ReceiverSMRTParameters.w > 0 ? 2 : 1;
+                // UE PageMarkingPixelStrideX/Y = 2, independent of the projection filter.
+                const int stride = 2;
                 cmd.DispatchCompute(shader, kernel, CoreUtils.DivRoundUp(m_ReceiverWidth, 8 * stride),
                     CoreUtils.DivRoundUp(m_ReceiverHeight, 8 * stride), 1);
             }

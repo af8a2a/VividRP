@@ -89,6 +89,73 @@ namespace VividRP.Editor.Tests
 
     public sealed class VirtualShadowMapReceiverMaskTests
     {
+        [TestCase(0)]
+        [TestCase(1)]
+        public void UEReceiverMask_AcceptedCasterWritesOutsideMarkedCell(int layer)
+        {
+            Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapDepthStorageTests.compute"));
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            using var masks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 8);
+            using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 64, 16);
+            using var results = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 64, 16);
+            var pool = new RenderTexture(new RenderTextureDescriptor(8, 8)
+            {
+                graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R32_UInt,
+                depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.None,
+                dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray,
+                volumeDepth = 2, enableRandomWrite = true, msaaSamples = 1,
+            });
+            pool.Create();
+            try
+            {
+                var points = new uint4[64];
+                for (int i = 0; i < 64; i++) points[i] = new uint4((uint)i % 8, (uint)i / 8, 0, 0);
+                inputs.SetData(points);
+                // Only one of 64 cells is marked. This must not trim coverage.
+                masks.SetData(new[] { new uint2(1, 0) });
+                table.SetData(new uint[] { 1 });
+                int kernel = shader.FindKernel("ResolveReceiverMaskedCaster");
+                shader.SetBuffer(kernel, "_VSMPrototypePageTable", table);
+                shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(kernel, "_VSMPageReceiverMasks", masks);
+                shader.SetBuffer(kernel, "_TestDepthInputs", inputs);
+                shader.SetBuffer(kernel, "_TestCasterResults", results);
+                shader.SetTexture(kernel, "_VSMPrototypePhysicalPage", pool);
+                int clear = shader.FindKernel("ClearReceiverMaskedCaster");
+                shader.SetTexture(clear, "_VSMPrototypePhysicalPage", pool);
+                shader.Dispatch(clear, 1, 1, 1);
+                shader.SetInt("_TestDepthInputCount", 64);
+                shader.SetInt("_VSMReceiverMaskEnabled", 1);
+                shader.SetInt("_VSMPrototypePageSize", 8);
+                shader.SetInt("_VSMPrototypeVirtualResolution", 8);
+                shader.SetInt("_VSMPrototypePagesPerAxis", 1);
+                shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 1);
+                shader.SetInt("_VSMPrototypeCasterLayer", layer);
+                var actual = new uint4[64];
+                uint dirty = layer == 0 ? 4u : 1u << 15;
+                foreach (uint flags in new[] { 2u | dirty, 2u, 2u | dirty | (1u << 17) })
+                {
+                    metadata.SetData(new[] { new uint4(flags, 1, 0, 0) });
+                    shader.Dispatch(kernel, 1, 1, 1);
+                    results.GetData(actual);
+                    uint expected = flags == (2u | dirty) ? 1u : 0u;
+                    foreach (var value in actual) Assert.That(value.xyz, Is.EqualTo(new uint3(expected)));
+                }
+                var readback = UnityEngine.Rendering.AsyncGPUReadback.Request(pool, 0);
+                readback.WaitForCompletion();
+                Assert.That(readback.hasError, Is.False);
+                // Static goes to slice 1, dynamic to final slice 0. Every covered
+                // texel must be written, while the other slice stays untouched.
+                for (int i = 0; i < 128; i++)
+                    Assert.That(readback.GetData<uint>(i / 64)[i % 64],
+                        Is.EqualTo(i / 64 == (layer == 0 ? 1 : 0) ? math.asuint(.75f) : 0u));
+            }
+            finally { pool.Release(); Object.DestroyImmediate(pool); Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(1, 31)]
         [TestCase(2, 64)]
         [TestCase(4, 193)]

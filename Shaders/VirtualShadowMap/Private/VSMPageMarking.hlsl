@@ -237,21 +237,24 @@ void MarkVSMReceiverPageUE(float2 uv, int level, uint groupIndex)
     uint2 positive = (uint2)clamp((int2)(pagePosition + offset), 0, lastPage);
     uint2 negative = (uint2)clamp((int2)(pagePosition - offset), 0, lastPage);
     uint flags = kVSMPageRequested | kVSMPagePrimaryRequested;
-    if (level == _VSMProjectionCount - 1) flags |= kVSMPageCoarseRequested;
-    // Vivid clips dynamic raster per texel and checks completed masks on reads.
-    // UE's point-only mask cannot certify the surrounding SMRT samples here.
-    // Request complete pages until that producer contract is aligned as well.
-    EmitVSMReceiverPage(page, level, flags, 0xffffffffu);
-    if (any(positive != page)) EmitVSMReceiverPage(positive, level, flags, 0xffffffffu);
+    // Pixel requests remain detail requests even in the terminal clipmap.
+    // UE marks one receiver cell on the primary page. Dilation marks page flags
+    // only: masks cull dynamic caster bounds, never individual raster samples.
+    uint size = (uint)_VSMPrototypePageSize;
+    uint2 texel = min((uint2)(uv * _VSMPrototypeVirtualResolution),
+        (uint)_VSMPrototypeVirtualResolution - 1u) % size;
+    uint2 cell = min(texel * 8u / size, 7u);
+    uint bit = 1u << ((cell.y & 3u) * 8u + cell.x);
+    uint2 mask = cell.y < 4u ? uint2(bit, 0u) : uint2(0u, bit);
+    EmitVSMReceiverPage(page, level, flags, mask);
+    if (any(positive != page)) EmitVSMReceiverPage(positive, level, flags, 0u);
     if (any(negative != page) && any(negative != positive))
-        EmitVSMReceiverPage(negative, level, flags, 0xffffffffu);
+        EmitVSMReceiverPage(negative, level, flags, 0u);
 }
 
-void MarkVSMReceiverUE(float3 position, float3 normalWS, uint groupIndex)
+void MarkVSMReceiverUE(float3 position, uint groupIndex)
 {
     if (_VSMPrototypeRequestEnabled == 0 || _VSMProjectionCount <= 0) return;
-    // The hard/PCF reference keeps its complete footprint contract.
-    if (!UseVSMSMRT()) { MarkVSMReceiver(position, normalWS); return; }
     int level = SelectVSMClipmapLevel(position, true);
     if (level < 0) return;
     float3 coord = mul(_VSMProjections[level].worldToShadow, float4(position, 1)).xyz;
@@ -283,14 +286,11 @@ void VSMMarkReceiverPagesGrouped(uint3 id : SV_DispatchThreadID) { VSMMarkReceiv
 void VSMMarkReceiverPagesUE(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 {
     // UE PageMarkingPixelStrideX/Y = 2. C# dispatch uses the same strided extent.
-    if (!UseVSMSMRT()) { VSMMarkReceiverPages(id); return; }
     uint2 pixel = id.xy * 2u;
     if (pixel.x >= (uint)_CSMOutputWidth || pixel.y >= (uint)_CSMOutputHeight) return;
     float depth = _DepthTexture.Load(int3(pixel, 0));
     if (IsSkyPixel(depth)) return;
     float3 position = ReconstructWorldPosition(pixel, depth);
-    float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixel, 0)).xy);
-    normal = ReconstructVSMReceiverNormal(pixel, depth, position, normal);
-    MarkVSMReceiverUE(position, normal, groupIndex);
+    MarkVSMReceiverUE(position, groupIndex);
 }
 #endif

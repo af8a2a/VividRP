@@ -361,6 +361,26 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS)
     return ResolveVSMReceiver(positionWS, normalWS, uint2(0, 0));
 }
 
+// Dedicated full-screen VSM path. The caller selects this entry only when VSM
+// supplies the output; request-only rendering keeps the generic CSM entry.
+void ResolveVSMScreenPixel(uint3 id)
+{
+    // Every lane must reach the projection-cache barrier, including edge/sky lanes.
+    InitializeVSMSMRTProjections((id.x & 7u) + ((id.y & 7u) << 3u));
+    if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
+    float depth = _DepthTexture.Load(int3(id.xy, 0));
+    float shadow = 1.0;
+    if (!IsSkyPixel(depth))
+    {
+        float3 position = ReconstructWorldPosition(id.xy, depth);
+        float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(id.xy, 0)).xy);
+        normal = ReconstructVSMReceiverNormal(id.xy, depth, position, normal);
+        // Includes the complete VSM PCF fallback when SMRT coverage is unavailable.
+        shadow = ResolveVSMReceiver(position, normal, id.xy);
+    }
+    _DirectionalShadowTexture[id.xy] = shadow;
+}
+
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
 #include "VSMReceiverDebug.hlsl"
 #endif

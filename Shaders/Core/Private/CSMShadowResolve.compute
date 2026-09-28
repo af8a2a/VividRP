@@ -53,6 +53,7 @@
 #pragma kernel VSMBuildAvailableLevelHints
 #pragma kernel VSMShadowResolveHints VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_AVAILABLE_LEVEL_HINTS
 #pragma kernel VSMShadowResolveAdaptiveHints VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_AVAILABLE_LEVEL_HINTS
+#pragma kernel VSMShadowResolve VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE
 #pragma use_dxc
 #pragma require Native16Bit
 #define VIVID_VSM_SHADER_DEBUG_SYMBOLS 1
@@ -1286,18 +1287,25 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void VSMShadowResolveAdaptive(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    CSMShadowResolve(dispatchThreadID);
+    ResolveVSMScreenPixel(dispatchThreadID);
 }
 
 // Opt-in variants keep hint addressing/votes out of the baseline binaries.
 [numthreads(8, 8, 1)]
 void VSMShadowResolveHints(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    CSMShadowResolve(dispatchThreadID);
+    ResolveVSMScreenPixel(dispatchThreadID);
 }
 
 [numthreads(8, 8, 1)]
 void VSMShadowResolveAdaptiveHints(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    CSMShadowResolve(dispatchThreadID);
+    ResolveVSMScreenPixel(dispatchThreadID);
+}
+
+// Fixed-ray/PCF VSM resolve; appended to preserve all existing kernel indices.
+[numthreads(8, 8, 1)]
+void VSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(dispatchThreadID);
 }

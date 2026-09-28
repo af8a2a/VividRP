@@ -209,6 +209,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_PreviousViewProjection, m_PreviousView, m_CurrentView;
         private Vector4 m_VSMHistoryLayout, m_VSMHistoryFilterSettings;
         private int m_VSMTemporalKernel = -1;
+        private int m_VSMKernel = -1;
         private int m_VSMAdaptiveKernel = -1;
         private int m_VSMHintsKernel = -1;
         private int m_VSMAdaptiveHintsKernel = -1;
@@ -329,6 +330,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMBilateralFilterHKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterH");
             m_VSMBilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterV");
             m_VSMTemporalKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowTemporalV");
+            m_VSMKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolve");
             m_VSMAdaptiveKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptive");
             m_VSMHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveHints");
             m_VSMAdaptiveHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptiveHints");
@@ -639,7 +641,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_ShadowHistoryStates.Dispose();
             m_VSMTemporalKernel = -1;
-            m_VSMAdaptiveKernel = -1;
+            m_VSMKernel = m_VSMAdaptiveKernel = -1;
             m_VSMHintsKernel = m_VSMAdaptiveHintsKernel = -1;
             m_LevelHintShadowData = null;
             m_ResolveCompute = null;
@@ -689,9 +691,15 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(cmd,
                 m_VirtualShadowMapPrototypeActive ? VSMProfiling.ResolveTrace : null))
             {
-                int kernel = m_EnableAdaptiveRays ? m_VSMAdaptiveKernel : m_Kernel;
-                int hintsKernel = m_EnableAdaptiveRays ? m_VSMAdaptiveHintsKernel : m_VSMHintsKernel;
-                if (CanUseAvailableLevelHints && hintsKernel >= 0) kernel = hintsKernel;
+                int kernel = m_Kernel;
+                if (m_VirtualShadowMapPrototypeActive)
+                {
+                    // Request-only VSM must retain the generic CSM output path.
+                    int vsmKernel = m_EnableAdaptiveRays ? m_VSMAdaptiveKernel : m_VSMKernel;
+                    if (vsmKernel >= 0) kernel = vsmKernel;
+                    int hintsKernel = m_EnableAdaptiveRays ? m_VSMAdaptiveHintsKernel : m_VSMHintsKernel;
+                    if (CanUseAvailableLevelHints && hintsKernel >= 0) kernel = hintsKernel;
+                }
                 BindCommonTextures(cmd, kernel);
                 BindVSMHistory(cmd, kernel);
                 BindShadowParameters(cmd);

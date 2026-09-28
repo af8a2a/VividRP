@@ -321,8 +321,12 @@ namespace VividRP.Editor.Tests
             finally { UnityEngine.Object.DestroyImmediate(settings); }
         }
 
-        [Test]
-        public void SMRT_StableExplicitBlueNoiseBindingDoesNotAllocate()
+        [TestCase("CSMShadowResolve")]
+        [TestCase("VSMShadowResolve")]
+        [TestCase("VSMShadowResolveAdaptive")]
+        [TestCase("VSMShadowResolveHints")]
+        [TestCase("VSMShadowResolveAdaptiveHints")]
+        public void SMRT_StableExplicitBlueNoiseBindingDoesNotAllocate(string kernelName)
         {
             bool ownsBlueNoise = BlueNoise.Instance == null;
             BlueNoise.Initialize();
@@ -331,7 +335,7 @@ namespace VividRP.Editor.Tests
             {
                 var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                     "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
-                int kernel = shader.FindKernel("CSMShadowResolve");
+                int kernel = shader.FindKernel(kernelName);
                 var noise = BlueNoise.Instance;
                 for (int i = 0; i < 32; i++) { cmd.Clear(); noise.Bind(cmd, shader, kernel); }
                 long before = GC.GetAllocatedBytesForCurrentThread();

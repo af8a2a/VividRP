@@ -1,5 +1,9 @@
 # VividRP PIX agent workflow (M3)
 
+Project-local skill: [vivid-pix-workflow](../../.agents/skills/vivid-pix-workflow/SKILL.md).
+Invoke it with `$vivid-pix-workflow` for environment discovery, capture/analysis
+decisions, evidence checks and failure recovery.
+
 `vivid_pix_agent.py` coordinates Unity capture and the external analyzer using
 Python 3.10+ standard library, Unity CLI and the optional native tools. It produces
 `diagnosis.json` with selected evidence, limits and links to raw JSON; agents do

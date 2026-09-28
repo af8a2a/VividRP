@@ -88,18 +88,12 @@ bool VividTryResolveVSMPhysicalTexel(
     return true;
 }
 
-// Atomic insertion preserves the nearest distinct depths regardless of draw
-// order. A displaced surface continues into the next layer; equal values must
-// stop here so repeated triangles cannot consume the hidden-surface budget.
+// UE reversed-depth visibility: a single atomic max, no hidden-layer insertion.
 void VividInsertVSMDepth(uint2 texel, uint depth)
 {
-    for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT && depth != 0u; layer++)
-    {
-        uint previous;
-        InterlockedMax(_VSMPrototypePhysicalPage[uint3(texel, layer)], depth, previous);
-        if (previous == depth) break;
-        depth = min(previous, depth);
-    }
+    uint slice = _VSMPrototypeCasterLayer == 0
+        ? VIVID_VSM_STATIC_DEPTH_SLICE : VIVID_VSM_FINAL_DEPTH_SLICE;
+    InterlockedMax(_VSMPrototypePhysicalPage[uint3(texel, slice)], depth);
 }
 
 void VividWriteVSMDepth(float4 positionCS, uint cascadeIndex)

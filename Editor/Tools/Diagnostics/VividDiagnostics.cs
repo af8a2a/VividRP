@@ -47,7 +47,7 @@ namespace VividRP.Editor
             public string utc, unityVersion, projectPath, gpu, graphicsApi, settingsJson;
             public bool playing, compiling, updating, vsmActive;
             public string cameraId;
-            public int virtualResolution, physicalPages, depthLayers;
+            public int virtualResolution, physicalPages, depthLayers, physicalPoolSlices, finalDepthSlice, staticDepthSlice;
             public VSMBaselineSceneSnapshot scene;
             public string vsmScope = "Runtime state at snapshot time; outside a resolve callback it may belong to the last rendered camera.";
         }
@@ -188,7 +188,10 @@ namespace VividRP.Editor
                 vsmActive = VirtualShadowMapPrototypeRuntime.IsFrameActive,
                 virtualResolution = VirtualShadowMapPrototypeRuntime.VirtualResolution,
                 physicalPages = VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity,
-                depthLayers = VirtualShadowMapPrototypeRuntime.DepthLayerCount
+                depthLayers = VirtualShadowMapPrototypeRuntime.DepthLayerCount,
+                physicalPoolSlices = VirtualShadowMapPrototypeRuntime.PhysicalPoolArraySize,
+                finalDepthSlice = VirtualShadowMapPrototypeRuntime.FinalDepthSlice,
+                staticDepthSlice = VirtualShadowMapPrototypeRuntime.StaticDepthSlice
             };
             File.WriteAllText(Path.Combine(folder, name), JsonUtility.ToJson(snapshot, true));
         }
@@ -315,8 +318,7 @@ namespace VividRP.Editor
                     BufferReadback(cmd, VirtualShadowMapPrototypeRuntime.Projections.Buffer, "projections");
                     if (m_Request.includeDepthPools)
                     {
-                        TextureReadback(cmd, VirtualShadowMapPrototypeRuntime.StaticPhysicalPage.rt, "static-depth-pool", false);
-                        TextureReadback(cmd, VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage.rt, "dynamic-depth-pool", false);
+                        TextureReadback(cmd, VirtualShadowMapPrototypeRuntime.PhysicalPagePool.rt, "physical-depth-pool", false);
                     }
                     Result.observations = 1; Result.state = "readback";
                 }

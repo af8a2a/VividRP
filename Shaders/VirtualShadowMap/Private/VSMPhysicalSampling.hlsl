@@ -23,9 +23,9 @@ float VSMSMRTRayLength(int index)
 float VSMFilterGuard(int index, bool smrt)
 {
     float radius = _VSMReceiverParameters.x >= 0.5 ? 1.5 : 0;
-    if (smrt)
-        radius += VSMSMRTRayLength(index) * _VSMSMRTParameters.w
-            / _VSMProjections[index].parameters.x + 0.001;
+    // UE traces through coarser pages per sample. Only the receiver/dither
+    // support constrains the starting map; the full ray is not an edge guard.
+    if (smrt) radius += 0.001;
     return radius / _VSMPrototypeVirtualResolution;
 }
 
@@ -102,6 +102,7 @@ bool TryResolveVSMPhysicalTexel(float2 shadowUV, int cascadeIndex, out int2 phys
     return TryResolveVSMPhysicalTexel(virtualTexel, cascadeIndex, physicalTexel);
 }
 
+#if defined(VIVID_VSM_LEGACY_DEPTH_TESTS)
 uint2 LoadVSMDepthLayer(int2 physicalTexel, uint layer, uint pageFlags)
 {
     uint2 depths = 0u;
@@ -122,10 +123,16 @@ uint2 LoadVSMDepthLayer(int2 physicalTexel, uint layer, uint pageFlags)
     return depths;
 }
 
+#endif
+
 uint LoadCombinedVSMDepth(int2 physicalTexel, uint pageFlags)
 {
-    uint2 depths = LoadVSMDepthLayer(physicalTexel, 0, pageFlags);
-    return max(depths.x, depths.y);
+    // The final slice already contains max(static, dynamic), as in UE.
+    // DynamicEmpty now describes this final slice, not a separate dynamic-only pool.
+    VSM_COST_ADD(21, (pageFlags & kVSMPageDynamicEmpty) != 0u ? 1u : 0u);
+    if ((pageFlags & kVSMPageDynamicEmpty) != 0u) return 0u;
+    VSM_COST_ADD(17, 1u);
+    return _VSMPhysicalPagePool.Load(int4(physicalTexel, VIVID_VSM_FINAL_DEPTH_SLICE, 0));
 }
 
 // One hard comparison. Every offset tap resolves its own virtual page; this is

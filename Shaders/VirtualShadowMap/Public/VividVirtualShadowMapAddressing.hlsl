@@ -1,8 +1,14 @@
 #ifndef VIVIDRP_VIRTUAL_SHADOW_MAP_ADDRESSING_INCLUDED
 #define VIVIDRP_VIRTUAL_SHADOW_MAP_ADDRESSING_INCLUDED
 
-// Independent nearest surfaces; never fill the empty space between layers.
+// One depth per texel. Slice 0 is final depth; slice 1 is the static cache.
+#define VIVID_VSM_FINAL_DEPTH_SLICE 0u
+#define VIVID_VSM_STATIC_DEPTH_SLICE 1u
+#if defined(VIVID_VSM_LEGACY_DEPTH_TESTS)
 #define VIVID_VSM_DEPTH_LAYER_COUNT 16
+#else
+#define VIVID_VSM_DEPTH_LAYER_COUNT 1
+#endif
 #define VIVID_VSM_RASTER_MAX_LEVELS 16
 #define VIVID_VSM_RASTER_PAGE_HEADER_SIZE (1 + 2 * VIVID_VSM_RASTER_MAX_LEVELS)
 

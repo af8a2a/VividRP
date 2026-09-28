@@ -298,15 +298,19 @@ namespace VividRP.Editor.Tests
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(budget));
                 Assert.That(VirtualShadowMapPrototypeRuntime.RasterDepth.rt.volumeDepth, Is.EqualTo(windows ? 1 : budget));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.count, Is.EqualTo(budget));
-                Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage.rt.dimension, Is.EqualTo(TextureDimension.Tex2DArray));
-                Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage.rt.volumeDepth, Is.EqualTo(VirtualShadowMapPrototypeRuntime.DepthLayerCount));
-                Assert.That(VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage.rt.volumeDepth, Is.EqualTo(VirtualShadowMapPrototypeRuntime.DepthLayerCount));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPagePool.rt.dimension, Is.EqualTo(TextureDimension.Tex2DArray));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPagePool.rt.volumeDepth, Is.EqualTo(VirtualShadowMapPrototypeRuntime.PhysicalPoolArraySize));
                 Assert.That(VirtualShadowMapPrototypeRuntime.RasterDepth.rt.width,
                     Is.EqualTo(VirtualShadowMapPrototypeRuntime.PageSize * (windows ? 4 : 1)));
                 var raster = VirtualShadowMapPrototypeRuntime.RasterDepth;
-                var pool = VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
+                var pool = VirtualShadowMapPrototypeRuntime.PhysicalPagePool;
                 var workList = VirtualShadowMapPrototypeRuntime.PageWorkList;
                 var workArgs = VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs;
+                var mergeList = VirtualShadowMapPrototypeRuntime.MergePageWorkList;
+                var mergeArgs = VirtualShadowMapPrototypeRuntime.MergePageDispatchArgs;
+                Assert.That(mergeList.count, Is.EqualTo(budget));
+                Assert.That(mergeArgs.count, Is.EqualTo(3));
+                Assert.That(mergeArgs.target, Is.EqualTo(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments));
                 var remapMetadata = VirtualShadowMapPrototypeRuntime.RemapPageMetadata;
                 var requestFlags = VirtualShadowMapPrototypeRuntime.PageRequestFlags;
                 Assert.That(requestFlags.count, Is.EqualTo(VirtualShadowMapPrototypeRuntime.PageTableEntryCount));
@@ -322,9 +326,11 @@ namespace VividRP.Editor.Tests
                 long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
                 Assert.That(allocated, Is.Zero);
                 Assert.That(VirtualShadowMapPrototypeRuntime.RasterDepth, Is.SameAs(raster));
-                Assert.That(VirtualShadowMapPrototypeRuntime.StaticPhysicalPage, Is.SameAs(pool));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPagePool, Is.SameAs(pool));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkList, Is.SameAs(workList));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, Is.SameAs(workArgs));
+                Assert.That(VirtualShadowMapPrototypeRuntime.MergePageWorkList, Is.SameAs(mergeList));
+                Assert.That(VirtualShadowMapPrototypeRuntime.MergePageDispatchArgs, Is.SameAs(mergeArgs));
                 Assert.That(VirtualShadowMapPrototypeRuntime.RemapPageMetadata, Is.SameAs(remapMetadata));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PageRequestFlags, Is.SameAs(requestFlags));
                 VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);

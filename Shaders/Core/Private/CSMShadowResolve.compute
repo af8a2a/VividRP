@@ -54,6 +54,10 @@
 #pragma kernel VSMShadowResolveHints VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_AVAILABLE_LEVEL_HINTS
 #pragma kernel VSMShadowResolveAdaptiveHints VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_AVAILABLE_LEVEL_HINTS
 #pragma kernel VSMShadowResolve VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE
+#pragma kernel VSMMarkReceiverPagesUE VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUPED_MARKING
+#pragma kernel VSMResetMergePages
+#pragma kernel VSMSelectMergePages
+#pragma kernel VSMMergeStaticPhysicalPagesIndirect
 #pragma use_dxc
 #pragma require Native16Bit
 #define VIVID_VSM_SHADER_DEBUG_SYMBOLS 1
@@ -75,8 +79,11 @@
 Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;
 Texture2DArray<float> _CSMShadowAtlas;
+Texture2DArray<uint> _VSMPhysicalPagePool;
+#if defined(VIVID_VSM_LEGACY_DEPTH_TESTS)
 Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
 Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
+#endif
 StructuredBuffer<uint> _VSMPrototypePageTable;
 StructuredBuffer<uint> _VSMPossibleMappedLevels;
 RWStructuredBuffer<uint> _VSMPossibleMappedLevelsRW;
@@ -127,8 +134,10 @@ RWStructuredBuffer<uint4> _VSMPrototypeMeshletPageRequests;
 RWByteAddressBuffer _VSMPrototypeMeshletPageIndirectArgs;
 // Count followed by the relevant virtual pages (at most the physical budget).
 RWStructuredBuffer<uint> _VSMPrototypeMeshletRasterPages;
-RWTexture2DArray<uint> _VSMPrototypeStaticPhysicalPageRW;
-RWTexture2DArray<uint> _VSMPrototypeDynamicPhysicalPageRW;
+RWTexture2DArray<uint> _VSMPhysicalPagePoolRW;
+RWStructuredBuffer<uint> _VSMMergePageWorkListRW;
+StructuredBuffer<uint> _VSMMergePageWorkList;
+RWByteAddressBuffer _VSMMergePageDispatchArgsRW;
 RWTexture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _CSMShadowFilterSource;
 RWTexture2D<float> _CSMShadowFilterTexture;
@@ -158,7 +167,7 @@ float4   _CSMCascadeBorders;
 int      _CSMShadowQuality;
 int      _VSMPrototypeEnabled;
 float4   _VSMReceiverParameters; // PCF enabled, constant bias in texels, slope bias, stochastic filter
-float4   _VSMSMRTParameters; // ray count (zero disables), cells per clipmap segment, max world length, tan angular radius
+float4   _VSMSMRTParameters; // ray count (zero disables), fixed steps per whole ray, max world length, tan angular radius
 int      _VSMPrototypePageSize;
 int      _VSMPrototypeVirtualResolution;
 int      _VSMPrototypePagesPerAxis;

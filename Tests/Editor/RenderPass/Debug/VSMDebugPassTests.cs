@@ -114,9 +114,9 @@ namespace VividRP.Editor.Tests
             var pass = new VSMDebugPass();
             RenderGraphPassEnumParameterUtility.ApplyEnumParameters(pass, typeof(VSMDebugPass),
                 new List<RenderGraphPassEnumParameter> { new() { FieldName = "m_DepthLayer", Value = 15 } });
-            Assert.That(pass.DepthLayer, Is.EqualTo(15));
+            Assert.That(pass.DepthLayer, Is.Zero);
             pass.DepthLayer = 50;
-            Assert.That(pass.DepthLayer, Is.EqualTo(15));
+            Assert.That(pass.DepthLayer, Is.Zero);
             pass.DepthLayer = -1;
             Assert.That(pass.DepthLayer, Is.Zero);
         }
@@ -342,7 +342,7 @@ namespace VividRP.Editor.Tests
             var pool = new RenderTexture(new RenderTextureDescriptor(1, 1)
             {
                 graphicsFormat = GraphicsFormat.R32_UInt, depthStencilFormat = GraphicsFormat.None,
-                dimension = TextureDimension.Tex2DArray, volumeDepth = VirtualShadowMapPrototypeRuntime.DepthLayerCount,
+                dimension = TextureDimension.Tex2DArray, volumeDepth = VirtualShadowMapPrototypeRuntime.PhysicalPoolArraySize,
                 enableRandomWrite = true,
             });
             try
@@ -352,8 +352,7 @@ namespace VividRP.Editor.Tests
                 var properties = new MaterialPropertyBlock();
                 properties.SetInt("_VSMPrototypeAvailable", 0);
                 properties.SetInt("_VSMDebugVisualizationMode", (int)VSMDebugVisualizationMode.PageStates);
-                properties.SetTexture("_VSMPrototypeStaticPhysicalPage", pool);
-                properties.SetTexture("_VSMPrototypeDynamicPhysicalPage", pool);
+                properties.SetTexture("_VSMPhysicalPagePool", pool);
                 using var command = new CommandBuffer();
                 command.SetRenderTarget(target);
                 command.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Triangles, 3, 1, properties);
@@ -478,8 +477,7 @@ namespace VividRP.Editor.Tests
             Assert.That(File.Exists(path), Is.True, path);
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage", source);
-            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage", source);
+            StringAssert.Contains("Texture2DArray<uint> _VSMPhysicalPagePool", source);
             StringAssert.Contains("_VSMDebugDepthLayer", source);
             StringAssert.Contains("asfloat(rawDepth)", source);
             StringAssert.Contains("VIVID_VSM_DEBUG_OCCUPANCY", source);

@@ -12,12 +12,16 @@ namespace VividRP.Runtime.VirtualShadowMap
     internal static class VirtualShadowMapPrototypeRuntime
     {
         internal const int PageSize = 128;
-        internal const int DepthLayerCount = 16;
+        internal const int DepthLayerCount = 1;
+        // UE physical pool: slice 0 is final depth, slice 1 is the static cache.
+        internal const int PhysicalPoolArraySize = 2;
+        internal const int FinalDepthSlice = 0;
+        internal const int StaticDepthSlice = 1;
         // Match VIVID_VSM_RASTER_WINDOW_PAGES. The DSV only provides a viewport;
-        // all visibility depths go to the 16-layer UAV, with depth testing off.
+        // visibility depths are atomically accumulated in the two-slice UAV.
         internal const int RasterWindowPages = 4;
         // Experimental until page/window rasterization preserves the complete
-        // multi-depth set. Diagnostic callers must restore this after use.
+        // page-space raster coverage. Diagnostic callers must restore this after use.
         internal static bool ExperimentalPageWindows { get; set; }
         internal static int RasterWindowScale => ExperimentalPageWindows ? RasterWindowPages : 1;
         internal const int DefaultPhysicalPageCount = 256;
@@ -38,8 +42,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             public uint DebugSnapshotFlags;
         }
 
-        private static RTHandle s_StaticPhysicalPage;
-        private static RTHandle s_DynamicPhysicalPage;
+        private static RTHandle s_PhysicalPagePool;
         private static RTHandle s_RasterDepth;
         private static RTHandle s_UnityRasterDepth;
         internal static readonly VirtualShadowMapProjectionSet Projections = new();
@@ -71,6 +74,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_AllocatorCounters;
         private static GraphicsBuffer s_AllocationRequests;
         private static GraphicsBuffer s_AllocationSummary;
+        private static GraphicsBuffer s_MergePageWorkList;
+        private static GraphicsBuffer s_MergePageDispatchArgs;
         private static GraphicsBuffer s_PageWorkList;
         private static GraphicsBuffer s_PageWorkDispatchArgs;
         private static GraphicsBuffer s_ProductionFeedback;
@@ -115,8 +120,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static uint s_DynamicShadowRevision;
         private static bool s_LoggedUnsupportedPlatform;
 
-        internal static RTHandle StaticPhysicalPage => s_StaticPhysicalPage;
-        internal static RTHandle DynamicPhysicalPage => s_DynamicPhysicalPage;
+        internal static RTHandle PhysicalPagePool => s_PhysicalPagePool;
         internal static RTHandle RasterDepth => s_RasterDepth;
         internal static RTHandle UnityRasterDepth => s_UnityRasterDepth;
         internal static GraphicsBuffer RemapPageMetadata => s_RemapPageMetadata;
@@ -136,6 +140,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static GraphicsBuffer AllocatorCounters => s_AllocatorCounters;
         internal static GraphicsBuffer AllocationRequests => s_AllocationRequests;
         internal static GraphicsBuffer AllocationSummary => s_AllocationSummary;
+        internal static GraphicsBuffer MergePageWorkList => s_MergePageWorkList;
+        internal static GraphicsBuffer MergePageDispatchArgs => s_MergePageDispatchArgs;
         internal static GraphicsBuffer PageWorkList => s_PageWorkList;
         internal static GraphicsBuffer PageWorkDispatchArgs => s_PageWorkDispatchArgs;
         internal static GraphicsBuffer ProductionFeedback => s_ProductionFeedback;
@@ -258,28 +264,17 @@ namespace VividRP.Runtime.VirtualShadowMap
             if (!supportsFormat)
                 return false;
 
-            if (s_StaticPhysicalPage == null || s_StaticPhysicalPage.rt == null)
+            if (s_PhysicalPagePool == null || s_PhysicalPagePool.rt == null)
             {
-                s_StaticPhysicalPage?.Release();
-                s_StaticPhysicalPage = AllocatePhysicalPage(
+                s_PhysicalPagePool?.Release();
+                s_PhysicalPagePool = AllocatePhysicalPage(
                     PageSize,
                     PageSize,
-                    "VSMPrototypeStaticPhysicalPage");
+                    "VSMPhysicalPagePool");
                 InvalidateCache();
             }
 
-            if (s_DynamicPhysicalPage == null || s_DynamicPhysicalPage.rt == null)
-            {
-                s_DynamicPhysicalPage?.Release();
-                s_DynamicPhysicalPage = AllocatePhysicalPage(
-                    PageSize,
-                    PageSize,
-                    "VSMPrototypeDynamicPhysicalPage");
-                InvalidateCache();
-            }
-
-            return s_StaticPhysicalPage?.rt != null
-                && s_DynamicPhysicalPage?.rt != null
+            return s_PhysicalPagePool?.rt != null
                 && s_PageTable?.IsValid() == true
                 && s_PageMetadata?.IsValid() == true
                 && s_PhysicalPageOwners?.IsValid() == true
@@ -580,16 +575,11 @@ namespace VividRP.Runtime.VirtualShadowMap
             }
 
             s_LoggedUnsupportedPlatform = false;
-            bool configurationMatches = s_StaticPhysicalPage != null
-                && s_StaticPhysicalPage.rt != null
-                && s_StaticPhysicalPage.rt.width == physicalPageWidth
-                && s_StaticPhysicalPage.rt.height == physicalPageHeight
-                && s_StaticPhysicalPage.rt.volumeDepth == DepthLayerCount
-                && s_DynamicPhysicalPage != null
-                && s_DynamicPhysicalPage.rt != null
-                && s_DynamicPhysicalPage.rt.width == physicalPageWidth
-                && s_DynamicPhysicalPage.rt.height == physicalPageHeight
-                && s_DynamicPhysicalPage.rt.volumeDepth == DepthLayerCount
+            bool configurationMatches = s_PhysicalPagePool != null
+                && s_PhysicalPagePool.rt != null
+                && s_PhysicalPagePool.rt.width == physicalPageWidth
+                && s_PhysicalPagePool.rt.height == physicalPageHeight
+                && s_PhysicalPagePool.rt.volumeDepth == PhysicalPoolArraySize
                 && s_RasterDepth != null
                 && s_RasterDepth.rt != null
                 && s_RasterDepth.rt.width == PageSize * RasterWindowScale
@@ -631,6 +621,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_AllocationRequests.count == CoreUtils.DivRoundUp(pageTableEntryCount, 32)
                 && s_AllocationSummary != null && s_AllocationSummary.IsValid()
                 && s_AllocationSummary.count == CoreUtils.DivRoundUp(pageTableEntryCount, 2048)
+                && s_MergePageWorkList?.IsValid() == true && s_MergePageWorkList.count == physicalPageCapacity
+                && s_MergePageDispatchArgs?.IsValid() == true && s_MergePageDispatchArgs.count == 3
                 && s_PageWorkList != null && s_PageWorkList.IsValid()
                 && s_PageWorkList.count == physicalPageCapacity * 2
                 && s_PageWorkDispatchArgs != null && s_PageWorkDispatchArgs.IsValid()
@@ -659,14 +651,10 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_PhysicalPageWidth = physicalPageWidth;
             s_PhysicalPageHeight = physicalPageHeight;
 
-            s_StaticPhysicalPage = AllocatePhysicalPage(
+            s_PhysicalPagePool = AllocatePhysicalPage(
                 physicalPageWidth,
                 physicalPageHeight,
-                "VSMPrototypeStaticPhysicalPage");
-            s_DynamicPhysicalPage = AllocatePhysicalPage(
-                physicalPageWidth,
-                physicalPageHeight,
-                "VSMPrototypeDynamicPhysicalPage");
+                "VSMPhysicalPagePool");
 
             s_UnityRasterDepth = RTHandles.Alloc(unityRasterSize, unityRasterSize,
                 depthBufferBits: DepthBits.Depth32, colorFormat: GraphicsFormat.None,
@@ -735,15 +723,17 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_ProductionFeedback = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, sizeof(uint) * 4)
             { name = "VSMProductionFeedback" };
             s_ProductionFeedback.SetData(s_ProductionFeedbackUpload);
+            s_MergePageWorkList = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
+                physicalPageCapacity, sizeof(uint)) { name = "VSMMergePageWorkList" };
+            s_MergePageDispatchArgs = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
+                3, sizeof(uint)) { name = "VSMMergePageDispatchArgs" };
             s_PageWorkList = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
                 physicalPageCapacity * 2, sizeof(uint)) { name = "VSMPageWorkList" };
             s_PageWorkDispatchArgs = new GraphicsBuffer(
                 GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
                 6, sizeof(uint)) { name = "VSMPageWorkDispatchArgs" };
-            return s_StaticPhysicalPage != null
-                && s_StaticPhysicalPage.rt != null
-                && s_DynamicPhysicalPage != null
-                && s_DynamicPhysicalPage.rt != null
+            return s_PhysicalPagePool != null
+                && s_PhysicalPagePool.rt != null
                 && s_RasterDepth != null
                 && s_RasterDepth.rt != null
                 && s_PageTable != null
@@ -986,10 +976,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_RemapPageMetadata?.Dispose();
             s_RemapPageMetadata = null;
             InvalidateCache();
-            s_StaticPhysicalPage?.Release();
-            s_StaticPhysicalPage = null;
-            s_DynamicPhysicalPage?.Release();
-            s_DynamicPhysicalPage = null;
+            s_PhysicalPagePool?.Release();
+            s_PhysicalPagePool = null;
             s_RasterDepth?.Release();
             s_RasterDepth = null;
             s_UnityRasterDepth?.Release();
@@ -1017,6 +1005,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_AllocationSummary?.Dispose();
             s_AllocationSummary = null;
             s_ProductionFeedback?.Dispose(); s_ProductionFeedback = null;
+            s_MergePageWorkList?.Dispose(); s_MergePageWorkList = null;
+            s_MergePageDispatchArgs?.Dispose(); s_MergePageDispatchArgs = null;
             s_PageWorkList?.Dispose();
             s_PageWorkList = null;
             s_PageWorkDispatchArgs?.Dispose();
@@ -1050,7 +1040,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             return RTHandles.Alloc(
                 width,
                 height,
-                slices: DepthLayerCount,
+                slices: PhysicalPoolArraySize,
                 depthBufferBits: DepthBits.None,
                 colorFormat: GraphicsFormat.R32_UInt,
                 filterMode: FilterMode.Point,

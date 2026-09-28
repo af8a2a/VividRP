@@ -1313,6 +1313,9 @@ void RunVSMBuildPageWorkLists(uint lane)
         uint slot = key.z, owner = key.w;
         if (slot >= capacity || owner == 0u) continue;
         uint flags = _VSMPrototypePageMetadata[owner - 1u].x & ~kVSMPageDeferred;
+        // UE: changing the static cache invalidates final depth as well. Without
+        // clearing/re-rendering it, removed static occluders remain in max(static,dynamic).
+        if ((flags & kVSMPageDirty) != 0u) flags |= kVSMPageDynamicDirty;
         bool dirty = (flags & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u;
         bool selected = dirty && rank < budget && key.x != 0xffffffffu;
         if (coarseReady)
@@ -1384,13 +1387,13 @@ void ClearVSMPhysicalPage(uint physicalPageIndex, uint2 texel)
         physicalPageIndex / (uint)_VSMPrototypePhysicalPagesPerRow);
     uint2 physicalTexel = physicalPage * (uint)_VSMPrototypePageSize
         + texel;
-    for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
-    {
-        if ((flags & kVSMPageDynamicDirty) != 0u)
-            _VSMPrototypeDynamicPhysicalPageRW[uint3(physicalTexel, layer)] = 0u;
-        if ((flags & kVSMPageDirty) != 0u)
-            _VSMPrototypeStaticPhysicalPageRW[uint3(physicalTexel, layer)] = 0u;
-    }
+    bool staticUncached = (flags & kVSMPageDirty) != 0u;
+    if (staticUncached)
+        _VSMPhysicalPagePoolRW[uint3(physicalTexel, VIVID_VSM_STATIC_DEPTH_SLICE)] = 0u;
+    // Static-cached pages initialize final depth from static, then raster dynamic.
+    // Static-uncached pages initialize both slices to zero, then merge after raster.
+    _VSMPhysicalPagePoolRW[uint3(physicalTexel, VIVID_VSM_FINAL_DEPTH_SLICE)] = staticUncached ? 0u
+        : _VSMPhysicalPagePoolRW[uint3(physicalTexel, VIVID_VSM_STATIC_DEPTH_SLICE)];
 }
 
 [numthreads(8, 8, 1)]
@@ -1423,7 +1426,7 @@ void VSMPrototypeFinalizeDirtyPages(
 
     uint redrawn = metadata.x & (kVSMPageDirty | kVSMPageDynamicDirty);
     if (_VSMReceiverMaskEnabled != 0 && (redrawn & kVSMPageDynamicDirty) != 0u)
-        // The dynamic page was cleared in full, so replace, never OR coverage.
+        // The final page was initialized in full, so replace, never OR coverage.
         // Deferred pages return above and cannot publish unproduced coverage.
         _VSMPhysicalReceiverMasks[metadata.y - 1u] = _VSMPageReceiverMasks[virtualPageIndex];
     metadata.x = (metadata.x | kVSMPageCached) & ~(kVSMPageDirty | kVSMPageDynamicDirty);
@@ -1434,8 +1437,8 @@ void VSMPrototypeFinalizeDirtyPages(
 
 groupshared uint g_VSMPageNonempty;
 
-// Run after both raster pools and before finalizing dirty pages. Ordered depth
-// insertion guarantees that an empty first layer has no hidden nonzero layers.
+// Run after raster and static merge, before publishing completed pages.
+// Occupancy describes the static cache and the final single-depth slices.
 void ReduceVSMPageOccupancy(uint physicalPageIndex, uint lane)
 {
     if (physicalPageIndex >= (uint)_VSMPrototypePhysicalPageCapacity) return;
@@ -1467,9 +1470,9 @@ void ReduceVSMPageOccupancy(uint physicalPageIndex, uint lane)
     {
         int4 address = int4(origin + uint2(texel % size, texel / size), 0, 0);
         if (scanStatic && (nonempty & 1u) == 0u
-            && _VSMPrototypeStaticPhysicalPage.Load(address) != 0u) nonempty |= 1u;
+            && _VSMPhysicalPagePool.Load(int4(address.xy, VIVID_VSM_STATIC_DEPTH_SLICE, 0)) != 0u) nonempty |= 1u;
         if (scanDynamic && (nonempty & 2u) == 0u
-            && _VSMPrototypeDynamicPhysicalPage.Load(address) != 0u) nonempty |= 2u;
+            && _VSMPhysicalPagePool.Load(int4(address.xy, VIVID_VSM_FINAL_DEPTH_SLICE, 0)) != 0u) nonempty |= 2u;
         if ((!scanDynamic || (nonempty & 2u) != 0u) && (!scanStatic || (nonempty & 1u) != 0u)) break;
     }
     InterlockedOr(g_VSMPageNonempty, nonempty);
@@ -1594,4 +1597,54 @@ void VSMBuildAvailableLevelHints(uint3 id : SV_DispatchThreadID)
     uint level = id.x / (axis * axis);
     uint local = id.x % (axis * axis);
     _VSMPossibleMappedLevelsRW[id.x] = BuildVSMPossibleMappedLevels(level, uint2(local % axis, local / axis));
+}
+
+// UE SelectPagesToMergeCS / MergeStaticPhysicalPagesIndirectCS. Reset even on
+// zero-work frames so no stale indirect dispatch or list entry can survive.
+[numthreads(1, 1, 1)]
+void VSMResetMergePages(uint3 id : SV_DispatchThreadID)
+{
+    uint tiles = ((uint)_VSMPrototypePageSize + 31u) / 32u;
+    _VSMMergePageDispatchArgsRW.Store3(0u, uint3(tiles, tiles, 0u));
+}
+
+[numthreads(64, 1, 1)]
+void VSMSelectMergePages(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = id.x;
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    if (owner == 0u) return;
+    uint flags = _VSMPrototypePageMetadata[owner - 1u].x;
+    if ((flags & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDeferred)) != (kVSMPageAllocated | kVSMPageDirty)) return;
+    uint count = WaveActiveCountBits(true), prefix = WavePrefixCountBits(true), baseIndex = 0u;
+    if (WaveIsFirstLane()) _VSMMergePageDispatchArgsRW.InterlockedAdd(8u, count, baseIndex);
+    _VSMMergePageWorkListRW[WaveReadLaneFirst(baseIndex) + prefix] = slot;
+}
+
+void MergeVSMPhysicalPixel(uint2 pixel)
+{
+    _VSMPhysicalPagePoolRW[uint3(pixel, VIVID_VSM_FINAL_DEPTH_SLICE)] = max(
+        _VSMPhysicalPagePoolRW[uint3(pixel, VIVID_VSM_FINAL_DEPTH_SLICE)],
+        _VSMPhysicalPagePoolRW[uint3(pixel, VIVID_VSM_STATIC_DEPTH_SLICE)]);
+}
+
+[numthreads(16, 16, 1)]
+void VSMMergeStaticPhysicalPagesIndirect(uint3 group : SV_GroupID, uint2 lane : SV_GroupThreadID)
+{
+    uint slot = _VSMMergePageWorkList[group.z];
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    if (owner == 0u) return;
+    uint flags = _VSMPrototypePageMetadata[owner - 1u].x;
+    if ((flags & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDeferred)) != (kVSMPageAllocated | kVSMPageDirty)) return;
+    uint size = (uint)_VSMPrototypePageSize, row = (uint)_VSMPrototypePhysicalPagesPerRow;
+    uint2 origin = uint2(slot % row, slot / row) * size;
+    uint2 base = group.xy * 32u + lane * 2u;
+    [unroll] for (uint y = 0u; y < 2u; y++)
+        [unroll] for (uint x = 0u; x < 2u; x++)
+        {
+            uint2 texel = base + uint2(x, y);
+            if (all(texel < size)) MergeVSMPhysicalPixel(origin + texel);
+        }
 }

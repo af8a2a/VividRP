@@ -44,19 +44,19 @@ namespace VividRP.Runtime
         public BoolParameter virtualShadowMapPCF = new(false);
         [Tooltip("Experimental nine-comparison stratified disk filter with frame-varying samples. Requires VSM PCF; radius is one virtual texel. Intended for comparison with area PCF under temporal anti-aliasing.")]
         public BoolParameter virtualShadowMapStochasticFiltering = new(false);
-        [Tooltip("Experimental directional SMRT contact-hardening soft shadows. Uses the light's Angular Diameter (clamped to 10 degrees for SMRT); zero angle preserves the PCF/hard reference. Incomplete footprints retry coarser levels, then the reference filter.")]
+        [Tooltip("Experimental directional SMRT contact-hardening soft shadows. Uses the light's Angular Diameter (clamped to 10 degrees for SMRT); zero angle preserves the PCF/hard reference. Uses UE-style fixed-step single-layer tracing and depth-history gap filling. Missing samples try coarser pages, then are skipped; thin or hidden occluders may be missed.")]
         public BoolParameter virtualShadowMapSMRT = new(false);
         [Tooltip("Distribute SMRT samples across TSR jitter cycles to reduce persistent shadow grain. May slightly increase temporal noise. Has no effect without active TSR.")]
         public BoolParameter virtualShadowMapSMRTJointSampling = new(false);
         [Tooltip("Accumulate a short, depth/normal-validated shadow history with current-frame clamping. Requires Screen Space Denoise and SMRT; independent of camera anti-aliasing.")]
         public BoolParameter virtualShadowMapSMRTTemporalDenoise = new(true);
-        [Tooltip("Use current-frame wave votes to stop after one ray in uniformly lit regions or at least two rays in uniformly shadowed regions. Mixed or unavailable waves keep the full budget. Independent of temporal denoising; may change penumbra noise.")]
+        [Tooltip("Use current-frame wave votes to stop after one ray in uniformly lit regions or at least two rays in uniformly shadowed regions. Mixed waves keep the full budget. Invalid ray samples are skipped. Independent of temporal denoising; may change penumbra noise.")]
         public BoolParameter virtualShadowMapSMRTAdaptiveRays = new(true);
         [Tooltip("Maximum rays per shadow estimate. Adaptive Rays can stop uniformly lit/shadowed waves early; disabling it uses the full count.")]
         public ClampedIntParameter virtualShadowMapSMRTRayCount = new(4, 4, 8);
-        [Tooltip("Depth-cell budget per intermediate clipmap segment. Longer rays continue through coarser levels along the same direction. The coarsest map visits enough cells to finish the configured world length, so total reads can exceed this value. More samples retain fine detail farther from the receiver.")]
+        [Tooltip("UE fixed-step count for the whole ray. Traces from far to near with squared spacing, plus one sample at the receiver (at most N+1 positions). Coarse fallback can probe multiple page tables at each position.")]
         public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 4, 8);
-        [Tooltip("Maximum distance in world units over which rays diverge. Fine-to-coarse clipmap continuation preserves this distance independently of texel size and segment budget. Beyond this explicit limit rays continue parallel to the light; incomplete map coverage or residency retries the reference filter.")]
+        [Tooltip("Length of the normalized SMRT ray in world units. No parallel tail is traced. This is Vivid's world-length control, not UE's view-distance scale; large lengths with few steps may skip occluders.")]
         public ClampedFloatParameter virtualShadowMapSMRTMaxRayLength = new(10, 0.1f, 100);
         [Tooltip("Width of transitions across fractional LOD steps with Screen Density, or selection radii with legacy selection. 0 disables this component of blending.")]
         public ClampedFloatParameter virtualShadowMapTransition = new(0.2f, 0f, 0.5f);

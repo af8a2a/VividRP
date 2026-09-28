@@ -1,0 +1,13 @@
+#pragma kernel InsertTestDepth
+#pragma use_dxc
+#define VIVID_VSM_CASTER 1
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapCaster.hlsl"
+StructuredBuffer<uint4> _TestDepthInputs;
+uint _TestDepthInputCount;
+[numthreads(64, 1, 1)]
+void InsertTestDepth(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _TestDepthInputCount) return;
+    uint4 input = _TestDepthInputs[id.x];
+    VividInsertVSMDepth(input.xy, input.z);
+}

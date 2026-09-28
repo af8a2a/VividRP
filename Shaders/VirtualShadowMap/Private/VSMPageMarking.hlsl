@@ -184,7 +184,9 @@ VSMReceiverPageFootprint BuildVSMSMRTPageFootprint(float3 position, VividVSMProj
     int level, uint role)
 {
     float2 center = mul(p.worldToShadow, float4(position, 1)).xy;
-    float radius = VSMSMRTRayLength(level) * _VSMSMRTParameters.w / p.parameters.x;
+    // Every sampled position may fall back to this map, so mark the full
+    // normalized ray support, not the former per-clipmap DDA segment.
+    float radius = _VSMSMRTParameters.z * _VSMSMRTParameters.w / p.parameters.x;
     float originGuard = (_VSMReceiverParameters.x >= 0.5 ? 1.5 : 0) + abs(p.parameters.y);
     int halo = (int)ceil(radius + originGuard + 0.001);
     float guard = (float)halo / _VSMPrototypeVirtualResolution;
@@ -239,6 +241,48 @@ void MarkVSMReceiver(float3 position, float3 normalWS)
     }
 }
 
+// UE VirtualShadowMapPageMarking.ush::MarkPage and GeneratePageFlagsFromPixels.
+// Bound demand to the selected page plus two dithered diagonal neighbours.
+// The border default (0.05 page) comes from VirtualShadowMapArray.cpp.
+void MarkVSMReceiverPageUE(float2 uv, int level, uint groupIndex)
+{
+    if (any(uv < 0.0) || any(uv >= 1.0)) return;
+    float2 pagePosition = uv * _VSMPrototypePagesPerAxis;
+    int2 lastPage = _VSMPrototypePagesPerAxis - 1;
+    uint2 page = min((uint2)pagePosition, (uint2)lastPage);
+    float2 offset = 0.05 * float2((groupIndex & 1u) != 0u ? 1.0 : -1.0,
+        (groupIndex & 2u) != 0u ? 1.0 : -1.0);
+    uint2 positive = (uint2)clamp((int2)(pagePosition + offset), 0, lastPage);
+    uint2 negative = (uint2)clamp((int2)(pagePosition - offset), 0, lastPage);
+    uint flags = kVSMPageRequested | kVSMPagePrimaryRequested;
+    if (level == _VSMProjectionCount - 1) flags |= kVSMPageCoarseRequested;
+    // Vivid clips dynamic raster per texel and checks completed masks on reads.
+    // UE's point-only mask cannot certify the surrounding SMRT samples here.
+    // Request complete pages until that producer contract is aligned as well.
+    EmitVSMReceiverPage(page, level, flags, 0xffffffffu);
+    if (any(positive != page)) EmitVSMReceiverPage(positive, level, flags, 0xffffffffu);
+    if (any(negative != page) && any(negative != positive))
+        EmitVSMReceiverPage(negative, level, flags, 0xffffffffu);
+}
+
+void MarkVSMReceiverUE(float3 position, float3 normalWS, uint groupIndex)
+{
+    if (_VSMPrototypeRequestEnabled == 0 || _VSMProjectionCount <= 0) return;
+    // The hard/PCF reference keeps its complete footprint contract.
+    if (!UseVSMSMRT()) { MarkVSMReceiver(position, normalWS); return; }
+    float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-8));
+    float blend;
+    bool unused;
+    VSMReceiverProjection selected;
+    // Use the same density/pressure/coverage choice as Resolve. UE's distance
+    // LOD policy needs a joint marking+sampling change, not a marking-only swap.
+    int level = SelectVSMMarkingStart(position, normal, true, blend, selected, unused);
+    if (level < 0) return;
+    if (_VSMReceiverQuality.x <= 0) selected = PrepareVSMReceiverProjection(position, normal, level);
+    if (selected.coord.z < 0 || selected.coord.z > 1) return;
+    MarkVSMReceiverPageUE(selected.coord.xy, level, groupIndex);
+}
+
 #if defined(VIVID_VSM_MARK_RECEIVERS)
 [numthreads(8, 8, 1)]
 void VSMMarkReceiverPages(uint3 id : SV_DispatchThreadID)
@@ -256,4 +300,21 @@ void VSMMarkReceiverPages(uint3 id : SV_DispatchThreadID)
 #if defined(VIVID_VSM_GROUPED_MARKING) && defined(VIVID_VSM_MARK_RECEIVERS)
 [numthreads(8, 8, 1)]
 void VSMMarkReceiverPagesGrouped(uint3 id : SV_DispatchThreadID) { VSMMarkReceiverPages(id); }
+#endif
+
+#if defined(VIVID_VSM_MARK_RECEIVERS)
+[numthreads(8, 8, 1)]
+void VSMMarkReceiverPagesUE(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
+{
+    // UE PageMarkingPixelStrideX/Y = 2. C# dispatch uses the same strided extent.
+    if (!UseVSMSMRT()) { VSMMarkReceiverPages(id); return; }
+    uint2 pixel = id.xy * 2u;
+    if (pixel.x >= (uint)_CSMOutputWidth || pixel.y >= (uint)_CSMOutputHeight) return;
+    float depth = _DepthTexture.Load(int3(pixel, 0));
+    if (IsSkyPixel(depth)) return;
+    float3 position = ReconstructWorldPosition(pixel, depth);
+    float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixel, 0)).xy);
+    normal = ReconstructVSMReceiverNormal(pixel, depth, position, normal);
+    MarkVSMReceiverUE(position, normal, groupIndex);
+}
 #endif

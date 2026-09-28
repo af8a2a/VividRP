@@ -3,6 +3,9 @@
 #pragma kernel InspectSMRTSamples
 #pragma kernel TraceSMRTRays
 #pragma kernel TraceSMRTClipmaps
+#pragma kernel TraceSMRTClipmapsLegacy
+#pragma kernel InspectSMRTTraceHistory
+#pragma kernel InspectSMRTClipmapSample
 #pragma kernel FilterSMRTFootprints
 #pragma kernel SampleTaps
 #pragma kernel ResolveReceivers
@@ -36,8 +39,14 @@
 #pragma kernel InspectVSMStableDepth
 #pragma kernel InspectVSMStableRasterGrid
 #pragma kernel FilterSMRTFootprintsCached VIVID_VSM_GROUP_PROJECTION_CACHE
+#pragma kernel MarkUEReceiverInputs VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUPED_MARKING
+#pragma kernel MarkUEPageInputs VIVID_VSM_MARK_RECEIVERS VIVID_VSM_GROUPED_MARKING
 #pragma use_dxc
 #pragma require Native16Bit
+
+#define VIVID_VSM_LEGACY_DEPTH_TESTS 1
+#pragma kernel UploadTestFinalPool
+#pragma kernel UploadUnifiedPool
 
 // Exercise the shipping functions, not a second shader implementation.
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"
@@ -354,6 +363,59 @@ void TraceSMRTClipmaps(uint3 id : SV_DispatchThreadID)
     _SamplingResults[id.x] = float2(valid ? 1 : 0, visibility);
 }
 
+[numthreads(64, 1, 1)]
+void TraceSMRTClipmapsLegacy(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    float visibility;
+    bool valid = TryTraceVSMSMRTClipmapsLegacy(input.xyz, _SamplingNormals[id.x].xy,
+        0.05, (int)_VSMSMRTParameters.y, (int)input.w, visibility);
+    _SamplingResults[id.x] = float2(valid ? 1 : 0, visibility);
+}
+
+// Sequence contract tests instantiate the shipping UE template directly.
+struct VSMTraceHistoryTestState { int mode; int calls; };
+VSMSMRTSample VSMSMRTFindSample(inout VSMTraceHistoryTestState state, float time)
+{
+    VSMSMRTSample sample = (VSMSMRTSample)0;
+    sample.ReferenceDepth = .2 + .5 * time;
+    sample.SampleDepth = state.mode == 1 || state.mode == 3 ? 2 : -1;
+    sample.bValid = state.mode != 0 && (state.mode != 3 || state.calls >= 4);
+    if (state.mode == 4) sample.SampleDepth = sample.ReferenceDepth;
+    if (state.mode == 5) { sample.SampleDepth = .3; sample.bValid = time == 0; }
+    state.calls++;
+    return sample;
+}
+#define VIVID_SMRT_TEMPLATE_RAY_STRUCT VSMTraceHistoryTestState
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMSMRTTraceTemplate.hlsl"
+#undef VIVID_SMRT_TEMPLATE_RAY_STRUCT
+
+[numthreads(64, 1, 1)]
+void InspectSMRTTraceHistory(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x]; // pattern, NumSteps, StepOffset
+    VSMTraceHistoryTestState state = (VSMTraceHistoryTestState)0;
+    state.mode = (int)input.x;
+    VSMSMRTResult result = VSMSMRTRayCast(state, (int)input.y, input.z);
+    _SamplingResults[id.x] = float2(result.bValidHit ? result.HitDepth : -1, state.calls);
+}
+
+[numthreads(64, 1, 1)]
+void InspectSMRTClipmapSample(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    VSMSMRTClipmapRayState state = (VSMSMRTClipmapRayState)0;
+    state.index = (int)input.w;
+    state.projection = GetVSMSMRTProjection(state.index);
+    state.RayStartUVZ = input.xyz;
+    state.RayStepUVZ = _SamplingNormals[id.x].xyz;
+    VSMSMRTSample sample = VSMSMRTFindSample(state, _SamplingNormals[id.x].w);
+    _SamplingResults[id.x] = float2(sample.bValid, sample.SampleDepth);
+}
+
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
 [numthreads(64, 1, 1)]
 void FilterSMRTAdaptive(uint3 id : SV_DispatchThreadID)
@@ -504,4 +566,35 @@ void FilterSMRTFootprintsCached(uint3 id : SV_DispatchThreadID)
 {
     InitializeVSMSMRTProjections(id.x & 63u);
     FilterSMRTFootprints(id);
+}
+
+[numthreads(64, 1, 1)]
+void MarkUEReceiverInputs(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    MarkVSMReceiverUE(_SamplingInputs[id.x].xyz, _SamplingNormals[id.x].xyz, id.x & 63u);
+}
+
+[numthreads(64, 1, 1)]
+void MarkUEPageInputs(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 input = _SamplingInputs[id.x];
+    MarkVSMReceiverPageUE(input.xy, (int)input.z, (uint)input.w);
+}
+
+RWTexture2DArray<uint> _TestPhysicalPool;
+[numthreads(8, 8, 1)]
+void UploadTestFinalPool(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= 16u)) return;
+    uint i = id.y * 16u + id.x;
+    _TestPhysicalPool[uint3(id.xy, 1)] = _TestStaticData[i];
+    _TestPhysicalPool[uint3(id.xy, 0)] = max(_TestStaticData[i], _TestDynamicData[i]);
+}
+[numthreads(8, 8, 1)]
+void UploadUnifiedPool(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= 16u) || id.z >= 2u) return;
+    _TestPhysicalPool[id] = _TestStaticData[id.z * 256u + id.y * 16u + id.x];
 }

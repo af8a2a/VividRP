@@ -16,6 +16,8 @@ namespace VividRP.Editor.Tests
     {
         // Tiny pages make every edge/corner testable; production uses the same
         // functions with 128-texel pages. Physical slots are deliberately shuffled.
+        private const int LegacyDepthLayerCount = 16; // Historical trace oracle only.
+
         private sealed class Fixture : IDisposable
         {
             internal readonly ComputeShader Shader;
@@ -24,7 +26,7 @@ namespace VividRP.Editor.Tests
             internal readonly uint4[] MetadataData = new uint4[12];
             internal readonly uint[] RequestData = new uint[12];
             internal readonly uint[] OwnerData = new uint[16];
-            internal readonly uint[] StaticData = new uint[256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount], DynamicData = new uint[256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount];
+            internal readonly uint[] StaticData = new uint[256 * LegacyDepthLayerCount], DynamicData = new uint[256 * LegacyDepthLayerCount];
             internal readonly VirtualShadowMapProjection[] ProjectionData = new VirtualShadowMapProjection[3];
             internal readonly GraphicsBuffer Table = new(GraphicsBuffer.Target.Structured, 12, 4);
             internal readonly GraphicsBuffer Metadata = new(GraphicsBuffer.Target.Structured, 12, 16);
@@ -36,10 +38,11 @@ namespace VividRP.Editor.Tests
             // Integer pools support Load/Store, not filtered Sample. Texture2D's
             // constructor validates Sample usage on Unity 6.7; use the same UAV
             // resource type as production and upload through a tiny test kernel.
+            private readonly RenderTexture m_PhysicalPool = CreatePool(2);
             private readonly RenderTexture m_Static = CreatePool();
             private readonly RenderTexture m_Dynamic = CreatePool();
-            private readonly GraphicsBuffer m_StaticUpload = new(GraphicsBuffer.Target.Structured, 256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount, 4);
-            private readonly GraphicsBuffer m_DynamicUpload = new(GraphicsBuffer.Target.Structured, 256 * VirtualShadowMapPrototypeRuntime.DepthLayerCount, 4);
+            private readonly GraphicsBuffer m_StaticUpload = new(GraphicsBuffer.Target.Structured, 256 * LegacyDepthLayerCount, 4);
+            private readonly GraphicsBuffer m_DynamicUpload = new(GraphicsBuffer.Target.Structured, 256 * LegacyDepthLayerCount, 4);
             private readonly ComputeShader m_UploadShader;
             private readonly BlueNoiseResources m_BlueNoise = PipelineResourceManager.Get<BlueNoiseResources>();
 
@@ -50,7 +53,7 @@ namespace VividRP.Editor.Tests
                 Shader.SetTexture(kernel, "_SobolOwenScrambledSequence", m_BlueNoise.OwenScrambledSequence);
             }
 
-            private static RenderTexture CreatePool()
+            private static RenderTexture CreatePool(int slices = LegacyDepthLayerCount)
             {
                 var texture = new RenderTexture(new RenderTextureDescriptor(16, 16)
                 {
@@ -59,7 +62,7 @@ namespace VividRP.Editor.Tests
                     enableRandomWrite = true,
                     msaaSamples = 1,
                     dimension = TextureDimension.Tex2DArray,
-                    volumeDepth = VirtualShadowMapPrototypeRuntime.DepthLayerCount,
+                    volumeDepth = slices,
                 });
                 Assert.That(texture.Create(), Is.True);
                 return texture;
@@ -131,7 +134,12 @@ namespace VividRP.Editor.Tests
                 m_UploadShader.SetBuffer(upload, "_TestDynamicData", m_DynamicUpload);
                 m_UploadShader.SetTexture(upload, "_TestStaticPool", m_Static);
                 m_UploadShader.SetTexture(upload, "_TestDynamicPool", m_Dynamic);
-                m_UploadShader.Dispatch(upload, 2, 2, VirtualShadowMapPrototypeRuntime.DepthLayerCount);
+                m_UploadShader.Dispatch(upload, 2, 2, LegacyDepthLayerCount);
+                int finalUpload = m_UploadShader.FindKernel("UploadTestFinalPool");
+                m_UploadShader.SetBuffer(finalUpload, "_TestStaticData", m_StaticUpload);
+                m_UploadShader.SetBuffer(finalUpload, "_TestDynamicData", m_DynamicUpload);
+                m_UploadShader.SetTexture(finalUpload, "_TestPhysicalPool", m_PhysicalPool);
+                m_UploadShader.Dispatch(finalUpload, 2, 2, 1);
             }
 
             internal float2[] Run(string kernelName, float4[] inputs, int2[] offsets = null, float4[] normals = null,
@@ -168,6 +176,7 @@ namespace VividRP.Editor.Tests
                     if (!inspectOnly)
                     {
                         Shader.SetBuffer(kernel, "_VSMPrototypePageTable", Table);
+                        Shader.SetTexture(kernel, "_VSMPhysicalPagePool", m_PhysicalPool);
                         Shader.SetTexture(kernel, "_VSMPrototypeStaticPhysicalPage", m_Static);
                         Shader.SetTexture(kernel, "_VSMPrototypeDynamicPhysicalPage", m_Dynamic);
                     }
@@ -255,7 +264,8 @@ namespace VividRP.Editor.Tests
                 {
                     Shader.SetBuffer(kernel, "_VSMPrototypePageTable", Table);
                     Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
-                    Shader.SetTexture(kernel, "_VSMPrototypeStaticPhysicalPage", m_Static);
+                    Shader.SetTexture(kernel, "_VSMPhysicalPagePool", m_PhysicalPool);
+                        Shader.SetTexture(kernel, "_VSMPrototypeStaticPhysicalPage", m_Static);
                     Shader.SetTexture(kernel, "_VSMPrototypeDynamicPhysicalPage", m_Dynamic);
                 }
                 Shader.Dispatch(kernel, 1, 1, 1);
@@ -278,7 +288,8 @@ namespace VividRP.Editor.Tests
                 Shader.SetBuffer(kernel, "_VSMPrototypePageTable", Table);
                 Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
                 Shader.SetBuffer(kernel, "_VSMPageRequestFlags", RequestFlags);
-                Shader.SetTexture(kernel, "_VSMPrototypeStaticPhysicalPage", m_Static);
+                Shader.SetTexture(kernel, "_VSMPhysicalPagePool", m_PhysicalPool);
+                        Shader.SetTexture(kernel, "_VSMPrototypeStaticPhysicalPage", m_Static);
                 Shader.SetTexture(kernel, "_VSMPrototypeDynamicPhysicalPage", m_Dynamic);
                 Shader.SetTexture(kernel, "_DepthTexture", depth);
                 Shader.SetTexture(kernel, "_GBuffer1", normal);
@@ -294,6 +305,7 @@ namespace VividRP.Editor.Tests
                 Table.Dispose(); Metadata.Dispose(); Owners.Dispose(); Counters.Dispose(); m_Projections.Dispose();
                 Pressure.Dispose(); RequestFlags.Dispose();
                 m_StaticUpload.Dispose(); m_DynamicUpload.Dispose();
+                m_PhysicalPool.Release(); Object.DestroyImmediate(m_PhysicalPool);
                 m_Static.Release(); m_Dynamic.Release();
                 if (m_UploadShader != Shader) Object.DestroyImmediate(m_UploadShader);
                 Object.DestroyImmediate(m_Static); Object.DestroyImmediate(m_Dynamic); Object.DestroyImmediate(Shader);
@@ -593,7 +605,7 @@ namespace VividRP.Editor.Tests
             // at the parallel tail prevents a central hard-shadow shortcut.
             int slot = (int)f.TableData[1] - 1;
             int pixel = (slot / 4 * 4 + 3) * 16 + slot % 4 * 4;
-            for (int hiddenLayer = 0; hiddenLayer < VirtualShadowMapPrototypeRuntime.DepthLayerCount; hiddenLayer++)
+            for (int hiddenLayer = 0; hiddenLayer < LegacyDepthLayerCount; hiddenLayer++)
             {
                 Array.Clear(f.StaticData, 0, f.StaticData.Length);
                 Array.Clear(f.DynamicData, 0, f.DynamicData.Length);
@@ -687,8 +699,70 @@ namespace VividRP.Editor.Tests
                 Is.Zero, "Out-of-map/budget failure cannot become a clear ray");
         }
 
+        [TestCase(4, 0f)]
+        [TestCase(8, 0.5f)]
+        [TestCase(8, 1f)]
+        public void SMRT_UEHistoryHonorsInvalidSamplesStrictBoundariesAndReceiverEndpoint(int steps, float offset)
+        {
+            using var f = new Fixture();
+            var inputs = new float4[6];
+            for (int mode = 0; mode < inputs.Length; mode++) inputs[mode] = new float4(mode, steps, offset, 0);
+            float2[] values = f.Run("InspectSMRTTraceHistory", inputs);
+            Assert.That(values[0], Is.EqualTo(new float2(-1, steps + 1)), "All invalid samples miss");
+            Assert.That(values[1], Is.EqualTo(new float2(2, 1)), "First valid sample blocks immediately");
+            Assert.That(values[2], Is.EqualTo(new float2(-1, steps + 1)), "Unoccluded ray visits endpoint");
+            Assert.That(values[3], Is.EqualTo(new float2(2, 5)), "Invalid samples do not seed history");
+            Assert.That(values[4], Is.EqualTo(new float2(-1, steps + 1)), "Depth equality is not a strict hit");
+            Assert.That(values[5], Is.EqualTo(new float2(.3f, steps + 1)), "Receiver endpoint is explicitly sampled");
+        }
+
         [Test]
-        public void SMRT_ContinuationPreservesWorldRayAcrossScrolledAndRescaledClipmaps()
+        public void SMRT_UEPointFallbackConvertsIndependentDepthRangesAndRejectsDirtyPages()
+        {
+            using var f = new Fixture();
+            var fine = f.ProjectionData[0];
+            fine.WorldToShadow.m22 = .05f; fine.WorldToShadow.m23 = .2f;
+            f.ProjectionData[0] = fine;
+            var parent = f.ProjectionData[1];
+            parent.WorldToShadow.m03 = .375f;
+            parent.WorldToShadow.m22 = .1f; parent.WorldToShadow.m23 = .6f;
+            f.ProjectionData[1] = parent;
+            for (int page = 4; page < 8; page++) f.Map(page, 11 - page, .8f);
+            var input = new[] { new float4(.5f, .5f, .2f, 0) };
+            for (int dirty = 0; dirty < 2; dirty++)
+            {
+                if (dirty != 0) { f.Map(3, 8, .95f); f.MetadataData[3].x |= 4; }
+                f.Upload();
+                float2 value = f.Run("InspectSMRTClipmapSample", input)[0];
+                Assert.That(value.x, Is.EqualTo(1));
+                Assert.That(value.y, Is.EqualTo(.3f).Within(1e-6));
+            }
+            for (int page = 4; page < 8; page++) f.Map(page, 11 - page);
+            f.Upload();
+            Assert.That(f.Run("InspectSMRTClipmapSample", input)[0].y, Is.EqualTo(-.1f).Within(1e-6),
+                "Valid empty coarse depth also needs inverse affine conversion");
+        }
+
+        [Test]
+        public void SMRT_UEPointReadsOnlyMergedFrontAndAllInvalidRayMisses()
+        {
+            using var f = new Fixture();
+            var input = new[] { new float4(.5f, .5f, .2f, 0) };
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 1, .5f));
+            f.Upload();
+            Assert.That(f.Run("TraceSMRTClipmaps", input)[0], Is.EqualTo(new float2(1, 1)));
+            f.Map(3, 8, .8f, .6f);
+            int pixel = (8 / 4 * 4) * 16 + 8 % 4 * 4;
+            f.StaticData[pixel + 256] = math.asuint(.4f);
+            f.DynamicData[pixel + 256] = math.asuint(.3f);
+            f.Upload();
+            float2 value = f.Run("InspectSMRTClipmapSample", input)[0];
+            Assert.That(value.x, Is.EqualTo(1));
+            Assert.That(value.y, Is.EqualTo(.8f).Within(1e-6));
+        }
+
+        [Test]
+        public void SMRT_LegacyContinuationPreservesWorldRayAcrossScrolledAndRescaledClipmaps()
         {
             using var f = new Fixture();
             for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
@@ -714,15 +788,11 @@ namespace VividRP.Editor.Tests
             f.Upload();
             var receiver = new[] { new float4(.25f, .5f, .2f, 0) };
             var ray = new[] { new float4(.5f, 0, 0, 0) };
-            Assert.That(f.Run("TraceSMRTClipmaps", receiver, normals: ray)[0], Is.EqualTo(new float2(1, 0)));
-            // Without parents, the full disk no longer fits this fine map.
-            // The filter must reject the union, rather than depend on ray phase.
-            f.Shader.SetInt("_VSMProjectionCount", 1);
-            Assert.That(f.Run("FilterSMRTFootprints", receiver)[0].x, Is.Zero);
+            Assert.That(f.Run("TraceSMRTClipmapsLegacy", receiver, normals: ray)[0], Is.EqualTo(new float2(1, 0)));
         }
 
         [Test]
-        public void SMRT_ContinuationDoesNotRestartBehindItsSegmentAndRequestsPrimaryDependencies()
+        public void SMRT_LegacyContinuationDoesNotRestartBehindItsSegmentAndRequestsPrimaryDependencies()
         {
             using var f = new Fixture();
             for (int page = 0; page < 12; page++) f.Map(page, 11 - page, page >= 4 ? .55f : 0);
@@ -730,7 +800,7 @@ namespace VividRP.Editor.Tests
             f.Upload();
             // Parent surface t=1 lies behind the first segment end (t=2.827).
             var receiver = new[] { new float4(.5f, .5f, .5f, 0) };
-            Assert.That(f.Run("TraceSMRTClipmaps", receiver, normals: new[] { new float4(.2f, 0, 0, 0) })[0],
+            Assert.That(f.Run("TraceSMRTClipmapsLegacy", receiver, normals: new[] { new float4(.2f, 0, 0, 0) })[0],
                 Is.EqualTo(new float2(1, 1)));
             f.Run("ResolveReceivers", new[] { new float4(0, 0, 0, 0) });
             for (int page = 4; page < 12; page++)
@@ -772,7 +842,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SMRT_FootprintValidityDoesNotDependOnRandomPhase()
+        public void SMRT_UETraceSkipsDirtySamplesWithoutRejectingTheWholeFootprint()
         {
             using var f = new Fixture();
             for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
@@ -784,7 +854,7 @@ namespace VividRP.Editor.Tests
                 f.MetadataData[3].x = 10; f.Upload();
                 Assert.That(f.Run("FilterSMRTFootprints", input)[0], Is.EqualTo(new float2(1, 1)), "Empty resident pages");
                 f.MetadataData[3].x |= 4; f.Upload();
-                Assert.That(f.Run("FilterSMRTFootprints", input)[0].x, Is.Zero, "Dirty union invalidates all phases");
+                Assert.That(f.Run("FilterSMRTFootprints", input)[0], Is.EqualTo(new float2(1, 1)), "Dirty points fall back to empty parent pages");
             }
         }
 
@@ -806,7 +876,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SMRT_MissingFineSupportRetriesParentThenCompletePCFWithoutLosingOcclusion()
+        public void SMRT_MissingOriginPromotesToMappedParentAndPreservesRequests()
         {
             using var f = new Fixture();
             for (int page = 0; page < 12; page++) f.Map(page, 11 - page, page >= 4 && page < 8 ? .8f : 0);
@@ -902,7 +972,7 @@ namespace VividRP.Editor.Tests
         [TestCase(6)]
         [TestCase(7)]
         [TestCase(8)]
-        public void SMRT_WaveMixedReceiversMatchFullBudgetAndMissingLanesPreventExit(int maximum)
+        public void SMRT_WaveMixedReceiversMatchFullBudgetAndMissingSamplesUseParents(int maximum)
         {
             using var f = new Fixture();
             for (int page = 0; page < 12; page++) f.Map(page, 11 - page);
@@ -918,13 +988,13 @@ namespace VividRP.Editor.Tests
             f.Shader.SetVector("_SamplingAdaptive", new Vector4(1, 0, 0, 0));
             CollectionAssert.AreEqual(reference, f.Run("FilterSMRTAdaptive", inputs));
             foreach (float2 sample in reference) Assert.That(sample.y, Is.EqualTo(maximum));
-            // Missing lanes must vote before leaving their fully lit neighbours.
+            // Missing samples may use the empty parents; both lanes remain valid.
             for (int i = 0; i < inputs.Length; i++)
                 inputs[i] = new float4(i % 2 == 0 ? .25f : .5f, .5f, .2f, 0);
-            f.TableData[1] = 0; f.Upload();
+            f.TableData[3] = 0; f.Upload();
             float2[] missing = f.Run("FilterSMRTAdaptive", inputs);
             for (int i = 0; i < inputs.Length; i++)
-                Assert.That(missing[i], Is.EqualTo(i % 2 == 0 ? new float2(1, maximum) : new float2(-1, 0)));
+                Assert.That(missing[i], Is.EqualTo(new float2(1, 1)));
         }
 
         [TestCase(4)]
@@ -1265,6 +1335,42 @@ namespace VividRP.Editor.Tests
             bool requestedPreferred = false;
             for (int i = 4; i < 8; i++) requestedPreferred |= (f.RequestData[i] & 1u) != 0;
             Assert.That(requestedPreferred, Is.True);
+        }
+
+        [TestCase(0, 0)]
+        [TestCase(1, 0)]
+        [TestCase(2, 2)]
+        [TestCase(3, 2)]
+        public void UEReceiverMarking_DiagonalDilationIsBoundedAndMasksCertifyWholePages(int phase, int level)
+        {
+            using var f = new Fixture();
+            f.Shader.SetInt("_VSMReceiverMaskEnabled", 1);
+            f.Upload();
+            f.Run("MarkUEPageInputs", new[] { new float4(.5f, .5f, level, phase) });
+            var masks = new uint2[12];
+            f.ReceiverMasks.Requests.GetData(masks);
+            for (int page = 0; page < 12; page++)
+            {
+                int local = page % 4;
+                bool diagonal = (phase == 0 || phase == 3) ? local == 0 : local == 1 || local == 2;
+                bool expected = page / 4 == level && (local == 3 || diagonal);
+                uint flags = expected ? (level == 2 ? 769u : 513u) : 0u;
+                Assert.That(f.RequestData[page], Is.EqualTo(flags));
+                Assert.That(masks[page], Is.EqualTo(expected ? new uint2(uint.MaxValue) : uint2.zero));
+            }
+        }
+
+        [Test]
+        public void UEReceiverMarking_DoesNotExpandWorldRayOrRequestParentChain()
+        {
+            using var f = new Fixture();
+            var input = new[] { new float4(.625f, .625f, 0, 0) };
+            f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 8, 100, .5f));
+            f.Shader.SetBuffer(f.Shader.FindKernel("MarkUEReceiverInputs"), "_VSMPagePressure", f.Pressure);
+            f.Upload();
+            f.Run("MarkUEReceiverInputs", input);
+            for (int page = 0; page < 12; page++)
+                Assert.That(f.RequestData[page], Is.EqualTo(page == 3 ? 513u : 0u));
         }
 
         [TestCase(3)]

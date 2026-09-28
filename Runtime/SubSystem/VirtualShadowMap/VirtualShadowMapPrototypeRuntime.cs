@@ -51,6 +51,10 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_PageMetadata;
         private static GraphicsBuffer s_PageRequestFlags;
         private static GraphicsBuffer s_PossibleMappedLevels;
+        private static GraphicsBuffer s_SamplingPageTable;
+        internal static GraphicsBuffer SamplingPageTable => s_SamplingPageTable;
+        internal static readonly int SamplingPageTableId = Shader.PropertyToID("_VSMSamplingPageTable");
+        internal static readonly int SamplingPageTableRWId = Shader.PropertyToID("_VSMSamplingPageTableRW");
         // Experimental: mixed per-frame benefit while moving; retain baseline kernels by default.
         internal static bool AvailableLevelHintsEnabled { get; set; }
         internal static readonly int PossibleMappedLevelsId = Shader.PropertyToID("_VSMPossibleMappedLevels");
@@ -183,7 +187,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             && s_PageTable.count == PageTableEntryCount
             && s_PageMetadata.count == PageTableEntryCount
             && s_PossibleMappedLevels?.IsValid() == true
-            && s_PossibleMappedLevels.count == PageTableEntryCount;
+            && s_PossibleMappedLevels.count == PageTableEntryCount
+            && s_SamplingPageTable?.IsValid() == true && s_SamplingPageTable.count == PageTableEntryCount;
         internal static VirtualShadowMapPrototypeFrameState FrameState => s_FrameState;
         internal static VirtualShadowMapPrototypeFallbackReason LastFallbackReason =>
             s_LastFallbackReason;
@@ -283,6 +288,12 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         private static void EnsureAllocationResources(int pageCount)
         {
+            if (s_SamplingPageTable == null || !s_SamplingPageTable.IsValid() || s_SamplingPageTable.count != pageCount)
+            {
+                s_SamplingPageTable?.Dispose();
+                s_SamplingPageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, sizeof(uint))
+                { name = "VSMSamplingPageTable" };
+            }
             if (s_PossibleMappedLevels == null || !s_PossibleMappedLevels.IsValid() || s_PossibleMappedLevels.count != pageCount)
             {
                 s_PossibleMappedLevels?.Dispose();
@@ -989,6 +1000,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_PageRequestFlags?.Dispose();
             s_PageRequestFlags = null;
             s_PossibleMappedLevels?.Dispose(); s_PossibleMappedLevels = null;
+            s_SamplingPageTable?.Dispose(); s_SamplingPageTable = null;
             s_PageReceiverMasks?.Dispose(); s_PageReceiverMasks = null;
             s_PhysicalReceiverMasks?.Dispose(); s_PhysicalReceiverMasks = null;
             s_PageCullHierarchy?.Dispose(); s_PageCullHierarchy = null;

@@ -37,6 +37,25 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(0f)]
+        [TestCase(.2f)]
+        [TestCase(.8f)]
+        public void UECoarseSampling_ConvertsDepthAndDoesNotUseReceiverMaskAsResidency(float depth)
+        {
+            using var f = new Fixture();
+            f.ProjectionData[0].WorldToShadow.m22 = .1f;
+            f.ProjectionData[0].WorldToShadow.m23 = .3f;
+            f.ProjectionData[1].WorldToShadow.m22 = .25f;
+            f.ProjectionData[1].WorldToShadow.m23 = .5f;
+            f.Map(4, 5, depth);
+            f.Shader.SetInt("_VSMReceiverMaskEnabled", 1);
+            f.ReceiverMasks.Completed.SetData(new uint2[16]);
+            f.Upload();
+            var result = f.Run("InspectSMRTClipmapSample", new[] { new float4(.25f, .25f, .7f, 0) });
+            Assert.That(result[0].x, Is.EqualTo(1));
+            Assert.That(result[0].y, Is.EqualTo((depth - .5f) / 2.5f + .3f).Within(1e-6));
+        }
+
         private sealed class Fixture : IDisposable
         {
             internal readonly ComputeShader Shader;
@@ -53,6 +72,8 @@ namespace VividRP.Editor.Tests
             internal readonly GraphicsBuffer Owners = new(GraphicsBuffer.Target.Structured, 16, 4);
             internal readonly GraphicsBuffer Counters = new(GraphicsBuffer.Target.Structured, 4, 4);
             internal readonly GraphicsBuffer Pressure = new(GraphicsBuffer.Target.Structured, 3, 16);
+            private readonly GraphicsBuffer m_SamplingTable = new(GraphicsBuffer.Target.Structured, 12, 4);
+            private readonly GraphicsBuffer m_PageOffsets = new(GraphicsBuffer.Target.Structured, 9, 8);
             private readonly GraphicsBuffer m_Projections = new(GraphicsBuffer.Target.Structured, 3, 160);
             // Integer pools support Load/Store, not filtered Sample. Texture2D's
             // constructor validates Sample usage on Unity 6.7; use the same UAV
@@ -67,6 +88,26 @@ namespace VividRP.Editor.Tests
 
             private void BindBlueNoise(int kernel)
             {
+                var offsets = new int2[9];
+                for (int source = 0; source < 3; source++)
+                for (int target = source; target < 3; target++)
+                {
+                    float scale = 1 << (target - source);
+                    var a = ProjectionData[source].WorldToShadow;
+                    var b = ProjectionData[target].WorldToShadow;
+                    offsets[source * 3 + target] = new int2(
+                        Mathf.RoundToInt((b.m03 * scale - a.m03) * 2),
+                        Mathf.RoundToInt((b.m13 * scale - a.m13) * 2));
+                }
+                m_PageOffsets.SetData(offsets);
+                int build = Shader.FindKernel("VSMPropagateMappedClipmaps");
+                Shader.SetBuffer(build, "_VSMClipmapPageOffsets", m_PageOffsets);
+                Shader.SetBuffer(build, "_VSMSamplingPageTableRW", m_SamplingTable);
+                Shader.SetBuffer(build, "_VSMPrototypePageTable", Table);
+                Shader.SetBuffer(build, "_VSMPrototypePageMetadata", Metadata);
+                Shader.Dispatch(build, 1, 1, 1);
+                Shader.SetBuffer(kernel, "_VSMSamplingPageTable", m_SamplingTable);
+                Shader.SetBuffer(kernel, "_VSMClipmapPageOffsets", m_PageOffsets);
                 Shader.SetTexture(kernel, "_VSMSTBNScalar", m_BlueNoise.VSMSTBNScalar);
                 Shader.SetTexture(kernel, "_VSMSTBNVec2", m_BlueNoise.VSMSTBNVec2);
                 Shader.SetTexture(kernel, "_SobolScramblingTile1SPP", m_BlueNoise.ScramblingTile1SPP);
@@ -325,7 +366,7 @@ namespace VividRP.Editor.Tests
             {
                 ReceiverMasks.Dispose();
                 Table.Dispose(); Metadata.Dispose(); Owners.Dispose(); Counters.Dispose(); m_Projections.Dispose();
-                Pressure.Dispose(); RequestFlags.Dispose();
+                Pressure.Dispose(); RequestFlags.Dispose(); m_SamplingTable.Dispose(); m_PageOffsets.Dispose();
                 m_StaticUpload.Dispose(); m_DynamicUpload.Dispose();
                 m_PhysicalPool.Release(); Object.DestroyImmediate(m_PhysicalPool);
                 m_Static.Release(); m_Dynamic.Release();

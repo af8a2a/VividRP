@@ -1648,3 +1648,33 @@ void VSMMergeStaticPhysicalPagesIndirect(uint3 group : SV_GroupID, uint2 lane : 
             if (all(texel < size)) MergeVSMPhysicalPixel(origin + texel);
         }
 }
+
+// UE directional PropagateMappedMips. Resident ownership remains separate from
+// sampling aliases; only completed native pages can be propagation sources.
+// UE bit layout: valid bit 31, LOD offset bits 20..25, physical XY 10 bits each.
+[numthreads(64, 1, 1)]
+void VSMPropagateMappedClipmaps(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_VSMPrototypePageTableEntryCount) return;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint perLevel = axis * axis;
+    uint source = id.x / perLevel, local = id.x % perLevel;
+    int2 basePage = int2(local % axis, local / axis);
+    uint result = 0u;
+    for (uint level = source; level < (uint)_VSMProjectionCount; level++)
+    {
+        uint offset = level - source;
+        int2 delta = _VSMClipmapPageOffsets[source * (uint)_VSMProjectionCount + level];
+        int2 page = (basePage + delta) >> offset;
+        if (any(page < 0) || any(page >= (int)axis)) continue;
+        uint address = (level * axis + (uint)page.y) * axis + (uint)page.x;
+        uint encoded = _VSMPrototypePageTable[address];
+        uint4 metadata = _VSMPrototypePageMetadata[address];
+        if (encoded == 0u || encoded > (uint)_VSMPrototypePhysicalPageCapacity || metadata.y != encoded
+            || (metadata.x & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty)) != kVSMPageAllocated) continue;
+        uint slot = encoded - 1u, row = (uint)_VSMPrototypePhysicalPagesPerRow;
+        result = 0x80000000u | (offset << 20u) | ((slot / row) << 10u) | (slot % row);
+        break;
+    }
+    _VSMSamplingPageTableRW[id.x] = result;
+}

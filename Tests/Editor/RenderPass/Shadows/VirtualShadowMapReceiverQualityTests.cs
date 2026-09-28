@@ -292,6 +292,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UECoarsePageOffsets_KeepIntegerPrecisionAndStablePreparationAllocatesZeroBytes()
+        {
+            var layout = new VirtualShadowMapClipmapLayout();
+            layout.Update(Vector3.zero, Quaternion.identity, new Bounds(Vector3.zero, Vector3.one * 100),
+                150, 4096, 0, 1, 1, 2);
+            // Relative offsets remain small even when absolute page origins exceed float precision.
+            for (int i = 0; i < layout.Count; i++)
+            {
+                layout.OriginX[i] = (1L << (42 - i)) - 16 + i;
+                layout.OriginY[i] = -(1L << (42 - i)) - 16 - i;
+            }
+            using var projections = new VirtualShadowMapProjectionSet();
+            using var cmd = new CommandBuffer();
+            for (int i = 0; i < 32; i++) { projections.PrepareClipmaps(layout); cmd.Clear(); projections.Upload(cmd); }
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 256; i++) { projections.PrepareClipmaps(layout); cmd.Clear(); projections.Upload(cmd); }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            Graphics.ExecuteCommandBuffer(cmd);
+            var offsets = new Unity.Mathematics.int2[layout.Count * layout.Count];
+            projections.PageOffsetsBuffer.GetData(offsets);
+            for (int a = 0; a < layout.Count; a++)
+            for (int b = a; b < layout.Count; b++)
+            {
+                long scale = 1L << (b - a);
+                Assert.That(offsets[a * layout.Count + b].x, Is.EqualTo(layout.OriginX[a] - layout.OriginX[b] * scale));
+                Assert.That(offsets[a * layout.Count + b].y, Is.EqualTo(layout.OriginY[a] - layout.OriginY[b] * scale));
+            }
+        }
+
+        [Test]
         public void SMRT_UEParametersAndPermutationAxes()
         {
             var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();

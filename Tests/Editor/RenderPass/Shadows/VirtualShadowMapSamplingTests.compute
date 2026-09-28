@@ -1,3 +1,5 @@
+#pragma kernel VSMPropagateMappedClipmaps
+#pragma kernel InspectUEMappedTexel
 #pragma kernel InspectUETrace5 VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
 #pragma kernel InspectUETrace4 VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
 #pragma kernel InspectUETrace3 VIVID_SMRT_EXTRAPOLATE_SLOPE=1
@@ -663,3 +665,13 @@ void InspectUETrace4(uint3 id : SV_DispatchThreadID) { InspectSMRTTraceHistory(i
 
 [numthreads(64, 1, 1)]
 void InspectUETrace5(uint3 id : SV_DispatchThreadID) { InspectSMRTTraceHistory(id); }
+
+[numthreads(64, 1, 1)]
+void InspectUEMappedTexel(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 p = _SamplingInputs[id.x];
+    int level; int2 physical; float2 uv;
+    bool valid = ResolveVSMSMRTMappedTexel(p.xy, (int)p.z, level, physical, uv);
+    _UESMRTResults[id.x] = float4(valid ? 1 : 0, level, physical);
+}

@@ -149,6 +149,8 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PagePressure, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels, AccessFlags.Read);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.SamplingPageTable, AccessFlags.Read);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer, AccessFlags.Read);
             m_Table = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageTable, AccessFlags.Read);
             m_Metadata = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageMetadata, AccessFlags.Read);
             m_RequestFlags = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.Read);
@@ -174,6 +176,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_Depth.innerHandle.IsValid() || !m_Normal.innerHandle.IsValid()
                 || !m_Shadow.innerHandle.IsValid() || !m_Output.innerHandle.IsValid() || !m_Data.innerHandle.IsValid()) return;
             var cmd = context.cmd;
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapPrototypeRuntime.SamplingPageTableId,
+                VirtualShadowMapPrototypeRuntime.SamplingPageTable);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapProjectionSet.PageOffsetsId,
+                VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapPrototypeRuntime.PossibleMappedLevelsId,
                 VirtualShadowMapPrototypeRuntime.PossibleMappedLevels);
             // Availability diagnoses every failed candidate, including skipped ones.

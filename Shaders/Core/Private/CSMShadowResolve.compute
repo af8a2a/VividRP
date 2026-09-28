@@ -85,6 +85,9 @@ Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
 Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
 #endif
 StructuredBuffer<uint> _VSMPrototypePageTable;
+StructuredBuffer<uint> _VSMSamplingPageTable;
+RWStructuredBuffer<uint> _VSMSamplingPageTableRW;
+StructuredBuffer<int2> _VSMClipmapPageOffsets;
 StructuredBuffer<uint> _VSMPossibleMappedLevels;
 RWStructuredBuffer<uint> _VSMPossibleMappedLevelsRW;
 int _VSMAvailableLevelHintsEnabled;
@@ -1403,3 +1406,5 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 {
     ResolveVSMScreenPixel(id);
 }
+
+#pragma kernel VSMPropagateMappedClipmaps

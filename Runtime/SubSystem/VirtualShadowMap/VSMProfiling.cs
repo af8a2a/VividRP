@@ -22,6 +22,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static readonly ProfilingSampler MergeStaticPages = new("VSM.MergeStaticPages");
         internal static readonly ProfilingSampler Occupancy = new("VSM.PageOccupancy");
         internal static readonly ProfilingSampler Finalize = new("VSM.FinalizePages");
+        internal static readonly ProfilingSampler PropagateMappedClipmaps = new("VSM.PropagateMappedClipmaps");
         internal static readonly ProfilingSampler BuildAvailableLevelHints = new("VSM.BuildAvailableLevelHints");
         internal static readonly ProfilingSampler DynamicRaster = new("VSM.DynamicRaster");
         internal static readonly ProfilingSampler Layout = new("VSM.LayoutRemap");

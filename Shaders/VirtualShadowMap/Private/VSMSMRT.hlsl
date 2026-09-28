@@ -461,64 +461,78 @@ struct VSMSMRTClipmapRayState
     float ExtrapolateSlope;
 };
 
+// UE SampleVirtualShadowMapClipmap: one source PT lookup, at most one
+// native destination PT lookup. No per-ray search through resident metadata.
+bool ResolveVSMSMRTMappedTexel(float2 uv, int index, out int mappedIndex,
+    out int2 physical, out float2 mappedUV)
+{
+    mappedIndex = index; physical = 0; mappedUV = uv;
+    if (!UseVirtualShadowMapPrototype(index) || !all(isfinite(uv)) || any(uv < 0) || any(uv >= 1)) return false;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint2 basePage = min((uint2)(uv * axis), axis - 1u);
+    uint entry = _VSMSamplingPageTable[((uint)index * axis + basePage.y) * axis + basePage.x];
+    VSM_COST_ADD(11, 1u);
+    if ((entry & 0x80000000u) == 0u) return false;
+    uint offset = (entry >> 20u) & 63u;
+    mappedIndex = index + (int)offset;
+    if (mappedIndex >= _VSMProjectionCount) return false;
+    int2 texel = (int2)(uv * _VSMPrototypeVirtualResolution);
+    if (offset > 0u)
+    {
+        int2 delta = _VSMClipmapPageOffsets[index * _VSMProjectionCount + mappedIndex];
+        int2 page = ((int2)basePage + delta) >> offset;
+        if (any(page < 0) || any(page >= (int)axis)) return false;
+        float scale = rcp(float(1u << offset));
+        mappedUV = uv * scale + float2(delta) * (scale / axis);
+        int2 low = page * _VSMPrototypePageSize;
+        texel = clamp((int2)(mappedUV * _VSMPrototypeVirtualResolution), low, low + _VSMPrototypePageSize - 1);
+        entry = _VSMSamplingPageTable[(mappedIndex * axis + (uint)page.y) * axis + (uint)page.x];
+        VSM_COST_ADD(11, 1u);
+        // Only THIS LOD is valid here; never follow a second alias.
+        if ((entry & 0x83f00000u) != 0x80000000u) return false;
+    }
+    uint2 physicalPage = uint2(entry & 1023u, (entry >> 10u) & 1023u);
+    physical = (int2)(physicalPage * (uint)_VSMPrototypePageSize) + texel % _VSMPrototypePageSize;
+    return true;
+}
+
 bool FindVSMSMRTMappedClipmap(float2 uv, int index, VSMSMRTProjection projection,
     out int mappedIndex, out VSMSMRTProjection mappedProjection)
 {
-    mappedIndex = index;
+    int2 physical; float2 mappedUV;
+    bool valid = ResolveVSMSMRTMappedTexel(uv, index, mappedIndex, physical, mappedUV);
+    if (!valid) mappedIndex = index; // UE keeps requested level when the origin is unmapped.
     mappedProjection = projection;
-    for (int level = index; level < _VSMProjectionCount; ++level)
-    {
-        VSMSMRTProjection destination = projection;
-        if (level != index) destination = GetVSMSMRTProjection(level);
-        float3 scale = VSMSMRTProjectionScale(projection, destination);
-        float2 levelUV = VSMSMRTReproject(float3(uv, 0), projection, destination, scale).xy;
-        int2 physical;
-        VSM_COST_ADD(11, 1u);
-        if (TryResolveVSMPhysicalTexel(levelUV, level, physical))
-        {
-            mappedIndex = level;
-            mappedProjection = destination;
-            return true;
-        }
-    }
-    return false;
+    if (mappedIndex != index) mappedProjection = GetVSMSMRTProjection(mappedIndex);
+    return valid;
 }
 
 VSMSMRTSample VSMSMRTFindSample(inout VSMSMRTClipmapRayState state, float sampleTime)
 {
     VSMSMRTSample sample = (VSMSMRTSample)0;
     float3 uvz = state.RayStartUVZ + state.RayStepUVZ * sampleTime;
-    // Required even when no page is available, as in UE's SMRTFindSample.
     sample.ReferenceDepth = uvz.z;
     sample.ExtrapolateSlope = state.ExtrapolateSlope;
     VSM_COST_ADD(10, 1u);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
     g_VSMDebugWork.x++;
 #endif
-    for (int level = state.index; level < _VSMProjectionCount; ++level)
+    int level; int2 physical; float2 mappedUV;
+    sample.bValid = ResolveVSMSMRTMappedTexel(uvz.xy, state.index, level, physical, mappedUV);
+    if (sample.bValid)
     {
         VSMSMRTProjection destination = state.projection;
         if (level != state.index) destination = GetVSMSMRTProjection(level);
-        float3 scale = VSMSMRTProjectionScale(state.projection, destination);
-        float3 levelUVZ = VSMSMRTReproject(uvz, state.projection, destination, scale);
-        int2 cell;
-        if (!VividVSMTryOffsetVirtualTexel(levelUVZ.xy, int2(0, 0),
-                (uint)_VSMPrototypeVirtualResolution, cell)) continue;
-        int2 physical;
-        uint flags;
-        VSM_COST_ADD(11, 1u);
-        if (!TryResolveVSMPhysicalTexel(cell, level, physical, flags)) continue;
-        // UE has one depth value. The final pool slice is merged before Resolve.
-        float depth = asfloat(LoadCombinedVSMDepth(physical, flags));
-        // Independent scrolling and depth ranges require separate XY/Z scales.
-        // Convert even a valid empty page (depth 0), just like the UE sampler.
-        sample.SampleDepth = (depth - destination.translation.z) / scale.z + state.projection.translation.z;
-        sample.bValid = true;
+        // Vivid pins depth ranges independently of XY clipmap size. Preserve
+        // its exact depth transform rather than assuming UE's power-of-two Z.
+        float depthScale = destination.depthScale / state.projection.depthScale;
+        VSM_COST_ADD(17, 1u);
+        float depth = asfloat(_VSMPhysicalPagePool.Load(int4(physical, VIVID_VSM_FINAL_DEPTH_SLICE, 0)));
+        sample.SampleDepth = (depth - destination.translation.z) / depthScale + state.projection.translation.z;
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
         g_VSMDebugWork.y++;
         g_VSMDebugLevels.y = level;
 #endif
-        break;
     }
     VSM_COST_ADD(28, sample.bValid ? 0u : 1u);
     return sample;
@@ -587,7 +601,13 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool ad
     FindVSMSMRTMappedClipmap(coord.xy, index, projection, mappedIndex, mappedProjection);
     coord.z += bias.z;
     float3 scale = VSMSMRTProjectionScale(projection, mappedProjection);
-    coord = VSMSMRTReproject(coord, projection, mappedProjection, scale);
+    float2 mappedUV = coord.xy;
+    if (mappedIndex != index)
+    {
+        int2 delta = _VSMClipmapPageOffsets[index * _VSMProjectionCount + mappedIndex];
+        mappedUV = coord.xy * scale.xy + float2(delta) * (scale.xy / _VSMPrototypePagesPerAxis);
+    }
+    coord = float3(mappedUV, (coord.z - projection.translation.z) * scale.z + mappedProjection.translation.z);
     bias.xy *= scale.z / scale.x;
     index = mappedIndex;
     projection = mappedProjection;

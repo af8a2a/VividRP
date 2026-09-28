@@ -146,6 +146,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_VSMMarkCoarsePagesKernel = -1;
         private int m_VSMClearPageHierarchyKernel = -1;
         private int m_VSMBuildPageHierarchyKernel = -1;
+        private int m_VSMBuildAvailableLevelHintsKernel = -1;
 
         private int m_VSMClearReceiverRequestsKernel = -1;
 
@@ -260,6 +261,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMMarkCoarsePagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMMarkCoarsePages");
             m_VSMClearPageHierarchyKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMClearPageCullHierarchy");
             m_VSMBuildPageHierarchyKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMBuildPageCullHierarchy");
+            m_VSMBuildAvailableLevelHintsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMBuildAvailableLevelHints");
             m_VSMClearReceiverRequestsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPrototypeClearReceiverRequests");
             m_VSMResetReceiverFeedbackKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPrototypeResetReceiverFeedback");
             m_VSMPrepareAllocationKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPrepareAllocationCached");
@@ -362,6 +364,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(UnsafePassContext context)
         {
+            if (m_ShadowData != null) m_ShadowData.virtualShadowMapLevelHintsRendered = false;
             if (!m_IsActive || !m_VirtualShadowMapPrototypeActive) return;
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             using (new ProfilingScope(nativeCmd, profilingSampler))
@@ -574,6 +577,7 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageReceiverMasks, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels, AccessFlags.Write);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullHierarchy, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds, AccessFlags.ReadWrite);
             var geometryBounds = VividGPUDrivenSystem.instance?.BufferSet?.VSMGeometryBounds;
@@ -1583,6 +1587,20 @@ namespace VividRP.Runtime.RenderPass.Core
                     CoreUtils.DivRoundUp(pageTableEntryCount, 64),
                     1,
                     1);
+            }
+
+            if (VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabled && m_VSMBuildAvailableLevelHintsKernel >= 0)
+            {
+                using var hintScope = new ProfilingScope(nativeCmd, VSMProfiling.BuildAvailableLevelHints);
+                int kernel = m_VSMBuildAvailableLevelHintsKernel;
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel,
+                    VirtualShadowMapPrototypeRuntime.PossibleMappedLevelsRWId, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel, VSMPrototypePageTableId, pageTable);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel, VSMPrototypePageMetadataId, pageMetadata);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel,
+                    VirtualShadowMapProjectionSet.BufferId, VirtualShadowMapPrototypeRuntime.Projections.Buffer);
+                nativeCmd.DispatchCompute(m_VirtualShadowMapPageManagementCompute, kernel, CoreUtils.DivRoundUp(pageTableEntryCount, 64), 1, 1);
+                m_ShadowData.virtualShadowMapLevelHintsRendered = true;
             }
 
             if (ProductionFeedbackEnabled)

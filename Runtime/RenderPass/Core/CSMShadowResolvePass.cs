@@ -210,6 +210,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_VSMHistoryLayout, m_VSMHistoryFilterSettings;
         private int m_VSMTemporalKernel = -1;
         private int m_VSMAdaptiveKernel = -1;
+        private int m_VSMHintsKernel = -1;
+        private int m_VSMAdaptiveHintsKernel = -1;
 
         private ComputeShader m_ResolveCompute;
         private int m_Kernel = -1;
@@ -248,6 +250,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_LightDirectionWS;
 
         // Cached shadow data for shader upload
+        private VividShadowData m_LevelHintShadowData;
         private readonly Matrix4x4[] m_ViewProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_CascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
         private Vector4 m_CascadeWorldTexelSizes = Vector4.zero;
@@ -327,6 +330,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMBilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterV");
             m_VSMTemporalKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowTemporalV");
             m_VSMAdaptiveKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptive");
+            m_VSMHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveHints");
+            m_VSMAdaptiveHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptiveHints");
 
             for (var i = 0; i < s_BendCompositeKernelNames.Length; i++)
                 m_BendCompositeKernels[i] = FindKernelOrInvalid(m_ResolveCompute, s_BendCompositeKernelNames[i]);
@@ -383,6 +388,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeIndirectArgsBuffer(m_DispatchIndirectArgsBuffer);
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
+            m_LevelHintShadowData = shadowData;
             if (!shadowData.isCSMActive)
                 return;
 
@@ -492,6 +498,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     VirtualShadowMapPrototypeRuntime.PageTable,
                     AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels, AccessFlags.Read);
                 m_VirtualShadowMapPrototypePageMetadata = PassRecorder.ImportBufferForPass(
                     this,
                     VirtualShadowMapPrototypeRuntime.PageMetadata,
@@ -633,6 +640,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShadowHistoryStates.Dispose();
             m_VSMTemporalKernel = -1;
             m_VSMAdaptiveKernel = -1;
+            m_VSMHintsKernel = m_VSMAdaptiveHintsKernel = -1;
+            m_LevelHintShadowData = null;
             m_ResolveCompute = null;
             m_Kernel = -1;
             m_ClearTilesKernel = -1;
@@ -681,6 +690,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_VirtualShadowMapPrototypeActive ? VSMProfiling.ResolveTrace : null))
             {
                 int kernel = m_EnableAdaptiveRays ? m_VSMAdaptiveKernel : m_Kernel;
+                int hintsKernel = m_EnableAdaptiveRays ? m_VSMAdaptiveHintsKernel : m_VSMHintsKernel;
+                if (CanUseAvailableLevelHints && hintsKernel >= 0) kernel = hintsKernel;
                 BindCommonTextures(cmd, kernel);
                 BindVSMHistory(cmd, kernel);
                 BindShadowParameters(cmd);
@@ -813,9 +824,18 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ResolveCompute, CSMBendBilinearSamplingOffsetModeId, m_BendQualitySettings.BilinearSamplingOffsetMode ? 1 : 0);
         }
 
+        private bool CanUseAvailableLevelHints => m_LevelHintShadowData != null
+            && m_LevelHintShadowData.virtualShadowMapRendered
+            && m_LevelHintShadowData.virtualShadowMapLevelHintsRendered
+            && VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabled;
+
         private void BindCommonTextures(ComputeCommandBuffer cmd, int kernel)
         {
             BlueNoise.Instance?.Bind(cmd, m_ResolveCompute, kernel);
+            cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapPrototypeRuntime.PossibleMappedLevelsId,
+                VirtualShadowMapPrototypeRuntime.PossibleMappedLevels);
+            cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabledId,
+                CanUseAvailableLevelHints ? 1 : 0);
             cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapPrototypeRuntime.ReceiverMaskEnabledId, 1);
             cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId,
                 VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks);

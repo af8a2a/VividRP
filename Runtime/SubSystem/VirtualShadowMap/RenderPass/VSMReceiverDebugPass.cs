@@ -85,6 +85,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_AdaptiveRays;
         private TextureHandle m_Static, m_Dynamic;
         private BufferHandle m_Table, m_Metadata, m_RequestFlags, m_Projections;
+        private VividShadowData m_LevelHintShadowData;
 
         public VSMReceiverDebugPass()
         {
@@ -125,6 +126,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (DebugPassCameraUtility.ShouldSkipExecution(camera)) return;
             var settings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             var shadow = frameData.GetOrCreate<VividShadowData>();
+            m_LevelHintShadowData = shadow;
             if (settings == null || !settings.enableVirtualShadowMapPrototype.value || !shadow.isCSMActive
                 || !VirtualShadowMapPrototypeRuntime.HasPageRequestResources
                 || !VirtualShadowMapPrototypeRuntime.IsFramePrepared) return;
@@ -147,6 +149,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Dynamic = PassRecorder.ImportTextureForPass(this, VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PagePressure, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.Read);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels, AccessFlags.Read);
             m_Table = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageTable, AccessFlags.Read);
             m_Metadata = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageMetadata, AccessFlags.Read);
             m_RequestFlags = PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.Read);
@@ -172,6 +175,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_Depth.innerHandle.IsValid() || !m_Normal.innerHandle.IsValid()
                 || !m_Shadow.innerHandle.IsValid() || !m_Output.innerHandle.IsValid() || !m_Data.innerHandle.IsValid()) return;
             var cmd = context.cmd;
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapPrototypeRuntime.PossibleMappedLevelsId,
+                VirtualShadowMapPrototypeRuntime.PossibleMappedLevels);
+            // Availability diagnoses every failed candidate, including skipped ones.
+            cmd.SetComputeIntParam(m_Compute, VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabledId,
+                m_ResolvedVisualizationMode != VSMReceiverDebugMode.Availability
+                && m_LevelHintShadowData != null && m_LevelHintShadowData.virtualShadowMapRendered
+                && m_LevelHintShadowData.virtualShadowMapLevelHintsRendered && VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabled ? 1 : 0);
             BlueNoise.Instance?.Bind(cmd, m_Compute, m_Kernel);
             cmd.SetComputeIntParam(m_Compute, VirtualShadowMapPrototypeRuntime.ReceiverMaskEnabledId, 1);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId,

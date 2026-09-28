@@ -208,6 +208,20 @@ namespace VividRP.Editor.Tests
                 Metadata.GetData(MetadataData); RequestFlags.GetData(RequestData);
             }
 
+            internal uint[] BuildAvailableLevelHints()
+            {
+                using var hints = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, sizeof(uint));
+                int kernel = Shader.FindKernel("VSMBuildAvailableLevelHints");
+                Shader.SetBuffer(kernel, "_VSMPossibleMappedLevelsRW", hints);
+                Shader.SetBuffer(kernel, "_VSMPrototypePageTable", Table);
+                Shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", Metadata);
+                Shader.SetBuffer(kernel, "_VSMProjections", m_Projections);
+                Shader.Dispatch(kernel, 1, 1, 1);
+                var result = new uint[12];
+                hints.GetData(result);
+                return result;
+            }
+
             internal void Allocate()
             {
                 int kernel = Shader.FindKernel("VSMPrototypeAllocatePages");
@@ -284,6 +298,53 @@ namespace VividRP.Editor.Tests
                 if (m_UploadShader != Shader) Object.DestroyImmediate(m_UploadShader);
                 Object.DestroyImmediate(m_Static); Object.DestroyImmediate(m_Dynamic); Object.DestroyImmediate(Shader);
             }
+        }
+
+        [TestCase(2u, true)] // Completed empty pages remain usable.
+        [TestCase(10u, true)]
+        [TestCase(6u, false)] // Static dirty.
+        [TestCase(32770u, false)] // Dynamic dirty.
+        [TestCase(0u, false)]
+        public void AvailableLevelHintsUseFinalizedMappingState(uint flags, bool possible)
+        {
+            using var fixture = new Fixture(allocator: true);
+            for (int page = 4; page < 8; page++)
+            {
+                fixture.Map(page, page);
+                fixture.MetadataData[page].x = flags;
+            }
+            fixture.Upload();
+            Assert.That((fixture.BuildAvailableLevelHints()[0] & 2u) != 0, Is.EqualTo(possible));
+            for (int page = 4; page < 8; page++) fixture.MetadataData[page].y = 0;
+            fixture.Upload();
+            Assert.That(fixture.BuildAvailableLevelHints()[0] & 2u, Is.Zero, "Stale slot ownership");
+        }
+
+        [Test]
+        public void AvailableLevelHintsIncludeLevelSpecificNormalBiasAcrossPageBoundary()
+        {
+            using var fixture = new Fixture(allocator: true);
+            for (int level = 0; level < 2; level++)
+            {
+                var projection = fixture.ProjectionData[level];
+                projection.WorldToShadow.m03 = level == 0 ? 0 : 0.05f;
+                fixture.ProjectionData[level] = projection;
+            }
+            fixture.Map(5, 1);
+            fixture.Upload();
+            Assert.That(fixture.BuildAvailableLevelHints()[0] & 2u, Is.Zero);
+            fixture.ProjectionData[1].Parameters.y = 5;
+            fixture.Upload();
+            Assert.That(fixture.BuildAvailableLevelHints()[0] & 2u, Is.EqualTo(2u));
+        }
+
+        [Test]
+        public void AvailableLevelHintsKeepUnknownProjection()
+        {
+            using var fixture = new Fixture(allocator: true);
+            fixture.ProjectionData[1].WorldToShadow.m00 *= 1.1f;
+            fixture.Upload();
+            Assert.That(fixture.BuildAvailableLevelHints()[0] & 2u, Is.EqualTo(2u));
         }
 
         [Test]

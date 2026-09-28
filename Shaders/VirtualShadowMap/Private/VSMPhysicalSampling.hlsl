@@ -157,3 +157,20 @@ bool TrySampleVSMVirtualTap(float2 shadowUV, int2 offset, float depth, int index
     return true;
 }
 
+
+uint LoadVSMPossibleMappedLevels(float3 positionWS, float3 normal, int index)
+{
+#if defined(VIVID_VSM_AVAILABLE_LEVEL_HINTS)
+    if (_VSMAvailableLevelHintsEnabled == 0 || _VSMProjectionCount > 16
+        || !all(isfinite(positionWS)) || any(abs(positionWS) > kVSMHintWorldLimit)
+        || !all(isfinite(normal)) || any(abs(normal) > 1.001)) return 0xffffffffu;
+    // Key by the UNBIASED receiver. Bias is reapplied at each candidate level.
+    float2 uv = mul(_VSMProjections[index].worldToShadow, float4(positionWS, 1)).xy;
+    if (!all(isfinite(uv)) || any(uv < 0) || any(uv >= 1)) return 0xffffffffu;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint2 page = (uint2)floor(uv * axis);
+    return _VSMPossibleMappedLevels[((uint)index * axis + page.y) * axis + page.x];
+#else
+    return 0xffffffffu;
+#endif
+}

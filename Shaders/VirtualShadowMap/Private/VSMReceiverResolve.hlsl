@@ -275,6 +275,24 @@ float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bo
         for (int level = index; level < _VSMProjectionCount; level++)
         {
             bool needSample = sampledLevel < 0 || (sampledLevel == index && blend > 0.0 && !hasTransition);
+#if defined(VIVID_VSM_AVAILABLE_LEVEL_HINTS)
+            bool skipCandidate = false;
+            if (needSample && level > index && level < 16)
+                skipCandidate = (LoadVSMPossibleMappedLevels(positionWS, normal, index) & (1u << level)) == 0u;
+#if defined(VIVID_VSM_ADAPTIVE_RAYS)
+            // Missing lanes latch waveComplete=false in the original filter.
+            // Removing only those lanes would change adaptive ray termination.
+            // Skip whole participating waves, retaining mixed waves verbatim.
+#if defined(VIVID_VSM_SMRT_COST) || defined(VIVID_VSM_RECEIVER_DEBUG)
+            bool adaptiveHints = _VSMHistoryParameters.y > 0;
+#else
+            const bool adaptiveHints = true;
+#endif
+            if (smrt && adaptiveHints)
+                skipCandidate = WaveActiveAllTrue(!needSample || skipCandidate);
+#endif
+            if (skipCandidate) continue;
+#endif
             float sampleShadow;
             VSMReceiverProjection prepared = selected;
             // Only prepare projections that still need a depth estimate.

@@ -16,6 +16,7 @@ namespace VividRP.Runtime
 
         public bool isCSMActive;
         internal bool virtualShadowMapRendered;
+        internal bool virtualShadowMapLevelHintsRendered;
         internal readonly VirtualShadowMapClipmapLayout clipmaps = new();
         public int cascadeCount;
         public float maxShadowDistance;
@@ -46,6 +47,7 @@ namespace VividRP.Runtime
             clipmaps.Reset();
             isCSMActive = false;
             virtualShadowMapRendered = false;
+            virtualShadowMapLevelHintsRendered = false;
             cascadeCount = 0;
             maxShadowDistance = 0f;
             cascadeResolution = 0;

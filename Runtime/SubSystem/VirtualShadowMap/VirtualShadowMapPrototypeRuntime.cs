@@ -47,6 +47,12 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_PageTable;
         private static GraphicsBuffer s_PageMetadata;
         private static GraphicsBuffer s_PageRequestFlags;
+        private static GraphicsBuffer s_PossibleMappedLevels;
+        // Experimental: mixed per-frame benefit while moving; retain baseline kernels by default.
+        internal static bool AvailableLevelHintsEnabled { get; set; }
+        internal static readonly int PossibleMappedLevelsId = Shader.PropertyToID("_VSMPossibleMappedLevels");
+        internal static readonly int PossibleMappedLevelsRWId = Shader.PropertyToID("_VSMPossibleMappedLevelsRW");
+        internal static readonly int AvailableLevelHintsEnabledId = Shader.PropertyToID("_VSMAvailableLevelHintsEnabled");
         private static GraphicsBuffer s_PageReceiverMasks, s_PhysicalReceiverMasks;
         private static GraphicsBuffer s_PageCullHierarchy, s_UncachedPageRectBounds;
         private static GraphicsBuffer s_ActiveViews, s_InstanceDispatchArgs, s_PageCullDispatchArgs;
@@ -117,6 +123,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static GraphicsBuffer PageTable => s_PageTable;
         internal static GraphicsBuffer PageMetadata => s_PageMetadata;
         internal static GraphicsBuffer PageRequestFlags => s_PageRequestFlags;
+        internal static GraphicsBuffer PossibleMappedLevels => s_PossibleMappedLevels;
         internal static GraphicsBuffer PageReceiverMasks => s_PageReceiverMasks;
         internal static GraphicsBuffer PhysicalReceiverMasks => s_PhysicalReceiverMasks;
         internal static GraphicsBuffer PageCullHierarchy => s_PageCullHierarchy;
@@ -168,7 +175,9 @@ namespace VividRP.Runtime.VirtualShadowMap
             && s_InstanceDispatchArgs?.IsValid() == true
             && s_PageCullDispatchArgs?.IsValid() == true
             && s_PageTable.count == PageTableEntryCount
-            && s_PageMetadata.count == PageTableEntryCount;
+            && s_PageMetadata.count == PageTableEntryCount
+            && s_PossibleMappedLevels?.IsValid() == true
+            && s_PossibleMappedLevels.count == PageTableEntryCount;
         internal static VirtualShadowMapPrototypeFrameState FrameState => s_FrameState;
         internal static VirtualShadowMapPrototypeFallbackReason LastFallbackReason =>
             s_LastFallbackReason;
@@ -279,6 +288,12 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         private static void EnsureAllocationResources(int pageCount)
         {
+            if (s_PossibleMappedLevels == null || !s_PossibleMappedLevels.IsValid() || s_PossibleMappedLevels.count != pageCount)
+            {
+                s_PossibleMappedLevels?.Dispose();
+                s_PossibleMappedLevels = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, sizeof(uint))
+                { name = "VSMPossibleMappedLevels" };
+            }
             if (s_PageRequestFlags == null || !s_PageRequestFlags.IsValid() || s_PageRequestFlags.count != pageCount)
             {
                 s_PageRequestFlags?.Dispose();
@@ -985,6 +1000,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_PageMetadata = null;
             s_PageRequestFlags?.Dispose();
             s_PageRequestFlags = null;
+            s_PossibleMappedLevels?.Dispose(); s_PossibleMappedLevels = null;
             s_PageReceiverMasks?.Dispose(); s_PageReceiverMasks = null;
             s_PhysicalReceiverMasks?.Dispose(); s_PhysicalReceiverMasks = null;
             s_PageCullHierarchy?.Dispose(); s_PageCullHierarchy = null;

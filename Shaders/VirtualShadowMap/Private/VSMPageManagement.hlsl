@@ -1516,3 +1516,82 @@ void VSMCullMeshletsToPagesAffine(uint3 id : SV_DispatchThreadID) { RunVSMCullMe
 void VSMCullMeshletsToPagesGeometryBounds(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
 #endif
 #endif
+
+// One uint per virtual page: bits denote possible absolute clipmap levels.
+// This never changes raster ownership or aliases the real page table.
+// Bounded-domain hint only. The consumer returns Unknown outside this domain.
+// 16*FLT_EPSILON covers the two affine dot products, their relative transform,
+// and bias addition; the 2x bias bound also covers normalized-normal roundoff.
+static const float kVSMHintWorldLimit = 65536.0;
+static const float kVSMHintRoundoff = 0.0000019073486328125;
+
+uint BuildVSMPossibleMappedLevels(uint sourceLevel, uint2 sourcePage)
+{
+    if (_VSMProjectionCount > 16 || _VSMPrototypePagesPerAxis <= 0) return 0xffffffffu;
+    VividVSMProjection source = _VSMProjections[sourceLevel];
+    float2 lowUV = float2(sourcePage) / _VSMPrototypePagesPerAxis;
+    float2 highUV = float2(sourcePage + 1u) / _VSMPrototypePagesPerAxis;
+    uint result = 0u;
+    for (uint level = sourceLevel; level < (uint)_VSMProjectionCount; level++)
+    {
+        VividVSMProjection target = _VSMProjections[level];
+        float scale = exp2((float)sourceLevel - (float)level);
+        // Arbitrary/non-clipmap projections remain on the original path.
+        if (any(target.worldToShadow[0].xyz != source.worldToShadow[0].xyz * scale)
+            || any(target.worldToShadow[1].xyz != source.worldToShadow[1].xyz * scale))
+        { result |= 1u << level; continue; }
+        float2 sourceTranslation = float2(source.worldToShadow._m03, source.worldToShadow._m13);
+        float2 targetTranslation = float2(target.worldToShadow._m03, target.worldToShadow._m13);
+        float2 sourceMagnitude = float2(dot(abs(source.worldToShadow[0].xyz), 1.0.xxx),
+            dot(abs(source.worldToShadow[1].xyz), 1.0.xxx));
+        float2 targetMagnitude = float2(dot(abs(target.worldToShadow[0].xyz), 1.0.xxx),
+            dot(abs(target.worldToShadow[1].xyz), 1.0.xxx));
+        float biasWorld = 2.0 * abs(target.parameters.x * target.parameters.y);
+        float2 margin = biasWorld * targetMagnitude + kVSMHintRoundoff *
+            ((sourceMagnitude * scale + targetMagnitude) * kVSMHintWorldLimit
+                + abs(sourceTranslation) * scale + abs(targetTranslation)
+                + biasWorld * targetMagnitude + 1.0);
+        float2 low = (lowUV - sourceTranslation) * scale + targetTranslation - margin;
+        float2 high = (highUV - sourceTranslation) * scale + targetTranslation + margin;
+        if (!all(isfinite(low)) || !all(isfinite(high)))
+        { result |= 1u << level; continue; }
+        // Clamp floats before conversion. Including the closed upper boundary
+        // deliberately keeps an extra page rather than risking a false negative.
+        if (any(high < 0.0) || any(low > 1.0)) continue;
+        int2 lowPage = int2(floor(saturate(low) * _VSMPrototypePagesPerAxis));
+        int2 highPage = min(int2(floor(saturate(high) * _VSMPrototypePagesPerAxis)), _VSMPrototypePagesPerAxis - 1);
+        if (any(highPage - lowPage > 3))
+        { result |= 1u << level; continue; }
+        bool possible = false;
+        for (int y = lowPage.y; y <= highPage.y && !possible; y++)
+            for (int x = lowPage.x; x <= highPage.x; x++)
+            {
+                uint page = (level * (uint)_VSMPrototypePagesPerAxis + (uint)y)
+                    * (uint)_VSMPrototypePagesPerAxis + (uint)x;
+                uint encoded = _VSMPrototypePageTable[page];
+                uint4 metadata = _VSMPrototypePageMetadata[page];
+                // Match TryResolveVSMPhysicalTexelInternal exactly. Empty,
+                // completed pages count as ready; receiver masks are NOT implied.
+                if (encoded != 0u && metadata.y == encoded
+                    && (metadata.x & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty)) == kVSMPageAllocated)
+                { possible = true; break; }
+            }
+        if (possible) result |= 1u << level;
+    }
+    return result;
+}
+
+[numthreads(64, 1, 1)]
+void VSMBuildAvailableLevelHints(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_VSMPrototypePageTableEntryCount) return;
+    if (_VSMPrototypePagesPerAxis <= 0)
+    {
+        _VSMPossibleMappedLevelsRW[id.x] = 0xffffffffu;
+        return;
+    }
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint level = id.x / (axis * axis);
+    uint local = id.x % (axis * axis);
+    _VSMPossibleMappedLevelsRW[id.x] = BuildVSMPossibleMappedLevels(level, uint2(local % axis, local / axis));
+}

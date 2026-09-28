@@ -78,9 +78,10 @@ void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
     }
     else if (_VSMReceiverDebugMode == 6)
     {
-        data = _VSMReceiverQuality.x > 0 ? g_VSMDebugQuality : -1;
+        // relative biased LOD, first absolute level, selected index, normalized bias.
+        data = g_VSMDebugQuality;
         color = data.w < 0 ? float3(1, 0, 1)
-            : lerp(float3(0, 0.7, 0), float3(1, 0, 0), saturate((data.w - 1) / 3));
+            : lerp(float3(0, 0.7, 0), float3(1, 0, 0), saturate(data.w / 4));
     }
     if (_VSMReceiverDebugMode == 7)
     {

@@ -30,8 +30,7 @@ float4 BuildVSMReceiverBias(VividVSMProjection projection, float3 normalWS)
     return float4(gradient, comparisonBias, normalOffset);
 }
 
-// Prepared for one candidate level. Density selection hands its accepted
-// projection to resolve so normal bias and world-to-shadow are not repeated.
+// Prepared for one selected level (or one hard/PCF fallback candidate).
 struct VSMReceiverProjection
 {
     VividVSMProjection projection;
@@ -240,99 +239,45 @@ bool TryEvaluateVSMProjection(VSMReceiverProjection prepared, int index,
 float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bool smrt, out bool unavailable)
 {
     unavailable = false;
-    bool densityPolicy = _VSMReceiverQuality.x > 0;
-    float densityBlend = 0;
-    int firstLevel = 0;
+    int index = SelectVSMClipmapLevel(positionWS, false);
+    // UE TraceDirectional returns valid fully lit outside the allocated levels.
+    if (index < 0 || _VSMPrototypeEnabled == 0) return 1.0;
     float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-8));
-    VSMReceiverProjection selected = (VSMReceiverProjection)0;
     VSMSMRTReceiverSamples samples = (VSMSMRTReceiverSamples)0;
-    [branch]
-    if (densityPolicy)
-        firstLevel = SelectVSMDensityLevelPrepared(positionWS, normal, smrt, densityBlend, selected);
-    if (firstLevel < 0) { unavailable = true; return 1.0; }
-    for (int index = firstLevel; index < _VSMProjectionCount; index++)
+    samples.viewDistance = length(positionWS - _VSMProjections[0].selectionSphere.xyz);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugLevels.x = index;
+    g_VSMDebugBlend = 0;
+#endif
+    if (smrt)
     {
-        VividVSMProjection projection = _VSMProjections[index];
-        float2 relative = mul(projection.worldToShadow,
-            float4(positionWS - projection.selectionSphere.xyz, 0.0)).xy * 2;
-        float edge = max(abs(relative.x), abs(relative.y));
-        if (!densityPolicy && edge >= 0.5)
-            continue;
-        float maxDistance = projection.parameters.w;
-        float distance = length(positionWS - projection.selectionSphere.xyz);
-        if (distance >= maxDistance)
-            return 1.0;
-        float border = projection.parameters.z;
-        float blend = densityPolicy ? densityBlend : VSMTransitionWeight(edge, border);
+        VSMReceiverProjection prepared = PrepareVSMReceiverProjection(positionWS, normal, index);
+        // GetMappedClipmap uses the unbiased receiver. Missing origin pages do
+        // not restart the entire trace; individual ray samples handle fallback.
+        prepared.coord = mul(prepared.projection.worldToShadow, float4(positionWS, 1)).xyz;
+        float shadow;
+        VSM_COST_ADD(1, 1u);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
-        g_VSMDebugLevels.x = index;
-        g_VSMDebugBlend = blend;
+        g_VSMDebugWork.z++;
 #endif
-        float shadow = 1.0;
-        float transition = 1.0;
-        int sampledLevel = -1;
-        bool hasTransition = false;
-        for (int level = index; level < _VSMProjectionCount; level++)
-        {
-            bool needSample = sampledLevel < 0 || (sampledLevel == index && blend > 0.0 && !hasTransition);
-#if defined(VIVID_VSM_AVAILABLE_LEVEL_HINTS)
-            bool skipCandidate = false;
-            if (needSample && level > index && level < 16)
-                skipCandidate = (LoadVSMPossibleMappedLevels(positionWS, normal, index) & (1u << level)) == 0u;
-#if defined(VIVID_VSM_ADAPTIVE_RAYS)
-            // Missing lanes latch waveComplete=false in the original filter.
-            // Removing only those lanes would change adaptive ray termination.
-            // Skip whole participating waves, retaining mixed waves verbatim.
-#if defined(VIVID_VSM_SMRT_COST) || defined(VIVID_VSM_RECEIVER_DEBUG)
-            bool adaptiveHints = _VSMHistoryParameters.y > 0;
-#else
-            const bool adaptiveHints = true;
-#endif
-            if (smrt && adaptiveHints)
-                skipCandidate = WaveActiveAllTrue(!needSample || skipCandidate);
-#endif
-            if (skipCandidate) continue;
-#endif
-            float sampleShadow;
-            VSMReceiverProjection prepared = selected;
-            // Only prepare projections that still need a depth estimate.
-            if (needSample)
-            {
-                if (!densityPolicy || level != firstLevel)
-                    prepared = PrepareVSMReceiverProjection(positionWS, normal, level);
-            }
-            bool sampled = TryEvaluateVSMProjection(prepared, level, needSample, pixel,
-                smrt, samples, sampleShadow);
-            VSM_COST_ADD(2, smrt && needSample && sampledLevel < 0 && level > index ? 1u : 0u);
-            VSM_COST_ADD(3, smrt && needSample && sampledLevel >= 0 ? 1u : 0u);
-            if (!sampled) continue;
-            if (sampledLevel < 0)
-            {
-                sampledLevel = level;
-                shadow = sampleShadow;
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-                g_VSMDebugLevels.y = level;
-#endif
-            }
-            else
-            {
-                transition = sampleShadow;
-                hasTransition = true;
-                VSM_COST_ADD(25, smrt ? 1u : 0u);
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-                g_VSMDebugLevels.z = level;
-#endif
-            }
-        }
-        // Missing transition coverage must not brighten a valid primary sample.
-        // If the primary already fell back, it must not be blended a second time.
-        if (sampledLevel == index && hasTransition)
-            shadow = lerp(shadow, transition, blend);
-        unavailable = sampledLevel < 0;
-        float fade = saturate((maxDistance - distance) / max(maxDistance * 0.2, 1e-5));
-        return lerp(1.0, shadow, fade);
+        TryFilterVSMSMRT(prepared.coord, prepared.bias, index, pixel,
+            GetVSMSMRTProjection(index), samples, shadow);
+        return shadow;
     }
-    // No complete level covers the receiver: explicit terminal lit policy.
+    // Keep the explicit hard/PCF diagnostic filter and its footprint contract.
+    // It shares UE distance selection and takes the first valid parent, once.
+    for (int level = index; level < _VSMProjectionCount; ++level)
+    {
+        VSMReceiverProjection prepared = PrepareVSMReceiverProjection(positionWS, normal, level);
+        float shadow;
+        if (TryEvaluateVSMProjection(prepared, level, true, pixel, false, samples, shadow))
+        {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+            g_VSMDebugLevels.y = level;
+#endif
+            return shadow;
+        }
+    }
     unavailable = true;
     return 1.0;
 }
@@ -342,16 +287,6 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)
     bool smrt = UseVSMSMRT();
     bool unavailable;
     float shadow = ResolveVSMReceiverMode(positionWS, normalWS, pixel, smrt, unavailable);
-    if (smrt && unavailable)
-    {
-        VSM_COST_ADD(22, 1u);
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-        g_VSMDebugSMRT.w++;
-#endif
-        // Retry the complete existing PCF hierarchy only after all soft estimates
-        // failed. Never clamp a valid penumbra against a hard central reference.
-        shadow = ResolveVSMReceiverMode(positionWS, normalWS, pixel, false, unavailable);
-    }
     VSM_COST_ADD(24, unavailable ? 1u : 0u);
     return shadow;
 }
@@ -375,7 +310,7 @@ void ResolveVSMScreenPixel(uint3 id)
         float3 position = ReconstructWorldPosition(id.xy, depth);
         float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(id.xy, 0)).xy);
         normal = ReconstructVSMReceiverNormal(id.xy, depth, position, normal);
-        // Includes the complete VSM PCF fallback when SMRT coverage is unavailable.
+        // Single UE trace; page misses are handled inside each ray sample.
         shadow = ResolveVSMReceiver(position, normal, id.xy);
     }
     _DirectionalShadowTexture[id.xy] = shadow;

@@ -359,7 +359,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ReceiverViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
                 m_ReceiverWidth = cameraData.actualWidth;
                 m_ReceiverHeight = cameraData.actualHeight;
-                m_ReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(settings);
+                m_ReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(settings, cameraData, clipmaps.Resolution);
                 m_ReceiverSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angularDiameter);
                 m_ReceiverParameters = new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0,
                     shadowData.depthBias, shadowData.slopeScaleDepthBias,

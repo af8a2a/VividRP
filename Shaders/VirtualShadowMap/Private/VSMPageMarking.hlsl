@@ -150,34 +150,16 @@ void MarkVSMReceiverPage(float2 uv, int level, uint role)
     MarkVSMReceiverPage(uv, level, role, 1);
 }
 
-// Select each filter independently: its map-edge guard can select a different
-// preferred level and transition. Share the production density/coverage policy.
+// UE request bias includes page pressure; sampling relies on mapped parents.
 int SelectVSMMarkingStart(float3 position, float3 normal, bool smrt, out float blend,
     out VSMReceiverProjection selected, out bool allowFallback)
 {
     blend = 0;
+    int level = SelectVSMClipmapLevel(position, true);
+    allowFallback = level >= 0;
     selected = (VSMReceiverProjection)0;
-    allowFallback = true;
-    bool density = _VSMReceiverQuality.x > 0;
-    int first = 0;
-    if (density) first = SelectVSMDensityLevelPrepared(position, normal, smrt, blend, selected);
-    if (first < 0) return -1;
-    for (int level = first; level < _VSMProjectionCount; level++)
-    {
-        VividVSMProjection p = _VSMProjections[level];
-        float2 relative = mul(p.worldToShadow, float4(position - p.selectionSphere.xyz, 0)).xy * 2;
-        float edge = max(abs(relative.x), abs(relative.y));
-        if (!density && edge >= 0.5) continue;
-        if (length(position - p.selectionSphere.xyz) >= p.parameters.w)
-        {
-            // Match the resolve's terminal distance fade: it does not retry PCF.
-            allowFallback = false;
-            return -1;
-        }
-        if (!density) blend = VSMTransitionWeight(edge, p.parameters.z);
-        return level;
-    }
-    return -1;
+    if (level >= 0) selected = PrepareVSMReceiverProjection(position, normal, level);
+    return level;
 }
 
 VSMReceiverPageFootprint BuildVSMSMRTPageFootprint(float3 position, VividVSMProjection p,
@@ -270,17 +252,11 @@ void MarkVSMReceiverUE(float3 position, float3 normalWS, uint groupIndex)
     if (_VSMPrototypeRequestEnabled == 0 || _VSMProjectionCount <= 0) return;
     // The hard/PCF reference keeps its complete footprint contract.
     if (!UseVSMSMRT()) { MarkVSMReceiver(position, normalWS); return; }
-    float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-8));
-    float blend;
-    bool unused;
-    VSMReceiverProjection selected;
-    // Use the same density/pressure/coverage choice as Resolve. UE's distance
-    // LOD policy needs a joint marking+sampling change, not a marking-only swap.
-    int level = SelectVSMMarkingStart(position, normal, true, blend, selected, unused);
+    int level = SelectVSMClipmapLevel(position, true);
     if (level < 0) return;
-    if (_VSMReceiverQuality.x <= 0) selected = PrepareVSMReceiverProjection(position, normal, level);
-    if (selected.coord.z < 0 || selected.coord.z > 1) return;
-    MarkVSMReceiverPageUE(selected.coord.xy, level, groupIndex);
+    float3 coord = mul(_VSMProjections[level].worldToShadow, float4(position, 1)).xyz;
+    if (coord.z < 0 || coord.z > 1) return;
+    MarkVSMReceiverPageUE(coord.xy, level, groupIndex);
 }
 
 #if defined(VIVID_VSM_MARK_RECEIVERS)

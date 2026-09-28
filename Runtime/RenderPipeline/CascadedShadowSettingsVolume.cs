@@ -32,15 +32,15 @@ namespace VividRP.Runtime
         public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
         [Tooltip("Shift intermediate clipmaps toward the non-jittered camera frustum while preserving page alignment and nested coverage. The nearest and farthest levels remain camera-centred.")]
         public BoolParameter virtualShadowMapViewCoverage = new(false);
-        [Tooltip("Select receiver levels by screen-space texel density within the existing stable projections. Off preserves P4 coverage selection. Does not resize projections, physical pools or invalidate cached caster depth.")]
+        [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public BoolParameter virtualShadowMapScreenDensity = new(false);
-        [Tooltip("Adapt receiver density to the physical page budget. Reduces detail under primary/parent/transition page pressure, then restores it slowly after sustained headroom. Requires Screen Density; preserves all hidden depth layers.")]
+        [Tooltip("Add budget pressure bias to requested clipmap levels, then restore detail slowly after sustained headroom. Sampling keeps its desired level and falls back to resident parents.")]
         public BoolParameter virtualShadowMapPagePressure = new(true);
-        [Tooltip("Target screen pixels per virtual texel before LOD bias. Smaller requests finer levels, limited by finest-level coverage and page residency. Uses geometric receiver-plane axis footprints, not the normal map.")]
+        [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapTargetTexelPixels = new(1, 0.25f, 8);
-        [Tooltip("Receiver quality only: -1 halves the target texel footprint (finer); +1 doubles it (coarser). Does not change First Level, virtual resolution or the page budget. Requires Screen Density.")]
+        [Tooltip("UE distance-based clipmap LOD bias. -1 requests finer levels; +1 requests coarser levels. Includes horizontal viewport/projection normalization; total bias is clamped to zero to preserve coverage. Does not change resident projection sizes.")]
         public ClampedFloatParameter virtualShadowMapResolutionLodBias = new(0, -4, 4);
-        [Tooltip("Enable VSM filtering, using two-texel-wide area PCF with up to nine comparisons by default. With SMRT, integrate this footprint at ray origins to preserve contact anti-aliasing. Off keeps the single-point hard-shadow reference; missing filter footprints fall back as a whole to a coarser level.")]
+        [Tooltip("Enable two-texel-wide area PCF for the hard-shadow reference. SMRT independently uses UE distance-scaled texel dither. Missing PCF footprints fall back as a whole to a coarser level.")]
         public BoolParameter virtualShadowMapPCF = new(false);
         [Tooltip("Experimental nine-comparison stratified disk filter with frame-varying samples. Requires VSM PCF; radius is one virtual texel. Intended for comparison with area PCF under temporal anti-aliasing.")]
         public BoolParameter virtualShadowMapStochasticFiltering = new(false);
@@ -58,9 +58,9 @@ namespace VividRP.Runtime
         public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 4, 8);
         [Tooltip("Length of the normalized SMRT ray in world units. No parallel tail is traced. This is Vivid's world-length control, not UE's view-distance scale; large lengths with few steps may skip occluders.")]
         public ClampedFloatParameter virtualShadowMapSMRTMaxRayLength = new(10, 0.1f, 100);
-        [Tooltip("Width of transitions across fractional LOD steps with Screen Density, or selection radii with legacy selection. 0 disables this component of blending.")]
+        [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapTransition = new(0.2f, 0f, 0.5f);
-        [Tooltip("Width of the projection-edge transition with Screen Density. When not overridden, follows the LOD transition; smaller values retain fine detail closer to the coverage edge. 0 disables this component of blending.")]
+        [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapCoverageTransition = new(0.2f, 0f, 0.5f);
         public ClampedIntParameter cascadeCount = new(DefaultCascadeCount, 1, 4);
         public MinFloatParameter maxShadowDistance = new(DefaultMaxShadowDistance, 0.01f);

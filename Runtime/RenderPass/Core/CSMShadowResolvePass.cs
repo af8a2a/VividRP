@@ -471,7 +471,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             m_SMRTSampleIndexOffset = VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(
                 csmSettings, cameraData.additionalData, m_FrameIndex);
-            m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings);
+            m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings, cameraData, shadowData.clipmaps.Resolution);
             m_VSMSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(csmSettings, m_LightAngularDiameter);
             m_VSMReceiverParameters = new Vector4(csmSettings != null && csmSettings.virtualShadowMapPCF.value ? 1 : 0,
                 shadowData.depthBias, shadowData.slopeScaleDepthBias,

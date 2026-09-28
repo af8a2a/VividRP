@@ -1,4 +1,6 @@
 #pragma kernel InspectPressureDensity VIVID_VSM_PAGE_PRESSURE
+#pragma kernel InspectUEClipmapSelection VIVID_VSM_PAGE_PRESSURE
+#pragma kernel InspectUEClipmapDither
 #pragma kernel InspectVSMHistory
 #pragma kernel InspectSMRTSamples
 #pragma kernel TraceSMRTRays
@@ -58,6 +60,23 @@ RWStructuredBuffer<float2> _SamplingResults;
 int _SamplingCount;
 int2 _SamplingPixel;
 float2 _SamplingAdaptive; // wave adaptation enabled, use production uniform binding
+
+[numthreads(64, 1, 1)]
+void InspectUEClipmapSelection(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float3 position = _SamplingInputs[id.x].xyz;
+    _SamplingResults[id.x] = float2(SelectVSMClipmapLevel(position, false), SelectVSMClipmapLevel(position, true));
+}
+
+[numthreads(64, 1, 1)]
+void InspectUEClipmapDither(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float2 input = _SamplingInputs[id.x].xy;
+    _SamplingResults[id.x] = float2(VSMSMRTTexelDitherScale(input.x, input.y),
+        VSMSMRTTexelDitherScale(input.x, input.y * 2));
+}
 
 [numthreads(64, 1, 1)]
 void InspectVSMHierarchyMip(uint3 id : SV_DispatchThreadID)

@@ -46,18 +46,36 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && smrtParameters.x >= 4 && smrtParameters.w > 0;
 
         internal static Vector4 BuildParameters(CascadedShadowSettingsVolume settings)
-            => settings == null ? Vector4.zero : BuildParameters(
-                settings.virtualShadowMapScreenDensity.value,
-                settings.virtualShadowMapTargetTexelPixels.value,
+            => settings == null ? Vector4.zero : BuildClipmapParameters(
                 settings.virtualShadowMapResolutionLodBias.value,
-                settings.virtualShadowMapCoverageTransition.overrideState
-                    ? settings.virtualShadowMapCoverageTransition.value : settings.virtualShadowMapTransition.value,
-                settings.virtualShadowMapPagePressure.value);
+                settings.virtualShadowMapPagePressure.value, 2, 1, 1);
+
+        internal static Vector4 BuildParameters(CascadedShadowSettingsVolume settings,
+            VividCameraData camera, int virtualResolution)
+        {
+            if (settings == null) return Vector4.zero;
+            var projection = camera.GetProjectionMatrixNoJitter();
+            float scaleX = Mathf.Max(Mathf.Abs(projection.m00), 1e-6f);
+            int width = Mathf.Max(camera.actualWidth, 1);
+            if (camera.camera != null && camera.camera.orthographic)
+                width = Mathf.Max(width, Mathf.CeilToInt(2 / scaleX));
+            return BuildClipmapParameters(settings.virtualShadowMapResolutionLodBias.value,
+                settings.virtualShadowMapPagePressure.value, virtualResolution, width, scaleX);
+        }
+
+        // UE FVirtualShadowMapClipmap: normalize to horizontal camera resolution,
+        // including its doubled projection extent, then clamp the TOTAL bias.
+        internal static Vector4 BuildClipmapParameters(float lodBias, bool pagePressure,
+            int virtualResolution, int viewportWidth, float projectionScaleX)
+            => new(pagePressure ? 2 : 1,
+                Mathf.Max(0, lodBias + Mathf.Log(0.5f * Mathf.Max(virtualResolution, 1)
+                    / (Mathf.Max(viewportWidth, 1) * Mathf.Max(Mathf.Abs(projectionScaleX), 1e-6f)), 2)),
+                0, 0);
 
         internal static Vector4 BuildParameters(bool enabled, float targetTexelPixels, float lodBias,
             float coverageTransition = -1, bool pagePressure = false)
-            => new(enabled ? (pagePressure ? 2 : 1) : 0,
-                Mathf.Clamp(targetTexelPixels, 0.25f, 8) * Mathf.Pow(2, Mathf.Clamp(lodBias, -4, 4)),
-                0.5f * Mathf.Clamp(coverageTransition, 0, 0.5f), coverageTransition >= 0 ? 1 : 0);
+            // Serialized density/transition controls are retained for old assets;
+            // UE selection is unconditional. This overload has unit LodScale.
+            => BuildClipmapParameters(lodBias, pagePressure, 2, 1, 1);
     }
 }

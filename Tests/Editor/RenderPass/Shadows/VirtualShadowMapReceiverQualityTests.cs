@@ -43,7 +43,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Volume_DefaultsToLegacyAndClampsIndependentQualityInputs()
+        public void Volume_AlwaysUsesUESelectionAndClampsQualityInputs()
         {
             var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
             try
@@ -51,7 +51,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.virtualShadowMapScreenDensity.value, Is.False);
                 Assert.That(settings.virtualShadowMapTargetTexelPixels.value, Is.EqualTo(1));
                 Assert.That(settings.virtualShadowMapResolutionLodBias.value, Is.Zero);
-                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings), Is.EqualTo(new Vector4(0, 1, 0.1f, 1)));
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings), Is.EqualTo(new Vector4(2, 0, 0, 0)));
                 settings.virtualShadowMapTargetTexelPixels.value = 0;
                 settings.virtualShadowMapResolutionLodBias.value = -100;
                 Assert.That(settings.virtualShadowMapTargetTexelPixels.value, Is.EqualTo(0.25f));
@@ -60,20 +60,20 @@ namespace VividRP.Editor.Tests
                 settings.virtualShadowMapResolutionLodBias.value = 100;
                 Assert.That(settings.virtualShadowMapTargetTexelPixels.value, Is.EqualTo(8));
                 Assert.That(settings.virtualShadowMapResolutionLodBias.value, Is.EqualTo(4));
-                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(true, 1, -1).y, Is.EqualTo(0.5f));
-                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(true, 1, 1).y, Is.EqualTo(2));
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(true, 1, -1).y, Is.Zero);
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(true, 1, 1).y, Is.EqualTo(1));
             }
             finally { UnityEngine.Object.DestroyImmediate(settings); }
         }
 
         [Test]
-        public void PagePressure_RequiresDensityAndCanBeDisabledIndependently()
+        public void PagePressure_IsIndependentOfLegacyDensityToggle()
         {
             var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
             try
             {
                 Assert.That(settings.virtualShadowMapPagePressure.value, Is.True);
-                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).x, Is.Zero);
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).x, Is.EqualTo(2));
                 settings.virtualShadowMapScreenDensity.value = true;
                 Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).x, Is.EqualTo(2));
                 settings.virtualShadowMapPagePressure.value = false;
@@ -170,7 +170,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PagePressure_CoarsensDegenerateAndUnattainableFineLevels()
+        public void PagePressure_CoarsensRequestsButNotSampling()
         {
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = UnityEngine.Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -190,13 +190,14 @@ namespace VividRP.Editor.Tests
                     Matrix4x4 matrix = Matrix4x4.Scale(Vector3.one / size);
                     matrix.m03 = matrix.m13 = matrix.m23 = .5f;
                     data[i].WorldToShadow = matrix;
+                    data[i].SelectionSphere = new Vector4(0, 0, 0, -4 * (1 << i));
                     data[i].Parameters = new Vector4(size / 512, 0, 0, 100);
                 }
                 projections.SetData(data);
                 pressure.SetData(new[] { new uint4(math.asuint(2f), 0, 0, 0), uint4.zero, uint4.zero });
-                inputs.SetData(new[] { Vector4.zero, Vector4.zero });
+                inputs.SetData(new[] { new Vector4(1, 0, 0, 0), new Vector4(1, 0, 0, 0) });
                 normals.SetData(new[] { new Vector4(1, 0, 0, 0), new Vector4(1, 0, .001f, 0) });
-                int kernel = shader.FindKernel("InspectPressureDensity");
+                int kernel = shader.FindKernel("InspectUEClipmapSelection");
                 shader.SetBuffer(kernel, "_VSMProjections", projections);
                 shader.SetBuffer(kernel, "_VSMPagePressure", pressure);
                 shader.SetBuffer(kernel, "_SamplingInputs", inputs);
@@ -210,16 +211,16 @@ namespace VividRP.Editor.Tests
                 shader.SetVector("_VSMReceiverParameters", Vector4.zero);
                 shader.SetMatrix("_VSMReceiverViewProjection", Matrix4x4.Rotate(Quaternion.Euler(0, 45, 0)));
                 var output = new Vector2[2];
-                shader.SetVector("_VSMReceiverQuality", new Vector4(1, 1, 0, 0));
+                shader.SetVector("_VSMReceiverQuality", new Vector4(1, 0, 0, 0));
                 shader.Dispatch(kernel, 1, 1, 1);
                 results.GetData(output);
                 Assert.That(output[0].x, Is.EqualTo(0));
                 Assert.That(output[1].x, Is.EqualTo(0));
-                shader.SetVector("_VSMReceiverQuality", new Vector4(2, 1, 0, 0));
+                shader.SetVector("_VSMReceiverQuality", new Vector4(2, 0, 0, 0));
                 shader.Dispatch(kernel, 1, 1, 1);
                 results.GetData(output);
-                Assert.That(output[0].x, Is.EqualTo(2));
-                Assert.That(output[1].x, Is.EqualTo(2));
+                Assert.That(output[0], Is.EqualTo(new Vector2(0, 2)));
+                Assert.That(output[1], Is.EqualTo(new Vector2(0, 2)));
             }
             finally { UnityEngine.Object.DestroyImmediate(shader); }
         }
@@ -421,19 +422,19 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CoverageAndLodTransitions_AreIndependentAndCanBeZero()
+        public void LegacyTransitionValues_DoNotEnableBlending()
         {
             var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
             try
             {
                 settings.virtualShadowMapTransition.value = .4f;
-                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).z, Is.EqualTo(.2f));
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).z, Is.Zero);
                 settings.virtualShadowMapCoverageTransition.Override(.05f);
-                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).z, Is.EqualTo(.025f));
+                Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).z, Is.Zero);
                 settings.virtualShadowMapCoverageTransition.value = 0;
                 var parameters = VirtualShadowMapReceiverQuality.BuildParameters(settings);
                 Assert.That(parameters.z, Is.Zero);
-                Assert.That(parameters.w, Is.EqualTo(1));
+                Assert.That(parameters.w, Is.Zero);
                 Assert.That(settings.virtualShadowMapTransition.value, Is.EqualTo(.4f));
                 Assert.That(settings.virtualShadowMapViewCoverage.value, Is.False);
                 Assert.That(settings.virtualShadowMapPhysicalPageBudget.value, Is.EqualTo(256));
@@ -441,6 +442,35 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.virtualShadowMapPhysicalPageBudget.value, Is.EqualTo(1024));
             }
             finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [TestCase(0, 4096, 1024, 1, 1)]
+        [TestCase(-1, 4096, 1024, 1, 0)]
+        [TestCase(-4, 4096, 1024, 1, 0)]
+        [TestCase(0, 4096, 2048, 1, 0)]
+        [TestCase(0, 8192, 1024, 2, 1)]
+        public void UEClipmapBias_NormalizesViewportAndProjectionBeforeClamp(float bias,
+            int resolution, int width, float scale, float expected)
+        {
+            Assert.That(VirtualShadowMapReceiverQuality.BuildClipmapParameters(bias, true,
+                resolution, width, scale), Is.EqualTo(new Vector4(2, expected, 0, 0)));
+        }
+
+        [Test]
+        public void UEClipmapBias_StableCameraPreparationAllocatesZeroBytes()
+        {
+            var go = new GameObject("VSM clipmap bias allocation test");
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            try
+            {
+                var camera = new VividCameraData { camera = go.AddComponent<Camera>(), actualWidth = 1920 };
+                for (int i = 0; i < 64; i++) VirtualShadowMapReceiverQuality.BuildParameters(settings, camera, 4096);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 1024; i++) VirtualShadowMapReceiverQuality.BuildParameters(settings, camera, 4096);
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); UnityEngine.Object.DestroyImmediate(go); }
         }
 
         private static void RecordSMRT(CommandBuffer cmd, CascadedShadowSettingsVolume settings, ComputeShader shader)

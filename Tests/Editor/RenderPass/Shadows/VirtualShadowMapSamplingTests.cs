@@ -1159,7 +1159,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ReceiverDiagnostics_ReportFallbackDirtyAndTransitionWork()
+        public void ReceiverDiagnostics_ReportFallbackWithoutTransitionWork()
         {
             using var f = new Fixture();
             for (int i = 0; i < 12; i++) f.Map(i, i, 0.8f);
@@ -1171,11 +1171,11 @@ namespace VividRP.Editor.Tests
             Assert.That(f.RunDiagnostic(receiver, 5).x, Is.EqualTo(2));
             for (int i = 0; i < 4; i++) f.MetadataData[i].x &= ~4u;
             f.Upload();
-            receiver.x = 2.25f;
+            receiver.x = 1.75f;
             float4 levels = f.RunDiagnostic(receiver, 0);
-            Assert.That(levels.xyz, Is.EqualTo(new float3(0, 0, 1)));
-            Assert.That(levels.w, Is.EqualTo(0.5f).Within(1e-5f));
-            Assert.That(f.RunDiagnostic(receiver, 4), Is.EqualTo(new float4(2, 2, 2, 1)));
+            Assert.That(levels.xyz, Is.EqualTo(new float3(0, 0, -1)));
+            Assert.That(levels.w, Is.Zero);
+            Assert.That(f.RunDiagnostic(receiver, 4), Is.EqualTo(new float4(1, 1, 1, 0)));
         }
 
         [Test]
@@ -1202,108 +1202,57 @@ namespace VividRP.Editor.Tests
             Assert.That(f.RunDiagnostic(new float4(0, 0, 0, -1), 0, true).xy, Is.EqualTo(new float2(-1, -1)));
         }
 
-        [Test]
-        public void DensityPolicy_RespondsToOutputResolutionZoomAndVirtualTexelDensity()
+        [TestCase(0, 0)]
+        [TestCase(1.999f, 0)]
+        [TestCase(2, 1)]
+        [TestCase(3.999f, 1)]
+        [TestCase(4, 2)]
+        [TestCase(8, -1)]
+        public void UEClipmapSelection_UsesDistanceFloorAndDoesNotClampToLast(float distance, int expected)
         {
             using var f = new Fixture();
-            for (int i = 0; i < 12; i++) f.Map(i, i, 0.8f);
+            f.ProjectionData[0].SelectionSphere.w = -4; // UE absolute first level 0.
             f.Upload();
-            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 8, 0));
-            Assert.That(f.RunDiagnostic(float4.zero, 6).xyz, Is.EqualTo(new float3(1, 0, 1)));
-            Assert.That(f.RunDiagnostic(float4.zero, 6, screenSize: 16).xyz, Is.EqualTo(new float3(0, 0, 0)));
-            Assert.That(f.RunDiagnostic(float4.zero, 6,
-                viewProjection: Matrix4x4.Scale(new Vector3(2, 2, 1))).xyz, Is.EqualTo(new float3(0, 0, 0)));
-            for (int i = 0; i < 3; i++) f.ProjectionData[i].Parameters.x *= 0.5f;
-            f.Upload();
-            Assert.That(f.RunDiagnostic(float4.zero, 6).xyz, Is.EqualTo(new float3(2, 0, 2)));
+            var receiver = new float4(distance, 0, 0, 0);
+            Assert.That(f.RunDiagnostic(receiver, 0).x, Is.EqualTo(expected));
+            Assert.That(f.RunDiagnostic(receiver, 0, receiverNormal: Vector3.right).x, Is.EqualTo(expected));
         }
 
         [Test]
-        public void DensityPolicy_PerspectiveDistanceFovAndGeometricSlopeAffectDemand()
+        public void UEClipmapSelection_DoesNotBlendOrFadeValidDepth()
         {
             using var f = new Fixture();
+            for (int i = 0; i < 12; i++) f.Map(i, i, i < 4 ? .8f : 0);
+            // The former distance fade and both transition controls are ignored.
+            for (int i = 0; i < 3; i++) f.ProjectionData[i].Parameters.w = 1.8f;
             f.Upload();
-            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 1, 0));
-            Matrix4x4 near = Matrix4x4.Perspective(60, 1, 0.1f, 100) * Matrix4x4.Translate(new Vector3(0, 0, -8));
-            Matrix4x4 far = Matrix4x4.Perspective(60, 1, 0.1f, 100) * Matrix4x4.Translate(new Vector3(0, 0, -16));
-            float nearLOD = f.RunDiagnostic(float4.zero, 6, viewProjection: near).x;
-            Assert.That(f.RunDiagnostic(float4.zero, 6, viewProjection: far).x, Is.EqualTo(nearLOD + 1).Within(1e-5));
-            Matrix4x4 zoom = Matrix4x4.Perspective(30, 1, 0.1f, 100) * Matrix4x4.Translate(new Vector3(0, 0, -8));
-            Assert.That(f.RunDiagnostic(float4.zero, 6, viewProjection: zoom).x, Is.LessThan(nearLOD));
-            Matrix4x4 angled = Matrix4x4.Rotate(Quaternion.Euler(0, 45, 0));
-            float flatLOD = f.RunDiagnostic(float4.zero, 6, viewProjection: angled).x;
-            Assert.That(f.RunDiagnostic(float4.zero, 6, viewProjection: angled,
-                receiverNormal: new Vector3(-0.8f, 0, 0.6f)).x, Is.LessThan(flatLOD));
-            Assert.That(f.RunDiagnostic(float4.zero, 6, receiverNormal: Vector3.right).w, Is.EqualTo(-1));
-        }
-
-        [Test]
-        public void DensityPolicy_UsesAvailableFineCoverageWithoutResizingTheProjection()
-        {
-            using var f = new Fixture();
-            for (int i = 0; i < 12; i++) f.Map(i, i, 0.8f);
-            f.Upload();
-            var receiver = new float4(3, 0, 0, 0);
-            Assert.That(f.RunDiagnostic(receiver, 0).x, Is.EqualTo(1), "Legacy half-radius selection.");
-            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 1, 0));
-            Assert.That(f.RunDiagnostic(receiver, 0).xy, Is.EqualTo(new float2(0, 0)));
-            Assert.That(f.RunDiagnostic(new float4(6, 0, 0, 0), 6).yz, Is.EqualTo(new float2(1, 1)));
-            Assert.That(f.RunDiagnostic(new float4(21, 0, 0, 0), 0).xy, Is.EqualTo(new float2(-1, -1)));
-            Assert.That(f.RunDiagnostic(new float4(0, 0, 101, 0), 5).y, Is.EqualTo(1));
-        }
-
-        [Test]
-        public void DensityPolicy_DisablingRestoresLegacyChoiceAndUnavailableQualityView()
-        {
-            using var f = new Fixture();
-            f.Upload();
-            var receiver = new float4(3, 0, 0, 0);
-            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 1, 0));
-            Assert.That(f.RunDiagnostic(receiver, 0).x, Is.Zero);
-            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(false, 1, 0));
-            Assert.That(f.RunDiagnostic(receiver, 0).x, Is.EqualTo(1));
-            Assert.That(f.RunDiagnostic(receiver, 6), Is.EqualTo(new float4(-1)));
-        }
-
-        [Test]
-        public void DensityPolicy_PcfCoverageGuardAndNormalOffsetConstrainFineRequests()
-        {
-            using var f = new Fixture();
-            f.Upload();
-            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 1, 0));
-            var receiver = new float4(4.5f, 0, 0, 0);
-            Assert.That(f.RunDiagnostic(receiver, 6).y, Is.Zero);
-            f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 0));
-            Assert.That(f.RunDiagnostic(receiver, 6).yz, Is.EqualTo(new float2(1, 1)));
-            f.Shader.SetVector("_VSMReceiverParameters", Vector4.zero);
-            for (int i = 0; i < 3; i++) f.ProjectionData[i].Parameters.y = 1;
-            f.Upload();
-            // A grazing X normal offsets the fine receiver by one world texel,
-            // outside level zero; level one still covers the biased receiver.
-            Assert.That(f.RunDiagnostic(receiver, 6, receiverNormal: Vector3.right).yz, Is.EqualTo(new float2(1, 1)));
-        }
-
-        [TestCase(-1)]
-        [TestCase(0)]
-        [TestCase(.05f)]
-        public void DensityPolicy_TransitionsAtLodBoundaryWithoutBlendingFallbackTwice(float coverage)
-        {
-            using var f = new Fixture();
-            for (int i = 0; i < 12; i++) f.Map(i, i, i < 4 ? 0.8f : 0);
-            f.Upload();
-            f.Shader.SetVector("_VSMReceiverQuality", VirtualShadowMapReceiverQuality.BuildParameters(true, 4 * Mathf.Pow(2, 0.9f), 0, coverage));
-            float4 levels = f.RunDiagnostic(float4.zero, 0);
-            Assert.That(levels.xyz, Is.EqualTo(new float3(0, 0, 1)));
-            Assert.That(levels.w, Is.EqualTo(0.5f).Within(1e-5));
-            Assert.That(f.RunDiagnostic(float4.zero, 5).y, Is.EqualTo(0.5f).Within(1e-5));
+            var receiver = new float4(1.75f, 0, 0, 0);
+            var levels = f.RunDiagnostic(receiver, 0);
+            Assert.That(levels, Is.EqualTo(new float4(0, 0, -1, 0)));
+            Assert.That(f.RunDiagnostic(receiver, 5).y, Is.Zero);
             for (int i = 0; i < 4; i++) f.MetadataData[i].x |= 4;
             f.Upload();
-            Assert.That(f.RunDiagnostic(float4.zero, 0).xyz, Is.EqualTo(new float3(0, 1, -1)));
-            Assert.That(f.RunDiagnostic(float4.zero, 5).y, Is.EqualTo(1));
+            Assert.That(f.RunDiagnostic(receiver, 0), Is.EqualTo(new float4(0, 1, -1, 0)));
+            Assert.That(f.RunDiagnostic(receiver, 5).y, Is.EqualTo(1));
         }
 
-        [TestCase(.2f, .5f)]
-        [TestCase(.05f, 0)]
+        [Test]
+        public void UEClipmapDither_ParentChangePreservesWorldSpaceSupport()
+        {
+            using var f = new Fixture();
+            f.Upload();
+            f.Shader.SetVector("_VSMReceiverQuality", new Vector4(1, 1, 0, 0));
+            var inputs = new[] { new float4(1.999f, 1, 0, 0), new float4(2, 1, 0, 0), new float4(2.001f, 1, 0, 0) };
+            var result = f.Run("InspectUEClipmapDither", inputs);
+            for (int i = 0; i < inputs.Length; i++)
+            {
+                // UE (0.5/resolution)*2*distance / exp2(level-bias).
+                float expected = inputs[i].x * 2 / 8;
+                Assert.That(result[i].x, Is.EqualTo(expected).Within(1e-6));
+                Assert.That(result[i].y * 2, Is.EqualTo(result[i].x).Within(1e-6));
+            }
+        }
+
         [TestCase(0, 0)]
         public void DensityPolicy_CoverageTransitionDoesNotChangePreferredLevel(float coverage, float blend)
         {
@@ -1545,14 +1494,14 @@ namespace VividRP.Editor.Tests
         }
 
         [TestCase(false, 0f)]
-        [TestCase(true, 0.5f)]
-        public void Transition_BlendsOnlyAvailableSamples(bool coarseAvailable, float expected)
+        [TestCase(true, 0f)]
+        public void UESelection_DoesNotBlendAvailableCoarseSamples(bool coarseAvailable, float expected)
         {
             using var f = new Fixture();
             f.Map(3, 9, 0.8f);
             if (coarseAvailable) f.Map(7, 2); // A completed empty coarse page is legitimately lit.
             f.Upload();
-            float2[] result = f.Run("ResolveReceivers", new[] { new float4(2.25f, 0, 0, 0) });
+            float2[] result = f.Run("ResolveReceivers", new[] { new float4(1.75f, 0, 0, 0) });
             Assert.That(result[0].x, Is.EqualTo(expected).Within(0.0001));
         }
 
@@ -2132,14 +2081,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PCF_IncompleteTransitionFootprintDoesNotBrightenThePrimary()
+        public void PCF_CoarseFootprintDoesNotBrightenValidPrimary()
         {
             using var f = new Fixture();
             f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 0));
             for (int page = 0; page < 4; page++) f.Map(page, 8 + page, 0.8f);
             f.Map(7, 4);
             f.Upload();
-            Assert.That(f.Run("ResolveReceivers", new[] { new float4(2.25f, 0, 0, 0) })[0].x, Is.Zero);
+            Assert.That(f.Run("ResolveReceivers", new[] { new float4(1.75f, 0, 0, 0) })[0].x, Is.Zero);
         }
 
         [TestCase(false, false)]
@@ -2558,32 +2507,21 @@ namespace VividRP.Editor.Tests
             Assert.That(result[3].x, Is.EqualTo(-0.75f * depthScale * texelSize).Within(1e-6));
         }
 
-        [Test]
-        public void Transition_UsesSmoothEndpointsAndCanBeDisabled()
-        {
-            using var f = new Fixture();
-            f.Upload();
-            var inputs = new float4[6];
-            for (int i = 0; i < 5; i++) inputs[i] = new float4(0.4f + i * 0.025f, 0.1f, 0, 0);
-            inputs[5] = new float4(0.49f, 0, 0, 0);
-            float[] expected = { 0, 0.15625f, 0.5f, 0.84375f, 1, 0 };
-            float2[] result = f.Run("InspectTransition", inputs);
-            for (int i = 0; i < result.Length; i++) Assert.That(result[i].x, Is.EqualTo(expected[i]).Within(1e-5));
-        }
-
         [TestCase(false)]
         [TestCase(true)]
-        public void Transition_HasNoStepWhenTheSelectedLevelChanges(bool pcf)
+        public void UESelection_SwitchesAtIntegerDistanceLodWithoutCrossFade(bool pcf)
         {
             using var f = new Fixture();
             f.Shader.SetVector("_VSMReceiverParameters", new Vector4(pcf ? 1 : 0, 0, 0, 0));
             for (int page = 0; page < 4; page++) f.Map(page, 8 + page, 0.8f);
             for (int page = 4; page < 8; page++) f.Map(page, page - 4);
             f.Upload();
-            var inputs = new[] { new float4(2.5f - 1e-4f, 0, 0, 0),
-                new float4(2.5f, 0, 0, 0), new float4(2.5f + 1e-4f, 0, 0, 0) };
-            foreach (float2 value in f.Run("ResolveReceivers", inputs))
-                Assert.That(value.x, Is.EqualTo(1).Within(1e-5));
+            var inputs = new[] { new float4(2f - 1e-4f, 0, 0, 0),
+                new float4(2f, 0, 0, 0), new float4(2f + 1e-4f, 0, 0, 0) };
+            var result = f.Run("ResolveReceivers", inputs);
+            Assert.That(result[0].x, Is.Zero);
+            Assert.That(result[1].x, Is.EqualTo(1));
+            Assert.That(result[2].x, Is.EqualTo(1));
         }
     }
 }

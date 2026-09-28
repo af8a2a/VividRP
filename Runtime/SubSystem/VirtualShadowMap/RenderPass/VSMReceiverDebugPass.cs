@@ -135,7 +135,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 settings, camera.additionalData, m_FrameIndex);
             m_ViewProjection = camera.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             m_InvViewProjection = m_ViewProjection.inverse;
-            m_Quality = VirtualShadowMapReceiverQuality.BuildParameters(settings);
+            m_Quality = VirtualShadowMapReceiverQuality.BuildParameters(settings, camera, shadow.clipmaps.Resolution);
             var lightData = frameData.GetOrCreate<VividLightData>();
             float angle = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
             if (DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out _, out var additional)

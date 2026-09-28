@@ -129,6 +129,7 @@ struct VSMSMRTReceiverSamples
     float2 diskPhase;
     float2 receiverPhase;
     float stepOffset;
+    float viewDistance;
     bool ready;
 };
 
@@ -136,9 +137,7 @@ void PrepareVSMSMRTReceiverSamples(uint2 pixel, inout VSMSMRTReceiverSamples sam
 {
     if (samples.ready) return;
     samples.diskPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 0u);
-    samples.receiverPhase = 0;
-    if (_VSMReceiverParameters.x >= 0.5)
-        samples.receiverPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 2u);
+    samples.receiverPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 2u);
     samples.stepOffset = GetBNDSequenceSample1SPPTemporal(pixel,
         (uint)_CSMFrameIndex + _VSMSMRTSampleIndexOffset, 4u);
     samples.ready = true;
@@ -483,6 +482,7 @@ VSMSMRTSample VSMSMRTFindSample(inout VSMSMRTClipmapRayState state, float sample
         sample.bValid = true;
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
         g_VSMDebugWork.y++;
+        g_VSMDebugLevels.y = level;
 #endif
         break;
     }
@@ -528,6 +528,12 @@ bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPe
         GetVSMSMRTProjection(index), 0.5, visibility);
 }
 
+float VSMSMRTTexelDitherScale(float distance, float texelSize)
+{
+    return distance * exp2(_VSMReceiverQuality.y)
+        / (_VSMPrototypeVirtualResolution * (texelSize * _VSMPrototypeVirtualResolution / 8.0));
+}
+
 bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool adaptive,
     VSMSMRTProjection projection, inout VSMSMRTReceiverSamples samples, out float shadow)
 {
@@ -549,6 +555,10 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool ad
 #if !UNITY_REVERSED_Z
     depthScale = -depthScale;
 #endif
+    // UE default TexelDitherScaleDirectional=2. Half-width=2^(Level+2),
+    // so 2^Level = texelSize * resolution / 8. The world-space dither is
+    // continuous across both selected-level and mapped-parent boundaries.
+    float ditherScale = VSMSMRTTexelDitherScale(samples.viewDistance, projection.texelSize);
     float slope = _VSMSMRTParameters.w / projection.texelSize;
     int maximum = clamp((int)_VSMSMRTParameters.x, 4, 8);
     int steps = clamp((int)_VSMSMRTParameters.y, 4, 8);
@@ -566,9 +576,8 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool ad
 #endif
         float2 disk = VSMSMRTDiskSample(samples.diskPhase, (uint)ray);
         float3 origin = coord;
-        if (_VSMReceiverParameters.x >= 0.5)
         {
-            float2 offsetUV = VSMSMRTReceiverOffset(samples.receiverPhase, (uint)ray) / _VSMPrototypeVirtualResolution;
+            float2 offsetUV = (VSMSMRTProgressiveSample(samples.receiverPhase, (uint)ray) - 0.5) * ditherScale;
             float2 depthSlopeUV = clamp(bias.xy * _VSMPrototypeVirtualResolution, -0.05, 0.05);
             origin.xy += offsetUV;
             // UE ComputeOptimalSlopeBiasDirectional (RayStartOffset is zero).

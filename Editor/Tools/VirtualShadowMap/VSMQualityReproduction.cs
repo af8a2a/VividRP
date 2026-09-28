@@ -190,7 +190,7 @@ namespace VividRP.Editor
             {
                 m_Report.captureModes = new[] { 0, 3, 5, 6 };
                 m_Report.trajectory += " Additional per-frame ROI captures at steps 440..480; no full-frame image readbacks.";
-                m_Report.dataLayout += " mode 6=density desiredLOD/finest covered level/selected level/footprint-to-target ratio (-1 when disabled).";
+                m_Report.dataLayout += " mode 6=relative biased distance LOD/first UE absolute level/selected index/normalized resolution bias.";
                 m_Report.dataLayout += " Detailed ROI files use lossless gzip (.rgba32f.gz); the decompressed byte layout is unchanged.";
             }
             m_TimeScale = Time.timeScale; m_CaptureDelta = Time.captureDeltaTime;

@@ -77,6 +77,9 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_PhysicalPageOwners;
         private static GraphicsBuffer s_AllocatorCounters;
         private static GraphicsBuffer s_AllocationRequests;
+        private static GraphicsBuffer s_PhysicalPageLists;
+        internal static GraphicsBuffer PhysicalPageLists => s_PhysicalPageLists;
+        internal static readonly int PhysicalPageListsId = Shader.PropertyToID("_VSMPhysicalPageLists");
         private static GraphicsBuffer s_AllocationSummary;
         private static GraphicsBuffer s_MergePageWorkList;
         private static GraphicsBuffer s_MergePageDispatchArgs;
@@ -288,6 +291,17 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         private static void EnsureAllocationResources(int pageCount)
         {
+            int listCapacity = Mathf.Max(s_PhysicalPageCapacity, 1);
+            int listWords = listCapacity * 4 + 4;
+            if (s_PhysicalPageLists == null || !s_PhysicalPageLists.IsValid() || s_PhysicalPageLists.count != listWords)
+            {
+                s_PhysicalPageLists?.Dispose();
+                s_PhysicalPageLists = new GraphicsBuffer(GraphicsBuffer.Target.Structured, listWords, sizeof(uint))
+                { name = "VSMPhysicalPageLists" };
+                var initial = new uint[listWords];
+                for (int slot = 0; slot < listCapacity; slot++) initial[slot] = (uint)slot;
+                s_PhysicalPageLists.SetData(initial);
+            }
             if (s_SamplingPageTable == null || !s_SamplingPageTable.IsValid() || s_SamplingPageTable.count != pageCount)
             {
                 s_SamplingPageTable?.Dispose();
@@ -628,6 +642,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_AllocatorCounters != null
                 && s_AllocatorCounters.IsValid()
                 && s_AllocatorCounters.count == s_AllocatorCountersUpload.Length
+                && s_PhysicalPageLists != null && s_PhysicalPageLists.IsValid()
+                && s_PhysicalPageLists.count == physicalPageCapacity * 4 + 4
                 && s_AllocationRequests != null && s_AllocationRequests.IsValid()
                 && s_AllocationRequests.count == CoreUtils.DivRoundUp(pageTableEntryCount, 32)
                 && s_AllocationSummary != null && s_AllocationSummary.IsValid()
@@ -1014,6 +1030,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_AllocatorCounters = null;
             s_AllocationRequests?.Dispose();
             s_AllocationRequests = null;
+            s_PhysicalPageLists?.Dispose();
+            s_PhysicalPageLists = null;
             s_AllocationSummary?.Dispose();
             s_AllocationSummary = null;
             s_ProductionFeedback?.Dispose(); s_ProductionFeedback = null;

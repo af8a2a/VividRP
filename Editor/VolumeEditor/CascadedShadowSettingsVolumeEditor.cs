@@ -61,8 +61,6 @@ namespace VividRP.Editor
         private SerializedDataParameter m_EnableVirtualShadowMapPrototype;
         private SerializedDataParameter m_VirtualShadowMapResolution;
         private SerializedDataParameter m_VirtualShadowMapPhysicalPageBudget;
-        private SerializedDataParameter m_VirtualShadowMapPageUpdateBudget;
-        private SerializedDataParameter m_VirtualShadowMapRasterVertexBudget;
         private SerializedDataParameter m_VirtualShadowMapViewCoverage;
         private SerializedDataParameter m_VirtualShadowMapFirstLevel;
         private SerializedDataParameter m_VirtualShadowMapResolutionLodBias;
@@ -105,8 +103,6 @@ namespace VividRP.Editor
             m_EnableVirtualShadowMapPrototype = Unpack(fetcher.Find(x => x.enableVirtualShadowMapPrototype));
             m_VirtualShadowMapResolution = Unpack(fetcher.Find(x => x.virtualShadowMapResolution));
             m_VirtualShadowMapPhysicalPageBudget = Unpack(fetcher.Find(x => x.virtualShadowMapPhysicalPageBudget));
-            m_VirtualShadowMapPageUpdateBudget = Unpack(fetcher.Find(x => x.virtualShadowMapPageUpdateBudget));
-            m_VirtualShadowMapRasterVertexBudget = Unpack(fetcher.Find(x => x.virtualShadowMapRasterVertexBudget));
             m_VirtualShadowMapViewCoverage = Unpack(fetcher.Find(x => x.virtualShadowMapViewCoverage));
             m_VirtualShadowMapFirstLevel = Unpack(fetcher.Find(x => x.virtualShadowMapFirstLevel));
             m_VirtualShadowMapResolutionLodBias = Unpack(fetcher.Find(x => x.virtualShadowMapResolutionLodBias));
@@ -141,8 +137,6 @@ namespace VividRP.Editor
             PropertyField(m_EnableVirtualShadowMapPrototype, s_EnableVirtualShadowMapPrototypeLabel);
             PropertyField(m_VirtualShadowMapResolution);
             PropertyField(m_VirtualShadowMapPhysicalPageBudget);
-            PropertyField(m_VirtualShadowMapPageUpdateBudget);
-            PropertyField(m_VirtualShadowMapRasterVertexBudget);
             PropertyField(m_VirtualShadowMapViewCoverage);
             PropertyField(m_VirtualShadowMapFirstLevel);
             PropertyField(m_VirtualShadowMapResolutionLodBias);

@@ -18,6 +18,93 @@ namespace VividRP.Editor.Tests
         // functions with 128-texel pages. Physical slots are deliberately shuffled.
         private const int LegacyDepthLayerCount = 16; // Historical trace oracle only.
 
+        [Test]
+        public void UEAllocation_ProtectsRequestedPagesAndPreservesEveryLRUSlotOnOverflow()
+        {
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 16);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 4);
+            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            using var lists = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
+            using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
+            using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            using var masks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 8);
+            try
+            {
+                // Both slots already belong to current demand, even though the
+                // new requests have a higher legacy priority. Neither may evict.
+                table.SetData(new uint[] { 1, 2, 0, 0 });
+                metadata.SetData(new[] { new uint4(2, 1, 1, 0), new uint4(2, 2, 1, 0), default, default });
+                owners.SetData(new uint[] { 1, 2 });
+                requests.SetData(new uint[] { 1, 1, 513, 513 });
+                lists.SetData(new uint[] { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+                pressure.SetData(new uint4[3]);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", 2);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", 4);
+                shader.SetInt("_VSMPrototypeFeedbackFrameIndex", 2);
+                shader.SetInt("_VSMReceiverMaskEnabled", 0);
+                foreach (string name in new[] { "VSMUpdatePhysicalPagesUE", "VSMAllocateNewPageMappingsUE", "VSMAppendPhysicalPageListsUE" })
+                {
+                    int kernel = shader.FindKernel(name);
+                    shader.SetBuffer(kernel, "_VSMPrototypeWritablePageTable", table);
+                    shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                    shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", owners);
+                    shader.SetBuffer(kernel, "_VSMPageRequestFlags", requests);
+                    shader.SetBuffer(kernel, "_VSMPhysicalPageLists", lists);
+                    shader.SetBuffer(kernel, "_VSMPagePressureRW", pressure);
+                    shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", counters);
+                    shader.SetBuffer(kernel, "_VSMPhysicalReceiverMasks", masks);
+                    shader.Dispatch(kernel, 1, 1, 1);
+                }
+                var mapping = new uint[4]; table.GetData(mapping);
+                CollectionAssert.AreEqual(new uint[] { 1, 2, 0, 0 }, mapping);
+                var list = new uint[12]; lists.GetData(list);
+                Assert.That((int)list[8], Is.EqualTo(-2)); // Signed underflow remains observable.
+                Assert.That(list[9], Is.EqualTo(2));
+                CollectionAssert.AreEquivalent(new uint[] { 0, 1 }, new[] { list[0], list[1] });
+                var count = new uint[4]; counters.GetData(count);
+                CollectionAssert.AreEqual(new uint[] { 2, 4, 0, 2 }, count);
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
+        [Test]
+        public void UEPoolPressure_UsesFastReductionTenFrameDelayAndSlowRecovery()
+        {
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
+            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            using var masks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 8);
+            var state = new uint4[3];
+            pressure.SetData(state);
+            try
+            {
+                int kernel = shader.FindKernel("VSMClearReceiverRequestsUE");
+                shader.SetBuffer(kernel, "_VSMPagePressureRW", pressure);
+                shader.SetBuffer(kernel, "_VSMPageRequestFlags", requests);
+                shader.SetBuffer(kernel, "_VSMPageReceiverMasks", masks);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", 1);
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", 1000);
+                shader.SetInt("_VSMReceiverMaskEnabled", 0);
+                shader.SetVector("_VSMReceiverQuality", new Vector4(2, 0, 0, 0));
+                for (int frame = 1; frame <= 13; frame++)
+                {
+                    state[0].z = frame == 1 ? 1700u : 425u;
+                    pressure.SetData(state);
+                    shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
+                    shader.Dispatch(kernel, 1, 1, 1);
+                    pressure.GetData(state);
+                    float expected = frame <= 11 ? .5f : frame == 12 ? .45f : .405f;
+                    Assert.That(math.asfloat(state[0].x), Is.EqualTo(expected).Within(1e-5));
+                    Assert.That(state[0].y, Is.EqualTo(1));
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [TestCase(2, false)]
         [TestCase(4, false)]
         [TestCase(2, true)]

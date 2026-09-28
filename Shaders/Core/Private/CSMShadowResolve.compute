@@ -1408,3 +1408,10 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 }
 
 #pragma kernel VSMPropagateMappedClipmaps
+
+#pragma kernel VSMUpdatePhysicalPagesUE
+#pragma kernel VSMAllocateNewPageMappingsUE
+#pragma kernel VSMAppendPhysicalPageListsUE
+#pragma kernel VSMBuildPageWorkListsUE
+#pragma kernel VSMClearReceiverRequestsUE VIVID_VSM_UE_ALLOCATION
+#pragma kernel VSMResetReceiverFeedbackUE VIVID_VSM_UE_ALLOCATION

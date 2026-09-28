@@ -24,9 +24,10 @@ namespace VividRP.Runtime
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]
         public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, 1024);
-        [Tooltip("Maximum physical pages rebuilt per camera render, coarse levels first. Each selected page completes all 16 depth layers in both dirty pools. Deferred fine pages use complete coarser coverage. 0 rebuilds all dirty pages; this bounds page count, not GPU milliseconds.")]
-        public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(64, 0, 1024);
-        [Tooltip("Target submitted raster vertices per camera render. Uses completed GPU work feedback to reduce the finite Page Update Budget, with slow detail recovery. 0 disables feedback; Page Update Budget 0 remains unlimited. This is a geometry-work estimate, not a GPU time or fragment/UAV limit.")]
+        // Retain serialized legacy fields; UE allocation never applies these quotas.
+        [HideInInspector]
+        public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(0, 0, 1024);
+        [HideInInspector]
         public ClampedIntParameter virtualShadowMapRasterVertexBudget = new(0, 0, 16777216);
         [Tooltip("Base-2 exponent of the finest directional clipmap radius in world units. Coarser levels double in size until Max Distance is covered.")]
         public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
@@ -34,7 +35,7 @@ namespace VividRP.Runtime
         public BoolParameter virtualShadowMapViewCoverage = new(false);
         [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public BoolParameter virtualShadowMapScreenDensity = new(false);
-        [Tooltip("Add budget pressure bias to requested clipmap levels, then restore detail slowly after sustained headroom. Sampling keeps its desired level and falls back to resident parents.")]
+        [Tooltip("UE pool-pressure LOD bias: target 85% capacity, fast reduction, recovery after 10 frames below the threshold, maximum +2 levels. Sampling keeps its desired level and falls back to resident parents.")]
         public BoolParameter virtualShadowMapPagePressure = new(true);
         [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapTargetTexelPixels = new(1, 0.25f, 8);

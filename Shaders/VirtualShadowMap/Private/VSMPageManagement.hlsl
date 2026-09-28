@@ -548,6 +548,34 @@ void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
 
 void UpdateVSMPagePressure(bool reset)
 {
+#if defined(VIVID_VSM_UE_ALLOCATION)
+    // UE CacheManager: signed available-list underflow includes failed requests.
+    // GPU feedback is consumed on the next render instead of CPU readback latency.
+    uint4 state = _VSMPagePressureRW[0];
+    uint4 detail = _VSMPagePressureRW[1];
+    float previous = asfloat(state.x), bias = previous;
+    uint frame = (uint)_VSMPrototypeFeedbackFrameIndex;
+    if (reset || _VSMReceiverQuality.x < 1.5 || detail.w != asuint(_VSMReceiverQuality.y))
+    {
+        state = 0u; detail = 0u; bias = 0.0;
+    }
+    else
+    {
+        float allocation = (float)state.z / max((float)_VSMPrototypePhysicalPageCapacity, 1.0);
+        float target = max(0.0, previous + log2(max(allocation / 0.85, 1e-20)));
+        if (allocation > 0.85)
+        {
+            state.y = frame;
+            bias = lerp(bias, target, 0.5);
+        }
+        else if (frame - state.y > 10u) bias = lerp(bias, target, 0.1);
+    }
+    state.x = asuint(clamp(bias, 0.0, 2.0));
+    detail.zw = uint2(asuint(previous), asuint(_VSMReceiverQuality.y));
+    _VSMPagePressureRW[0] = state;
+    _VSMPagePressureRW[1] = detail;
+    _VSMPagePressureRW[2] = 0u;
+#else
     uint4 state = _VSMPagePressureRW[0];
     uint4 detail = _VSMPagePressureRW[1];
     uint4 recovery = _VSMPagePressureRW[2];
@@ -604,6 +632,7 @@ void UpdateVSMPagePressure(bool reset)
     _VSMPagePressureRW[0] = state;
     _VSMPagePressureRW[1] = detail;
     _VSMPagePressureRW[2] = recovery;
+#endif
 }
 
 [numthreads(64, 1, 1)]
@@ -1678,3 +1707,190 @@ void VSMPropagateMappedClipmaps(uint3 id : SV_DispatchThreadID)
     }
     _VSMSamplingPageTableRW[id.x] = result;
 }
+
+// UE physical page lists: previous LRU, AVAILABLE, REQUESTED, EMPTY, then
+// counters. REQUESTED + remaining AVAILABLE becomes next frame's LRU.
+RWStructuredBuffer<uint> _VSMPhysicalPageLists;
+groupshared uint4 g_VSMListPrefix[1024];
+
+[numthreads(1024, 1, 1)]
+void VSMUpdatePhysicalPagesUE(uint lane : SV_GroupIndex)
+{
+    uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
+    uint slot = lane < capacity ? _VSMPhysicalPageLists[lane] : 0u;
+    uint owner = lane < capacity ? _VSMPrototypePhysicalPageOwners[slot] : 0u;
+    bool requested = false;
+    if (owner != 0u)
+    {
+        uint page = owner - 1u;
+        uint4 metadata = _VSMPrototypePageMetadata[page];
+        metadata.w = metadata.x;
+        requested = (_VSMPageRequestFlags[page] & kVSMPageRequested) != 0u;
+        // UE Cache.MaxPageAgeSinceLastRequest = 1000. Unrequested dirty pages
+        // retain invalidation until requested again or reassigned.
+        if (!requested && (uint)_VSMPrototypeFeedbackFrameIndex - metadata.z > 1000u)
+        {
+            _VSMPrototypeWritablePageTable[page] = 0u;
+            _VSMPrototypePageMetadata[page] = 0u;
+            _VSMPrototypePhysicalPageOwners[slot] = 0u;
+            owner = 0u;
+        }
+        else
+        {
+            if (requested) metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
+            // UE receiver-masked dynamic pages are incomplete and always redraw.
+            if (requested && _VSMReceiverMaskEnabled != 0)
+                metadata.x = (metadata.x | kVSMPageDynamicDirty) & ~kVSMPageCached;
+            _VSMPrototypePageMetadata[page] = metadata;
+        }
+    }
+    uint4 item = uint4(lane < capacity && owner != 0u && !requested,
+        lane < capacity && requested, lane < capacity && owner == 0u, owner != 0u);
+    g_VSMListPrefix[lane] = item;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint step = 1u; step < 1024u; step <<= 1u)
+    {
+        uint4 add = lane >= step ? g_VSMListPrefix[lane - step] : 0u;
+        GroupMemoryBarrierWithGroupSync();
+        g_VSMListPrefix[lane] += add;
+        GroupMemoryBarrierWithGroupSync();
+    }
+    uint4 rank = g_VSMListPrefix[lane] - item;
+    uint4 total = g_VSMListPrefix[1023];
+    if (item.x != 0u) _VSMPhysicalPageLists[capacity + rank.x] = slot;
+    // Empty entries go at the end: the allocator pops them before cached LRU.
+    if (item.z != 0u) _VSMPhysicalPageLists[capacity + total.x + rank.z] = slot;
+    if (item.y != 0u) _VSMPhysicalPageLists[2u * capacity + rank.y] = slot;
+    if (lane == 0u)
+    {
+        _VSMPhysicalPageLists[4u * capacity] = total.x + total.z;
+        _VSMPhysicalPageLists[4u * capacity + 1u] = total.y;
+        _VSMPrototypeAllocatorCounters[0] = total.w;
+        _VSMPrototypeAllocatorCounters[1] = 0u;
+        _VSMPrototypeAllocatorCounters[2] = 0u;
+        _VSMPrototypeAllocatorCounters[3] = 0u;
+        _VSMPagePressureRW[0].zw = 0u;
+        _VSMPagePressureRW[1].xy = 0u;
+    }
+}
+
+[numthreads(64, 1, 1)]
+void VSMAllocateNewPageMappingsUE(uint3 id : SV_DispatchThreadID)
+{
+    uint page = id.x, capacity = (uint)_VSMPrototypePhysicalPageCapacity;
+    if (page >= (uint)_VSMPrototypePageTableEntryCount) return;
+    uint request = _VSMPageRequestFlags[page];
+    if ((request & kVSMPageRequested) == 0u) return;
+    InterlockedAdd(_VSMPrototypeAllocatorCounters[1], 1u);
+    InterlockedAdd(_VSMPagePressureRW[0].z, 1u);
+    bool primary = (request & kVSMPagePrimaryRequested) != 0u;
+    if (primary) InterlockedAdd(_VSMPagePressureRW[1].x, 1u);
+    uint4 metadata = _VSMPrototypePageMetadata[page];
+    if ((metadata.x & kVSMPageAllocated) == 0u)
+    {
+        uint previous;
+        uint waveCount = WaveActiveCountBits(true);
+        uint waveOffset = WavePrefixCountBits(true);
+        previous = 0u;
+        if (WaveIsFirstLane())
+            InterlockedAdd(_VSMPhysicalPageLists[4u * capacity], 0u - waveCount, previous);
+        previous = WaveReadLaneFirst(previous);
+        int availableIndex = (int)previous - (int)waveOffset - 1;
+        if (availableIndex >= 0)
+        {
+            uint slot = _VSMPhysicalPageLists[capacity + (uint)availableIndex];
+            uint owner = _VSMPrototypePhysicalPageOwners[slot];
+            // Victims are never requested this frame: no allocator lane can
+            // concurrently read/write this old mapping as an allocation target.
+            if (owner != 0u)
+            {
+                uint4 evicted = _VSMPrototypePageMetadata[owner - 1u];
+                evicted.xy = 0u; evicted.w = kVSMPageDebugEvicted;
+                _VSMPrototypePageMetadata[owner - 1u] = evicted;
+                _VSMPrototypeWritablePageTable[owner - 1u] = 0u;
+            }
+            else InterlockedAdd(_VSMPrototypeAllocatorCounters[0], 1u);
+            metadata.x = kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty | kVSMPageStatic | kVSMPageDynamic;
+            metadata.y = slot + 1u;
+            metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
+            metadata.w = metadata.x;
+            _VSMPrototypePageMetadata[page] = metadata;
+            _VSMPrototypeWritablePageTable[page] = slot + 1u;
+            _VSMPrototypePhysicalPageOwners[slot] = page + 1u;
+            if (_VSMReceiverMaskEnabled != 0) _VSMPhysicalReceiverMasks[slot] = 0u;
+            uint offset = 0u;
+            uint appendCount = WaveActiveCountBits(true);
+            uint appendOffset = WavePrefixCountBits(true);
+            if (WaveIsFirstLane())
+                InterlockedAdd(_VSMPhysicalPageLists[4u * capacity + 1u], appendCount, offset);
+            offset = WaveReadLaneFirst(offset) + appendOffset;
+            _VSMPhysicalPageLists[2u * capacity + offset] = slot;
+            InterlockedAdd(_VSMPrototypeAllocatorCounters[2], 1u);
+        }
+        else
+        {
+            metadata.w |= kVSMPageDebugOverflow;
+            _VSMPrototypePageMetadata[page] = metadata;
+            InterlockedAdd(_VSMPrototypeAllocatorCounters[3], 1u);
+            InterlockedAdd(_VSMPagePressureRW[0].w, 1u);
+        }
+    }
+    if (primary && (metadata.x & kVSMPageAllocated) != 0u)
+        InterlockedAdd(_VSMPagePressureRW[1].y, 1u);
+}
+
+[numthreads(64, 1, 1)]
+void VSMAppendPhysicalPageListsUE(uint3 id : SV_DispatchThreadID)
+{
+    uint capacity = (uint)_VSMPrototypePhysicalPageCapacity, index = id.x;
+    if (index >= capacity) return;
+    uint requested = _VSMPhysicalPageLists[4u * capacity + 1u];
+    _VSMPhysicalPageLists[index] = index < requested
+        ? _VSMPhysicalPageLists[2u * capacity + index]
+        : _VSMPhysicalPageLists[capacity + index - requested];
+}
+
+[numthreads(64, 1, 1)]
+void VSMBuildPageWorkListsUE(uint lane : SV_GroupIndex)
+{
+    uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
+    if (lane == 0u) { g_VSMClearPageCount = 0u; g_VSMOccupancyPageCount = 0u; }
+    GroupMemoryBarrierWithGroupSync();
+    for (uint slot = lane; slot < capacity; slot += 64u)
+    {
+        uint owner = _VSMPrototypePhysicalPageOwners[slot];
+        if (owner == 0u) continue;
+        uint flags = _VSMPrototypePageMetadata[owner - 1u].x & ~kVSMPageDeferred;
+        bool requested = (_VSMPageRequestFlags[owner - 1u] & kVSMPageRequested) != 0u;
+        if ((flags & kVSMPageDirty) != 0u) flags |= kVSMPageDynamicDirty;
+        bool dirty = (flags & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u;
+        bool selected = requested && dirty;
+        // Deferred represents UE's unreferenced invalid page here, not a quota.
+        if (dirty && !requested) flags |= kVSMPageDeferred;
+        _VSMPrototypePageMetadata[owner - 1u].x = flags;
+        uint index;
+        if (selected)
+        {
+            InterlockedAdd(g_VSMClearPageCount, 1u, index);
+            _VSMPageWorkListRW[index] = slot;
+        }
+        uint known = kVSMPageStaticOccupancyKnown | kVSMPageDynamicOccupancyKnown;
+        if (requested && (selected || ((flags & known) != known || _VSMPageOccupancySkipDisabled != 0)))
+        {
+            InterlockedAdd(g_VSMOccupancyPageCount, 1u, index);
+            _VSMPageWorkListRW[capacity + index] = slot;
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0u)
+    {
+        uint tiles = ((uint)_VSMPrototypePageSize + 7u) / 8u;
+        _VSMPageWorkDispatchArgsRW.Store3(0u, uint3(tiles, tiles, g_VSMClearPageCount));
+        _VSMPageWorkDispatchArgsRW.Store3(12u, uint3(g_VSMOccupancyPageCount, 1u, 1u));
+    }
+}
+
+[numthreads(64, 1, 1)]
+void VSMClearReceiverRequestsUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeClearReceiverRequests(id); }
+[numthreads(64, 1, 1)]
+void VSMResetReceiverFeedbackUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeResetReceiverFeedback(id); }

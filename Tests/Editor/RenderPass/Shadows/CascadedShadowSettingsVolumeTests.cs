@@ -1339,7 +1339,7 @@ namespace VividRP.Editor.Tests
             var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
             try
             {
-                Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.EqualTo(64));
+                Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.Zero);
                 Assert.That(settings.virtualShadowMapRasterVertexBudget.value, Is.Zero);
                 settings.virtualShadowMapPageUpdateBudget.value = -1;
                 Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.Zero);

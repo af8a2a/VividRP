@@ -1,0 +1,4 @@
+interface:
+  display_name: "VividRP PIX Workflow"
+  short_description: "执行 VividRP PIX 捕获与外部分析，保留可验证的 GPU 诊断证据"
+  default_prompt: "使用 $vivid-pix-workflow 在当前 VividRP 项目中捕获目标 pass，分析 GPU 事件和资源，并给出带证据路径与验证边界的诊断。"

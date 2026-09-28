@@ -14,7 +14,7 @@ namespace VividRP.AgenticDebugger
         {
             if (backend != "pix" && backend != "frame_debugger")
                 return Failure(backend, "invalid_backend", "backend must be pix or frame_debugger.");
-            if (action != "status" && action != "capture")
+            if (action != "status" && action != "capture" && action != "preflight")
             {
                 if (string.IsNullOrEmpty(sessionId))
                     return Failure(backend, "session_mismatch", "A matching session_id is required for session operations.");

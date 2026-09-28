@@ -42,7 +42,7 @@ namespace VividRP.AgenticDebugger
                 compute.BeginSample(begins[i]);
                 compute.EndSample(begins[i]);
                 context.ExecuteCommandBufferAsync(compute, QueueTypes[i]);
-                compute.Clear();
+                ResetCompute();
             }
         }
 
@@ -60,9 +60,17 @@ namespace VividRP.AgenticDebugger
                 }
                 var tail = compute.CreateGraphicsFence(GraphicsFenceType.AsyncQueueSynchronisation, SynchronisationStageFlags.AllGPUOperations);
                 context.ExecuteCommandBufferAsync(compute, QueueTypes[i]);
-                compute.Clear();
+                ResetCompute();
                 graphics.WaitOnAsyncGraphicsFence(tail, SynchronisationStageFlags.AllGPUOperations);
             }
+        }
+
+        private void ResetCompute()
+        {
+            // Unity Clear resets execution flags too; each reused recording
+            // must explicitly opt into the async queue again.
+            compute.Clear();
+            compute.SetExecutionFlags(CommandBufferExecutionFlags.AsyncCompute);
         }
 
         public void Dispose() => compute?.Dispose();

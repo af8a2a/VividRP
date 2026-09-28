@@ -1,4 +1,9 @@
-# Agentic PIX — M0/M1/M2
+# Agentic PIX — M0/M1/M2/M3
+
+For capture-to-diagnosis orchestration and official pixtool early injection, use
+the [M3 agent workflow](../../Tools~/PIX/README.md). Real VividRP scene acceptance
+and its remaining boundaries are recorded in the
+[M3 report](../../Documentation~/AgenticPixM3Acceptance.md).
 
 The backend uses explicit capture and a hard content gate. `success=true` for a capture
 requires `state=ready`; an existing `.wpix`, a successful Begin/End HRESULT, or
@@ -113,7 +118,7 @@ poll until `ready=true` or failure. Idle status is a successful query, not a cap
 Native PIX cleanup can remain pending after failure: inspect `cleanupPending` too.
 Frame Debugger's historical commands retain their original response semantics.
 
-Every unified session operation except status/capture requires its backend's
+Every unified session operation except preflight/status/capture requires its backend's
 matching `session_id`; an explicitly supplied token on status is checked too.
 PIX and Frame Debugger cannot acquire captures while the other owns a session,
 including through legacy commands. User-enabled Frame Debugger also blocks PIX.
@@ -219,11 +224,13 @@ queries replay on the local GPU using the captured adapter's ordinary defaults.
   identity checks. Occupancy is checked as explicitly unsupported on this SDK;
   no occupancy points are claimed. Raster/RT analysis is not GPU-validated here.
 - Actual VividRP camera capture, Unity's worker/submission integration, Scene/Game
-  view behavior and domain reload during capture still need a PIX-launched Editor
-  run. No Editor was running during M1/M2 checks; Unity Test Framework was not run.
+  view behavior and domain reload during capture were not covered by the M1/M2
+  standalone checks. M3 has since verified a real SampleScene normal-camera
+  capture/analysis path; see the report above for the remaining async/failure matrix.
+  Unity Test Framework was not run in the active Editor.
 - The separate PIX API LaunchProcess experiment hung with a suspended test child;
   that experimental launcher was removed. This integration uses PIX's UI launch
-  prerequisite; an unattended bootstrap is still follow-up work.
+  prerequisite in M0/M1. M3 now uses the verified official `pixtool launch` path.
 
 The original old fork isn't a dependency of this package; its Present/Delay code
 remains in that external repository. This backend supersedes that capture path

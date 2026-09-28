@@ -36,6 +36,7 @@ namespace VividRP.AgenticDebugger
             {
                 switch (action)
                 {
+                    case "preflight": return Preflight();
                     case "status": return Status();
                     case "capture":
                         if (session != null) return Error("busy", "Release the previous PIX session first.");
@@ -74,7 +75,7 @@ namespace VividRP.AgenticDebugger
                         var runtimePath = new System.Text.StringBuilder(32768);
                         uint pathLength = PixNative.VividPixRuntimePath(runtimePath, runtimePath.Capacity);
                         if (pathLength == 0 || pathLength >= runtimePath.Capacity ||
-                            !string.Equals(Path.GetFullPath(runtimePath.ToString()), Path.GetFullPath(Path.Combine(pixInstall, "WinPixGpuCapturer.dll")), StringComparison.OrdinalIgnoreCase))
+                            !string.Equals(PixNative.CanonicalPath(runtimePath.ToString()), PixNative.CanonicalPath(Path.Combine(pixInstall, "WinPixGpuCapturer.dll")), StringComparison.OrdinalIgnoreCase))
                             return Error("pix_version_mismatch", "The injected capturer and selected PIX API must come from the same PIX installation.");
                         Directory.CreateDirectory(Path.GetDirectoryName(output));
                         var operations = new PixOperations(id, output, expectedPass, camera, Path.GetFullPath(pixInstall), Path.GetFullPath(analyzerPath));
@@ -122,6 +123,46 @@ namespace VividRP.AgenticDebugger
                 }
             }
             catch (Exception e) { return Error("pix_capture_error", e.Message); }
+        }
+
+        private static JObject Preflight()
+        {
+            var asset = GraphicsSettings.currentRenderPipeline;
+            var cameras = new JArray();
+            foreach (var camera in Resources.FindObjectsOfTypeAll<Camera>())
+                if (camera.isActiveAndEnabled && (camera.cameraType == CameraType.Game || camera.cameraType == CameraType.SceneView))
+                    cameras.Add(new JObject { ["name"] = camera.name, ["type"] = camera.cameraType.ToString(), ["scene"] = camera.gameObject.scene.path });
+            string runtime = null, nativeError = null; int hr = unchecked((int)0x80004005);
+            try
+            {
+                hr = PixNative.VividPixAvailable();
+                var buffer = new System.Text.StringBuilder(32768);
+                if (PixNative.VividPixRuntimePath(buffer, buffer.Capacity) > 0) runtime = PixNative.CanonicalPath(buffer.ToString());
+            }
+            catch (Exception e) { nativeError = e.Message; }
+            // Read the optional VividRP asset contract without introducing graph
+            // dependencies into this small Editor adapter's offline compile.
+            var passes = new JArray();
+            var graph = asset ? asset.GetType().GetField("RenderGraphAsset")?.GetValue(asset) as UnityEngine.Object : null;
+            var definitions = graph ? graph.GetType().GetField("Passes")?.GetValue(graph) as System.Collections.IList : null;
+            if (definitions != null)
+                for (int i = 0; i < Math.Min(definitions.Count, 256); ++i)
+                {
+                    var p = definitions[i]; var type = p.GetType();
+                    string name = type.GetField("PassName")?.GetValue(p) as string;
+                    passes.Add(new JObject { ["index"] = i, ["name"] = name,
+                        ["marker"] = "VividRP.RenderPass.Record/" + i + ":" + name,
+                        ["asyncCompute"] = (bool?)type.GetField("EnableAsyncCompute")?.GetValue(p) });
+                }
+            return new JObject { ["success"] = true, ["state"] = "available", ["code"] = "ok", ["backend"] = "pix",
+                ["processId"] = Process.GetCurrentProcess().Id, ["unityVersion"] = Application.unityVersion,
+                ["graphicsApi"] = SystemInfo.graphicsDeviceType.ToString(), ["pipelineType"] = asset ? asset.GetType().FullName : null,
+                ["pipelineAsset"] = asset ? AssetDatabase.GetAssetPath(asset) : null,
+                ["graphAsset"] = graph ? AssetDatabase.GetAssetPath(graph) : null,
+                ["editorBusy"] = EditorApplication.isCompiling || EditorApplication.isUpdating,
+                ["nativeAvailable"] = hr >= 0, ["nativeHresult"] = hr, ["nativeError"] = nativeError,
+                ["pixRuntime"] = runtime, ["cameras"] = cameras, ["passes"] = passes,
+                ["passCount"] = definitions?.Count ?? 0, ["sessionOwned"] = session != null };
         }
 
         private static Camera FindCamera(string name)
@@ -192,6 +233,17 @@ namespace VividRP.AgenticDebugger
 
     internal static class PixNative
     {
+        // PIX's launcher can inject using DOS 8.3 paths. FullPath alone does not
+        // expand them, incorrectly rejecting the exact same selected install.
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetLongPathName(string path, System.Text.StringBuilder output, uint capacity);
+        internal static string CanonicalPath(string path)
+        {
+            var buffer = new System.Text.StringBuilder(32768);
+            uint length = GetLongPathName(Path.GetFullPath(path), buffer, (uint)buffer.Capacity);
+            if (length == 0 || length >= buffer.Capacity) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            return buffer.ToString();
+        }
         private const string Dll = "VividPixCapture";
         [DllImport(Dll)] internal static extern int VividPixAvailable();
         [DllImport(Dll)] internal static extern int VividPixPrepare(out ulong token, out int firstEvent);
@@ -274,13 +326,13 @@ namespace VividRP.AgenticDebugger
             if (targetDepth != 1 || captureStarted || callbackFailure != null) return;
             try
             {
+                Application.logMessageReceived += logCallback;
                 if (!armed) return;
                 // Pipeline-owned boundary, before public camera callbacks, jobs,
                 // culling and RenderGraph recording. PIX begins on the main thread.
                 Check(PixNative.VividPixBegin(token, path), "PIXBeginCapture");
                 captureStarted = true;
                 captureFrameIndex = frameIndex;
-                Application.logMessageReceived += logCallback;
                 commands.BeginSample(beginMarker);
                 commands.EndSample(beginMarker);
                 queues.Begin(context, commands);
@@ -304,11 +356,12 @@ namespace VividRP.AgenticDebugger
                     context.ExecuteCommandBuffer(commands);
                     commands.Clear();
                     context.Submit();
+                    if (renderError) throw new PixCaptureFailure("target_camera_render_error", "The preparation camera or queue boundary logged a rendering error.");
                     preparePending = false;
                     return;
                 }
                 if (!captureStarted || frameIndex != captureFrameIndex) return;
-                DetachCamera();
+                VividCaptureHooks.Release(this);
                 if (renderError) throw new PixCaptureFailure("target_camera_render_error", "The target camera logged a rendering error.");
                 // End is guaranteed by the pipeline wrapper even when rendering,
                 // Submit or a public callback throws. Only a submitted camera can
@@ -320,8 +373,10 @@ namespace VividRP.AgenticDebugger
                 context.ExecuteCommandBuffer(commands);
                 context.Submit();
                 commands.Clear();
+                if (renderError) throw new PixCaptureFailure("target_camera_render_error", "The capture queue boundary logged a rendering error.");
             }
             catch (Exception e) { callbackFailure = e; DetachCamera(); }
+            finally { Application.logMessageReceived -= logCallback; }
         }
 
         public void CameraSkipped(Camera target, VividCaptureOutcome outcome)

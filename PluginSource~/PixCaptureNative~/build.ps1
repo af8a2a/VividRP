@@ -49,9 +49,19 @@ if ($Deploy) {
     $plugin = Join-Path $packageRoot 'Editor/AgenticDebugger/Plugins/x86_64'
     $tool = Join-Path $packageRoot 'Tools~/PIX/bin'
     New-Item -ItemType Directory -Force -Path $plugin,$tool | Out-Null
-    Copy-Item -LiteralPath "$native/Release/VividPixCapture.dll" -Destination $plugin
-    Copy-Item -LiteralPath "$events/bin/x64/WinPixEventRuntime.dll" -Destination $plugin
-    Copy-Item -LiteralPath "$native/Release/vivid-pix-analyzer.exe" -Destination $tool
+    # Identical loaded DLLs need no replacement; analyzer-only iterations can be
+    # deployed while the Editor is running. Changed native DLLs still fail if locked.
+    foreach ($source in @("$native/Release/VividPixCapture.dll", "$events/bin/x64/WinPixEventRuntime.dll")) {
+        $target = Join-Path $plugin ([IO.Path]::GetFileName($source))
+        if (-not (Test-Path -LiteralPath $target) -or (Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {
+            Copy-Item -LiteralPath $source -Destination $target
+        }
+    }
+    $analyzerSource = "$native/Release/vivid-pix-analyzer.exe"
+    $analyzerTarget = "$tool/vivid-pix-analyzer.exe"
+    if (-not (Test-Path -LiteralPath $analyzerTarget) -or (Get-FileHash -LiteralPath $analyzerSource).Hash -ne (Get-FileHash -LiteralPath $analyzerTarget).Hash) {
+        Copy-Item -LiteralPath $analyzerSource -Destination $analyzerTarget
+    }
     $license = Join-Path $events 'License.txt'
     if (Test-Path -LiteralPath $license) { Copy-Item -LiteralPath $license -Destination "$plugin/WinPixEventRuntime.License.txt" }
     $manifest = [ordered]@{

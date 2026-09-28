@@ -8,9 +8,9 @@ namespace VividRP.AgenticDebugger
         [CliCommand("agentic_gpu_debugger", "VividRP GPU capture: PIX with validated GPU work, or Compute/RayTracing Frame Debugger inspection.", MainThreadRequired = true)]
         public static JObject Execute(
             [CliArg("backend", "pix | frame_debugger")] string backend = "pix",
-            [CliArg("action", "status | capture | release | events | event | pipeline | resources | accessed_resources | timing | counters | occupancy | drpix | analysis_status | analysis_cancel; frame_debugger also supports select.")] string action = "status",
+            [CliArg("action", "preflight | status | capture | release | events | event | pipeline | resources | accessed_resources | timing | counters | occupancy | drpix | analysis_status | analysis_cancel; frame_debugger also supports select.")] string action = "status",
             [CliArg("session_id", "Required for every session operation except status/capture.")] string sessionId = null,
-            [CliArg("path", "New .wpix capture or Frame Debugger JSON path, relative to project root.")] string path = null,
+            [CliArg("path", "New .wpix capture or .json evidence path, relative to project root.")] string path = null,
             [CliArg("camera", "Unique enabled camera name; PIX defaults to MainCamera.")] string cameraName = null,
             [CliArg("expected_pass", "PIX: required exact GPU pass marker containing real GPU work.")] string expectedPass = null,
             [CliArg("timeout_seconds", "Capture/analysis deadline (PIX) or lease (Frame Debugger), 1..300.")] float timeoutSeconds = 120,

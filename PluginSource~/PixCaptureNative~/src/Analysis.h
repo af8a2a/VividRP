@@ -97,6 +97,11 @@ struct CaptureDocument
     ComPtr<IPixFactory> factory;
     ComPtr<IPixGpuCaptureDocument> document;
     std::vector<QueueData> queues;
+    PIX_QUEUE_TYPE QueueType(UINT32 id) const
+    {
+        for (const auto& queue : queues) if (queue.info->GetId() == id) return queue.info->GetType();
+        throw Error{E_INVALIDARG, "queue_not_found"};
+    }
     void Open(const fs::path& pix, const fs::path& path, const std::string& session, const std::string& pass, bool all)
     {
         factory = CreateFactory(pix);
@@ -150,11 +155,13 @@ struct CaptureDocument
         throw Error{E_INVALIDARG, "event_not_found"};
     }
 };
-std::string EventJson(const PIX_EVENT_INFO& e, UINT32 queueId, bool details)
+std::string EventJson(const PIX_EVENT_INFO& e, UINT32 queueId, PIX_QUEUE_TYPE queueType, bool details)
 {
     ObjectJson row; row.Add("queueId", Number(queueId)); row.Add("eventIndex", Number(e.Index));
+    row.Add("queueType", Number(queueType));
     row.Add("parentIndex", e.ParentIndex == UINT32_MAX ? "null" : Number(e.ParentIndex));
     row.Add("name", Json(Limited(e.Name ? e.Name : "")));
+    row.Add("gpuWork", vivid::pix::IsWork(e.Name ? e.Name : "", e.ApiCallData ? e.ApiCallData : "") ? "true" : "false");
     row.Add("commandListId", Number(e.CommandListId));
     if (details) { row.Add("apiCallData", Json(Limited(e.ApiCallData ? e.ApiCallData : "", 16384)));
         row.Add("apiCallDataTruncated", e.ApiCallData && strlen(e.ApiCallData) > 16384 ? "true" : "false"); }
@@ -182,7 +189,7 @@ std::string Events(CaptureDocument& capture, const AnalysisOptions& o)
                 p = it->second;
             }
             if (!match) continue;
-            if (total++ >= o.offset && rows.size() < o.count) rows.push_back(EventJson(queue.events[i], queue.info->GetId(), false));
+            if (total++ >= o.offset && rows.size() < o.count) rows.push_back(EventJson(queue.events[i], queue.info->GetId(), queue.info->GetType(), false));
         }
     }
     if (!foundQueue) throw Error{E_INVALIDARG, "queue_not_found"};
@@ -674,7 +681,7 @@ int Analyze(const fs::path& pix, const fs::path& path, const std::string& sessio
         {
             CaptureDocument c; c.Open(pix, path, session, pass, all);
             if (o.action == "events") data = Events(c, o);
-            else if (o.action == "event") data = EventJson(c.Find(o), static_cast<UINT32>(o.queue), true);
+            else if (o.action == "event") data = EventJson(c.Find(o), static_cast<UINT32>(o.queue), c.QueueType(static_cast<UINT32>(o.queue)), true);
             else if (o.action == "pipeline") data = Pipeline(c, o);
             else if (o.action == "resources" || o.action == "accessed_resources") data = Resources(c, o);
             else data = ReplayQuery(c, o);

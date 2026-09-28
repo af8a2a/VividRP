@@ -26,7 +26,7 @@ namespace UnityEngine.Rendering
             var fence = new GraphicsFence { Id = ++NextFence }; Ops.Add("signal:" + fence.Id); return fence;
         }
         public void WaitOnAsyncGraphicsFence(GraphicsFence fence, SynchronisationStageFlags stage) => Ops.Add("wait:" + fence.Id);
-        public void Clear() => Ops.Clear();
+        public void Clear() { Ops.Clear(); Flags = CommandBufferExecutionFlags.None; }
         public void Dispose() { }
     }
     public struct ScriptableRenderContext

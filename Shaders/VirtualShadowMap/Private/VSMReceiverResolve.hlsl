@@ -236,6 +236,50 @@ bool TryEvaluateVSMProjection(VSMReceiverProjection prepared, int index,
 #include "VSMReceiverQuality.hlsl"
 #include "VSMPageMarking.hlsl"
 
+// UE SampleVirtualShadowMapDirectional: one mapped point comparison, including
+// its coarse page and optimal slope bias. No PCF footprint or receiver-mask gate.
+float SampleUEVSMDirectional(float3 positionWS, float3 normalWS, int index, out bool unavailable)
+{
+    VividVSMProjection source = _VSMProjections[index];
+    float3 coord = mul(source.worldToShadow, float4(positionWS, 1)).xyz;
+    int level; int2 physical; float2 mappedUV;
+    unavailable = !ResolveVSMSMRTMappedTexel(coord.xy, index, level, physical, mappedUV);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugWork.xz++;
+    if (unavailable) g_VSMDebugMissing |= 1u;
+#endif
+    if (unavailable) return 1.0;
+    VividVSMProjection destination = _VSMProjections[level];
+    float3 x = destination.worldToShadow[0].xyz;
+    float3 y = destination.worldToShadow[1].xyz;
+    float3 z = destination.worldToShadow[2].xyz;
+    float3 plane = float3(dot(normalWS, x) / dot(x, x),
+        dot(normalWS, y) / dot(y, y), dot(normalWS, z) / dot(z, z));
+    float denominator = plane.z < 0 ? min(plane.z, -1e-8) : max(plane.z, 1e-8);
+    float2 slopeUV = -plane.xy / denominator;
+    // The mapped texel was clamped to the integer coarse page. Recover that
+    // exact local center instead of re-rounding the floating address.
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    int2 page = (int2)(coord.xy * axis);
+    if (level != index)
+        page = (page + _VSMClipmapPageOffsets[index * _VSMProjectionCount + level]) >> (level - index);
+    int2 texel = page * _VSMPrototypePageSize + physical % _VSMPrototypePageSize;
+    float2 offsetUV = (float2(texel) + 0.5) / _VSMPrototypeVirtualResolution - mappedUV;
+    // UE's 100 cm clamp is one metre in Vivid world units. Independent clipmap
+    // Z ranges require the actual depth ratio, rather than exp2(LODOffset).
+    float destinationScale = length(z), sourceScale = length(source.worldToShadow[2].xyz);
+    float depthScale = destinationScale / sourceScale;
+    float slopeBias = min(2.0 * max(0.0, dot(slopeUV, offsetUV)), destinationScale) / depthScale;
+    VSM_COST_ADD(17, 1u);
+    float depth = asfloat(_VSMPhysicalPagePool.Load(int4(physical, VIVID_VSM_FINAL_DEPTH_SLICE, 0)));
+    depth = (depth - destination.worldToShadow._m23) / depthScale + source.worldToShadow._m23;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugLevels.y = level;
+    g_VSMDebugWork.y++;
+#endif
+    return depth - slopeBias > coord.z ? 0.0 : 1.0;
+}
+
 float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bool smrt, out bool unavailable)
 {
     unavailable = false;
@@ -264,22 +308,7 @@ float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bo
             GetVSMSMRTProjection(index), samples, shadow);
         return shadow;
     }
-    // Keep the explicit hard/PCF diagnostic filter and its footprint contract.
-    // It shares UE distance selection and takes the first valid parent, once.
-    for (int level = index; level < _VSMProjectionCount; ++level)
-    {
-        VSMReceiverProjection prepared = PrepareVSMReceiverProjection(positionWS, normal, level);
-        float shadow;
-        if (TryEvaluateVSMProjection(prepared, level, true, pixel, false, samples, shadow))
-        {
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-            g_VSMDebugLevels.y = level;
-#endif
-            return shadow;
-        }
-    }
-    unavailable = true;
-    return 1.0;
+    return SampleUEVSMDirectional(positionWS, normal, index, unavailable);
 }
 
 float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)

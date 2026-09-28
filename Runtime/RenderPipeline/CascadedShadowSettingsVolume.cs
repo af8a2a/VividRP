@@ -41,16 +41,16 @@ namespace VividRP.Runtime
         public ClampedFloatParameter virtualShadowMapTargetTexelPixels = new(1, 0.25f, 8);
         [Tooltip("UE distance-based clipmap LOD bias. -1 requests finer levels; +1 requests coarser levels. Includes horizontal viewport/projection normalization; total bias is clamped to zero to preserve coverage. Does not change resident projection sizes.")]
         public ClampedFloatParameter virtualShadowMapResolutionLodBias = new(0, -4, 4);
-        [Tooltip("Enable two-texel-wide area PCF for the hard-shadow reference. SMRT independently uses UE distance-scaled texel dither. Missing PCF footprints fall back as a whole to a coarser level.")]
+        [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
         public BoolParameter virtualShadowMapPCF = new(false);
-        [Tooltip("Experimental nine-comparison stratified disk filter with frame-varying samples. Requires VSM PCF; radius is one virtual texel. Intended for comparison with area PCF under temporal anti-aliasing.")]
+        [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
         public BoolParameter virtualShadowMapStochasticFiltering = new(false);
-        [Tooltip("Experimental directional SMRT contact-hardening soft shadows. Uses sin(half Angular Diameter), as UE's directional SourceRadius; zero angle preserves the PCF/hard reference. Uses UE-style fixed-step single-layer tracing and depth-history gap filling. Missing samples try coarser pages, then are skipped; thin or hidden occluders may be missed.")]
+        [Tooltip("Experimental directional SMRT contact-hardening soft shadows. Uses sin(half Angular Diameter), as UE's directional SourceRadius; zero angle uses the UE point comparison. Uses UE-style fixed-step single-layer tracing and depth-history gap filling. Missing samples try coarser pages, then are skipped; thin or hidden occluders may be missed.")]
         public BoolParameter virtualShadowMapSMRT = new(false);
         [HideInInspector, Tooltip("Legacy value. UE STBN uses the frame index directly.")]
         public BoolParameter virtualShadowMapSMRTJointSampling = new(false);
-        [Tooltip("Accumulate a short, depth/normal-validated shadow history with current-frame clamping. Requires Screen Space Denoise and SMRT; independent of camera anti-aliasing.")]
-        public BoolParameter virtualShadowMapSMRTTemporalDenoise = new(true);
+        [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
+        public BoolParameter virtualShadowMapSMRTTemporalDenoise = new(false);
         [Tooltip("Use current-frame wave votes to stop after one ray in uniformly lit regions or at least two rays in uniformly shadowed regions. Mixed waves keep the full budget. Invalid ray samples are skipped. Independent of temporal denoising; may change penumbra noise.")]
         public BoolParameter virtualShadowMapSMRTAdaptiveRays = new(true);
         [Tooltip("Maximum rays per shadow estimate. Adaptive Rays can stop uniformly lit/shadowed waves early; disabling it uses the full count.")]

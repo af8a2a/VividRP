@@ -363,9 +363,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ReceiverHeight = cameraData.actualHeight;
                 m_ReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(settings, cameraData, clipmaps.Resolution);
                 m_ReceiverSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angularDiameter);
-                m_ReceiverParameters = new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0,
+                m_ReceiverParameters = new Vector4(0,
                     shadowData.depthBias, shadowData.slopeScaleDepthBias,
-                    settings.virtualShadowMapStochasticFiltering.value ? 1 : 0);
+                    0);
             }
         }
 

@@ -143,6 +143,31 @@ namespace VividRP.Editor.Tests
             Assert.That(result[0].y, Is.EqualTo((depth - .5f) / 2.5f + .3f).Within(1e-6));
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void UEPointFilter_UsesMappedDepthSlopeAndIgnoresLegacyPCF(bool coarse)
+        {
+            using var f = new Fixture();
+            f.ProjectionData[0].WorldToShadow.m22 = .1f;
+            f.ProjectionData[0].WorldToShadow.m23 = .3f;
+            f.ProjectionData[1].WorldToShadow.m22 = .25f;
+            f.ProjectionData[1].WorldToShadow.m23 = .5f;
+            int first = coarse ? 4 : 0;
+            for (int i = first; i < first + 4; i++) f.Map(i, i, coarse ? .6f : .34f);
+            f.Upload();
+            var p = new[] { new float4(0, 0, 0, 0) };
+            f.Shader.SetInt("_VSMReceiverMaskEnabled", 1);
+            f.ReceiverMasks.Completed.SetData(new uint2[16]);
+            f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 100, 100, 1));
+            var flat = f.Run("InspectUEPointSample", p, normals: new[] { new float4(0, 0, 1, 0) });
+            Assert.That(flat[0], Is.EqualTo(new float2(0, 0)));
+            var sloped = f.Run("InspectUEPointSample", p, normals: new[] { new float4(-1, 0, 1, 0) });
+            Assert.That(sloped[0], Is.EqualTo(new float2(1, 0)));
+            Array.Clear(f.TableData, 0, f.TableData.Length);
+            f.Upload();
+            Assert.That(f.Run("InspectUEPointSample", p)[0], Is.EqualTo(new float2(1, 1)));
+        }
+
         private sealed class Fixture : IDisposable
         {
             internal readonly ComputeShader Shader;
@@ -1017,11 +1042,11 @@ namespace VividRP.Editor.Tests
             f.Upload();
             f.Shader.SetVector("_VSMReceiverParameters", new Vector4(1, 0, 0, 0));
             var receiver = new[] { new float4(.1f, .1f, -.3f, 0) };
-            float pcf = f.Run("ResolveReceivers", receiver)[0].x;
+            float point = f.Run("ResolveReceivers", receiver)[0].x;
             f.Shader.SetVector("_VSMSMRTParameters", new Vector4(4, 4, 1, .5f));
-            Assert.That(pcf, Is.InRange(.1f, .9f));
+            Assert.That(point, Is.Zero);
             float soft = f.Run("FilterSMRTFootprints", new[] { new float4(.51f, .51f, .2f, 0) })[0].y;
-            Assert.That(soft, Is.Not.EqualTo(pcf));
+            Assert.That(soft, Is.Not.EqualTo(point));
             Assert.That(f.Run("ResolveReceivers", receiver)[0].x, Is.EqualTo(soft));
         }
 
@@ -1300,7 +1325,7 @@ namespace VividRP.Editor.Tests
             float4 levels = f.RunDiagnostic(receiver, 0);
             Assert.That(levels.xyz, Is.EqualTo(new float3(0, 0, -1)));
             float4 work = f.RunDiagnostic(receiver, 4);
-            Assert.That(work, Is.EqualTo(new float4(pcf ? 9 : 1, pcf ? 9 : 1, 1, 0)));
+            Assert.That(work, Is.EqualTo(new float4(1, 1, 1, 0)));
             float4 status = f.RunDiagnostic(receiver, 5);
             Assert.That(status.x, Is.Zero);
             Assert.That(f.MetadataData, Is.EqualTo(before), "Diagnostic replay must not request pages or update timestamps.");
@@ -1317,8 +1342,8 @@ namespace VividRP.Editor.Tests
             f.Upload();
             var receiver = new float4(0.625f, 0.625f, 0, 0);
             Assert.That(f.RunDiagnostic(receiver, 0).xyz, Is.EqualTo(new float3(0, 1, -1)));
-            Assert.That(f.RunDiagnostic(receiver, 4), Is.EqualTo(new float4(2, 1, 2, 0)));
-            Assert.That(f.RunDiagnostic(receiver, 5).x, Is.EqualTo(2));
+            Assert.That(f.RunDiagnostic(receiver, 4), Is.EqualTo(new float4(1, 1, 1, 0)));
+            Assert.That(f.RunDiagnostic(receiver, 5).x, Is.Zero);
             for (int i = 0; i < 4; i++) f.MetadataData[i].x &= ~4u;
             f.Upload();
             receiver.x = 1.75f;

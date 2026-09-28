@@ -478,9 +478,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings, cameraData, shadowData.clipmaps.Resolution);
             m_VSMSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(csmSettings, m_LightAngularDiameter);
             m_VSMSMRTSettings = VirtualShadowMapReceiverQuality.BuildSMRTSettings(csmSettings);
-            m_VSMReceiverParameters = new Vector4(csmSettings != null && csmSettings.virtualShadowMapPCF.value ? 1 : 0,
+            m_VSMReceiverParameters = new Vector4(0,
                 shadowData.depthBias, shadowData.slopeScaleDepthBias,
-                csmSettings != null && csmSettings.virtualShadowMapStochasticFiltering.value ? 1 : 0);
+                0);
             m_EnableBilateralDenoise = csmSettings != null && csmSettings.screenSpaceShadowDenoise.value;
             m_EnableTiledResolve = IsVividTiledPCSSQuality(m_ShadowQuality)
                 && CanUseTiledResolveKernels();
@@ -521,12 +521,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_EnableAdaptiveRays = VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(
                     csmSettings, m_VSMSMRTParameters) && m_VSMAdaptiveKernel >= 0;
                 m_EnableTiledResolve = false;
-                m_EnableBilateralDenoise &= m_VSMSMRTParameters.x > 0f
-                    && m_VSMBilateralFilterHKernel >= 0 && m_VSMBilateralFilterVKernel >= 0;
+                // UE directional projection writes raw visibility. Scene TAA/TSR
+                // owns temporal reconstruction; no private VSM spatial/history filter.
+                m_EnableBilateralDenoise = false;
+                m_EnableVSMTemporal = m_HasVSMHistory = false;
                 m_EnableBendComposite = false;
-                if (m_EnableBilateralDenoise && csmSettings.virtualShadowMapSMRTTemporalDenoise.value
-                    && m_VSMTemporalKernel >= 0 && cameraData.camera != null)
-                    PrepareVSMHistory(cameraData, frameData.GetOrCreate<VividTemporalData>(), csmSettings);
             }
         }
 

@@ -1,3 +1,4 @@
+#pragma kernel InspectUEPointSample
 #pragma kernel VSMPropagateMappedClipmaps
 #pragma kernel InspectUEMappedTexel
 #pragma kernel InspectUETrace5 VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
@@ -674,4 +675,15 @@ void InspectUEMappedTexel(uint3 id : SV_DispatchThreadID)
     int level; int2 physical; float2 uv;
     bool valid = ResolveVSMSMRTMappedTexel(p.xy, (int)p.z, level, physical, uv);
     _UESMRTResults[id.x] = float4(valid ? 1 : 0, level, physical);
+}
+
+// Direct UE directional point comparison, with an explicit source clipmap.
+[numthreads(64, 1, 1)]
+void InspectUEPointSample(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 p = _SamplingInputs[id.x];
+    bool unavailable;
+    float shadow = SampleUEVSMDirectional(p.xyz, _SamplingNormals[id.x].xyz, (int)p.w, unavailable);
+    _SamplingResults[id.x] = float2(shadow, unavailable ? 1.0 : 0.0);
 }

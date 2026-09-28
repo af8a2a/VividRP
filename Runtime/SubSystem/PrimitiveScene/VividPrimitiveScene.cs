@@ -13,6 +13,11 @@ namespace VividRP.Runtime.PrimitiveScene
     {
         internal const uint InvalidIndex = uint.MaxValue;
         internal const int MaxPendingStaticShadowInvalidationBounds = 1024;
+        // CPU shadow draw-set classification; does not change authoring Static or GPU layout.
+        internal const VividPrimitiveFlags ShadowCacheStaticFlag = (VividPrimitiveFlags)(1u << 8);
+        internal const uint ShadowCacheFramesStaticThreshold = 100;
+        private readonly List<uint> m_LastShadowInvalidatedFrame = new();
+        private readonly List<bool> m_PendingShadowCacheInvalidation = new();
 
         private static int s_NextSceneToken;
 
@@ -219,12 +224,12 @@ namespace VividRP.Runtime.PrimitiveScene
                 handle = Register(descriptor);
                 m_ChangedPrimitiveCount++;
                 IncrementSceneRevision();
-                if (IsStaticShadowCaster(descriptor.Flags, descriptor.PassMask))
+                if (IsStaticShadowCaster(PrimitiveTable[handle.Index].Flags, descriptor.PassMask))
                 {
                     IncrementStaticShadowRevision();
                     RecordStaticShadowInvalidation(descriptor.WorldBounds);
                 }
-                if (IsDynamicShadowCaster(descriptor.Flags, descriptor.PassMask))
+                if (IsDynamicShadowCaster(PrimitiveTable[handle.Index].Flags, descriptor.PassMask))
                     RecordDynamicShadowInvalidation(descriptor.WorldBounds);
                 return handle;
             }
@@ -235,9 +240,13 @@ namespace VividRP.Runtime.PrimitiveScene
                 (VividInstancePassMask) previousData.PassMask);
             if (Update(handle, descriptor))
             {
+                // Source changes are synchronized before draw-set jobs are scheduled.
+                SetShadowCacheStatic(handle.Index, false);
+                m_LastShadowInvalidatedFrame[handle.Index] = (uint)Math.Max(m_PreparedFrameIndex, 0);
+                m_PendingShadowCacheInvalidation[handle.Index] = false;
                 m_ChangedPrimitiveCount++;
                 bool isStaticShadowCaster = IsStaticShadowCaster(
-                    descriptor.Flags,
+                    PrimitiveTable[handle.Index].Flags,
                     descriptor.PassMask);
                 if (wasStaticShadowCaster || isStaticShadowCaster)
                 {
@@ -259,7 +268,7 @@ namespace VividRP.Runtime.PrimitiveScene
                     }
                 }
                 bool wasDynamic = IsDynamicShadowCaster(previousData.Flags, (VividInstancePassMask)previousData.PassMask);
-                bool isDynamic = IsDynamicShadowCaster(descriptor.Flags, descriptor.PassMask);
+                bool isDynamic = IsDynamicShadowCaster(PrimitiveTable[handle.Index].Flags, descriptor.PassMask);
                 if (wasDynamic)
                     RecordDynamicShadowInvalidation(previousData.WorldBoundsMin, previousData.WorldBoundsMax);
                 if (isDynamic && (!wasDynamic || !BoundsAreEqual(previousData.WorldBoundsMin,
@@ -327,6 +336,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 return;
             }
 
+            QueueShadowCacheInvalidation(handle.Index);
             VividPrimitiveData data = PrimitiveTable[handle.Index];
             if (IsDynamicShadowCaster(data.Flags, (VividInstancePassMask)data.PassMask))
                 RecordDynamicShadowInvalidation(data.WorldBoundsMin, data.WorldBoundsMax);
@@ -363,6 +373,7 @@ namespace VividRP.Runtime.PrimitiveScene
                         && !affectedMaterials[(int)materialIndex])
                         continue;
 
+                    QueueShadowCacheInvalidation(record.Handle.Index);
                     if (isStatic)
                     {
                         IncrementStaticShadowRevision();
@@ -468,6 +479,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 });
             }
             m_MovedPrimitiveSlots.Clear();
+            UpdateShadowCacheStates((uint)Math.Max(frameIndex, 0));
         }
 
         internal void RecordFullResync()
@@ -673,7 +685,16 @@ namespace VividRP.Runtime.PrimitiveScene
             m_PrimitivesByEntityId.Add(descriptor.SourceEntityId, handle);
 
             float4x4 objectToWorld = ToFloat4x4(descriptor.ObjectToWorldMatrix);
-            PrimitiveTable.Set(primitiveSlot, CreatePrimitiveData(descriptor, handle, sectionOffset, sectionCount));
+            while (m_LastShadowInvalidatedFrame.Count <= primitiveSlot)
+            {
+                m_LastShadowInvalidatedFrame.Add(uint.MaxValue);
+                m_PendingShadowCacheInvalidation.Add(false);
+            }
+            m_LastShadowInvalidatedFrame[primitiveSlot] = uint.MaxValue;
+            m_PendingShadowCacheInvalidation[primitiveSlot] = false;
+            var initialData = CreatePrimitiveData(descriptor, handle, sectionOffset, sectionCount);
+            if ((descriptor.Flags & VividPrimitiveFlags.Skinned) == 0) initialData.Flags |= ShadowCacheStaticFlag;
+            PrimitiveTable.Set(primitiveSlot, initialData);
             TransformTable.Set(primitiveSlot, new VividPrimitiveTransformData
             {
                 ObjectToWorldMatrix = objectToWorld,
@@ -737,9 +758,9 @@ namespace VividRP.Runtime.PrimitiveScene
                 });
             }
 
-            bool primitiveDataChanged = PrimitiveTable.SetIfChanged(
-                handle.Index,
-                CreatePrimitiveData(descriptor, handle, record.DrawSectionOffset, record.DrawSectionCount));
+            var nextData = CreatePrimitiveData(descriptor, handle, record.DrawSectionOffset, record.DrawSectionCount);
+            nextData.Flags |= PrimitiveTable[handle.Index].Flags & ShadowCacheStaticFlag;
+            bool primitiveDataChanged = PrimitiveTable.SetIfChanged(handle.Index, nextData);
             bool cullRecordChanged = UpdateCullRecord(
                 handle,
                 descriptor,
@@ -1033,7 +1054,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 m_PrimitiveSlotToActiveIndex.Add(-1);
         }
 
-        private static VividPrimitiveCullRecord CreateCullRecord(
+        private VividPrimitiveCullRecord CreateCullRecord(
             VividPrimitiveHandle handle,
             in VividPrimitiveSourceDescriptor descriptor,
             int sectionOffset,
@@ -1049,7 +1070,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 DrawSectionOffset = sectionCount > 0 ? (uint) sectionOffset : InvalidIndex,
                 DrawSectionCount = (uint) sectionCount,
                 PassMask = descriptor.PassMask,
-                Flags = descriptor.Flags,
+                Flags = PrimitiveTable[handle.Index].Flags,
                 CameraLayerMask = descriptor.CameraLayerMask,
             };
         }
@@ -1179,8 +1200,53 @@ namespace VividRP.Runtime.PrimitiveScene
         }
 
         private static bool IsDynamicShadowCaster(VividPrimitiveFlags flags, VividInstancePassMask passMask)
-            => (flags & (VividPrimitiveFlags.Valid | VividPrimitiveFlags.Disabled | VividPrimitiveFlags.Static))
+            => (flags & (VividPrimitiveFlags.Valid | VividPrimitiveFlags.Disabled | ShadowCacheStaticFlag))
                 == VividPrimitiveFlags.Valid && (passMask & VividInstancePassMask.Shadows) != 0;
+
+        private void QueueShadowCacheInvalidation(int slot)
+        {
+            m_LastShadowInvalidatedFrame[slot] = (uint)Math.Max(m_PreparedFrameIndex, 0);
+            m_PendingShadowCacheInvalidation[slot] = true;
+        }
+
+        private void SetShadowCacheStatic(int slot, bool isStatic)
+        {
+            var data = PrimitiveTable[slot];
+            var flags = isStatic ? data.Flags | ShadowCacheStaticFlag : data.Flags & ~ShadowCacheStaticFlag;
+            if (data.Flags == flags) return;
+            data.Flags = flags;
+            PrimitiveTable.Set(slot, data);
+            int active = m_PrimitiveSlotToActiveIndex[slot];
+            var cull = m_ActiveCullRecords[active];
+            cull.Flags = flags;
+            m_ActiveCullRecords[active] = cull;
+            IncrementSceneRevision(); // Invalidate shadow draw-set query caches.
+        }
+
+        private void UpdateShadowCacheStates(uint frame)
+        {
+            for (int i = 0; i < m_ActiveCullRecords.Length; i++)
+            {
+                var cull = m_ActiveCullRecords[i];
+                int slot = cull.Handle.Index;
+                uint last = m_LastShadowInvalidatedFrame[slot];
+                bool pending = m_PendingShadowCacheInvalidation[slot];
+                uint age = frame >= last ? frame - last : uint.MaxValue;
+                bool wantStatic = !pending && (cull.Flags & VividPrimitiveFlags.Skinned) == 0
+                    && age > ShadowCacheFramesStaticThreshold;
+                bool wasStatic = (cull.Flags & ShadowCacheStaticFlag) != 0;
+                m_PendingShadowCacheInvalidation[slot] = false;
+                if (wantStatic == wasStatic) continue;
+                SetShadowCacheStatic(slot, wantStatic);
+                // A transition must remove old depth and produce into the new pool.
+                if ((cull.PassMask & VividInstancePassMask.Shadows) != 0)
+                {
+                    IncrementStaticShadowRevision();
+                    RecordStaticShadowInvalidation(new float4(cull.BoundsMin, 0), new float4(cull.BoundsMax, 0));
+                    RecordDynamicShadowInvalidation(new float4(cull.BoundsMin, 0), new float4(cull.BoundsMax, 0));
+                }
+            }
+        }
 
         private static bool BoundsAreEqual(
             float4 previousMinimum,
@@ -1201,7 +1267,7 @@ namespace VividRP.Runtime.PrimitiveScene
             VividPrimitiveFlags flags,
             VividInstancePassMask passMask)
         {
-            return (flags & VividPrimitiveFlags.Static) != 0
+            return (flags & ShadowCacheStaticFlag) != 0
                 && (flags & (VividPrimitiveFlags.Valid | VividPrimitiveFlags.Disabled))
                     == VividPrimitiveFlags.Valid
                 && (passMask & VividInstancePassMask.Shadows) != 0;

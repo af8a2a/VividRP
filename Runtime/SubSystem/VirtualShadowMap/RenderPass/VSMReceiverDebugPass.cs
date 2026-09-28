@@ -143,8 +143,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angle);
             m_SMRTSettings = VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings);
             m_AdaptiveRays = VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(settings, m_SMRTParameters);
-            m_Parameters = new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0,
-                shadow.depthBias, shadow.slopeScaleDepthBias, settings.virtualShadowMapStochasticFiltering.value ? 1 : 0);
+            m_Parameters = new Vector4(0,
+                shadow.depthBias, shadow.slopeScaleDepthBias, 0);
             m_PhysicalPool = PassRecorder.ImportTextureForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalPagePool, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PagePressure, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.Read);

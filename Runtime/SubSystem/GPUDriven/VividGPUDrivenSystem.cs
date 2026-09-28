@@ -1039,7 +1039,7 @@ namespace VividRP.Runtime.GPUDriven
                     shadowData,
                     cameraData.frameIndex,
                     gpuDrivenSystem.m_StaticShadowPrimitiveDrawSetSystem,
-                    VividPrimitiveFlags.Static,
+                    VividPrimitiveScene.ShadowCacheStaticFlag,
                     VividPrimitiveFlags.None);
             VividPrimitiveDrawSet scheduledDynamicShadowDrawSet =
                 gpuDrivenSystem.ScheduleShadowDrawSet(
@@ -1048,7 +1048,7 @@ namespace VividRP.Runtime.GPUDriven
                     cameraData.frameIndex,
                     gpuDrivenSystem.m_DynamicShadowPrimitiveDrawSetSystem,
                     VividPrimitiveFlags.None,
-                    VividPrimitiveFlags.Static);
+                    VividPrimitiveScene.ShadowCacheStaticFlag);
 
             if (gpuDrivenSystem.m_TextureBackend is IGPUDrivenTerrainRuntimeVirtualTextureBackend terrainRVTBackend)
             {

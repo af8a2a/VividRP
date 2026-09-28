@@ -68,6 +68,10 @@ namespace VividRP.Editor
         private SerializedDataParameter m_VirtualShadowMapResolutionLodBias;
         private SerializedDataParameter m_VirtualShadowMapPCF;
         private SerializedDataParameter m_VirtualShadowMapStochasticFiltering;
+        private SerializedDataParameter m_VirtualShadowMapSMRTRayLengthScale;
+        private SerializedDataParameter m_VirtualShadowMapSMRTExtrapolateMaxSlope;
+        private SerializedDataParameter m_VirtualShadowMapSMRTTexelDitherScale;
+        private SerializedDataParameter m_VirtualShadowMapSMRTAdaptiveRayCount;
         private SerializedDataParameter m_VirtualShadowMapSMRT;
         private SerializedDataParameter m_VirtualShadowMapSMRTJointSampling;
         private SerializedDataParameter m_VirtualShadowMapSMRTTemporalDenoise;
@@ -108,6 +112,10 @@ namespace VividRP.Editor
             m_VirtualShadowMapResolutionLodBias = Unpack(fetcher.Find(x => x.virtualShadowMapResolutionLodBias));
             m_VirtualShadowMapPCF = Unpack(fetcher.Find(x => x.virtualShadowMapPCF));
             m_VirtualShadowMapStochasticFiltering = Unpack(fetcher.Find(x => x.virtualShadowMapStochasticFiltering));
+            m_VirtualShadowMapSMRTRayLengthScale = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTRayLengthScale));
+            m_VirtualShadowMapSMRTExtrapolateMaxSlope = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTExtrapolateMaxSlope));
+            m_VirtualShadowMapSMRTTexelDitherScale = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTTexelDitherScale));
+            m_VirtualShadowMapSMRTAdaptiveRayCount = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTAdaptiveRayCount));
             m_VirtualShadowMapSMRT = Unpack(fetcher.Find(x => x.virtualShadowMapSMRT));
             m_VirtualShadowMapSMRTJointSampling = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTJointSampling));
             m_VirtualShadowMapSMRTTemporalDenoise = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTTemporalDenoise));
@@ -141,12 +149,14 @@ namespace VividRP.Editor
             PropertyField(m_VirtualShadowMapPCF);
             PropertyField(m_VirtualShadowMapStochasticFiltering);
             PropertyField(m_VirtualShadowMapSMRT);
-            PropertyField(m_VirtualShadowMapSMRTJointSampling);
             PropertyField(m_VirtualShadowMapSMRTTemporalDenoise);
             PropertyField(m_VirtualShadowMapSMRTAdaptiveRays);
             PropertyField(m_VirtualShadowMapSMRTRayCount);
             PropertyField(m_VirtualShadowMapSMRTSamplesPerRay);
-            PropertyField(m_VirtualShadowMapSMRTMaxRayLength);
+            PropertyField(m_VirtualShadowMapSMRTAdaptiveRayCount);
+            PropertyField(m_VirtualShadowMapSMRTTexelDitherScale);
+            PropertyField(m_VirtualShadowMapSMRTExtrapolateMaxSlope);
+            PropertyField(m_VirtualShadowMapSMRTRayLengthScale);
             PropertyField(m_MaxShadowDistance, s_MaxShadowDistanceLabel);
             PropertyField(m_ScreenSpaceShadowDenoise, s_ScreenSpaceShadowDenoiseLabel);
 

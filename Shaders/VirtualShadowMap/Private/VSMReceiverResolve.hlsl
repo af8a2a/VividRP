@@ -300,6 +300,7 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS)
 // supplies the output; request-only rendering keeps the generic CSM entry.
 void ResolveVSMScreenPixel(uint3 id)
 {
+    id.xy = VSMMortonPixel(id.xy);
     // Every lane must reach the projection-cache barrier, including edge/sky lanes.
     InitializeVSMSMRTProjections((id.x & 7u) + ((id.y & 7u) << 3u));
     if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
@@ -329,6 +330,7 @@ Texture2D<float> _VSMSMRTCostReference;
 [numthreads(8, 8, 1)]
 void VSMReceiverCost(uint3 id : SV_DispatchThreadID)
 {
+    id.xy = VSMMortonPixel(id.xy);
     InitializeVSMSMRTProjections((id.x & 7u) + ((id.y & 7u) << 3u));
     if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
     [unroll] for (uint c = 0u; c < 8u; c++) g_VSMSMRTCost[c] = 0u;

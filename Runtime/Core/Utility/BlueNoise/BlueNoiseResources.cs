@@ -5,6 +5,10 @@ namespace VividRP.Runtime
     [PipelineResource]
     public class BlueNoiseResources
     {
+        [VividResourcePath("Texture/BlueNoise/VSM_STBN_scalar.png")]
+        public Texture2D VSMSTBNScalar;
+        [VividResourcePath("Texture/BlueNoise/VSM_STBN_vec2.png")]
+        public Texture2D VSMSTBNVec2;
         [VividResourcePath("Texture/BlueNoise/ScramblingTile1SPP.png")]
         public Texture2D ScramblingTile1SPP;
 

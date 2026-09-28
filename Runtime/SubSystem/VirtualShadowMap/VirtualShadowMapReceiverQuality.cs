@@ -17,10 +17,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static int BuildSMRTSampleIndexOffset(
             CascadedShadowSettingsVolume settings, VividAdditionalCameraData camera, int frameIndex)
         {
-            if (settings == null || !settings.virtualShadowMapSMRT.value
-                || !settings.virtualShadowMapSMRTJointSampling.value || camera == null || !camera.enableTSR)
-                return 0;
-            return CalculateSMRTSampleIndexOffset(frameIndex, camera.tsrJitterPhaseCount);
+            // UE STBN addresses time by StateFrameIndex; no TSR cycle remapping.
+            return 0;
         }
 
         internal static int CalculateSMRTSampleIndexOffset(int frameIndex, int jitterPhaseCount)
@@ -38,12 +36,23 @@ namespace VividRP.Runtime.VirtualShadowMap
                 ? Vector4.zero : new Vector4(
                     settings.virtualShadowMapSMRTRayCount.value,
                     settings.virtualShadowMapSMRTSamplesPerRay.value,
-                    settings.virtualShadowMapSMRTMaxRayLength.value,
-                    Mathf.Tan(Mathf.Min(angularDiameter, 10) * (0.5f * Mathf.Deg2Rad)));
+                    settings.virtualShadowMapSMRTRayLengthScale.value,
+                    Mathf.Sin(Mathf.Clamp(angularDiameter, 0, 180) * (0.5f * Mathf.Deg2Rad)));
+
+        internal static readonly int SMRTSettingsId = Shader.PropertyToID("_VSMSMRTSettings");
+
+        internal static Vector4 BuildSMRTSettings(CascadedShadowSettingsVolume settings)
+            => settings == null ? Vector4.zero : new Vector4(
+                settings.virtualShadowMapSMRTExtrapolateMaxSlope.value,
+                settings.virtualShadowMapSMRTTexelDitherScale.value,
+                settings.virtualShadowMapSMRTAdaptiveRayCount.value, 0);
+
+        internal static int SMRTPermutationIndex(int samples, bool adaptive, bool slope)
+            => (slope ? 6 : 0) + (adaptive ? 3 : 0) + (samples == 2 ? 1 : samples == 4 ? 2 : 0);
 
         internal static bool BuildSMRTAdaptiveEnabled(CascadedShadowSettingsVolume settings, Vector4 smrtParameters)
             => settings != null && settings.virtualShadowMapSMRTAdaptiveRays.value
-                && smrtParameters.x >= 4 && smrtParameters.w > 0;
+                && smrtParameters.x > 0 && smrtParameters.w > 0;
 
         internal static Vector4 BuildParameters(CascadedShadowSettingsVolume settings)
             => settings == null ? Vector4.zero : BuildClipmapParameters(

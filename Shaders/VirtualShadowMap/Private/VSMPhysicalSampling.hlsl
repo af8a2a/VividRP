@@ -1,6 +1,6 @@
 bool UseVSMSMRT()
 {
-    return _VSMSMRTParameters.x >= 4 && _VSMSMRTParameters.w > 0;
+    return _VSMSMRTParameters.x > 0 && _VSMSMRTParameters.w > 0;
 }
 
 float VSMSMRTRayLength(int index, float texelSize)

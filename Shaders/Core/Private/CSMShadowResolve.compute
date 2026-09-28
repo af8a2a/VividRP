@@ -167,7 +167,8 @@ float4   _CSMCascadeBorders;
 int      _CSMShadowQuality;
 int      _VSMPrototypeEnabled;
 float4   _VSMReceiverParameters; // PCF enabled, constant bias in texels, slope bias, stochastic filter
-float4   _VSMSMRTParameters; // ray count (zero disables), fixed steps per whole ray, max world length, tan angular radius
+float4   _VSMSMRTSettings; // extrapolate max slope, texel dither scale, adaptive all-hit threshold, reserved
+float4   _VSMSMRTParameters; // ray count (zero disables), steps per ray, view-distance length scale, sin angular radius
 int      _VSMPrototypePageSize;
 int      _VSMPrototypeVirtualResolution;
 int      _VSMPrototypePagesPerAxis;
@@ -1317,4 +1318,88 @@ void VSMShadowResolveAdaptiveHints(uint3 dispatchThreadID : SV_DispatchThreadID)
 void VSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     ResolveVSMScreenPixel(dispatchThreadID);
+}
+
+#pragma kernel VSMShadowResolveUE0 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=0
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE0(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE1 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE1(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE2 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE2(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE3 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=0
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE3(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE4 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE4(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE5 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE5(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE6 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=1
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE6(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE7 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE7(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE8 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE8(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE9 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=1
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE9(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE10 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE10(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE11 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
 }

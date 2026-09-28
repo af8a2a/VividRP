@@ -462,7 +462,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeIntParam(shader, VSMPrototypeRequestEnabledId, 1);
                 // Match UE PageMarkingPixelStrideX/Y = 2 for the SMRT marker.
                 // Hard/PCF still uses its existing full-resolution footprint path.
-                int stride = m_ReceiverSMRTParameters.x >= 4 && m_ReceiverSMRTParameters.w > 0 ? 2 : 1;
+                int stride = m_ReceiverSMRTParameters.x > 0 && m_ReceiverSMRTParameters.w > 0 ? 2 : 1;
                 cmd.DispatchCompute(shader, kernel, CoreUtils.DivRoundUp(m_ReceiverWidth, 8 * stride),
                     CoreUtils.DivRoundUp(m_ReceiverHeight, 8 * stride), 1);
             }

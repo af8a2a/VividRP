@@ -277,8 +277,8 @@ namespace VividRP.Editor.Tests
                 settings.virtualShadowMapSMRT.value = true;
                 Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, 0), Is.EqualTo(Vector4.zero));
                 Vector4 parameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, .5f);
-                Assert.That(parameters.x, Is.EqualTo(4)); Assert.That(parameters.y, Is.EqualTo(8));
-                Assert.That(parameters.w, Is.EqualTo(Mathf.Tan(.25f * Mathf.Deg2Rad)).Within(1e-7));
+                Assert.That(parameters.x, Is.EqualTo(7)); Assert.That(parameters.y, Is.EqualTo(8));
+                Assert.That(parameters.w, Is.EqualTo(Mathf.Sin(.25f * Mathf.Deg2Rad)).Within(1e-7));
                 var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                     "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute");
                 Assert.That(shader, Is.Not.Null);
@@ -287,6 +287,25 @@ namespace VividRP.Editor.Tests
                 for (int i = 0; i < 256; i++) RecordSMRT(cmd, settings, shader);
                 long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
                 Assert.That(bytes, Is.Zero);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [Test]
+        public void SMRT_UEParametersAndPermutationAxes()
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            try
+            {
+                settings.virtualShadowMapSMRT.value = true;
+                var parameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, 90);
+                Assert.That(parameters, Is.EqualTo(new Vector4(7, 8, 1.5f, Mathf.Sin(45 * Mathf.Deg2Rad))));
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings), Is.EqualTo(new Vector4(5, 2, 1, 0)));
+                foreach (bool slope in new[] { false, true })
+                foreach (bool adaptive in new[] { false, true })
+                foreach (int samples in new[] { 1, 2, 4, 8, 32 })
+                    Assert.That(VirtualShadowMapReceiverQuality.SMRTPermutationIndex(samples, adaptive, slope),
+                        Is.EqualTo((slope ? 6 : 0) + (adaptive ? 3 : 0) + (samples == 2 ? 1 : samples == 4 ? 2 : 0)));
             }
             finally { UnityEngine.Object.DestroyImmediate(settings); }
         }
@@ -384,7 +403,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.virtualShadowMapSMRTJointSampling.value, Is.False);
                 Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.Zero);
                 settings.virtualShadowMapSMRTJointSampling.value = true;
-                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.EqualTo(1));
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.Zero);
                 camera.ResetTsrJitterData();
                 Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(settings, camera, 8), Is.Zero);
                 camera.SetTsrJitterData(Vector2.zero, 8);
@@ -478,6 +497,8 @@ namespace VividRP.Editor.Tests
             cmd.Clear();
             cmd.SetComputeVectorParam(shader, VirtualShadowMapReceiverQuality.SMRTParametersId,
                 VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, .5f));
+            cmd.SetComputeVectorParam(shader, VirtualShadowMapReceiverQuality.SMRTSettingsId,
+                VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings));
         }
 
         private static void RecordQuality(CommandBuffer cmd)

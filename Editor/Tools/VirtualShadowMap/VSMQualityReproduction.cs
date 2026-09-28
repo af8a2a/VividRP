@@ -392,6 +392,7 @@ namespace VividRP.Editor
                 && additional != null) angle = additional.angularDiameter;
             cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.SMRTParametersId,
                 VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angle));
+            cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.SMRTSettingsId, VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings));
             cmd.SetComputeVectorParam(m_Compute, s_Ids[10], new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0, shadow.depthBias, shadow.slopeScaleDepthBias, settings.virtualShadowMapStochasticFiltering.value ? 1 : 0));
             cmd.SetComputeIntParam(m_Compute, s_Ids[11], m_Width); cmd.SetComputeIntParam(m_Compute, s_Ids[12], m_Height);
             cmd.SetComputeIntParam(m_Compute, s_Ids[13], 1);

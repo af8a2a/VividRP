@@ -196,6 +196,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly CameraRelativeSystem<ShadowHistoryState> m_ShadowHistoryStates = new();
         internal sealed class ShadowHistoryState : CameraRelativeState
         {
+            internal Vector4 SMRTSettings;
             internal Matrix4x4 ViewProjection, View;
             internal Vector4 Light, Receiver, Quality, SMRT;
             internal Vector4 Layout, FilterSettings;
@@ -208,6 +209,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_PreviousViewProjection, m_PreviousView, m_CurrentView;
         private Vector4 m_VSMHistoryLayout, m_VSMHistoryFilterSettings;
         private int m_VSMTemporalKernel = -1;
+        private readonly int[] m_SMRTPermutations = new int[12];
         private int m_VSMKernel = -1;
         private int m_VSMAdaptiveKernel = -1;
         private int m_VSMHintsKernel = -1;
@@ -232,7 +234,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_VirtualShadowMapPrototypeActive;
         private Vector4 m_VSMReceiverParameters;
         private Vector4 m_VSMReceiverQuality;
-        private Vector4 m_VSMSMRTParameters;
+        private Vector4 m_VSMSMRTParameters, m_VSMSMRTSettings;
         private TextureHandle m_VSMPhysicalPagePool;
 
         private BufferHandle m_VirtualShadowMapPrototypePageTable;
@@ -330,6 +332,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMBilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterV");
             m_VSMTemporalKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowTemporalV");
             m_VSMKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolve");
+            for (int i = 0; i < m_SMRTPermutations.Length; i++)
+                m_SMRTPermutations[i] = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveUE" + i);
             m_VSMAdaptiveKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptive");
             m_VSMHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveHints");
             m_VSMAdaptiveHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptiveHints");
@@ -473,6 +477,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 csmSettings, cameraData.additionalData, m_FrameIndex);
             m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings, cameraData, shadowData.clipmaps.Resolution);
             m_VSMSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(csmSettings, m_LightAngularDiameter);
+            m_VSMSMRTSettings = VirtualShadowMapReceiverQuality.BuildSMRTSettings(csmSettings);
             m_VSMReceiverParameters = new Vector4(csmSettings != null && csmSettings.virtualShadowMapPCF.value ? 1 : 0,
                 shadowData.depthBias, shadowData.slopeScaleDepthBias,
                 csmSettings != null && csmSettings.virtualShadowMapStochasticFiltering.value ? 1 : 0);
@@ -548,6 +553,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_ShadowHistoryState.Light == m_LightDirectionWS
                 && m_ShadowHistoryState.Receiver == m_VSMReceiverParameters
                 && m_ShadowHistoryState.Quality == m_VSMReceiverQuality
+                && m_ShadowHistoryState.SMRTSettings == m_VSMSMRTSettings
                 && m_ShadowHistoryState.SMRT == m_VSMSMRTParameters
                 && m_ShadowHistoryState.Layout == m_VSMHistoryLayout
                 && m_ShadowHistoryState.FilterSettings == m_VSMHistoryFilterSettings
@@ -590,6 +596,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShadowHistoryState.Receiver = m_VSMReceiverParameters;
             m_ShadowHistoryState.Quality = m_VSMReceiverQuality;
             m_ShadowHistoryState.SMRT = m_VSMSMRTParameters;
+            m_ShadowHistoryState.SMRTSettings = m_VSMSMRTSettings;
             m_ShadowHistoryState.Layout = m_VSMHistoryLayout;
             m_ShadowHistoryState.FilterSettings = m_VSMHistoryFilterSettings;
             m_ShadowHistoryState.Adaptive = m_EnableAdaptiveRays;
@@ -694,6 +701,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     if (vsmKernel >= 0) kernel = vsmKernel;
                     int hintsKernel = m_EnableAdaptiveRays ? m_VSMAdaptiveHintsKernel : m_VSMHintsKernel;
                     if (CanUseAvailableLevelHints && hintsKernel >= 0) kernel = hintsKernel;
+                    if (m_VSMSMRTParameters.x > 0)
+                    {
+                        int permutation = VirtualShadowMapReceiverQuality.SMRTPermutationIndex(
+                            (int)m_VSMSMRTParameters.y, m_EnableAdaptiveRays, m_VSMSMRTSettings.x > 0);
+                        if (m_SMRTPermutations[permutation] >= 0) kernel = m_SMRTPermutations[permutation];
+                    }
                 }
                 BindCommonTextures(cmd, kernel);
                 BindVSMHistory(cmd, kernel);
@@ -914,6 +927,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeMatrixParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ViewProjMatrix);
             cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters);
             cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTParametersId, m_VSMSMRTParameters);
+            cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTSettingsId, m_VSMSMRTSettings);
             cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTSampleIndexOffsetId, m_SMRTSampleIndexOffset);
             cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapProjectionSet.CountId,
                 VirtualShadowMapPrototypeRuntime.Projections.Count);

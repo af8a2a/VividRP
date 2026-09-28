@@ -38,6 +38,9 @@ VSMSMRTResult VSMSMRTRayCast(
 	float DepthHistoryTime = -1.0f;
 	float DepthSlope = 0;
 
+#if VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY >= 0
+	NumSteps = VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY;
+#endif
 	const float TimeScale = -1.0f / NumSteps;
 	const float TimeBias = 1.0f + ( 1.0 - StepOffset ) * TimeScale;
 
@@ -47,7 +50,6 @@ VSMSMRTResult VSMSMRTRayCast(
 
 	bool bValidHit =  false;
 #if VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY >= 0
-	NumSteps = VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY;
 	[unroll]
 #endif
 	for (int i = 0; i <= NumSteps; i++)

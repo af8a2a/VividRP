@@ -1,3 +1,11 @@
+#pragma kernel InspectUETrace5 VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+#pragma kernel InspectUETrace4 VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+#pragma kernel InspectUETrace3 VIVID_SMRT_EXTRAPOLATE_SLOPE=1
+#pragma kernel InspectUETrace2 VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+#pragma kernel InspectUETrace1 VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+#pragma kernel InspectUETrace0 VIVID_SMRT_EXTRAPOLATE_SLOPE=0
+#pragma kernel InspectUESMRTNoise
+#pragma kernel InspectUESMRTMath
 #pragma kernel InspectPressureDensity VIVID_VSM_PAGE_PRESSURE
 #pragma kernel InspectUEClipmapSelection VIVID_VSM_PAGE_PRESSURE
 #pragma kernel InspectUEClipmapDither
@@ -403,6 +411,8 @@ VSMSMRTSample VSMSMRTFindSample(inout VSMTraceHistoryTestState state, float time
     sample.bValid = state.mode != 0 && (state.mode != 3 || state.calls >= 4);
     if (state.mode == 4) sample.SampleDepth = sample.ReferenceDepth;
     if (state.mode == 5) { sample.SampleDepth = .3; sample.bValid = time == 0; }
+    if (state.mode == 6) { sample.SampleDepth = time > .25 ? .1 + .5 * time : .9; sample.ExtrapolateSlope = .5; }
+    if (state.mode == 7) { sample.SampleDepth = .1 + .5 * time; sample.ExtrapolateSlope = 5; sample.bResetExtrapolation = time < .25; }
     state.calls++;
     return sample;
 }
@@ -617,3 +627,39 @@ void UploadUnifiedPool(uint3 id : SV_DispatchThreadID)
     if (any(id.xy >= 16u) || id.z >= 2u) return;
     _TestPhysicalPool[id] = _TestStaticData[id.z * 256u + id.y * 16u + id.x];
 }
+
+// Direct production sampling probes for byte-exact UE atlas and lane-order verification.
+RWStructuredBuffer<float4> _UESMRTResults;
+[numthreads(64, 1, 1)]
+void InspectUESMRTNoise(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    uint4 p = (uint4)_SamplingInputs[id.x];
+    _UESMRTResults[id.x * 2] = VSMSMRTRandomSample(p.xy, p.z, p.w, (uint)_VSMSMRTParameters.x);
+    _UESMRTResults[id.x * 2 + 1] = _VSMSTBNScalar.Load(int3(VSMSMRTNoiseAddress(p.xy, p.z), 0)).xxxx;
+}
+[numthreads(64, 1, 1)]
+void InspectUESMRTMath(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 p = _SamplingInputs[id.x];
+    _UESMRTResults[id.x] = float4(VSMSMRTConcentricDisk(p.xy), VSMMortonPixel((uint2)p.zw));
+}
+
+[numthreads(64, 1, 1)]
+void InspectUETrace0(uint3 id : SV_DispatchThreadID) { InspectSMRTTraceHistory(id); }
+
+[numthreads(64, 1, 1)]
+void InspectUETrace1(uint3 id : SV_DispatchThreadID) { InspectSMRTTraceHistory(id); }
+
+[numthreads(64, 1, 1)]
+void InspectUETrace2(uint3 id : SV_DispatchThreadID) { InspectSMRTTraceHistory(id); }
+
+[numthreads(64, 1, 1)]
+void InspectUETrace3(uint3 id : SV_DispatchThreadID) { InspectSMRTTraceHistory(id); }
+
+[numthreads(64, 1, 1)]
+void InspectUETrace4(uint3 id : SV_DispatchThreadID) { InspectSMRTTraceHistory(id); }
+
+[numthreads(64, 1, 1)]
+void InspectUETrace5(uint3 id : SV_DispatchThreadID) { InspectSMRTTraceHistory(id); }

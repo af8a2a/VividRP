@@ -18,6 +18,25 @@ namespace VividRP.Editor.Tests
         // functions with 128-texel pages. Physical slots are deliberately shuffled.
         private const int LegacyDepthLayerCount = 16; // Historical trace oracle only.
 
+        [TestCase(2, false)]
+        [TestCase(4, false)]
+        [TestCase(2, true)]
+        [TestCase(4, true)]
+        public void UETrace_StaticStepsMatchDynamic(int steps, bool extrapolateSlope)
+        {
+            using var fixture = new Fixture();
+            var inputs = new float4[64];
+            for (int i = 0; i < inputs.Length; i++) inputs[i] = new float4(i % 8, steps, (i / 8 + .5f) / 8, 0);
+            int baseIndex = extrapolateSlope ? 3 : 0;
+            var dynamicResult = fixture.Run("InspectUETrace" + baseIndex, inputs);
+            var staticResult = fixture.Run("InspectUETrace" + (baseIndex + (steps == 2 ? 1 : 2)), inputs);
+            for (int i = 0; i < inputs.Length; i++)
+            {
+                Assert.That(staticResult[i].x, Is.EqualTo(dynamicResult[i].x).Within(1e-6));
+                Assert.That(staticResult[i].y, Is.EqualTo(dynamicResult[i].y));
+            }
+        }
+
         private sealed class Fixture : IDisposable
         {
             internal readonly ComputeShader Shader;
@@ -48,6 +67,8 @@ namespace VividRP.Editor.Tests
 
             private void BindBlueNoise(int kernel)
             {
+                Shader.SetTexture(kernel, "_VSMSTBNScalar", m_BlueNoise.VSMSTBNScalar);
+                Shader.SetTexture(kernel, "_VSMSTBNVec2", m_BlueNoise.VSMSTBNVec2);
                 Shader.SetTexture(kernel, "_SobolScramblingTile1SPP", m_BlueNoise.ScramblingTile1SPP);
                 Shader.SetTexture(kernel, "_SobolRankingTile1SPP", m_BlueNoise.RankingTile1SPP);
                 Shader.SetTexture(kernel, "_SobolOwenScrambledSequence", m_BlueNoise.OwenScrambledSequence);
@@ -83,6 +104,7 @@ namespace VividRP.Editor.Tests
                 Shader.SetVector("_VSMReceiverParameters", Vector4.zero);
                 Shader.SetVector("_VSMReceiverQuality", Vector4.zero);
                 Shader.SetVector("_VSMSMRTParameters", Vector4.zero);
+                Shader.SetVector("_VSMSMRTSettings", new Vector4(0, 2, 1, 0));
                 Shader.SetMatrix("_VSMReceiverViewProjection", Matrix4x4.identity);
                 Shader.SetInt("_CSMOutputWidth", 8); Shader.SetInt("_CSMOutputHeight", 8);
                 Shader.SetInt("_VSMPrototypeRequestEnabled", 1);

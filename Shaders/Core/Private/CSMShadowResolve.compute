@@ -52,8 +52,15 @@
 #pragma kernel VSMBuildPageWorkListsFeedback VIVID_VSM_PRODUCTION_FEEDBACK
 #pragma use_dxc
 #pragma require Native16Bit
-
-// #pragma enable_d3d11_debug_symbols
+#define VIVID_VSM_SHADER_DEBUG_SYMBOLS 1
+// Opt in before compilation for Nsight/PIX source correlation. This is not a
+// runtime keyword: Unity debug symbols also disable shader optimizations.
+#ifndef VIVID_VSM_SHADER_DEBUG_SYMBOLS
+#define VIVID_VSM_SHADER_DEBUG_SYMBOLS 0
+#endif
+#if VIVID_VSM_SHADER_DEBUG_SYMBOLS
+#pragma enable_debug_symbols
+#endif
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"

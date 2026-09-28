@@ -1,5 +1,6 @@
 """Bounded PIX agent workflow; Python standard library, Unity CLI and PIX only."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,32 @@ def save(path, value):
 
 def canonical(path):
     return os.path.normcase(os.path.realpath(path))
+
+
+def retain_capture(source, destination):
+    # pixtool owns programmatic captures and may remove them at process exit.
+    # Analyze an independent, immutable copy instead of that session file.
+    digest = hashlib.sha256()
+    size = 0
+    with Path(source).open("rb") as reader, Path(destination).open("xb") as writer:
+        while chunk := reader.read(8 * 1024 * 1024):
+            writer.write(chunk)
+            digest.update(chunk)
+            size += len(chunk)
+        writer.flush()
+        os.fsync(writer.fileno())
+    expected = digest.hexdigest()
+    for path in (source, destination):
+        verified = hashlib.sha256()
+        with Path(path).open("rb") as stream:
+            while chunk := stream.read(8 * 1024 * 1024):
+                verified.update(chunk)
+        if verified.hexdigest() != expected:
+            raise Failure("capture_retention_hash_mismatch", str(path))
+    if size == 0:
+        raise Failure("empty_capture_copy", str(source))
+    return {"sourcePath": str(source), "capturePath": str(destination),
+            "captureHash": expected, "bytes": size}
 
 
 def pix_command_line(arguments):
@@ -179,7 +206,7 @@ class Workflow:
         save(self.directory / "context.json", context)
         for attempt in range(self.args.attempts):
             cursor = self.console(f"console-before-{attempt + 1}.json")
-            self.capture = str(self.directory / f"capture-{attempt + 1}.wpix")
+            self.capture = str(self.directory / f"capture-live-{attempt + 1}.wpix")
             result = self.command("capture", path=self.capture, camera=self.args.camera,
                                   expected_pass=self.args.marker, timeout_seconds=self.budget(),
                                   pix_install=self.args.pix, analyzer_path=self.args.analyzer)
@@ -202,6 +229,9 @@ class Workflow:
                 save(self.directory / "capture-ready.json", result)
                 self.release()
                 self.capture_session = captured_session
+                retained = retain_capture(self.capture, self.directory / f"capture-{attempt + 1}.wpix")
+                save(self.directory / "capture-retention.json", retained)
+                self.capture, self.capture_hash = retained["capturePath"], retained["captureHash"]
                 return
             code = result.get("code", "capture_timeout")
             self.release()

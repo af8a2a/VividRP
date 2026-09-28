@@ -50,7 +50,9 @@ bool VividVSMReceiverMaskContains(uint2 coverage, uint2 demand)
 bool VividVSMReceiverMaskTexel(uint2 mask, uint2 texel, uint pageSize)
 {
     uint2 cell = min(texel * 8u / pageSize, 7u);
-    return (mask[cell.y >> 2u] & (1u << ((cell.y & 3u) * 8u + cell.x))) != 0u;
+    // Keep both words scalar; dynamic vector indexing creates private arrays in DXC.
+    uint word = cell.y < 4u ? mask.x : mask.y;
+    return (word & (1u << ((cell.y & 3u) * 8u + cell.x))) != 0u;
 }
 
 bool VividVSMReceiverMaskOverlapsRect(uint2 mask, uint2 page, uint2 low, uint2 high, uint pageSize)

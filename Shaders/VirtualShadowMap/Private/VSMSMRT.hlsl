@@ -130,6 +130,7 @@ struct VSMSMRTReceiverSamples
     float2 receiverPhase;
     float stepOffset;
     float viewDistance;
+    float rayStartOffset;
     bool ready;
 };
 
@@ -588,6 +589,16 @@ float VSMSMRTTexelDitherScale(float distance, float texelSize)
         / (_VSMPrototypeVirtualResolution * (texelSize * _VSMPrototypeVirtualResolution / 8.0));
 }
 
+float3 InitializeUEVSMRayOrigin(float3 coord, float3 directionUVZ, float rayStartOffset,
+    float depthScale, float2 depthSlopeUV, float2 texelOffset)
+{
+    coord += directionUVZ * rayStartOffset;
+    coord.xy += texelOffset;
+    coord.z += max(0.0, 2.0 * max(0.0, dot(clamp(depthSlopeUV, -0.05, 0.05), texelOffset))
+        - abs(rayStartOffset * depthScale));
+    return coord;
+}
+
 bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool adaptive,
     VSMSMRTProjection projection, inout VSMSMRTReceiverSamples samples, out float shadow)
 {
@@ -650,11 +661,13 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool ad
         disk = float2(dot(diskBasis.xy, disk), dot(diskBasis.zw, disk));
         float3 origin = coord;
         {
+            float2 lateral = disk * _VSMSMRTParameters.w;
+            float3 rayDirectionUVZ = float3(disk * slope / _VSMPrototypeVirtualResolution, depthScale)
+                * rsqrt(1.0 + dot(lateral, lateral));
             float2 offsetUV = (randomSample.zw - 0.5) * ditherScale;
-            float2 depthSlopeUV = clamp(bias.xy * _VSMPrototypeVirtualResolution, -0.05, 0.05);
-            origin.xy += offsetUV;
-            // UE ComputeOptimalSlopeBiasDirectional (RayStartOffset is zero).
-            origin.z += 2.0 * max(0.0, dot(depthSlopeUV, offsetUV));
+            // Do not apply the part of slope bias already covered by screen ray.
+            origin = InitializeUEVSMRayOrigin(coord, rayDirectionUVZ, samples.rayStartOffset,
+                depthScale, bias.xy * _VSMPrototypeVirtualResolution, offsetUV);
         }
         float visibility;
         bool valid = TraceVSMSMRTClipmapsWorldLength(origin, disk * slope, depthScale, steps,

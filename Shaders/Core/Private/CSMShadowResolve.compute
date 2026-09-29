@@ -1235,7 +1235,6 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
     if (_VSMPrototypeEnabled != 0 || _VSMPrototypeRequestEnabled != 0)
     {
         float3 vsmNormal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
-        vsmNormal = ReconstructVSMReceiverNormal(pixelCoord, deviceDepth, positionWS, vsmNormal);
         float vsmShadow = ResolveVSMReceiver(positionWS, vsmNormal, pixelCoord);
         if (_VSMPrototypeEnabled != 0)
         {

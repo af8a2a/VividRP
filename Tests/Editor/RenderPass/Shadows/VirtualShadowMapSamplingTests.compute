@@ -9,6 +9,9 @@
 #pragma kernel InspectUETrace0 VIVID_SMRT_EXTRAPOLATE_SLOPE=0
 #pragma kernel InspectUESMRTNoise
 #pragma kernel InspectUESMRTMath
+#pragma kernel InspectUEReceiverOffset
+#pragma kernel InspectUEScreenRay
+#pragma kernel InspectUERayOrigin
 #pragma kernel InspectPressureDensity VIVID_VSM_PAGE_PRESSURE
 #pragma kernel InspectUEClipmapSelection VIVID_VSM_PAGE_PRESSURE
 #pragma kernel InspectUEClipmapDither
@@ -223,9 +226,38 @@ void UploadTestPools(uint3 id : SV_DispatchThreadID)
     _TestDynamicPool[id] = _TestDynamicData[index];
 }
 
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
 RWStructuredBuffer<float4> _DiagnosticResults;
 
+[numthreads(64, 1, 1)]
+void InspectUEReceiverOffset(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 p = _SamplingInputs[id.x];
+    float2 slope = ComputeUEVSMDepthSlopeUV(_VSMProjections[(uint)_SamplingNormals[id.x].w],
+        _SamplingNormals[id.x].xyz);
+    _DiagnosticResults[id.x] = float4(VSMReceiverNormalBiasLength(p.xyz, p.w), slope, 0);
+}
+
+[numthreads(64, 1, 1)]
+void InspectUEScreenRay(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 p = _SamplingInputs[id.x];
+    float4 ray = _SamplingNormals[id.x];
+    _SamplingResults[id.x] = float2(VSMReceiverScreenRayCast(p.xyz, ray.xyz, p.w, ray.w), 0);
+}
+
+[numthreads(64, 1, 1)]
+void InspectUERayOrigin(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SamplingCount) return;
+    float4 p = _SamplingInputs[id.x];
+    float4 direction = _SamplingNormals[id.x];
+    _DiagnosticResults[id.x] = float4(InitializeUEVSMRayOrigin(float3(.3, .4, .5),
+        direction.xyz, p.x, direction.w, p.yz, float2(p.w, -p.w)), 1);
+}
+
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
 [numthreads(64, 1, 1)]
 void InspectReceiverDiagnostics(uint3 id : SV_DispatchThreadID)
 {
@@ -684,6 +716,7 @@ void InspectUEPointSample(uint3 id : SV_DispatchThreadID)
     if (id.x >= (uint)_SamplingCount) return;
     float4 p = _SamplingInputs[id.x];
     bool unavailable;
-    float shadow = SampleUEVSMDirectional(p.xyz, _SamplingNormals[id.x].xyz, (int)p.w, unavailable);
+    float4 normal = _SamplingNormals[id.x];
+    float shadow = SampleUEVSMDirectional(p.xyz, normal.xyz, (int)p.w, normal.w, unavailable);
     _SamplingResults[id.x] = float2(shadow, unavailable ? 1.0 : 0.0);
 }

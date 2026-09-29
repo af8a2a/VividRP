@@ -193,6 +193,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VSMPreviousViewProjectionId = Shader.PropertyToID("_VSMPreviousViewProjection");
         private static readonly int VSMPreviousViewId = Shader.PropertyToID("_VSMPreviousView");
         private static readonly int VSMCurrentViewId = Shader.PropertyToID("_VSMCurrentView");
+        private static readonly int VSMReceiverOffsetParametersId = Shader.PropertyToID("_VSMReceiverOffsetParameters");
+        private static readonly int VSMReceiverViewForwardId = Shader.PropertyToID("_VSMReceiverViewForward");
+        private Vector4 m_VSMReceiverOffsetParameters, m_VSMReceiverViewForward;
         private readonly CameraRelativeSystem<ShadowHistoryState> m_ShadowHistoryStates = new();
         internal sealed class ShadowHistoryState : CameraRelativeState
         {
@@ -400,6 +403,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = true;
             m_ViewProjMatrix = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             m_InvViewProjMatrix = m_ViewProjMatrix.inverse;
+            var receiverProjection = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
+            bool orthographic = cameraData.camera.orthographic;
+            m_VSMReceiverOffsetParameters = orthographic
+                ? new Vector4(0.0005f, 0, 0.01f, 1)
+                : new Vector4(0.0005f / Mathf.Abs(receiverProjection.m00),
+                    0.015f / Mathf.Abs(receiverProjection.m11), 0, 0);
+            m_VSMReceiverViewForward = -cameraData.GetViewMatrix().GetRow(2);
 
             m_CascadeCount = shadowData.cascadeCount;
             m_MaxShadowDistance = shadowData.maxShadowDistance;
@@ -928,6 +938,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMPreviousViewProjectionId, m_PreviousViewProjection);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMPreviousViewId, m_PreviousView);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMCurrentViewId, m_CurrentView);
+            cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverOffsetParametersId, m_VSMReceiverOffsetParameters);
+            cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverViewForwardId, m_VSMReceiverViewForward);
             cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ParametersId, m_VSMReceiverQuality);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ViewProjMatrix);
             cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters);

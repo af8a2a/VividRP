@@ -1,6 +1,5 @@
 // Receiver policy only. Stable power-of-two projections and page identities do
 // not depend on these uniforms. Global pressure bias applies to requests only.
-float4x4 _VSMReceiverViewProjection;
 
 // Project virtual texel axes onto the geometric receiver plane, then the screen.
 // These are local axis lengths, not a singular-value bound in every direction.

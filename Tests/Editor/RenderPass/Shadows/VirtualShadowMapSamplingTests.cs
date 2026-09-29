@@ -18,6 +18,71 @@ namespace VividRP.Editor.Tests
         // functions with 128-texel pages. Physical slots are deliberately shuffled.
         private const int LegacyDepthLayerCount = 16; // Historical trace oracle only.
 
+        [TestCase(.4f, 1f, 1f, 1f)]
+        [TestCase(.2f, 1f, 1f, 1f)]
+        [TestCase(.6f, .25f, .125f, .25f)]
+        public void UEReceiverScreenRay_SkipsSameDepthAndBacksUpBeforeOccluder(
+            float otherDepth, float expected0, float expectedHalf, float expected1)
+        {
+            Assume.That(SystemInfo.usesReversedZBuffer, Is.True);
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
+            using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
+            using var directions = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
+            using var results = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 8);
+            var depth = new Texture2D(8, 1, TextureFormat.RFloat, false, true);
+            try
+            {
+                var depths = new float[8];
+                for (int i = 0; i < 8; i++) depths[i] = i < 3 ? .4f : otherDepth;
+                depth.SetPixelData(depths, 0); depth.Apply(false, false);
+                inputs.SetData(new[] { new float4(-.75f, 0, .4f, 1), new float4(-.75f, 0, .4f, 1), new float4(-.75f, 0, .4f, 1) });
+                directions.SetData(new[] { new float4(1, 0, 0, 0), new float4(1, 0, 0, .5f), new float4(1, 0, 0, 1) });
+                int kernel = shader.FindKernel("InspectUEScreenRay");
+                shader.SetBuffer(kernel, "_SamplingInputs", inputs);
+                shader.SetBuffer(kernel, "_SamplingNormals", directions);
+                shader.SetBuffer(kernel, "_SamplingResults", results);
+                shader.SetTexture(kernel, "_DepthTexture", depth);
+                shader.SetInt("_SamplingCount", 3);
+                shader.SetInt("_CSMOutputWidth", 8); shader.SetInt("_CSMOutputHeight", 1);
+                shader.SetMatrix("_VSMReceiverViewProjection", Matrix4x4.identity);
+                shader.Dispatch(kernel, 1, 1, 1);
+                var actual = new float2[3]; results.GetData(actual);
+                Assert.That(actual[0].x, Is.EqualTo(expected0).Within(1e-6));
+                Assert.That(actual[1].x, Is.EqualTo(expectedHalf).Within(1e-6));
+                Assert.That(actual[2].x, Is.EqualTo(expected1).Within(1e-6));
+            }
+            finally { Object.DestroyImmediate(depth); Object.DestroyImmediate(shader); }
+        }
+
+        [TestCase(0f, .502f)]
+        [TestCase(.002f, .502f)]
+        [TestCase(.01f, .51f)]
+        public void UEReceiverRayOrigin_SubtractsSlopeBiasAlreadyCoveredByStartOffset(float distance, float expectedDepth)
+        {
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
+            using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            using var direction = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            try
+            {
+                input.SetData(new[] { new float4(distance, 1, -.5f, .01f) });
+                direction.SetData(new[] { new float4(.1f, .2f, 1, 1) });
+                int kernel = shader.FindKernel("InspectUERayOrigin");
+                shader.SetBuffer(kernel, "_SamplingInputs", input);
+                shader.SetBuffer(kernel, "_SamplingNormals", direction);
+                shader.SetBuffer(kernel, "_DiagnosticResults", output);
+                shader.SetInt("_SamplingCount", 1);
+                shader.Dispatch(kernel, 1, 1, 1);
+                var result = new float4[1]; output.GetData(result);
+                Assert.That(result[0].x, Is.EqualTo(.31f + .1f * distance).Within(1e-6));
+                Assert.That(result[0].y, Is.EqualTo(.39f + .2f * distance).Within(1e-6));
+                Assert.That(result[0].z, Is.EqualTo(expectedDepth).Within(1e-6));
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [Test]
         public void UEAllocation_ProtectsRequestedPagesAndPreservesEveryLRUSlotOnOverflow()
         {
@@ -255,6 +320,7 @@ namespace VividRP.Editor.Tests
                     "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute")) : Shader;
                 Shader.SetInt("_VSMPrototypeEnabled", 1);
                 Shader.SetVector("_VSMReceiverParameters", Vector4.zero);
+                Shader.SetVector("_VSMReceiverOffsetParameters", Vector4.zero);
                 Shader.SetVector("_VSMReceiverQuality", Vector4.zero);
                 Shader.SetVector("_VSMSMRTParameters", Vector4.zero);
                 Shader.SetVector("_VSMSMRTSettings", new Vector4(0, 2, 1, 0));

@@ -42,7 +42,6 @@ void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
     }
     float3 position = ReconstructWorldPosition(pixel, depth);
     float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixel, 0)).xy);
-    normal = ReconstructVSMReceiverNormal(pixel, depth, position, normal);
     float shadow = ResolveVSMReceiver(position, normal, pixel);
     float4 data = float4(g_VSMDebugLevels, g_VSMDebugBlend);
     float3 color = VSMReceiverLevelColor(g_VSMDebugLevels.x);

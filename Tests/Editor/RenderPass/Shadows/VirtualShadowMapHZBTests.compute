@@ -1,0 +1,46 @@
+#pragma kernel UploadHZBTestDepth
+#pragma kernel InspectHZBRect
+#pragma kernel VSMBuildShadowHZBTop
+#pragma kernel VSMBuildShadowHZB
+#pragma kernel VSMSnapshotShadowHZB
+#pragma kernel ExerciseHZBPageCandidate
+#pragma kernel VSMPostCullMeshletsToPagesHZB
+#pragma kernel VSMPrototypePrepareMeshletPageRequests
+#pragma kernel VSMResetHZBDeferred
+#pragma kernel VSMResetHZBPostDraws
+#pragma use_dxc
+#pragma require Native16Bit
+#define VIVID_VSM_SHADOW_HZB 1
+#define VIVID_VSM_GEOMETRY_BOUNDS 1
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"
+
+StructuredBuffer<uint2> _HZBTestDepth;
+RWStructuredBuffer<uint> _HZBTestResults;
+float4 _HZBTestRect;
+float _HZBTestDepthValue;
+int _HZBTestPrevious;
+
+[numthreads(8, 8, 1)]
+void UploadHZBTestDepth(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= 256u || id.y >= 128u) return;
+    uint2 value = _HZBTestDepth[id.y * 256u + id.x];
+    _VSMPhysicalPagePoolRW[uint3(id.xy, 0)] = value.x;
+    _VSMPhysicalPagePoolRW[uint3(id.xy, 1)] = value.y;
+}
+
+[numthreads(1, 1, 1)]
+void InspectHZBRect(uint3 id : SV_DispatchThreadID)
+{
+    _HZBTestResults[0] = VSMHZBRectOccluded(_HZBTestRect.xy, _HZBTestRect.zw,
+        _HZBTestDepthValue, 0u, _HZBTestPrevious != 0) ? 1u : 0u;
+}
+
+[numthreads(1, 1, 1)]
+void ExerciseHZBPageCandidate(uint3 id : SV_DispatchThreadID)
+{
+    VividMeshletRenderRequestPacked request;
+    request.InstanceID_LOD = 0u;
+    request.MeshletID = 0u;
+    ProcessVSMPageMeshlet(request, 0u, 0u, false);
+}

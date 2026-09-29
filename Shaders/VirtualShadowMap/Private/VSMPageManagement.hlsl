@@ -7,6 +7,7 @@ RWStructuredBuffer<uint4> _VSMProductionFeedbackRW;
 int _VSMRasterVertexBudget;
 int _VSMProductionReset;
 uint _VSMProductionDrawMask;
+int _VSMProductionAccumulate;
 
 [numthreads(1, 1, 1)]
 void VSMUpdateProductionBudget(uint3 id : SV_DispatchThreadID)
@@ -68,6 +69,8 @@ void VSMCaptureProductionWork(uint3 id : SV_DispatchThreadID)
         // Convert before multiplying: large Pmax fan-out can overflow uint32.
         vertices += (float)args.x * (float)args.y;
     }
+    if (_VSMProductionAccumulate != 0)
+        vertices += asfloat(_VSMProductionFeedbackRW[1][(uint)_VSMPrototypeCasterLayer]);
     _VSMProductionFeedbackRW[1][(uint)_VSMPrototypeCasterLayer] = asuint(vertices);
 }
 
@@ -82,6 +85,7 @@ void VSMCompleteProductionFeedback(uint3 id : SV_DispatchThreadID)
 // 1 keeps the qualified per-page path; larger values enable experimental windows.
 int _VSMRasterWindowPages;
 #include "VSMPageCulling.hlsl"
+#include "VSMHZB.hlsl"
 #if defined(VIVID_VSM_COMPACT_VIEWS)
 #include "VSMViewCompaction.hlsl"
 RWStructuredBuffer<uint> _VSMPageCullDispatchArgsRW;
@@ -424,44 +428,9 @@ bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPa
     return true;
 }
 
-void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
+void ProcessVSMPageMeshlet(VividMeshletRenderRequestPacked sourceRequest,
+    uint cascadeIndex, uint rendererListIndex, bool post)
 {
-    const uint localRequestIndex = dispatchThreadID.x;
-#if defined(VIVID_VSM_COMPACT_VIEWS)
-    uint cascadeIndex;
-    if (!VividVSMResolveActiveView(dispatchThreadID.y, cascadeIndex)) return;
-#else
-    const uint cascadeIndex = dispatchThreadID.y;
-#endif
-    const uint rendererListIndex = dispatchThreadID.z;
-    if (localRequestIndex
-            >= (uint)_VSMPrototypeSourceRequestsPerCascadeCapacity
-        || cascadeIndex >= (uint)_VSMProjectionCount
-        || rendererListIndex >= VIVIDRENDERERLISTID_COUNT)
-    {
-        return;
-    }
-
-    const uint sourceArgsIndex = GetVSMSourceDrawArgsIndex(
-        cascadeIndex,
-        rendererListIndex);
-    const uint sourceArgsAddress = GetIndirectDrawArgsByteAddress(
-        sourceArgsIndex);
-    const uint sourceRequestCount =
-        _VSMPrototypeSourceMeshletIndirectArgs.Load(
-            sourceArgsAddress
-                + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET);
-    if (localRequestIndex >= sourceRequestCount)
-        return;
-
-    const uint sourceStartInstance =
-        _VSMPrototypeSourceMeshletIndirectArgs.Load(
-            sourceArgsAddress
-                + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
-    const VividMeshletRenderRequestPacked sourceRequest =
-        _VSMPrototypeSourceMeshletRequests[
-            sourceStartInstance + localRequestIndex];
-
     uint2 minPage;
     uint2 maxPage;
     uint2 minTexel, maxTexel;
@@ -477,6 +446,21 @@ void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
     if (!ClipVSMCasterToUncachedPages(cascadeIndex, minPage, maxPage, minTexel, maxTexel)) return;
     if (!VSMCasterHierarchyOverlaps(cascadeIndex, minTexel, maxTexel)) return;
 
+#if defined(VIVID_VSM_SHADOW_HZB)
+    if (VSMHZBOccluded(sourceRequest, cascadeIndex, !post))
+    {
+        if (!post)
+        {
+            uint index;
+            _VSMHZBDeferredArgs.InterlockedAdd(12u, 1u, index);
+            _VSMHZBDeferred[index] = uint4(sourceRequest.InstanceID_LOD, sourceRequest.MeshletID,
+                cascadeIndex, rendererListIndex);
+            _VSMHZBDeferredArgs.InterlockedMax(0u, (index + 64u) / 64u);
+        }
+        return;
+    }
+    if (post) _VSMHZBDeferredArgs.InterlockedAdd(16u, 1u);
+#endif
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
     const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
     const uint coveredPageCount = (maxPage.x - minPage.x + 1u)
@@ -545,6 +529,59 @@ void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
         }
     }
 }
+void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
+{
+    const uint localRequestIndex = dispatchThreadID.x;
+#if defined(VIVID_VSM_COMPACT_VIEWS)
+    uint cascadeIndex;
+    if (!VividVSMResolveActiveView(dispatchThreadID.y, cascadeIndex)) return;
+#else
+    const uint cascadeIndex = dispatchThreadID.y;
+#endif
+    const uint rendererListIndex = dispatchThreadID.z;
+    if (localRequestIndex
+            >= (uint)_VSMPrototypeSourceRequestsPerCascadeCapacity
+        || cascadeIndex >= (uint)_VSMProjectionCount
+        || rendererListIndex >= VIVIDRENDERERLISTID_COUNT)
+    {
+        return;
+    }
+
+    const uint sourceArgsIndex = GetVSMSourceDrawArgsIndex(
+        cascadeIndex,
+        rendererListIndex);
+    const uint sourceArgsAddress = GetIndirectDrawArgsByteAddress(
+        sourceArgsIndex);
+    const uint sourceRequestCount =
+        _VSMPrototypeSourceMeshletIndirectArgs.Load(
+            sourceArgsAddress
+                + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET);
+    if (localRequestIndex >= sourceRequestCount)
+        return;
+
+    const uint sourceStartInstance =
+        _VSMPrototypeSourceMeshletIndirectArgs.Load(
+            sourceArgsAddress
+                + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
+    const VividMeshletRenderRequestPacked sourceRequest =
+        _VSMPrototypeSourceMeshletRequests[
+            sourceStartInstance + localRequestIndex];
+
+    ProcessVSMPageMeshlet(sourceRequest, cascadeIndex, rendererListIndex, false);
+}
+
+#if defined(VIVID_VSM_SHADOW_HZB)
+[numthreads(64, 1, 1)]
+void VSMPostCullMeshletsToPagesHZB(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _VSMHZBDeferredArgs.Load(12u)) return;
+    uint4 item = _VSMHZBDeferred[id.x];
+    VividMeshletRenderRequestPacked request;
+    request.InstanceID_LOD = item.x;
+    request.MeshletID = item.y;
+    ProcessVSMPageMeshlet(request, item.z, item.w, true);
+}
+#endif
 
 void UpdateVSMPagePressure(bool reset)
 {

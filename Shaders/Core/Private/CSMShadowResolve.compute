@@ -42,7 +42,7 @@
 #pragma kernel VSMPrepareMeshletPageRequestsCompacted VIVID_VSM_COMPACT_VIEWS
 #pragma kernel VSMCullMeshletsToPagesCompacted VIVID_VSM_COMPACT_VIEWS
 #pragma kernel VSMCullMeshletsToPagesAffine VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
-#pragma kernel VSMCullMeshletsToPagesGeometryBounds VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS
+#pragma kernel VSMCullMeshletsToPagesGeometryBounds VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB
 #pragma kernel VSMPrepareAllocationCached VIVID_VSM_ALLOCATION_SUMMARY_WRITE
 #pragma kernel VSMAllocatePagesCached VIVID_VSM_ALLOCATION_SUMMARY
 #pragma kernel VSMMarkReceiverPagesGrouped VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUPED_MARKING
@@ -1414,3 +1414,11 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMBuildPageWorkListsUE
 #pragma kernel VSMClearReceiverRequestsUE VIVID_VSM_UE_ALLOCATION
 #pragma kernel VSMResetReceiverFeedbackUE VIVID_VSM_UE_ALLOCATION
+#pragma kernel VSMBuildShadowHZB
+#pragma kernel VSMSnapshotShadowHZB
+#pragma kernel VSMResetHZBDeferred
+#pragma kernel VSMPostCullMeshletsToPagesHZB VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB
+
+#pragma kernel VSMPrepareShadowHZB
+#pragma kernel VSMBuildShadowHZBTop
+#pragma kernel VSMResetHZBPostDraws

@@ -27,7 +27,7 @@ float2 VSMReceiverTexelFootprint(float3 positionWS, float3 normalWS, int level)
 // Our stored radius is projection half-width: UE HalfLevelDim = 2^(Level+2).
 float VSMBaseAbsoluteClipmapLevel()
 {
-    return round(log2(max(-_VSMProjections[0].selectionSphere.w, 1e-20))) - 2.0;
+    return round(log2(max(-_VSMProjections[0].selectionSphere.w * 100.0, 1e-20))) - 2.0;
 }
 
 int VSMClipmapLevelFromDistance(float distance, float firstAbsoluteLevel, float bias, int count)
@@ -39,7 +39,8 @@ int VSMClipmapLevelFromDistance(float distance, float firstAbsoluteLevel, float 
 int SelectVSMClipmapLevel(float3 positionWS, bool marking)
 {
     if (_VSMProjectionCount <= 0) return -1;
-    float distance = length(positionWS - _VSMProjections[0].selectionSphere.xyz);
+    // UE absolute levels are centimetre exponents; position buffers use metres.
+    float distance = length(positionWS - _VSMProjections[0].selectionSphere.xyz) * 100.0;
     float bias = _VSMReceiverQuality.y;
 #if defined(VIVID_VSM_PAGE_PRESSURE)
     // UE GetBiasedClipmapLevel adds GlobalResolutionLodBias to demand only.

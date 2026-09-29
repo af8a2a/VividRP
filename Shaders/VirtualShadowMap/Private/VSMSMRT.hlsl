@@ -28,7 +28,7 @@ VSMSMRTProjection PrepareVSMSMRTProjection(VividVSMProjection projection)
 // once per 8x8 receiver group, rather than once per pixel/ray/clipmap segment.
 // Match the current CPU MaxLevels; larger diagnostic sets use the direct path.
 #if defined(VIVID_VSM_GROUP_PROJECTION_CACHE)
-#define VIVID_VSM_SMRT_CACHED_PROJECTIONS 16
+#define VIVID_VSM_SMRT_CACHED_PROJECTIONS 24
 groupshared VSMSMRTProjection g_VSMSMRTProjections[VIVID_VSM_SMRT_CACHED_PROJECTIONS];
 #endif
 

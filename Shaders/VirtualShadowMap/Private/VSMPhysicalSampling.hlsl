@@ -168,7 +168,7 @@ bool TrySampleVSMVirtualTap(float2 shadowUV, int2 offset, float depth, int index
 uint LoadVSMPossibleMappedLevels(float3 positionWS, float3 normal, int index)
 {
 #if defined(VIVID_VSM_AVAILABLE_LEVEL_HINTS)
-    if (_VSMAvailableLevelHintsEnabled == 0 || _VSMProjectionCount > 16
+    if (_VSMAvailableLevelHintsEnabled == 0 || _VSMProjectionCount > VIVID_VSM_RASTER_MAX_LEVELS
         || !all(isfinite(positionWS)) || any(abs(positionWS) > kVSMHintWorldLimit)
         || !all(isfinite(normal)) || any(abs(normal) > 1.001)) return 0xffffffffu;
     // Key by the UNBIASED receiver. Bias is reapplied at each candidate level.

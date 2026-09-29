@@ -9,7 +9,7 @@
 #else
 #define VIVID_VSM_DEPTH_LAYER_COUNT 1
 #endif
-#define VIVID_VSM_RASTER_MAX_LEVELS 16
+#define VIVID_VSM_RASTER_MAX_LEVELS 24
 #define VIVID_VSM_RASTER_PAGE_HEADER_SIZE (1 + 2 * VIVID_VSM_RASTER_MAX_LEVELS)
 
 // Bounded HW raster windows. Keep RasterWindowPages in the runtime in sync.

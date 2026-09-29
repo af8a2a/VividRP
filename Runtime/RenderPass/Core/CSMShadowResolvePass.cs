@@ -548,10 +548,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PreviousViewProjection = m_ShadowHistoryState.ViewProjection;
             m_PreviousView = m_ShadowHistoryState.View;
             m_VSMHistoryLayout = new Vector4(VirtualShadowMapPrototypeRuntime.VirtualResolution,
-                VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, settings.virtualShadowMapFirstLevel.value,
+                VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, settings.virtualShadowMapClipmapFirstLevel.value,
                 settings.maxShadowDistance.value);
             m_VSMHistoryFilterSettings = new Vector4(m_NormalBias, settings.virtualShadowMapTransition.value,
-                settings.virtualShadowMapViewCoverage.value ? 1 : 0, 0);
+                settings.virtualShadowMapClipmapLastLevel.value, settings.virtualShadowMapClipmapZRangeScale.value);
             ConfigureHistoryDescriptor(m_VSMHistoryCurrent.desc, cameraData.actualWidth, cameraData.actualHeight);
             ConfigureHistoryDescriptor(m_VSMDepthCurrent.desc, cameraData.actualWidth, cameraData.actualHeight);
             bool signalValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, cameraData.camera,

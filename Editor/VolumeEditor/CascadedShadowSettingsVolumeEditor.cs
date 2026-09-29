@@ -61,8 +61,9 @@ namespace VividRP.Editor
         private SerializedDataParameter m_EnableVirtualShadowMapPrototype;
         private SerializedDataParameter m_VirtualShadowMapResolution;
         private SerializedDataParameter m_VirtualShadowMapPhysicalPageBudget;
-        private SerializedDataParameter m_VirtualShadowMapViewCoverage;
+        private SerializedDataParameter m_VirtualShadowMapLastLevel;
         private SerializedDataParameter m_VirtualShadowMapFirstLevel;
+        private SerializedDataParameter m_VirtualShadowMapZRangeScale;
         private SerializedDataParameter m_VirtualShadowMapResolutionLodBias;
         private SerializedDataParameter m_VirtualShadowMapSMRTRayLengthScale;
         private SerializedDataParameter m_VirtualShadowMapSMRTExtrapolateMaxSlope;
@@ -100,8 +101,9 @@ namespace VividRP.Editor
             m_EnableVirtualShadowMapPrototype = Unpack(fetcher.Find(x => x.enableVirtualShadowMapPrototype));
             m_VirtualShadowMapResolution = Unpack(fetcher.Find(x => x.virtualShadowMapResolution));
             m_VirtualShadowMapPhysicalPageBudget = Unpack(fetcher.Find(x => x.virtualShadowMapPhysicalPageBudget));
-            m_VirtualShadowMapViewCoverage = Unpack(fetcher.Find(x => x.virtualShadowMapViewCoverage));
-            m_VirtualShadowMapFirstLevel = Unpack(fetcher.Find(x => x.virtualShadowMapFirstLevel));
+            m_VirtualShadowMapLastLevel = Unpack(fetcher.Find(x => x.virtualShadowMapClipmapLastLevel));
+            m_VirtualShadowMapZRangeScale = Unpack(fetcher.Find(x => x.virtualShadowMapClipmapZRangeScale));
+            m_VirtualShadowMapFirstLevel = Unpack(fetcher.Find(x => x.virtualShadowMapClipmapFirstLevel));
             m_VirtualShadowMapResolutionLodBias = Unpack(fetcher.Find(x => x.virtualShadowMapResolutionLodBias));
             m_VirtualShadowMapSMRTRayLengthScale = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTRayLengthScale));
             m_VirtualShadowMapSMRTExtrapolateMaxSlope = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTExtrapolateMaxSlope));
@@ -131,8 +133,9 @@ namespace VividRP.Editor
             PropertyField(m_EnableVirtualShadowMapPrototype, s_EnableVirtualShadowMapPrototypeLabel);
             PropertyField(m_VirtualShadowMapResolution);
             PropertyField(m_VirtualShadowMapPhysicalPageBudget);
-            PropertyField(m_VirtualShadowMapViewCoverage);
             PropertyField(m_VirtualShadowMapFirstLevel);
+            PropertyField(m_VirtualShadowMapLastLevel);
+            PropertyField(m_VirtualShadowMapZRangeScale);
             PropertyField(m_VirtualShadowMapResolutionLodBias);
             PropertyField(m_VirtualShadowMapSMRT);
             PropertyField(m_VirtualShadowMapSMRTAdaptiveRays);

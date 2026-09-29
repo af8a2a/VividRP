@@ -419,9 +419,9 @@ namespace VividRP.Editor.Tests
         }
 
         [TestCase(0, 2048, 2048)]
-        [TestCase(4097, 512, 4224)]
+        [TestCase(4097, 512, 8192)]
         [TestCase(16384, 512, 16384)]
-        [TestCase(99, 512, 128)]
+        [TestCase(99, 512, 512)]
         public void VSMResolution_IsIndependentAndPageAligned(int requested, int csm, int expected)
         {
             Assert.That(VirtualShadowMapProjectionSet.ResolveResolution(requested, csm), Is.EqualTo(expected));

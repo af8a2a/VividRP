@@ -20,7 +20,7 @@ namespace VividRP.Runtime
         public BoolParameter enableCSM = new(false);
         [Tooltip("Experimental directional-light virtual shadow map. Unity Renderer casters require a VSM-compatible ShadowCaster pass; incompatible content and unsupported platforms fail closed to CSM.")]
         public BoolParameter enableVirtualShadowMapPrototype = new(false);
-        [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to 128 texels (clipmaps use at least 512). Does not resize the CSM atlas or physical page budget.")]
+        [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to a power of two (at least 512). Does not resize the CSM atlas or physical page budget.")]
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]
         public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, 1024);
@@ -29,10 +29,15 @@ namespace VividRP.Runtime
         public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(0, 0, 1024);
         [HideInInspector]
         public ClampedIntParameter virtualShadowMapRasterVertexBudget = new(0, 0, 16777216);
-        [Tooltip("Base-2 exponent of the finest directional clipmap radius in world units. Coarser levels double in size until Max Distance is covered.")]
-        public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
-        [Tooltip("Shift intermediate clipmaps toward the non-jittered camera frustum while preserving page alignment and nested coverage. The nearest and farthest levels remain camera-centred.")]
-        public BoolParameter virtualShadowMapViewCoverage = new(false);
+        // Retain old metre-exponent / view-focus fields without reinterpreting saved assets.
+        [HideInInspector] public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
+        [HideInInspector] public BoolParameter virtualShadowMapViewCoverage = new(false);
+        [Tooltip("UE absolute first clipmap level (centimetres). Level 6 has a 1.28 m coverage radius and 2.56 m projection half-width.")]
+        public ClampedIntParameter virtualShadowMapClipmapFirstLevel = new(6, -1, 22);
+        [Tooltip("UE absolute last clipmap level, independent of Max Shadow Distance. Default 22; each additional level doubles the extent.")]
+        public ClampedIntParameter virtualShadowMapClipmapLastLevel = new(22, -1, 22);
+        [Tooltip("UE per-level Z half-range divided by coverage radius. Depth is retained until the camera crosses the 90 percent cache guard.")]
+        public MinFloatParameter virtualShadowMapClipmapZRangeScale = new(1000, 1.2f);
         [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public BoolParameter virtualShadowMapScreenDensity = new(false);
         [Tooltip("UE pool-pressure LOD bias: target 85% capacity, fast reduction, recovery after 10 frames below the threshold, maximum +2 levels. Sampling keeps its desired level and falls back to resident parents.")]

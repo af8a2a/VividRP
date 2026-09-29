@@ -169,33 +169,34 @@ namespace VividRP.Editor.Tests
             finally { UnityEngine.Object.DestroyImmediate(shader); }
         }
 
-        [Test]
-        public void PagePressure_CoarsensRequestsButNotSampling()
+        [TestCase(4)]
+        [TestCase(17)]
+        public void PagePressure_CoarsensRequestsButNotSampling(int levelCount)
         {
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = UnityEngine.Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
             using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
-            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 160);
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levelCount, 160);
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
             using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
             using var normals = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
             using var results = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 8);
             try
             {
-                var data = new VirtualShadowMapProjection[4];
+                var data = new VirtualShadowMapProjection[levelCount];
                 for (int i = 0; i < data.Length; i++)
                 {
                     float size = 2 << i;
                     Matrix4x4 matrix = Matrix4x4.Scale(Vector3.one / size);
                     matrix.m03 = matrix.m13 = matrix.m23 = .5f;
                     data[i].WorldToShadow = matrix;
-                    data[i].SelectionSphere = new Vector4(0, 0, 0, -4 * (1 << i));
+                    data[i].SelectionSphere = new Vector4(0, 0, 0, -2.56f * (1 << i));
                     data[i].Parameters = new Vector4(size / 512, 0, 0, 100);
                 }
                 projections.SetData(data);
                 pressure.SetData(new[] { new uint4(math.asuint(2f), 0, 0, 0), uint4.zero, uint4.zero });
-                inputs.SetData(new[] { new Vector4(1, 0, 0, 0), new Vector4(1, 0, 0, 0) });
+                inputs.SetData(new[] { new Vector4(1, 0, 0, 0), new Vector4(levelCount == 17 ? 43000 : 1, 0, 0, 0) });
                 normals.SetData(new[] { new Vector4(1, 0, 0, 0), new Vector4(1, 0, .001f, 0) });
                 int kernel = shader.FindKernel("InspectUEClipmapSelection");
                 shader.SetBuffer(kernel, "_VSMProjections", projections);
@@ -204,7 +205,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(kernel, "_SamplingNormals", normals);
                 shader.SetBuffer(kernel, "_SamplingResults", results);
                 shader.SetInt("_SamplingCount", 2);
-                shader.SetInt("_VSMProjectionCount", 4);
+                shader.SetInt("_VSMProjectionCount", levelCount);
                 shader.SetInt("_VSMPrototypeVirtualResolution", 512);
                 shader.SetInt("_CSMOutputWidth", 128);
                 shader.SetInt("_CSMOutputHeight", 128);
@@ -215,12 +216,12 @@ namespace VividRP.Editor.Tests
                 shader.Dispatch(kernel, 1, 1, 1);
                 results.GetData(output);
                 Assert.That(output[0].x, Is.EqualTo(0));
-                Assert.That(output[1].x, Is.EqualTo(0));
+                Assert.That(output[1].x, Is.EqualTo(levelCount == 17 ? 16 : 0));
                 shader.SetVector("_VSMReceiverQuality", new Vector4(2, 0, 0, 0));
                 shader.Dispatch(kernel, 1, 1, 1);
                 results.GetData(output);
                 Assert.That(output[0], Is.EqualTo(new Vector2(0, 2)));
-                Assert.That(output[1], Is.EqualTo(new Vector2(0, 2)));
+                Assert.That(output[1], Is.EqualTo(levelCount == 17 ? new Vector2(16, -1) : new Vector2(0, 2)));
             }
             finally { UnityEngine.Object.DestroyImmediate(shader); }
         }

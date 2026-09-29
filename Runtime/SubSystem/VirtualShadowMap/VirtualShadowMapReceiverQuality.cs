@@ -67,7 +67,12 @@ namespace VividRP.Runtime.VirtualShadowMap
             float scaleX = Mathf.Max(Mathf.Abs(projection.m00), 1e-6f);
             int width = Mathf.Max(camera.actualWidth, 1);
             if (camera.camera != null && camera.camera.orthographic)
+            {
+                // UE's orthographic projection and OrthoWidth are centimetre based.
+                // Perspective projection scales are unitless and need no conversion.
+                scaleX *= 0.01f;
                 width = Mathf.Max(width, Mathf.CeilToInt(2 / scaleX));
+            }
             return BuildClipmapParameters(settings.virtualShadowMapResolutionLodBias.value,
                 settings.virtualShadowMapPagePressure.value, virtualResolution, width, scaleX);
         }

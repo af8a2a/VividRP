@@ -16,7 +16,9 @@ namespace VividRP.Editor
         [Range(512, 16384)] public int resolution = 2048;
         public bool pcf;
         public bool stochasticFiltering;
-        [Range(-4, 12)] public int firstLevel = 1;
+        [HideInInspector] public int firstLevel = 1; // Legacy metre exponent; retained for saved cases.
+        [Range(-1, 22)] public int clipmapFirstLevel = 6;
+        [Range(-1, 22)] public int clipmapLastLevel = 22;
         [Min(0.01f)] public float maxDistance = 150;
         [Range(0, 0.5f)] public float transition = 0.2f;
         public bool screenDensity;
@@ -65,7 +67,8 @@ namespace VividRP.Editor
         internal void Validate()
         {
             if (resolution < 512 || resolution > 16384 || resolution % 128 != 0
-                || firstLevel < -4 || firstLevel > 12 || !float.IsFinite(maxDistance) || maxDistance <= 0
+                || clipmapFirstLevel < -1 || clipmapFirstLevel > 22
+                || clipmapLastLevel < clipmapFirstLevel || clipmapLastLevel > 22 || !float.IsFinite(maxDistance) || maxDistance <= 0
                 || !float.IsFinite(transition) || transition < 0 || transition > 0.5f
                 || !float.IsFinite(targetTexelPixels) || targetTexelPixels < 0.25f || targetTexelPixels > 8
                 || !float.IsFinite(lodBias) || lodBias < -4 || lodBias > 4)
@@ -79,7 +82,8 @@ namespace VividRP.Editor
             settings.virtualShadowMapResolution.Override(resolution);
             settings.virtualShadowMapPCF.Override(pcf);
             settings.virtualShadowMapStochasticFiltering.Override(stochasticFiltering);
-            settings.virtualShadowMapFirstLevel.Override(firstLevel);
+            settings.virtualShadowMapClipmapFirstLevel.Override(clipmapFirstLevel);
+            settings.virtualShadowMapClipmapLastLevel.Override(clipmapLastLevel);
             settings.maxShadowDistance.Override(maxDistance);
             settings.virtualShadowMapTransition.Override(transition);
             settings.virtualShadowMapScreenDensity.Override(screenDensity);
@@ -92,7 +96,8 @@ namespace VividRP.Editor
             => settings != null && settings.enableCSM.value && settings.enableVirtualShadowMapPrototype.value
                 && settings.virtualShadowMapResolution.value == resolution && settings.virtualShadowMapPCF.value == pcf
                 && settings.virtualShadowMapStochasticFiltering.value == stochasticFiltering
-                && settings.virtualShadowMapFirstLevel.value == firstLevel && settings.maxShadowDistance.value == maxDistance
+                && settings.virtualShadowMapClipmapFirstLevel.value == clipmapFirstLevel
+                && settings.virtualShadowMapClipmapLastLevel.value == clipmapLastLevel && settings.maxShadowDistance.value == maxDistance
                 && settings.virtualShadowMapTransition.value == transition && settings.virtualShadowMapScreenDensity.value == screenDensity
                 && settings.virtualShadowMapTargetTexelPixels.value == targetTexelPixels && settings.virtualShadowMapResolutionLodBias.value == lodBias
                 && settings.screenSpaceShadowDenoise.value == screenSpaceDenoise;

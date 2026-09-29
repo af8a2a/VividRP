@@ -1559,7 +1559,7 @@ static const float kVSMHintRoundoff = 0.0000019073486328125;
 
 uint BuildVSMPossibleMappedLevels(uint sourceLevel, uint2 sourcePage)
 {
-    if (_VSMProjectionCount > 16 || _VSMPrototypePagesPerAxis <= 0) return 0xffffffffu;
+    if (_VSMProjectionCount > VIVID_VSM_RASTER_MAX_LEVELS || _VSMPrototypePagesPerAxis <= 0) return 0xffffffffu;
     VividVSMProjection source = _VSMProjections[sourceLevel];
     float2 lowUV = float2(sourcePage) / _VSMPrototypePagesPerAxis;
     float2 highUV = float2(sourcePage + 1u) / _VSMPrototypePagesPerAxis;

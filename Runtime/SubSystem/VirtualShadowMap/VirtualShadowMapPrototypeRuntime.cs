@@ -20,10 +20,10 @@ namespace VividRP.Runtime.VirtualShadowMap
         // Match VIVID_VSM_RASTER_WINDOW_PAGES. The DSV only provides a viewport;
         // visibility depths are atomically accumulated in the two-slice UAV.
         internal const int RasterWindowPages = 4;
-        // Experimental until page/window rasterization preserves the complete
-        // page-space raster coverage. Diagnostic callers must restore this after use.
-        internal static bool ExperimentalPageWindows { get; set; }
-        internal static int RasterWindowScale => ExperimentalPageWindows ? RasterWindowPages : 1;
+        // UE HW raster: 4x4 virtual-page windows with fragment-stage translation.
+        // The single-page mode is retained for controlled A/B validation only.
+        internal static bool PageWindowsEnabled { get; set; } = true;
+        internal static int RasterWindowScale => PageWindowsEnabled ? RasterWindowPages : 1;
         internal const int DefaultPhysicalPageCount = 256;
         internal const int MaxPhysicalPageCount = 1024;
         internal const int ClearWorkArgsOffset = 0;
@@ -610,7 +610,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_RasterDepth.rt.width == PageSize * RasterWindowScale
                 && s_RasterDepth.rt.height == PageSize * RasterWindowScale
                 && s_RasterDepth.rt.dimension == TextureDimension.Tex2DArray
-                && s_RasterDepth.rt.volumeDepth == (ExperimentalPageWindows ? 1 : physicalPageCapacity)
+                && s_RasterDepth.rt.volumeDepth == (PageWindowsEnabled ? 1 : physicalPageCapacity)
                 && s_UnityRasterDepth != null
                 && s_UnityRasterDepth.rt != null
                 && s_UnityRasterDepth.rt.width == unityRasterSize
@@ -690,7 +690,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_RasterDepth = RTHandles.Alloc(
                 PageSize * RasterWindowScale,
                 PageSize * RasterWindowScale,
-                slices: ExperimentalPageWindows ? 1 : physicalPageCapacity,
+                slices: PageWindowsEnabled ? 1 : physicalPageCapacity,
                 depthBufferBits: DepthBits.Depth32,
                 colorFormat: GraphicsFormat.None,
                 filterMode: FilterMode.Point,

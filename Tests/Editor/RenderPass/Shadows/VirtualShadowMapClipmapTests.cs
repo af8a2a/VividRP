@@ -176,10 +176,10 @@ namespace VividRP.Editor.Tests
         public void PageBudget_ResizesAllPhysicalResourcesAndReusesTheStableConfiguration(int budget, bool windows = false)
         {
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
-            bool previousWindows = VirtualShadowMapPrototypeRuntime.ExperimentalPageWindows;
+            bool previousWindows = VirtualShadowMapPrototypeRuntime.PageWindowsEnabled;
             try
             {
-                VirtualShadowMapPrototypeRuntime.ExperimentalPageWindows = windows;
+                VirtualShadowMapPrototypeRuntime.PageWindowsEnabled = windows;
                 VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);
                 Assert.That(VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget), Is.True);
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(budget));
@@ -226,7 +226,7 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
-                VirtualShadowMapPrototypeRuntime.ExperimentalPageWindows = previousWindows;
+                VirtualShadowMapPrototypeRuntime.PageWindowsEnabled = previousWindows;
                 VirtualShadowMapPrototypeRuntime.ReleaseResources();
             }
             Assert.That(VirtualShadowMapPrototypeRuntime.RemapPageMetadata, Is.Null);

@@ -238,6 +238,35 @@ void AppendVSMPageMeshletRequest(
             cascadeIndex);
 }
 
+// Choose the first relevant page as the unique owner of a fixed-grid window.
+// The compact overflow list is bounded by physical page capacity, independent
+// of the source meshlet count. Diagnostic mode retains individual pages.
+bool GetVSMRasterListPage(uint owner, out uint rasterPage)
+{
+    rasterPage = 0u;
+    if (owner == 0u || !IsVSMCasterPageRelevant(owner - 1u)) return false;
+    uint page = owner - 1u;
+    rasterPage = page;
+    if (_VSMRasterWindowPages <= 1) return true;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint basePage = page / (axis * axis) * axis * axis;
+    uint2 coord = uint2(page % axis, (page / axis) % axis);
+    uint2 low = coord / VIVID_VSM_RASTER_WINDOW_PAGES * VIVID_VSM_RASTER_WINDOW_PAGES;
+    uint2 high = min(low + VIVID_VSM_RASTER_WINDOW_PAGES, axis);
+    for (uint y = low.y; y < high.y; y++)
+        for (uint x = low.x; x < high.x; x++)
+        {
+            uint candidate = basePage + y * axis + x;
+            if (candidate == page)
+            {
+                rasterPage = basePage + low.y * axis + low.x;
+                return true;
+            }
+            if (IsVSMCasterPageRelevant(candidate)) return false;
+        }
+    return false;
+}
+
 // Large records retain one fixed instance stride so their record address is
 // arithmetic. Use the largest per-clipmap page count, not the sum across all
 // clipmaps; each record only visits its own level's list and skips padding.
@@ -264,9 +293,10 @@ void RunVSMPrepareMeshletPageRequests(uint groupIndex)
     for (uint slot = groupIndex; slot < (uint)_VSMPrototypePhysicalPageCapacity; slot += 64u)
     {
         uint owner = _VSMPrototypePhysicalPageOwners[slot];
-        if (owner != 0u && IsVSMCasterPageRelevant(owner - 1u))
+        uint rasterPage;
+        if (GetVSMRasterListPage(owner, rasterPage))
         {
-            uint level = (owner - 1u) / pagesPerLevel;
+            uint level = rasterPage / pagesPerLevel;
             InterlockedAdd(g_VSMRasterLevelCounts[level], 1u);
         }
     }
@@ -290,13 +320,14 @@ void RunVSMPrepareMeshletPageRequests(uint groupIndex)
     for (uint slot = groupIndex; slot < (uint)_VSMPrototypePhysicalPageCapacity; slot += 64u)
     {
         uint owner = _VSMPrototypePhysicalPageOwners[slot];
-        if (owner != 0u && IsVSMCasterPageRelevant(owner - 1u))
+        uint rasterPage;
+        if (GetVSMRasterListPage(owner, rasterPage))
         {
-            uint level = (owner - 1u) / pagesPerLevel;
+            uint level = rasterPage / pagesPerLevel;
             uint index;
             InterlockedAdd(g_VSMRasterLevelCounts[level], 1u, index);
             index += g_VSMRasterLevelOffsets[level];
-            _VSMPrototypeMeshletRasterPages[index] = owner - 1u;
+            _VSMPrototypeMeshletRasterPages[index] = rasterPage;
         }
     }
     GroupMemoryBarrierWithGroupSync();
@@ -404,7 +435,8 @@ bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPa
             uint2 low = uint2(x, y);
             uint2 high = min(low + VIVID_VSM_RASTER_WINDOW_PAGES - 1u, maxPage);
             bool nonempty = false;
-            [loop] for (uint py = low.y; py <= high.y && !nonempty; py++)
+            uint2 clippedLow = high, clippedHigh = low;
+            [loop] for (uint py = low.y; py <= high.y; py++)
             {
                 [loop] for (uint px = low.x; px <= high.x; px++)
                 {
@@ -413,14 +445,15 @@ bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPa
                         && VSMCasterOverlapsReceiverMask(page, uint2(px, py), minTexel, maxTexel))
                     {
                         nonempty = true;
-                        break;
+                        clippedLow = min(clippedLow, uint2(px, py));
+                        clippedHigh = max(clippedHigh, uint2(px, py));
                     }
                 }
             }
             if (!nonempty) continue;
             if (count == kVSMMaxPagesPerMeshletRequest) return false;
-            windows[count++] = uint2(level * axis * axis + y * axis + x,
-                VividVSMEncodePageWindow(level, high - low + 1u));
+            windows[count++] = uint2(level * axis * axis + clippedLow.y * axis + clippedLow.x,
+                VividVSMEncodePageWindow(level, clippedHigh - clippedLow + 1u));
         }
     }
     for (uint i = 0u; i < count; i++)
@@ -465,15 +498,16 @@ void ProcessVSMPageMeshlet(VividMeshletRenderRequestPacked sourceRequest,
     const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
     const uint coveredPageCount = (maxPage.x - minPage.x + 1u)
         * (maxPage.y - minPage.y + 1u);
+    // Match NaniteClusterCulling: all sizes use 4x4 windows, clipped to
+    // renderable pages. A source is staged completely before any append.
+    // Explicit branch: HLSL logical operators do not short-circuit UAV writes.
+    [branch] if (_VSMRasterWindowPages > 1)
+    {
+        if (TryAppendVSMPageWindows(rendererListIndex, sourceRequest, cascadeIndex,
+                minPage, maxPage, minTexel, maxTexel)) return;
+    }
     if (coveredPageCount > kVSMMaxPagesPerMeshletRequest)
     {
-        // HLSL logical operators do not guarantee short circuit evaluation.
-        // Keep the function that appends UAV records inside an explicit branch.
-        [branch] if (_VSMRasterWindowPages > 1)
-        {
-            if (TryAppendVSMPageWindows(rendererListIndex, sourceRequest, cascadeIndex,
-                    minPage, maxPage, minTexel, maxTexel)) return;
-        }
         for (uint pageY = minPage.y; pageY <= maxPage.y; pageY++)
         {
             for (uint pageX = minPage.x; pageX <= maxPage.x; pageX++)

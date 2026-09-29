@@ -232,15 +232,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void ConfigureRasterState()
         {
-            bool windows = VirtualShadowMapPrototypeRuntime.ExperimentalPageWindows;
+            bool windows = VirtualShadowMapPrototypeRuntime.PageWindowsEnabled;
             if (m_RasterStateInitialized && m_RasterWindowsEnabled == windows) return;
             for (int i = 0; i < m_Materials.Length; i++)
             {
                 Material material = m_Materials[i];
                 if (material == null) continue;
-                CoreUtils.SetKeyword(material, "VIVID_VSM_STABLE_RASTER", windows);
                 material.SetInteger(RasterWindowPagesId, VirtualShadowMapPrototypeRuntime.RasterWindowScale);
-                // A shared window target must not occlude the hidden UAV layers.
+                // UE window raster writes visibility through the UAV, not the DSV.
                 material.SetFloat(ZWriteId, windows ? 0f : 1f);
                 material.SetFloat(ZTestId, (float)(windows ? CompareFunction.Always : CompareFunction.LessEqual));
             }
@@ -1408,7 +1407,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     CoreUtils.SetRenderTarget(
                         nativeCmd,
                         rasterDepth,
-                        ClearFlag.Depth,
+                        VirtualShadowMapPrototypeRuntime.PageWindowsEnabled ? ClearFlag.None : ClearFlag.Depth,
                         Color.black,
                         depthSlice: -1);
                 }
@@ -1511,7 +1510,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     CoreUtils.SetRenderTarget(
                         nativeCmd,
                         rasterDepth,
-                        ClearFlag.Depth,
+                        VirtualShadowMapPrototypeRuntime.PageWindowsEnabled ? ClearFlag.None : ClearFlag.Depth,
                         Color.black,
                         depthSlice: -1);
                 }

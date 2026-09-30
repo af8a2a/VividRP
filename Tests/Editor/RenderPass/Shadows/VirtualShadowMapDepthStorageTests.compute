@@ -1,0 +1,39 @@
+#pragma kernel InsertTestDepth
+#pragma kernel ResolveReceiverMaskedCaster
+#pragma kernel ClearReceiverMaskedCaster
+#pragma use_dxc
+#define VIVID_VSM_CASTER 1
+#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapCaster.hlsl"
+StructuredBuffer<uint4> _TestDepthInputs;
+uint _TestDepthInputCount;
+RWStructuredBuffer<uint4> _TestCasterResults;
+
+[numthreads(8, 8, 1)]
+void ClearReceiverMaskedCaster(uint3 id : SV_DispatchThreadID)
+{
+    _VSMPrototypePhysicalPage[uint3(id.xy, 0u)] = 0u;
+    _VSMPrototypePhysicalPage[uint3(id.xy, 1u)] = 0u;
+}
+
+// Exercise the same three addressing paths used by the raster shader. Receiver
+// masks select caster bounds; a selected caster must retain its full coverage.
+[numthreads(64, 1, 1)]
+void ResolveReceiverMaskedCaster(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _TestDepthInputCount) return;
+    uint4 input = _TestDepthInputs[id.x];
+    float4 position = float4(input.xy, 0.75, 1);
+    uint2 texel;
+    bool page = VividTryResolveVSMPagePhysicalTexel(position, input.z, texel);
+    bool window = VividTryResolveVSMWindowPhysicalTexel(position, input.z, uint2(1u, 1u), texel);
+    bool full = VividTryResolveVSMPhysicalTexel(position, 0u, texel);
+    _TestCasterResults[id.x] = uint4(page, window, full, 0u);
+    if (page) VividWriteVSMPageDepth(position, input.z);
+}
+[numthreads(64, 1, 1)]
+void InsertTestDepth(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _TestDepthInputCount) return;
+    uint4 input = _TestDepthInputs[id.x];
+    VividInsertVSMDepth(input.xy, input.z);
+}

@@ -761,8 +761,7 @@ namespace VividRP.Editor.Tests
                     supportedUnityCasterSources[shaderIndex]);
             }
             StringAssert.Contains("AccessFlags.Read", resolvePassSource);
-            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage", resolveSource);
-            StringAssert.Contains("Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage", resolveSource);
+            StringAssert.Contains("Texture2DArray<uint> _VSMPhysicalPagePool", resolveSource);
             StringAssert.Contains("max(staticRawDepth, dynamicRawDepth)", resolveSource);
             StringAssert.Contains("StructuredBuffer<uint> _VSMPrototypePageTable", resolveSource);
             StringAssert.Contains("RWStructuredBuffer<uint4> _VSMPrototypePageMetadata", resolveSource);

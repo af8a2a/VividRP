@@ -70,6 +70,28 @@ GPU recorder 是**最近完成的 profiling frame**，不是 observation 的 GPU
 
 profile 使用当前场景设置，不施加固定射线/页预算 preset。做 A/B 时由上层流程记录、设置并恢复参数，复用同一相机、预热、窗口长度及正反顺序；读回与计时分开运行。
 
+## VSM / SMRT 的 Nsight Shader Profiler 源码关联
+
+`Shaders/Core/Private/CSMShadowResolve.compute` 提供编译期开关 `VIVID_VSM_SHADER_DEBUG_SYMBOLS`，默认 `0`。采集源码热点时将该文件开头的默认值临时改为 `1`，保存并等待 Unity 导入、编译完成，再捕获新的 GPU Trace；结束后恢复 `0` 并重新导入。也可由独立编译工具在源码之前定义该宏。它不是运行时 keyword，`EnableKeyword` 和 Player 的 C# Scripting Define Symbols 不会启用它。
+
+开关覆盖此 compute 文件中的所有入口及其包含的 VSM / SMRT HLSL；其他 compute / raster shader 不受此开关控制。当前 Unity 6000.7 使用 `#pragma enable_debug_symbols`。**Unity 同时关闭 Shader 优化**，所以开启符号的捕获用于源码定位，关闭符号的同路线冷/暖 replay 用于确认生产收益；不能将两种编译模式直接做性能 A/B。[Unity pragma 文档](https://docs.unity.com/en-us/engine/6000.7/manual/materials-and-shaders/shaders/reference/sl-pragma-directives)
+
+### 捕获与导出
+
+1. 在 Nsight Graphics GPU Trace Profiler 开启 **Real-Time Shader Profiling**、**Collect Shader Pipelines**、**Collect External Shader Debug Info**。原生 `ngfx` CLI 对应 `--real-time-shader-profiler`，保留默认的 shader pipelines / external debug info / shader bindings 收集；不要添加关闭它们的 `--disable-collect-shader-pipelines`、`--disable-collect-external-shader-debug-info`、`--disable-trace-shader-bindings`。先固定相机和渲染设置、完成预热，再捕获。已有 GPU 超时历史时，先验证较低工作量的符号捕获，避免直接运行大负载的未优化版本。
+2. 选择 `VSM.ResolveTrace` 的时间范围，在 **Shader Pipelines** 中定位实际执行的入口（如 `VSMShadowResolveAdaptive`），保存 shader hash、Correlation 状态、`# Reg`、`# Warp`、CTA Dim、Samples 和 stall 列。右键 **Save as CSV…**；另存 **Export bytecode…**，保留本次准确字节码，不能拿离线编译的其他 variant 替代。
+3. 确认 Correlation 成功，再查看 **Hotspots / Top-Down / Bottom-Up / Source / Instruction Mix**。导出视图中实际提供的 CSV；Source 视图可复制选中的带行号源码。保留列名、单位、选定时间范围与行范围，尤其是 Self Mix、Input Dependencies 和 Output Stall Locations。CLI `--auto-export` 的普通 range/marker 表不能当作源码级导出；目前未验证原生 CLI 自动导出这些 Shader Profiler 表。
+4. Source 视图的 **Source** 选择器按文件显示数据。展开主 `CSMShadowResolve.compute` 的 DXIL 不会自动导出 include 的逐行指标；另选 `VSMSMRT.hlsl`、`VSMPhysicalSampling.hlsl` 和 `VSMReceiverResolve.hlsl` 导出，或导出整个目标入口的 Hotspots / Top-Down。核对输出中实际出现的源文件名；重复导出可用 SHA256 检查。CSV 可能在源码段与 DXIL 段使用不同表头，必须按段解析；两段的 Samples 是同一批观测的不同归因，不能相加。
+5. Unity 的符号可能使用展开后的 `HLSL` 文件名；保存捕获内嵌源码及其 `#line` 标记，分析时据此映射到 `VSMSMRT.hlsl` 等原文件。展开源码行号不能直接当作仓库行号；当前编译器输出的函数名也可辅助定位。
+
+[Shader Profiler 官方说明](https://docs.nvidia.com/nsight-graphics/UserGuide/shader-profiler.html) 中的完整 SASS 逐指令反汇编限 Pro 构建；公共版仍可提供源码与指令范围关联。采样 stall 比例不是某条源码的毫秒成本，依赖等待也可能落在消费结果的指令上。指令执行次数等额外指标需相应采集模式，未收集或为空的值不能补零。
+
+### 持续分析所需产物
+
+每轮保存到忽略目录 `Temp~/VSM/<实验名>/`：原始 `.ngfx-gputrace`、Shader Profiler CSV、导出的 shader bytecode、关联源码、阶段计时 CSV，以及本次源码/差异快照。记录 commit、dirty diff、Unity/驱动/Nsight 版本、入口和 shader hash、符号开关、相机路线、分辨率、页预算、SMRT 参数、预热条件、所选范围和 Correlation 状态。
+
+分析闭环是：源码热点提出单一候选 → 关闭符号 → 同条件交替 A/B 与阴影质量验证 → 决定保留或撤回。符号捕获改变优化模式，热点应作为线索，不能单凭其排名认定生产瓶颈。
+
 ## 实验专用配方
 
 [16层容量、成本与动态基线](../../Temp~/VSM/Roadmap~/Experiments/VSMCapacityCostDynamic_20260912/README.md) 中的 RTAS 几何参考、36个插入夹具、动态 meshlet 序列和256/1024射线配对属于实验配方，保留原始来源及分析脚本，本轮不复制成另一套常驻实现。

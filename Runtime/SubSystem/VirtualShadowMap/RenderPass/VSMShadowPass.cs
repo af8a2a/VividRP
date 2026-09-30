@@ -26,21 +26,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int VSMPrototypePhysicalPageOwnersId = Shader.PropertyToID("_VSMPrototypePhysicalPageOwners");
 
-        private static readonly int VSMAllocationRequestsId = Shader.PropertyToID("_VSMAllocationRequests");
-        private static readonly int VSMAllocationSummaryId = Shader.PropertyToID("_VSMAllocationSummary");
         private static readonly int VSMPageWorkListId = Shader.PropertyToID("_VSMPageWorkList");
         private static readonly int VSMPageWorkListRWId = Shader.PropertyToID("_VSMPageWorkListRW");
         private static readonly int VSMPageWorkDispatchArgsRWId = Shader.PropertyToID("_VSMPageWorkDispatchArgsRW");
 
         private static readonly int VSMPrototypeAllocatorCountersId = Shader.PropertyToID("_VSMPrototypeAllocatorCounters");
 
-        private static readonly int VSMPrototypeStaticPhysicalPageRWId = Shader.PropertyToID("_VSMPrototypeStaticPhysicalPageRW");
+        private static readonly int VSMPhysicalPagePoolRWId = Shader.PropertyToID("_VSMPhysicalPagePoolRW");
 
-        private static readonly int VSMPrototypeStaticPhysicalPageId = Shader.PropertyToID("_VSMPrototypeStaticPhysicalPage");
-
-        private static readonly int VSMPrototypeDynamicPhysicalPageRWId = Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPageRW");
-
-        private static readonly int VSMPrototypeDynamicPhysicalPageId = Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
+        private static readonly int VSMPhysicalPagePoolId = Shader.PropertyToID("_VSMPhysicalPagePool");
 
         private static readonly int VSMPrototypePageSizeId = Shader.PropertyToID("_VSMPrototypePageSize");
 
@@ -88,7 +82,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private const string VirtualShadowMapPageCasterKeywordName = "VIVID_VSM_PAGE_CASTER";
 
-        private const string VSMPrototypeAllocatePagesKernelName = "VSMAllocatePagesCached";
+        private const string VSMPrototypeAllocatePagesKernelName = "VSMAllocateNewPageMappingsUE";
 
         private const string VSMPrototypeMarkAllAllocatedPagesDirtyKernelName = "VSMPrototypeMarkAllAllocatedPagesDirty";
 
@@ -115,7 +109,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
 
-        private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
 
         private static readonly int CSMInvViewProjMatrixId = Shader.PropertyToID("_CSMInvViewProjMatrix");
 
@@ -146,6 +139,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_VSMMarkCoarsePagesKernel = -1;
         private int m_VSMClearPageHierarchyKernel = -1;
         private int m_VSMBuildPageHierarchyKernel = -1;
+        private int m_VSMBuildAvailableLevelHintsKernel = -1;
+        private int m_VSMPropagateMappedClipmapsKernel = -1;
 
         private int m_VSMClearReceiverRequestsKernel = -1;
 
@@ -193,7 +188,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_VirtualShadowMapPageManagementCompute;
 
-        private int m_VSMPrepareAllocationKernel = -1;
+        private int m_VSMUpdatePhysicalPagesKernel = -1;
+        private int m_VSMAppendPhysicalPageListsKernel = -1;
 
         private int m_VirtualShadowMapAllocatePagesKernel = -1;
 
@@ -209,6 +205,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private int m_VirtualShadowMapFinalizeDirtyPagesKernel = -1;
 
+        private int m_VSMResetMergePagesKernel = -1;
+        private int m_VSMSelectMergePagesKernel = -1;
+        private int m_VSMMergeStaticPagesKernel = -1;
+        private static readonly int MergeListRWId = Shader.PropertyToID("_VSMMergePageWorkListRW");
+        private static readonly int MergeListId = Shader.PropertyToID("_VSMMergePageWorkList");
+        private static readonly int MergeArgsRWId = Shader.PropertyToID("_VSMMergePageDispatchArgsRW");
         private int m_VSMReducePageOccupancyKernel = -1;
         private int m_VSMBuildPageWorkListsKernel = -1;
 
@@ -230,15 +232,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void ConfigureRasterState()
         {
-            bool windows = VirtualShadowMapPrototypeRuntime.ExperimentalPageWindows;
+            bool windows = VirtualShadowMapPrototypeRuntime.PageWindowsEnabled;
             if (m_RasterStateInitialized && m_RasterWindowsEnabled == windows) return;
             for (int i = 0; i < m_Materials.Length; i++)
             {
                 Material material = m_Materials[i];
                 if (material == null) continue;
-                CoreUtils.SetKeyword(material, "VIVID_VSM_STABLE_RASTER", windows);
                 material.SetInteger(RasterWindowPagesId, VirtualShadowMapPrototypeRuntime.RasterWindowScale);
-                // A shared window target must not occlude the hidden UAV layers.
+                // UE window raster writes visibility through the UAV, not the DSV.
                 material.SetFloat(ZWriteId, windows ? 0f : 1f);
                 material.SetFloat(ZTestId, (float)(windows ? CompareFunction.Always : CompareFunction.LessEqual));
             }
@@ -256,13 +257,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMCaptureProductionWorkKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMCaptureProductionWork");
             m_VSMCompleteProductionFeedbackKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMCompleteProductionFeedback");
             m_VSMBuildPageWorkListsFeedbackKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMBuildPageWorkListsFeedback");
-            m_VSMMarkReceiverPagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMMarkReceiverPagesGrouped");
+            m_VSMMarkReceiverPagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMMarkReceiverPagesUE");
             m_VSMMarkCoarsePagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMMarkCoarsePages");
             m_VSMClearPageHierarchyKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMClearPageCullHierarchy");
             m_VSMBuildPageHierarchyKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMBuildPageCullHierarchy");
-            m_VSMClearReceiverRequestsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPrototypeClearReceiverRequests");
-            m_VSMResetReceiverFeedbackKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPrototypeResetReceiverFeedback");
-            m_VSMPrepareAllocationKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPrepareAllocationCached");
+            m_VSMPropagateMappedClipmapsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPropagateMappedClipmaps");
+            m_VSMBuildAvailableLevelHintsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMBuildAvailableLevelHints");
+            m_VSMClearReceiverRequestsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMClearReceiverRequestsUE");
+            m_VSMResetReceiverFeedbackKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMResetReceiverFeedbackUE");
+            m_VSMUpdatePhysicalPagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMUpdatePhysicalPagesUE");
+            m_VSMAppendPhysicalPageListsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMAppendPhysicalPageListsUE");
             m_VSMMarkDynamicPagesDirtyKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPrototypeMarkDynamicPagesDirty");
             m_VSMInvalidateDynamicPagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPrototypeInvalidateDynamicPages");
             m_VirtualShadowMapAllocatePagesKernel = FindKernelOrInvalid(
@@ -277,10 +281,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VirtualShadowMapClearPhysicalPagesKernel = FindKernelOrInvalid(
                 m_VirtualShadowMapPageManagementCompute,
                 VSMPrototypeClearPhysicalPagesKernelName);
+            m_VSMResetMergePagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMResetMergePages");
+            m_VSMSelectMergePagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMSelectMergePages");
+            m_VSMMergeStaticPagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMMergeStaticPhysicalPagesIndirect");
             m_VSMReducePageOccupancyKernel = FindKernelOrInvalid(
                 m_VirtualShadowMapPageManagementCompute, "VSMReducePageOccupancyIndirect");
             m_VSMBuildPageWorkListsKernel = FindKernelOrInvalid(
-                m_VirtualShadowMapPageManagementCompute, "VSMBuildPageWorkLists");
+                m_VirtualShadowMapPageManagementCompute, "VSMBuildPageWorkListsUE");
             m_VirtualShadowMapFinalizeDirtyPagesKernel = FindKernelOrInvalid(
                 m_VirtualShadowMapPageManagementCompute,
                 VSMPrototypeFinalizeDirtyPagesKernelName);
@@ -319,8 +326,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var shadowSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             if (shadowSettings == null || !shadowSettings.enableVirtualShadowMapPrototype.value)
                 return;
-            m_PageUpdateBudget = shadowSettings.virtualShadowMapPageUpdateBudget.value;
-            m_RasterVertexBudget = shadowSettings.virtualShadowMapRasterVertexBudget.value;
+            m_PageUpdateBudget = 0; // UE produces all requested dirty pages; throttle request resolution instead.
+            m_RasterVertexBudget = 0; // Vertex quotas are not UE Nanite load/time feedback.
             base.Prepare(frameData);
             if (!m_IsActive) return;
             var cameraData = frameData.GetOrCreate<VividCameraData>();
@@ -352,16 +359,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ReceiverViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
                 m_ReceiverWidth = cameraData.actualWidth;
                 m_ReceiverHeight = cameraData.actualHeight;
-                m_ReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(settings);
+                m_ReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(settings, cameraData, clipmaps.Resolution);
                 m_ReceiverSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angularDiameter);
-                m_ReceiverParameters = new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0,
+                m_ReceiverParameters = new Vector4(0,
                     shadowData.depthBias, shadowData.slopeScaleDepthBias,
-                    settings.virtualShadowMapStochasticFiltering.value ? 1 : 0);
+                    0);
             }
         }
 
         public override void Record(UnsafePassContext context)
         {
+            if (m_ShadowData != null) m_ShadowData.virtualShadowMapLevelHintsRendered = false;
             if (!m_IsActive || !m_VirtualShadowMapPrototypeActive) return;
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             using (new ProfilingScope(nativeCmd, profilingSampler))
@@ -442,7 +450,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapPrototypeRuntime.PageReceiverMasksId,
                     VirtualShadowMapPrototypeRuntime.PageReceiverMasks);
                 cmd.SetComputeTextureParam(shader, kernel, DepthTextureId, m_DepthTexture.innerHandle);
-                cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
                 cmd.SetComputeMatrixParam(shader, CSMInvViewProjMatrixId, m_ReceiverViewProjection.inverse);
                 cmd.SetComputeMatrixParam(shader, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ReceiverViewProjection);
                 cmd.SetComputeVectorParam(shader, VirtualShadowMapReceiverQuality.ParametersId, m_ReceiverQuality);
@@ -452,8 +459,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeIntParam(shader, CSMOutputHeightId, m_ReceiverHeight);
                 cmd.SetComputeIntParam(shader, CSMFrameIndexId, m_FrameIndex);
                 cmd.SetComputeIntParam(shader, VSMPrototypeRequestEnabledId, 1);
-                cmd.DispatchCompute(shader, kernel, CoreUtils.DivRoundUp(m_ReceiverWidth, 8),
-                    CoreUtils.DivRoundUp(m_ReceiverHeight, 8), 1);
+                // UE PageMarkingPixelStrideX/Y = 2, independent of the projection filter.
+                const int stride = 2;
+                cmd.DispatchCompute(shader, kernel, CoreUtils.DivRoundUp(m_ReceiverWidth, 8 * stride),
+                    CoreUtils.DivRoundUp(m_ReceiverHeight, 8 * stride), 1);
             }
             VirtualShadowMapPrototypeRuntime.MarkReceiverFeedbackProduced(m_PageDebugCameraEntityId, m_FrameIndex);
             return true;
@@ -557,6 +566,12 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             VirtualShadowMapPrototypeRuntime.Projections.PrepareClipmaps(clipmaps);
+            VirtualShadowMapHZB.EnsureResources(m_VirtualShadowMapPageManagementCompute);
+            PassRecorder.ImportTextureForPass(this, VirtualShadowMapHZB.Texture, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapHZB.PreviousTable, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapHZB.PreviousProjections, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapHZB.DeferredArgs, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapHZB.BuildArgs, AccessFlags.ReadWrite);
             for (int i = 0; i < clipmaps.Count && m_HasUnityShadowCasters; i++)
             {
                 var drawSettings = new ShadowDrawingSettings(m_CullingResults, m_MainLightVisibleIndex);
@@ -574,6 +589,9 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageReceiverMasks, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels, AccessFlags.Write);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.SamplingPageTable, AccessFlags.Write);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullHierarchy, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds, AccessFlags.ReadWrite);
             var geometryBounds = VividGPUDrivenSystem.instance?.BufferSet?.VSMGeometryBounds;
@@ -592,7 +610,10 @@ namespace VividRP.Runtime.RenderPass.Core
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.InstanceDispatchArgs, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalPageOwners, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.MergePageWorkList, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.MergePageDispatchArgs, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.AllocationRequests, AccessFlags.ReadWrite);
+            PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalPageLists, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.AllocationSummary, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageWorkList, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, AccessFlags.ReadWrite);
@@ -716,11 +737,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             PassRecorder.ImportTextureForPass(
                 this,
-                VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
-                AccessFlags.ReadWrite);
-            PassRecorder.ImportTextureForPass(
-                this,
-                VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage,
+                VirtualShadowMapPrototypeRuntime.PhysicalPagePool,
                 AccessFlags.ReadWrite);
             PassRecorder.ImportTextureForPass(
                 this,
@@ -845,7 +862,7 @@ namespace VividRP.Runtime.RenderPass.Core
             GraphicsBuffer sourceArgsBuffer,
             int casterLayer,
             out GraphicsBuffer pageRequestsBuffer,
-            out GraphicsBuffer pageArgsBuffer)
+            out GraphicsBuffer pageArgsBuffer, bool postHZB = false)
         {
             using var pageScope = new ProfilingScope(nativeCmd, VSMProfiling.PageCull);
             pageRequestsBuffer = null;
@@ -879,17 +896,20 @@ namespace VividRP.Runtime.RenderPass.Core
             if (pageRequestsBuffer == null || pageArgsBuffer == null)
                 return false;
 
+            VirtualShadowMapHZB.EnsureDeferredCapacity(sourceRequestsBuffer.count);
+            int cullKernel = postHZB ? VirtualShadowMapHZB.PostKernel : m_VirtualShadowMapCullMeshletsToPagesKernel;
             int sourceRequestsPerCascadeCapacity =
                 sourceRequestsBuffer.count / VirtualShadowMapPrototypeRuntime.Projections.Count;
             if (sourceRequestsPerCascadeCapacity <= 0)
                 return false;
 
             ComputeShader compute = m_VirtualShadowMapPageManagementCompute;
+            VirtualShadowMapHZB.BindCull(nativeCmd, compute, cullKernel, postHZB);
             nativeCmd.SetComputeIntParam(compute, RasterWindowPagesId,
                 VirtualShadowMapPrototypeRuntime.RasterWindowScale);
             var vsmCulling = VirtualShadowMapCullingParameters.ForCurrentFrame(casterLayer);
             vsmCulling.BindViews(nativeCmd, compute, m_VirtualShadowMapPrepareMeshletPageRequestsKernel);
-            vsmCulling.BindViews(nativeCmd, compute, m_VirtualShadowMapCullMeshletsToPagesKernel);
+            vsmCulling.BindViews(nativeCmd, compute, cullKernel);
             nativeCmd.SetComputeBufferParam(compute, m_VirtualShadowMapPrepareMeshletPageRequestsKernel,
                 VirtualShadowMapPrototypeRuntime.PageCullDispatchArgsRWId, VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs);
             nativeCmd.SetComputeIntParam(
@@ -901,7 +921,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 VSMPrototypeCasterLayerId,
                 casterLayer);
             nativeCmd.SetComputeBufferParam(compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VirtualShadowMapProjectionSet.BufferId,
                 VirtualShadowMapPrototypeRuntime.Projections.Buffer);
             SetVirtualShadowMapPageManagementParameters(nativeCmd);
@@ -938,60 +958,64 @@ namespace VividRP.Runtime.RenderPass.Core
                 pageArgsBuffer);
             using (new ProfilingScope(nativeCmd, VSMProfiling.PagePrepare))
             {
-                nativeCmd.DispatchCompute(
-                    compute,
-                    m_VirtualShadowMapPrepareMeshletPageRequestsKernel,
-                    1,
-                    1,
-                    1);
+                // Post culling uses the same source segments and dirty-page lists.
+                // Reset only instance counts; preserve front/back record offsets.
+                if (postHZB)
+                {
+                    nativeCmd.SetComputeBufferParam(compute, VirtualShadowMapHZB.ResetPostKernel,
+                        VSMPrototypeMeshletPageIndirectArgsId, pageArgsBuffer);
+                    nativeCmd.DispatchCompute(compute, VirtualShadowMapHZB.ResetPostKernel, 1, 1, 1);
+                }
+                else
+                    nativeCmd.DispatchCompute(compute, m_VirtualShadowMapPrepareMeshletPageRequestsKernel, 1, 1, 1);
             }
 
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VSMPrototypeSourceMeshletRequestsId,
                 sourceRequestsBuffer);
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VSMPrototypeSourceMeshletIndirectArgsId,
                 sourceArgsBuffer);
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VSMPrototypeMeshletPageRequestsId,
                 pageRequestsBuffer);
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VSMPrototypeMeshletPageIndirectArgsId,
                 pageArgsBuffer);
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VSMPrototypeMeshletRasterPagesId,
                 VirtualShadowMapPrototypeRuntime.MeshletRasterPages);
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VSMPrototypePageTableId,
                 VirtualShadowMapPrototypeRuntime.PageTable);
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VSMPrototypePageMetadataId,
                 VirtualShadowMapPrototypeRuntime.PageMetadata);
-            nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, m_VirtualShadowMapCullMeshletsToPagesKernel,
+            nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, cullKernel,
                 VirtualShadowMapPrototypeRuntime.PageReceiverMasksId, VirtualShadowMapPrototypeRuntime.PageReceiverMasks);
             nativeCmd.SetComputeIntParam(compute, VirtualShadowMapPrototypeRuntime.UncachedPageRectBoundsEnabledId, 1);
-            nativeCmd.SetComputeBufferParam(compute, m_VirtualShadowMapCullMeshletsToPagesKernel,
+            nativeCmd.SetComputeBufferParam(compute, cullKernel,
                 VirtualShadowMapPrototypeRuntime.UncachedPageRectBoundsId, VirtualShadowMapPrototypeRuntime.UncachedPageRectBounds);
             nativeCmd.SetComputeIntParam(compute, VirtualShadowMapPrototypeRuntime.PageCullHierarchyEnabledId, 1);
-            nativeCmd.SetComputeBufferParam(compute, m_VirtualShadowMapCullMeshletsToPagesKernel,
+            nativeCmd.SetComputeBufferParam(compute, cullKernel,
                 VirtualShadowMapPrototypeRuntime.PageCullHierarchyId, VirtualShadowMapPrototypeRuntime.PageCullHierarchy);
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VividGPUDrivenShaderIDs._InstanceData,
                 sceneBuffers.InstanceDataBuffer);
             nativeCmd.SetComputeIntParam(
@@ -1000,31 +1024,35 @@ namespace VividRP.Runtime.RenderPass.Core
                 sceneBuffers.InstanceCount);
             nativeCmd.SetComputeBufferParam(
                 compute,
-                m_VirtualShadowMapCullMeshletsToPagesKernel,
+                cullKernel,
                 VividGPUDrivenShaderIDs._Meshlets,
                 sceneBuffers.MeshletsBuffer);
             nativeCmd.SetComputeIntParam(
                 compute,
                 VividGPUDrivenShaderIDs._MeshletCount,
                 sceneBuffers.MeshletCount);
-            sceneBuffers.VSMGeometryBounds.BindMeshlets(nativeCmd, compute, m_VirtualShadowMapCullMeshletsToPagesKernel);
+            sceneBuffers.VSMGeometryBounds.BindMeshlets(nativeCmd, compute, cullKernel);
             using (new ProfilingScope(nativeCmd, VSMProfiling.PageExpand))
             {
                 nativeCmd.DispatchCompute(
                     compute,
-                    m_VirtualShadowMapCullMeshletsToPagesKernel,
-                    VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs,
-                    (uint)casterLayer * 3u * sizeof(uint));
+                    cullKernel,
+                    postHZB ? VirtualShadowMapHZB.DeferredArgs : VirtualShadowMapPrototypeRuntime.PageCullDispatchArgs,
+                    postHZB ? 0u : (uint)casterLayer * 3u * sizeof(uint));
             }
             return true;
         }
 
-        private void RecordProductionWork(CommandBuffer cmd, GraphicsBuffer args, uint submittedMask, int layer)
+        private static readonly int VSMProductionAccumulateId = Shader.PropertyToID("_VSMProductionAccumulate");
+
+        private void RecordProductionWork(CommandBuffer cmd, GraphicsBuffer args, uint submittedMask, int layer,
+            bool accumulate = false)
         {
             if (!ProductionFeedbackEnabled) return;
             using var scope = new ProfilingScope(cmd, VSMProfiling.ProductionFeedback);
             var shader = m_VirtualShadowMapPageManagementCompute;
             cmd.SetComputeIntParam(shader, VSMProductionDrawMaskId, (int)submittedMask);
+            cmd.SetComputeIntParam(shader, VSMProductionAccumulateId, accumulate ? 1 : 0);
             cmd.SetComputeIntParam(shader, VSMPrototypeCasterLayerId, layer);
             cmd.SetComputeBufferParam(shader, m_VSMCaptureProductionWorkKernel,
                 VSMPrototypeMeshletPageIndirectArgsId, args);
@@ -1111,10 +1139,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             fallbackReason =
                 VirtualShadowMapPrototypeFallbackReason.PhysicalResourceUnavailable;
-            RTHandle staticPhysicalPage =
-                VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
-            RTHandle dynamicPhysicalPage =
-                VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage;
+            RTHandle physicalPagePool =
+                VirtualShadowMapPrototypeRuntime.PhysicalPagePool;
             RTHandle rasterDepth = VirtualShadowMapPrototypeRuntime.RasterDepth;
             GraphicsBuffer pageTable = VirtualShadowMapPrototypeRuntime.PageTable;
             GraphicsBuffer pageMetadata =
@@ -1126,8 +1152,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int pageTableEntryCount = VirtualShadowMapPrototypeRuntime.PageTableEntryCount;
             int physicalPageCapacity =
                 VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity;
-            if (staticPhysicalPage == null
-                || dynamicPhysicalPage == null
+            if (physicalPagePool == null
                 || rasterDepth == null
                 || pageTable == null
                 || pageMetadata == null
@@ -1143,47 +1168,24 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(nativeCmd, VSMProfiling.Allocate))
             {
                 var shader = m_VirtualShadowMapPageManagementCompute;
-                BindVirtualShadowMapPageManagementBuffers(
-                    nativeCmd,
-                    m_VirtualShadowMapAllocatePagesKernel,
-                    pageTable,
-                    pageMetadata,
-                    physicalPageOwners,
-                    allocatorCounters);
-                using (new ProfilingScope(nativeCmd, VSMProfiling.AllocationPrepare))
-                {
-                    nativeCmd.SetComputeBufferParam(shader, m_VSMPrepareAllocationKernel,
-                        VSMPrototypePageMetadataId, pageMetadata);
-                    nativeCmd.SetComputeBufferParam(shader, m_VSMPrepareAllocationKernel,
-                        VSMPageRequestFlagsId, VirtualShadowMapPrototypeRuntime.PageRequestFlags);
-                    nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, m_VSMPrepareAllocationKernel,
-                        VirtualShadowMapPrototypeRuntime.PageReceiverMasksId, VirtualShadowMapPrototypeRuntime.PageReceiverMasks);
-                    nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, m_VSMPrepareAllocationKernel,
-                        VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks);
-                    nativeCmd.SetComputeBufferParam(shader, m_VSMPrepareAllocationKernel,
-                        VSMAllocationRequestsId, VirtualShadowMapPrototypeRuntime.AllocationRequests);
-                    nativeCmd.SetComputeBufferParam(shader, m_VSMPrepareAllocationKernel,
-                        VSMAllocationSummaryId, VirtualShadowMapPrototypeRuntime.AllocationSummary);
-                    nativeCmd.DispatchCompute(shader, m_VSMPrepareAllocationKernel,
-                        CoreUtils.DivRoundUp(VirtualShadowMapPrototypeRuntime.AllocationRequests.count, 64), 1, 1);
-                }
                 using var allocationCommitScope = new ProfilingScope(nativeCmd, VSMProfiling.AllocationCommit);
-                nativeCmd.SetComputeBufferParam(shader, m_VirtualShadowMapAllocatePagesKernel,
-                    VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks);
-                nativeCmd.SetComputeBufferParam(shader, m_VirtualShadowMapAllocatePagesKernel,
-                    VSMPageRequestFlagsId, VirtualShadowMapPrototypeRuntime.PageRequestFlags);
-                nativeCmd.SetComputeBufferParam(shader, m_VirtualShadowMapAllocatePagesKernel,
-                    VSMAllocationRequestsId, VirtualShadowMapPrototypeRuntime.AllocationRequests);
-                nativeCmd.SetComputeBufferParam(shader, m_VirtualShadowMapAllocatePagesKernel,
-                    VirtualShadowMapReceiverQuality.PressureRWId, VirtualShadowMapPrototypeRuntime.PagePressure);
-                nativeCmd.SetComputeBufferParam(shader, m_VirtualShadowMapAllocatePagesKernel,
-                    VSMAllocationSummaryId, VirtualShadowMapPrototypeRuntime.AllocationSummary);
-                nativeCmd.DispatchCompute(
-                    m_VirtualShadowMapPageManagementCompute,
-                    m_VirtualShadowMapAllocatePagesKernel,
-                    1,
-                    1,
-                    1);
+                for (int stage = 0; stage < 3; stage++)
+                {
+                    int kernel = stage == 0 ? m_VSMUpdatePhysicalPagesKernel
+                        : stage == 1 ? m_VirtualShadowMapAllocatePagesKernel : m_VSMAppendPhysicalPageListsKernel;
+                    BindVirtualShadowMapPageManagementBuffers(nativeCmd, kernel,
+                        pageTable, pageMetadata, physicalPageOwners, allocatorCounters);
+                    nativeCmd.SetComputeBufferParam(shader, kernel,
+                        VirtualShadowMapPrototypeRuntime.PhysicalPageListsId, VirtualShadowMapPrototypeRuntime.PhysicalPageLists);
+                    nativeCmd.SetComputeBufferParam(shader, kernel,
+                        VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks);
+                    nativeCmd.SetComputeBufferParam(shader, kernel, VSMPageRequestFlagsId, VirtualShadowMapPrototypeRuntime.PageRequestFlags);
+                    nativeCmd.SetComputeBufferParam(shader, kernel,
+                        VirtualShadowMapReceiverQuality.PressureRWId, VirtualShadowMapPrototypeRuntime.PagePressure);
+                    int groups = stage == 0 ? 1 : CoreUtils.DivRoundUp(stage == 1 ? pageTableEntryCount
+                        : VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, 64);
+                    nativeCmd.DispatchCompute(shader, kernel, groups, 1, 1);
+                }
             }
 
             nativeCmd.SetGlobalBuffer(VirtualShadowMapProjectionSet.BufferId,
@@ -1336,13 +1338,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 nativeCmd.SetComputeTextureParam(
                     m_VirtualShadowMapPageManagementCompute,
                     m_VirtualShadowMapClearPhysicalPagesKernel,
-                    VSMPrototypeStaticPhysicalPageRWId,
-                    staticPhysicalPage);
-                nativeCmd.SetComputeTextureParam(
-                    m_VirtualShadowMapPageManagementCompute,
-                    m_VirtualShadowMapClearPhysicalPagesKernel,
-                    VSMPrototypeDynamicPhysicalPageRWId,
-                    dynamicPhysicalPage);
+                    VSMPhysicalPagePoolRWId,
+                    physicalPagePool);
+
                 SetVirtualShadowMapPageManagementParameters(nativeCmd);
                 nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute,
                     m_VirtualShadowMapClearPhysicalPagesKernel, VSMPageWorkListId,
@@ -1409,14 +1407,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     CoreUtils.SetRenderTarget(
                         nativeCmd,
                         rasterDepth,
-                        ClearFlag.Depth,
+                        VirtualShadowMapPrototypeRuntime.PageWindowsEnabled ? ClearFlag.None : ClearFlag.Depth,
                         Color.black,
                         depthSlice: -1);
                 }
                 uint submittedMask = 0u;
                 using (new ProfilingScope(nativeCmd, VSMProfiling.StaticRasterDraw))
                 {
-                    nativeCmd.SetRandomWriteTarget(0, staticPhysicalPage);
+                    nativeCmd.SetRandomWriteTarget(0, physicalPagePool);
                     submittedMask = DrawMeshletVirtualShadowMapPages(
                         nativeCmd,
                         meshletContext.System,
@@ -1427,6 +1425,34 @@ namespace VividRP.Runtime.RenderPass.Core
                     nativeCmd.ClearRandomWriteTargets();
                 }
                 RecordProductionWork(nativeCmd, staticPageArgsBuffer, submittedMask, 0);
+            }
+
+            if (canDrawStaticMeshletCasters && VirtualShadowMapHZB.Enabled)
+            {
+                // UE main/post contract: the main pass may only defer an occluded
+                // candidate. Retest it against depth produced in this frame.
+                VirtualShadowMapHZB.Build(nativeCmd, 1);
+                using (new ProfilingScope(nativeCmd, VirtualShadowMapHZB.PostCullSampler))
+                {
+                    if (!TryPrepareMeshletPageDraws(nativeCmd, meshletContext.System,
+                            staticRequestsBuffer, staticArgsBuffer, 0,
+                            out staticPageRequestsBuffer, out staticPageArgsBuffer, postHZB: true))
+                    {
+                        fallbackReason = VirtualShadowMapPrototypeFallbackReason.RecordPreparationFailed;
+                        return false;
+                    }
+                }
+                using (new ProfilingScope(nativeCmd, VirtualShadowMapHZB.PostRasterSampler))
+                {
+                    CoreUtils.SetRenderTarget(nativeCmd, rasterDepth, ClearFlag.None, Color.black, depthSlice: -1);
+                    nativeCmd.SetGlobalInt(VSMPrototypeCasterLayerId, 0);
+                    nativeCmd.SetRandomWriteTarget(0, physicalPagePool);
+                    uint submitted = DrawMeshletVirtualShadowMapPages(nativeCmd, meshletContext.System,
+                        staticPageRequestsBuffer, staticPageArgsBuffer,
+                        meshletContext.VirtualTextureReady, meshletContext.VirtualTextureBinding);
+                    nativeCmd.ClearRandomWriteTargets();
+                    RecordProductionWork(nativeCmd, staticPageArgsBuffer, submitted, 0, accumulate: true);
+                }
             }
 
             bool canDrawDynamicMeshletCasters = false;
@@ -1484,14 +1510,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     CoreUtils.SetRenderTarget(
                         nativeCmd,
                         rasterDepth,
-                        ClearFlag.Depth,
+                        VirtualShadowMapPrototypeRuntime.PageWindowsEnabled ? ClearFlag.None : ClearFlag.Depth,
                         Color.black,
                         depthSlice: -1);
                 }
                 uint submittedMask = 0u;
                 using (new ProfilingScope(nativeCmd, VSMProfiling.DynamicRasterDraw))
                 {
-                    nativeCmd.SetRandomWriteTarget(0, dynamicPhysicalPage);
+                    nativeCmd.SetRandomWriteTarget(0, physicalPagePool);
                     if (canDrawDynamicMeshletCasters)
                     {
                         submittedMask = DrawMeshletVirtualShadowMapPages(
@@ -1506,6 +1532,34 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
                 RecordProductionWork(nativeCmd, dynamicPageArgsBuffer, submittedMask, 1);
             }
+            if (canDrawDynamicMeshletCasters && VirtualShadowMapHZB.Enabled)
+            {
+                // UE main/post contract: the main pass may only defer an occluded
+                // candidate. Retest it against depth produced in this frame.
+                VirtualShadowMapHZB.Build(nativeCmd, 0);
+                using (new ProfilingScope(nativeCmd, VirtualShadowMapHZB.PostCullSampler))
+                {
+                    if (!TryPrepareMeshletPageDraws(nativeCmd, meshletContext.System,
+                            dynamicRequestsBuffer, dynamicArgsBuffer, 1,
+                            out dynamicPageRequestsBuffer, out dynamicPageArgsBuffer, postHZB: true))
+                    {
+                        fallbackReason = VirtualShadowMapPrototypeFallbackReason.RecordPreparationFailed;
+                        return false;
+                    }
+                }
+                using (new ProfilingScope(nativeCmd, VirtualShadowMapHZB.PostRasterSampler))
+                {
+                    CoreUtils.SetRenderTarget(nativeCmd, rasterDepth, ClearFlag.None, Color.black, depthSlice: -1);
+                    nativeCmd.SetGlobalInt(VSMPrototypeCasterLayerId, 1);
+                    nativeCmd.SetRandomWriteTarget(0, physicalPagePool);
+                    uint submitted = DrawMeshletVirtualShadowMapPages(nativeCmd, meshletContext.System,
+                        dynamicPageRequestsBuffer, dynamicPageArgsBuffer,
+                        meshletContext.VirtualTextureReady, meshletContext.VirtualTextureBinding);
+                    nativeCmd.ClearRandomWriteTargets();
+                    RecordProductionWork(nativeCmd, dynamicPageArgsBuffer, submitted, 1, accumulate: true);
+                }
+            }
+
             if (m_HasUnityShadowCasters)
             {
                 using var unityScope = new ProfilingScope(nativeCmd, VSMProfiling.UnityRaster);
@@ -1537,13 +1591,41 @@ namespace VividRP.Runtime.RenderPass.Core
                                 SystemInfo.graphicsUVStartsAtTop));
                         nativeCmd.SetGlobalVector(VSMRasterOriginId,
                             new Vector4(originX, originY, 0, 0));
-                        nativeCmd.SetRandomWriteTarget(0, dynamicPhysicalPage);
+                        nativeCmd.SetRandomWriteTarget(0, physicalPagePool);
                         nativeCmd.DrawRendererList(rendererList);
                         nativeCmd.ClearRandomWriteTargets();
                     }
                     nativeCmd.DisableKeyword(s_VirtualShadowMapCasterKeyword);
                 }
                 nativeCmd.SetGlobalInt(VSMUnityRasterEnabledId, 0);
+            }
+
+            // Static-invalid pages initialized both slices and redrew dynamic casters.
+            // Publish their final max only after both raster paths have completed.
+            using (new ProfilingScope(nativeCmd, VSMProfiling.SelectMergePages))
+            {
+                var shader = m_VirtualShadowMapPageManagementCompute;
+                SetVirtualShadowMapPageManagementParameters(nativeCmd);
+                nativeCmd.SetComputeBufferParam(shader, m_VSMResetMergePagesKernel, MergeArgsRWId,
+                    VirtualShadowMapPrototypeRuntime.MergePageDispatchArgs);
+                nativeCmd.DispatchCompute(shader, m_VSMResetMergePagesKernel, 1, 1, 1);
+                nativeCmd.SetComputeBufferParam(shader, m_VSMSelectMergePagesKernel, VSMPrototypePageMetadataId, pageMetadata);
+                nativeCmd.SetComputeBufferParam(shader, m_VSMSelectMergePagesKernel, VSMPrototypePhysicalPageOwnersId, physicalPageOwners);
+                nativeCmd.SetComputeBufferParam(shader, m_VSMSelectMergePagesKernel, MergeListRWId,
+                    VirtualShadowMapPrototypeRuntime.MergePageWorkList);
+                nativeCmd.SetComputeBufferParam(shader, m_VSMSelectMergePagesKernel, MergeArgsRWId,
+                    VirtualShadowMapPrototypeRuntime.MergePageDispatchArgs);
+                nativeCmd.DispatchCompute(shader, m_VSMSelectMergePagesKernel, CoreUtils.DivRoundUp(physicalPageCapacity, 64), 1, 1);
+            }
+            using (new ProfilingScope(nativeCmd, VSMProfiling.MergeStaticPages))
+            {
+                var shader = m_VirtualShadowMapPageManagementCompute;
+                int kernel = m_VSMMergeStaticPagesKernel;
+                nativeCmd.SetComputeBufferParam(shader, kernel, VSMPrototypePageMetadataId, pageMetadata);
+                nativeCmd.SetComputeBufferParam(shader, kernel, VSMPrototypePhysicalPageOwnersId, physicalPageOwners);
+                nativeCmd.SetComputeBufferParam(shader, kernel, MergeListId, VirtualShadowMapPrototypeRuntime.MergePageWorkList);
+                nativeCmd.SetComputeTextureParam(shader, kernel, VSMPhysicalPagePoolRWId, physicalPagePool);
+                nativeCmd.DispatchCompute(shader, kernel, VirtualShadowMapPrototypeRuntime.MergePageDispatchArgs, 0);
             }
 
             using (new ProfilingScope(nativeCmd, VSMProfiling.Occupancy))
@@ -1556,9 +1638,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute,
                     m_VSMReducePageOccupancyKernel, VSMPrototypePhysicalPageOwnersId, physicalPageOwners);
                 nativeCmd.SetComputeTextureParam(m_VirtualShadowMapPageManagementCompute,
-                    m_VSMReducePageOccupancyKernel, VSMPrototypeStaticPhysicalPageId, staticPhysicalPage);
-                nativeCmd.SetComputeTextureParam(m_VirtualShadowMapPageManagementCompute,
-                    m_VSMReducePageOccupancyKernel, VSMPrototypeDynamicPhysicalPageId, dynamicPhysicalPage);
+                    m_VSMReducePageOccupancyKernel, VSMPhysicalPagePoolId, physicalPagePool);
+
                 SetVirtualShadowMapPageManagementParameters(nativeCmd);
                 nativeCmd.DispatchCompute(m_VirtualShadowMapPageManagementCompute,
                     m_VSMReducePageOccupancyKernel, VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs,
@@ -1583,6 +1664,36 @@ namespace VividRP.Runtime.RenderPass.Core
                     CoreUtils.DivRoundUp(pageTableEntryCount, 64),
                     1,
                     1);
+            }
+
+            VirtualShadowMapHZB.Commit(nativeCmd);
+
+            // UE PropagateMappedMips: rebuild aliases after final validity is known.
+            // Every virtual entry is overwritten, including zero-work/cache-hit frames.
+            using (new ProfilingScope(nativeCmd, VSMProfiling.PropagateMappedClipmaps))
+            {
+                int kernel = m_VSMPropagateMappedClipmapsKernel;
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel,
+                    VirtualShadowMapPrototypeRuntime.SamplingPageTableRWId, VirtualShadowMapPrototypeRuntime.SamplingPageTable);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel,
+                    VirtualShadowMapProjectionSet.PageOffsetsId, VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel, VSMPrototypePageTableId, pageTable);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel, VSMPrototypePageMetadataId, pageMetadata);
+                nativeCmd.DispatchCompute(m_VirtualShadowMapPageManagementCompute, kernel, CoreUtils.DivRoundUp(pageTableEntryCount, 64), 1, 1);
+            }
+
+            if (VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabled && m_VSMBuildAvailableLevelHintsKernel >= 0)
+            {
+                using var hintScope = new ProfilingScope(nativeCmd, VSMProfiling.BuildAvailableLevelHints);
+                int kernel = m_VSMBuildAvailableLevelHintsKernel;
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel,
+                    VirtualShadowMapPrototypeRuntime.PossibleMappedLevelsRWId, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel, VSMPrototypePageTableId, pageTable);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel, VSMPrototypePageMetadataId, pageMetadata);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, kernel,
+                    VirtualShadowMapProjectionSet.BufferId, VirtualShadowMapPrototypeRuntime.Projections.Buffer);
+                nativeCmd.DispatchCompute(m_VirtualShadowMapPageManagementCompute, kernel, CoreUtils.DivRoundUp(pageTableEntryCount, 64), 1, 1);
+                m_ShadowData.virtualShadowMapLevelHintsRendered = true;
             }
 
             if (ProductionFeedbackEnabled)
@@ -1721,7 +1832,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool CanManageVirtualShadowMapPages()
         {
             return m_VirtualShadowMapPageManagementCompute != null
-                && m_VSMPrepareAllocationKernel >= 0
                 && m_VSMMarkCoarsePagesKernel >= 0
                 && m_VSMClearPageHierarchyKernel >= 0
                 && m_VSMBuildPageHierarchyKernel >= 0
@@ -1732,6 +1842,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_VirtualShadowMapInvalidateStaticPagesKernel >= 0
                 && m_VirtualShadowMapClearPhysicalPagesKernel >= 0
                 && m_VirtualShadowMapFinalizeDirtyPagesKernel >= 0
+                && m_VSMPropagateMappedClipmapsKernel >= 0
+                && m_VSMUpdatePhysicalPagesKernel >= 0
+                && m_VSMAppendPhysicalPageListsKernel >= 0
+                && m_VSMResetMergePagesKernel >= 0
+                && m_VSMSelectMergePagesKernel >= 0
+                && m_VSMMergeStaticPagesKernel >= 0
                 && m_VSMReducePageOccupancyKernel >= 0
                 && m_VSMBuildPageWorkListsKernel >= 0
                 && (!m_HasMeshletShadowCasters

@@ -28,6 +28,12 @@ namespace VividRP.Runtime
         static readonly int s_OwenScrambledSequenceId = Shader.PropertyToID("_SobolOwenScrambledSequence");
         static readonly int s_SobolMatricesBufferId = Shader.PropertyToID("_SobolMatricesBuffer");
 
+        static readonly int s_VSMSTBNScalarId = Shader.PropertyToID("_VSMSTBNScalar");
+        RTHandle m_VSMSTBNScalar;
+        TextureHandle m_VSMSTBNScalarHandle;
+        static readonly int s_VSMSTBNVec2Id = Shader.PropertyToID("_VSMSTBNVec2");
+        RTHandle m_VSMSTBNVec2;
+        TextureHandle m_VSMSTBNVec2Handle;
         RTHandle m_ScramblingTile1SPP;
         RTHandle m_RankingTile1SPP;
         RTHandle m_ScramblingTile8SPP;
@@ -55,6 +61,8 @@ namespace VividRP.Runtime
             var resources = PipelineResourceManager.Get<BlueNoiseResources>();
 
             var instance = new BlueNoise();
+            if (resources.VSMSTBNVec2 != null) instance.m_VSMSTBNVec2 = RTHandles.Alloc(resources.VSMSTBNVec2);
+            if (resources.VSMSTBNScalar != null) instance.m_VSMSTBNScalar = RTHandles.Alloc(resources.VSMSTBNScalar);
 
             if (resources.ScramblingTile1SPP != null)
                 instance.m_ScramblingTile1SPP = RTHandles.Alloc(resources.ScramblingTile1SPP);
@@ -86,6 +94,8 @@ namespace VividRP.Runtime
 
         public void ImportResources(RenderGraph renderGraph)
         {
+            m_VSMSTBNScalarHandle = m_VSMSTBNScalar != null ? renderGraph.ImportTexture(m_VSMSTBNScalar) : default;
+            m_VSMSTBNVec2Handle = m_VSMSTBNVec2 != null ? renderGraph.ImportTexture(m_VSMSTBNVec2) : default;
             m_ScramblingTile1SPPHandle = default;
             m_RankingTile1SPPHandle = default;
             m_ScramblingTile8SPPHandle = default;
@@ -121,6 +131,8 @@ namespace VividRP.Runtime
             if (pass == null)
                 return;
 
+            if (m_VSMSTBNScalarHandle.IsValid()) PassRecorder.RegisterImportedTextureForPass(pass, m_VSMSTBNScalarHandle);
+            if (m_VSMSTBNVec2Handle.IsValid()) PassRecorder.RegisterImportedTextureForPass(pass, m_VSMSTBNVec2Handle);
             if (m_ScramblingTile1SPPHandle.IsValid())
                 PassRecorder.RegisterImportedTextureForPass(pass, m_ScramblingTile1SPPHandle);
             if (m_RankingTile1SPPHandle.IsValid())
@@ -277,6 +289,8 @@ namespace VividRP.Runtime
 
         public void Bind(CommandBuffer cmd, ComputeShader cs, int kernel)
         {
+            if (m_VSMSTBNVec2 != null) cmd.SetComputeTextureParam(cs, kernel, s_VSMSTBNVec2Id, m_VSMSTBNVec2);
+            if (m_VSMSTBNScalar != null) cmd.SetComputeTextureParam(cs, kernel, s_VSMSTBNScalarId, m_VSMSTBNScalar);
             if (m_ScramblingTile1SPP != null)
                 cmd.SetComputeTextureParam(cs, kernel, s_ScramblingTile1SPPId, m_ScramblingTile1SPP);
             if (m_RankingTile1SPP != null)
@@ -303,6 +317,8 @@ namespace VividRP.Runtime
 
         public void Bind(ComputeCommandBuffer cmd, ComputeShader cs, int kernel)
         {
+            if (m_VSMSTBNVec2Handle.IsValid()) cmd.SetComputeTextureParam(cs, kernel, s_VSMSTBNVec2Id, m_VSMSTBNVec2Handle);
+            if (m_VSMSTBNScalarHandle.IsValid()) cmd.SetComputeTextureParam(cs, kernel, s_VSMSTBNScalarId, m_VSMSTBNScalarHandle);
             if (m_ScramblingTile1SPPHandle.IsValid())
                 cmd.SetComputeTextureParam(cs, kernel, s_ScramblingTile1SPPId, m_ScramblingTile1SPPHandle);
             if (m_RankingTile1SPPHandle.IsValid())
@@ -356,6 +372,10 @@ namespace VividRP.Runtime
 
         public void Dispose()
         {
+            m_VSMSTBNScalar?.Release();
+            m_VSMSTBNScalar = null;
+            m_VSMSTBNVec2?.Release();
+            m_VSMSTBNVec2 = null;
             m_ScramblingTile1SPP?.Release();
             m_RankingTile1SPP?.Release();
             m_ScramblingTile8SPP?.Release();

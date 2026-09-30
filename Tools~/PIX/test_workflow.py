@@ -51,6 +51,32 @@ class WorkflowChecks(unittest.TestCase):
             agent.save(self.path / "result.json", {"a": 2})
         self.assertEqual({"a": 1}, json.loads((self.path / "result.json").read_text()))
 
+    def test_capture_survives_supervisor_cleanup(self):
+        source, target = self.path / "live.wpix", self.path / "retained.wpix"
+        source.write_bytes(b"validated capture")
+        retained = agent.retain_capture(source, target)
+        source.unlink()  # Simulate pixtool cleanup after Editor exit.
+        self.assertEqual(b"validated capture", target.read_bytes())
+        self.assertEqual(str(target), retained["capturePath"])
+        self.assertEqual(17, retained["bytes"])
+        self.assertEqual(64, len(retained["captureHash"]))
+        source.write_bytes(b"new capture")
+        with self.assertRaises(FileExistsError):
+            agent.retain_capture(source, target)
+        self.assertEqual(b"validated capture", target.read_bytes())
+
+    def test_empty_capture_copy_rejected(self):
+        source = self.path / "empty.wpix"
+        source.touch()
+        self.assert_failure("empty_capture_copy", lambda: agent.retain_capture(source, self.path / "retained.wpix"))
+
+    def test_capture_changed_during_retention_rejected(self):
+        source = self.path / "live.wpix"
+        source.write_bytes(b"validated capture")
+        with patch.object(agent.os, "fsync", lambda _: source.write_bytes(b"changed capture")):
+            self.assert_failure("capture_retention_hash_mismatch",
+                                lambda: agent.retain_capture(source, self.path / "retained.wpix"))
+
     def test_pixtool_raw_options(self):
         text = agent.pix_command_line(["C:/Program Files/PIX/pixtool.exe", "launch", "Unity.exe", "--command-line=-projectPath test -force-d3d12"])
         self.assertIn('--command-line="-projectPath test -force-d3d12"', text)
@@ -124,6 +150,7 @@ class WorkflowChecks(unittest.TestCase):
             if action == "preflight": return self.context
             attempts.append(action)
             if len(attempts) == 1: return {"code": "editor_busy", "success": False}
+            Path(kwargs["path"]).write_bytes(b"validated capture")
             return {"success": True, "ready": True, "state": "ready", "code": "ok", "sessionId": "session", "boundaryMode": "all"}
         self.workflow.command = command
         self.workflow.console = lambda *args: {"cursor": 1, "session": "console", "entries": []}

@@ -16,6 +16,7 @@ namespace VividRP.Runtime
 
         public bool isCSMActive;
         internal bool virtualShadowMapRendered;
+        internal bool virtualShadowMapLevelHintsRendered;
         internal readonly VirtualShadowMapClipmapLayout clipmaps = new();
         public int cascadeCount;
         public float maxShadowDistance;
@@ -46,6 +47,7 @@ namespace VividRP.Runtime
             clipmaps.Reset();
             isCSMActive = false;
             virtualShadowMapRendered = false;
+            virtualShadowMapLevelHintsRendered = false;
             cascadeCount = 0;
             maxShadowDistance = 0f;
             cascadeResolution = 0;
@@ -182,10 +184,11 @@ namespace VividRP.Runtime
                 clipmaps.Update(cameraData.camera.transform.position, light.transform.rotation,
                     shadowCasterBounds, maxShadowDistance,
                     VirtualShadowMapProjectionSet.ResolveResolution(csmSettings.virtualShadowMapResolution.value, cascadeResolution),
-                    csmSettings.virtualShadowMapFirstLevel.value, normalBias,
+                    csmSettings.virtualShadowMapClipmapFirstLevel.value, normalBias,
                     EntityId.ToULong(cameraData.camera.GetEntityId()), EntityId.ToULong(light.GetEntityId()),
                     csmSettings.virtualShadowMapTransition.value,
-                    csmSettings.virtualShadowMapViewCoverage.value ? cameraData : null);
+                    cameraData, csmSettings.virtualShadowMapClipmapLastLevel.value,
+                    csmSettings.virtualShadowMapClipmapZRangeScale.value);
             }
         }
 

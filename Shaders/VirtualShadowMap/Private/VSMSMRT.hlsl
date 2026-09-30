@@ -1,8 +1,7 @@
-// Directional layered-depth-field ray tracing. This is a bounded texel-cell
-// approximation, not geometry ray tracing or a copy of Unreal's private SMRT.
-// t is world distance along the central light axis. Clipmap segments keep the
-// original light-disk direction and world origin, including its receiver bias.
-// Only the configured maximum world length starts the parallel-light tail.
+// Directional SMRT. Production uses the supplied Unreal fixed-step/depth-history
+// trace; the layered DDA below remains only as a direct diagnostic reference.
+// Production uses one normalized world ray, no per-level restart or parallel
+// tail. The caller retains Vivid receiver bias, noise and world-length controls.
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 
@@ -29,7 +28,7 @@ VSMSMRTProjection PrepareVSMSMRTProjection(VividVSMProjection projection)
 // once per 8x8 receiver group, rather than once per pixel/ray/clipmap segment.
 // Match the current CPU MaxLevels; larger diagnostic sets use the direct path.
 #if defined(VIVID_VSM_GROUP_PROJECTION_CACHE)
-#define VIVID_VSM_SMRT_CACHED_PROJECTIONS 16
+#define VIVID_VSM_SMRT_CACHED_PROJECTIONS 24
 groupshared VSMSMRTProjection g_VSMSMRTProjections[VIVID_VSM_SMRT_CACHED_PROJECTIONS];
 #endif
 
@@ -129,16 +128,53 @@ struct VSMSMRTReceiverSamples
 {
     float2 diskPhase;
     float2 receiverPhase;
+    float stepOffset;
+    float viewDistance;
+    float rayStartOffset;
     bool ready;
 };
+
+Texture2D<float> _VSMSTBNScalar;
+Texture2D<float2> _VSMSTBNVec2;
+
+uint2 VSMSMRTNoiseAddress(uint2 pixel, uint frame)
+{
+    uint3 wrapped = uint3(pixel, frame) & uint3(127, 127, 63);
+    // Unity imports PNG rows bottom-up; undo that to preserve UE atlas addresses.
+    return uint2(wrapped.x, 8191u - (wrapped.z * 128 + wrapped.y));
+}
+
+float4 VSMSMRTRandomSample(uint2 pixel, uint frame, uint ray, uint maximum)
+{
+    // UE VirtualShadowMapGetRandomSample: R2 offsets index the STBN atlas.
+    uint2 first = (uint2)(frac(float(ray) * float2(0.754877669, 0.569840296)) * 128);
+    uint2 second = (uint2)(frac(float(ray + maximum) * float2(0.754877669, 0.569840296)) * 128);
+    return float4(_VSMSTBNVec2.Load(int3(VSMSMRTNoiseAddress(pixel + first, frame), 0)),
+        _VSMSTBNVec2.Load(int3(VSMSMRTNoiseAddress(pixel + second, frame), 0)));
+}
+
+float2 VSMSMRTConcentricDisk(float2 samplePoint)
+{
+    float2 p = 2 * samplePoint - 0.99999994;
+    float2 a = abs(p);
+    float hi = max(a.x, a.y), lo = min(a.x, a.y);
+    float phi = (kPCSSTwoPi / 8) * (lo / (hi + 5.42101086243e-20) + 2 * float(a.y >= a.x));
+    float2 disk = float2(cos(phi), sin(phi));
+    return asfloat((asuint(disk) & ~0x80000000u) | (asuint(p) & 0x80000000u)) * hi;
+}
+
+uint2 VSMMortonPixel(uint2 dispatchPixel)
+{
+    uint lane = (dispatchPixel.x & 7u) + ((dispatchPixel.y & 7u) << 3u);
+    uint2 xy = uint2((lane & 1u) | ((lane >> 1u) & 2u) | ((lane >> 2u) & 4u),
+        ((lane >> 1u) & 1u) | ((lane >> 2u) & 2u) | ((lane >> 3u) & 4u));
+    return (dispatchPixel & ~7u) + xy;
+}
 
 void PrepareVSMSMRTReceiverSamples(uint2 pixel, inout VSMSMRTReceiverSamples samples)
 {
     if (samples.ready) return;
-    samples.diskPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 0u);
-    samples.receiverPhase = 0;
-    if (_VSMReceiverParameters.x >= 0.5)
-        samples.receiverPhase = VSMSMRTPhase(pixel, (uint)_CSMFrameIndex, 2u);
+    samples.stepOffset = _VSMSTBNScalar.Load(int3(VSMSMRTNoiseAddress(pixel, (uint)_CSMFrameIndex), 0));
     samples.ready = true;
 }
 
@@ -169,6 +205,7 @@ float2 VSMSMRTReceiverOffset(float2 phase, uint ray)
 // Diagnostic A/B only; zero uses the ordered search.
 int _VSMDepthSearchLinear;
 
+#if defined(VIVID_VSM_LEGACY_DEPTH_TESTS)
 bool VSMSMRTHasDepthInInterval(Texture2DArray<uint> pool, int2 texel, uint frontDepth,
     float originDepth, float depthPerWorld, float enter, float exitTime, float thickness, uint costCounter = 18u)
 {
@@ -343,7 +380,7 @@ bool TryTraceVSMSMRTRay(float3 origin, float2 texelsPerWorld, float depthPerWorl
         0, rayLength, true, thickness, budget, index, visibility);
 }
 
-bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+bool TryTraceVSMSMRTClipmapsLegacy(float3 origin, float2 texelsPerWorld, float depthPerWorld,
     int budget, int index, VSMSMRTProjection projection, out float visibility)
 {
     visibility = 1;
@@ -379,12 +416,14 @@ bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPe
 }
 
 // Standalone tracing diagnostics prepare their starting projection once too.
-bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+bool TryTraceVSMSMRTClipmapsLegacy(float3 origin, float2 texelsPerWorld, float depthPerWorld,
     int budget, int index, out float visibility)
 {
-    return TryTraceVSMSMRTClipmaps(origin, texelsPerWorld, depthPerWorld, budget, index,
+    return TryTraceVSMSMRTClipmapsLegacy(origin, texelsPerWorld, depthPerWorld, budget, index,
         GetVSMSMRTProjection(index), visibility);
 }
+
+#endif
 
 bool VSMWaveCanFinish(int rayIndex, float visibilitySum, bool rayValid, inout bool waveComplete)
 {
@@ -395,40 +434,221 @@ bool VSMWaveCanFinish(int rayIndex, float visibilitySum, bool rayValid, inout bo
     // UE directional rule with AdaptiveRayCount = 1 (zero-based ray index):
     // first-ray all-miss, or from the second ray onward all-hit so far.
     // Mixed waves keep tracing; unavailable is never a valid miss.
-    return waveComplete && unanimous;
+    return waveComplete && unanimous && (rayIndex == 0 || rayIndex >= max(1, (int)_VSMSMRTSettings.z));
+}
+
+// UE trace sample contract. Depth is always in the starting clipmap's space.
+struct VSMSMRTSample
+{
+    bool bValid;
+    float SampleDepth;
+    float ReferenceDepth;
+    float ExtrapolateSlope;
+    bool bResetExtrapolation;
+};
+
+struct VSMSMRTResult
+{
+    bool bValidHit;
+    float HitDepth;
+};
+
+struct VSMSMRTClipmapRayState
+{
+    int index;
+    VSMSMRTProjection projection;
+    float3 RayStartUVZ;
+    float3 RayStepUVZ;
+    float ExtrapolateSlope;
+};
+
+// UE SampleVirtualShadowMapClipmap: one source PT lookup, at most one
+// native destination PT lookup. No per-ray search through resident metadata.
+bool ResolveVSMSMRTMappedTexel(float2 uv, int index, out int mappedIndex,
+    out int2 physical, out float2 mappedUV)
+{
+    mappedIndex = index; physical = 0; mappedUV = uv;
+    if (!UseVirtualShadowMapPrototype(index) || !all(isfinite(uv)) || any(uv < 0) || any(uv >= 1)) return false;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint2 basePage = min((uint2)(uv * axis), axis - 1u);
+    uint entry = _VSMSamplingPageTable[((uint)index * axis + basePage.y) * axis + basePage.x];
+    VSM_COST_ADD(11, 1u);
+    if ((entry & 0x80000000u) == 0u) return false;
+    uint offset = (entry >> 20u) & 63u;
+    mappedIndex = index + (int)offset;
+    if (mappedIndex >= _VSMProjectionCount) return false;
+    int2 texel = (int2)(uv * _VSMPrototypeVirtualResolution);
+    if (offset > 0u)
+    {
+        int2 delta = _VSMClipmapPageOffsets[index * _VSMProjectionCount + mappedIndex];
+        int2 page = ((int2)basePage + delta) >> offset;
+        if (any(page < 0) || any(page >= (int)axis)) return false;
+        float scale = rcp(float(1u << offset));
+        mappedUV = uv * scale + float2(delta) * (scale / axis);
+        int2 low = page * _VSMPrototypePageSize;
+        texel = clamp((int2)(mappedUV * _VSMPrototypeVirtualResolution), low, low + _VSMPrototypePageSize - 1);
+        entry = _VSMSamplingPageTable[(mappedIndex * axis + (uint)page.y) * axis + (uint)page.x];
+        VSM_COST_ADD(11, 1u);
+        // Only THIS LOD is valid here; never follow a second alias.
+        if ((entry & 0x83f00000u) != 0x80000000u) return false;
+    }
+    uint2 physicalPage = uint2(entry & 1023u, (entry >> 10u) & 1023u);
+    physical = (int2)(physicalPage * (uint)_VSMPrototypePageSize) + texel % _VSMPrototypePageSize;
+    return true;
+}
+
+bool FindVSMSMRTMappedClipmap(float2 uv, int index, VSMSMRTProjection projection,
+    out int mappedIndex, out VSMSMRTProjection mappedProjection)
+{
+    int2 physical; float2 mappedUV;
+    bool valid = ResolveVSMSMRTMappedTexel(uv, index, mappedIndex, physical, mappedUV);
+    if (!valid) mappedIndex = index; // UE keeps requested level when the origin is unmapped.
+    mappedProjection = projection;
+    if (mappedIndex != index) mappedProjection = GetVSMSMRTProjection(mappedIndex);
+    return valid;
+}
+
+VSMSMRTSample VSMSMRTFindSample(inout VSMSMRTClipmapRayState state, float sampleTime)
+{
+    VSMSMRTSample sample = (VSMSMRTSample)0;
+    float3 uvz = state.RayStartUVZ + state.RayStepUVZ * sampleTime;
+    sample.ReferenceDepth = uvz.z;
+    sample.ExtrapolateSlope = state.ExtrapolateSlope;
+    VSM_COST_ADD(10, 1u);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugWork.x++;
+#endif
+    int level; int2 physical; float2 mappedUV;
+    sample.bValid = ResolveVSMSMRTMappedTexel(uvz.xy, state.index, level, physical, mappedUV);
+    if (sample.bValid)
+    {
+        VSMSMRTProjection destination = state.projection;
+        if (level != state.index) destination = GetVSMSMRTProjection(level);
+        // Vivid pins depth ranges independently of XY clipmap size. Preserve
+        // its exact depth transform rather than assuming UE's power-of-two Z.
+        float depthScale = destination.depthScale / state.projection.depthScale;
+        VSM_COST_ADD(17, 1u);
+        float depth = asfloat(_VSMPhysicalPagePool.Load(int4(physical, VIVID_VSM_FINAL_DEPTH_SLICE, 0)));
+        sample.SampleDepth = (depth - destination.translation.z) / depthScale + state.projection.translation.z;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugWork.y++;
+        g_VSMDebugLevels.y = level;
+#endif
+    }
+    VSM_COST_ADD(28, sample.bValid ? 0u : 1u);
+    return sample;
+}
+
+// UE selects the slope permutation when ExtrapolateMaxSlope > 0.
+#ifndef VIVID_SMRT_EXTRAPOLATE_SLOPE
+#define VIVID_SMRT_EXTRAPOLATE_SLOPE 1
+#endif
+#define VIVID_SMRT_TEMPLATE_RAY_STRUCT VSMSMRTClipmapRayState
+#include "VSMSMRTTraceTemplate.hlsl"
+#undef VIVID_SMRT_TEMPLATE_RAY_STRUCT
+
+bool TraceVSMSMRTClipmapsWorldLength(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    int budget, int index, VSMSMRTProjection projection, float stepOffset, float worldLength, out float visibility)
+{
+    VSMSMRTClipmapRayState state;
+    state.index = index;
+    state.projection = projection;
+    state.RayStartUVZ = origin;
+    // The caller supplies lateral slopes relative to the central light axis.
+    // UE traces a normalized light ray; z and xy must share the same length.
+    float2 lateral = texelsPerWorld * projection.texelSize;
+    float rayLength = worldLength * rsqrt(1.0 + dot(lateral, lateral));
+    state.RayStepUVZ = float3(texelsPerWorld / _VSMPrototypeVirtualResolution, depthPerWorld) * rayLength;
+    state.ExtrapolateSlope = abs(_VSMSMRTSettings.x * projection.depthScale);
+    VSM_COST_ADD(9, 1u);
+    VSMSMRTResult result = VSMSMRTRayCast(state, budget, stepOffset);
+    visibility = result.bValidHit ? 0.0 : 1.0;
+    VSM_COST_ADD(15, result.bValidHit ? 1u : 0u);
+    // UE skips invalid samples, and reports an all-invalid ray as a miss.
+    // This intentionally replaces the former complete-footprint/PCF policy.
+    return true;
+}
+
+bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    int budget, int index, VSMSMRTProjection projection, float stepOffset, out float visibility)
+{
+    return TraceVSMSMRTClipmapsWorldLength(origin, texelsPerWorld, depthPerWorld, budget,
+        index, projection, stepOffset, _VSMSMRTParameters.z, visibility);
+}
+
+bool TryTraceVSMSMRTClipmaps(float3 origin, float2 texelsPerWorld, float depthPerWorld,
+    int budget, int index, out float visibility)
+{
+    return TryTraceVSMSMRTClipmaps(origin, texelsPerWorld, depthPerWorld, budget, index,
+        GetVSMSMRTProjection(index), 0.5, visibility);
+}
+
+float VSMSMRTTexelDitherScale(float distance, float texelSize)
+{
+    return (0.5 * _VSMSMRTSettings.y) * distance * exp2(_VSMReceiverQuality.y)
+        / (_VSMPrototypeVirtualResolution * (texelSize * _VSMPrototypeVirtualResolution / 8.0));
+}
+
+float3 InitializeUEVSMRayOrigin(float3 coord, float3 directionUVZ, float rayStartOffset,
+    float depthScale, float2 depthSlopeUV, float2 texelOffset)
+{
+    coord += directionUVZ * rayStartOffset;
+    coord.xy += texelOffset;
+    coord.z += max(0.0, 2.0 * max(0.0, dot(clamp(depthSlopeUV, -0.05, 0.05), texelOffset))
+        - abs(rayStartOffset * depthScale));
+    return coord;
 }
 
 bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool adaptive,
     VSMSMRTProjection projection, inout VSMSMRTReceiverSamples samples, out float shadow)
 {
     shadow = 1;
-    bool footprintValid = HasVSMSMRTFootprint(coord.xy, index, projection);
-#if defined(VIVID_VSM_ADAPTIVE_RAYS)
-    bool waveComplete = false;
-    [branch]
-    if (adaptive) waveComplete = WaveActiveAllTrue(footprintValid);
-#endif
-    if (!footprintValid)
+    int mappedIndex;
+    VSMSMRTProjection mappedProjection;
+    // Match GetMappedClipmap: choose the starting mapped level at the receiver,
+    // not by requiring the union of every ray's complete footprint to be ready.
+    // UE keeps the requested starting level when the origin itself is unmapped;
+    // later ray points may still find valid pages. Only a mapped parent promotes it.
+    FindVSMSMRTMappedClipmap(coord.xy, index, projection, mappedIndex, mappedProjection);
+    coord.z += bias.z;
+    float3 scale = VSMSMRTProjectionScale(projection, mappedProjection);
+    float2 mappedUV = coord.xy;
+    if (mappedIndex != index)
     {
-        VSM_COST_ADD(7, 1u);
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-        g_VSMDebugSMRT.z++;
-#endif
-        return false;
+        int2 delta = _VSMClipmapPageOffsets[index * _VSMProjectionCount + mappedIndex];
+        mappedUV = coord.xy * scale.xy + float2(delta) * (scale.xy / _VSMPrototypePagesPerAxis);
     }
+    coord = float3(mappedUV, (coord.z - projection.translation.z) * scale.z + mappedProjection.translation.z);
+    bias.xy *= scale.z / scale.x;
+    index = mappedIndex;
+    projection = mappedProjection;
     float depthScale = projection.depthScale;
 #if !UNITY_REVERSED_Z
     depthScale = -depthScale;
 #endif
-    // Apply the receiver bias once. PCF's receiver-plane gradient is not the
-    // depth trajectory of a shadow ray leaving that surface.
-    coord.z += bias.z;
+    // UE default TexelDitherScaleDirectional=2. Half-width=2^(Level+2),
+    // so 2^Level = texelSize * resolution / 8. The world-space dither is
+    // continuous across both selected-level and mapped-parent boundaries.
+    float ditherScale = VSMSMRTTexelDitherScale(samples.viewDistance, projection.texelSize);
+    VividVSMProjection fullProjection = _VSMProjections[index];
+    float3 axisX = normalize(fullProjection.worldToShadow[0].xyz);
+    float3 axisY = normalize(fullProjection.worldToShadow[1].xyz);
+    float3 lightDirection = normalize(fullProjection.worldToShadow[2].xyz);
+#if !UNITY_REVERSED_Z
+    lightDirection = -lightDirection;
+#endif
+    // UE GetRandomDirectionalLightRayDir deliberately does not normalize dPdu.
+    float3 dPdu = cross(lightDirection, abs(lightDirection.x) > 1e-6 ? float3(1, 0, 0) : float3(0, 1, 0));
+    float3 dPdv = cross(dPdu, lightDirection);
+    float4 diskBasis = float4(dot(axisX, dPdu), dot(axisX, dPdv), dot(axisY, dPdu), dot(axisY, dPdv));
     float slope = _VSMSMRTParameters.w / projection.texelSize;
-    int maximum = clamp((int)_VSMSMRTParameters.x, 4, 8);
-    int steps = clamp((int)_VSMSMRTParameters.y, 4, 8);
+    int maximum = clamp((int)_VSMSMRTParameters.x, 1, 16);
+    int steps = clamp((int)_VSMSMRTParameters.y, 1, 32);
     PrepareVSMSMRTReceiverSamples(pixel, samples);
-    float2 originalTexel = coord.xy * _VSMPrototypeVirtualResolution;
     float sum = 0;
+#if defined(VIVID_VSM_ADAPTIVE_RAYS)
+    bool waveComplete = true;
+#endif
     [loop]
     for (int ray = 0; ray < maximum; ray++)
     {
@@ -436,33 +656,31 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool ad
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
         g_VSMDebugSMRT.x++;
 #endif
-        float2 disk = VSMSMRTDiskSample(samples.diskPhase, (uint)ray);
+        float4 randomSample = VSMSMRTRandomSample(pixel, (uint)_CSMFrameIndex, (uint)ray, (uint)maximum);
+        float2 disk = VSMSMRTConcentricDisk(randomSample.xy);
+        disk = float2(dot(diskBasis.xy, disk), dot(diskBasis.zw, disk));
         float3 origin = coord;
-        if (_VSMReceiverParameters.x >= 0.5)
         {
-            float2 jitter = VSMSMRTReceiverOffset(samples.receiverPhase, (uint)ray);
-            float2 sampleTexel = floor(originalTexel + jitter) + 0.5;
-            origin.xy = sampleTexel / _VSMPrototypeVirtualResolution;
-            // Reconstruct the new origin on the receiver plane, once. The ray
-            // thereafter follows its light direction, not this depth gradient.
-            origin.z += dot(bias.xy, sampleTexel - originalTexel);
+            float2 lateral = disk * _VSMSMRTParameters.w;
+            float3 rayDirectionUVZ = float3(disk * slope / _VSMPrototypeVirtualResolution, depthScale)
+                * rsqrt(1.0 + dot(lateral, lateral));
+            float2 offsetUV = (randomSample.zw - 0.5) * ditherScale;
+            // Do not apply the part of slope bias already covered by screen ray.
+            origin = InitializeUEVSMRayOrigin(coord, rayDirectionUVZ, samples.rayStartOffset,
+                depthScale, bias.xy * _VSMPrototypeVirtualResolution, offsetUV);
         }
         float visibility;
-        bool valid = TryTraceVSMSMRTClipmaps(origin, disk * slope, depthScale, steps, index, projection, visibility);
-        VSM_COST_ADD(13, valid ? 0u : 1u);
+        bool valid = TraceVSMSMRTClipmapsWorldLength(origin, disk * slope, depthScale, steps,
+            index, projection, samples.stepOffset, _VSMSMRTParameters.z * samples.viewDistance, visibility);
         sum += visibility;
 #if defined(VIVID_VSM_ADAPTIVE_RAYS)
         [branch]
-        if (adaptive)
+        if (adaptive && VSMWaveCanFinish(ray, sum, valid, waveComplete))
         {
-            if (VSMWaveCanFinish(ray, sum, valid, waveComplete))
-            {
-                shadow = sum / (ray + 1);
-                return true;
-            }
+            shadow = sum / (ray + 1);
+            return true;
         }
 #endif
-        if (!valid) return false;
     }
     shadow = sum / maximum;
     return true;
@@ -490,6 +708,7 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel,
 bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool adaptive, out float shadow)
 {
     VSMSMRTReceiverSamples samples = (VSMSMRTReceiverSamples)0;
+    samples.viewDistance = 1; // Standalone diagnostics interpret length scale at unit view distance.
     return TryFilterVSMSMRT(coord, bias, index, pixel, adaptive,
         GetVSMSMRTProjection(index), samples, shadow);
 }
@@ -497,6 +716,7 @@ bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, bool ad
 bool TryFilterVSMSMRT(float3 coord, float4 bias, int index, uint2 pixel, out float shadow)
 {
     VSMSMRTReceiverSamples samples = (VSMSMRTReceiverSamples)0;
+    samples.viewDistance = 1; // Standalone diagnostics interpret length scale at unit view distance.
     return TryFilterVSMSMRT(coord, bias, index, pixel,
         GetVSMSMRTProjection(index), samples, shadow);
 }

@@ -20,47 +20,61 @@ namespace VividRP.Runtime
         public BoolParameter enableCSM = new(false);
         [Tooltip("Experimental directional-light virtual shadow map. Unity Renderer casters require a VSM-compatible ShadowCaster pass; incompatible content and unsupported platforms fail closed to CSM.")]
         public BoolParameter enableVirtualShadowMapPrototype = new(false);
-        [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to 128 texels (clipmaps use at least 512). Does not resize the CSM atlas or physical page budget.")]
+        [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to a power of two (at least 512). Does not resize the CSM atlas or physical page budget.")]
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]
         public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, 1024);
-        [Tooltip("Maximum physical pages rebuilt per camera render, coarse levels first. Each selected page completes all 16 depth layers in both dirty pools. Deferred fine pages use complete coarser coverage. 0 rebuilds all dirty pages; this bounds page count, not GPU milliseconds.")]
-        public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(64, 0, 1024);
-        [Tooltip("Target submitted raster vertices per camera render. Uses completed GPU work feedback to reduce the finite Page Update Budget, with slow detail recovery. 0 disables feedback; Page Update Budget 0 remains unlimited. This is a geometry-work estimate, not a GPU time or fragment/UAV limit.")]
+        // Retain serialized legacy fields; UE allocation never applies these quotas.
+        [HideInInspector]
+        public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(0, 0, 1024);
+        [HideInInspector]
         public ClampedIntParameter virtualShadowMapRasterVertexBudget = new(0, 0, 16777216);
-        [Tooltip("Base-2 exponent of the finest directional clipmap radius in world units. Coarser levels double in size until Max Distance is covered.")]
-        public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
-        [Tooltip("Shift intermediate clipmaps toward the non-jittered camera frustum while preserving page alignment and nested coverage. The nearest and farthest levels remain camera-centred.")]
-        public BoolParameter virtualShadowMapViewCoverage = new(false);
-        [Tooltip("Select receiver levels by screen-space texel density within the existing stable projections. Off preserves P4 coverage selection. Does not resize projections, physical pools or invalidate cached caster depth.")]
+        // Retain old metre-exponent / view-focus fields without reinterpreting saved assets.
+        [HideInInspector] public ClampedIntParameter virtualShadowMapFirstLevel = new(2, -4, 12);
+        [HideInInspector] public BoolParameter virtualShadowMapViewCoverage = new(false);
+        [Tooltip("UE absolute first clipmap level (centimetres). Level 6 has a 1.28 m coverage radius and 2.56 m projection half-width.")]
+        public ClampedIntParameter virtualShadowMapClipmapFirstLevel = new(6, -1, 22);
+        [Tooltip("UE absolute last clipmap level, independent of Max Shadow Distance. Default 22; each additional level doubles the extent.")]
+        public ClampedIntParameter virtualShadowMapClipmapLastLevel = new(22, -1, 22);
+        [Tooltip("UE per-level Z half-range divided by coverage radius. Depth is retained until the camera crosses the 90 percent cache guard.")]
+        public MinFloatParameter virtualShadowMapClipmapZRangeScale = new(1000, 1.2f);
+        [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public BoolParameter virtualShadowMapScreenDensity = new(false);
-        [Tooltip("Adapt receiver density to the physical page budget. Reduces detail under primary/parent/transition page pressure, then restores it slowly after sustained headroom. Requires Screen Density; preserves all hidden depth layers.")]
+        [Tooltip("UE pool-pressure LOD bias: target 85% capacity, fast reduction, recovery after 10 frames below the threshold, maximum +2 levels. Sampling keeps its desired level and falls back to resident parents.")]
         public BoolParameter virtualShadowMapPagePressure = new(true);
-        [Tooltip("Target screen pixels per virtual texel before LOD bias. Smaller requests finer levels, limited by finest-level coverage and page residency. Uses geometric receiver-plane axis footprints, not the normal map.")]
+        [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapTargetTexelPixels = new(1, 0.25f, 8);
-        [Tooltip("Receiver quality only: -1 halves the target texel footprint (finer); +1 doubles it (coarser). Does not change First Level, virtual resolution or the page budget. Requires Screen Density.")]
+        [Tooltip("UE distance-based clipmap LOD bias. -1 requests finer levels; +1 requests coarser levels. Includes horizontal viewport/projection normalization; total bias is clamped to zero to preserve coverage. Does not change resident projection sizes.")]
         public ClampedFloatParameter virtualShadowMapResolutionLodBias = new(0, -4, 4);
-        [Tooltip("Enable VSM filtering, using two-texel-wide area PCF with up to nine comparisons by default. With SMRT, integrate this footprint at ray origins to preserve contact anti-aliasing. Off keeps the single-point hard-shadow reference; missing filter footprints fall back as a whole to a coarser level.")]
+        [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
         public BoolParameter virtualShadowMapPCF = new(false);
-        [Tooltip("Experimental nine-comparison stratified disk filter with frame-varying samples. Requires VSM PCF; radius is one virtual texel. Intended for comparison with area PCF under temporal anti-aliasing.")]
+        [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
         public BoolParameter virtualShadowMapStochasticFiltering = new(false);
-        [Tooltip("Experimental directional SMRT contact-hardening soft shadows. Uses the light's Angular Diameter (clamped to 10 degrees for SMRT); zero angle preserves the PCF/hard reference. Incomplete footprints retry coarser levels, then the reference filter.")]
+        [Tooltip("Experimental directional SMRT contact-hardening soft shadows. Uses sin(half Angular Diameter), as UE's directional SourceRadius; zero angle uses the UE point comparison. Uses UE-style fixed-step single-layer tracing and depth-history gap filling. Missing samples try coarser pages, then are skipped; thin or hidden occluders may be missed.")]
         public BoolParameter virtualShadowMapSMRT = new(false);
-        [Tooltip("Distribute SMRT samples across TSR jitter cycles to reduce persistent shadow grain. May slightly increase temporal noise. Has no effect without active TSR.")]
+        [HideInInspector, Tooltip("Legacy value. UE STBN uses the frame index directly.")]
         public BoolParameter virtualShadowMapSMRTJointSampling = new(false);
-        [Tooltip("Accumulate a short, depth/normal-validated shadow history with current-frame clamping. Requires Screen Space Denoise and SMRT; independent of camera anti-aliasing.")]
-        public BoolParameter virtualShadowMapSMRTTemporalDenoise = new(true);
-        [Tooltip("Use current-frame wave votes to stop after one ray in uniformly lit regions or at least two rays in uniformly shadowed regions. Mixed or unavailable waves keep the full budget. Independent of temporal denoising; may change penumbra noise.")]
+        [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
+        public BoolParameter virtualShadowMapSMRTTemporalDenoise = new(false);
+        [Tooltip("Use current-frame wave votes to stop after one ray in uniformly lit regions or at least two rays in uniformly shadowed regions. Mixed waves keep the full budget. Invalid ray samples are skipped. Independent of temporal denoising; may change penumbra noise.")]
         public BoolParameter virtualShadowMapSMRTAdaptiveRays = new(true);
         [Tooltip("Maximum rays per shadow estimate. Adaptive Rays can stop uniformly lit/shadowed waves early; disabling it uses the full count.")]
-        public ClampedIntParameter virtualShadowMapSMRTRayCount = new(4, 4, 8);
-        [Tooltip("Depth-cell budget per intermediate clipmap segment. Longer rays continue through coarser levels along the same direction. The coarsest map visits enough cells to finish the configured world length, so total reads can exceed this value. More samples retain fine detail farther from the receiver.")]
-        public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 4, 8);
-        [Tooltip("Maximum distance in world units over which rays diverge. Fine-to-coarse clipmap continuation preserves this distance independently of texel size and segment budget. Beyond this explicit limit rays continue parallel to the light; incomplete map coverage or residency retries the reference filter.")]
+        public ClampedIntParameter virtualShadowMapSMRTRayCount = new(7, 0, 16);
+        [Tooltip("UE fixed-step count for the whole ray. Traces from far to near with squared spacing, plus one sample at the receiver (at most N+1 positions). Coarse fallback can probe multiple page tables at each position.")]
+        public ClampedIntParameter virtualShadowMapSMRTSamplesPerRay = new(8, 1, 32);
+        [HideInInspector, Tooltip("Legacy world-length value. Replaced by SMRT Ray Length Scale times view distance.")]
         public ClampedFloatParameter virtualShadowMapSMRTMaxRayLength = new(10, 0.1f, 100);
-        [Tooltip("Width of transitions across fractional LOD steps with Screen Density, or selection radii with legacy selection. 0 disables this component of blending.")]
+        [Tooltip("UE directional ray length = this scale times distance from the view origin.")]
+        public MinFloatParameter virtualShadowMapSMRTRayLengthScale = new(1.5f, 0);
+        [Tooltip("UE maximum depth-history extrapolation slope. Zero selects the no-slope shader permutation.")]
+        public MinFloatParameter virtualShadowMapSMRTExtrapolateMaxSlope = new(5, 0);
+        [Tooltip("UE directional texel dither scale. Zero disables ray-origin dither.")]
+        public MinFloatParameter virtualShadowMapSMRTTexelDitherScale = new(2, 0);
+        [Tooltip("UE zero-based ray index at which all-hit waves may stop. First-ray all-miss exit is always allowed when adaptive rays are enabled.")]
+        public ClampedIntParameter virtualShadowMapSMRTAdaptiveRayCount = new(1, 1, 16);
+        [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapTransition = new(0.2f, 0f, 0.5f);
-        [Tooltip("Width of the projection-edge transition with Screen Density. When not overridden, follows the LOD transition; smaller values retain fine detail closer to the coverage edge. 0 disables this component of blending.")]
+        [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapCoverageTransition = new(0.2f, 0f, 0.5f);
         public ClampedIntParameter cascadeCount = new(DefaultCascadeCount, 1, 4);
         public MinFloatParameter maxShadowDistance = new(DefaultMaxShadowDistance, 0.01f);

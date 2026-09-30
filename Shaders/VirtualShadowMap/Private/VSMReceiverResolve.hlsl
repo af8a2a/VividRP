@@ -1,3 +1,65 @@
+// UE NormalBias=0.5 / 1000; ScreenRayLength=0.015. CPU folds in camera FOV.
+// x: normal scale, y/z: screen length = eye depth * y + z, w: orthographic.
+float4 _VSMReceiverOffsetParameters;
+float4 _VSMReceiverViewForward;
+float4x4 _VSMReceiverViewProjection;
+
+float VSMReceiverNormalBiasLength(float3 viewVector, float eyeDepth)
+{
+    float distance = _VSMReceiverOffsetParameters.w != 0
+        ? dot(viewVector, viewVector) / max(eyeDepth, 1e-8) : length(viewVector);
+    // UE's minimum 0.02 cm expressed in Unity metres.
+    return max(0.0002, _VSMReceiverOffsetParameters.x * distance);
+}
+
+float2 ComputeUEVSMDepthSlopeUV(VividVSMProjection projection, float3 normal)
+{
+    float3 x = projection.worldToShadow[0].xyz;
+    float3 y = projection.worldToShadow[1].xyz;
+    float3 z = projection.worldToShadow[2].xyz;
+    // Inverse transpose of the orthogonal directional shadow projection.
+    float3 plane = float3(dot(normal, x) / dot(x, x), dot(normal, y) / dot(y, y),
+        dot(normal, z) / dot(z, z));
+    float denominator = plane.z < 0 ? min(plane.z, -1e-20) : max(plane.z, 1e-20);
+    return -plane.xy / denominator;
+}
+
+float LoadVSMReceiverScreenDepth(float2 uv)
+{
+    int2 size = int2(_CSMOutputWidth, _CSMOutputHeight);
+    return _DepthTexture.Load(int3(clamp((int2)floor(uv * size), 0, size - 1), 0));
+}
+
+float VSMReceiverScreenRayCast(float3 position, float3 direction, float rayLength, float noise)
+{
+    float4 startClip = mul(_VSMReceiverViewProjection, float4(position, 1));
+    float4 endClip = startClip + mul(_VSMReceiverViewProjection, float4(direction * rayLength, 0));
+    float3 start = startClip.xyz / startClip.w;
+    float3 step = endClip.xyz / endClip.w - start;
+    start.xy = start.xy * 0.5 + 0.5;
+    step.xy *= 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+    start.y = 1.0 - start.y;
+    step.y = -step.y;
+#endif
+    float startDepth = LoadVSMReceiverScreenDepth(start.xy);
+    float time = (noise - 0.5) * 0.25 + 0.25;
+    [unroll] for (uint i = 0; i < 4u; i++)
+    {
+        float3 sample = start + step * time;
+        float depth = LoadVSMReceiverScreenDepth(sample.xy);
+#if UNITY_REVERSED_Z
+        bool behind = sample.z < depth;
+#else
+        bool behind = sample.z > depth;
+#endif
+        if (depth != startDepth && behind)
+            return rayLength * max(0.0, time - 1.5 * 0.25);
+        time += 0.25;
+    }
+    return rayLength;
+}
+
 float4 BuildVSMReceiverBias(VividVSMProjection projection, float3 normalWS)
 {
     float3 rowX = projection.worldToShadow[0].xyz;
@@ -30,8 +92,7 @@ float4 BuildVSMReceiverBias(VividVSMProjection projection, float3 normalWS)
     return float4(gradient, comparisonBias, normalOffset);
 }
 
-// Prepared for one candidate level. Density selection hands its accepted
-// projection to resolve so normal bias and world-to-shadow are not repeated.
+// Prepared for one selected level (or one hard/PCF fallback candidate).
 struct VSMReceiverProjection
 {
     VividVSMProjection projection;
@@ -237,86 +298,102 @@ bool TryEvaluateVSMProjection(VSMReceiverProjection prepared, int index,
 #include "VSMReceiverQuality.hlsl"
 #include "VSMPageMarking.hlsl"
 
+// UE SampleVirtualShadowMapDirectional: one mapped point comparison, including
+// its coarse page and optimal slope bias. No PCF footprint or receiver-mask gate.
+float SampleUEVSMDirectional(float3 positionWS, float3 normalWS, int index, float rayStartOffset, out bool unavailable)
+{
+    VividVSMProjection source = _VSMProjections[index];
+    float3 coord = mul(source.worldToShadow, float4(positionWS, 1)).xyz;
+    int level; int2 physical; float2 mappedUV;
+    unavailable = !ResolveVSMSMRTMappedTexel(coord.xy, index, level, physical, mappedUV);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugWork.xz++;
+    if (unavailable) g_VSMDebugMissing |= 1u;
+#endif
+    if (unavailable) return 1.0;
+    VividVSMProjection destination = _VSMProjections[level];
+    float3 x = destination.worldToShadow[0].xyz;
+    float3 y = destination.worldToShadow[1].xyz;
+    float3 z = destination.worldToShadow[2].xyz;
+    float3 plane = float3(dot(normalWS, x) / dot(x, x),
+        dot(normalWS, y) / dot(y, y), dot(normalWS, z) / dot(z, z));
+    float denominator = plane.z < 0 ? min(plane.z, -1e-8) : max(plane.z, 1e-8);
+    float2 slopeUV = -plane.xy / denominator;
+    // The mapped texel was clamped to the integer coarse page. Recover that
+    // exact local center instead of re-rounding the floating address.
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    int2 page = (int2)(coord.xy * axis);
+    if (level != index)
+        page = (page + _VSMClipmapPageOffsets[index * _VSMProjectionCount + level]) >> (level - index);
+    int2 texel = page * _VSMPrototypePageSize + physical % _VSMPrototypePageSize;
+    float2 offsetUV = (float2(texel) + 0.5) / _VSMPrototypeVirtualResolution - mappedUV;
+    // UE's 100 cm clamp is one metre in Vivid world units. Independent clipmap
+    // Z ranges require the actual depth ratio, rather than exp2(LODOffset).
+    float destinationScale = length(z), sourceScale = length(source.worldToShadow[2].xyz);
+    float depthScale = destinationScale / sourceScale;
+    float slopeBias = min(2.0 * max(0.0, dot(slopeUV, offsetUV)), destinationScale) / depthScale;
+    VSM_COST_ADD(17, 1u);
+    float depth = asfloat(_VSMPhysicalPagePool.Load(int4(physical, VIVID_VSM_FINAL_DEPTH_SLICE, 0)));
+    depth = (depth - destination.worldToShadow._m23) / depthScale + source.worldToShadow._m23;
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugLevels.y = level;
+    g_VSMDebugWork.y++;
+#endif
+    return depth - slopeBias - max(rayStartOffset, 0.0) * sourceScale > coord.z ? 0.0 : 1.0;
+}
+
+float SampleUEVSMDirectional(float3 positionWS, float3 normalWS, int index, out bool unavailable)
+{
+    return SampleUEVSMDirectional(positionWS, normalWS, index, 0.0, unavailable);
+}
+
 float ResolveVSMReceiverMode(float3 positionWS, float3 normalWS, uint2 pixel, bool smrt, out bool unavailable)
 {
     unavailable = false;
-    bool densityPolicy = _VSMReceiverQuality.x > 0;
-    float densityBlend = 0;
-    int firstLevel = 0;
+    if (_VSMPrototypeEnabled == 0 || _VSMProjectionCount <= 0) return 1.0;
     float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-8));
-    VSMReceiverProjection selected = (VSMReceiverProjection)0;
     VSMSMRTReceiverSamples samples = (VSMSMRTReceiverSamples)0;
-    [branch]
-    if (densityPolicy)
-        firstLevel = SelectVSMDensityLevelPrepared(positionWS, normal, smrt, densityBlend, selected);
-    if (firstLevel < 0) { unavailable = true; return 1.0; }
-    for (int index = firstLevel; index < _VSMProjectionCount; index++)
+    // Apply the common receiver offset before GetMappedClipmap, as UE's caller
+    // does. The screen ray only chooses a distance; it never returns a shadow.
+    if (_VSMReceiverOffsetParameters.x > 0)
+    {
+        float eyeDepth = dot(_VSMReceiverViewForward, float4(positionWS, 1));
+        float rayLength = eyeDepth * _VSMReceiverOffsetParameters.y + _VSMReceiverOffsetParameters.z;
+        positionWS += normal * VSMReceiverNormalBiasLength(
+            positionWS - _VSMProjections[0].selectionSphere.xyz, eyeDepth);
+        if (rayLength > 0)
+        {
+            PrepareVSMSMRTReceiverSamples(pixel, samples);
+            float3 light = normalize(_VSMProjections[0].worldToShadow[2].xyz);
+            samples.rayStartOffset = VSMReceiverScreenRayCast(positionWS, light, rayLength, samples.stepOffset);
+        }
+    }
+    int index = SelectVSMClipmapLevel(positionWS, false);
+    // UE TraceDirectional returns valid fully lit outside the allocated levels.
+    if (index < 0 || _VSMPrototypeEnabled == 0) return 1.0;
+    samples.viewDistance = length(positionWS - _VSMProjections[0].selectionSphere.xyz);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugLevels.x = index;
+    g_VSMDebugBlend = 0;
+#endif
+    if (smrt)
     {
         VividVSMProjection projection = _VSMProjections[index];
-        float2 relative = mul(projection.worldToShadow,
-            float4(positionWS - projection.selectionSphere.xyz, 0.0)).xy * 2;
-        float edge = max(abs(relative.x), abs(relative.y));
-        if (!densityPolicy && edge >= 0.5)
-            continue;
-        float maxDistance = projection.parameters.w;
-        float distance = length(positionWS - projection.selectionSphere.xyz);
-        if (distance >= maxDistance)
-            return 1.0;
-        float border = projection.parameters.z;
-        float blend = densityPolicy ? densityBlend : VSMTransitionWeight(edge, border);
+        float3 coord = mul(projection.worldToShadow, float4(positionWS, 1)).xyz;
+        // Keep slope unclamped until the starting mapped clipmap is known.
+        // No CSM constant bias, residual-slope bias or texel-scaled normal offset.
+        float4 bias = float4(ComputeUEVSMDepthSlopeUV(projection, normal)
+            / _VSMPrototypeVirtualResolution, 0, 0);
+        float shadow;
+        VSM_COST_ADD(1, 1u);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
-        g_VSMDebugLevels.x = index;
-        g_VSMDebugBlend = blend;
+        g_VSMDebugWork.z++;
 #endif
-        float shadow = 1.0;
-        float transition = 1.0;
-        int sampledLevel = -1;
-        bool hasTransition = false;
-        for (int level = index; level < _VSMProjectionCount; level++)
-        {
-            bool needSample = sampledLevel < 0 || (sampledLevel == index && blend > 0.0 && !hasTransition);
-            float sampleShadow;
-            VSMReceiverProjection prepared = selected;
-            // Only prepare projections that still need a depth estimate.
-            if (needSample)
-            {
-                if (!densityPolicy || level != firstLevel)
-                    prepared = PrepareVSMReceiverProjection(positionWS, normal, level);
-            }
-            bool sampled = TryEvaluateVSMProjection(prepared, level, needSample, pixel,
-                smrt, samples, sampleShadow);
-            VSM_COST_ADD(2, smrt && needSample && sampledLevel < 0 && level > index ? 1u : 0u);
-            VSM_COST_ADD(3, smrt && needSample && sampledLevel >= 0 ? 1u : 0u);
-            if (!sampled) continue;
-            if (sampledLevel < 0)
-            {
-                sampledLevel = level;
-                shadow = sampleShadow;
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-                g_VSMDebugLevels.y = level;
-#endif
-            }
-            else
-            {
-                transition = sampleShadow;
-                hasTransition = true;
-                VSM_COST_ADD(25, smrt ? 1u : 0u);
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-                g_VSMDebugLevels.z = level;
-#endif
-            }
-        }
-        // Missing transition coverage must not brighten a valid primary sample.
-        // If the primary already fell back, it must not be blended a second time.
-        if (sampledLevel == index && hasTransition)
-            shadow = lerp(shadow, transition, blend);
-        unavailable = sampledLevel < 0;
-        float fade = saturate((maxDistance - distance) / max(maxDistance * 0.2, 1e-5));
-        return lerp(1.0, shadow, fade);
+        TryFilterVSMSMRT(coord, bias, index, pixel,
+            GetVSMSMRTProjection(index), samples, shadow);
+        return shadow;
     }
-    // No complete level covers the receiver: explicit terminal lit policy.
-    unavailable = true;
-    return 1.0;
+    return SampleUEVSMDirectional(positionWS, normal, index, samples.rayStartOffset, unavailable);
 }
 
 float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)
@@ -324,16 +401,6 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)
     bool smrt = UseVSMSMRT();
     bool unavailable;
     float shadow = ResolveVSMReceiverMode(positionWS, normalWS, pixel, smrt, unavailable);
-    if (smrt && unavailable)
-    {
-        VSM_COST_ADD(22, 1u);
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-        g_VSMDebugSMRT.w++;
-#endif
-        // Retry the complete existing PCF hierarchy only after all soft estimates
-        // failed. Never clamp a valid penumbra against a hard central reference.
-        shadow = ResolveVSMReceiverMode(positionWS, normalWS, pixel, false, unavailable);
-    }
     VSM_COST_ADD(24, unavailable ? 1u : 0u);
     return shadow;
 }
@@ -341,6 +408,26 @@ float ResolveVSMReceiver(float3 positionWS, float3 normalWS, uint2 pixel)
 float ResolveVSMReceiver(float3 positionWS, float3 normalWS)
 {
     return ResolveVSMReceiver(positionWS, normalWS, uint2(0, 0));
+}
+
+// Dedicated full-screen VSM path. The caller selects this entry only when VSM
+// supplies the output; request-only rendering keeps the generic CSM entry.
+void ResolveVSMScreenPixel(uint3 id)
+{
+    id.xy = VSMMortonPixel(id.xy);
+    // Every lane must reach the projection-cache barrier, including edge/sky lanes.
+    InitializeVSMSMRTProjections((id.x & 7u) + ((id.y & 7u) << 3u));
+    if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
+    float depth = _DepthTexture.Load(int3(id.xy, 0));
+    float shadow = 1.0;
+    if (!IsSkyPixel(depth))
+    {
+        float3 position = ReconstructWorldPosition(id.xy, depth);
+        float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(id.xy, 0)).xy);
+        // Single UE trace; page misses are handled inside each ray sample.
+        shadow = ResolveVSMReceiver(position, normal, id.xy);
+    }
+    _DirectionalShadowTexture[id.xy] = shadow;
 }
 
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
@@ -356,6 +443,7 @@ Texture2D<float> _VSMSMRTCostReference;
 [numthreads(8, 8, 1)]
 void VSMReceiverCost(uint3 id : SV_DispatchThreadID)
 {
+    id.xy = VSMMortonPixel(id.xy);
     InitializeVSMSMRTProjections((id.x & 7u) + ((id.y & 7u) << 3u));
     if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
     [unroll] for (uint c = 0u; c < 8u; c++) g_VSMSMRTCost[c] = 0u;
@@ -366,7 +454,6 @@ void VSMReceiverCost(uint3 id : SV_DispatchThreadID)
         VSM_COST_ADD(0, 1u);
         float3 position = ReconstructWorldPosition(id.xy, depth);
         float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(id.xy, 0)).xy);
-        normal = ReconstructVSMReceiverNormal(id.xy, depth, position, normal);
         shadow = ResolveVSMReceiver(position, normal, id.xy);
     }
     float reference = _VSMSMRTCostReference.Load(int3(id.xy, 0));

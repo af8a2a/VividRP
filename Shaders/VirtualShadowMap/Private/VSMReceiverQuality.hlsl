@@ -1,6 +1,5 @@
 // Receiver policy only. Stable power-of-two projections and page identities do
-// not depend on these uniforms. Resolve, feedback and debug use this same choice.
-float4x4 _VSMReceiverViewProjection;
+// not depend on these uniforms. Global pressure bias applies to requests only.
 
 // Project virtual texel axes onto the geometric receiver plane, then the screen.
 // These are local axis lengths, not a singular-value bound in every direction.
@@ -24,69 +23,53 @@ float2 VSMReceiverTexelFootprint(float3 positionWS, float3 normalWS, int level)
                   length((deltaY.xy * center.w - center.xy * deltaY.w) * scale));
 }
 
+// UE uses floor(log2(distance) + ResolutionLodBias), with no upper clamp.
+// Our stored radius is projection half-width: UE HalfLevelDim = 2^(Level+2).
+float VSMBaseAbsoluteClipmapLevel()
+{
+    return round(log2(max(-_VSMProjections[0].selectionSphere.w * 100.0, 1e-20))) - 2.0;
+}
+
+int VSMClipmapLevelFromDistance(float distance, float firstAbsoluteLevel, float bias, int count)
+{
+    int index = max(0, (int)floor(log2(max(distance, 1e-20)) + bias) - (int)firstAbsoluteLevel);
+    return index < count ? index : -1;
+}
+
+int SelectVSMClipmapLevel(float3 positionWS, bool marking)
+{
+    if (_VSMProjectionCount <= 0) return -1;
+    // UE absolute levels are centimetre exponents; position buffers use metres.
+    float distance = length(positionWS - _VSMProjections[0].selectionSphere.xyz) * 100.0;
+    float bias = _VSMReceiverQuality.y;
+#if defined(VIVID_VSM_PAGE_PRESSURE)
+    // UE GetBiasedClipmapLevel adds GlobalResolutionLodBias to demand only.
+    // Sampling starts at its desired level and uses resident parent mappings.
+    if (marking && _VSMReceiverQuality.x > 1.5) bias += asfloat(_VSMPagePressure[0].x);
+#endif
+    float first = VSMBaseAbsoluteClipmapLevel();
+    int level = VSMClipmapLevelFromDistance(distance, first, bias, _VSMProjectionCount);
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+    g_VSMDebugQuality = float4(log2(max(distance, 1e-20)) + bias - first, first, level, bias);
+#endif
+    return level;
+}
+
+// Kept as the sampling-diagnostic entry point; fractional/coverage blend is gone.
 int SelectVSMDensityLevelPrepared(float3 positionWS, float3 normal, bool smrt, out float blend,
     out VSMReceiverProjection prepared)
 {
     blend = 0;
     prepared = (VSMReceiverProjection)0;
-    if (_VSMProjectionCount <= 0) return -1;
-    VividVSMProjection first = _VSMProjections[0];
-    if (length(positionWS - first.selectionSphere.xyz) >= first.parameters.w) return -1;
-
-    // All directional levels share axes and double texel size. Evaluate the
-    // camera/receiver differential once, not once per projection.
-    float2 footprint = VSMReceiverTexelFootprint(positionWS, normal, 0);
-    float worst = max(footprint.x, footprint.y);
-    float target = max(_VSMReceiverQuality.y, 1e-4);
-    // Degenerate planes conservatively request the finest covered level.
-    float desiredLOD = worst > 0 ? log2(target / worst) : 0;
-#if defined(VIVID_VSM_PAGE_PRESSURE)
-    if (_VSMReceiverQuality.x > 1.5)
-    {
-        float pressureBias = asfloat(_VSMPagePressure[0].x);
-        // Offset the available finest level, including degenerate planes and
-        // unattainable negative LODs; these must not cancel budget feedback.
-        desiredLOD = max(desiredLOD, 0.0) + pressureBias;
-        target *= exp2(pressureBias);
-    }
-#endif
-    float lod = clamp(desiredLOD, 0, _VSMProjectionCount - 1);
-    int desired = (int)floor(lod);
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-    g_VSMDebugQuality = float4(desiredLOD, -1, -1, -1);
-#endif
-    for (int level = 0; level < _VSMProjectionCount; level++)
-    {
-        float guard = VSMFilterGuard(level, smrt);
-        prepared = PrepareVSMReceiverProjection(positionWS, normal, level);
-        VividVSMProjection p = prepared.projection;
-        float3 coord = prepared.coord;
-        // Coverage, including normal offset and filter map-edge guard, is a hard
-        // constraint independent of requested density and current residency.
-        if (any(coord.xy < guard) || any(coord.xy >= 1 - guard) || coord.z < 0 || coord.z > 1)
-            continue;
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-        if (g_VSMDebugQuality.y < 0) g_VSMDebugQuality.y = level;
-#endif
-        if (level < desired) continue;
-        float edge = max(abs(coord.x - 0.5), abs(coord.y - 0.5));
-        float coverageBorder = _VSMReceiverQuality.w > 0 ? _VSMReceiverQuality.z : p.parameters.z;
-        blend = VSMTransitionWeight(edge + guard, coverageBorder);
-        if (level == desired)
-            blend = max(blend, VSMTransitionWeight(frac(lod) * 0.5, p.parameters.z));
-#if defined(VIVID_VSM_RECEIVER_DEBUG)
-        g_VSMDebugQuality.zw = float2(level, worst >= 0 ? worst * exp2((float)level) / target : -1);
-#endif
-        return level;
-    }
-    return -1;
+    int level = SelectVSMClipmapLevel(positionWS, false);
+    if (level >= 0) prepared = PrepareVSMReceiverProjection(positionWS, normal, level);
+    return level;
 }
 
 int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, bool smrt, out float blend)
 {
-    float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-8));
-    VSMReceiverProjection prepared;
-    return SelectVSMDensityLevelPrepared(positionWS, normal, smrt, blend, prepared);
+    blend = 0;
+    return SelectVSMClipmapLevel(positionWS, false);
 }
 
 int SelectVSMDensityLevel(float3 positionWS, float3 normalWS, out float blend)

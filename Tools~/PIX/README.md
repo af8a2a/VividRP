@@ -55,6 +55,10 @@ The workflow:
 2. Polls to validated ready; checks a Console cursor for new errors or lost/reset
    evidence. Never accepts an empty/wrong capture or an incomplete Console interval.
 3. Releases the capture owner, retaining disk evidence for independent analysis.
+   Copies the validated programmatic capture to `capture-N.wpix` and verifies
+   both files' SHA-256. `capture-retention.json` records the original live path
+   and retained path; all analysis pins the retained copy's digest. This copy
+   survives pixtool's cleanup when the Editor exits.
 4. Pages events under the exact marker. Selects the first **actual nonzero GPU
    work** returned by PIX, or an explicit `--queue ID --event INDEX` from a prior
    event query. This selection is not a claim about the slowest event.

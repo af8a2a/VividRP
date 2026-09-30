@@ -294,7 +294,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var parameter = new VSMBaselineCase { resolution = 4096, pcf = true, stochasticFiltering = true, screenDensity = true,
-                    targetTexelPixels = 0.5f, lodBias = -1, firstLevel = 0, maxDistance = 80, transition = 0.3f };
+                    targetTexelPixels = 0.5f, lodBias = -1, clipmapFirstLevel = 7, clipmapLastLevel = 20, maxDistance = 80, transition = 0.3f };
                 settings.cascadeCount.value = 2;
                 parameter.Validate(); parameter.Apply(settings);
                 Assert.That(parameter.Matches(settings), Is.True);

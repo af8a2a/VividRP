@@ -273,6 +273,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 2800000, guid: 4af270a7411c44b4aafa6b305d16d933, type: 3}
   - ResourceName: Texture/BlueNoise/SobolOwenScrambled256.png
     ResourceObject: {fileID: 2800000, guid: 740f2c43de4841599d4b6f676ef3d897, type: 3}
+  - ResourceName: Texture/BlueNoise/VSM_STBN_scalar.png
+    ResourceObject: {fileID: 2800000, guid: 5e07d31a48f4b1d48a20f68273a412d4, type: 3}
+  - ResourceName: Texture/BlueNoise/VSM_STBN_vec2.png
+    ResourceObject: {fileID: 2800000, guid: 5d55b9604cc2a6f4186d686604b22ff4, type: 3}
   - ResourceName: Texture/Default/DefaultHDRISky.exr
     ResourceObject: {fileID: 8900000, guid: 6ef3a4217fa94c6ab3c3ebef707ef3f1, type: 3}
   - ResourceName: Texture/FilmGrain/Large01.png

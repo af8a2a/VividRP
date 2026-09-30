@@ -7,6 +7,7 @@ RWStructuredBuffer<uint4> _VSMProductionFeedbackRW;
 int _VSMRasterVertexBudget;
 int _VSMProductionReset;
 uint _VSMProductionDrawMask;
+int _VSMProductionAccumulate;
 
 [numthreads(1, 1, 1)]
 void VSMUpdateProductionBudget(uint3 id : SV_DispatchThreadID)
@@ -68,6 +69,8 @@ void VSMCaptureProductionWork(uint3 id : SV_DispatchThreadID)
         // Convert before multiplying: large Pmax fan-out can overflow uint32.
         vertices += (float)args.x * (float)args.y;
     }
+    if (_VSMProductionAccumulate != 0)
+        vertices += asfloat(_VSMProductionFeedbackRW[1][(uint)_VSMPrototypeCasterLayer]);
     _VSMProductionFeedbackRW[1][(uint)_VSMPrototypeCasterLayer] = asuint(vertices);
 }
 
@@ -82,6 +85,7 @@ void VSMCompleteProductionFeedback(uint3 id : SV_DispatchThreadID)
 // 1 keeps the qualified per-page path; larger values enable experimental windows.
 int _VSMRasterWindowPages;
 #include "VSMPageCulling.hlsl"
+#include "VSMHZB.hlsl"
 #if defined(VIVID_VSM_COMPACT_VIEWS)
 #include "VSMViewCompaction.hlsl"
 RWStructuredBuffer<uint> _VSMPageCullDispatchArgsRW;
@@ -234,6 +238,35 @@ void AppendVSMPageMeshletRequest(
             cascadeIndex);
 }
 
+// Choose the first relevant page as the unique owner of a fixed-grid window.
+// The compact overflow list is bounded by physical page capacity, independent
+// of the source meshlet count. Diagnostic mode retains individual pages.
+bool GetVSMRasterListPage(uint owner, out uint rasterPage)
+{
+    rasterPage = 0u;
+    if (owner == 0u || !IsVSMCasterPageRelevant(owner - 1u)) return false;
+    uint page = owner - 1u;
+    rasterPage = page;
+    if (_VSMRasterWindowPages <= 1) return true;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint basePage = page / (axis * axis) * axis * axis;
+    uint2 coord = uint2(page % axis, (page / axis) % axis);
+    uint2 low = coord / VIVID_VSM_RASTER_WINDOW_PAGES * VIVID_VSM_RASTER_WINDOW_PAGES;
+    uint2 high = min(low + VIVID_VSM_RASTER_WINDOW_PAGES, axis);
+    for (uint y = low.y; y < high.y; y++)
+        for (uint x = low.x; x < high.x; x++)
+        {
+            uint candidate = basePage + y * axis + x;
+            if (candidate == page)
+            {
+                rasterPage = basePage + low.y * axis + low.x;
+                return true;
+            }
+            if (IsVSMCasterPageRelevant(candidate)) return false;
+        }
+    return false;
+}
+
 // Large records retain one fixed instance stride so their record address is
 // arithmetic. Use the largest per-clipmap page count, not the sum across all
 // clipmaps; each record only visits its own level's list and skips padding.
@@ -260,9 +293,10 @@ void RunVSMPrepareMeshletPageRequests(uint groupIndex)
     for (uint slot = groupIndex; slot < (uint)_VSMPrototypePhysicalPageCapacity; slot += 64u)
     {
         uint owner = _VSMPrototypePhysicalPageOwners[slot];
-        if (owner != 0u && IsVSMCasterPageRelevant(owner - 1u))
+        uint rasterPage;
+        if (GetVSMRasterListPage(owner, rasterPage))
         {
-            uint level = (owner - 1u) / pagesPerLevel;
+            uint level = rasterPage / pagesPerLevel;
             InterlockedAdd(g_VSMRasterLevelCounts[level], 1u);
         }
     }
@@ -286,13 +320,14 @@ void RunVSMPrepareMeshletPageRequests(uint groupIndex)
     for (uint slot = groupIndex; slot < (uint)_VSMPrototypePhysicalPageCapacity; slot += 64u)
     {
         uint owner = _VSMPrototypePhysicalPageOwners[slot];
-        if (owner != 0u && IsVSMCasterPageRelevant(owner - 1u))
+        uint rasterPage;
+        if (GetVSMRasterListPage(owner, rasterPage))
         {
-            uint level = (owner - 1u) / pagesPerLevel;
+            uint level = rasterPage / pagesPerLevel;
             uint index;
             InterlockedAdd(g_VSMRasterLevelCounts[level], 1u, index);
             index += g_VSMRasterLevelOffsets[level];
-            _VSMPrototypeMeshletRasterPages[index] = owner - 1u;
+            _VSMPrototypeMeshletRasterPages[index] = rasterPage;
         }
     }
     GroupMemoryBarrierWithGroupSync();
@@ -400,7 +435,8 @@ bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPa
             uint2 low = uint2(x, y);
             uint2 high = min(low + VIVID_VSM_RASTER_WINDOW_PAGES - 1u, maxPage);
             bool nonempty = false;
-            [loop] for (uint py = low.y; py <= high.y && !nonempty; py++)
+            uint2 clippedLow = high, clippedHigh = low;
+            [loop] for (uint py = low.y; py <= high.y; py++)
             {
                 [loop] for (uint px = low.x; px <= high.x; px++)
                 {
@@ -409,14 +445,15 @@ bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPa
                         && VSMCasterOverlapsReceiverMask(page, uint2(px, py), minTexel, maxTexel))
                     {
                         nonempty = true;
-                        break;
+                        clippedLow = min(clippedLow, uint2(px, py));
+                        clippedHigh = max(clippedHigh, uint2(px, py));
                     }
                 }
             }
             if (!nonempty) continue;
             if (count == kVSMMaxPagesPerMeshletRequest) return false;
-            windows[count++] = uint2(level * axis * axis + y * axis + x,
-                VividVSMEncodePageWindow(level, high - low + 1u));
+            windows[count++] = uint2(level * axis * axis + clippedLow.y * axis + clippedLow.x,
+                VividVSMEncodePageWindow(level, clippedHigh - clippedLow + 1u));
         }
     }
     for (uint i = 0u; i < count; i++)
@@ -424,44 +461,9 @@ bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPa
     return true;
 }
 
-void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
+void ProcessVSMPageMeshlet(VividMeshletRenderRequestPacked sourceRequest,
+    uint cascadeIndex, uint rendererListIndex, bool post)
 {
-    const uint localRequestIndex = dispatchThreadID.x;
-#if defined(VIVID_VSM_COMPACT_VIEWS)
-    uint cascadeIndex;
-    if (!VividVSMResolveActiveView(dispatchThreadID.y, cascadeIndex)) return;
-#else
-    const uint cascadeIndex = dispatchThreadID.y;
-#endif
-    const uint rendererListIndex = dispatchThreadID.z;
-    if (localRequestIndex
-            >= (uint)_VSMPrototypeSourceRequestsPerCascadeCapacity
-        || cascadeIndex >= (uint)_VSMProjectionCount
-        || rendererListIndex >= VIVIDRENDERERLISTID_COUNT)
-    {
-        return;
-    }
-
-    const uint sourceArgsIndex = GetVSMSourceDrawArgsIndex(
-        cascadeIndex,
-        rendererListIndex);
-    const uint sourceArgsAddress = GetIndirectDrawArgsByteAddress(
-        sourceArgsIndex);
-    const uint sourceRequestCount =
-        _VSMPrototypeSourceMeshletIndirectArgs.Load(
-            sourceArgsAddress
-                + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET);
-    if (localRequestIndex >= sourceRequestCount)
-        return;
-
-    const uint sourceStartInstance =
-        _VSMPrototypeSourceMeshletIndirectArgs.Load(
-            sourceArgsAddress
-                + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
-    const VividMeshletRenderRequestPacked sourceRequest =
-        _VSMPrototypeSourceMeshletRequests[
-            sourceStartInstance + localRequestIndex];
-
     uint2 minPage;
     uint2 maxPage;
     uint2 minTexel, maxTexel;
@@ -477,19 +479,35 @@ void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
     if (!ClipVSMCasterToUncachedPages(cascadeIndex, minPage, maxPage, minTexel, maxTexel)) return;
     if (!VSMCasterHierarchyOverlaps(cascadeIndex, minTexel, maxTexel)) return;
 
+#if defined(VIVID_VSM_SHADOW_HZB)
+    if (VSMHZBOccluded(sourceRequest, cascadeIndex, !post))
+    {
+        if (!post)
+        {
+            uint index;
+            _VSMHZBDeferredArgs.InterlockedAdd(12u, 1u, index);
+            _VSMHZBDeferred[index] = uint4(sourceRequest.InstanceID_LOD, sourceRequest.MeshletID,
+                cascadeIndex, rendererListIndex);
+            _VSMHZBDeferredArgs.InterlockedMax(0u, (index + 64u) / 64u);
+        }
+        return;
+    }
+    if (post) _VSMHZBDeferredArgs.InterlockedAdd(16u, 1u);
+#endif
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
     const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
     const uint coveredPageCount = (maxPage.x - minPage.x + 1u)
         * (maxPage.y - minPage.y + 1u);
+    // Match NaniteClusterCulling: all sizes use 4x4 windows, clipped to
+    // renderable pages. A source is staged completely before any append.
+    // Explicit branch: HLSL logical operators do not short-circuit UAV writes.
+    [branch] if (_VSMRasterWindowPages > 1)
+    {
+        if (TryAppendVSMPageWindows(rendererListIndex, sourceRequest, cascadeIndex,
+                minPage, maxPage, minTexel, maxTexel)) return;
+    }
     if (coveredPageCount > kVSMMaxPagesPerMeshletRequest)
     {
-        // HLSL logical operators do not guarantee short circuit evaluation.
-        // Keep the function that appends UAV records inside an explicit branch.
-        [branch] if (_VSMRasterWindowPages > 1)
-        {
-            if (TryAppendVSMPageWindows(rendererListIndex, sourceRequest, cascadeIndex,
-                    minPage, maxPage, minTexel, maxTexel)) return;
-        }
         for (uint pageY = minPage.y; pageY <= maxPage.y; pageY++)
         {
             for (uint pageX = minPage.x; pageX <= maxPage.x; pageX++)
@@ -545,9 +563,90 @@ void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
         }
     }
 }
+void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
+{
+    const uint localRequestIndex = dispatchThreadID.x;
+#if defined(VIVID_VSM_COMPACT_VIEWS)
+    uint cascadeIndex;
+    if (!VividVSMResolveActiveView(dispatchThreadID.y, cascadeIndex)) return;
+#else
+    const uint cascadeIndex = dispatchThreadID.y;
+#endif
+    const uint rendererListIndex = dispatchThreadID.z;
+    if (localRequestIndex
+            >= (uint)_VSMPrototypeSourceRequestsPerCascadeCapacity
+        || cascadeIndex >= (uint)_VSMProjectionCount
+        || rendererListIndex >= VIVIDRENDERERLISTID_COUNT)
+    {
+        return;
+    }
+
+    const uint sourceArgsIndex = GetVSMSourceDrawArgsIndex(
+        cascadeIndex,
+        rendererListIndex);
+    const uint sourceArgsAddress = GetIndirectDrawArgsByteAddress(
+        sourceArgsIndex);
+    const uint sourceRequestCount =
+        _VSMPrototypeSourceMeshletIndirectArgs.Load(
+            sourceArgsAddress
+                + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET);
+    if (localRequestIndex >= sourceRequestCount)
+        return;
+
+    const uint sourceStartInstance =
+        _VSMPrototypeSourceMeshletIndirectArgs.Load(
+            sourceArgsAddress
+                + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
+    const VividMeshletRenderRequestPacked sourceRequest =
+        _VSMPrototypeSourceMeshletRequests[
+            sourceStartInstance + localRequestIndex];
+
+    ProcessVSMPageMeshlet(sourceRequest, cascadeIndex, rendererListIndex, false);
+}
+
+#if defined(VIVID_VSM_SHADOW_HZB)
+[numthreads(64, 1, 1)]
+void VSMPostCullMeshletsToPagesHZB(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _VSMHZBDeferredArgs.Load(12u)) return;
+    uint4 item = _VSMHZBDeferred[id.x];
+    VividMeshletRenderRequestPacked request;
+    request.InstanceID_LOD = item.x;
+    request.MeshletID = item.y;
+    ProcessVSMPageMeshlet(request, item.z, item.w, true);
+}
+#endif
 
 void UpdateVSMPagePressure(bool reset)
 {
+#if defined(VIVID_VSM_UE_ALLOCATION)
+    // UE CacheManager: signed available-list underflow includes failed requests.
+    // GPU feedback is consumed on the next render instead of CPU readback latency.
+    uint4 state = _VSMPagePressureRW[0];
+    uint4 detail = _VSMPagePressureRW[1];
+    float previous = asfloat(state.x), bias = previous;
+    uint frame = (uint)_VSMPrototypeFeedbackFrameIndex;
+    if (reset || _VSMReceiverQuality.x < 1.5 || detail.w != asuint(_VSMReceiverQuality.y))
+    {
+        state = 0u; detail = 0u; bias = 0.0;
+    }
+    else
+    {
+        float allocation = (float)state.z / max((float)_VSMPrototypePhysicalPageCapacity, 1.0);
+        float target = max(0.0, previous + log2(max(allocation / 0.85, 1e-20)));
+        if (allocation > 0.85)
+        {
+            state.y = frame;
+            bias = lerp(bias, target, 0.5);
+        }
+        else if (frame - state.y > 10u) bias = lerp(bias, target, 0.1);
+    }
+    state.x = asuint(clamp(bias, 0.0, 2.0));
+    detail.zw = uint2(asuint(previous), asuint(_VSMReceiverQuality.y));
+    _VSMPagePressureRW[0] = state;
+    _VSMPagePressureRW[1] = detail;
+    _VSMPagePressureRW[2] = 0u;
+#else
     uint4 state = _VSMPagePressureRW[0];
     uint4 detail = _VSMPagePressureRW[1];
     uint4 recovery = _VSMPagePressureRW[2];
@@ -604,6 +703,7 @@ void UpdateVSMPagePressure(bool reset)
     _VSMPagePressureRW[0] = state;
     _VSMPagePressureRW[1] = detail;
     _VSMPagePressureRW[2] = recovery;
+#endif
 }
 
 [numthreads(64, 1, 1)]
@@ -1313,6 +1413,9 @@ void RunVSMBuildPageWorkLists(uint lane)
         uint slot = key.z, owner = key.w;
         if (slot >= capacity || owner == 0u) continue;
         uint flags = _VSMPrototypePageMetadata[owner - 1u].x & ~kVSMPageDeferred;
+        // UE: changing the static cache invalidates final depth as well. Without
+        // clearing/re-rendering it, removed static occluders remain in max(static,dynamic).
+        if ((flags & kVSMPageDirty) != 0u) flags |= kVSMPageDynamicDirty;
         bool dirty = (flags & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u;
         bool selected = dirty && rank < budget && key.x != 0xffffffffu;
         if (coarseReady)
@@ -1384,13 +1487,13 @@ void ClearVSMPhysicalPage(uint physicalPageIndex, uint2 texel)
         physicalPageIndex / (uint)_VSMPrototypePhysicalPagesPerRow);
     uint2 physicalTexel = physicalPage * (uint)_VSMPrototypePageSize
         + texel;
-    for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT; layer++)
-    {
-        if ((flags & kVSMPageDynamicDirty) != 0u)
-            _VSMPrototypeDynamicPhysicalPageRW[uint3(physicalTexel, layer)] = 0u;
-        if ((flags & kVSMPageDirty) != 0u)
-            _VSMPrototypeStaticPhysicalPageRW[uint3(physicalTexel, layer)] = 0u;
-    }
+    bool staticUncached = (flags & kVSMPageDirty) != 0u;
+    if (staticUncached)
+        _VSMPhysicalPagePoolRW[uint3(physicalTexel, VIVID_VSM_STATIC_DEPTH_SLICE)] = 0u;
+    // Static-cached pages initialize final depth from static, then raster dynamic.
+    // Static-uncached pages initialize both slices to zero, then merge after raster.
+    _VSMPhysicalPagePoolRW[uint3(physicalTexel, VIVID_VSM_FINAL_DEPTH_SLICE)] = staticUncached ? 0u
+        : _VSMPhysicalPagePoolRW[uint3(physicalTexel, VIVID_VSM_STATIC_DEPTH_SLICE)];
 }
 
 [numthreads(8, 8, 1)]
@@ -1423,7 +1526,7 @@ void VSMPrototypeFinalizeDirtyPages(
 
     uint redrawn = metadata.x & (kVSMPageDirty | kVSMPageDynamicDirty);
     if (_VSMReceiverMaskEnabled != 0 && (redrawn & kVSMPageDynamicDirty) != 0u)
-        // The dynamic page was cleared in full, so replace, never OR coverage.
+        // The final page was initialized in full, so replace, never OR coverage.
         // Deferred pages return above and cannot publish unproduced coverage.
         _VSMPhysicalReceiverMasks[metadata.y - 1u] = _VSMPageReceiverMasks[virtualPageIndex];
     metadata.x = (metadata.x | kVSMPageCached) & ~(kVSMPageDirty | kVSMPageDynamicDirty);
@@ -1434,8 +1537,8 @@ void VSMPrototypeFinalizeDirtyPages(
 
 groupshared uint g_VSMPageNonempty;
 
-// Run after both raster pools and before finalizing dirty pages. Ordered depth
-// insertion guarantees that an empty first layer has no hidden nonzero layers.
+// Run after raster and static merge, before publishing completed pages.
+// Occupancy describes the static cache and the final single-depth slices.
 void ReduceVSMPageOccupancy(uint physicalPageIndex, uint lane)
 {
     if (physicalPageIndex >= (uint)_VSMPrototypePhysicalPageCapacity) return;
@@ -1467,9 +1570,9 @@ void ReduceVSMPageOccupancy(uint physicalPageIndex, uint lane)
     {
         int4 address = int4(origin + uint2(texel % size, texel / size), 0, 0);
         if (scanStatic && (nonempty & 1u) == 0u
-            && _VSMPrototypeStaticPhysicalPage.Load(address) != 0u) nonempty |= 1u;
+            && _VSMPhysicalPagePool.Load(int4(address.xy, VIVID_VSM_STATIC_DEPTH_SLICE, 0)) != 0u) nonempty |= 1u;
         if (scanDynamic && (nonempty & 2u) == 0u
-            && _VSMPrototypeDynamicPhysicalPage.Load(address) != 0u) nonempty |= 2u;
+            && _VSMPhysicalPagePool.Load(int4(address.xy, VIVID_VSM_FINAL_DEPTH_SLICE, 0)) != 0u) nonempty |= 2u;
         if ((!scanDynamic || (nonempty & 2u) != 0u) && (!scanStatic || (nonempty & 1u) != 0u)) break;
     }
     InterlockedOr(g_VSMPageNonempty, nonempty);
@@ -1516,3 +1619,349 @@ void VSMCullMeshletsToPagesAffine(uint3 id : SV_DispatchThreadID) { RunVSMCullMe
 void VSMCullMeshletsToPagesGeometryBounds(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
 #endif
 #endif
+
+// One uint per virtual page: bits denote possible absolute clipmap levels.
+// This never changes raster ownership or aliases the real page table.
+// Bounded-domain hint only. The consumer returns Unknown outside this domain.
+// 16*FLT_EPSILON covers the two affine dot products, their relative transform,
+// and bias addition; the 2x bias bound also covers normalized-normal roundoff.
+static const float kVSMHintWorldLimit = 65536.0;
+static const float kVSMHintRoundoff = 0.0000019073486328125;
+
+uint BuildVSMPossibleMappedLevels(uint sourceLevel, uint2 sourcePage)
+{
+    if (_VSMProjectionCount > VIVID_VSM_RASTER_MAX_LEVELS || _VSMPrototypePagesPerAxis <= 0) return 0xffffffffu;
+    VividVSMProjection source = _VSMProjections[sourceLevel];
+    float2 lowUV = float2(sourcePage) / _VSMPrototypePagesPerAxis;
+    float2 highUV = float2(sourcePage + 1u) / _VSMPrototypePagesPerAxis;
+    uint result = 0u;
+    for (uint level = sourceLevel; level < (uint)_VSMProjectionCount; level++)
+    {
+        VividVSMProjection target = _VSMProjections[level];
+        float scale = exp2((float)sourceLevel - (float)level);
+        // Arbitrary/non-clipmap projections remain on the original path.
+        if (any(target.worldToShadow[0].xyz != source.worldToShadow[0].xyz * scale)
+            || any(target.worldToShadow[1].xyz != source.worldToShadow[1].xyz * scale))
+        { result |= 1u << level; continue; }
+        float2 sourceTranslation = float2(source.worldToShadow._m03, source.worldToShadow._m13);
+        float2 targetTranslation = float2(target.worldToShadow._m03, target.worldToShadow._m13);
+        float2 sourceMagnitude = float2(dot(abs(source.worldToShadow[0].xyz), 1.0.xxx),
+            dot(abs(source.worldToShadow[1].xyz), 1.0.xxx));
+        float2 targetMagnitude = float2(dot(abs(target.worldToShadow[0].xyz), 1.0.xxx),
+            dot(abs(target.worldToShadow[1].xyz), 1.0.xxx));
+        float biasWorld = 2.0 * abs(target.parameters.x * target.parameters.y);
+        float2 margin = biasWorld * targetMagnitude + kVSMHintRoundoff *
+            ((sourceMagnitude * scale + targetMagnitude) * kVSMHintWorldLimit
+                + abs(sourceTranslation) * scale + abs(targetTranslation)
+                + biasWorld * targetMagnitude + 1.0);
+        float2 low = (lowUV - sourceTranslation) * scale + targetTranslation - margin;
+        float2 high = (highUV - sourceTranslation) * scale + targetTranslation + margin;
+        if (!all(isfinite(low)) || !all(isfinite(high)))
+        { result |= 1u << level; continue; }
+        // Clamp floats before conversion. Including the closed upper boundary
+        // deliberately keeps an extra page rather than risking a false negative.
+        if (any(high < 0.0) || any(low > 1.0)) continue;
+        int2 lowPage = int2(floor(saturate(low) * _VSMPrototypePagesPerAxis));
+        int2 highPage = min(int2(floor(saturate(high) * _VSMPrototypePagesPerAxis)), _VSMPrototypePagesPerAxis - 1);
+        if (any(highPage - lowPage > 3))
+        { result |= 1u << level; continue; }
+        bool possible = false;
+        for (int y = lowPage.y; y <= highPage.y && !possible; y++)
+            for (int x = lowPage.x; x <= highPage.x; x++)
+            {
+                uint page = (level * (uint)_VSMPrototypePagesPerAxis + (uint)y)
+                    * (uint)_VSMPrototypePagesPerAxis + (uint)x;
+                uint encoded = _VSMPrototypePageTable[page];
+                uint4 metadata = _VSMPrototypePageMetadata[page];
+                // Match TryResolveVSMPhysicalTexelInternal exactly. Empty,
+                // completed pages count as ready; receiver masks are NOT implied.
+                if (encoded != 0u && metadata.y == encoded
+                    && (metadata.x & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty)) == kVSMPageAllocated)
+                { possible = true; break; }
+            }
+        if (possible) result |= 1u << level;
+    }
+    return result;
+}
+
+[numthreads(64, 1, 1)]
+void VSMBuildAvailableLevelHints(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_VSMPrototypePageTableEntryCount) return;
+    if (_VSMPrototypePagesPerAxis <= 0)
+    {
+        _VSMPossibleMappedLevelsRW[id.x] = 0xffffffffu;
+        return;
+    }
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint level = id.x / (axis * axis);
+    uint local = id.x % (axis * axis);
+    _VSMPossibleMappedLevelsRW[id.x] = BuildVSMPossibleMappedLevels(level, uint2(local % axis, local / axis));
+}
+
+// UE SelectPagesToMergeCS / MergeStaticPhysicalPagesIndirectCS. Reset even on
+// zero-work frames so no stale indirect dispatch or list entry can survive.
+[numthreads(1, 1, 1)]
+void VSMResetMergePages(uint3 id : SV_DispatchThreadID)
+{
+    uint tiles = ((uint)_VSMPrototypePageSize + 31u) / 32u;
+    _VSMMergePageDispatchArgsRW.Store3(0u, uint3(tiles, tiles, 0u));
+}
+
+[numthreads(64, 1, 1)]
+void VSMSelectMergePages(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = id.x;
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    if (owner == 0u) return;
+    uint flags = _VSMPrototypePageMetadata[owner - 1u].x;
+    if ((flags & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDeferred)) != (kVSMPageAllocated | kVSMPageDirty)) return;
+    uint count = WaveActiveCountBits(true), prefix = WavePrefixCountBits(true), baseIndex = 0u;
+    if (WaveIsFirstLane()) _VSMMergePageDispatchArgsRW.InterlockedAdd(8u, count, baseIndex);
+    _VSMMergePageWorkListRW[WaveReadLaneFirst(baseIndex) + prefix] = slot;
+}
+
+void MergeVSMPhysicalPixel(uint2 pixel)
+{
+    _VSMPhysicalPagePoolRW[uint3(pixel, VIVID_VSM_FINAL_DEPTH_SLICE)] = max(
+        _VSMPhysicalPagePoolRW[uint3(pixel, VIVID_VSM_FINAL_DEPTH_SLICE)],
+        _VSMPhysicalPagePoolRW[uint3(pixel, VIVID_VSM_STATIC_DEPTH_SLICE)]);
+}
+
+[numthreads(16, 16, 1)]
+void VSMMergeStaticPhysicalPagesIndirect(uint3 group : SV_GroupID, uint2 lane : SV_GroupThreadID)
+{
+    uint slot = _VSMMergePageWorkList[group.z];
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    if (owner == 0u) return;
+    uint flags = _VSMPrototypePageMetadata[owner - 1u].x;
+    if ((flags & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDeferred)) != (kVSMPageAllocated | kVSMPageDirty)) return;
+    uint size = (uint)_VSMPrototypePageSize, row = (uint)_VSMPrototypePhysicalPagesPerRow;
+    uint2 origin = uint2(slot % row, slot / row) * size;
+    uint2 base = group.xy * 32u + lane * 2u;
+    [unroll] for (uint y = 0u; y < 2u; y++)
+        [unroll] for (uint x = 0u; x < 2u; x++)
+        {
+            uint2 texel = base + uint2(x, y);
+            if (all(texel < size)) MergeVSMPhysicalPixel(origin + texel);
+        }
+}
+
+// UE directional PropagateMappedMips. Resident ownership remains separate from
+// sampling aliases; only completed native pages can be propagation sources.
+// UE bit layout: valid bit 31, LOD offset bits 20..25, physical XY 10 bits each.
+[numthreads(64, 1, 1)]
+void VSMPropagateMappedClipmaps(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_VSMPrototypePageTableEntryCount) return;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint perLevel = axis * axis;
+    uint source = id.x / perLevel, local = id.x % perLevel;
+    int2 basePage = int2(local % axis, local / axis);
+    uint result = 0u;
+    for (uint level = source; level < (uint)_VSMProjectionCount; level++)
+    {
+        uint offset = level - source;
+        int2 delta = _VSMClipmapPageOffsets[source * (uint)_VSMProjectionCount + level];
+        int2 page = (basePage + delta) >> offset;
+        if (any(page < 0) || any(page >= (int)axis)) continue;
+        uint address = (level * axis + (uint)page.y) * axis + (uint)page.x;
+        uint encoded = _VSMPrototypePageTable[address];
+        uint4 metadata = _VSMPrototypePageMetadata[address];
+        if (encoded == 0u || encoded > (uint)_VSMPrototypePhysicalPageCapacity || metadata.y != encoded
+            || (metadata.x & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty)) != kVSMPageAllocated) continue;
+        uint slot = encoded - 1u, row = (uint)_VSMPrototypePhysicalPagesPerRow;
+        result = 0x80000000u | (offset << 20u) | ((slot / row) << 10u) | (slot % row);
+        break;
+    }
+    _VSMSamplingPageTableRW[id.x] = result;
+}
+
+// UE physical page lists: previous LRU, AVAILABLE, REQUESTED, EMPTY, then
+// counters. REQUESTED + remaining AVAILABLE becomes next frame's LRU.
+RWStructuredBuffer<uint> _VSMPhysicalPageLists;
+groupshared uint4 g_VSMListPrefix[1024];
+
+[numthreads(1024, 1, 1)]
+void VSMUpdatePhysicalPagesUE(uint lane : SV_GroupIndex)
+{
+    uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
+    uint slot = lane < capacity ? _VSMPhysicalPageLists[lane] : 0u;
+    uint owner = lane < capacity ? _VSMPrototypePhysicalPageOwners[slot] : 0u;
+    bool requested = false;
+    if (owner != 0u)
+    {
+        uint page = owner - 1u;
+        uint4 metadata = _VSMPrototypePageMetadata[page];
+        metadata.w = metadata.x;
+        requested = (_VSMPageRequestFlags[page] & kVSMPageRequested) != 0u;
+        // UE Cache.MaxPageAgeSinceLastRequest = 1000. Unrequested dirty pages
+        // retain invalidation until requested again or reassigned.
+        if (!requested && (uint)_VSMPrototypeFeedbackFrameIndex - metadata.z > 1000u)
+        {
+            _VSMPrototypeWritablePageTable[page] = 0u;
+            _VSMPrototypePageMetadata[page] = 0u;
+            _VSMPrototypePhysicalPageOwners[slot] = 0u;
+            owner = 0u;
+        }
+        else
+        {
+            if (requested) metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
+            // UE receiver-masked dynamic pages are incomplete and always redraw.
+            if (requested && _VSMReceiverMaskEnabled != 0)
+                metadata.x = (metadata.x | kVSMPageDynamicDirty) & ~kVSMPageCached;
+            _VSMPrototypePageMetadata[page] = metadata;
+        }
+    }
+    uint4 item = uint4(lane < capacity && owner != 0u && !requested,
+        lane < capacity && requested, lane < capacity && owner == 0u, owner != 0u);
+    g_VSMListPrefix[lane] = item;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint step = 1u; step < 1024u; step <<= 1u)
+    {
+        uint4 add = lane >= step ? g_VSMListPrefix[lane - step] : 0u;
+        GroupMemoryBarrierWithGroupSync();
+        g_VSMListPrefix[lane] += add;
+        GroupMemoryBarrierWithGroupSync();
+    }
+    uint4 rank = g_VSMListPrefix[lane] - item;
+    uint4 total = g_VSMListPrefix[1023];
+    if (item.x != 0u) _VSMPhysicalPageLists[capacity + rank.x] = slot;
+    // Empty entries go at the end: the allocator pops them before cached LRU.
+    if (item.z != 0u) _VSMPhysicalPageLists[capacity + total.x + rank.z] = slot;
+    if (item.y != 0u) _VSMPhysicalPageLists[2u * capacity + rank.y] = slot;
+    if (lane == 0u)
+    {
+        _VSMPhysicalPageLists[4u * capacity] = total.x + total.z;
+        _VSMPhysicalPageLists[4u * capacity + 1u] = total.y;
+        _VSMPrototypeAllocatorCounters[0] = total.w;
+        _VSMPrototypeAllocatorCounters[1] = 0u;
+        _VSMPrototypeAllocatorCounters[2] = 0u;
+        _VSMPrototypeAllocatorCounters[3] = 0u;
+        _VSMPagePressureRW[0].zw = 0u;
+        _VSMPagePressureRW[1].xy = 0u;
+    }
+}
+
+[numthreads(64, 1, 1)]
+void VSMAllocateNewPageMappingsUE(uint3 id : SV_DispatchThreadID)
+{
+    uint page = id.x, capacity = (uint)_VSMPrototypePhysicalPageCapacity;
+    if (page >= (uint)_VSMPrototypePageTableEntryCount) return;
+    uint request = _VSMPageRequestFlags[page];
+    if ((request & kVSMPageRequested) == 0u) return;
+    InterlockedAdd(_VSMPrototypeAllocatorCounters[1], 1u);
+    InterlockedAdd(_VSMPagePressureRW[0].z, 1u);
+    bool primary = (request & kVSMPagePrimaryRequested) != 0u;
+    if (primary) InterlockedAdd(_VSMPagePressureRW[1].x, 1u);
+    uint4 metadata = _VSMPrototypePageMetadata[page];
+    if ((metadata.x & kVSMPageAllocated) == 0u)
+    {
+        uint previous;
+        uint waveCount = WaveActiveCountBits(true);
+        uint waveOffset = WavePrefixCountBits(true);
+        previous = 0u;
+        if (WaveIsFirstLane())
+            InterlockedAdd(_VSMPhysicalPageLists[4u * capacity], 0u - waveCount, previous);
+        previous = WaveReadLaneFirst(previous);
+        int availableIndex = (int)previous - (int)waveOffset - 1;
+        if (availableIndex >= 0)
+        {
+            uint slot = _VSMPhysicalPageLists[capacity + (uint)availableIndex];
+            uint owner = _VSMPrototypePhysicalPageOwners[slot];
+            // Victims are never requested this frame: no allocator lane can
+            // concurrently read/write this old mapping as an allocation target.
+            if (owner != 0u)
+            {
+                uint4 evicted = _VSMPrototypePageMetadata[owner - 1u];
+                evicted.xy = 0u; evicted.w = kVSMPageDebugEvicted;
+                _VSMPrototypePageMetadata[owner - 1u] = evicted;
+                _VSMPrototypeWritablePageTable[owner - 1u] = 0u;
+            }
+            else InterlockedAdd(_VSMPrototypeAllocatorCounters[0], 1u);
+            metadata.x = kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty | kVSMPageStatic | kVSMPageDynamic;
+            metadata.y = slot + 1u;
+            metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
+            metadata.w = metadata.x;
+            _VSMPrototypePageMetadata[page] = metadata;
+            _VSMPrototypeWritablePageTable[page] = slot + 1u;
+            _VSMPrototypePhysicalPageOwners[slot] = page + 1u;
+            if (_VSMReceiverMaskEnabled != 0) _VSMPhysicalReceiverMasks[slot] = 0u;
+            uint offset = 0u;
+            uint appendCount = WaveActiveCountBits(true);
+            uint appendOffset = WavePrefixCountBits(true);
+            if (WaveIsFirstLane())
+                InterlockedAdd(_VSMPhysicalPageLists[4u * capacity + 1u], appendCount, offset);
+            offset = WaveReadLaneFirst(offset) + appendOffset;
+            _VSMPhysicalPageLists[2u * capacity + offset] = slot;
+            InterlockedAdd(_VSMPrototypeAllocatorCounters[2], 1u);
+        }
+        else
+        {
+            metadata.w |= kVSMPageDebugOverflow;
+            _VSMPrototypePageMetadata[page] = metadata;
+            InterlockedAdd(_VSMPrototypeAllocatorCounters[3], 1u);
+            InterlockedAdd(_VSMPagePressureRW[0].w, 1u);
+        }
+    }
+    if (primary && (metadata.x & kVSMPageAllocated) != 0u)
+        InterlockedAdd(_VSMPagePressureRW[1].y, 1u);
+}
+
+[numthreads(64, 1, 1)]
+void VSMAppendPhysicalPageListsUE(uint3 id : SV_DispatchThreadID)
+{
+    uint capacity = (uint)_VSMPrototypePhysicalPageCapacity, index = id.x;
+    if (index >= capacity) return;
+    uint requested = _VSMPhysicalPageLists[4u * capacity + 1u];
+    _VSMPhysicalPageLists[index] = index < requested
+        ? _VSMPhysicalPageLists[2u * capacity + index]
+        : _VSMPhysicalPageLists[capacity + index - requested];
+}
+
+[numthreads(64, 1, 1)]
+void VSMBuildPageWorkListsUE(uint lane : SV_GroupIndex)
+{
+    uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
+    if (lane == 0u) { g_VSMClearPageCount = 0u; g_VSMOccupancyPageCount = 0u; }
+    GroupMemoryBarrierWithGroupSync();
+    for (uint slot = lane; slot < capacity; slot += 64u)
+    {
+        uint owner = _VSMPrototypePhysicalPageOwners[slot];
+        if (owner == 0u) continue;
+        uint flags = _VSMPrototypePageMetadata[owner - 1u].x & ~kVSMPageDeferred;
+        bool requested = (_VSMPageRequestFlags[owner - 1u] & kVSMPageRequested) != 0u;
+        if ((flags & kVSMPageDirty) != 0u) flags |= kVSMPageDynamicDirty;
+        bool dirty = (flags & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u;
+        bool selected = requested && dirty;
+        // Deferred represents UE's unreferenced invalid page here, not a quota.
+        if (dirty && !requested) flags |= kVSMPageDeferred;
+        _VSMPrototypePageMetadata[owner - 1u].x = flags;
+        uint index;
+        if (selected)
+        {
+            InterlockedAdd(g_VSMClearPageCount, 1u, index);
+            _VSMPageWorkListRW[index] = slot;
+        }
+        uint known = kVSMPageStaticOccupancyKnown | kVSMPageDynamicOccupancyKnown;
+        if (requested && (selected || ((flags & known) != known || _VSMPageOccupancySkipDisabled != 0)))
+        {
+            InterlockedAdd(g_VSMOccupancyPageCount, 1u, index);
+            _VSMPageWorkListRW[capacity + index] = slot;
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0u)
+    {
+        uint tiles = ((uint)_VSMPrototypePageSize + 7u) / 8u;
+        _VSMPageWorkDispatchArgsRW.Store3(0u, uint3(tiles, tiles, g_VSMClearPageCount));
+        _VSMPageWorkDispatchArgsRW.Store3(12u, uint3(g_VSMOccupancyPageCount, 1u, 1u));
+    }
+}
+
+[numthreads(64, 1, 1)]
+void VSMClearReceiverRequestsUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeClearReceiverRequests(id); }
+[numthreads(64, 1, 1)]
+void VSMResetReceiverFeedbackUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeResetReceiverFeedback(id); }

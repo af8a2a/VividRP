@@ -14,6 +14,7 @@ float3 VSMReceiverLevelColor(int level)
 [numthreads(8, 8, 1)]
 void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
 {
+    id.xy = VSMMortonPixel(id.xy);
     InitializeVSMSMRTProjections((id.x & 7u) + ((id.y & 7u) << 3u));
     if (id.x >= (uint)_CSMOutputWidth || id.y >= (uint)_CSMOutputHeight) return;
     uint2 pixel = id.xy;
@@ -41,7 +42,6 @@ void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
     }
     float3 position = ReconstructWorldPosition(pixel, depth);
     float3 normal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixel, 0)).xy);
-    normal = ReconstructVSMReceiverNormal(pixel, depth, position, normal);
     float shadow = ResolveVSMReceiver(position, normal, pixel);
     float4 data = float4(g_VSMDebugLevels, g_VSMDebugBlend);
     float3 color = VSMReceiverLevelColor(g_VSMDebugLevels.x);
@@ -78,9 +78,10 @@ void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
     }
     else if (_VSMReceiverDebugMode == 6)
     {
-        data = _VSMReceiverQuality.x > 0 ? g_VSMDebugQuality : -1;
+        // relative biased LOD, first absolute level, selected index, normalized bias.
+        data = g_VSMDebugQuality;
         color = data.w < 0 ? float3(1, 0, 1)
-            : lerp(float3(0, 0.7, 0), float3(1, 0, 0), saturate((data.w - 1) / 3));
+            : lerp(float3(0, 0.7, 0), float3(1, 0, 0), saturate(data.w / 4));
     }
     if (_VSMReceiverDebugMode == 7)
     {

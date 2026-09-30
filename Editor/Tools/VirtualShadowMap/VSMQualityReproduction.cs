@@ -21,7 +21,7 @@ namespace VividRP.Editor
         private static readonly Vector3 s_Offset = new Vector3(2, 0, 2);
         private static readonly string[] s_ParameterNames = {
             "_DepthTexture", "_GBuffer1", "_VSMReceiverDebugShadow", "_VSMReceiverDebugOutput", "_VSMReceiverDebugData",
-            "_VSMPrototypeStaticPhysicalPage", "_VSMPrototypeDynamicPhysicalPage", "_VSMPrototypePageTable",
+            "_VSMPhysicalPagePool", "_VSMPrototypePageTable",
             "_VSMPrototypePageMetadata", "_VSMReceiverDebugMode", "_CSMInvViewProjMatrix",
             "_VSMReceiverParameters", "_CSMOutputWidth", "_CSMOutputHeight", "_VSMPrototypeEnabled",
             "_VSMPrototypeVirtualResolution", "_VSMPrototypePageSize", "_VSMPrototypePagesPerAxis", "_VSMPrototypePhysicalPagesPerRow", "_CSMFrameIndex" };
@@ -190,7 +190,7 @@ namespace VividRP.Editor
             {
                 m_Report.captureModes = new[] { 0, 3, 5, 6 };
                 m_Report.trajectory += " Additional per-frame ROI captures at steps 440..480; no full-frame image readbacks.";
-                m_Report.dataLayout += " mode 6=density desiredLOD/finest covered level/selected level/footprint-to-target ratio (-1 when disabled).";
+                m_Report.dataLayout += " mode 6=relative biased distance LOD/first UE absolute level/selected index/normalized resolution bias.";
                 m_Report.dataLayout += " Detailed ROI files use lossless gzip (.rgba32f.gz); the decompressed byte layout is unchanged.";
             }
             m_TimeScale = Time.timeScale; m_CaptureDelta = Time.captureDeltaTime;
@@ -344,7 +344,7 @@ namespace VividRP.Editor
                 for (int i = 0; i < capture.channels.Length; i++)
                 {
                     var channel = capture.channels[i];
-                    cmd.SetComputeIntParam(m_Compute, s_Ids[9], channel.Mode);
+                    cmd.SetComputeIntParam(m_Compute, s_Ids[8], channel.Mode);
                     cmd.DispatchCompute(m_Compute, m_Kernel, (m_Width + 7) / 8, (m_Height + 7) / 8, 1);
                     m_Pending++; capture.pending++;
                     cmd.RequestAsyncReadback(m_Data, 0, m_Report.roiX, RoiSize, m_Report.roiY, RoiSize, 0, 1, channel.RawCallback);
@@ -357,7 +357,7 @@ namespace VividRP.Editor
             for (int i = 0; i < m_Channels.Length; i++)
             {
                 var channel = m_Channels[i];
-                cmd.SetComputeIntParam(m_Compute, s_Ids[9], channel.Mode);
+                cmd.SetComputeIntParam(m_Compute, s_Ids[8], channel.Mode);
                 cmd.DispatchCompute(m_Compute, m_Kernel, (m_Width + 7) / 8, (m_Height + 7) / 8, 1);
                 m_Pending += 2;
                 cmd.RequestAsyncReadback(m_Data, 0, m_Report.roiX, RoiSize, m_Report.roiY, RoiSize, 0, 1, channel.RawCallback);
@@ -377,30 +377,32 @@ namespace VividRP.Editor
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[2], sourceShadow);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[3], m_Output);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[4], m_Data);
-            cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[5], VirtualShadowMapPrototypeRuntime.StaticPhysicalPage);
-            cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[6], VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage);
-            cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_Ids[7], VirtualShadowMapPrototypeRuntime.PageTable);
-            cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_Ids[8], VirtualShadowMapPrototypeRuntime.PageMetadata);
+            cmd.SetComputeTextureParam(m_Compute, m_Kernel, s_Ids[5], VirtualShadowMapPrototypeRuntime.PhysicalPagePool);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_Ids[6], VirtualShadowMapPrototypeRuntime.PageTable);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_Ids[7], VirtualShadowMapPrototypeRuntime.PageMetadata);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_RequestFlagsId, VirtualShadowMapPrototypeRuntime.PageRequestFlags);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapPrototypeRuntime.SamplingPageTableId, VirtualShadowMapPrototypeRuntime.SamplingPageTable);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapProjectionSet.PageOffsetsId, VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapProjectionSet.BufferId, VirtualShadowMapPrototypeRuntime.Projections.Buffer);
             cmd.SetComputeIntParam(m_Compute, VirtualShadowMapProjectionSet.CountId, VirtualShadowMapPrototypeRuntime.Projections.Count);
             Matrix4x4 vp = camera.GetGPUViewProjectionMatrix(true);
             cmd.SetComputeMatrixParam(m_Compute, VirtualShadowMapReceiverQuality.ViewProjectionId, vp);
-            cmd.SetComputeMatrixParam(m_Compute, s_Ids[10], vp.inverse);
+            cmd.SetComputeMatrixParam(m_Compute, s_Ids[9], vp.inverse);
             cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.ParametersId, VirtualShadowMapReceiverQuality.BuildParameters(settings));
             float angle = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
             if (DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out _, out var additional)
                 && additional != null) angle = additional.angularDiameter;
             cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.SMRTParametersId,
                 VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angle));
-            cmd.SetComputeVectorParam(m_Compute, s_Ids[11], new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0, shadow.depthBias, shadow.slopeScaleDepthBias, settings.virtualShadowMapStochasticFiltering.value ? 1 : 0));
-            cmd.SetComputeIntParam(m_Compute, s_Ids[12], m_Width); cmd.SetComputeIntParam(m_Compute, s_Ids[13], m_Height);
-            cmd.SetComputeIntParam(m_Compute, s_Ids[14], 1);
-            cmd.SetComputeIntParam(m_Compute, s_Ids[15], VirtualShadowMapPrototypeRuntime.VirtualResolution);
-            cmd.SetComputeIntParam(m_Compute, s_Ids[16], VirtualShadowMapPrototypeRuntime.PageSize);
-            cmd.SetComputeIntParam(m_Compute, s_Ids[17], VirtualShadowMapPrototypeRuntime.PagesPerAxis);
-            cmd.SetComputeIntParam(m_Compute, s_Ids[18], VirtualShadowMapPrototypeRuntime.PhysicalPagesPerRow);
-            cmd.SetComputeIntParam(m_Compute, s_Ids[19], camera.frameIndex >= 0 ? camera.frameIndex : Time.frameCount);
+            cmd.SetComputeVectorParam(m_Compute, VirtualShadowMapReceiverQuality.SMRTSettingsId, VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings));
+            cmd.SetComputeVectorParam(m_Compute, s_Ids[10], new Vector4(settings.virtualShadowMapPCF.value ? 1 : 0, shadow.depthBias, shadow.slopeScaleDepthBias, settings.virtualShadowMapStochasticFiltering.value ? 1 : 0));
+            cmd.SetComputeIntParam(m_Compute, s_Ids[11], m_Width); cmd.SetComputeIntParam(m_Compute, s_Ids[12], m_Height);
+            cmd.SetComputeIntParam(m_Compute, s_Ids[13], 1);
+            cmd.SetComputeIntParam(m_Compute, s_Ids[14], VirtualShadowMapPrototypeRuntime.VirtualResolution);
+            cmd.SetComputeIntParam(m_Compute, s_Ids[15], VirtualShadowMapPrototypeRuntime.PageSize);
+            cmd.SetComputeIntParam(m_Compute, s_Ids[16], VirtualShadowMapPrototypeRuntime.PagesPerAxis);
+            cmd.SetComputeIntParam(m_Compute, s_Ids[17], VirtualShadowMapPrototypeRuntime.PhysicalPagesPerRow);
+            cmd.SetComputeIntParam(m_Compute, s_Ids[18], camera.frameIndex >= 0 ? camera.frameIndex : Time.frameCount);
         }
 
         private void ShadowReadback(AsyncGPUReadbackRequest request)

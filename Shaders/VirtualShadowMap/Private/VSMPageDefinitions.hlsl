@@ -15,6 +15,8 @@ static const uint kVSMPagePrimaryRequested = 1u << 9;
 static const uint kVSMPageTransitionRequested = 1u << 10;
 static const uint kVSMPageParentRequested = 1u << 11;
 static const uint kVSMPageStaticEmpty = 1u << 12;
+// Legacy bit names are retained in the metadata ABI. Dynamic occupancy now
+// describes final depth (slice 0), including the cached static contribution.
 static const uint kVSMPageDynamicEmpty = 1u << 13;
 static const uint kVSMPageStaticOccupancyKnown = 1u << 14;
 static const uint kVSMPageDynamicDirty = 1u << 15;

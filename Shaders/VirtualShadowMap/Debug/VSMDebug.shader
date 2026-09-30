@@ -25,8 +25,7 @@ Shader "Hidden/VividRP/VSMDebug"
             #define VIVID_VSM_DEBUG_POOL_STATIC 1
             #define VIVID_VSM_DEBUG_POOL_DYNAMIC 2
 
-            Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
-            Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
+            Texture2DArray<uint> _VSMPhysicalPagePool;
             int _VSMPrototypeAvailable;
             int _VSMDebugVisualizationMode;
             int _VSMDebugPoolMode;
@@ -73,34 +72,14 @@ Shader "Hidden/VividRP/VSMDebug"
                 uint pageWidth;
                 uint pageHeight;
                 uint layers;
-                _VSMPrototypeStaticPhysicalPage.GetDimensions(pageWidth, pageHeight, layers);
+                _VSMPhysicalPagePool.GetDimensions(pageWidth, pageHeight, layers);
                 uint2 pageSize = max(uint2(pageWidth, pageHeight), 1u);
                 uint2 texel = min(
                     uint2(saturate(input.uv) * pageSize),
                     pageSize - 1u);
-                uint selectedLayer = min((uint)max(_VSMDebugDepthLayer, 0), layers - 1u);
-                uint rawDepth = 0u;
-                if (_VSMDebugPoolMode == VIVID_VSM_DEBUG_POOL_STATIC)
-                    rawDepth = _VSMPrototypeStaticPhysicalPage.Load(int4(texel, selectedLayer, 0));
-                else if (_VSMDebugPoolMode == VIVID_VSM_DEBUG_POOL_DYNAMIC)
-                    rawDepth = _VSMPrototypeDynamicPhysicalPage.Load(int4(texel, selectedLayer, 0));
-                else
-                {
-                    // Merge two sorted depth streams, removing equal depths across pools.
-                    // max(static[layer], dynamic[layer]) is NOT the combined depth rank.
-                    uint staticLayer = 0u, dynamicLayer = 0u;
-                    for (uint rank = 0u; rank <= selectedLayer; rank++)
-                    {
-                        uint s = staticLayer < layers
-                            ? _VSMPrototypeStaticPhysicalPage.Load(int4(texel, staticLayer, 0)) : 0u;
-                        uint d = dynamicLayer < layers
-                            ? _VSMPrototypeDynamicPhysicalPage.Load(int4(texel, dynamicLayer, 0)) : 0u;
-                        rawDepth = max(s, d);
-                        if (rawDepth == 0u) break;
-                        if (s == rawDepth) staticLayer++;
-                        if (d == rawDepth) dynamicLayer++;
-                    }
-                }
+                // Serialized Combined/Dynamic modes both show the final UE depth slice.
+                uint slice = _VSMDebugPoolMode == VIVID_VSM_DEBUG_POOL_STATIC ? 1u : 0u;
+                uint rawDepth = _VSMPhysicalPagePool.Load(int4(texel, slice, 0));
 
                 if (_VSMDebugVisualizationMode == VIVID_VSM_DEBUG_OCCUPANCY)
                 {

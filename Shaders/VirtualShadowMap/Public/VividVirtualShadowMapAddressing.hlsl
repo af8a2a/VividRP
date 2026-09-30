@@ -1,9 +1,15 @@
 #ifndef VIVIDRP_VIRTUAL_SHADOW_MAP_ADDRESSING_INCLUDED
 #define VIVIDRP_VIRTUAL_SHADOW_MAP_ADDRESSING_INCLUDED
 
-// Independent nearest surfaces; never fill the empty space between layers.
+// One depth per texel. Slice 0 is final depth; slice 1 is the static cache.
+#define VIVID_VSM_FINAL_DEPTH_SLICE 0u
+#define VIVID_VSM_STATIC_DEPTH_SLICE 1u
+#if defined(VIVID_VSM_LEGACY_DEPTH_TESTS)
 #define VIVID_VSM_DEPTH_LAYER_COUNT 16
-#define VIVID_VSM_RASTER_MAX_LEVELS 16
+#else
+#define VIVID_VSM_DEPTH_LAYER_COUNT 1
+#endif
+#define VIVID_VSM_RASTER_MAX_LEVELS 24
 #define VIVID_VSM_RASTER_PAGE_HEADER_SIZE (1 + 2 * VIVID_VSM_RASTER_MAX_LEVELS)
 
 // Bounded HW raster windows. Keep RasterWindowPages in the runtime in sync.
@@ -50,7 +56,9 @@ bool VividVSMReceiverMaskContains(uint2 coverage, uint2 demand)
 bool VividVSMReceiverMaskTexel(uint2 mask, uint2 texel, uint pageSize)
 {
     uint2 cell = min(texel * 8u / pageSize, 7u);
-    return (mask[cell.y >> 2u] & (1u << ((cell.y & 3u) * 8u + cell.x))) != 0u;
+    // Keep both words scalar; dynamic vector indexing creates private arrays in DXC.
+    uint word = cell.y < 4u ? mask.x : mask.y;
+    return (word & (1u << ((cell.y & 3u) * 8u + cell.x))) != 0u;
 }
 
 bool VividVSMReceiverMaskOverlapsRect(uint2 mask, uint2 page, uint2 low, uint2 high, uint pageSize)

@@ -31,14 +31,16 @@ namespace VividRP.Runtime.RenderPass.Core
         PageAge = 14,
         StaticCache = 15,
         DynamicCache = 16,
-        [InspectorName("Page Occupancy (Static / Dynamic)")]
+        [InspectorName("Page Occupancy (Static / Final)")]
         PageOccupancy = 17,
     }
 
     public enum VSMDebugPoolMode
     {
+        [InspectorName("Final Depth")]
         Combined = 0,
         Static = 1,
+        [InspectorName("Final Depth (Legacy Dynamic)")]
         Dynamic = 2,
     }
 
@@ -52,10 +54,9 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal const string VSMDebugShaderName = "Hidden/VividRP/VSMDebug";
 
-        private static readonly int VSMPrototypeStaticPhysicalPageId =
-            Shader.PropertyToID("_VSMPrototypeStaticPhysicalPage");
-        private static readonly int VSMPrototypeDynamicPhysicalPageId =
-            Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
+        private static readonly int VSMPhysicalPagePoolId =
+            Shader.PropertyToID("_VSMPhysicalPagePool");
+
         private static readonly int VSMPrototypeAvailableId =
             Shader.PropertyToID("_VSMPrototypeAvailable");
         private static readonly int VSMDebugVisualizationModeId =
@@ -92,7 +93,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [SerializeField, Range(-16f, 16f)]
         private float m_Exposure;
 
-        [SerializeField, Tooltip("Depth rank, nearest first. Combined merges distinct depths from both pools. Raw atlas includes retained texels of unused pages; check Page States for validity.")]
+        [SerializeField, Tooltip("Legacy depth rank; clamped to zero for UE single-depth storage.")]
         private VSMDebugDepthLayer m_DepthLayer;
 
         public int DepthLayer
@@ -102,8 +103,8 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         private Material m_Material;
-        private TextureHandle m_StaticPhysicalPageHandle;
-        private TextureHandle m_DynamicPhysicalPageHandle;
+        private TextureHandle m_PhysicalPagePoolHandle;
+
         private bool m_PhysicalPageAvailable;
         private bool m_ShouldSkipExecution;
         private bool m_PageStateResourcesAvailable;
@@ -158,8 +159,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            m_StaticPhysicalPageHandle = default;
-            m_DynamicPhysicalPageHandle = default;
+            m_PhysicalPagePoolHandle = default;
+
             m_PhysicalPageAvailable = false;
             m_PageStateResourcesAvailable = false;
 
@@ -187,19 +188,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
                 else
                 {
-                    m_StaticPhysicalPageHandle = PassRecorder.ImportTextureForPass(
+                    m_PhysicalPagePoolHandle = PassRecorder.ImportTextureForPass(
                         this,
-                        VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
+                        VirtualShadowMapPrototypeRuntime.PhysicalPagePool,
                         AccessFlags.Read);
-                    m_DynamicPhysicalPageHandle = PassRecorder.ImportTextureForPass(
-                        this,
-                        VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage,
-                        AccessFlags.Read);
+
                 }
             }
 
-            m_PhysicalPageAvailable = m_StaticPhysicalPageHandle.IsValid()
-                && m_DynamicPhysicalPageHandle.IsValid();
+            m_PhysicalPageAvailable = m_PhysicalPagePoolHandle.IsValid();
 
             var cameraData = frameData?.GetOrCreate<VividCameraData>();
             m_CameraEntityId = cameraData?.camera != null
@@ -242,31 +239,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            RTHandle staticPhysicalPage =
-                VirtualShadowMapPrototypeRuntime.StaticPhysicalPage;
-            RTHandle dynamicPhysicalPage =
-                VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage;
-            Texture staticPhysicalPageTexture = staticPhysicalPage != null
-                ? staticPhysicalPage.ResolveTexture()
-                : null;
-            Texture dynamicPhysicalPageTexture = dynamicPhysicalPage != null
-                ? dynamicPhysicalPage.ResolveTexture()
+            RTHandle physicalPagePool =
+                VirtualShadowMapPrototypeRuntime.PhysicalPagePool;
+            Texture physicalPagePoolTexture = physicalPagePool != null
+                ? physicalPagePool.ResolveTexture()
                 : null;
             bool pageAvailable = !IsPageStateMode(m_VisualizationMode) && m_PhysicalPageAvailable
                 && VirtualShadowMapPrototypeRuntime.HasPageDebugSnapshot(m_CameraEntityId, m_FrameIndex)
-                && staticPhysicalPageTexture != null
-                && dynamicPhysicalPageTexture != null;
+                && physicalPagePoolTexture != null;
 
             mpb.SetTexture(
-                VSMPrototypeStaticPhysicalPageId,
-                staticPhysicalPageTexture != null
-                    ? staticPhysicalPageTexture
+                VSMPhysicalPagePoolId,
+                physicalPagePoolTexture != null
+                    ? physicalPagePoolTexture
                     : Texture2D.blackTexture);
-            mpb.SetTexture(
-                VSMPrototypeDynamicPhysicalPageId,
-                dynamicPhysicalPageTexture != null
-                    ? dynamicPhysicalPageTexture
-                    : Texture2D.blackTexture);
+
             mpb.SetInt(VSMPrototypeAvailableId, pageAvailable ? 1 : 0);
             mpb.SetInt(
                 VSMDebugVisualizationModeId,
@@ -286,8 +273,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Material = null;
             }
 
-            m_StaticPhysicalPageHandle = default;
-            m_DynamicPhysicalPageHandle = default;
+            m_PhysicalPagePoolHandle = default;
+
             m_PhysicalPageAvailable = false;
             m_ShouldSkipExecution = false;
             m_PageStateResourcesAvailable = false;

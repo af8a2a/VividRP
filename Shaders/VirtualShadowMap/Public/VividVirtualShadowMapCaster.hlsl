@@ -21,13 +21,9 @@ static const uint kVividVSMPageDirty = 1u << 2;
 static const uint kVividVSMPageDynamicDirty = 1u << 15;
 static const uint kVividVSMPageDeferred = 1u << 17;
 
-bool VividVSMCasterReceiverTexel(uint page, uint2 texel)
-{
-    // Cached static pages always contain complete geometry.
-    return _VSMReceiverMaskEnabled == 0 || _VSMPrototypeCasterLayer == 0
-        || VividVSMReceiverMaskTexel(_VSMPageReceiverMasks[page], texel, (uint)_VSMPrototypePageSize);
-}
-
+// UE receiver masks reject dynamic caster bounds before raster. Once accepted,
+// geometry writes all covered texels, including those outside receiver cells.
+// Static geometry bypasses masks so cached static pages remain complete.
 bool VividVSMCasterReceiverSphere(uint page, float4 sphereWS, float4x4 worldToShadow)
 {
     if (_VSMReceiverMaskEnabled == 0 || _VSMPrototypeCasterLayer == 0) return true;
@@ -69,7 +65,6 @@ bool VividTryResolveVSMPhysicalTexel(
         + virtualPage.y * pagesPerAxis
         + virtualPage.x;
     const uint encodedPhysicalPage = _VSMPrototypePageTable[pageTableIndex];
-    if (!VividVSMCasterReceiverTexel(pageTableIndex, texelInPage)) return false;
     if (encodedPhysicalPage == 0u)
         return false;
     if ((_VSMPrototypePageMetadata[pageTableIndex].x & kVividVSMPageDeferred) != 0u)
@@ -88,18 +83,12 @@ bool VividTryResolveVSMPhysicalTexel(
     return true;
 }
 
-// Atomic insertion preserves the nearest distinct depths regardless of draw
-// order. A displaced surface continues into the next layer; equal values must
-// stop here so repeated triangles cannot consume the hidden-surface budget.
+// UE reversed-depth visibility: a single atomic max, no hidden-layer insertion.
 void VividInsertVSMDepth(uint2 texel, uint depth)
 {
-    for (uint layer = 0; layer < VIVID_VSM_DEPTH_LAYER_COUNT && depth != 0u; layer++)
-    {
-        uint previous;
-        InterlockedMax(_VSMPrototypePhysicalPage[uint3(texel, layer)], depth, previous);
-        if (previous == depth) break;
-        depth = min(previous, depth);
-    }
+    uint slice = _VSMPrototypeCasterLayer == 0
+        ? VIVID_VSM_STATIC_DEPTH_SLICE : VIVID_VSM_FINAL_DEPTH_SLICE;
+    InterlockedMax(_VSMPrototypePhysicalPage[uint3(texel, slice)], depth);
 }
 
 void VividWriteVSMDepth(float4 positionCS, uint cascadeIndex)
@@ -127,7 +116,6 @@ bool VividTryResolveVSMPagePhysicalTexel(
     float4 positionCS, uint virtualPageIndex, out uint2 physicalTexel)
 {
     physicalTexel = 0u;
-    if (!VividVSMCasterReceiverTexel(virtualPageIndex, (uint2)positionCS.xy)) return false;
     uint encodedPage = _VSMPrototypePageTable[virtualPageIndex];
     if (encodedPage == 0u)
         return false;
@@ -143,7 +131,7 @@ bool VividTryResolveVSMPagePhysicalTexel(
     return true;
 }
 
-// A window can contain unmapped, clean, deferred or masked holes. Resolve each
+// A window can contain unmapped, clean or deferred holes. Resolve each
 // fragment independently, after derivatives but before coverage and UAV writes.
 bool VividTryResolveVSMWindowPhysicalTexel(float4 positionCS, uint originPage,
     uint2 extent, out uint2 physicalTexel)

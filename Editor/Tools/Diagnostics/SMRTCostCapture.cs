@@ -13,12 +13,12 @@ namespace VividRP.Editor
         {
             "receivers", "smrtProjectionAttempts", "smrtProjectionRetries", "transitionAttempts",
             "footprintCalls", "footprintLevels", "footprintPageChecks", "footprintFailures",
-            "rays", "clipmapSegments", "ddaCells", "ddaPageResolves",
+            "rays", "traceCalls", "traceSamples", "samplePageProbes",
             "ddaPageCacheHits", "unavailableRays", "unoccludedTails", "blockedRays",
-            "staticFrontLoads", "dynamicFrontLoads", "staticHiddenLoads", "dynamicHiddenLoads",
-            "staticPoolSkips", "dynamicPoolSkips", "pcfFallbacks", "pcfTapAttempts",
+            "reservedStaticFrontLoads", "finalDepthLoads", "staticHiddenLoads", "dynamicHiddenLoads",
+            "reservedStaticPoolSkips", "finalPoolSkips", "pcfFallbacks", "pcfTapAttempts",
             "terminalUnavailable", "transitionSuccesses", "rayBudgetFailures", "gapHits",
-            "rayPageFailures", "pcfProjectionAttempts", "exactShadowDifferences", "shadowDifferencesOverTolerance"
+            "invalidTraceSamples", "pcfProjectionAttempts", "exactShadowDifferences", "shadowDifferencesOverTolerance"
         };
 
         [Serializable]
@@ -34,9 +34,9 @@ namespace VividRP.Editor
         [Serializable]
         internal sealed class Report
         {
-            public int schemaVersion = 1, width, height, receivers;
+            public int schemaVersion = 3, width, height, receivers;
             public long bufferBytes, exactShadowDifferences, shadowDifferencesOverTolerance;
-            public string scope = "Exact per-pixel operation counts from one raw pre-denoise replay; not GPU time or cache misses. Percentiles include zero-work receivers, exclude sky; activeP95 excludes zero work. Loads count scalar pool.Load calls, including PCF fallback, not memory transactions. Footprint checks may terminate early. This replay changes neither quality parameters nor production history.";
+            public string scope = "Exact per-pixel operation counts from one raw pre-denoise replay; not GPU time or cache misses. Percentiles include zero-work receivers, exclude sky; activeP95 excludes zero work. Loads count scalar pool.Load calls, including PCF fallback, not memory transactions. UE fixed-step trace reads the merged final-depth slice only; traceSamples counts positions, samplePageProbes includes origin mapping and per-point fallback. Legacy DDA/hidden-layer counters remain reserved and zero in production. This replay changes neither quality parameters nor production history.";
             public Metric[] metrics;
         }
 

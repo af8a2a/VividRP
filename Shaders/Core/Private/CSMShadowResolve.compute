@@ -1,5 +1,5 @@
 #pragma kernel CSMShadowResolve VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE
-#pragma kernel VSMReceiverDebug VIVID_VSM_RECEIVER_DEBUG VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE
+#pragma kernel VSMReceiverDebug VIVID_VSM_RECEIVER_DEBUG VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_AVAILABLE_LEVEL_HINTS
 #pragma kernel VSMMarkReceiverPages VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE
 #pragma kernel VSMPrototypeClearReceiverRequests
 #pragma kernel VSMPrototypeResetReceiverFeedback
@@ -33,7 +33,7 @@
 #pragma kernel VSMBuildPageWorkLists
 #pragma kernel VSMClearPhysicalPagesIndirect
 #pragma kernel VSMReducePageOccupancyIndirect
-#pragma kernel VSMReceiverCost VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_SMRT_COST VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE
+#pragma kernel VSMReceiverCost VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_SMRT_COST VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_AVAILABLE_LEVEL_HINTS
 #pragma kernel VSMShadowResolveAdaptive VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE
 #pragma kernel VSMClearVirtualPageMappings
 #pragma kernel VSMMarkCoarsePages
@@ -42,7 +42,7 @@
 #pragma kernel VSMPrepareMeshletPageRequestsCompacted VIVID_VSM_COMPACT_VIEWS
 #pragma kernel VSMCullMeshletsToPagesCompacted VIVID_VSM_COMPACT_VIEWS
 #pragma kernel VSMCullMeshletsToPagesAffine VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
-#pragma kernel VSMCullMeshletsToPagesGeometryBounds VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS
+#pragma kernel VSMCullMeshletsToPagesGeometryBounds VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB
 #pragma kernel VSMPrepareAllocationCached VIVID_VSM_ALLOCATION_SUMMARY_WRITE
 #pragma kernel VSMAllocatePagesCached VIVID_VSM_ALLOCATION_SUMMARY
 #pragma kernel VSMMarkReceiverPagesGrouped VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUPED_MARKING
@@ -50,10 +50,25 @@
 #pragma kernel VSMCaptureProductionWork
 #pragma kernel VSMCompleteProductionFeedback
 #pragma kernel VSMBuildPageWorkListsFeedback VIVID_VSM_PRODUCTION_FEEDBACK
+#pragma kernel VSMBuildAvailableLevelHints
+#pragma kernel VSMShadowResolveHints VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_AVAILABLE_LEVEL_HINTS
+#pragma kernel VSMShadowResolveAdaptiveHints VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_ADAPTIVE_RAYS VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_AVAILABLE_LEVEL_HINTS
+#pragma kernel VSMShadowResolve VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE
+#pragma kernel VSMMarkReceiverPagesUE VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUPED_MARKING
+#pragma kernel VSMResetMergePages
+#pragma kernel VSMSelectMergePages
+#pragma kernel VSMMergeStaticPhysicalPagesIndirect
 #pragma use_dxc
 #pragma require Native16Bit
-
-// #pragma enable_d3d11_debug_symbols
+#define VIVID_VSM_SHADER_DEBUG_SYMBOLS 1
+// Opt in before compilation for Nsight/PIX source correlation. This is not a
+// runtime keyword: Unity debug symbols also disable shader optimizations.
+#ifndef VIVID_VSM_SHADER_DEBUG_SYMBOLS
+#define VIVID_VSM_SHADER_DEBUG_SYMBOLS 0
+#endif
+#if VIVID_VSM_SHADER_DEBUG_SYMBOLS
+#pragma enable_debug_symbols
+#endif
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
@@ -64,9 +79,18 @@
 Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;
 Texture2DArray<float> _CSMShadowAtlas;
+Texture2DArray<uint> _VSMPhysicalPagePool;
+#if defined(VIVID_VSM_LEGACY_DEPTH_TESTS)
 Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
 Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
+#endif
 StructuredBuffer<uint> _VSMPrototypePageTable;
+StructuredBuffer<uint> _VSMSamplingPageTable;
+RWStructuredBuffer<uint> _VSMSamplingPageTableRW;
+StructuredBuffer<int2> _VSMClipmapPageOffsets;
+StructuredBuffer<uint> _VSMPossibleMappedLevels;
+RWStructuredBuffer<uint> _VSMPossibleMappedLevelsRW;
+int _VSMAvailableLevelHintsEnabled;
 RWStructuredBuffer<uint> _VSMPrototypeWritablePageTable;
 RWStructuredBuffer<uint4> _VSMPrototypePageMetadata;
 // Transient demand in virtual-page order; cleared before marking each camera.
@@ -113,8 +137,10 @@ RWStructuredBuffer<uint4> _VSMPrototypeMeshletPageRequests;
 RWByteAddressBuffer _VSMPrototypeMeshletPageIndirectArgs;
 // Count followed by the relevant virtual pages (at most the physical budget).
 RWStructuredBuffer<uint> _VSMPrototypeMeshletRasterPages;
-RWTexture2DArray<uint> _VSMPrototypeStaticPhysicalPageRW;
-RWTexture2DArray<uint> _VSMPrototypeDynamicPhysicalPageRW;
+RWTexture2DArray<uint> _VSMPhysicalPagePoolRW;
+RWStructuredBuffer<uint> _VSMMergePageWorkListRW;
+StructuredBuffer<uint> _VSMMergePageWorkList;
+RWByteAddressBuffer _VSMMergePageDispatchArgsRW;
 RWTexture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _CSMShadowFilterSource;
 RWTexture2D<float> _CSMShadowFilterTexture;
@@ -144,7 +170,8 @@ float4   _CSMCascadeBorders;
 int      _CSMShadowQuality;
 int      _VSMPrototypeEnabled;
 float4   _VSMReceiverParameters; // PCF enabled, constant bias in texels, slope bias, stochastic filter
-float4   _VSMSMRTParameters; // ray count (zero disables), cells per clipmap segment, max world length, tan angular radius
+float4   _VSMSMRTSettings; // extrapolate max slope, texel dither scale, adaptive all-hit threshold, reserved
+float4   _VSMSMRTParameters; // ray count (zero disables), steps per ray, view-distance length scale, sin angular radius
 int      _VSMPrototypePageSize;
 int      _VSMPrototypeVirtualResolution;
 int      _VSMPrototypePagesPerAxis;
@@ -1208,7 +1235,6 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
     if (_VSMPrototypeEnabled != 0 || _VSMPrototypeRequestEnabled != 0)
     {
         float3 vsmNormal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
-        vsmNormal = ReconstructVSMReceiverNormal(pixelCoord, deviceDepth, positionWS, vsmNormal);
         float vsmShadow = ResolveVSMReceiver(positionWS, vsmNormal, pixelCoord);
         if (_VSMPrototypeEnabled != 0)
         {
@@ -1273,5 +1299,126 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void VSMShadowResolveAdaptive(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    CSMShadowResolve(dispatchThreadID);
+    ResolveVSMScreenPixel(dispatchThreadID);
 }
+
+// Opt-in variants keep hint addressing/votes out of the baseline binaries.
+[numthreads(8, 8, 1)]
+void VSMShadowResolveHints(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(dispatchThreadID);
+}
+
+[numthreads(8, 8, 1)]
+void VSMShadowResolveAdaptiveHints(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(dispatchThreadID);
+}
+
+// Fixed-ray/PCF VSM resolve; appended to preserve all existing kernel indices.
+[numthreads(8, 8, 1)]
+void VSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(dispatchThreadID);
+}
+
+#pragma kernel VSMShadowResolveUE0 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=0
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE0(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE1 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE1(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE2 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE2(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE3 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=0
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE3(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE4 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE4(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE5 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=0 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE5(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE6 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=1
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE6(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE7 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE7(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE8 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE8(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE9 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=1
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE9(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE10 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=2
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE10(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMShadowResolveUE11 VIVID_VSM_RESOLVE_RECEIVERS VIVID_VSM_PAGE_PRESSURE VIVID_VSM_GROUP_PROJECTION_CACHE VIVID_VSM_ADAPTIVE_RAYS VIVID_SMRT_EXTRAPOLATE_SLOPE=1 VIVID_SMRT_TEMPLATE_STATIC_SAMPLES_PER_RAY=4
+[numthreads(8, 8, 1)]
+void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
+{
+    ResolveVSMScreenPixel(id);
+}
+
+#pragma kernel VSMPropagateMappedClipmaps
+
+#pragma kernel VSMUpdatePhysicalPagesUE
+#pragma kernel VSMAllocateNewPageMappingsUE
+#pragma kernel VSMAppendPhysicalPageListsUE
+#pragma kernel VSMBuildPageWorkListsUE
+#pragma kernel VSMClearReceiverRequestsUE VIVID_VSM_UE_ALLOCATION
+#pragma kernel VSMResetReceiverFeedbackUE VIVID_VSM_UE_ALLOCATION
+#pragma kernel VSMBuildShadowHZB
+#pragma kernel VSMSnapshotShadowHZB
+#pragma kernel VSMResetHZBDeferred
+#pragma kernel VSMPostCullMeshletsToPagesHZB VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB
+
+#pragma kernel VSMPrepareShadowHZB
+#pragma kernel VSMBuildShadowHZBTop
+#pragma kernel VSMResetHZBPostDraws

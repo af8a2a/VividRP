@@ -35,10 +35,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int CSMShadowAtlasId = Shader.PropertyToID("_CSMShadowAtlas");
-        private static readonly int VSMPrototypeStaticPhysicalPageId =
-            Shader.PropertyToID("_VSMPrototypeStaticPhysicalPage");
-        private static readonly int VSMPrototypeDynamicPhysicalPageId =
-            Shader.PropertyToID("_VSMPrototypeDynamicPhysicalPage");
+        private static readonly int VSMPhysicalPagePoolId =
+            Shader.PropertyToID("_VSMPhysicalPagePool");
+
         private static readonly int VSMPrototypePageTableId = Shader.PropertyToID("_VSMPrototypePageTable");
         private static readonly int VSMPrototypePageMetadataId = Shader.PropertyToID("_VSMPrototypePageMetadata");
         private static readonly int VSMPrototypeEnabledId = Shader.PropertyToID("_VSMPrototypeEnabled");
@@ -194,9 +193,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VSMPreviousViewProjectionId = Shader.PropertyToID("_VSMPreviousViewProjection");
         private static readonly int VSMPreviousViewId = Shader.PropertyToID("_VSMPreviousView");
         private static readonly int VSMCurrentViewId = Shader.PropertyToID("_VSMCurrentView");
+        private static readonly int VSMReceiverOffsetParametersId = Shader.PropertyToID("_VSMReceiverOffsetParameters");
+        private static readonly int VSMReceiverViewForwardId = Shader.PropertyToID("_VSMReceiverViewForward");
+        private Vector4 m_VSMReceiverOffsetParameters, m_VSMReceiverViewForward;
         private readonly CameraRelativeSystem<ShadowHistoryState> m_ShadowHistoryStates = new();
         internal sealed class ShadowHistoryState : CameraRelativeState
         {
+            internal Vector4 SMRTSettings;
             internal Matrix4x4 ViewProjection, View;
             internal Vector4 Light, Receiver, Quality, SMRT;
             internal Vector4 Layout, FilterSettings;
@@ -209,7 +212,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_PreviousViewProjection, m_PreviousView, m_CurrentView;
         private Vector4 m_VSMHistoryLayout, m_VSMHistoryFilterSettings;
         private int m_VSMTemporalKernel = -1;
+        private readonly int[] m_SMRTPermutations = new int[12];
+        private int m_VSMKernel = -1;
         private int m_VSMAdaptiveKernel = -1;
+        private int m_VSMHintsKernel = -1;
+        private int m_VSMAdaptiveHintsKernel = -1;
 
         private ComputeShader m_ResolveCompute;
         private int m_Kernel = -1;
@@ -230,9 +237,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_VirtualShadowMapPrototypeActive;
         private Vector4 m_VSMReceiverParameters;
         private Vector4 m_VSMReceiverQuality;
-        private Vector4 m_VSMSMRTParameters;
-        private TextureHandle m_VirtualShadowMapPrototypeStaticPhysicalPage;
-        private TextureHandle m_VirtualShadowMapPrototypeDynamicPhysicalPage;
+        private Vector4 m_VSMSMRTParameters, m_VSMSMRTSettings;
+        private TextureHandle m_VSMPhysicalPagePool;
+
         private BufferHandle m_VirtualShadowMapPrototypePageTable;
         private BufferHandle m_VirtualShadowMapPrototypePageMetadata;
         private int m_DispatchGroupCountX = 1;
@@ -248,6 +255,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_LightDirectionWS;
 
         // Cached shadow data for shader upload
+        private VividShadowData m_LevelHintShadowData;
         private readonly Matrix4x4[] m_ViewProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_CascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
         private Vector4 m_CascadeWorldTexelSizes = Vector4.zero;
@@ -326,7 +334,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMBilateralFilterHKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterH");
             m_VSMBilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowBilateralFilterV");
             m_VSMTemporalKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowTemporalV");
+            m_VSMKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolve");
+            for (int i = 0; i < m_SMRTPermutations.Length; i++)
+                m_SMRTPermutations[i] = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveUE" + i);
             m_VSMAdaptiveKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptive");
+            m_VSMHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveHints");
+            m_VSMAdaptiveHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptiveHints");
 
             for (var i = 0; i < s_BendCompositeKernelNames.Length; i++)
                 m_BendCompositeKernels[i] = FindKernelOrInvalid(m_ResolveCompute, s_BendCompositeKernelNames[i]);
@@ -342,8 +355,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_VirtualShadowMapPrototypeActive = false;
-            m_VirtualShadowMapPrototypeStaticPhysicalPage = default;
-            m_VirtualShadowMapPrototypeDynamicPhysicalPage = default;
+            m_VSMPhysicalPagePool = default;
+
             m_VirtualShadowMapPrototypePageTable = default;
             m_VirtualShadowMapPrototypePageMetadata = default;
             m_LightDirectionWS = Vector4.zero;
@@ -383,12 +396,20 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeIndirectArgsBuffer(m_DispatchIndirectArgsBuffer);
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
+            m_LevelHintShadowData = shadowData;
             if (!shadowData.isCSMActive)
                 return;
 
             m_IsActive = true;
             m_ViewProjMatrix = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             m_InvViewProjMatrix = m_ViewProjMatrix.inverse;
+            var receiverProjection = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
+            bool orthographic = cameraData.camera.orthographic;
+            m_VSMReceiverOffsetParameters = orthographic
+                ? new Vector4(0.0005f, 0, 0.01f, 1)
+                : new Vector4(0.0005f / Mathf.Abs(receiverProjection.m00),
+                    0.015f / Mathf.Abs(receiverProjection.m11), 0, 0);
+            m_VSMReceiverViewForward = -cameraData.GetViewMatrix().GetRow(2);
 
             m_CascadeCount = shadowData.cascadeCount;
             m_MaxShadowDistance = shadowData.maxShadowDistance;
@@ -464,11 +485,12 @@ namespace VividRP.Runtime.RenderPass.Core
             var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             m_SMRTSampleIndexOffset = VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(
                 csmSettings, cameraData.additionalData, m_FrameIndex);
-            m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings);
+            m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings, cameraData, shadowData.clipmaps.Resolution);
             m_VSMSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(csmSettings, m_LightAngularDiameter);
-            m_VSMReceiverParameters = new Vector4(csmSettings != null && csmSettings.virtualShadowMapPCF.value ? 1 : 0,
+            m_VSMSMRTSettings = VirtualShadowMapReceiverQuality.BuildSMRTSettings(csmSettings);
+            m_VSMReceiverParameters = new Vector4(0,
                 shadowData.depthBias, shadowData.slopeScaleDepthBias,
-                csmSettings != null && csmSettings.virtualShadowMapStochasticFiltering.value ? 1 : 0);
+                0);
             m_EnableBilateralDenoise = csmSettings != null && csmSettings.screenSpaceShadowDenoise.value;
             m_EnableTiledResolve = IsVividTiledPCSSQuality(m_ShadowQuality)
                 && CanUseTiledResolveKernels();
@@ -479,19 +501,19 @@ namespace VividRP.Runtime.RenderPass.Core
                     VirtualShadowMapPrototypeRuntime.Projections.Buffer, AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(this,
                     VirtualShadowMapPrototypeRuntime.PagePressure, AccessFlags.Read);
-                m_VirtualShadowMapPrototypeStaticPhysicalPage = PassRecorder.ImportTextureForPass(
+                m_VSMPhysicalPagePool = PassRecorder.ImportTextureForPass(
                     this,
-                    VirtualShadowMapPrototypeRuntime.StaticPhysicalPage,
+                    VirtualShadowMapPrototypeRuntime.PhysicalPagePool,
                     AccessFlags.Read);
-                m_VirtualShadowMapPrototypeDynamicPhysicalPage = PassRecorder.ImportTextureForPass(
-                    this,
-                    VirtualShadowMapPrototypeRuntime.DynamicPhysicalPage,
-                    AccessFlags.Read);
+
                 m_VirtualShadowMapPrototypePageTable = PassRecorder.ImportBufferForPass(
                     this,
                     VirtualShadowMapPrototypeRuntime.PageTable,
                     AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.SamplingPageTable, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer, AccessFlags.Read);
                 m_VirtualShadowMapPrototypePageMetadata = PassRecorder.ImportBufferForPass(
                     this,
                     VirtualShadowMapPrototypeRuntime.PageMetadata,
@@ -502,20 +524,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 && csmSettings.enableVirtualShadowMapPrototype.value
                 && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform()
                 && VirtualShadowMapPrototypeRuntime.IsFramePrepared
-                && m_VirtualShadowMapPrototypeStaticPhysicalPage.IsValid()
-                && m_VirtualShadowMapPrototypeDynamicPhysicalPage.IsValid()
+                && m_VSMPhysicalPagePool.IsValid()
                 && m_VirtualShadowMapPrototypePageTable.IsValid())
             {
                 m_VirtualShadowMapPrototypeActive = true;
                 m_EnableAdaptiveRays = VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(
                     csmSettings, m_VSMSMRTParameters) && m_VSMAdaptiveKernel >= 0;
                 m_EnableTiledResolve = false;
-                m_EnableBilateralDenoise &= m_VSMSMRTParameters.x > 0f
-                    && m_VSMBilateralFilterHKernel >= 0 && m_VSMBilateralFilterVKernel >= 0;
+                // UE directional projection writes raw visibility. Scene TAA/TSR
+                // owns temporal reconstruction; no private VSM spatial/history filter.
+                m_EnableBilateralDenoise = false;
+                m_EnableVSMTemporal = m_HasVSMHistory = false;
                 m_EnableBendComposite = false;
-                if (m_EnableBilateralDenoise && csmSettings.virtualShadowMapSMRTTemporalDenoise.value
-                    && m_VSMTemporalKernel >= 0 && cameraData.camera != null)
-                    PrepareVSMHistory(cameraData, frameData.GetOrCreate<VividTemporalData>(), csmSettings);
             }
         }
 
@@ -528,10 +548,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PreviousViewProjection = m_ShadowHistoryState.ViewProjection;
             m_PreviousView = m_ShadowHistoryState.View;
             m_VSMHistoryLayout = new Vector4(VirtualShadowMapPrototypeRuntime.VirtualResolution,
-                VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, settings.virtualShadowMapFirstLevel.value,
+                VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, settings.virtualShadowMapClipmapFirstLevel.value,
                 settings.maxShadowDistance.value);
             m_VSMHistoryFilterSettings = new Vector4(m_NormalBias, settings.virtualShadowMapTransition.value,
-                settings.virtualShadowMapViewCoverage.value ? 1 : 0, 0);
+                settings.virtualShadowMapClipmapLastLevel.value, settings.virtualShadowMapClipmapZRangeScale.value);
             ConfigureHistoryDescriptor(m_VSMHistoryCurrent.desc, cameraData.actualWidth, cameraData.actualHeight);
             ConfigureHistoryDescriptor(m_VSMDepthCurrent.desc, cameraData.actualWidth, cameraData.actualHeight);
             bool signalValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, cameraData.camera,
@@ -544,6 +564,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_ShadowHistoryState.Light == m_LightDirectionWS
                 && m_ShadowHistoryState.Receiver == m_VSMReceiverParameters
                 && m_ShadowHistoryState.Quality == m_VSMReceiverQuality
+                && m_ShadowHistoryState.SMRTSettings == m_VSMSMRTSettings
                 && m_ShadowHistoryState.SMRT == m_VSMSMRTParameters
                 && m_ShadowHistoryState.Layout == m_VSMHistoryLayout
                 && m_ShadowHistoryState.FilterSettings == m_VSMHistoryFilterSettings
@@ -586,6 +607,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShadowHistoryState.Receiver = m_VSMReceiverParameters;
             m_ShadowHistoryState.Quality = m_VSMReceiverQuality;
             m_ShadowHistoryState.SMRT = m_VSMSMRTParameters;
+            m_ShadowHistoryState.SMRTSettings = m_VSMSMRTSettings;
             m_ShadowHistoryState.Layout = m_VSMHistoryLayout;
             m_ShadowHistoryState.FilterSettings = m_VSMHistoryFilterSettings;
             m_ShadowHistoryState.Adaptive = m_EnableAdaptiveRays;
@@ -632,7 +654,9 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_ShadowHistoryStates.Dispose();
             m_VSMTemporalKernel = -1;
-            m_VSMAdaptiveKernel = -1;
+            m_VSMKernel = m_VSMAdaptiveKernel = -1;
+            m_VSMHintsKernel = m_VSMAdaptiveHintsKernel = -1;
+            m_LevelHintShadowData = null;
             m_ResolveCompute = null;
             m_Kernel = -1;
             m_ClearTilesKernel = -1;
@@ -653,8 +677,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_VirtualShadowMapPrototypeActive = false;
-            m_VirtualShadowMapPrototypeStaticPhysicalPage = default;
-            m_VirtualShadowMapPrototypeDynamicPhysicalPage = default;
+            m_VSMPhysicalPagePool = default;
+
             m_VirtualShadowMapPrototypePageTable = default;
             m_VirtualShadowMapPrototypePageMetadata = default;
             m_DispatchGroupCountX = 1;
@@ -680,7 +704,21 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(cmd,
                 m_VirtualShadowMapPrototypeActive ? VSMProfiling.ResolveTrace : null))
             {
-                int kernel = m_EnableAdaptiveRays ? m_VSMAdaptiveKernel : m_Kernel;
+                int kernel = m_Kernel;
+                if (m_VirtualShadowMapPrototypeActive)
+                {
+                    // Request-only VSM must retain the generic CSM output path.
+                    int vsmKernel = m_EnableAdaptiveRays ? m_VSMAdaptiveKernel : m_VSMKernel;
+                    if (vsmKernel >= 0) kernel = vsmKernel;
+                    int hintsKernel = m_EnableAdaptiveRays ? m_VSMAdaptiveHintsKernel : m_VSMHintsKernel;
+                    if (CanUseAvailableLevelHints && hintsKernel >= 0) kernel = hintsKernel;
+                    if (m_VSMSMRTParameters.x > 0)
+                    {
+                        int permutation = VirtualShadowMapReceiverQuality.SMRTPermutationIndex(
+                            (int)m_VSMSMRTParameters.y, m_EnableAdaptiveRays, m_VSMSMRTSettings.x > 0);
+                        if (m_SMRTPermutations[permutation] >= 0) kernel = m_SMRTPermutations[permutation];
+                    }
+                }
                 BindCommonTextures(cmd, kernel);
                 BindVSMHistory(cmd, kernel);
                 BindShadowParameters(cmd);
@@ -813,21 +851,30 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ResolveCompute, CSMBendBilinearSamplingOffsetModeId, m_BendQualitySettings.BilinearSamplingOffsetMode ? 1 : 0);
         }
 
+        private bool CanUseAvailableLevelHints => m_LevelHintShadowData != null
+            && m_LevelHintShadowData.virtualShadowMapRendered
+            && m_LevelHintShadowData.virtualShadowMapLevelHintsRendered
+            && VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabled;
+
         private void BindCommonTextures(ComputeCommandBuffer cmd, int kernel)
         {
             BlueNoise.Instance?.Bind(cmd, m_ResolveCompute, kernel);
+            cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapPrototypeRuntime.SamplingPageTableId,
+                VirtualShadowMapPrototypeRuntime.SamplingPageTable);
+            cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapProjectionSet.PageOffsetsId,
+                VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer);
+            cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapPrototypeRuntime.PossibleMappedLevelsId,
+                VirtualShadowMapPrototypeRuntime.PossibleMappedLevels);
+            cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabledId,
+                CanUseAvailableLevelHints ? 1 : 0);
             cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapPrototypeRuntime.ReceiverMaskEnabledId, 1);
             cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId,
                 VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks);
             cmd.SetComputeBufferParam(m_ResolveCompute, kernel,
                 VirtualShadowMapReceiverQuality.PressureId, VirtualShadowMapPrototypeRuntime.PagePressure);
-            TextureHandle staticVirtualShadowMapPage =
-                m_VirtualShadowMapPrototypeStaticPhysicalPage.IsValid()
-                ? m_VirtualShadowMapPrototypeStaticPhysicalPage
-                : m_GBuffer1.innerHandle;
-            TextureHandle dynamicVirtualShadowMapPage =
-                m_VirtualShadowMapPrototypeDynamicPhysicalPage.IsValid()
-                ? m_VirtualShadowMapPrototypeDynamicPhysicalPage
+            TextureHandle virtualShadowMapPool =
+                m_VSMPhysicalPagePool.IsValid()
+                ? m_VSMPhysicalPagePool
                 : m_GBuffer1.innerHandle;
             cmd.SetComputeBufferParam(m_ResolveCompute, kernel,
                 VirtualShadowMapProjectionSet.BufferId, VirtualShadowMapPrototypeRuntime.Projections.Buffer);
@@ -837,13 +884,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(
                 m_ResolveCompute,
                 kernel,
-                VSMPrototypeStaticPhysicalPageId,
-                staticVirtualShadowMapPage);
-            cmd.SetComputeTextureParam(
-                m_ResolveCompute,
-                kernel,
-                VSMPrototypeDynamicPhysicalPageId,
-                dynamicVirtualShadowMapPage);
+                VSMPhysicalPagePoolId,
+                virtualShadowMapPool);
+
             if (VirtualShadowMapPrototypeRuntime.PageTable != null)
                 cmd.SetComputeBufferParam(
                     m_ResolveCompute,
@@ -895,10 +938,13 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMPreviousViewProjectionId, m_PreviousViewProjection);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMPreviousViewId, m_PreviousView);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VSMCurrentViewId, m_CurrentView);
+            cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverOffsetParametersId, m_VSMReceiverOffsetParameters);
+            cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverViewForwardId, m_VSMReceiverViewForward);
             cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ParametersId, m_VSMReceiverQuality);
             cmd.SetComputeMatrixParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ViewProjMatrix);
             cmd.SetComputeVectorParam(m_ResolveCompute, VSMReceiverParametersId, m_VSMReceiverParameters);
             cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTParametersId, m_VSMSMRTParameters);
+            cmd.SetComputeVectorParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTSettingsId, m_VSMSMRTSettings);
             cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapReceiverQuality.SMRTSampleIndexOffsetId, m_SMRTSampleIndexOffset);
             cmd.SetComputeIntParam(m_ResolveCompute, VirtualShadowMapProjectionSet.CountId,
                 VirtualShadowMapPrototypeRuntime.Projections.Count);

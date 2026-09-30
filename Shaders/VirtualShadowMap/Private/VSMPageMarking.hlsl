@@ -150,41 +150,25 @@ void MarkVSMReceiverPage(float2 uv, int level, uint role)
     MarkVSMReceiverPage(uv, level, role, 1);
 }
 
-// Select each filter independently: its map-edge guard can select a different
-// preferred level and transition. Share the production density/coverage policy.
+// UE request bias includes page pressure; sampling relies on mapped parents.
 int SelectVSMMarkingStart(float3 position, float3 normal, bool smrt, out float blend,
     out VSMReceiverProjection selected, out bool allowFallback)
 {
     blend = 0;
+    int level = SelectVSMClipmapLevel(position, true);
+    allowFallback = level >= 0;
     selected = (VSMReceiverProjection)0;
-    allowFallback = true;
-    bool density = _VSMReceiverQuality.x > 0;
-    int first = 0;
-    if (density) first = SelectVSMDensityLevelPrepared(position, normal, smrt, blend, selected);
-    if (first < 0) return -1;
-    for (int level = first; level < _VSMProjectionCount; level++)
-    {
-        VividVSMProjection p = _VSMProjections[level];
-        float2 relative = mul(p.worldToShadow, float4(position - p.selectionSphere.xyz, 0)).xy * 2;
-        float edge = max(abs(relative.x), abs(relative.y));
-        if (!density && edge >= 0.5) continue;
-        if (length(position - p.selectionSphere.xyz) >= p.parameters.w)
-        {
-            // Match the resolve's terminal distance fade: it does not retry PCF.
-            allowFallback = false;
-            return -1;
-        }
-        if (!density) blend = VSMTransitionWeight(edge, p.parameters.z);
-        return level;
-    }
-    return -1;
+    if (level >= 0) selected = PrepareVSMReceiverProjection(position, normal, level);
+    return level;
 }
 
 VSMReceiverPageFootprint BuildVSMSMRTPageFootprint(float3 position, VividVSMProjection p,
     int level, uint role)
 {
     float2 center = mul(p.worldToShadow, float4(position, 1)).xy;
-    float radius = VSMSMRTRayLength(level) * _VSMSMRTParameters.w / p.parameters.x;
+    // Every sampled position may fall back to this map, so mark the full
+    // normalized ray support, not the former per-clipmap DDA segment.
+    float radius = _VSMSMRTParameters.z * _VSMSMRTParameters.w / p.parameters.x;
     float originGuard = (_VSMReceiverParameters.x >= 0.5 ? 1.5 : 0) + abs(p.parameters.y);
     int halo = (int)ceil(radius + originGuard + 0.001);
     float guard = (float)halo / _VSMPrototypeVirtualResolution;
@@ -239,6 +223,45 @@ void MarkVSMReceiver(float3 position, float3 normalWS)
     }
 }
 
+// UE VirtualShadowMapPageMarking.ush::MarkPage and GeneratePageFlagsFromPixels.
+// Bound demand to the selected page plus two dithered diagonal neighbours.
+// The border default (0.05 page) comes from VirtualShadowMapArray.cpp.
+void MarkVSMReceiverPageUE(float2 uv, int level, uint groupIndex)
+{
+    if (any(uv < 0.0) || any(uv >= 1.0)) return;
+    float2 pagePosition = uv * _VSMPrototypePagesPerAxis;
+    int2 lastPage = _VSMPrototypePagesPerAxis - 1;
+    uint2 page = min((uint2)pagePosition, (uint2)lastPage);
+    float2 offset = 0.05 * float2((groupIndex & 1u) != 0u ? 1.0 : -1.0,
+        (groupIndex & 2u) != 0u ? 1.0 : -1.0);
+    uint2 positive = (uint2)clamp((int2)(pagePosition + offset), 0, lastPage);
+    uint2 negative = (uint2)clamp((int2)(pagePosition - offset), 0, lastPage);
+    uint flags = kVSMPageRequested | kVSMPagePrimaryRequested;
+    // Pixel requests remain detail requests even in the terminal clipmap.
+    // UE marks one receiver cell on the primary page. Dilation marks page flags
+    // only: masks cull dynamic caster bounds, never individual raster samples.
+    uint size = (uint)_VSMPrototypePageSize;
+    uint2 texel = min((uint2)(uv * _VSMPrototypeVirtualResolution),
+        (uint)_VSMPrototypeVirtualResolution - 1u) % size;
+    uint2 cell = min(texel * 8u / size, 7u);
+    uint bit = 1u << ((cell.y & 3u) * 8u + cell.x);
+    uint2 mask = cell.y < 4u ? uint2(bit, 0u) : uint2(0u, bit);
+    EmitVSMReceiverPage(page, level, flags, mask);
+    if (any(positive != page)) EmitVSMReceiverPage(positive, level, flags, 0u);
+    if (any(negative != page) && any(negative != positive))
+        EmitVSMReceiverPage(negative, level, flags, 0u);
+}
+
+void MarkVSMReceiverUE(float3 position, uint groupIndex)
+{
+    if (_VSMPrototypeRequestEnabled == 0 || _VSMProjectionCount <= 0) return;
+    int level = SelectVSMClipmapLevel(position, true);
+    if (level < 0) return;
+    float3 coord = mul(_VSMProjections[level].worldToShadow, float4(position, 1)).xyz;
+    if (coord.z < 0 || coord.z > 1) return;
+    MarkVSMReceiverPageUE(coord.xy, level, groupIndex);
+}
+
 #if defined(VIVID_VSM_MARK_RECEIVERS)
 [numthreads(8, 8, 1)]
 void VSMMarkReceiverPages(uint3 id : SV_DispatchThreadID)
@@ -256,4 +279,18 @@ void VSMMarkReceiverPages(uint3 id : SV_DispatchThreadID)
 #if defined(VIVID_VSM_GROUPED_MARKING) && defined(VIVID_VSM_MARK_RECEIVERS)
 [numthreads(8, 8, 1)]
 void VSMMarkReceiverPagesGrouped(uint3 id : SV_DispatchThreadID) { VSMMarkReceiverPages(id); }
+#endif
+
+#if defined(VIVID_VSM_MARK_RECEIVERS)
+[numthreads(8, 8, 1)]
+void VSMMarkReceiverPagesUE(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
+{
+    // UE PageMarkingPixelStrideX/Y = 2. C# dispatch uses the same strided extent.
+    uint2 pixel = id.xy * 2u;
+    if (pixel.x >= (uint)_CSMOutputWidth || pixel.y >= (uint)_CSMOutputHeight) return;
+    float depth = _DepthTexture.Load(int3(pixel, 0));
+    if (IsSkyPixel(depth)) return;
+    float3 position = ReconstructWorldPosition(pixel, depth);
+    MarkVSMReceiverUE(position, groupIndex);
+}
 #endif
